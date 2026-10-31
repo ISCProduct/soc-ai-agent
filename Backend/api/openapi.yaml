@@ -27,7 +27,7 @@ info:
     |---|---|---|
     | `userToken` | `X-User-Token` | 学生・教員。ログインで発行される短TTLのJWT |
     | `adminAuth` | `X-Admin-Email` + `X-Admin-Token` | 管理画面。管理者本人の認証 |
-    | `serviceSecret` | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない |
+    | `serviceSecret` | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない。値は `SERVICE_SECRET`（`ADMIN_SECRET` とは別値） |
     | `companyCookie` | Cookie | 企業ポータル。httpOnly Cookie 3本 |
 
     テナントの切り替えが必要な場合は `X-Tenant-Slug` を併せて送る。
@@ -126,6 +126,9 @@ components:
       type: apiKey
       in: header
       name: X-Admin-Secret
+      description: |
+        ヘッダ名は歴史的に `X-Admin-Secret` だが、照合する値は `SERVICE_SECRET` であり
+        管理者トークンのHMAC鍵 `ADMIN_SECRET` とは別値（#1158）。未設定なら 503 で拒否する。
     companyCookie:
       type: apiKey
       in: cookie
@@ -3566,7 +3569,7 @@ paths:
       tags: [admin-training]
       summary: 学習データの件数
       description: |
-        件数しか返さず個人情報を含まないため、`X-Admin-Secret` によるサービス間認証にしている。運用から機械的に叩けるようにするためで、管理者になりすます形を避けている。
+        件数しか返さず個人情報を含まないため、`X-Admin-Secret` によるサービス間認証にしている。運用から機械的に叩けるようにするためで、管理者になりすます形を避けている。照合する値は `SERVICE_SECRET`（`ADMIN_SECRET` とは別値、#1158）。
       security: [{ serviceSecret: [] }]
       responses:
         "200":
@@ -3578,7 +3581,7 @@ paths:
       tags: [release-notes]
       summary: リリースノートを取り込む
       description: |
-        CI（GitHub Actions）からのマシン間呼び出しのため、共有シークレットのみで認証する（#861）。
+        CI（GitHub Actions）からのマシン間呼び出しのため、共有シークレットのみで認証する（#861）。照合する値は `SERVICE_SECRET` で、管理者トークンのHMAC鍵 `ADMIN_SECRET` とは分けてある（#1158）。
       security: [{ serviceSecret: [] }]
       responses:
         "200":

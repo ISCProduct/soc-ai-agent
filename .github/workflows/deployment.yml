@@ -1173,7 +1173,7 @@ jobs:
     name: Sync whats-new from merged PRs
     runs-on: ubuntu-latest
     continue-on-error: true
-    # 本番の admin_secret を Secrets Manager から読むため、production の認証情報を使う(#1158)。
+    # 本番の service_secret を Secrets Manager から読むため、production の認証情報を使う(#1158)。
     # リポジトリ既定の認証情報はECSクラスタ作成前の古い値で、本番リソースを引けない。
     environment: production
     steps:
@@ -1198,26 +1198,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
-          # staging 側は引き続きリポジトリシークレットを使う。
-          # 本番と staging で別値にするのが #1158 の目的。
-          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          # staging 側はリポジトリシークレットを使う。本番と staging で別値にするのが #1158 の目的。
+          # ここで使うのは SERVICE_SECRET(サービス間呼び出し用)で、管理者トークンの
+          # HMAC鍵である ADMIN_SECRET はCIには渡さない。
+          SERVICE_SECRET: ${{ secrets.SERVICE_SECRET }}
           PROD_API_BASE: https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }}
           STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
         run: |
-          # 本番の admin_secret は Secrets Manager を正とする(#1158)。
-          # 読めない場合だけリポジトリシークレットへフォールバックする(移行期間の両対応)。
+          # 本番の service_secret は Secrets Manager(soc-app/service-secret)が正(#1158)。
+          # リポジトリシークレットへのフォールバックは持たない。本番の値は Terraform の
+          # random_password で自動生成されるので、GitHub 側に同じ値は存在し得ない。
           # 失敗理由(AccessDenied / ResourceNotFound / ExpiredToken)が分からないと
           # 警告を見ても何を直せばよいか判断できない。stderr は残す(値は stdout 側)。
           sm_err=$(mktemp)
-          PROD_ADMIN_SECRET=$(aws secretsmanager get-secret-value \
-            --secret-id "${PROJECT_NAME:-soc-app}/admin" --query SecretString --output text 2>"$sm_err" \
-            | python3 -c "import json,sys; print(json.load(sys.stdin).get('admin_secret',''))" 2>>"$sm_err" || true)
-          if [ -n "$PROD_ADMIN_SECRET" ]; then
-            echo "::add-mask::$PROD_ADMIN_SECRET"
+          PROD_SERVICE_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id "${PROJECT_NAME:-soc-app}/service-secret" --query SecretString --output text 2>"$sm_err" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('service_secret',''))" 2>>"$sm_err" || true)
+          if [ -n "$PROD_SERVICE_SECRET" ]; then
+            echo "::add-mask::$PROD_SERVICE_SECRET"
           else
-            echo "::warning::Secrets Manager から admin_secret を読めませんでした。リポジトリシークレットで続行します(IAMに secretsmanager:GetSecretValue を確認してください)"
+            echo "::warning::Secrets Manager から service_secret を読めませんでした。本番への取り込みは見送ります(IAMに secretsmanager:GetSecretValue / soc-app/service-secret の存在を確認してください)。本番起動時に回収されます。"
             sed 's/^/  aws: /' "$sm_err"
-            PROD_ADMIN_SECRET="$ADMIN_SECRET"
           fi
           rm -f "$sm_err"
 
@@ -1239,24 +1240,31 @@ jobs:
           # 気づけない。実際にそれで、運用作業がユーザー向け更新情報に出たまま残った(#1290)。
           # 取りこぼしは prod-uptime-scheduler.yml が本番起動時に回収する。
           # 「停止中で届かない」と「鍵が違って拒否された」は対処が別物。
-          # 後者を warning で流すと、admin_secret のローテーション後に更新情報が
+          # 後者を warning で流すと、service_secret のローテーション後に更新情報が
           # 反映されないまま誰も気づかない(#1290 と同じ症状)。
           #
           # 503 は拾わない。CloudFront が ALB の 500/502/503/504 をすべて 503 へ
           # 差し替えるため(modules/cloudfront_app_proxy)、503 はほぼ「オリジンが
-          # 応答しない」を意味する。バックエンドの「ADMIN_SECRET 未設定」も 503 だが、
+          # 応答しない」を意味する。バックエンドの「SERVICE_SECRET 未設定」も 503 だが、
           # ローリング更新中やタスク停止中に必ず踏むので、ここで落とすと
           # 正常なデプロイが赤くなる(実際に本番デプロイで踏んだ)。
-          prod_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
-            -H "Content-Type: application/json" \
-            -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
-            -d @"$payload" \
-            --max-time 60 || true)
+          #
+          # service_secret が読めなかった場合は呼ばない。値が無いまま叩くと必ず 403 になり、「鍵の不一致」として赤くなる。
+          # 読めなかったことは上で警告済みなので、ここは呼ばずに次回へ回す。
+          if [ -n "$PROD_SERVICE_SECRET" ]; then
+            prod_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
+              -H "Content-Type: application/json" \
+              -H "X-Admin-Secret: $PROD_SERVICE_SECRET" \
+              -d @"$payload" \
+              --max-time 60 || true)
+          else
+            prod_code=skipped
+          fi
           prod_rejected=0
           case "$prod_code" in
-            2*) ;;
+            2*|skipped) ;;
             401|403)
-              echo "::error::本番への更新情報の取り込みが $prod_code で拒否されました。admin_secret が本番の値と一致していません(ローテーション後の CI 設定を確認してください)"
+              echo "::error::本番への更新情報の取り込みが $prod_code で拒否されました。service_secret が本番の値と一致していません(SERVICE_SECRET の注入とローテーション後の CI 設定を確認してください)"
               prod_rejected=1
               ;;
             *)
@@ -1266,7 +1274,7 @@ jobs:
 
           curl -sf -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
-            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            -H "X-Admin-Secret: $SERVICE_SECRET" \
             -d @"$payload" \
             --max-time 60 \
             || echo "::warning::stagingへの更新情報の取り込みに失敗しました(停止中の可能性)。"
@@ -1488,7 +1496,7 @@ jobs:
       - name: Fetch recently merged PRs (base develop) and ingest into staging
         env:
           GH_TOKEN: ${{ github.token }}
-          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          SERVICE_SECRET: ${{ secrets.SERVICE_SECRET }}
           STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
         run: |
           sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base develop --limit 20 \
@@ -1504,7 +1512,7 @@ jobs:
 
           curl -sf -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
-            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            -H "X-Admin-Secret: $SERVICE_SECRET" \
             -d @"$payload" \
             --max-time 60 \
             || echo "stagingへの取り込みに失敗しました(停止中の可能性)。スキップします。"

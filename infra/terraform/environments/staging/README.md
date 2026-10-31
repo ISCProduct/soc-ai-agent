@@ -45,6 +45,11 @@ cp terraform.tfvars.example terraform.tfvars
 
 `*.tfvars` は gitignore 済み。
 
+シークレット（`openai_api_key_plain` などの `*_plain` 変数）は **初回 apply で
+Secrets Manager `<project>/app-env` へ書き込まれるだけ**で、以降は Secrets Manager 側が正。
+2回目以降は tfvars に平文を置かずに `secret_values_managed_outside = true` で apply できる。
+詳細は下の「シークレット」を参照。
+
 ### 3. remote state（推奨）
 
 `versions.tf` の `backend "s3"` ブロックコメントを外し:
@@ -105,6 +110,37 @@ bash infra/scripts/verify-error-pages.sh
 
 # 起動直後（EC2 は UP、frontend 起動待ち）
 curl -s https://stg.shukatsu-ai.jp/ | grep -E 'og:title|起動'
+```
+
+## シークレット (#1158)
+
+**シークレットを user_data に平文で置かない。** user_data は launch template の
+バージョンとして保存され、`ec2:DescribeLaunchTemplateVersions` を持つ IAM ユーザーなら
+誰でも読める（インスタンス上からは IMDS 経由でも読める）。実際にこの経路で staging の
+`ADMIN_SECRET` が読め、本番と同値だったため本番の管理者権限が取れる状態になっていた。
+
+| 値 | 置き場所 |
+| --- | --- |
+| `DB_PASSWORD` | Secrets Manager `<project>/db` の `password`（正本は `modules/rds` の `random_password`） |
+| API キー・OAuth クライアントシークレット・`ADMIN_SECRET` / `SERVICE_SECRET` など | Secrets Manager `<project>/app-env` |
+| 自動生成（`USER_SECRET` / `OAUTH_STATE_SECRET` / `TOKEN_ENCRYPTION_KEY` / `BFF_INTERNAL_TOKEN`） | Secrets Manager `<project>/app-env`（Terraform の `random_password`） |
+| 秘密でない値（ドメイン・モデル名など） | user_data のまま |
+
+user_data は起動時にインスタンスロール（`secretsmanager:GetSecretValue` はこの2本だけ）で
+取得し、0600 の `/opt/app/.env` へ書く。取得に失敗したら `.env` を書かずに異常終了する。
+
+キーを増やすときは `main.tf` の `aws_secretsmanager_secret_version.app_env` に
+キー（`.env` の変数名の小文字）を足すだけでよい。user_data 側は
+`to_entries | ascii_upcase` で `.env` の行へ展開する。
+
+値のローテーションは `terraform apply` では行えない（`ignore_changes = [secret_string]`）。
+AWS CLI で書き換える。手順は `docs/wiki/prod-secrets-rotation.md` と同じ
+（`--secret-id` を `soc-stg/app-env` に読み替える）。**反映にはインスタンスの入れ替えが必要**。
+
+user_data の `.env` 生成ロジックは手元で検証できる（AWS 不要。起動確認そのものは staging で行う）:
+
+```bash
+bash infra/scripts/verify-staging-user-data.sh
 ```
 
 ## 注意

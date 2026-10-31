@@ -248,6 +248,15 @@ resource "aws_iam_role_policy" "app" {
         Resource = [aws_ssm_parameter.bff_internal_token.arn]
       },
       {
+        # user_data が起動時に .env のシークレットを取得する(#1158)。
+        # この2本に限定する。user_data に平文で焼く代わりの経路なので、
+        # 読めるのはこのインスタンスロールだけで足りる。
+        Sid      = "AppEnvSecretsRead"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = [aws_secretsmanager_secret.app_env.arn, module.secrets.db_secret_arn]
+      },
+      {
         # コンテナログを CloudWatch Logs へ転送する(awslogsログドライバ)。
         # 権限が無いとログ転送だけでなくコンテナ起動自体が失敗するため、
         # ロググループを作る aws_cloudwatch_log_group.app より後に評価されるよう
@@ -298,13 +307,12 @@ resource "random_password" "bff_internal_token" {
 # インスタンス毎にトークンを生成した場合は frontend と backend の組み合わせ次第で
 # 検証に失敗し、X-Client-IP が捨てられて全利用者が frontend の出口IP1つへ再集約される。
 #
-# user_data(新規インスタンス)は下の launch template から直接この値を受け取り、
+# user_data(新規インスタンス)は起動時に Secrets Manager(app_env)からこの値を読み、
 # 稼働中インスタンスは deployment.yml が SSM からこの値を読んで .env を更新する。
 # どちらも出どころが random_password.bff_internal_token 1つなので必ず一致する。
-# 型は String。この同じ値が下の launch template の user_data に平文で載っており
-# (db_password や oauth_state_secret など既存の秘密も同様)、
-# ec2:DescribeLaunchTemplateVersions で読めるため、SecureString を足しても
-# 実際の境界は IAM のまま変わらない。読み出しはこのパラメータ1本へ限定する。
+# 型は String。SecureString にすると読み手(deployment.yml の OIDC ロール)にも
+# kms:Decrypt が要り、読めなくても警告で流れる実装なので無言で古い値のまま
+# 動き続ける危険がある。切り替えるなら CI 側の権限とあわせて別PRで行う。
 resource "aws_ssm_parameter" "bff_internal_token" {
   name        = "/${var.project_name}/bff-internal-token"
   description = "BFF(frontend) -> backend の X-Client-IP 検証用共有トークン(#1407)"
@@ -312,6 +320,76 @@ resource "aws_ssm_parameter" "bff_internal_token" {
   value       = random_password.bff_internal_token.result
 
   tags = local.tags
+}
+
+# staging アプリ(.env)のシークレットの入れ物(#1158)。
+#
+# user_data は launch template のバージョンとして保存され、
+# ec2:DescribeLaunchTemplateVersions を持つIAMユーザーなら誰でも読めるうえ、
+# インスタンス上からは IMDS 経由でも読める。実際にこの経路で staging の
+# ADMIN_SECRET が読め、それが本番と同値だったため本番の管理者権限が取れる状態に
+# なっていた。値は user_data に載せず、インスタンスロールで起動時に取得する。
+#
+# 本番(environments/prod)が ECS タスク定義の valueFrom で参照しているのと
+# 同じ「専用の secret + secret_version + ignore_changes」の形に揃える。
+# staging は1台の docker compose で .env を共有するため、入れ物は1本にまとめる。
+#
+# キー名は .env の変数名の小文字。user_data 側は
+# `to_entries | ascii_upcase` で .env の行へ展開するだけなので、
+# 新しいシークレットを配るときはここにキーを足せば足りる。
+resource "aws_secretsmanager_secret" "app_env" {
+  name        = "${var.project_name}/app-env"
+  description = "staging アプリ(.env)のシークレット。user_data には平文で置かない(#1158)"
+  tags        = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "app_env" {
+  secret_id = aws_secretsmanager_secret.app_env.id
+  secret_string = jsonencode({
+    # --- 外部サービス由来（tfvars から渡すしかない値） ---
+    openai_api_key        = var.openai_api_key_plain
+    resend_api_key        = var.resend_api_key_plain
+    google_client_secret  = var.google_client_secret
+    github_client_secret  = var.github_client_secret
+    github_dispatch_token = var.github_dispatch_token
+    houjin_bangou_app_id  = var.houjin_bangou_app_id
+    gbizinfo_api_key      = var.gbizinfo_api_key
+    # 空なら Backend の observability.InitSentry / RAG の sentry_sdk は初期化しない(#1185)
+    sentry_dsn = var.sentry_dsn
+
+    # 管理者トークン(X-Admin-Token)のHMAC鍵。CI には渡さない(#1158)。
+    admin_secret = var.admin_secret_plain
+
+    # CI(sync-whats-new)が staging の /api/admin/whats-new/ingest を
+    # X-Admin-Secret で叩くため、ここだけは自動生成にできない。GitHub の
+    # リポジトリシークレット SERVICE_SECRET と同値にし、admin_secret とも
+    # 本番とも必ず別値にする(#1158)。
+    service_secret = var.service_secret_plain
+
+    # --- 自動生成（出どころは Terraform state。applyしても値は変わらない） ---
+    user_secret          = random_password.user_secret.result
+    oauth_state_secret   = random_password.oauth_state_secret.result
+    token_encryption_key = random_id.token_encryption_key.hex
+    bff_internal_token   = random_password.bff_internal_token.result
+  })
+
+  lifecycle {
+    # 値の管理を Terraform から外す(#1158、本番と同じ方針)。
+    # これが無いと、tfvars に平文を置き続けない限り plan が差分を出して
+    # 空文字で上書きしてしまう。ローテーションは AWS CLI で行う
+    # (手順は docs/wiki/prod-secrets-rotation.md と同じ)。
+    ignore_changes = [secret_string]
+
+    # 初回作成時に空のまま作ると ignore_changes で固定され、AWS CLI で
+    # 書き換えるまで直らない。admin_secret が空だと管理者トークンを発行できず、
+    # service_secret が空だと CI の whats-new 取り込みが通らない。
+    # 値を Secrets Manager 側で管理している状態では tfvars が空なのが正しいので、
+    # 本番と同じく secret_values_managed_outside で検査を外せるようにする。
+    precondition {
+      condition     = var.secret_values_managed_outside || (var.admin_secret_plain != "" && var.service_secret_plain != "")
+      error_message = "admin_secret_plain / service_secret_plain のいずれかが空です。service_secret_plain は GitHub リポジトリシークレット SERVICE_SECRET と同じ値にしてください(admin_secret_plain とは別値)。値を Secrets Manager 側で管理している場合は secret_values_managed_outside = true を設定してください(#1158)。"
+    }
+  }
 }
 
 data "aws_ami" "app" {
@@ -356,41 +434,35 @@ resource "aws_launch_template" "app" {
   # 3 にすると通常の2要素XFFでは転送が無効になり、さらにクライアントが先頭へIPを1個足すと
   # その詐称値が3段目として内部トークン付きで署名され、IP単位の制限を回避できてしまう。
   user_data = base64encode(templatefile("${path.module}/app_user_data.sh.tftpl", {
-    aws_region               = var.region
-    log_group_name           = aws_cloudwatch_log_group.app.name
-    backend_image            = local.backend_image
-    frontend_image           = local.frontend_image
-    rag_image                = local.rag_image
-    db_host                  = module.rds.address
-    db_port                  = module.rds.port
-    db_name                  = module.rds.db_name
-    db_user                  = module.rds.master_username
-    db_password              = module.rds.master_password
-    s3_bucket                = module.s3.bucket_id
-    openai_api_key           = var.openai_api_key_plain
-    houjin_bangou_app_id     = var.houjin_bangou_app_id
-    gbizinfo_api_key         = var.gbizinfo_api_key
-    gbizinfo_base_url        = var.gbizinfo_base_url
-    openai_model             = var.openai_model
-    resend_api_key           = var.resend_api_key_plain
-    google_client_id         = var.google_client_id
-    google_client_secret     = var.google_client_secret
-    github_client_id         = var.github_client_id
-    github_client_secret     = var.github_client_secret
-    backend_domain           = local.backend_domain
-    frontend_domain          = local.frontend_domain
-    user_secret              = random_password.user_secret.result
-    admin_secret             = var.admin_secret_plain
-    openai_whisper_model     = var.openai_whisper_model
-    discord_public_key       = var.discord_public_key
-    discord_allowed_role_id  = var.discord_allowed_role_id
-    github_dispatch_token    = var.github_dispatch_token
-    github_dispatch_repo     = var.github_dispatch_repo
-    oauth_state_secret       = random_password.oauth_state_secret.result
-    sentry_dsn               = var.sentry_dsn
-    token_encryption_key     = random_id.token_encryption_key.hex
-    bff_internal_token       = random_password.bff_internal_token.result
-    trusted_proxy_hops       = "2"
+    aws_region              = var.region
+    log_group_name          = aws_cloudwatch_log_group.app.name
+    backend_image           = local.backend_image
+    frontend_image          = local.frontend_image
+    rag_image               = local.rag_image
+    db_host                 = module.rds.address
+    db_port                 = module.rds.port
+    db_name                 = module.rds.db_name
+    db_user                 = module.rds.master_username
+    s3_bucket               = module.s3.bucket_id
+    gbizinfo_base_url       = var.gbizinfo_base_url
+    openai_model            = var.openai_model
+    google_client_id        = var.google_client_id
+    github_client_id        = var.github_client_id
+    backend_domain          = local.backend_domain
+    frontend_domain         = local.frontend_domain
+    openai_whisper_model    = var.openai_whisper_model
+    discord_public_key      = var.discord_public_key
+    discord_allowed_role_id = var.discord_allowed_role_id
+    github_dispatch_repo    = var.github_dispatch_repo
+    trusted_proxy_hops      = "2"
+
+    # シークレットは値ではなく「取得先」だけを渡す(#1158)。
+    # ここに値を書くと launch template のバージョンへ平文で残り、
+    # ec2:DescribeLaunchTemplateVersions だけで読めてしまう。
+    # DB_PASSWORD の正本は random_password(modules/rds) で、その値は
+    # 既に module.secrets の <project>/db に入っているのでそれを読む。
+    app_env_secret_id        = aws_secretsmanager_secret.app_env.arn
+    db_secret_id             = module.secrets.db_secret_arn
     edge_nginx_conf          = file("${path.module}/../../../nginx/staging-edge.conf")
     service_unavailable_html = file("${path.module}/../../../static/service-unavailable.html")
     service_starting_html    = file("${path.module}/../../../static/service-starting.html")
@@ -402,6 +474,11 @@ resource "aws_launch_template" "app" {
   }
 
   tags = local.tags
+
+  # 初回 apply で、値を書く前の空のシークレットをインスタンスが読んでしまうと
+  # user_data が止まってインスタンスが起動しない。入れ物(secret)への参照だけでは
+  # secret_version の順序は保証されないため明示する。
+  depends_on = [aws_secretsmanager_secret_version.app_env]
 }
 
 # 平常時は最小構成(desired=min=1)、負荷試験時にCPU使用率でオートスケールする。

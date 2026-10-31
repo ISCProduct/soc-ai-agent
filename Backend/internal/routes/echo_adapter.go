@@ -113,15 +113,21 @@ func EchoTenantResolver(orgs *organization.OrganizationService) echo.MiddlewareF
 // EchoAdminAuth はX-Admin-Email / X-Admin-Tokenヘッダーを検証するEcho nativeミドルウェアを返す。
 // 検証済み管理者のユーザーIDを AdminUserIDContextKey へ格納する(後続のEchoAdminSchoolScope等が利用する)。
 // EchoStaticSecretAuth はログインユーザーを介さないサービス間呼び出し（CI等）向けの
-// 単純な共有シークレット認証。X-Admin-Secretヘッダーの値をadminSecretと定数時間比較する。
-func EchoStaticSecretAuth(adminSecret string) echo.MiddlewareFunc {
+// 単純な共有シークレット認証。X-Admin-Secretヘッダーの値をserviceSecretと定数時間比較する。
+//
+// ここで使うのは SERVICE_SECRET であって ADMIN_SECRET ではない(#1158)。
+// ADMIN_SECRET は管理者/職員トークンのHMAC鍵で、漏れると /api/admin/* の全権限が取れる。
+// CIは既知の値でこのエンドポイントを叩く必要があるため、両者を同じ値にすると
+// HMAC鍵の露出面がCIまで広がる。未設定時は503でfail-closeし、ADMIN_SECRETへは
+// フォールバックしない（フォールバックすると分離した意味が無くなる）。
+func EchoStaticSecretAuth(serviceSecret string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			if adminSecret == "" {
-				return echo.NewHTTPError(http.StatusServiceUnavailable, "Service Unavailable: admin authentication not configured")
+			if serviceSecret == "" {
+				return echo.NewHTTPError(http.StatusServiceUnavailable, "Service Unavailable: service authentication not configured")
 			}
 			token := c.Request().Header.Get("X-Admin-Secret")
-			if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(adminSecret)) != 1 {
+			if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(serviceSecret)) != 1 {
 				return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 			}
 			return next(c)
