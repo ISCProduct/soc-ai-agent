@@ -135,6 +135,11 @@ jobs:
       - name: 本番 uptime 判定のテスト
         run: ./automation/test/prod-uptime-decision-test.sh
 
+      # ブランチ作成→処理中、PR オープン→PR確認待ちの Backlog 同期。
+      # 後退させない・push で戻さない、が崩れるとレビュー待ちの課題が処理中へ戻る。
+      - name: PR → Backlog ステータス同期の検査
+        run: python3 automation/test/pr-to-backlog-status-test.py
+
       # 本番反映済み issue の解決ロジック。
       # 誤検出すると無関係な issue を閉じ、取りこぼすと開いたまま溜まる。
       - name: デプロイ済み issue 解決の自己チェック
@@ -277,6 +282,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # eslint はこれまでCIのどのジョブでも実行していなかった。
+      # CLAUDE.md は「PR時: Go/FEのLint & Test」と書いているが実態が伴っておらず、
+      # eslint プラグインの版上げPRを「CI緑だから」で通す判断ができなかった。
+      # 既存ジョブへステップとして足す（別ジョブにすると npm ci がもう一度走る）。
+      - name: Run lint
+        run: npm run lint
 
       - name: Run unit tests
         run: npm test -- --no-coverage
