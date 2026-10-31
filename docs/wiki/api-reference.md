@@ -36,13 +36,19 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 |---|---|---|
 | ユーザー | `X-User-Token` | 学生・教員。ログインで発行される短TTLのJWT |
 | 管理者 | `X-Admin-Email` + `X-Admin-Token` | 管理画面。管理者本人の認証 |
-| サービス間 | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない |
+| サービス間 | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない。照合値は `SERVICE_SECRET`（`ADMIN_SECRET` とは別値、#1158） |
 | 企業ポータル | Cookie 3本 | `company_user_id` / `company_user_token` / `company_refresh_token` |
 
 テナントを切り替える場合は `X-Tenant-Slug` を併せて送ります。
 
 実装は `Backend/internal/routes/echo_adapter.go` の `EchoUserAuth` /
 `EchoAdminAuth` / `EchoStaticSecretAuth` です。
+
+`EchoStaticSecretAuth`（サービス間）が照合するのは `SERVICE_SECRET` で、
+`EchoAdminAuth`（管理者トークンのHMAC鍵）が使う `ADMIN_SECRET` とは別の値です。
+CI は既知の値でサービス間エンドポイントを叩く必要があるため、兼用すると
+HMAC鍵の露出面が CI まで広がります（#1158）。`SERVICE_SECRET` が未設定の場合は
+503 で拒否し、`ADMIN_SECRET` へのフォールバックはしません。
 
 ### ロールと職員（staff）
 

@@ -192,7 +192,14 @@ variable "resend_api_key_plain" {
 
 variable "admin_secret_plain" {
   type        = string
-  description = "管理者認証シークレット(平文)。CI(sync-whats-newジョブ等)から既知の値で呼び出せるよう、random_passwordではなく固定値にする"
+  description = "管理者トークン(X-Admin-Token)のHMAC鍵(平文)。CIには渡さない(#1158: CIが叩く共有シークレットは service_secret_plain)"
+  sensitive   = true
+  default     = ""
+}
+
+variable "service_secret_plain" {
+  type        = string
+  description = "CIからのサービス間呼び出し(X-Admin-Secret)用の共有シークレット(平文)。GitHubのリポジトリシークレット SERVICE_SECRET と同じ値にする。admin_secret_plain とは必ず別値にする(#1158)"
   sensitive   = true
   default     = ""
 }

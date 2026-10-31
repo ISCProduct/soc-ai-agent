@@ -15,9 +15,26 @@ tfvars が空でも plan に差分は出ない。
 | `soc-app/oauth` | `google_client_secret` / `github_client_secret` | 各 OAuth アプリ | 初回のみ |
 | `soc-app/admin` | `admin_secret` | 自動生成（`random_password`） | 初回のみ |
 | `soc-app/admin` | `user_secret` / `company_user_secret` / `oauth_state_secret` / `token_encryption_key` | 自動生成 | 初回のみ |
+| `soc-app/service-secret` | `service_secret` | 自動生成（`random_password`） | 初回のみ |
 
 `admin_secret` は **staging と別値**にする。staging が漏れても本番の管理者権限に波及させないため。
-CI（`sync-whats-new`）は本番向けには Secrets Manager から読むので、既知の固定値である必要はない。
+
+## `admin_secret` と `service_secret` の役割分担（#1158）
+
+| | `admin_secret`（`ADMIN_SECRET`） | `service_secret`（`SERVICE_SECRET`） |
+|---|---|---|
+| 用途 | 管理者/職員トークン（`X-Admin-Token`）のHMAC鍵 | CI・運用からのサービス間呼び出し（`X-Admin-Secret`）の共有シークレット |
+| 漏えい時の影響 | `/api/admin/*` の全権限 | 更新情報の取り込みと学習データの件数取得のみ |
+| CI が知るか | **知らない**（渡さない） | 知る（本番は Secrets Manager から読む） |
+
+もともとこの2つは `ADMIN_SECRET` 1本で兼用されていた。CI が既知の値で
+`/api/admin/whats-new/ingest` を叩く必要があるため、その要件のために
+HMAC鍵の露出面まで CI へ広がっていた。シークレットを分けて解消済み。
+
+`SERVICE_SECRET` が未設定でもバックエンドは起動する（Terraform apply より先に
+新しいイメージがデプロイされても本番が落ちないようにするため）。その場合は
+サービス間エンドポイントが 503 で fail-close し、取り込みは次回の実行で回収される。
+**`ADMIN_SECRET` へのフォールバックは実装されていない。**
 
 `ignore_changes` は `secret_string` 全体にかかるため、**秘密でない値も Terraform からは変更できない**。
 `google_client_id` / `github_client_id` は tfvars を書き換えても plan に差分が出ず無言で無視される。
@@ -27,12 +44,16 @@ OAuth アプリを作り直して client_id が変わった場合も、下の CL
 
 `terraform apply` では更新されない。AWS CLI で直接書き換える。
 
-`admin_secret` を変える場合は、**先に CI が Secrets Manager を読めることを確認する**。
-読めないまま回すと CI は旧値（staging 共用の値）でフォールバックし、本番への
-更新情報の取り込みが 403 になる。手元で確認するなら次のとおり。
+`admin_secret` は CI に渡していないので、ローテーションしても CI 側の設定変更は要らない
+（管理者は再ログインが必要になる）。
+
+`service_secret` を変える場合は、**先に CI が Secrets Manager を読めることを確認する**。
+読めないと CI は本番への取り込みを見送る（警告のみ。次回の本番起動時に回収される）。
+値を書き換える対象は `soc-app/service-secret` で、キーは `service_secret`（下の手順の
+`--secret-id` とキー名を読み替える）。手元で確認するなら次のとおり。
 
 ```bash
-aws secretsmanager get-secret-value --secret-id soc-app/admin --query SecretString --output text >/dev/null \
+aws secretsmanager get-secret-value --secret-id soc-app/service-secret --query SecretString --output text >/dev/null \
   && echo "読めた（CI のロールでも同じ権限があるか確認すること）"
 ```
 
@@ -76,11 +97,13 @@ unset NEW_SECRET
 
 **旧キーの失効は必ず最後**。先に失効させると、新デプロイが失敗したときに戻す先が無くなる。
 
-## `admin_secret` を変えたあとの後始末
+## `service_secret` を変えたあとの後始末
 
-リポジトリシークレット `ADMIN_SECRET` は **staging 専用**に戻す（本番値を入れない）。
-CI は本番向けには Secrets Manager から読み、読めないときだけこのシークレットへ
-フォールバックする。本番値が残っていると、権限不調に気づかないまま動いてしまう。
+リポジトリシークレット `SERVICE_SECRET` は **staging 専用**（本番値を入れない）。
+CI は本番向けには Secrets Manager だけを見る（フォールバックは無い）ので、
+本番値を GitHub 側に置く理由は無い。
+
+リポジトリシークレット `ADMIN_SECRET` は**不要**になった。CI は参照していないので削除してよい。
 
 取り込みが 401/403/503 になった場合、CI は警告では流さずエラーにする。
 - `prod-uptime-scheduler`（本番起動時の回収）はジョブを失敗させ、Discord へ通知する
@@ -109,7 +132,7 @@ Terraform は値を管理しないので、**Secrets Manager 側が空のまま�
 気づかないまま「起動はするが AI 機能が全部無効」になる。
 
 ```bash
-for id in soc-app/openai soc-app/email soc-app/oauth soc-app/admin; do
+for id in soc-app/openai soc-app/email soc-app/oauth soc-app/admin soc-app/service-secret; do
   echo "--- $id"
   aws secretsmanager get-secret-value --secret-id "$id" --query SecretString --output text \
     | python3 -c "import json,sys; print({k: ('設定済み' if v else '空') for k, v in json.load(sys.stdin).items()})"

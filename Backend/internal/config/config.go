@@ -18,6 +18,7 @@ type Config struct {
 	GBizInfoBaseURL   string
 	GBizInfoToken     string
 	AdminSecret       string
+	ServiceSecret     string
 	UserSecret        string
 	CompanyUserSecret string
 	OAuthStateSecret  string
@@ -35,6 +36,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	adminSecret := os.Getenv("ADMIN_SECRET")
+	serviceSecret := os.Getenv("SERVICE_SECRET")
 	userSecret := os.Getenv("USER_SECRET")
 	companyUserSecret := os.Getenv("COMPANY_USER_SECRET")
 	oauthStateSecret := os.Getenv("OAUTH_STATE_SECRET")
@@ -58,9 +60,24 @@ func LoadConfig() (*Config, error) {
 				log.Fatalf("%s が未設定またはプレースホルダーのままです。本番環境では必ず安全な値を設定してください。", key)
 			}
 		}
+		// SERVICE_SECRET は上の必須チェックに入れない。ここを log.Fatalf にすると、
+		// Terraform apply より先に新しいイメージがデプロイされた時点で本番が起動不能になる
+		// (COMPANY_USER_SECRET の追加漏れで実際に起きた。infra/.../prod/main.tf のコメント参照)。
+		// 未設定でも EchoStaticSecretAuth が 503 で fail-close するため、影響は
+		// サービス間呼び出し(更新情報の取り込み)が拒否されることに限られ、取りこぼしは
+		// 次回の取り込みで回収される。ADMIN_SECRET へのフォールバックはしない(#1158)。
+		if serviceSecret == "" {
+			log.Println("WARNING: SERVICE_SECRET が未設定です。CI・運用からのサービス間呼び出し(X-Admin-Secret)は503で拒否されます。Secrets Manager の soc-app/service-secret を確認してください。")
+		}
+		if serviceSecret != "" && serviceSecret == adminSecret {
+			log.Fatalf("SERVICE_SECRET と ADMIN_SECRET が同値です。CIが知る共有シークレットと管理者トークンのHMAC鍵は別値にしてください。")
+		}
 	} else {
 		if adminSecret == "" {
 			log.Println("WARNING: ADMIN_SECRET が設定されていません。管理者認証トークンの検証が無効化されます。本番環境では必ず設定してください。")
+		}
+		if serviceSecret == "" {
+			log.Println("WARNING: SERVICE_SECRET が設定されていません。サービス間呼び出し(X-Admin-Secret)は503で拒否されます。")
 		}
 		if userSecret == "" {
 			log.Println("WARNING: USER_SECRET が設定されていません。ユーザー認証が利用できません。本番環境では必ず設定してください。")
@@ -83,6 +100,7 @@ func LoadConfig() (*Config, error) {
 		GBizInfoBaseURL:   get("GBIZINFO_BASE_URL", ""),
 		GBizInfoToken:     getFirst("GBIZINFO_API_KEY", "GBIZINFO_API_TOKEN"),
 		AdminSecret:       adminSecret,
+		ServiceSecret:     serviceSecret,
 		UserSecret:        userSecret,
 		CompanyUserSecret: companyUserSecret,
 		OAuthStateSecret:  oauthStateSecret,
