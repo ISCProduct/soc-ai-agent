@@ -175,6 +175,12 @@ jobs:
       - name: staging の .env 継ぎ足し検査
         run: ./automation/test/staging-env-topup-test.sh
 
+      # SERVICE_SECRET の例示値が「弾かれる値」と一致していること。
+      # example をコピーしたまま apply すると、リポジトリを読める第三者が
+      # サービス間エンドポイントを叩ける状態になる。
+      - name: SERVICE_SECRET のプレースホルダー整合検査
+        run: ./automation/test/service-secret-placeholder-test.sh
+
       # 更新情報の取り込みで「鍵が違う/読めない」が warning のまま緑で終わらないこと。
       # ジョブは continue-on-error なので、昇格させないと永久に反映されないまま気づけない。
       - name: 更新情報の取り込みの認証失敗検査

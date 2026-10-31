@@ -128,7 +128,9 @@ components:
       name: X-Admin-Secret
       description: |
         ヘッダ名は歴史的に `X-Admin-Secret` だが、照合する値は `SERVICE_SECRET` であり
-        管理者トークンのHMAC鍵 `ADMIN_SECRET` とは別値（#1158）。未設定なら 503 で拒否する。
+        管理者トークンのHMAC鍵 `ADMIN_SECRET` とは別値（#1158）。未設定なら 503 で拒否し、
+        本文に `"code": "SERVICE_SECRET_NOT_CONFIGURED"` を入れる（ALB が healthy target
+        ゼロで返す 503 と区別するため。CI がこのコードを見ている）。
     companyCookie:
       type: apiKey
       in: cookie

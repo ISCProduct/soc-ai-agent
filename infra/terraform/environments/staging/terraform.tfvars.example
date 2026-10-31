@@ -18,7 +18,9 @@ frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:s
 # GitHub のリポジトリシークレット SERVICE_SECRET と同じ値にする。
 # ADMIN_SECRET(管理者トークンのHMAC鍵)とは必ず別値にすること。
 # 生成例: python3 -c "import secrets; print(secrets.token_urlsafe(36))"
-service_secret_plain = "<SERVICE_SECRET と同じ値>"
+# 下の値はプレースホルダー。そのまま apply すると variables.tf の validation で止まる
+# （そのまま通ると、リポジトリを読める第三者がサービス間エンドポイントを叩けてしまう）。
+service_secret_plain = "change-me-service-secret"
 
 # staging 用 OpenAI キーの Secrets Manager ARN（未設定でも apply は可能だが BE の AI 機能は動かない）
 # openai_secret_arn = "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:stg/openai/api-key-xxxxxx"

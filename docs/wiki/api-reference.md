@@ -50,6 +50,8 @@ CI は既知の値でサービス間エンドポイントを叩く必要があ�
 HMAC鍵の露出面が CI まで広がります（#1158）。`SERVICE_SECRET` が未設定の場合は
 503 で拒否し、`ADMIN_SECRET` へのフォールバックはしません。プレースホルダー
 （`change-me-service-secret`）のままの場合と `ADMIN_SECRET` と同値の場合も未設定扱いです。
+この 503 の本文には `"code": "SERVICE_SECRET_NOT_CONFIGURED"` が入ります。ALB が
+healthy target ゼロで返す 503 と区別するためで、CI がこのコードを見ています。
 
 ### ロールと職員（staff）
 

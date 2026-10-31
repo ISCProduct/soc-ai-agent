@@ -5,6 +5,10 @@
 # 「停止中で届かない」は放っておけば次回で回収されるが、次の3つは放置しても直らない:
 #   - 送った鍵が違う / 未登録 (401/403)
 #   - Secrets Manager から鍵を読めない (IAM権限不足・シークレット未作成)
+#   - バックエンドに SERVICE_SECRET が入っていない (503。設定不備の方)
+# 503 はステータスだけでは判断できない。api.* は ALB 直結(prod/main.tf の
+# aws_route53_record.backend)で、ALB も healthy target ゼロなら 503 を返すため。
+# 設定不備の方は EchoStaticSecretAuth が本文へ SERVICE_SECRET_NOT_CONFIGURED を入れる。
 # これらを warning で流すと、更新情報が永久に反映されないまま誰も気づかない(#1290)。
 # 鍵が ADMIN_SECRET から SERVICE_SECRET へ分離された(#1158)ことで、
 # 「リポジトリシークレットの登録漏れ」という新しい失敗の仕方も増えている。
@@ -16,6 +20,14 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 fail=0
 checked=0
+
+# 本文に入るコードは Backend 側が正。ワークフローの grep と食い違ったら検査が無意味になる。
+NOT_CONFIGURED_CODE=$(grep -oE '"SERVICE_SECRET_NOT_CONFIGURED"' "$ROOT/Backend/internal/routes/echo_adapter.go" | head -1 | tr -d '"')
+if [ -z "$NOT_CONFIGURED_CODE" ]; then
+  echo "FAIL echo_adapter.go が設定不備の503にコードを入れていない（CIが停止中と区別できない）"
+  exit 1
+fi
+echo "ok   設定不備の503のコード: $NOT_CONFIGURED_CODE"
 
 check_step() {
   local label="$1" body="$2" bad=0
@@ -40,6 +52,13 @@ check_step() {
   # 401|403 の分岐の中に ::error:: があること（コメント込みでも数行以内に出る書き方に揃えてある）。
   if ! grep -A6 '401|403)' <<< "$body" | grep -q '::error::'; then
     echo "FAIL $label: 401/403 を ::error:: にしていない（warning だと誰も気づかない）"
+    fail=$((fail + 1)); bad=1
+  fi
+
+  # 設定不備の503を本文で見分けていること。ステータスだけで一律 warning にすると、
+  # SERVICE_SECRET が未注入のまま更新情報が永久に反映されない。
+  if ! grep -q "$NOT_CONFIGURED_CODE" <<< "$body"; then
+    echo "FAIL $label: 設定不備の503($NOT_CONFIGURED_CODE)を本文で見分けていない"
     fail=$((fail + 1)); bad=1
   fi
 

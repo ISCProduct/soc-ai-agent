@@ -339,7 +339,9 @@ jobs:
               if [ -n "$BFF_TOKEN" ] && [ "$BFF_TOKEN" != None ]; then
                 if [ -f .env ]; then
                   sed -i /^BFF_INTERNAL_TOKEN=/d .env
-                  echo BFF_INTERNAL_TOKEN=$BFF_TOKEN >> .env
+                  # 引用する。値に空白やタブが入ると単語分割され、echo が単一スペースへ
+                  # 詰め直すので .env の値が SSM の値と一致しなくなる。
+                  echo "BFF_INTERNAL_TOKEN=$BFF_TOKEN" >> .env
                 fi
               else
                 # 新規インスタンスは user_data が同じ値を既に書いているので .env は触らない。
@@ -354,7 +356,7 @@ jobs:
               if [ -n "$SERVICE_SECRET_VALUE" ] && [ "$SERVICE_SECRET_VALUE" != None ]; then
                 if [ -f .env ]; then
                   sed -i /^SERVICE_SECRET=/d .env
-                  echo SERVICE_SECRET=$SERVICE_SECRET_VALUE >> .env
+                  echo "SERVICE_SECRET=$SERVICE_SECRET_VALUE" >> .env
                 fi
               else
                 # 新規インスタンスは user_data が同じ値を既に書いているので .env は触らない。
@@ -362,7 +364,7 @@ jobs:
               fi
               # staging は常に ALB -> edge nginx -> frontend の2段(terraform と同値)
               if [ -f .env ] && ! grep -q ^TRUSTED_PROXY_HOPS= .env; then
-                echo TRUSTED_PROXY_HOPS=2 >> .env
+                echo "TRUSTED_PROXY_HOPS=2" >> .env
               fi
               df -h /
               # 稼働中イメージは prune できない。先に down してから空ける。
@@ -1262,18 +1264,23 @@ jobs:
           # 後者を warning で流すと、service_secret のローテーション後に更新情報が
           # 反映されないまま誰も気づかない(#1290 と同じ症状)。
           #
-          # 503 は拾わない。CloudFront が ALB の 500/502/503/504 をすべて 503 へ
-          # 差し替えるため(modules/cloudfront_app_proxy)、503 はほぼ「オリジンが
-          # 応答しない」を意味する。バックエンドの「SERVICE_SECRET 未設定」も 503 だが、
-          # ローリング更新中やタスク停止中に必ず踏むので、ここで落とすと
-          # 正常なデプロイが赤くなる(実際に本番デプロイで踏んだ)。
+          # 503 は本文で切り分ける。api.* は CloudFront を経由せず ALB 直結
+          # (infra/terraform/environments/prod/main.tf の aws_route53_record.backend が
+          # module.alb.alb_dns_name を alias にしている。CloudFront が噛むのはフロント側だけ)。
+          # ただし ALB も healthy target がゼロなら自分で 503 を返すので、
+          # ステータスだけでは「停止中」と「SERVICE_SECRET 未設定」が区別できない。
+          # 後者は EchoStaticSecretAuth が本文に SERVICE_SECRET_NOT_CONFIGURED を入れるので
+          # (Backend/internal/routes/echo_adapter.go)、それが有るときだけ落とす。
+          # 一律で落とすと、ローリング更新中やタスク停止中の 503 で正常なデプロイが
+          # 赤くなる(実際に本番デプロイで踏んだ)。
           #
           # service_secret が読めなかった場合は叩かない。値が無いまま送ると必ず 403 になり、
           # 「鍵の不一致」と「鍵が読めない」を区別できなくなる。上で error を出してあり、
           # prod_rejected を立てたまま最後にジョブを落とす。
           prod_rejected=$lookup_failed
           if [ "$lookup_failed" = "0" ]; then
-            prod_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
+            prod_resp=$(mktemp)
+            prod_code=$(curl -s -o "$prod_resp" -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
               -H "Content-Type: application/json" \
               -H "X-Admin-Secret: $PROD_SERVICE_SECRET" \
               -d @"$payload" \
@@ -1284,16 +1291,28 @@ jobs:
                 echo "::error::本番への更新情報の取り込みが $prod_code で拒否されました。service_secret が本番の値と一致していません(SERVICE_SECRET の注入とローテーション後の CI 設定を確認してください)"
                 prod_rejected=1
                 ;;
+              503)
+                if grep -q SERVICE_SECRET_NOT_CONFIGURED "$prod_resp"; then
+                  echo "::error::本番の SERVICE_SECRET が未設定です(503)。terraform apply でタスク定義へ注入してからデプロイし直してください"
+                  prod_rejected=1
+                else
+                  echo "::warning::本番への更新情報の取り込みに失敗しました(HTTP 503 / 停止中・ローリング更新中の可能性)。本番起動時に回収されます。"
+                fi
+                ;;
               *)
                 echo "::warning::本番への更新情報の取り込みに失敗しました(HTTP $prod_code / 停止中の可能性)。本番起動時に回収されます。"
                 ;;
             esac
+            rm -f "$prod_resp"
           fi
 
           # staging も「停止中で届かない」と「鍵が違う/未登録」を分ける。送る鍵が
           # ADMIN_SECRET から SERVICE_SECRET へ変わったので、リポジトリシークレット
           # SERVICE_SECRET の未登録や値違いを「停止中かも」で流すと気づけない。
-          stg_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
+          # staging の api も ALB 直結(edge nginx が噛むのは frontend だけ)なので、
+          # 本番と同じく本文で設定不備の503を見分けられる。
+          stg_resp=$(mktemp)
+          stg_code=$(curl -s -o "$stg_resp" -w '%{http_code}' -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $SERVICE_SECRET" \
             -d @"$payload" \
@@ -1305,10 +1324,19 @@ jobs:
               echo "::error::stagingへの更新情報の取り込みが $stg_code で拒否されました。リポジトリシークレット SERVICE_SECRET が staging の値と一致していません"
               stg_rejected=1
               ;;
+            503)
+              if grep -q SERVICE_SECRET_NOT_CONFIGURED "$stg_resp"; then
+                echo "::error::staging の SERVICE_SECRET が未設定です(503)。staging の terraform apply とデプロイ(.env の継ぎ足し)を確認してください"
+                stg_rejected=1
+              else
+                echo "::warning::stagingへの更新情報の取り込みに失敗しました(HTTP 503 / 停止中の可能性)。"
+              fi
+              ;;
             *)
               echo "::warning::stagingへの更新情報の取り込みに失敗しました(HTTP $stg_code / 停止中の可能性)。"
               ;;
           esac
+          rm -f "$stg_resp"
 
           # staging まで流し終えてから落とす。先に exit すると staging の取り込みも飛ぶ。
           [ "$prod_rejected" = "0" ] && [ "$stg_rejected" = "0" ]
@@ -1531,7 +1559,8 @@ jobs:
 
           # 「停止中で届かない」と「鍵が違う/未登録」は対処が別物。後者を握りつぶすと
           # リポジトリシークレット SERVICE_SECRET の設定漏れに気づけない。
-          stg_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
+          stg_resp=$(mktemp)
+          stg_code=$(curl -s -o "$stg_resp" -w '%{http_code}' -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $SERVICE_SECRET" \
             -d @"$payload" \
@@ -1541,6 +1570,14 @@ jobs:
             401|403)
               echo "::error::stagingへの更新情報の取り込みが $stg_code で拒否されました。リポジトリシークレット SERVICE_SECRET が staging の値と一致していません"
               exit 1
+              ;;
+            503)
+              # ALB の 503(停止中)と区別する。設定不備は本文で名乗る。
+              if grep -q SERVICE_SECRET_NOT_CONFIGURED "$stg_resp"; then
+                echo "::error::staging の SERVICE_SECRET が未設定です(503)。staging の terraform apply とデプロイ(.env の継ぎ足し)を確認してください"
+                exit 1
+              fi
+              echo "::warning::stagingへの取り込みに失敗しました(HTTP 503 / 停止中の可能性)。スキップします。"
               ;;
             *)
               echo "::warning::stagingへの取り込みに失敗しました(HTTP $stg_code / 停止中の可能性)。スキップします。"

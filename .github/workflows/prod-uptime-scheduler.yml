@@ -475,12 +475,25 @@ jobs:
 
           # 起動確認済みの状態で 401/403 なら「停止中」ではなく鍵の不一致。
           # ここは最後の回収経路なので、warning で流すと誰も気づけない。
-          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
+          # 503 は本文で切り分ける。api.* は ALB 直結(prod/main.tf の
+          # aws_route53_record.backend)で、ALB も healthy target ゼロなら 503 を返すため、
+          # ステータスだけでは SERVICE_SECRET 未設定と区別できない。
+          resp=$(mktemp)
+          code=$(curl -s -o "$resp" -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $PROD_SERVICE_SECRET" \
             -d @"$payload" \
             --max-time 60 || true)
+          if [ "$code" = "503" ] && grep -q SERVICE_SECRET_NOT_CONFIGURED "$resp"; then
+            # 設定不備は放置しても直らない。拒否と同じ扱いで失敗へ昇格させる。
+            # 下の失敗ステップへ実際のコードを渡す(503 のまま。嘘の 403 にはしない)。
+            echo "rejected=$code" >> "$GITHUB_OUTPUT"
+            echo "::error::本番の SERVICE_SECRET が未設定です(503)。terraform apply でタスク定義へ注入してからデプロイし直してください"
+            code=handled
+          fi
+          rm -f "$resp"
           case "$code" in
+            handled) ;;
             2*)
               echo "更新情報を取り込みました"
               ;;

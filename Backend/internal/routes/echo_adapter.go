@@ -124,7 +124,15 @@ func EchoStaticSecretAuth(serviceSecret string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			if serviceSecret == "" {
-				return echo.NewHTTPError(http.StatusServiceUnavailable, "Service Unavailable: service authentication not configured")
+				// 設定不備の503であることを本文のコードで名乗る。
+				// api.* は ALB 直結(infra/terraform/environments/prod/main.tf の
+				// aws_route53_record.backend)なので、ALB が healthy target ゼロで返す503も
+				// 同じ 503 として CI に見える。CI はこのコードの有無で
+				// 「設定不備(放置しても直らない)」と「停止中(次回で回収される)」を分ける。
+				return echo.NewHTTPError(http.StatusServiceUnavailable, middleware.APIError{
+					Code: "SERVICE_SECRET_NOT_CONFIGURED",
+					Msg:  "Service Unavailable: service authentication not configured",
+				})
 			}
 			token := c.Request().Header.Get("X-Admin-Secret")
 			if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(serviceSecret)) != 1 {

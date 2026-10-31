@@ -205,9 +205,22 @@ variable "service_secret_plain" {
   # 既定値を持たせない。空のまま apply すると SERVICE_SECRET も aws_ssm_parameter も空になり、
   # CI の取り込みが 503 で拒否される（CI 側は警告で流すので気づきにくい）。
   # plan の時点で止めて、tfvars への設定漏れをその場で分かるようにする。
+  #
+  # 空文字だけでは足りない。terraform.tfvars.example をそのままコピーして apply すると
+  # 例示値が本物の SERVICE_SECRET として .env と SSM へ入り、リポジトリを読める第三者が
+  # /api/admin/whats-new/ingest と /api/admin/training/stats を叩けてしまう。
+  # 例示値は Backend/.env.example と同じ change-me-service-secret に揃えてあり
+  # (Backend/internal/config/config.go の serviceSecretPlaceholder と同値)、ここで弾く。
+  # 山括弧を含む値も `<...>` 形のプレースホルダーなので弾く。
+  # 対応関係は automation/test/service-secret-placeholder-test.sh が固定している。
   validation {
     condition     = length(var.service_secret_plain) > 0
     error_message = "service_secret_plain は必須です。GitHub のリポジトリシークレット SERVICE_SECRET と同じ値を tfvars に設定してください(#1158)。"
+  }
+
+  validation {
+    condition     = var.service_secret_plain != "change-me-service-secret" && !can(regex("[<>]", var.service_secret_plain))
+    error_message = "service_secret_plain がプレースホルダーのままです。terraform.tfvars.example の値をコピーしただけだと、リポジトリを読める第三者がサービス間エンドポイントを叩けます(#1158)。"
   }
 }
 

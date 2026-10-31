@@ -71,7 +71,7 @@ for res in $resources; do
     echo "FAIL $envvar の継ぎ足しが既存行を削除していない（古い値が残り全台で揃わない）"
     fail=$((fail + 1))
   fi
-  if ! grep -qE "echo ${envvar}=" <<< "$SSH_BODY"; then
+  if ! grep -qE "echo \"?${envvar}=" <<< "$SSH_BODY"; then
     echo "FAIL $envvar を .env へ書き足していない"
     fail=$((fail + 1))
   fi
@@ -100,6 +100,18 @@ if grep -qE "cat > /opt/app/\.env <<'[A-Za-z]+'" "$TPL"; then
 else
   echo "FAIL .env のヒアドキュメント区切り文字が引用されていない（値の \$ や \$(...) が bash に展開される）"
   fail=$((fail + 1))
+fi
+
+# .env へ値を書く echo が引用されていること。
+# 引用が無いと値の連続した空白やタブで単語分割され、echo が単一スペースへ詰め直すので
+# .env の値が SSM / user_data の値と一致しなくなる（検証が静かに失敗する）。
+unquoted=$(grep -nE '^[[:space:]]*echo [A-Z_]+=' <<< "$SSH_BODY")
+if [ -n "$unquoted" ]; then
+  echo "FAIL .env へ書く echo が引用されていない（値の空白で単語分割される）:"
+  sed 's/^/     /' <<< "$unquoted"
+  fail=$((fail + 1))
+else
+  echo "ok   .env へ書く echo がすべて引用されている"
 fi
 
 echo "検査した SSM パラメータ: $checked 件"

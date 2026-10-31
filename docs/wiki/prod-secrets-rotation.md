@@ -110,8 +110,17 @@ CI は本番向けには Secrets Manager だけを見る（フォールバック
 
 リポジトリシークレット `ADMIN_SECRET` は**不要**になった。CI は参照していないので削除してよい。
 
-取り込みが 401/403 になった場合、および Secrets Manager から `service_secret` を
-読めなかった場合、CI は警告では流さずエラーにする（staging への取り込みの 401/403 も同じ扱い）。
+取り込みが 401/403 になった場合、Secrets Manager から `service_secret` を読めなかった場合、
+および **`SERVICE_SECRET` 未設定の 503** の場合、CI は警告では流さずエラーにする
+（staging への取り込みも同じ扱い）。
+
+503 はステータスだけでは判断できない。`api.shukatsu-ai.jp` は CloudFront を経由せず
+ALB 直結（`prod/main.tf` の `aws_route53_record.backend`）で、ALB も healthy target が
+ゼロなら自分で 503 を返すため、「停止中」と「設定不備」が同じ 503 に見える。
+設定不備の方は `EchoStaticSecretAuth` がレスポンス本文に
+`SERVICE_SECRET_NOT_CONFIGURED` を入れるので、CI はそれが有るときだけ失敗させる。
+**このコード文字列はワークフローが grep している。変えるなら両方そろえること**
+（`automation/test/whats-new-ingest-auth-failure-test.sh` が対応関係を固定している）。
 - `prod-uptime-scheduler`（本番起動時の回収）はジョブを失敗させ、Discord へ通知する
 - `deployment` の `sync-whats-new` はジョブを失敗表示にする（ジョブ自体が
   `continue-on-error` なのでデプロイは止まらない。通知は飛ばないので、

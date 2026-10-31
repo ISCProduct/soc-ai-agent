@@ -3,6 +3,7 @@ package routes_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"Backend/internal/routes"
@@ -46,6 +47,15 @@ func TestEchoStaticSecretAuth(t *testing.T) {
 
 			if rec.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+
+			// 未設定の503は「設定不備」であり、ALBがhealthy targetゼロで返す503とは別物。
+			// CI(deployment.yml / prod-uptime-scheduler.yml)はレスポンス本文の
+			// このコードを見て両者を区別し、設定不備だけをエラーにする。
+			// コード文字列を変えるならワークフロー側の grep も一緒に変えること。
+			if tt.wantStatus == http.StatusServiceUnavailable &&
+				!strings.Contains(rec.Body.String(), "SERVICE_SECRET_NOT_CONFIGURED") {
+				t.Errorf("設定不備の503には SERVICE_SECRET_NOT_CONFIGURED を含めること: %s", rec.Body.String())
 			}
 		})
 	}
