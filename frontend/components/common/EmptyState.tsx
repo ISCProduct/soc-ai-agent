@@ -14,6 +14,14 @@ type EmptyStateProps = {
    * ページの見出し階層に合わせて呼び出し元が指定する。
    */
   titleComponent?: ElementType
+  /**
+   * 余白を詰める。
+   *
+   * 既定の余白はページ全体が空のときを想定している。チャットのログのように
+   * 既に余白を持つ領域の中へ置くと、本文（挨拶や直前の質問）を画面外へ
+   * 押し出してしまう。省略時は従来どおり。
+   */
+  dense?: boolean
 }
 
 /**
@@ -29,11 +37,17 @@ type EmptyStateProps = {
  * 装飾目的のイラストやアイコンは置かない（§27）。読む順序は
  * 「何が無いか」→「どうすればよいか」→「操作」に固定する。
  */
-export function EmptyState({ title, description, action, titleComponent }: EmptyStateProps) {
+export function EmptyState({
+  title,
+  description,
+  action,
+  titleComponent,
+  dense = false,
+}: EmptyStateProps) {
   return (
     <Box
       sx={{
-        py: { xs: 5, sm: 7 },
+        py: dense ? { xs: 2, sm: 2.5 } : { xs: 5, sm: 7 },
         px: 2,
         textAlign: 'center',
         // 読み幅を抑える。中央寄せの文は長いと視線の戻りが大きくなる。

@@ -12,7 +12,9 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { visuallyHidden } from '@mui/utils'
 import { ErrorOutline, WarningAmber } from '@mui/icons-material'
+import { EmptyState } from '@/components/common/EmptyState'
 import styles from '../MuiChat.module.css'
 import { TypingIndicator } from './TypingIndicator'
 import {
@@ -61,6 +63,13 @@ export function ChatMessageList({
 
   // ログには名前を与える。無いと読み上げでは「ログ」としか案内されず、
   // 何の一覧なのか分からない。
+  //
+  // 応答の到着はこのライブリージョンが伝える。politeness は polite のまま。
+  // assertive にすると入力中でも読み上げを断ち切るので、書きかけの回答を
+  // 見失う。応答は待てる情報なので割り込ませない。
+  //
+  // aria-relevant は指定しない。"additions" だけに絞ると文字の差し替えが
+  // 通知から外れる。role="log" の既定（additions text）に任せる。
   return (
     <Box
       ref={messagesAreaRef}
@@ -68,7 +77,6 @@ export function ChatMessageList({
       role="log"
       aria-label="自己分析チャットのやり取り"
       aria-live="polite"
-      aria-relevant="additions"
       sx={{
         flexGrow: 1,
         // 選択肢の最大高さとホーム上部の帯で、この領域が中身の高さまで潰れる。
@@ -108,18 +116,7 @@ export function ChatMessageList({
             履歴を待っている間は、これが無いと空のチャットログと入力欄だけが
             読み上げられ、待機中だと分からない。
           */}
-          <Box
-            role="status"
-            sx={{
-              position: 'absolute',
-              width: 1,
-              height: 1,
-              overflow: 'hidden',
-              clip: 'rect(0 0 0 0)',
-              clipPath: 'inset(50%)',
-              whiteSpace: 'nowrap',
-            }}
-          >
+          <Box component="span" role="status" sx={visuallyHidden}>
             チャット履歴を読み込んでいます
           </Box>
           <Box sx={{ px: { xs: 2, md: 3 }, pt: 2 }} aria-hidden>
@@ -166,6 +163,7 @@ export function ChatMessageList({
           message.role === 'assistant' ? extractChoices(message.content) : []
         const displayContent =
           choices.length > 0 ? stripChoiceLines(message.content) : message.content
+        const speakerLabel = messageAccessibleLabel(message.role, message.timestamp)
 
         return (
           <Box
@@ -173,7 +171,7 @@ export function ChatMessageList({
             // 1件ずつを名前付きの区切りにする。発言者と時刻が無いと、
             // 読み上げでは誰の発言か分からないまま本文だけが並ぶ。
             component="article"
-            aria-label={messageAccessibleLabel(message.role, message.timestamp)}
+            aria-label={speakerLabel}
             sx={{
               display: 'flex',
               mb: { xs: 2, md: 2.5 },
@@ -218,6 +216,15 @@ export function ChatMessageList({
                 maxWidth: message.role === 'assistant' ? '46rem' : undefined,
               }}
             >
+              {/*
+                発言者を文字としても置く。ライブリージョンは追加された部分の
+                文字列を読み上げるため、発言者が aria-label にしか無いと、
+                名前を読む実装では本文が落ち、本文を読む実装では誰の発言かが落ちる。
+                画面には出さないので、見た目は変わらない。
+              */}
+              <Box component="span" sx={visuallyHidden}>
+                {speakerLabel}
+              </Box>
               {(isTerminationMessage || isValidationError) && (
                 <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 0.5 }}>
                   {isTerminationMessage ? (
@@ -256,37 +263,52 @@ export function ChatMessageList({
         </Box>
       )}
 
+      {/*
+        初回利用の空状態（§24）。
+        まだ1問も答えていないあいだは候補のチップだけが並んでいて、
+        今どういう状態なのか・選ぶと何が起きるのか・当てはまるものが
+        無いときどうするのかが、どこにも書かれていなかった。
+        共通の EmptyState（§30）に寄せて「状態 → 次の操作」の順に読ませる。
+
+        「クイック選択（タップで送信）」のような見出しは置かない。
+        押せば送られることはボタンの見た目で分かるので、
+        説明を足すとフォームではなくAIの機能紹介に見える。
+        チップは EmptyState の操作枠に入れ、名前付きのまとまりとして渡す。
+      */}
       {showQuickSelect && (
         <Box sx={{ mt: 1, mb: 2, px: 1 }}>
-          {/*
-            「クイック選択（タップで送信）」という見出しは外した。
-            押せば送られることはボタンの見た目で分かるので、
-            説明を足すとフォームではなくAIの機能紹介に見える。
-            質問の直下に左から並べて、設問の選択肢として読ませる。
-          */}
-          <Stack
-            direction="row"
-            spacing={1}
-            justifyContent="flex-start"
-            flexWrap="wrap"
-            useFlexGap
-            gap={1}
-          >
-            {JOB_QUICK_OPTIONS.map((option) => (
-              <Chip
-                key={option}
-                label={option}
-                onClick={() => onQuickSelect(option)}
-                clickable
-                sx={{
-                  cursor: 'pointer',
-                  borderColor: CHAT_ACCENT,
-                  '&:hover': { bgcolor: 'rgba(236,91,19,0.08)' },
-                }}
-                variant="outlined"
-              />
-            ))}
-          </Stack>
+          <EmptyState
+            dense
+            title="まだ回答がありません"
+            description="近いものを選ぶと、その内容に合わせて次の質問が続きます。当てはまるものが無ければ、下の入力欄に書いて送ってください。"
+            action={
+              <Stack
+                direction="row"
+                spacing={1}
+                justifyContent="center"
+                flexWrap="wrap"
+                useFlexGap
+                gap={1}
+                role="group"
+                aria-label="興味のある仕事の候補"
+              >
+                {JOB_QUICK_OPTIONS.map((option) => (
+                  <Chip
+                    key={option}
+                    label={option}
+                    onClick={() => onQuickSelect(option)}
+                    clickable
+                    sx={{
+                      cursor: 'pointer',
+                      borderColor: CHAT_ACCENT,
+                      '&:hover': { bgcolor: 'rgba(236,91,19,0.08)' },
+                    }}
+                    variant="outlined"
+                  />
+                ))}
+              </Stack>
+            }
+          />
         </Box>
       )}
 

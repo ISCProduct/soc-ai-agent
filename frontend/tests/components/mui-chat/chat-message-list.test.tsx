@@ -137,4 +137,30 @@ describe('読み上げでの区別（WCAG）', () => {
     )
     expect(screen.getByRole('article', { name: 'あなた' })).toBeInTheDocument()
   })
+
+  /**
+   * 応答の到着を読み上げへ伝える。
+   *
+   * ライブリージョンは「追加された部分の文字列」を読み上げる。発言者が
+   * aria-label にしか無いと、名前を読む実装では本文が落ち、本文を読む実装では
+   * 誰の発言か落ちる。どちらでも揃うよう、発言者は文字としても置く。
+   */
+  it('追加された発言は発言者も本文も文字として持つ', () => {
+    render(
+      <ChatMessageList
+        {...baseProps()}
+        messages={[{ id: 'a', role: 'assistant', content: '次の質問です', timestamp: at }]}
+      />,
+    )
+    const article = screen.getByRole('article', { name: 'エージェント、9時05分' })
+    expect(article).toHaveTextContent('エージェント、9時05分')
+    expect(article).toHaveTextContent('次の質問です')
+  })
+
+  it('読み上げへの通知を追加だけに絞らない', () => {
+    // aria-relevant="additions" は文字の差し替えを通知から外す。
+    // role="log" の既定（additions text）に戻し、応答の到着を取りこぼさない。
+    const { container } = render(<ChatMessageList {...baseProps()} messages={[greeting]} />)
+    expect(container.querySelector('[role="log"]')?.getAttribute('aria-relevant')).toBeNull()
+  })
 })
