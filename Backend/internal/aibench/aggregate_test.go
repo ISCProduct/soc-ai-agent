@@ -280,6 +280,10 @@ func TestDiffコストは絶対額で判定する(t *testing.T) {
 		{name: "#1584 の実測: 1.42倍だが +$0.00026/件", prev: 0.000622, cur: 0.000882, wantRegress: false},
 		{name: "高い工程: 1.19倍だが +$0.0095/件", prev: 0.05, cur: 0.0595, wantRegress: true},
 		{name: "コスト減は劣化ではない", prev: 0.05, cur: 0.01, wantRegress: false},
+		// 閾値ちょうどは劣化として扱う（他の指標と同じ）。この2件は
+		// 月額換算がちょうど $10.00 と $9.00 になる（eps そのものは踏んでいない）。
+		{name: "月額換算がちょうど閾値なら劣化", prev: 0.001, cur: 0.002, wantRegress: true},
+		{name: "月額換算が閾値を僅かに下回れば劣化ではない", prev: 0.001, cur: 0.0019, wantRegress: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -587,6 +591,26 @@ func TestDiff前回コストが0でも絶対増で判定する(t *testing.T) {
 				t.Errorf("コストの比較不能警告 = %v, want %v (warnings=%v)", gotWarn, tt.wantWarning, warnings)
 			}
 		})
+	}
+}
+
+// #1598: 前回が未計測のときコストの行を出さない。交絡（#1593）と同じ理由で、
+// 「0.00 → 500.00 +500.00」と並べながら「劣化は検知されませんでした」と続く表は、
+// 警告を読み飛ばすと増加を見逃したようにも、無視したようにも読める。
+func TestPrintDiff前回が未計測ならコストの行を出さない(t *testing.T) {
+	var buf strings.Builder
+	prev := &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30, MeasuredRuns: 0}
+	cur := &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30,
+		CostPerCallUSD: 0.05, MeasuredRuns: 60}
+	if PrintDiff(&buf, prev, cur) {
+		t.Fatalf("未計測は劣化にしない:\n%s", buf.String())
+	}
+	out := buf.String()
+	if strings.Contains(out, "コスト/件($)") || strings.Contains(out, "件換算($)") {
+		t.Errorf("比較できないのにコストの行を出している:\n%s", out)
+	}
+	if !strings.Contains(out, "コストは比較できない") {
+		t.Errorf("比較不能の警告が出ていない:\n%s", out)
 	}
 }
 

@@ -257,8 +257,13 @@ func lengthComparable(prev, cur *Summary) bool {
 //
 // 1件も計測できていない実行（#1634）の $0 は「無料だった」ではなく
 // 「測れていない」。そのまま比べると今回のコスト全額が増加として出て、
-// 設定の問題を費用の劣化と読み違える。前回が $0 のときだけ確かめればよく、
-// $0 より大きければ計測できている。
+// 設定の問題を費用の劣化と読み違える。
+//
+// 確かめるのは前回が $0 のときだけでよい。$0 より大きければ計測できているし、
+// 計測できた実行の $0（無料経路・ローカルモデル）は比較に使える。
+// 今回も $0 なら増加のしようが無いので、警告を出さず比較できるものとして扱う。
+// コストを記録していない古い結果JSONどうしを並べたときに、増えてもいないのに
+// 毎回「比較できない」と出るのを避ける。
 func costComparable(prev, cur *Summary) bool {
 	return prev.CostPerCallUSD > 0 || prev.MeasuredRuns > 0 || cur.CostPerCallUSD == 0
 }
@@ -298,10 +303,15 @@ func PrintDiff(w io.Writer, prev, cur *Summary) bool {
 	}
 	row("再現性(平均σ)", prev.MeanScoreStdDev, cur.MeanScoreStdDev, false)
 	fmt.Fprintf(w, "%-18s %10d %10d %+10d\n", "p95(ms)", prev.LatencyP95MS, cur.LatencyP95MS, cur.LatencyP95MS-prev.LatencyP95MS)
-	fmt.Fprintf(w, "%-18s %10.5f %10.5f %+10.5f\n", "コスト/件($)", prev.CostPerCallUSD, cur.CostPerCallUSD, cur.CostPerCallUSD-prev.CostPerCallUSD)
-	fmt.Fprintf(w, "%-18s %10.2f %10.2f %+10.2f\n", fmt.Sprintf("月%d件換算($)", assumedMonthlyCalls),
-		prev.CostPerCallUSD*assumedMonthlyCalls, cur.CostPerCallUSD*assumedMonthlyCalls,
-		(cur.CostPerCallUSD-prev.CostPerCallUSD)*assumedMonthlyCalls)
+	// 前回が未計測のときは行自体を出さない。交絡（#1593）と同じ理由で、
+	// 「0.00 → 500.00 +500.00」と並べながら「劣化は検知されませんでした」と
+	// 続く表は、警告を読み飛ばすと増加を見逃したようにも、無視したようにも読める。
+	if costComparable(prev, cur) {
+		fmt.Fprintf(w, "%-18s %10.5f %10.5f %+10.5f\n", "コスト/件($)", prev.CostPerCallUSD, cur.CostPerCallUSD, cur.CostPerCallUSD-prev.CostPerCallUSD)
+		fmt.Fprintf(w, "%-18s %10.2f %10.2f %+10.2f\n", fmt.Sprintf("月%d件換算($)", assumedMonthlyCalls),
+			prev.CostPerCallUSD*assumedMonthlyCalls, cur.CostPerCallUSD*assumedMonthlyCalls,
+			(cur.CostPerCallUSD-prev.CostPerCallUSD)*assumedMonthlyCalls)
+	}
 
 	if len(regs) == 0 {
 		fmt.Fprintln(w, "\n劣化は検知されませんでした")
