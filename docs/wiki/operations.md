@@ -264,8 +264,8 @@ staging はコスト削減のため、デプロイから1時間で自動停止�
 末尾の `desired:` を先に見る。
 
 - `desired: 0` — 5分間 0 のままだった。上げ直しが効いていないので、前回の auto-stop が
-  まだ生きているか、ASG の min/max や権限を疑う。この周回では state を読まないため
-  `state: unknown` と出る（インスタンスの有無は分からない）。
+  まだ生きているか、ASG の min/max や権限を疑う。desired が 0 の周回では state を
+  読まないため `state: unread` と出る（インスタンスの有無は分からない）。
 - `desired: 1` かつ `state: None` — desired は戻っているがインスタンスが現れない
   （`None` = 該当インスタンスなし）。AZ の容量不足や launch template の不備を疑う。
 - `desired: unknown` — ASG を読めていない。権限か API 障害。

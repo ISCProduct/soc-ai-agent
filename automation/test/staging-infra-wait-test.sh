@@ -56,20 +56,23 @@ fail=0
 ran=0
 
 # 判定を1回走らせ、"ok"（待機を抜けて後続へ進む）か "ng"（ステップを落とす）を返す。
-# 上げ直し(update-auto-scaling-group)の回数は $WORK/raises に残す。
+# 上げ直し(update-auto-scaling-group)の回数は $WORK/raises、出力は $WORK/out に残す。
 #
-# STUB_RDS        : describe-db-instances が返すステータス（空白区切りの列。尽きたら最後の値）
-# STUB_DESIRED    : DesiredCapacity の初期値（__error__ でAPIエラー）
-# STUB_STICKY     : yes なら上げ直しても desired が 0 のまま（auto-stop が勝ち続ける状況）
-# STUB_EC2        : describe-instances が返す state の列（__error__ でAPIエラー）
+# どのスタブも「呼ばれた回数」で列の n 番目を返す（尽きたら最後の値を返し続ける）。
+# STUB_RDS     : describe-db-instances が返すステータスの列
+# STUB_DESIRED : DesiredCapacity の列。`@` は「こちらが上げ直せた値」(未実施なら0、
+#                実施後は1)で、`0` を置き続ければ auto-stop が勝ち続ける状況になる。
+#                `__error__` でAPIエラー。
+# STUB_EC2     : describe-instances が返す state の列（__error__ でAPIエラー）
 #
 # case のパターンを "(" 始まりにするのは bash 3.2 (macOS既定) 対策（既存テストと同じ）。
 _run() {
   export PROJECT_NAME=soc-app
-  export STUB_RDS="$1" STUB_DESIRED="$2" STUB_STICKY="$3" STUB_EC2="$4"
-  echo "$STUB_DESIRED" > "$WORK/desired"
+  export STUB_RDS="$1" STUB_DESIRED="$2" STUB_EC2="$3"
   echo 0 > "$WORK/raises"
+  echo 0 > "$WORK/raised"
   echo 0 > "$WORK/rds_n"
+  echo 0 > "$WORK/asg_n"
   echo 0 > "$WORK/ec2_n"
   echo 0 > "$WORK/rds_starts"
   (
@@ -81,7 +84,7 @@ _run() {
       echo "${items[$((n - 1))]}"
     }
     aws() {
-      local n
+      local n v
       case "$*" in
         (*rds*describe-db-instances*)
           n=$(( $(cat "$WORK/rds_n") + 1 )); echo "$n" > "$WORK/rds_n"
@@ -89,19 +92,19 @@ _run() {
         (*rds*start-db-instance*)
           echo $(( $(cat "$WORK/rds_starts") + 1 )) > "$WORK/rds_starts" ;;
         (*describe-auto-scaling-groups*)
-          local d
-          d=$(cat "$WORK/desired")
-          [ "$d" == "__error__" ] && return 255
-          echo "$d" ;;
+          n=$(( $(cat "$WORK/asg_n") + 1 )); echo "$n" > "$WORK/asg_n"
+          v=$(_nth "$n" $STUB_DESIRED)
+          [ "$v" == "@" ] && v=$(cat "$WORK/raised")
+          [ "$v" == "__error__" ] && return 255
+          echo "$v" ;;
         (*update-auto-scaling-group*)
           echo $(( $(cat "$WORK/raises") + 1 )) > "$WORK/raises"
-          [ "$STUB_STICKY" == "yes" ] || echo 1 > "$WORK/desired" ;;
+          echo 1 > "$WORK/raised" ;;
         (*ec2*describe-instances*)
           n=$(( $(cat "$WORK/ec2_n") + 1 )); echo "$n" > "$WORK/ec2_n"
-          local s
-          s=$(_nth "$n" $STUB_EC2)
-          [ "$s" == "__error__" ] && return 255
-          echo "$s" ;;
+          v=$(_nth "$n" $STUB_EC2)
+          [ "$v" == "__error__" ] && return 255
+          echo "$v" ;;
         (*) return 0 ;;
       esac
     }
@@ -114,22 +117,21 @@ _run() {
     set +u
     # shellcheck disable=SC1090
     source "$FRAGMENT"
-  ) >/dev/null 2>&1 && echo "ok" || echo "ng"
+  ) > "$WORK/out" 2>&1 && echo "ok" || echo "ng"
 }
 
 # want: ok = 待機を抜けてデプロイへ進む / ng = ステップを落とす
 check() {
-  local desc="$1" want="$2" want_raises="$3"
-  local rds="$4" desired="$5" sticky="$6" ec2="$7"
+  local desc="$1" want="$2" want_raises="$3" rds="$4" desired="$5" ec2="$6"
   ran=$((ran + 1))
   local got raises
-  got=$(_run "$rds" "$desired" "$sticky" "$ec2")
+  got=$(_run "$rds" "$desired" "$ec2")
   raises=$(cat "$WORK/raises")
   if [ "$got" == "$want" ] && [ "$raises" == "$want_raises" ]; then
     echo "ok   $desc"
   else
     echo "FAIL $desc (want=$want/$want_raises got=$got/$raises"\
-" rds=$rds desired=$desired sticky=$sticky ec2=$ec2)"
+" rds=$rds desired=$desired ec2=$ec2)"
     fail=$((fail + 1))
   fi
 }
@@ -138,20 +140,34 @@ AVAIL="available"
 
 # 本題: desired が 0 のまま戻らないなら、running な台があってもデプロイへ進まない。
 # これを許すと「これから auto-stop に落とされる台」へ配って、デプロイ中に落ちる。
-check "desired が 0 のままなら running でも進まない" ng 20 "$AVAIL" 0 yes "running"
+check "desired が 0 のままなら running でも進まない" ng 20 "$AVAIL" "0"   "running"
 # 上げ直しが効けば進む。desired が戻った後に1回だけ上げ、二重に叩かない。
-check "desired=0 を上げ直せたら進む"                 ok 1  "$AVAIL" 0 no  "running running"
+check "desired=0 を上げ直せたら進む"                 ok 1  "$AVAIL" "0 @" "running"
 # 既に起動していれば上げ直さない。
-check "desired=1 で running なら即進む"              ok 0  "$AVAIL" 1 no  "running"
-check "EC2 が後から running になれば進む"            ok 0  "$AVAIL" 1 no  "None None running"
-check "EC2 が現れなければ落とす"                     ng 0  "$AVAIL" 1 no  "None"
-# ASG を読めないときに勝手に上げ直さない（ASGを読めない＝0とは限らない）。
-check "desired を読めなくても running なら進む"      ok 0  "$AVAIL" __error__ no "running"
+check "desired=1 で running なら即進む"              ok 0  "$AVAIL" "1"   "running"
+check "EC2 が後から running になれば進む"            ok 0  "$AVAIL" "1"   "None None running"
+check "EC2 が現れなければ落とす"                     ng 0  "$AVAIL" "1"   "None"
+# ASG を読めないときに勝手に上げ直さない（読めない＝0とは限らない）。
+check "desired を読めなくても running なら進む"      ok 0  "$AVAIL" "__error__" "running"
 # 一時的なAPIエラーで待機ループごと落ちない（自己修復のための待機が無意味になる）。
-check "EC2 の一時APIエラーは次の周回で読み直す"      ok 0  "$AVAIL" 1 no  "__error__ running"
+check "EC2 の一時APIエラーは次の周回で読み直す"      ok 0  "$AVAIL" "1"   "__error__ running"
 # RDS 側の終了条件を壊さないこと。
-check "RDS が stopped のままなら落とす"              ng 0  "stopped" 1 no "running"
-check "RDS が後から available になれば進む"          ok 0  "starting starting available" 1 no "running"
+check "RDS が stopped のままなら落とす"              ng 0  "stopped" "1"  "running"
+check "RDS が後から available になれば進む"          ok 0  "starting starting available" "1" "running"
+
+# 途中から desired が 0 に落とされたとき、失敗メッセージが「数分前の state」ではなく
+# desired を指すこと。運用手順書(docs/wiki/operations.md 1.2)はここを見て切り分ける。
+ran=$((ran + 1))
+_run "$AVAIL" "1 0" "None" > /dev/null   # 1周目は state を読み(None)、2周目以降は desired=0
+# 周回ごとのログには1周目の None が残るので、最後の失敗メッセージだけを見る。
+LAST=$(tail -1 "$WORK/out")
+if [ "${LAST#*desired: 0}" != "$LAST" ] && [ "${LAST#*state: None}" == "$LAST" ]; then
+  echo "ok   失敗メッセージが古い state ではなく desired を指す"
+else
+  echo "FAIL 失敗メッセージが古い state ではなく desired を指す"
+  echo "     $LAST"
+  fail=$((fail + 1))
+fi
 
 echo
 if [ "$fail" -gt 0 ]; then
