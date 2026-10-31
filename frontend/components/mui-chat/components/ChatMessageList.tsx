@@ -81,8 +81,9 @@ export function ChatMessageList({
   // assertive にすると入力中でも読み上げを断ち切るので、書きかけの回答を
   // 見失う。応答は待てる情報なので割り込ませない。
   //
-  // aria-relevant は指定しない。"additions" だけに絞ると文字の差し替えが
-  // 通知から外れる。role="log" の既定（additions text）に任せる。
+  // aria-relevant="additions" は維持する（#1615）。発言は追加されるだけで、
+  // 既にある吹き出しの文字を書き換えることはない。既定の "additions text" に
+  // 広げても拾えるものが増えず、進捗など周辺の文字変化まで読み上げてしまう。
   //
   // 読み込み中は aria-busy を立てる。骨格の追加を「新しい発言」として
   // 読み上げさせない（共通の ListSkeleton と同じ扱い）。
@@ -93,6 +94,7 @@ export function ChatMessageList({
       role="log"
       aria-label="自己分析チャットのやり取り"
       aria-live="polite"
+      aria-relevant="additions"
       aria-busy={historyLoading}
       sx={{
         flexGrow: 1,

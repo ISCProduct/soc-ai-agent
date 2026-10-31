@@ -156,11 +156,4 @@ describe('読み上げでの区別（WCAG）', () => {
     expect(article).toHaveTextContent('エージェント、9時05分')
     expect(article).toHaveTextContent('次の質問です')
   })
-
-  it('読み上げへの通知を追加だけに絞らない', () => {
-    // aria-relevant="additions" は文字の差し替えを通知から外す。
-    // role="log" の既定（additions text）に戻し、応答の到着を取りこぼさない。
-    const { container } = render(<ChatMessageList {...baseProps()} messages={[greeting]} />)
-    expect(container.querySelector('[role="log"]')?.getAttribute('aria-relevant')).toBeNull()
-  })
 })
