@@ -460,12 +460,19 @@ jobs:
             --json number,title,body,mergedAt \
             --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
 
+          # ペイロードは argv に乗せない。PR本文を含むと ARG_MAX を超え、
+          # 「curl: Argument list too long」で curl 自体が起動しない。空の HTTP
+          # コードが下の *) に落ちて「停止中の可能性」という無関係な警告に化け、
+          # 本番・staging とも取り込みが黙って飛ぶ(60件で実際に踏んだ)。
+          payload=$(mktemp)
+          printf '{"sources": %s}' "$sources" > "$payload"
+
           # 起動確認済みの状態で 401/403 なら「停止中」ではなく鍵の不一致。
           # ここは最後の回収経路なので、warning で流すと誰も気づけない。
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
-            -d "{\"sources\": $sources}" \
+            -d @"$payload" \
             --max-time 60 || true)
           case "$code" in
             2*)

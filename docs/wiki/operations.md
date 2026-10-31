@@ -455,6 +455,12 @@ EventBridge Scheduler へ移すまで（#1388）は、以下を手順として�
 
    これでオーバーライドが `on` になり、日付リストに関係なく起動する。
 
+   `/prod state:on expiry:<YYYY-MM-DD>` の形にすると、その日に自動で `auto` へ戻る。
+   復帰日なしの `on` は戻し忘れると課金が続くため、展示会が終わったら
+   **`/prod state:auto` に戻す**。復帰日を過ぎた `on:<過去日>` は失効扱いになり、
+   スケジューラもデプロイ後の停止処理も `auto` と同じに読む
+   （`automation/test/prod-deploy-scale-down-test.sh` で固定）。
+
    **Discord の返信が「反映を開始しました」であることを確認する。**
    即時実行は `GITHUB_DISPATCH_TOKEN` / `GITHUB_DISPATCH_REPO` が揃っているときだけで、
    未設定・API 失敗時は「⚠️ 即時反映の起動に失敗しました。次の毎時実行(最大1時間後)で
