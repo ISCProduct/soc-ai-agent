@@ -263,6 +263,21 @@ func (s *InterviewService) isAllowed(actorID uint, ownerID uint) bool {
 	return user.IsAdmin
 }
 
+// redactTeacherReport は教員用レポートを見てよい実ロール（職員・管理者）以外には
+// TeacherReportJSON を空にしたコピーを返す。ユーザーを引けない場合も除去する(fail-close)。
+func (s *InterviewService) redactTeacherReport(actorID uint, report *models.InterviewReport) *models.InterviewReport {
+	if report == nil {
+		return nil
+	}
+	if user, err := s.userRepo.GetUserByID(actorID); err == nil && user != nil &&
+		(user.IsAdmin || user.HasStaffRole()) {
+		return report
+	}
+	sanitized := *report
+	sanitized.TeacherReportJSON = ""
+	return &sanitized
+}
+
 func toSessionResponse(session *models.InterviewSession) *InterviewSessionResponse {
 	lang := session.Language
 	if lang == "" {

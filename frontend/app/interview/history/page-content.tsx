@@ -100,7 +100,8 @@ export default function PageContent() {
   useEffect(() => { void loadSessions() }, [loadSessions])
   useEffect(() => { void loadTrend() }, [loadTrend])
 
-  const isTeacher = user?.role === 'teacher'
+  // 教員モードは職員・管理者のみ。サーバー側の開示条件(is_staff/is_admin)と揃える(#1815)
+  const isTeacher = Boolean(user?.is_staff || user?.is_admin)
 
   const handleSelectSession = async (session: InterviewSession) => {
     if (!user) return
@@ -108,7 +109,7 @@ export default function PageContent() {
     setSelectedDetail(null)
     setDetailError(null)
     try {
-      const detail = await interviewApi.getDetail(session.id, user.user_id, user.role)
+      const detail = await interviewApi.getDetail(session.id, user.user_id)
       setSelectedDetail(detail)
     } catch {
       setDetailError('面接詳細の取得に失敗しました')
@@ -124,7 +125,7 @@ export default function PageContent() {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Box sx={{ color: UI.mark }}><PsychologyIcon sx={{ fontSize: 32 }} /></Box>
           <Typography component="h1" sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: UI.ink }}>面接履歴</Typography>
-          {user?.role === 'teacher' && (
+          {isTeacher && (
             <Chip label="教員モード" size="small" sx={{ bgcolor: '#3b82f6', color: '#fff', fontWeight: 700, ml: 1 }} />
           )}
         </Box>
