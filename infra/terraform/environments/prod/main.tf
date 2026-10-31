@@ -684,6 +684,10 @@ module "backend" {
   s3_bucket_arn     = module.s3.bucket_arn
   secret_arns       = local.backend_secret_arns
   secrets           = local.backend_secrets
+  # backend_secret_arns は compact() を通るため、新しいシークレットを1つ足した apply では
+  # リスト長が unknown になり、モジュール側の count が plan 時に評価できない。
+  # 中身が必ず1件以上あることは静的に分かっているので、ここで真偽値を渡す。
+  create_secrets_policy = true
   environment = {
     APP_ENV                     = "production"
     AWS_REGION                  = var.region
@@ -811,6 +815,9 @@ module "rag_review" {
     [aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
   ))
+  # 上の compact() は未作成リソースの ARN が混ざるとリスト長ごと unknown になる。
+  # 固定2件が必ず入るので、件数判定をここで明示する(module.backend と同じ理由)。
+  create_secrets_policy = true
   secrets = [
     {
       name = "OPENAI_API_KEY"

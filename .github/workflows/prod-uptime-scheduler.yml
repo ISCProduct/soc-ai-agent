@@ -451,7 +451,11 @@ jobs:
           if [ -n "$PROD_SERVICE_SECRET" ]; then
             echo "::add-mask::$PROD_SERVICE_SECRET"
           else
-            echo "::warning::Secrets Manager から service_secret を読めませんでした。更新情報の取り込みを見送ります(IAMに secretsmanager:GetSecretValue / soc-app/service-secret の存在を確認してください)"
+            # ここは最後の回収経路。IAM権限不足やシークレット未作成は放っておいても直らず、
+            # 警告で流すと更新情報が永久に反映されないまま誰も気づけない(#1290 と同じ症状)。
+            # このステップは continue-on-error なので、出力で下の失敗ステップへ伝える。
+            echo "lookup_failed=1" >> "$GITHUB_OUTPUT"
+            echo "::error::Secrets Manager から service_secret を読めませんでした(IAMに secretsmanager:GetSecretValue があるか、soc-app/service-secret が存在するかを確認してください)"
             sed 's/^/  aws: /' "$sm_err"
             rm -f "$sm_err"
             exit 0
@@ -499,6 +503,16 @@ jobs:
         run: |
           echo "本番を起動しましたが backend の /health が 200 を返しませんでした" > "$RUNNER_TEMP/alert-reason.txt"
           echo "::error::本番を起動しましたが backend の /health が 200 を返しませんでした"
+          exit 1
+
+      # 鍵そのものが読めないのも、放っておいて直るものではない。
+      # 取り込みを一度もできないまま緑で終わるのを防ぐ。
+      - name: service_secret を読めなかったら失敗させる
+        if: steps.whatsnew.outputs.lookup_failed == '1'
+        run: |
+          reason="Secrets Manager から service_secret を読めず、本番への更新情報の取り込みができませんでした(IAM権限 / soc-app/service-secret の存在を確認してください)"
+          echo "$reason" > "$RUNNER_TEMP/alert-reason.txt"
+          echo "::error::$reason"
           exit 1
 
       # 鍵の不一致は「停止中で届かない」と違い、放っておいても直らない。

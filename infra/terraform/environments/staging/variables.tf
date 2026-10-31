@@ -201,7 +201,14 @@ variable "service_secret_plain" {
   type        = string
   description = "CIからのサービス間呼び出し(X-Admin-Secret)用の共有シークレット(平文)。GitHubのリポジトリシークレット SERVICE_SECRET と同じ値にする。admin_secret_plain とは必ず別値にする(#1158)"
   sensitive   = true
-  default     = ""
+
+  # 既定値を持たせない。空のまま apply すると SERVICE_SECRET も aws_ssm_parameter も空になり、
+  # CI の取り込みが 503 で拒否される（CI 側は警告で流すので気づきにくい）。
+  # plan の時点で止めて、tfvars への設定漏れをその場で分かるようにする。
+  validation {
+    condition     = length(var.service_secret_plain) > 0
+    error_message = "service_secret_plain は必須です。GitHub のリポジトリシークレット SERVICE_SECRET と同じ値を tfvars に設定してください(#1158)。"
+  }
 }
 
 # AI面接の音声認識モデル。既定はコード側と同じ gpt-transcribe。

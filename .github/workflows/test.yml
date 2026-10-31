@@ -175,6 +175,16 @@ jobs:
       - name: staging の .env 継ぎ足し検査
         run: ./automation/test/staging-env-topup-test.sh
 
+      # 更新情報の取り込みで「鍵が違う/読めない」が warning のまま緑で終わらないこと。
+      # ジョブは continue-on-error なので、昇格させないと永久に反映されないまま気づけない。
+      - name: 更新情報の取り込みの認証失敗検査
+        run: ./automation/test/whats-new-ingest-auth-failure-test.sh
+
+      # 同一 apply 内で作るシークレットの ARN を count の判定に使っていないこと。
+      # compact() 越しに unknown が混ざると plan が Invalid count argument で止まる。
+      - name: ECSシークレットポリシーのcount判定検査
+        run: ./automation/test/ecs-secrets-policy-count-test.sh
+
       - name: Dependabot 互換性の検査
         run: ./automation/test/dependabot-workflow-test.sh
 

@@ -91,6 +91,17 @@ for res in $resources; do
   [ "$fail" -eq 0 ] && echo "ok   $envvar: user_data / SSM継ぎ足し / IAM が揃っている"
 done
 
+# .env を書くヒアドキュメントの区切り文字が引用されていること。
+# 引用が無いと bash が値の $ / `...` / \ を展開してから書き込むため、
+# シークレットに $(...) が含まれると cloud-init の root 権限で実行され、
+# 未定義の $name が含まれると set -u でそこで落ちて docker compose まで到達しない。
+if grep -qE "cat > /opt/app/\.env <<'[A-Za-z]+'" "$TPL"; then
+  echo "ok   .env のヒアドキュメント区切り文字が引用されている"
+else
+  echo "FAIL .env のヒアドキュメント区切り文字が引用されていない（値の \$ や \$(...) が bash に展開される）"
+  fail=$((fail + 1))
+fi
+
 echo "検査した SSM パラメータ: $checked 件"
 if [ "$fail" -gt 0 ]; then
   echo "FAILED ($fail)"

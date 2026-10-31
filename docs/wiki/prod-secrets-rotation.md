@@ -52,7 +52,8 @@ OAuth アプリを作り直して client_id が変わった場合も、下の CL
 （管理者は再ログインが必要になる）。
 
 `service_secret` を変える場合は、**先に CI が Secrets Manager を読めることを確認する**。
-読めないと CI は本番への取り込みを見送る（警告のみ。次回の本番起動時に回収される）。
+読めないと CI は本番への取り込みを行わず、**ジョブをエラーにする**（権限不足やシークレット
+未作成は放置しても直らないため、警告では流さない。`prod-uptime-scheduler` 側は Discord へ通知する）。
 値を書き換える対象は `soc-app/service-secret` で、キーは `service_secret`（下の手順の
 `--secret-id` とキー名を読み替える）。手元で確認するなら次のとおり。
 
@@ -109,7 +110,8 @@ CI は本番向けには Secrets Manager だけを見る（フォールバック
 
 リポジトリシークレット `ADMIN_SECRET` は**不要**になった。CI は参照していないので削除してよい。
 
-取り込みが 401/403/503 になった場合、CI は警告では流さずエラーにする。
+取り込みが 401/403 になった場合、および Secrets Manager から `service_secret` を
+読めなかった場合、CI は警告では流さずエラーにする（staging への取り込みの 401/403 も同じ扱い）。
 - `prod-uptime-scheduler`（本番起動時の回収）はジョブを失敗させ、Discord へ通知する
 - `deployment` の `sync-whats-new` はジョブを失敗表示にする（ジョブ自体が
   `continue-on-error` なのでデプロイは止まらない。通知は飛ばないので、

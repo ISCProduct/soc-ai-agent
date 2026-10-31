@@ -36,7 +36,12 @@ ${service_starting_html}
 HTMLEOF
 
 mkdir -p /opt/app
-cat > /opt/app/.env <<EOF
+# 区切り文字を引用する。引用しないと bash が値の $ / `...` / \ を展開してから書き込むため、
+# シークレットに $(...) が含まれると cloud-init の root 権限でそれが実行され、
+# 未定義の $name が含まれると set -u でここで落ちて docker compose まで到達しない。
+# terraform の templatefile による変数の差し込みは引用の有無に関係なく先に済むので、
+# 引用しても値はそのまま入る。
+cat > /opt/app/.env <<'EOF'
 SERVER_PORT=8080
 DB_HOST=${db_host}
 DB_PORT=${db_port}

@@ -14,6 +14,12 @@ domain_name = "shukatsu-ai.jp"
 backend_image  = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-backend:staging"
 frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:staging"
 
+# CI(更新情報の取り込み)が X-Admin-Secret で叩くための共有シークレット（#1158・必須）。
+# GitHub のリポジトリシークレット SERVICE_SECRET と同じ値にする。
+# ADMIN_SECRET(管理者トークンのHMAC鍵)とは必ず別値にすること。
+# 生成例: python3 -c "import secrets; print(secrets.token_urlsafe(36))"
+service_secret_plain = "<SERVICE_SECRET と同じ値>"
+
 # staging 用 OpenAI キーの Secrets Manager ARN（未設定でも apply は可能だが BE の AI 機能は動かない）
 # openai_secret_arn = "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:stg/openai/api-key-xxxxxx"
 
