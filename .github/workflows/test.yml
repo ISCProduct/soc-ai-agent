@@ -283,6 +283,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # eslint はこれまでCIのどのジョブでも実行していなかった。
+      # CLAUDE.md は「PR時: Go/FEのLint & Test」と書いているが実態が伴っておらず、
+      # eslint プラグインの版上げPRを「CI緑だから」で通す判断ができなかった。
+      # 既存ジョブへステップとして足す（別ジョブにすると npm ci がもう一度走る）。
+      - name: Run lint
+        run: npm run lint
+
       - name: Run unit tests
         run: npm test -- --no-coverage
 
