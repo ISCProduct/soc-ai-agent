@@ -213,9 +213,9 @@ jobs:
           # desired が 0 の周回では state を見ない。running で抜けてしまうと、
           # これから落とされる台へ配ってデプロイ中にアプリが消える。
           #
-          # 抜けたかどうかは READY で持つ。STATE だけで事後判定すると、タイムアウトまで
-          # desired が 0 のままでも「running だから成功」と読んでしまい、周回中の
-          # desired チェックが無意味になる。
+          # 抜けたかどうかは READY で持ち、STATE はログ用に留める。STATE だけで事後判定
+          # すると、タイムアウトまで desired が 0 のままでも「running だから成功」と
+          # 読んでしまい、周回中の desired チェックが無意味になる。
           READY=no
           for i in $(seq 1 20); do
             DESIRED=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "${PROJECT_NAME}-app" \

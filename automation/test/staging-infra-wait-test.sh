@@ -27,7 +27,7 @@ if [ -z "$START" ]; then
   echo "NG: 待機ステップが見つかりません。deployment.yml の構造変更を確認してください。" >&2
   exit 1
 fi
-# YAML のキー行（run: 等）を含めると source した時点で構文エラーになり、
+# YAML のキー行（run: 等）を含めると実行した時点で構文エラーになり、
 # 全ケースが「判定前に落ちた」結果になる。run: | の次行から、
 # 本体のインデント(10スペース)が切れるまでを取る。
 awk -v s="$START" '
@@ -58,16 +58,67 @@ ran=0
 # 判定を1回走らせ、"ok"（待機を抜けて後続へ進む）か "ng"（ステップを落とす）を返す。
 # 上げ直し(update-auto-scaling-group)の回数は $WORK/raises、出力は $WORK/out に残す。
 #
+# **実行は独立した `bash -e` プロセスで行う。** サブシェル + `(...) && ok || ng` の形に
+# すると、サブシェルが AND-OR リストの判定対象になるため、中で set -e を書いても
+# errexit が抑止される。bash 5.2 では source したファイルの中まで抑止が及ぶので
+# （3.2 では及ばない）、CI では errexit 無しで走ることになり、
+# `|| echo "unknown"` のようなエラーガードを外しても緑のままになる。実測済み。
+# フラグは本番と同じ `-e` だけにする（GitHub Actions の既定シェルは
+# `shell: /usr/bin/bash -e {0}`。`shell: bash` を明示していないので pipefail は付かない）。
+#
 # どのスタブも「呼ばれた回数」で列の n 番目を返す（尽きたら最後の値を返し続ける）。
-# STUB_RDS     : describe-db-instances が返すステータスの列
+# STUB_RDS     : describe-db-instances が返すステータスの列。`@` は「start-db-instance を
+#                打たれていれば available、まだなら stopped」。
 # STUB_DESIRED : DesiredCapacity の列。`@` は「こちらが上げ直せた値」(未実施なら0、
 #                実施後は1)で、`0` を置き続ければ auto-stop が勝ち続ける状況になる。
 #                `__error__` でAPIエラー。
 # STUB_EC2     : describe-instances が返す state の列（__error__ でAPIエラー）
 #
 # case のパターンを "(" 始まりにするのは bash 3.2 (macOS既定) 対策（既存テストと同じ）。
+STUBS="$WORK/stubs.sh"
+cat > "$STUBS" <<'STUB'
+# 列から n 番目（尽きたら最後）を取り出す。
+_nth() {
+  local n="$1"; shift
+  local items=("$@")
+  [ "$n" -gt "${#items[@]}" ] && n="${#items[@]}"
+  echo "${items[$((n - 1))]}"
+}
+aws() {
+  local n v
+  case "$*" in
+    (*rds*describe-db-instances*)
+      n=$(( $(cat "$WORK/rds_n") + 1 )); echo "$n" > "$WORK/rds_n"
+      v=$(_nth "$n" $STUB_RDS)
+      if [ "$v" == "@" ]; then
+        if [ "$(cat "$WORK/rds_starts")" == "0" ]; then v=stopped; else v=available; fi
+      fi
+      echo "$v" ;;
+    (*rds*start-db-instance*)
+      echo $(( $(cat "$WORK/rds_starts") + 1 )) > "$WORK/rds_starts" ;;
+    (*describe-auto-scaling-groups*)
+      n=$(( $(cat "$WORK/asg_n") + 1 )); echo "$n" > "$WORK/asg_n"
+      v=$(_nth "$n" $STUB_DESIRED)
+      [ "$v" == "@" ] && v=$(cat "$WORK/raised")
+      [ "$v" == "__error__" ] && return 255
+      echo "$v" ;;
+    (*update-auto-scaling-group*)
+      echo $(( $(cat "$WORK/raises") + 1 )) > "$WORK/raises"
+      echo 1 > "$WORK/raised" ;;
+    (*ec2*describe-instances*)
+      n=$(( $(cat "$WORK/ec2_n") + 1 )); echo "$n" > "$WORK/ec2_n"
+      v=$(_nth "$n" $STUB_EC2)
+      [ "$v" == "__error__" ] && return 255
+      echo "$v" ;;
+    (*) return 0 ;;
+  esac
+}
+# 実時間を待たない。
+sleep() { :; }
+STUB
+
 _run() {
-  export PROJECT_NAME=soc-app
+  export PROJECT_NAME=soc-app WORK
   export STUB_RDS="$1" STUB_DESIRED="$2" STUB_EC2="$3"
   echo 0 > "$WORK/raises"
   echo 0 > "$WORK/raised"
@@ -75,49 +126,11 @@ _run() {
   echo 0 > "$WORK/asg_n"
   echo 0 > "$WORK/ec2_n"
   echo 0 > "$WORK/rds_starts"
-  (
-    # 列から n 番目（尽きたら最後）を取り出す。
-    _nth() {
-      local n="$1"; shift
-      local items=("$@")
-      [ "$n" -gt "${#items[@]}" ] && n="${#items[@]}"
-      echo "${items[$((n - 1))]}"
-    }
-    aws() {
-      local n v
-      case "$*" in
-        (*rds*describe-db-instances*)
-          n=$(( $(cat "$WORK/rds_n") + 1 )); echo "$n" > "$WORK/rds_n"
-          _nth "$n" $STUB_RDS ;;
-        (*rds*start-db-instance*)
-          echo $(( $(cat "$WORK/rds_starts") + 1 )) > "$WORK/rds_starts" ;;
-        (*describe-auto-scaling-groups*)
-          n=$(( $(cat "$WORK/asg_n") + 1 )); echo "$n" > "$WORK/asg_n"
-          v=$(_nth "$n" $STUB_DESIRED)
-          [ "$v" == "@" ] && v=$(cat "$WORK/raised")
-          [ "$v" == "__error__" ] && return 255
-          echo "$v" ;;
-        (*update-auto-scaling-group*)
-          echo $(( $(cat "$WORK/raises") + 1 )) > "$WORK/raises"
-          echo 1 > "$WORK/raised" ;;
-        (*ec2*describe-instances*)
-          n=$(( $(cat "$WORK/ec2_n") + 1 )); echo "$n" > "$WORK/ec2_n"
-          v=$(_nth "$n" $STUB_EC2)
-          [ "$v" == "__error__" ] && return 255
-          echo "$v" ;;
-        (*) return 0 ;;
-      esac
-    }
-    # 実時間を待たない。GitHub Actions の既定シェルと同じ -e -o pipefail で走らせる
-    # （待機ループ内の一時的なAPIエラーでステップごと落ちないかもここで見る）。
-    # -u は外側の set -u が継いでしまうため明示的に外す。本番より厳しい条件で
-    # 落とすと、ワークフローでは起きない失敗をテストだけが報告することになる。
-    sleep() { :; }
-    set -eo pipefail
-    set +u
-    # shellcheck disable=SC1090
-    source "$FRAGMENT"
-  ) > "$WORK/out" 2>&1 && echo "ok" || echo "ng"
+  cat "$STUBS" "$FRAGMENT" > "$WORK/run.sh"
+  local rc
+  bash -e "$WORK/run.sh" > "$WORK/out" 2>&1
+  rc=$?
+  if [ "$rc" -eq 0 ]; then echo "ok"; else echo "ng"; fi
 }
 
 # want: ok = 待機を抜けてデプロイへ進む / ng = ステップを落とす
@@ -154,6 +167,9 @@ check "EC2 の一時APIエラーは次の周回で読み直す"      ok 0  "$AVA
 # RDS 側の終了条件を壊さないこと。
 check "RDS が stopped のままなら落とす"              ng 0  "stopped" "1"  "running"
 check "RDS が後から available になれば進む"          ok 0  "starting starting available" "1" "running"
+# 待機ループ内の start-db-instance の打ち直し(#1642)。auto-stop と重なって
+# stopping の間に起動キックが素通りすると、打ち直さない限り stopped のまま回り続ける。
+check "stopped を見たら start を打ち直す"            ok 0  "stopped @" "1" "running"
 
 # 途中から desired が 0 に落とされたとき、失敗メッセージが「数分前の state」ではなく
 # desired を指すこと。運用手順書(docs/wiki/operations.md 1.2)はここを見て切り分ける。
