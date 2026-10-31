@@ -3,7 +3,7 @@ set -eux
 
 # --- Docker + Compose plugin ---
 apt-get update -y
-apt-get install -y ca-certificates curl gnupg unzip
+apt-get install -y ca-certificates curl gnupg unzip jq
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 chmod a+r /etc/apt/keyrings/docker.asc
@@ -36,20 +36,41 @@ ${service_starting_html}
 HTMLEOF
 
 mkdir -p /opt/app
-cat > /opt/app/.env <<EOF
+
+# --- シークレットの取得(#1158) ---
+# user_data は launch template のバージョンとして保存され、
+# ec2:DescribeLaunchTemplateVersions を持つIAMユーザーなら誰でも読めるうえ、
+# インスタンス上からは IMDS 経由でも読める。したがってシークレットは
+# user_data に載せず、インスタンスロールで起動時に Secrets Manager から取得し、
+# 0600 の .env にだけ書く。
+#
+# 取得の前にトレース(set -x)を止める。止めないと値が
+# /var/log/cloud-init-output.log に平文で残る。
+set +x
+app_secrets=$(aws secretsmanager get-secret-value --region ${aws_region} \
+  --secret-id "${app_env_secret_id}" --query SecretString --output text)
+db_password=$(aws secretsmanager get-secret-value --region ${aws_region} \
+  --secret-id "${db_secret_id}" --query SecretString --output text | jq -r '.password')
+# 取得に失敗したらここで止める。空の値で .env を書くと、起動はするのに
+# 認証やDB接続だけが通らない状態で動き出し、原因特定に時間がかかる。
+test -n "$app_secrets"
+test -n "$db_password" && test "$db_password" != null
+set -x
+
+# 先に 0600 の空ファイルを作る。中身を書いてから chmod すると、
+# その一瞬だけ 0644 で他ユーザーにシークレットが読める。
+install -m 600 /dev/null /opt/app/.env
+
+cat >> /opt/app/.env <<EOF
 SERVER_PORT=8080
 DB_HOST=${db_host}
 DB_PORT=${db_port}
 DB_NAME=${db_name}
 DB_USER=${db_user}
-DB_PASSWORD=${db_password}
 APP_ENV=staging
 AWS_REGION=${aws_region}
 AWS_S3_BUCKET=${s3_bucket}
 S3_BUCKET=${s3_bucket}
-OPENAI_API_KEY=${openai_api_key}
-HOUJIN_BANGOU_APP_ID=${houjin_bangou_app_id}
-GBIZINFO_API_KEY=${gbizinfo_api_key}
 GBIZINFO_BASE_URL=${gbizinfo_base_url}
 OPENAI_MODEL=${openai_model}
 OPENAI_WEB_SEARCH_MODEL=gpt-4o-mini
@@ -58,35 +79,18 @@ OPENAI_HINTS_MODEL=gpt-4o-mini
 # AI面接のSTT。既定は gpt-transcribe。mini にすると問題発話だけ
 # gpt-transcribe へ自動で再送する(stt_fallback.go)。
 OPENAI_WHISPER_MODEL=${openai_whisper_model}
-RESEND_API_KEY=${resend_api_key}
 EMAIL_PROVIDER=resend
 EMAIL_FROM=noreply@shukatsu-ai.jp
 GOOGLE_CLIENT_ID=${google_client_id}
-GOOGLE_CLIENT_SECRET=${google_client_secret}
 GITHUB_CLIENT_ID=${github_client_id}
-GITHUB_CLIENT_SECRET=${github_client_secret}
-USER_SECRET=${user_secret}
-ADMIN_SECRET=${admin_secret}
-# CIからのサービス間呼び出し(X-Admin-Secret)用。ADMIN_SECRETとは別値(#1158)
-SERVICE_SECRET=${service_secret}
 DISCORD_PUBLIC_KEY=${discord_public_key}
 DISCORD_ALLOWED_ROLE_ID=${discord_allowed_role_id}
-GITHUB_DISPATCH_TOKEN=${github_dispatch_token}
 GITHUB_DISPATCH_REPO=${github_dispatch_repo}
-OAUTH_STATE_SECRET=${oauth_state_secret}
-# サーバー側(Backend/RAG)のエラートラッキング(#1185)。
-# 未設定なら Backend の observability.InitSentry / RAG の sentry_sdk は初期化しない。
-# rag-review も同じ .env を env_file で読むため、この1行で両方に渡る。
-SENTRY_DSN=${sentry_dsn}
-TOKEN_ENCRYPTION_KEY=${token_encryption_key}
 BASE_URL=https://${backend_domain}
 APP_URL=https://${frontend_domain}
 ALLOWED_ORIGINS=https://${frontend_domain}
 NEXT_PUBLIC_BACKEND_URL=https://${backend_domain}
 BACKEND_URL=https://${backend_domain}
-# BFFが転送する X-Client-IP を backend が信用してよいかの共有トークン(#1407)。
-# frontend/backend が同じ .env を読むので、この1行で両方に同じ値が渡る。
-BFF_INTERNAL_TOKEN=${bff_internal_token}
 # X-Forwarded-For のどこが実クライアントIPかは frontend の手前の段数で決まる(#1407)。
 # staging は常に ALB -> edge nginx -> frontend の2段。
 # edge nginx へは ALB の SG からしか届かないため、この2段は迂回できない。
@@ -98,7 +102,18 @@ CHROMA_PORT=8000
 SERVER_PORT=8080
 REDIS_URL=redis://redis:6379/0
 EOF
-chmod 600 /opt/app/.env
+
+# シークレット行を追記する。どのキーが入るかは main.tf の
+# aws_secretsmanager_secret_version.app_env（キー名は env 変数名の小文字）を見る。
+# BFF_INTERNAL_TOKEN は staging 全インスタンスで同一でなければならないため、
+# ここで生成せず Secrets Manager の値をそのまま使う(#1407)。
+# SENTRY_DSN が空なら Backend/RAG は Sentry を初期化しない(#1185)。
+set +x
+{
+  printf '%s' "$app_secrets" | jq -r 'to_entries[] | "\(.key | ascii_upcase)=\(.value)"'
+  printf 'DB_PASSWORD=%s\n' "$db_password"
+} >> /opt/app/.env
+set -x
 
 cat > /opt/app/docker-compose.yml <<EOF
 x-logging: &default-logging

@@ -688,7 +688,7 @@ IP単位の制限を任意のIPごとに分散できてしまう。
 
 | 変数 | 置き場所 | 値 |
 | --- | --- | --- |
-| `BFF_INTERNAL_TOKEN` | frontend タスクと backend タスクの両方 | 同じランダム文字列。prod は Secrets Manager `soc-app/bff-internal` の `bff_internal_token`、staging は EC2 の共有 `.env` + SSM `/soc-stg/bff-internal-token`（いずれも Terraform の `random_password` が生成。staging は全インスタンスで同一必須） |
+| `BFF_INTERNAL_TOKEN` | frontend タスクと backend タスクの両方 | 同じランダム文字列。prod は Secrets Manager `soc-app/bff-internal` の `bff_internal_token`、staging は Secrets Manager `soc-stg/app-env` の `bff_internal_token`（EC2 の共有 `.env` へ起動時に展開）+ SSM `/soc-stg/bff-internal-token`（いずれも Terraform の `random_password` が生成。staging は全インスタンスで同一必須） |
 | `TRUSTED_PROXY_HOPS` | frontend タスクのみ | frontend の手前にいる**必ず通る**プロキシの段数。prod(CloudFront+ALB)=2、prod で `enable_error_fallback=false`(ALBのみ)=1、staging(ALB+edge nginx)=2、ローカル=未設定(1) |
 | `CLOUDFRONT_ORIGIN_TOKEN` | frontend タスクのみ | CloudFront が `X-Origin-Token` として付ける値。Secrets Manager `soc-app/bff-internal` の `cloudfront_origin_token`。CloudFront を迂回できる環境（prod）でのみ設定する |
 
@@ -770,9 +770,45 @@ aws ecs wait services-stable --cluster soc-app --services backend frontend
 本番が停止日（`desired_count=0`）なら update-service だけ打っておけばよく、
 `services-stable` は即座に返る。次にスケジューラが起動した時点で新リビジョンが使われる。
 
+### staging の `.env` はどこから来るか (#1158)
+
+staging は EC2 上の docker compose で、全コンテナが `/opt/app/.env`（0600）を共有する。
+**シークレットは user_data に平文で置かない。** user_data は launch template の
+バージョンとして保存されるため、`ec2:DescribeLaunchTemplateVersions` を持つ IAM ユーザー
+なら誰でも読めてしまう（インスタンス上からは IMDS 経由でも読める）。実際にこの経路で
+staging の `ADMIN_SECRET` が読め、本番と同値だったため本番の管理者権限が取れる状態に
+なっていた。
+
+| 値 | 置き場所 |
+| --- | --- |
+| `DB_PASSWORD` | Secrets Manager `<project>/db` の `password`（正本は `modules/rds` の `random_password`） |
+| `OPENAI_API_KEY` / `RESEND_API_KEY` / `GOOGLE_CLIENT_SECRET` / `GITHUB_CLIENT_SECRET` / `GITHUB_DISPATCH_TOKEN` / `HOUJIN_BANGOU_APP_ID` / `GBIZINFO_API_KEY` / `SENTRY_DSN` / `ADMIN_SECRET` / `SERVICE_SECRET` | Secrets Manager `<project>/app-env`（初回 apply のみ tfvars から書き込み、以降は Secrets Manager 側が正） |
+| `USER_SECRET` / `OAUTH_STATE_SECRET` / `TOKEN_ENCRYPTION_KEY` / `BFF_INTERNAL_TOKEN` | Secrets Manager `<project>/app-env`（Terraform の `random_password` が生成） |
+| 上記以外（ドメイン・モデル名・ポートなど） | user_data（秘密ではないのでそのまま） |
+
+user_data は起動時にインスタンスロールでこの2本を読み、`.env` へ展開する。
+取得に失敗した場合は `.env` を書かずに異常終了する（空の値のまま起動して
+「認証だけ通らない」状態になるのを避けるため）。
+
+`<project>/app-env` のキー名は `.env` の変数名の小文字。user_data 側は
+`to_entries | ascii_upcase` で展開するだけなので、**新しいシークレットを配るときは
+`environments/staging/main.tf` の `aws_secretsmanager_secret_version.app_env` に
+キーを足せばよい**（user_data の編集は不要）。
+
+`SERVICE_SECRET` だけは CI（`sync-whats-new`）が staging の
+`/api/admin/whats-new/ingest` を既知の値で叩くため自動生成にできない。GitHub の
+リポジトリシークレット `SERVICE_SECRET` と同値にし、**`ADMIN_SECRET` とも本番とも
+必ず別値**にする。
+
+値のローテーションは `terraform apply` では行えない（`ignore_changes = [secret_string]`）。
+AWS CLI で書き換える。手順は本番と同じなので
+[`prod-secrets-rotation.md`](prod-secrets-rotation.md) を参照（`--secret-id` を
+`soc-stg/app-env` に読み替える）。**書き換えたあと反映するにはインスタンスの入れ替えが必要**
+（user_data は起動時にしか読まない）。
+
 ### staging の既存インスタンスへ反映する
 
-staging は EC2 上の docker compose で、`.env` を書くのは launch template の user_data
+`.env` を書くのは launch template の user_data
 だけ。ASG は `version = "$Latest"` を指定しており、新しい LT 版を作っても**この指定自体は
 変化しない**ため instance refresh は起きない。つまり apply しても稼働中のインスタンスは
 古い `.env` のままになる。
@@ -790,7 +826,7 @@ backend を叩くため、インスタンス毎に生成した値だと組み合
 
 | 対象 | 経路 |
 | --- | --- |
-| 新規インスタンス | launch template の user_data が `random_password.bff_internal_token` を直接書く |
+| 新規インスタンス | launch template の user_data が Secrets Manager `<project>/app-env` の `bff_internal_token` を読んで `.env` へ書く |
 | 稼働中インスタンス | `deployment.yml` が SSM `/<project>/bff-internal-token` を読んで `.env` を上書き |
 
 SSM パラメータの中身は `random_password.bff_internal_token` と同じ値なので、

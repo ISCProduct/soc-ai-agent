@@ -150,16 +150,22 @@ variable "additional_secret_arns" {
   default     = []
 }
 
+variable "secret_values_managed_outside" {
+  type        = bool
+  description = "シークレットの値を Secrets Manager 側で直接管理している場合は true。tfvarsに平文を置かずにplan/applyできるようにする(#1158)。このフラグが効くのは初回構築時のprecondition検査だけで、値の更新はfalseでもTerraformからは行えない(ignore_changesは常時有効で、tfvarsの値が入るのは初回作成時のみ)"
+  default     = false
+}
+
 variable "openai_api_key_plain" {
   type        = string
-  description = "OpenAI APIキー(平文、Secrets Manager未使用のためuser_dataに直接埋め込む)。未設定でも apply 可"
+  description = "OpenAI APIキー。初回 apply で Secrets Manager <project>/app-env の openai_api_key へ書き込み、以降は Secrets Manager 側が正(#1158)。未設定でも apply 可"
   sensitive   = true
   default     = ""
 }
 
 variable "gbizinfo_api_key" {
   type        = string
-  description = "gBizINFO Web-APIのアクセストークン(平文、Secrets Manager未使用のためuser_dataに直接埋め込む)。未設定時はgBizINFO連携が無効になり、企業情報の取得がweb_searchに寄る"
+  description = "gBizINFO Web-APIのアクセストークン。初回 apply で Secrets Manager <project>/app-env へ書き込む(#1158)。未設定時はgBizINFO連携が無効になり、企業情報の取得がweb_searchに寄る"
   sensitive   = true
   default     = ""
 }
@@ -172,7 +178,7 @@ variable "gbizinfo_base_url" {
 
 variable "houjin_bangou_app_id" {
   type        = string
-  description = "国税庁 法人番号システムWeb-APIのアプリケーションID(平文、Secrets Manager未使用のためuser_dataに直接埋め込む)。未設定時は法人番号の自動特定だけが無効になる"
+  description = "国税庁 法人番号システムWeb-APIのアプリケーションID。初回 apply で Secrets Manager <project>/app-env へ書き込む(#1158)。未設定時は法人番号の自動特定だけが無効になる"
   sensitive   = true
   default     = ""
 }
@@ -185,21 +191,21 @@ variable "openai_model" {
 
 variable "resend_api_key_plain" {
   type        = string
-  description = "Resend APIキー(平文、Secrets Manager未使用のためuser_dataに直接埋め込む)。未設定時はEMAIL_PROVIDERがlogにフォールバックする"
+  description = "Resend APIキー。初回 apply で Secrets Manager <project>/app-env へ書き込む(#1158)。未設定時はEMAIL_PROVIDERがlogにフォールバックする"
   sensitive   = true
   default     = ""
 }
 
 variable "admin_secret_plain" {
   type        = string
-  description = "管理者トークン(X-Admin-Token)のHMAC鍵(平文)。CIには渡さない(#1158: CIが叩く共有シークレットは service_secret_plain)"
+  description = "管理者トークン(X-Admin-Token)のHMAC鍵。CIには渡さない(#1158: CIが叩く共有シークレットは service_secret_plain)。初回 apply で Secrets Manager <project>/app-env へ書き込み、以降は Secrets Manager 側が正"
   sensitive   = true
   default     = ""
 }
 
 variable "service_secret_plain" {
   type        = string
-  description = "CIからのサービス間呼び出し(X-Admin-Secret)用の共有シークレット(平文)。GitHubのリポジトリシークレット SERVICE_SECRET と同じ値にする。admin_secret_plain とは必ず別値にする(#1158)"
+  description = "CIからのサービス間呼び出し(X-Admin-Secret)用の共有シークレット。GitHubのリポジトリシークレット SERVICE_SECRET と同じ値にする。admin_secret_plain とは必ず別値にする(#1158)。初回 apply で Secrets Manager <project>/app-env へ書き込み、以降は Secrets Manager 側が正"
   sensitive   = true
   default     = ""
 }
