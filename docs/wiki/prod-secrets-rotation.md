@@ -36,6 +36,10 @@ HMAC鍵の露出面まで CI へ広がっていた。シークレットを分け
 サービス間エンドポイントが 503 で fail-close し、取り込みは次回の実行で回収される。
 **`ADMIN_SECRET` へのフォールバックは実装されていない。**
 
+プレースホルダー（`change-me-service-secret`）のまま、または `ADMIN_SECRET` と同値の場合も
+**未設定と同じ扱い**（503 で fail-close）になる。`.env.example` の値は公開されているので、
+通ってしまうと `/api/admin/whats-new/ingest` と `/api/admin/training/stats` を誰でも叩ける。
+
 `ignore_changes` は `secret_string` 全体にかかるため、**秘密でない値も Terraform からは変更できない**。
 `google_client_id` / `github_client_id` は tfvars を書き換えても plan に差分が出ず無言で無視される。
 OAuth アプリを作り直して client_id が変わった場合も、下の CLI 手順で書き換えること。

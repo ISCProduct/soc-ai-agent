@@ -169,6 +169,12 @@ jobs:
       - name: ECS update-service のリビジョン指定検査
         run: ./automation/test/ecs-update-service-revision-test.sh
 
+      # SSM 経由で全台へ配る staging のシークレットが、稼働中インスタンスにも届くこと。
+      # ASG は version=$Latest でも既存インスタンスを置換しないため、user_data への
+      # 追記だけでは稼働中の .env に反映されず「新規インスタンスだけ動く」状態になる。
+      - name: staging の .env 継ぎ足し検査
+        run: ./automation/test/staging-env-topup-test.sh
+
       - name: Dependabot 互換性の検査
         run: ./automation/test/dependabot-workflow-test.sh
 

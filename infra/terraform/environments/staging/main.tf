@@ -241,11 +241,13 @@ resource "aws_iam_role_policy" "app" {
       },
       {
         # デプロイ手順(deployment.yml)が稼働中インスタンスの /opt/app/.env を
-        # 全台同じ BFF_INTERNAL_TOKEN へ更新するために読む(#1407)。
-        Sid      = "BffInternalTokenSsmRead"
+        # 全台同じ値へ更新するために読む(#1407 の BFF_INTERNAL_TOKEN、#1158 の SERVICE_SECRET)。
+        # user_data は新規インスタンスでしか走らないため、この経路が無いと
+        # 稼働中インスタンスに新しいシークレットが届かない。
+        Sid      = "AppSecretsSsmRead"
         Effect   = "Allow"
         Action   = ["ssm:GetParameter"]
-        Resource = [aws_ssm_parameter.bff_internal_token.arn]
+        Resource = [aws_ssm_parameter.bff_internal_token.arn, aws_ssm_parameter.service_secret.arn]
       },
       {
         # コンテナログを CloudWatch Logs へ転送する(awslogsログドライバ)。
@@ -310,6 +312,27 @@ resource "aws_ssm_parameter" "bff_internal_token" {
   description = "BFF(frontend) -> backend の X-Client-IP 検証用共有トークン(#1407)"
   type        = "String"
   value       = random_password.bff_internal_token.result
+
+  tags = local.tags
+}
+
+# CIからのサービス間呼び出し(X-Admin-Secret)用の共有シークレット(#1158)。
+#
+# bff_internal_token と同じ事情で、稼働中インスタンスにも配る必要がある。
+# ASG は version=$Latest で Launch Template を更新しても既存インスタンスを置換しないため、
+# user_data への追記だけでは稼働中の /opt/app/.env に届かず、
+# 「新規インスタンスだけ取り込みが通る」状態になる。
+# user_data(新規インスタンス)は launch template から直接この値を受け取り、
+# 稼働中インスタンスは deployment.yml がこのパラメータを読んで .env を更新する。
+# 出どころが var.service_secret_plain 1つなので必ず一致する。
+# 型は String。同じ値が launch template の user_data に平文で載っており
+# ec2:DescribeLaunchTemplateVersions で読めるため、SecureString を足しても
+# 実際の境界は IAM のまま変わらない(bff_internal_token と同じ理由)。
+resource "aws_ssm_parameter" "service_secret" {
+  name        = "/${var.project_name}/service-secret"
+  description = "CI・運用からのサービス間呼び出し(X-Admin-Secret)用の共有シークレット(#1158)"
+  type        = "String"
+  value       = var.service_secret_plain
 
   tags = local.tags
 }

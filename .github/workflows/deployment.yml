@@ -346,6 +346,20 @@ jobs:
                 # 黙って進むと不一致に気付けないため、理由をログへ残す。
                 echo "WARN: SSM /${{ env.PROJECT_NAME }}/bff-internal-token を読めませんでした（terraform apply 未実施の可能性）。.env は変更しません" >&2
               fi
+              # CIからのサービス間呼び出し用の共有シークレット(#1158)。BFF_INTERNAL_TOKEN と
+              # 同じ事情で、user_data への追記だけでは稼働中インスタンスに届かない
+              # （ASG は version=$Latest でも既存インスタンスを置換しない）。
+              # 届かないと staging への更新情報の取り込みが 503 のまま回復しない。
+              SERVICE_SECRET_VALUE=$(aws ssm get-parameter --region ${{ env.AWS_REGION }} --name /${{ env.PROJECT_NAME }}/service-secret --query Parameter.Value --output text 2>/dev/null || true)
+              if [ -n "$SERVICE_SECRET_VALUE" ] && [ "$SERVICE_SECRET_VALUE" != None ]; then
+                if [ -f .env ]; then
+                  sed -i /^SERVICE_SECRET=/d .env
+                  echo SERVICE_SECRET=$SERVICE_SECRET_VALUE >> .env
+                fi
+              else
+                # 新規インスタンスは user_data が同じ値を既に書いているので .env は触らない。
+                echo "WARN: SSM /${{ env.PROJECT_NAME }}/service-secret を読めませんでした（terraform apply 未実施の可能性）。.env は変更しません" >&2
+              fi
               # staging は常に ALB -> edge nginx -> frontend の2段(terraform と同値)
               if [ -f .env ] && ! grep -q ^TRUSTED_PROXY_HOPS= .env; then
                 echo TRUSTED_PROXY_HOPS=2 >> .env

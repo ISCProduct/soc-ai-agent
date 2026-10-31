@@ -48,7 +48,8 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 `EchoAdminAuth`（管理者トークンのHMAC鍵）が使う `ADMIN_SECRET` とは別の値です。
 CI は既知の値でサービス間エンドポイントを叩く必要があるため、兼用すると
 HMAC鍵の露出面が CI まで広がります（#1158）。`SERVICE_SECRET` が未設定の場合は
-503 で拒否し、`ADMIN_SECRET` へのフォールバックはしません。
+503 で拒否し、`ADMIN_SECRET` へのフォールバックはしません。プレースホルダー
+（`change-me-service-secret`）のままの場合と `ADMIN_SECRET` と同値の場合も未設定扱いです。
 
 ### ロールと職員（staff）
 

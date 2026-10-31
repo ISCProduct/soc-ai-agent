@@ -24,6 +24,10 @@ type Config struct {
 	OAuthStateSecret  string
 }
 
+// serviceSecretPlaceholder は .env.example / docs の例に入っている値。
+// 公開されているため、これが設定されている状態は未設定と同じ扱いにする(#1158)。
+const serviceSecretPlaceholder = "change-me-service-secret"
+
 func LoadConfig() (*Config, error) {
 	env := os.Getenv("APP_ENV")
 
@@ -60,24 +64,9 @@ func LoadConfig() (*Config, error) {
 				log.Fatalf("%s が未設定またはプレースホルダーのままです。本番環境では必ず安全な値を設定してください。", key)
 			}
 		}
-		// SERVICE_SECRET は上の必須チェックに入れない。ここを log.Fatalf にすると、
-		// Terraform apply より先に新しいイメージがデプロイされた時点で本番が起動不能になる
-		// (COMPANY_USER_SECRET の追加漏れで実際に起きた。infra/.../prod/main.tf のコメント参照)。
-		// 未設定でも EchoStaticSecretAuth が 503 で fail-close するため、影響は
-		// サービス間呼び出し(更新情報の取り込み)が拒否されることに限られ、取りこぼしは
-		// 次回の取り込みで回収される。ADMIN_SECRET へのフォールバックはしない(#1158)。
-		if serviceSecret == "" {
-			log.Println("WARNING: SERVICE_SECRET が未設定です。CI・運用からのサービス間呼び出し(X-Admin-Secret)は503で拒否されます。Secrets Manager の soc-app/service-secret を確認してください。")
-		}
-		if serviceSecret != "" && serviceSecret == adminSecret {
-			log.Fatalf("SERVICE_SECRET と ADMIN_SECRET が同値です。CIが知る共有シークレットと管理者トークンのHMAC鍵は別値にしてください。")
-		}
 	} else {
 		if adminSecret == "" {
 			log.Println("WARNING: ADMIN_SECRET が設定されていません。管理者認証トークンの検証が無効化されます。本番環境では必ず設定してください。")
-		}
-		if serviceSecret == "" {
-			log.Println("WARNING: SERVICE_SECRET が設定されていません。サービス間呼び出し(X-Admin-Secret)は503で拒否されます。")
 		}
 		if userSecret == "" {
 			log.Println("WARNING: USER_SECRET が設定されていません。ユーザー認証が利用できません。本番環境では必ず設定してください。")
@@ -88,6 +77,28 @@ func LoadConfig() (*Config, error) {
 		if oauthStateSecret == "" {
 			log.Fatal("OAUTH_STATE_SECRET が設定されていません。OAuth CSRF 対策が機能しないため起動を中止します。.env に OAUTH_STATE_SECRET を設定してください。")
 		}
+	}
+
+	// SERVICE_SECRET は「CIが既知の値で叩くための静的共有シークレット」で、
+	// ADMIN_SECRET(管理者/職員トークンのHMAC鍵)とは別の値でなければ分離した意味が無い(#1158)。
+	// 次のどちらかなら未設定として扱い、EchoStaticSecretAuth に503で fail-close させる。
+	//   - .env.example のプレースホルダーのまま: 公開されている値なので、そのまま本番へ出ると
+	//     /api/admin/whats-new/ingest と /api/admin/training/stats を誰でも叩ける
+	//   - ADMIN_SECRET と同値: 兼用へ戻っており、HMAC鍵の露出面がCIまで広がる
+	// 本番の必須チェック(log.Fatalf)には入れない。Terraform apply より先に新しいイメージが
+	// デプロイされた時点で本番が起動不能になる方が影響が大きい(COMPANY_USER_SECRET の
+	// 追加漏れで実際に起きた)。未設定でも落ちるのはサービス間呼び出しだけで、取りこぼしは
+	// 次回の取り込みで回収される。ADMIN_SECRET へのフォールバックはしない。
+	if serviceSecret == serviceSecretPlaceholder {
+		log.Println("WARNING: SERVICE_SECRET が .env.example のプレースホルダーのままです。未設定として扱います。")
+		serviceSecret = ""
+	}
+	if serviceSecret != "" && serviceSecret == adminSecret {
+		log.Println("WARNING: SERVICE_SECRET が ADMIN_SECRET と同値です。CIが知る共有シークレットと管理者トークンのHMAC鍵は別値にしてください。未設定として扱います。")
+		serviceSecret = ""
+	}
+	if serviceSecret == "" {
+		log.Println("WARNING: SERVICE_SECRET が未設定です。CI・運用からのサービス間呼び出し(X-Admin-Secret)は503で拒否されます。")
 	}
 
 	cfg := &Config{
