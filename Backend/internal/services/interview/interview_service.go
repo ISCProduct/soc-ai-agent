@@ -269,8 +269,11 @@ func (s *InterviewService) redactTeacherReport(actorID uint, report *models.Inte
 	if report == nil {
 		return nil
 	}
-	if user, err := s.userRepo.GetUserByID(actorID); err == nil && user != nil &&
-		(user.IsAdmin || user.HasStaffRole()) {
+	user, err := s.userRepo.GetUserByID(actorID)
+	if err != nil {
+		// 除去側に倒すが、DB 障害で職員のレポートが空になる原因を追えるよう残す
+		log.Printf("[Interview] WARN: 教員用レポートの開示判定でユーザーを取得できず除去しました user=%d: %v", actorID, err)
+	} else if user != nil && (user.IsAdmin || user.HasStaffRole()) {
 		return report
 	}
 	sanitized := *report

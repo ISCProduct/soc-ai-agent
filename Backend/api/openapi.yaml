@@ -1071,10 +1071,10 @@ paths:
     get:
       tags: [interviews]
       summary: セッション詳細
+      description: report.teacher_report_json は職員・管理者にのみ含まれる（認証ユーザーの実ロールで決まる。#1814）。
       security: [{ userToken: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
-        - { in: query, name: role, schema: { type: string } }
       responses:
         "200": { description: 詳細 }
         "401": { $ref: "#/components/responses/Unauthorized" }

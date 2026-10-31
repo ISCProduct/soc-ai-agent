@@ -51,6 +51,9 @@ func TestTeacherReportVisibility(t *testing.T) {
 		{"職員本人には教員用レポートを返す", 2, 2, map[uint]*entity.User{2: staffOwner}, true, nil},
 		{"管理者には教員用レポートを返す", ownerID, 3, map[uint]*entity.User{ownerID: owner, 3: admin}, true, nil},
 		{"ユーザーを引けない本人には返さない(fail-close)", ownerID, ownerID, map[uint]*entity.User{}, false, nil},
+		{"ユーザーがnilでも本人には返さない(fail-close)", ownerID, ownerID, map[uint]*entity.User{ownerID: nil}, false, nil},
+		{"管理者かつ職員でも返す", 4, 4, map[uint]*entity.User{4: {ID: 4, Role: models.UserRoleStaff, IsAdmin: true}}, true, nil},
+		{"旧データの teacher 値だけでは返さない", 5, 5, map[uint]*entity.User{5: {ID: 5, Role: "teacher"}}, false, nil},
 		{"他人のセッションは403", ownerID, 9, map[uint]*entity.User{9: {ID: 9, Role: models.UserRoleStudent}}, false, shared.ErrForbidden},
 	}
 

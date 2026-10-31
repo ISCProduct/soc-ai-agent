@@ -21,7 +21,7 @@ type User struct {
 	Password       string `gorm:"size:255"` // ハッシュ化されたパスワード (OAuth時は空)
 	Name           string `gorm:"size:100"`
 	IsGuest        bool   `gorm:"default:false"`                                     // ゲストユーザーフラグ
-	Role           string `gorm:"size:20;default:'student'" json:"role"`             // ユーザーロール: student / teacher
+	Role           string `gorm:"size:20;default:'student'" json:"role"`             // ユーザーロール: student / staff
 	TargetLevel    string `gorm:"size:20;default:'新卒'"`                              // 新卒 or 中途
 	SchoolName     string `gorm:"size:255;column:school_name"`                       // 学校名(自由記述)
 	SchoolID       *uint  `gorm:"column:school_id;index" json:"school_id,omitempty"` // 個別校(構造化、既存データはNULLのまま)
