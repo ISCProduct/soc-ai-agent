@@ -3,6 +3,7 @@
 import { createRef } from 'react'
 import { render, screen } from '@testing-library/react'
 import { ChatMessageList } from '@/components/mui-chat/components/ChatMessageList'
+import { INITIAL_GREETING } from '@/components/mui-chat/utils'
 import type { Message } from '@/components/mui-chat/types'
 
 /**
@@ -85,5 +86,59 @@ describe('初回利用の空状態', () => {
 
     expect(screen.queryByText('まだ回答がありません')).toBeNull()
     expect(screen.getByText('履歴の読み込みに失敗しました。')).toBeInTheDocument()
+  })
+})
+
+describe('初回利用の空状態を出さない場面', () => {
+  it('その質問に自前の選択肢があるときは出さない', () => {
+    // 選択肢付きの質問は ChatInputBar 側に A)〜D) が並ぶ。
+    // そこへ「近いものを選ぶと…」と職種の候補を重ねると、
+    // 質問と関係のない候補を選ばせることになる。
+    const withChoices: Message = {
+      id: '0',
+      role: 'assistant',
+      content: [
+        '新しいことに挑戦しましたか？',
+        '',
+        'A) 自分から新しいことを学び続けたい',
+        'B) 必要になったときに学べばいい',
+      ].join('\n'),
+      timestamp: new Date('2026-10-01T09:05:00'),
+    }
+
+    render(<ChatMessageList {...baseProps()} messages={[withChoices]} />)
+
+    expect(screen.queryByText('まだ回答がありません')).toBeNull()
+    expect(screen.queryByRole('group', { name: '興味のある仕事の候補' })).toBeNull()
+  })
+
+  it('実際の挨拶文では空状態を出す', () => {
+    // 挨拶に番号付きの行が混ざると選択肢として拾われ、空状態が消える。
+    const actual: Message = {
+      id: '0',
+      role: 'assistant',
+      content: INITIAL_GREETING,
+      timestamp: new Date('2026-10-01T09:05:00'),
+    }
+
+    render(<ChatMessageList {...baseProps()} messages={[actual]} />)
+
+    expect(screen.getByText('まだ回答がありません')).toBeInTheDocument()
+  })
+})
+
+describe('読み込み中のライブリージョン', () => {
+  it('履歴を読み込んでいるあいだは aria-busy を立てる', () => {
+    // 骨格の追加を「新しい発言」として読み上げさせない。
+    // 共通の ListSkeleton と同じ扱いに揃える。
+    const { container } = render(<ChatMessageList {...baseProps()} historyLoading />)
+    expect(container.querySelector('[role="log"]')?.getAttribute('aria-busy')).toBe('true')
+  })
+
+  it('読み込みが終われば aria-busy を下ろす', () => {
+    const { container } = render(
+      <ChatMessageList {...baseProps()} historyLoading={false} messages={[greeting]} />,
+    )
+    expect(container.querySelector('[role="log"]')?.getAttribute('aria-busy')).toBe('false')
   })
 })

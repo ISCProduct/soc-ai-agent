@@ -25,6 +25,7 @@ import {
   CHAT_WARN_EDGE,
   CHAT_WARN_TEXT,
   extractChoices,
+  findLastAssistantQuestionMessage,
   isValidationFeedbackMessage,
   isValidationTerminationMessage,
   JOB_QUICK_OPTIONS,
@@ -59,7 +60,19 @@ export function ChatMessageList({
   onQuickSelect,
 }: ChatMessageListProps) {
   const hasUserMessage = messages.some((m) => m.role === 'user')
-  const showQuickSelect = !historyLoadError && !hasUserMessage && messages.length > 0
+  /**
+   * 直近の質問が自前の選択肢を持っているか。
+   *
+   * 選択肢付きの質問では ChatInputBar に A)〜D) が並ぶ。そこへ職種の候補を
+   * 重ねると、質問と関係のない候補を選ばせることになるので出さない。
+   * 判定は入力欄側（useMuiChat の showChoiceButtons）と同じ 2件以上に揃える。
+   */
+  const lastAssistantMessage = findLastAssistantQuestionMessage(messages)
+  const lastQuestionHasChoices = lastAssistantMessage
+    ? extractChoices(lastAssistantMessage.content).length >= 2
+    : false
+  const showQuickSelect =
+    !historyLoadError && !hasUserMessage && messages.length > 0 && !lastQuestionHasChoices
 
   // ログには名前を与える。無いと読み上げでは「ログ」としか案内されず、
   // 何の一覧なのか分からない。
@@ -70,6 +83,9 @@ export function ChatMessageList({
   //
   // aria-relevant は指定しない。"additions" だけに絞ると文字の差し替えが
   // 通知から外れる。role="log" の既定（additions text）に任せる。
+  //
+  // 読み込み中は aria-busy を立てる。骨格の追加を「新しい発言」として
+  // 読み上げさせない（共通の ListSkeleton と同じ扱い）。
   return (
     <Box
       ref={messagesAreaRef}
@@ -77,6 +93,7 @@ export function ChatMessageList({
       role="log"
       aria-label="自己分析チャットのやり取り"
       aria-live="polite"
+      aria-busy={historyLoading}
       sx={{
         flexGrow: 1,
         // 選択肢の最大高さとホーム上部の帯で、この領域が中身の高さまで潰れる。
