@@ -4,7 +4,7 @@
 chromadb>=0.6.3,<0.7.0
 # CrewAI は embedchain/langchain の依存衝突が未解決のため意図的に無効化中。
 # #1604 では追加しない。互換性解消と依存整理は Issue #273 で別途対応する。
-fastapi==0.161.1
+fastapi==0.162.0
 # LangChain（埋め込み・検索・今後のチェーン化）。1.x 系に固定（constraints.txt 参照）。
 langchain>=1.4.7,<2.0
 langchain-core>=1.7.0,<2.0
