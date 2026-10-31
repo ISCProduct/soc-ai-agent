@@ -80,6 +80,11 @@ run('J キー無しPR→課題名の完全一致でPR確認待ち', dict(ACTION=
 run('K キー無しPR→一致なしは警告', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=NOKEY, hits=[{'issueKey': 'SOCAIAGENT-1', 'summary': '別の課題'}], expect_warn=True)
 run('L キー無しPR→複数一致は更新せず警告', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=NOKEY, hits=HIT + [dict(HIT[0], issueKey='SOCAIAGENT-327')], expect_warn=True)
 run('M キー無しPR→マージで警告(develop)', dict(ACTION='closed', PR_NUMBER='9'), (2, '処理中'), pr=dict(NOKEY, merged=True), hits=[], expect_warn=True)
+JA = dict(PRBASE, title='ログイン: エラーを表示する (#9)')
+run('N 日本語の分類名は落とさない(別課題に誤爆しない)', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=JA,
+    hits=[{'issueKey': 'SOCAIAGENT-8', 'summary': '検索: エラーを表示する'}], expect_warn=True)
+run('O 日本語の分類名が同じ課題には一致する', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=JA,
+    hits=[{'issueKey': 'SOCAIAGENT-8', 'summary': 'ログイン: エラーを表示する'}], expect_patch=5)
 if FAILED:
     print('FAIL:', ', '.join(FAILED))
     sys.exit(1)

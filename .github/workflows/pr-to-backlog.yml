@@ -254,6 +254,8 @@ jobs:
                       if not sub:
                           continue
                       k = extract_bl_key(sub.get('title', ''), sub.get('body') or '')
+                      if not k:
+                          k = resolve_bl_key_from_title(sub.get('title', ''), sub.get('body') or '', '')
                       if k:
                           keys.add(k)
                       elif 'pull_request' in sub:
@@ -265,7 +267,7 @@ jobs:
               """タイトルから [KEY-N]・末尾の (#N)・先頭の `feat(scope):` を除く"""
               t = re.sub(r'\[[A-Za-z]+-\d+\]', '', t or '')
               t = re.sub(r'\s*\(#\d+\)\s*$', '', t.strip())
-              return re.sub(r'^\s*\w+(\([^)]*\))?!?\s*[:：]\s*', '', t).strip()
+              return re.sub(r'^\s*[a-z]+(\([^)]*\))?!?\s*:\s*', '', t).strip()
 
           def norm_title(t):
               return re.sub(r'\s+', '', strip_title(t)).lower()
@@ -289,9 +291,16 @@ jobs:
                   want = norm_title(t)
                   if not want:
                       continue
-                  hits = bl_request('GET', '/issues', {
-                      'projectId[]': proj['id'], 'keyword': strip_title(t), 'count': 20,
-                  }) or []
+                  hits, offset = [], 0
+                  while True:  # 21件目以降の同名課題を見落とさないよう全ページ読む
+                      page = bl_request('GET', '/issues', {
+                          'projectId[]': proj['id'], 'keyword': strip_title(t),
+                          'count': 100, 'offset': offset,
+                      }) or []
+                      hits += page
+                      if len(page) < 100:
+                          break
+                      offset += 100
                   found |= {h['issueKey'] for h in hits if norm_title(h.get('summary', '')) == want}
               if len(found) > 1:
                   warn(f"課題名が一致する Backlog 課題が複数あります（{', '.join(sorted(found))}）。"
