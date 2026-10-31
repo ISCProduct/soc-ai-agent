@@ -36,6 +36,11 @@ name: PR → Backlog 同期
 #   4. PR タイトル・本文の Closes/Fixes/Resolves/Refs/Related/See #N が指す GitHub Issue
 #   5. ブランチ名に埋め込まれた番号（fix/1374-... / feature/619-... / feature/issue-521）
 #
+#   6. 上の 1〜5 で決まらないとき: PR タイトル・参照する GitHub Issue のタイトルを、
+#      Backlog の課題名と照合する（`feat(scope):` 等の接頭辞・末尾の (#N)・空白を除いた完全一致が
+#      1 件に決まるときだけ採用。複数一致・不一致は採らない）。
+#   それでも決まらないときは黙ってスキップせず、Actions に `::warning::` を残す（ジョブは失敗させない）。
+#
 #   4・5 の参照先が Issue ではなく別のPRだった場合は、そのPRの参照先をもう一段たどる
 #   （「#1357 のレビュー指摘」のような追いPRは、元PR経由でしか元Issueに届かない）。
 #
@@ -249,12 +254,67 @@ jobs:
                       if not sub:
                           continue
                       k = extract_bl_key(sub.get('title', ''), sub.get('body') or '')
+                      if not k:
+                          k = resolve_bl_key_from_title(sub.get('title', ''), sub.get('body') or '', '')
                       if k:
                           keys.add(k)
                       elif 'pull_request' in sub:
                           # 参照先も直接キーを持たないPR: さらに1段階そのPRのコミットを辿る
                           keys |= resolve_bl_keys_from_commits(num, depth=depth - 1, _seen_numbers=_seen_numbers)
               return keys
+
+          def strip_title(t):
+              """タイトルから [KEY-N]・末尾の (#N)・先頭の `feat(scope):` を除く"""
+              t = re.sub(r'\[[A-Za-z]+-\d+\]', '', t or '')
+              t = re.sub(r'\s*\(#\d+\)\s*$', '', t.strip())
+              return re.sub(r'^\s*[a-z]+(\([^)]*\))?!?\s*:\s*', '', t).strip()
+
+          def norm_title(t):
+              return re.sub(r'\s+', '', strip_title(t)).lower()
+
+          def resolve_bl_key_from_title(title, body, head_ref):
+              """キーが書かれていない PR を、課題名の完全一致で Backlog 課題に結びつける。
+
+              照合に使うのは PR タイトルと、PR が参照する GitHub Issue のタイトル。
+              正規化後の完全一致が 1 件に決まるときだけ採用する（部分一致や複数一致は
+              別の課題を更新しかねないので採らない）。"""
+              titles = [title]
+              for num in candidate_issue_numbers(title, body, head_ref):
+                  t = gh_get_issue_or_pr(num)
+                  if t:
+                      titles.append(t.get('title', ''))
+              proj = bl_request('GET', f"/projects/{PROJ_KEY}")
+              if not proj or 'id' not in proj:
+                  return None
+              found = set()
+              for t in titles:
+                  want = norm_title(t)
+                  if not want:
+                      continue
+                  hits, offset = [], 0
+                  while True:  # 21件目以降の同名課題を見落とさないよう全ページ読む
+                      page = bl_request('GET', '/issues', {
+                          'projectId[]': proj['id'], 'keyword': strip_title(t),
+                          'count': 100, 'offset': offset,
+                      }) or []
+                      hits += page
+                      if len(page) < 100:
+                          break
+                      offset += 100
+                  found |= {h['issueKey'] for h in hits if norm_title(h.get('summary', '')) == want}
+              if len(found) > 1:
+                  warn(f"課題名が一致する Backlog 課題が複数あります（{', '.join(sorted(found))}）。"
+                       "どれか決められないため更新しません。")
+                  return None
+              if found:
+                  key = next(iter(found))
+                  print(f"課題名の一致から Backlog キーを解決: {key}")
+                  return key
+              return None
+
+          def warn(msg):
+              """黙ってスキップしない。Actions の実行画面に警告として残す（ジョブは失敗させない）。"""
+              print(f"::warning title=Backlog 課題と結びつけられません::{msg}")
 
           def load_status_id_map():
               statuses = bl_request('GET', f"/projects/{PROJ_KEY}/statuses")
@@ -342,7 +402,8 @@ jobs:
               m = re.search(rf'{re.escape(PROJ_KEY)}-\d+', branch)
               key = m.group(0) if m else resolve_bl_key_from_gh_issue('', '', branch)
               if not key:
-                  print(f"ブランチ '{branch}' から Backlog 課題キーを解決できません。スキップします。")
+                  warn(f"ブランチ '{branch}' から課題キーを解決できません。処理中へ変更しません。"
+                       "ブランチ名に SOCAIAGENT-N か GitHub Issue 番号（例: fix/1374-...）を入れてください。")
                   sys.exit(0)
               in_progress_id = load_status_id_map().get('処理中', 2)
               result = advance_issue_status(BL_BASE, API_KEY, key, in_progress_id, '処理中')
@@ -367,6 +428,8 @@ jobs:
           own_key = extract_bl_key(PR_TITLE, PR_BODY)
           if not own_key:
               own_key = resolve_bl_key_from_gh_issue(PR_BODY, PR_TITLE, PR_HEAD_REF)
+          if not own_key:
+              own_key = resolve_bl_key_from_title(PR_TITLE, PR_BODY, PR_HEAD_REF)
 
           # ---- PR オープン/更新時 ----
           # 準備完了のPRを開いた/再オープン/ドラフト解除 → PR確認待ち、ドラフト → 処理中。
@@ -374,7 +437,8 @@ jobs:
           # どちらも前進のみ。すでに先へ進んだ課題（追いPRなど）は戻さない。
           if ACTION != 'closed':
               if not own_key:
-                  print("Backlog 課題キーが見つかりません。スキップします。")
+                  warn("課題キーが見つからず、課題名でも特定できません。ステータスを更新しません。"
+                       "PR タイトルに [SOCAIAGENT-N]、または本文に「Backlog: SOCAIAGENT-N」を書くと同期されます。")
                   sys.exit(0)
               is_draft = bool(pr.get('draft'))
               if is_draft:
@@ -404,7 +468,8 @@ jobs:
           # ---- PR クローズ（非マージ）: 未対応に戻す ----
           if not PR_MERGED:
               if not own_key:
-                  print("Backlog 課題キーが見つかりません。スキップします。")
+                  warn("課題キーが見つからず、課題名でも特定できません。ステータスを更新しません。"
+                       "PR タイトルに [SOCAIAGENT-N]、または本文に「Backlog: SOCAIAGENT-N」を書くと同期されます。")
                   sys.exit(0)
               if update_backlog_status(own_key, 1):
                   print(f"Backlog 課題を更新しました: {own_key} (ステータス: 未対応)")
@@ -429,7 +494,8 @@ jobs:
           if own_key:
               keys.add(own_key)
           if not keys:
-              print("Backlog 課題キーが見つかりません。スキップします。")
+              warn("課題キーが見つからず、課題名でも特定できません。ステータスを更新しません。"
+                   "PR タイトルに [SOCAIAGENT-N]、または本文に「Backlog: SOCAIAGENT-N」を書くと同期されます。")
               sys.exit(0)
 
           print(f"検出した Backlog 課題キー: {', '.join(sorted(keys))}")

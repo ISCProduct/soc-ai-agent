@@ -1021,9 +1021,25 @@ jobs:
           fi
           # /prod on は日付リストを無視して起動させる指示。日付リストに今日が無くても止めない。
           # ここを見落とすと、手動で起動させた本番をデプロイが落とす。
+          #
+          # ただし on:<復帰日> は復帰日に達した時点で失効する。失効を見ていなかったため、
+          # SSM に古い on:<過去日> が残っていると停止日のデプロイが本番を起動したまま
+          # 終わり、次の毎時5分(prod-uptime-scheduler)まで Fargate と RDS が課金され
+          # 続けた。判定は prod-uptime-scheduler と同じにする(片方だけ直すと再発する)。
           if [ "${OVERRIDE_NOW%%:*}" = "on" ]; then
-            echo "override=$OVERRIDE_NOW（起動指示）のため、起動状態には触らない"
-            exit 0
+            OVERRIDE_EXPIRY=""
+            if [ "$OVERRIDE_NOW" != "${OVERRIDE_NOW%%:*}" ]; then
+              OVERRIDE_EXPIRY="${OVERRIDE_NOW#*:}"
+            fi
+            # 復帰日なし、または実在しない日付(2026-09-31 等)は失効させず起動指示のまま扱う。
+            # 停止側で判断に迷ったら止めない(fail-closed)。
+            if [ -z "$OVERRIDE_EXPIRY" ] \
+              || ! python3 -c 'import sys,datetime; datetime.date.fromisoformat(sys.argv[1])' "$OVERRIDE_EXPIRY" 2>/dev/null \
+              || [[ "$TODAY_JST" < "$OVERRIDE_EXPIRY" ]]; then
+              echo "override=$OVERRIDE_NOW（起動指示）のため、起動状態には触らない"
+              exit 0
+            fi
+            echo "override=$OVERRIDE_NOW は復帰日 $OVERRIDE_EXPIRY に達して失効しているため、停止処理を続ける"
           fi
 
           # 日付リストは JST の暦日で判定する。デプロイが日付をまたぐと、
@@ -1211,6 +1227,13 @@ jobs:
           # 出てしまう（実際に出た）。傘PRは要約対象にせず、中身の個別PRを送る。
           sources=$(python3 .github/scripts/collect_whats_new_sources.py)
 
+          # ペイロードは argv に乗せない。PR本文を含むと ARG_MAX を超え、
+          # 「curl: Argument list too long」で curl 自体が起動しない。空の HTTP
+          # コードが下の *) に落ちて「停止中の可能性」という無関係な警告に化け、
+          # 本番・staging とも取り込みが黙って飛ぶ(60件で実際に踏んだ)。
+          payload=$(mktemp)
+          printf '{"sources": %s}' "$sources" > "$payload"
+
           # 本番が停止していると必ず失敗する(既定停止の運用)。ここで失敗させるとデプロイが
           # 落ちてしまうため続行はするが、黙って握りつぶすと「反映されていない」ことに
           # 気づけない。実際にそれで、運用作業がユーザー向け更新情報に出たまま残った(#1290)。
@@ -1227,7 +1250,7 @@ jobs:
           prod_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
-            -d "{\"sources\": $sources}" \
+            -d @"$payload" \
             --max-time 60 || true)
           prod_rejected=0
           case "$prod_code" in
@@ -1244,7 +1267,7 @@ jobs:
           curl -sf -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $ADMIN_SECRET" \
-            -d "{\"sources\": $sources}" \
+            -d @"$payload" \
             --max-time 60 \
             || echo "::warning::stagingへの更新情報の取り込みに失敗しました(停止中の可能性)。"
 
@@ -1460,9 +1483,16 @@ jobs:
             --json number,title,body,mergedAt \
             --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
 
+          # ペイロードは argv に乗せない。PR本文を含むと ARG_MAX を超え、
+          # 「curl: Argument list too long」で curl 自体が起動しない。空の HTTP
+          # コードが下の *) に落ちて「停止中の可能性」という無関係な警告に化け、
+          # 本番・staging とも取り込みが黙って飛ぶ(60件で実際に踏んだ)。
+          payload=$(mktemp)
+          printf '{"sources": %s}' "$sources" > "$payload"
+
           curl -sf -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $ADMIN_SECRET" \
-            -d "{\"sources\": $sources}" \
+            -d @"$payload" \
             --max-time 60 \
             || echo "stagingへの取り込みに失敗しました(停止中の可能性)。スキップします。"

@@ -152,6 +152,12 @@ jobs:
       - name: 本番デプロイのRDSガード検査
         run: ./automation/test/prod-deploy-db-guard-test.sh
 
+      # デプロイ後に本番を desired=0 へ戻す判定。失効済みの override を
+      # 「起動指示」と読むと、停止日のデプロイが本番を起動したまま終わり
+      # 次の毎時5分まで Fargate と RDS が課金される（2026-10-31 に発生）。
+      - name: 本番デプロイ後の停止判定のテスト
+        run: ./automation/test/prod-deploy-scale-down-test.sh
+
       # サーキットブレーカーの戻し先イメージがECRから消えていると、起動不能なタスク定義を
       # 指したまま残る（#1518）。停止日は desired=0 なので次の稼働日まで気づけない。
       - name: タスク定義イメージ存在検査のテスト
