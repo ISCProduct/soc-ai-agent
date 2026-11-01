@@ -309,6 +309,81 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
     }
   }
 
+  // 詳細パネルの横はみ出し（SOCAIAGENT-468 / #1863）。
+  //
+  // AIの生成文に空白を含まない長い文字列（URL など）が混じると、既定の
+  // overflow-wrap では折り返さずページ全体が横に伸びる。#1863 の実測では
+  // 98文字の URL ひとつで 1024px のとき scrollWidth が 1106 になっていた。
+  // 列揃えの検査は帯と本文の左端しか見ないので、この崩れは捕まらない。
+  //
+  // トレンドも3点返して recharts の ResponsiveContainer を実際に描かせる。
+  // 空配列だとチャートの描画経路を通らず、はみ出しを見落とす。
+  test('詳細パネルに空白なしの長文があってもページが横にはみ出さない', async ({ page }) => {
+    const LONG_URL = `https://example.com/${'a'.repeat(70)}`
+    const NO_SPACE_640 = 'あ'.repeat(640)
+    const REPORT = {
+      session_id: 1,
+      summary_text: `今回の面接の要約です。参考資料: ${LONG_URL}`,
+      scores_json: JSON.stringify({ logic: 4, specificity: 3 }),
+      evidence_json: JSON.stringify({ logic: LONG_URL }),
+      strengths_json: JSON.stringify([LONG_URL]),
+      improvements_json: JSON.stringify([NO_SPACE_640]),
+      teacher_report_json: JSON.stringify({
+        overall_comment: NO_SPACE_640,
+        coaching_points: [LONG_URL],
+        next_steps: [NO_SPACE_640],
+        detailed_evidence: { logic: NO_SPACE_640 },
+      }),
+      created_at: '2026-10-01T01:30:00Z',
+      updated_at: '2026-10-01T01:30:00Z',
+    }
+    const TREND_POINTS = [1, 2, 3].map((n) => ({
+      session_id: n,
+      created_at: `2026-10-0${n}T01:00:00Z`,
+      logic: 3,
+      specificity: 4,
+      ownership: 3,
+      communication: 4,
+      enthusiasm: 3,
+    }))
+
+    // 教員用レポートはサーバーが実ロールで返すか決める(#1814)。教員として見る。
+    await setupAuth(page, { ...TEST_USER, is_staff: true })
+    await stubApi(page)
+    await page.route('**/api/interviews**', (route) => {
+      const { pathname } = new URL(route.request().url())
+      const json = (body: unknown) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+      if (pathname === '/api/interviews') return json({ ...SESSION_RESPONSE })
+      if (pathname === '/api/interviews/trend') return json({ points: TREND_POINTS })
+      if (pathname === '/api/interviews/1') {
+        return json({ session: SESSION_RESPONSE.sessions[0], utterances: [], report: REPORT })
+      }
+      return route.fallback()
+    })
+
+    const overflows: Array<{ width: number; scrollWidth: number; clientWidth: number }> = []
+    for (const width of [2000, 1440, 1024, 900, 768, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/interview/history')
+      await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
+      await page.getByText('面接セッション #1', { exact: true }).click()
+      // 詳細パネルが開いたこと。教員用レポートまで出てから測る。
+      await expect(page.getByText('教員用詳細レポート', { exact: true })).toBeVisible({ timeout: 15000 })
+
+      const box = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+      overflows.push({ width, ...box })
+    }
+    // 幅ごとに fail-fast せず、全幅を測ってからまとめて判定する。
+    expect(
+      overflows.filter((o) => o.scrollWidth > o.clientWidth),
+      `横にはみ出した幅: ${JSON.stringify(overflows)}`,
+    ).toEqual([])
+  })
+
   for (const historyContent of ['session', 'empty'] as const) {
     test(`${historyContent === 'session' ? '履歴あり' : '空状態'}でもヘッダー・本文の左端が揃う`, async ({ page }) => {
       await setupAuth(page, TEST_USER)

@@ -276,7 +276,8 @@ export default function PageContent() {
                     const tr: TeacherReport | null = parseJsonSafe(selectedDetail.report?.teacher_report_json) as TeacherReport | null
                     if (!tr) return null
                     return (
-                      <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: '2px solid #3b82f6', bgcolor: '#eff6ff' }}>
+                      // 総評・指導ポイント・根拠もAIの生成文なので、同じく根で折り返す（#1863）
+                      <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: '2px solid #3b82f6', bgcolor: '#eff6ff', overflowWrap: 'anywhere' }}>
                         <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
                           <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#3b82f6' }} />
                           <Typography sx={{ fontWeight: 700, color: '#1d4ed8', fontSize: 14 }}>教員用詳細レポート</Typography>
