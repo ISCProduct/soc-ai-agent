@@ -265,8 +265,10 @@ export default function PageContent() {
                 <>
                   <InterviewSummary report={selectedDetail.report} userId={user?.user_id} theme="light" />
 
-                  {/* 教員用レポートパネル */}
-                  {isTeacher && (() => {
+                  {/* 教員用レポートパネル。開示判定はサーバー側（実ロールで teacher_report_json
+                      自体を除去する）。ここで保存済み利用者情報を見て再判定すると、昇格直後など
+                      localStorage が古いときにサーバーが返したレポートを隠してしまう。 */}
+                  {(() => {
                     const tr: TeacherReport | null = parseJsonSafe(selectedDetail.report?.teacher_report_json) as TeacherReport | null
                     if (!tr) return null
                     return (

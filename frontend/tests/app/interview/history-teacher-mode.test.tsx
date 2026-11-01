@@ -2,12 +2,17 @@
  * @jest-environment jsdom
  */
 /**
- * 面接履歴の「教員モード」表示が、サーバー側の開示条件と同じ主体で出ること（#1814 #1815）。
+ * 面接履歴の教員向け表示（#1814 #1815）。
  *
  * 以前は `user.role === 'teacher'` で判定していた。実運用では role が 'teacher' にならず
- * （職員は is_staff で表す）、教員モードも教員用詳細レポートのパネルも到達不能だった。
- * 判定を is_staff / is_admin に寄せたので、ここが壊れたら落ちるテストを置く。
- * サーバーは別途、実ロールで teacher_report_json 自体を除去する（redactTeacherReport）。
+ * （職員は is_staff で表す）、教員モードも教員用詳細レポートも到達不能だった。
+ *
+ * 役割は2つに分かれている:
+ * - 「教員モード」チップ: 保存済み利用者情報の is_staff / is_admin による表示ラベル。
+ * - 教員用詳細レポートのパネル: 開示判定はサーバー側（実ロールで teacher_report_json
+ *   自体を除去する。redactTeacherReport）。クライアントは返ってきたものを出すだけ。
+ *   ここで保存済み利用者情報を見て再判定すると、昇格直後に localStorage が古いとき
+ *   サーバーが返したレポートを隠してしまう。
  */
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import PageContent from '@/app/interview/history/page-content'
@@ -42,13 +47,18 @@ const teacherReport = {
   overall_comment: '面接官視点の総評', detailed_evidence: {}, coaching_points: ['指導の着眼点'],
   strengths_for_teacher: [], next_steps: [],
 }
-const detail: InterviewDetail = {
+const baseReport = {
+  session_id: 1, summary_text: '', scores_json: '{}', evidence_json: '{}',
+  created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+}
+// 職員・管理者に対するサーバーの応答。
+const detailWithTeacherReport: InterviewDetail = {
   session, utterances: [],
-  report: {
-    session_id: 1, summary_text: '', scores_json: '{}', evidence_json: '{}',
-    teacher_report_json: JSON.stringify(teacherReport),
-    created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
-  },
+  report: { ...baseReport, teacher_report_json: JSON.stringify(teacherReport) },
+}
+// 学生に対するサーバーの応答（redactTeacherReport が空にしている）。
+const detailWithoutTeacherReport: InterviewDetail = {
+  session, utterances: [], report: { ...baseReport, teacher_report_json: '' },
 }
 
 const baseUser: User = { user_id: 1, email: 'a@example.com', name: 'A', is_guest: false }
@@ -58,37 +68,53 @@ describe('面接履歴の教員モード', () => {
     jest.clearAllMocks()
     mockList.mockResolvedValue({ sessions: [session], total: 1 })
     mockTrend.mockResolvedValue([])
-    mockDetail.mockResolvedValue(detail)
+    mockDetail.mockResolvedValue(detailWithTeacherReport)
   })
 
-  const tests: { name: string; user: User; wantTeacher: boolean }[] = [
-    { name: '職員(is_staff)には出す', user: { ...baseUser, is_staff: true }, wantTeacher: true },
-    { name: '管理者(is_admin)には出す', user: { ...baseUser, is_admin: true }, wantTeacher: true },
-    { name: '学生には出さない', user: baseUser, wantTeacher: false },
-    // role は旧実装の判定軸。これだけで出てしまうと、サーバーの開示条件とずれる。
-    { name: "role='teacher' だけでは出さない", user: { ...baseUser, role: 'teacher' }, wantTeacher: false },
+  // チップは保存済み利用者情報の is_staff / is_admin で出す。
+  const chipCases: { name: string; user: User; wantChip: boolean }[] = [
+    { name: '職員(is_staff)には出す', user: { ...baseUser, is_staff: true }, wantChip: true },
+    { name: '管理者(is_admin)には出す', user: { ...baseUser, is_admin: true }, wantChip: true },
+    { name: '学生には出さない', user: baseUser, wantChip: false },
+    // role は旧実装の判定軸。これだけで出るとサーバーの開示条件とずれる。
+    { name: "role='teacher' だけでは出さない", user: { ...baseUser, role: 'teacher' }, wantChip: false },
   ]
 
-  for (const tt of tests) {
-    it(tt.name, async () => {
+  for (const tt of chipCases) {
+    it(`教員モードのチップ: ${tt.name}`, async () => {
       mockUser.mockReturnValue(tt.user)
       render(<PageContent />)
-
-      const row = await screen.findByText('面接セッション #1')
-      await act(async () => { fireEvent.click(row) })
-
-      const chip = screen.queryByText('教員モード')
-      const panel = screen.queryByText('教員用詳細レポート')
-      if (tt.wantTeacher) {
-        expect(chip).toBeInTheDocument()
-        expect(panel).toBeInTheDocument()
-        expect(screen.getByText('面接官視点の総評')).toBeInTheDocument()
-        expect(screen.getByText('・指導の着眼点')).toBeInTheDocument()
+      await screen.findByText('面接セッション #1')
+      if (tt.wantChip) {
+        expect(screen.getByText('教員モード')).toBeInTheDocument()
       } else {
-        expect(chip).not.toBeInTheDocument()
-        expect(panel).not.toBeInTheDocument()
-        expect(screen.queryByText('面接官視点の総評')).not.toBeInTheDocument()
+        expect(screen.queryByText('教員モード')).not.toBeInTheDocument()
       }
     })
   }
+
+  it('サーバーが教員用レポートを返したら、保存済み利用者情報が古くても表示する', async () => {
+    // 昇格直後で localStorage は学生のまま。サーバーは実ロールで職員と判定して返している。
+    mockUser.mockReturnValue(baseUser)
+    mockDetail.mockResolvedValue(detailWithTeacherReport)
+    render(<PageContent />)
+    const row = await screen.findByText('面接セッション #1')
+    await act(async () => { fireEvent.click(row) })
+
+    expect(screen.getByText('教員用詳細レポート')).toBeInTheDocument()
+    expect(screen.getByText('面接官視点の総評')).toBeInTheDocument()
+    expect(screen.getByText('・指導の着眼点')).toBeInTheDocument()
+  })
+
+  it('サーバーが教員用レポートを返さなければ、職員でもパネルを出さない', async () => {
+    // 学生に対するサーバーの応答（teacher_report_json は除去済み）。
+    mockUser.mockReturnValue({ ...baseUser, is_staff: true })
+    mockDetail.mockResolvedValue(detailWithoutTeacherReport)
+    render(<PageContent />)
+    const row = await screen.findByText('面接セッション #1')
+    await act(async () => { fireEvent.click(row) })
+
+    expect(screen.queryByText('教員用詳細レポート')).not.toBeInTheDocument()
+    expect(screen.queryByText('面接官視点の総評')).not.toBeInTheDocument()
+  })
 })
