@@ -83,6 +83,26 @@ func (r *UserRepository) ListUsers() ([]entity.User, error) {
 	return result, nil
 }
 
+// scopeUsersBySchool は「担当校の在籍者」の絞り込みを1箇所にまとめる（#1675）。
+//
+// 学校だけで絞ると他学園の学生が混ざる。users.school_id はプロフィールの学校名
+// （本人の自己申告）から解決されるため、学校名を他学園の校名に書き替えた学生が
+// その学校の一覧に現れてしまう。解決側（SchoolRepository.FindByName）は
+// organization_id で絞り、既存の汚染行は migration 000054 で外したが、
+// 境界の判定はデータの綺麗さに依存させない。学校の学園と本人の学園の一致を
+// クエリ自体で要求する。
+//
+// 担当校スコープ（EchoAdminSchoolScope）の結果を受けて users を絞る経路は
+// すべてここを通す。1つでも素の school_id で絞ると、同じ穴がその経路に残る。
+// users を JOIN している呼び出し元でも使えるよう列は users. で修飾する。
+func scopeUsersBySchool(q *gorm.DB, schoolID *uint) *gorm.DB {
+	if schoolID == nil {
+		return q
+	}
+	return q.Where("users.school_id = ?", *schoolID).
+		Where("users.organization_id = (SELECT organization_id FROM schools WHERE id = ?)", *schoolID)
+}
+
 // ListUsersPaged ページング付きユーザー一覧を取得
 // schoolID が非nilの場合は個別校で絞り込む。
 func (r *UserRepository) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
@@ -94,9 +114,7 @@ func (r *UserRepository) ListUsersPaged(limit, offset int, query string, schoolI
 		like := "%" + query + "%"
 		q = q.Where("name LIKE ? OR email LIKE ? OR school_name LIKE ?", like, like, like)
 	}
-	if schoolID != nil {
-		q = q.Where("school_id = ?", *schoolID)
-	}
+	q = scopeUsersBySchool(q, schoolID)
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -177,9 +195,7 @@ func (r *UserRepository) ListStudentsPaged(limit, offset int, query string, scho
 		like := "%" + query + "%"
 		q = q.Where("name LIKE ? OR email LIKE ? OR school_name LIKE ?", like, like, like)
 	}
-	if schoolID != nil {
-		q = q.Where("school_id = ?", *schoolID)
-	}
+	q = scopeUsersBySchool(q, schoolID)
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}

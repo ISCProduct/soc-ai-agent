@@ -32,7 +32,7 @@ func TestAdminSchoolController_Get_OtherSchoolDenied(t *testing.T) {
 	repo := &mocks.SchoolRepositoryMock{}
 	repo.On("ListSchoolsForAdmin", uint(1)).Return([]models.School{{ID: 5, Name: "担当校"}}, nil)
 	ctx, _ := newSchoolGetCtx("9")
-	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo, nil))
 	testsupport.AssertStatus(t, ctrl.Get, ctx, http.StatusForbidden)
 	repo.AssertNotCalled(t, "FindByID", mock.Anything)
 }
@@ -42,7 +42,7 @@ func TestAdminSchoolController_Get_OwnSchoolAllowed(t *testing.T) {
 	repo.On("ListSchoolsForAdmin", uint(1)).Return([]models.School{{ID: 5, Name: "担当校"}}, nil)
 	repo.On("FindByID", uint(5)).Return(&models.School{ID: 5, Name: "担当校"}, nil)
 	ctx, _ := newSchoolGetCtx("5")
-	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo, nil))
 	testsupport.AssertStatus(t, ctrl.Get, ctx, http.StatusOK)
 }
 
@@ -54,7 +54,7 @@ func TestAdminSchoolController_ListCompanyApprovals_OtherSchoolDenied(t *testing
 	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("9")
-	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo, nil))
 	testsupport.AssertStatus(t, ctrl.ListCompanyApprovals, ctx, http.StatusForbidden)
 	repo.AssertNotCalled(t, "ListApprovedCompanyIDs", mock.Anything)
 }

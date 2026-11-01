@@ -23,7 +23,7 @@ func newAdminUserController(userRepo *mocks.UserRepositoryMock, schoolRepo *mock
 	audit := &mocks.AuditLogServiceMock{}
 	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 	ctrl := admincontrollers.NewAdminUserController(userRepo, audit)
-	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo))
+	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo, nil))
 	return ctrl
 }
 
@@ -85,6 +85,9 @@ func TestUpdate_GrantStaff_RestrictedDenied(t *testing.T) {
 	// 担当校あり = 制限admin。対象の学校(5)は担当内なので ensureSchoolAccess は通り、
 	// is_staff 付与の denyIfRestricted で 403 になることを確認する。
 	schoolRepo.On("ListSchoolsForAdmin", uint(1)).Return([]models.School{{ID: 5, Name: "担当校"}}, nil)
+	// 対象ユーザーの学園と一致する学校を返す（#1675 の学園一致検査を通す）。
+	// 403 の理由は職員ロール付与の制限であり、学園不一致ではない。
+	schoolRepo.On("FindByID", schoolID).Return(&models.School{ID: schoolID, Name: "担当校"}, nil)
 
 	ctrl := newAdminUserController(userRepo, schoolRepo)
 	ctx, _ := newUpdateCtx(t, "2", map[string]any{"is_staff": true}, 1)

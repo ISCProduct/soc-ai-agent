@@ -42,8 +42,9 @@ func TestFindAll_ScopedBySchool(t *testing.T) {
 	repo, mock, captured := newAppStatusRepo(t)
 	schoolID := uint(5)
 
-	mock.ExpectQuery("SELECT .* FROM `user_application_statuses` JOIN users ON users.id = user_application_statuses.user_id WHERE users.school_id = \\?").
-		WithArgs(schoolID).
+	// 学園一致の条件も入る（#1675）。素の school_id だけだと他学園の学生の応募が混ざる。
+	mock.ExpectQuery("SELECT .* FROM `user_application_statuses` JOIN users ON users.id = user_application_statuses.user_id WHERE users.school_id = \\? AND users.organization_id = \\(SELECT organization_id FROM schools WHERE id = \\?\\)").
+		WithArgs(schoolID, schoolID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "company_id", "status"}))
 
 	if _, err := repo.FindAll(0, 0, "", &schoolID); err != nil {
@@ -85,7 +86,8 @@ func TestFindAll_NoSchoolFilterKeepsQueryUnchanged(t *testing.T) {
 func TestFindOwnerSchoolID(t *testing.T) {
 	repo, mock, _ := newAppStatusRepo(t)
 
-	mock.ExpectQuery("SELECT users.school_id AS school_id FROM `user_application_statuses` JOIN users ON users.id = user_application_statuses.user_id WHERE user_application_statuses.id = \\?").
+	// 学校は本人の学園に属するものだけ所属校として認める（#1675）。
+	mock.ExpectQuery("SELECT s.id AS school_id FROM `user_application_statuses` JOIN users ON users.id = user_application_statuses.user_id LEFT JOIN schools s ON s.id = users.school_id AND s.organization_id = users.organization_id WHERE user_application_statuses.id = \\?").
 		WithArgs(uint(42), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"school_id"}).AddRow(9))
 
@@ -106,7 +108,8 @@ func TestFindOwnerSchoolID(t *testing.T) {
 func TestFindOwnerSchoolID_NullSchool(t *testing.T) {
 	repo, mock, _ := newAppStatusRepo(t)
 
-	mock.ExpectQuery("SELECT users.school_id AS school_id FROM `user_application_statuses`").
+	// 学園が一致しない場合もここに合流する（s.id が NULL になる / #1675）。
+	mock.ExpectQuery("SELECT s.id AS school_id FROM `user_application_statuses`.*LEFT JOIN schools s ON s.id = users.school_id AND s.organization_id = users.organization_id").
 		WithArgs(uint(43), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"school_id"}).AddRow(nil))
 

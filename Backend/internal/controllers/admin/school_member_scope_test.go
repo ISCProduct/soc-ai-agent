@@ -47,9 +47,20 @@ func TestAdminSchoolController_AddMember_OtherSchoolDenied(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	ctx, _ := newSchoolMemberCtx(req, "9", "")
 
-	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo, nil))
 	testsupport.AssertStatus(t, ctrl.AddMember, ctx, http.StatusForbidden)
 	repo.AssertNotCalled(t, "AddMember", mock.Anything)
+}
+
+// stubUserReader は担当校割当の学園一致チェック用。
+// 引数の ID で引く。無視すると AddMember が誤った ID を渡しても気づけない。
+type stubUserReader struct{ user *entity.User }
+
+func (s stubUserReader) GetUserByID(id uint) (*entity.User, error) {
+	if s.user == nil || s.user.ID != id {
+		return nil, nil
+	}
+	return s.user, nil
 }
 
 // TestAdminSchoolController_AddMember_OwnSchoolAllowed は担当校への追加は通ることを検証する。
@@ -60,7 +71,7 @@ func TestAdminSchoolController_AddMember_OwnSchoolAllowed(t *testing.T) {
 	// 対象も担当校を持つ管理者（無制限管理者の降格ではない）
 	repo.On("ListSchoolsForAdmin", uint(2)).
 		Return([]models.School{{ID: 6, Name: "別の担当校"}}, nil)
-	repo.On("FindByID", uint(5)).Return(&models.School{ID: 5, Name: "担当校"}, nil)
+	repo.On("FindByID", uint(5)).Return(&models.School{ID: 5, Name: "担当校", OrganizationID: 7}, nil) // 学園は非ゼロの同値。0同士だと比較しない実装でも通る
 	repo.On("AddMember", mock.MatchedBy(func(m *models.AdminSchoolMembership) bool {
 		return m.UserID == 2 && m.SchoolID == 5
 	})).Return(nil)
@@ -70,7 +81,9 @@ func TestAdminSchoolController_AddMember_OwnSchoolAllowed(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	ctx, _ := newSchoolMemberCtx(req, "5", "")
 
-	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
+	// 担当校割当は対象ユーザーの学園と学校の学園が一致することを要求する（#1675）。
+	ctrl := admincontrollers.NewAdminSchoolController(
+		school.NewSchoolService(repo, stubUserReader{user: &entity.User{ID: 2, OrganizationID: 7}}))
 	testsupport.AssertStatus(t, ctrl.AddMember, ctx, http.StatusCreated)
 	repo.AssertExpectations(t)
 }
@@ -83,7 +96,7 @@ func TestAdminSchoolController_AddMember_OwnSchoolAllowed(t *testing.T) {
 func TestAdminSchoolController_AddMember_UnrestrictedBootstrap(t *testing.T) {
 	repo := &mocks.SchoolRepositoryMock{}
 	repo.On("ListSchoolsForAdmin", uint(1)).Return([]models.School{}, nil) // 呼び出し元=無制限
-	repo.On("FindByID", uint(5)).Return(&models.School{ID: 5, Name: "A校"}, nil)
+	repo.On("FindByID", uint(5)).Return(&models.School{ID: 5, Name: "A校", OrganizationID: 7}, nil)
 	repo.On("AddMember", mock.MatchedBy(func(m *models.AdminSchoolMembership) bool {
 		return m.UserID == 50 && m.SchoolID == 5
 	})).Return(nil)
@@ -93,7 +106,9 @@ func TestAdminSchoolController_AddMember_UnrestrictedBootstrap(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	ctx, _ := newSchoolMemberCtx(req, "5", "")
 
-	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
+	// 担当校割当は対象ユーザーの学園と学校の学園が一致することを要求する（#1675）。
+	ctrl := admincontrollers.NewAdminSchoolController(
+		school.NewSchoolService(repo, stubUserReader{user: &entity.User{ID: 50, OrganizationID: 7}}))
 	testsupport.AssertStatus(t, ctrl.AddMember, ctx, http.StatusCreated)
 	repo.AssertExpectations(t)
 }
@@ -113,7 +128,7 @@ func TestAdminSchoolController_AddMember_UnrestrictedCannotAddSelf(t *testing.T)
 	req.Header.Set("Content-Type", "application/json")
 	ctx, _ := newSchoolMemberCtx(req, "5", "")
 
-	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo, nil))
 	testsupport.AssertStatus(t, ctrl.AddMember, ctx, http.StatusForbidden)
 	repo.AssertNotCalled(t, "AddMember", mock.Anything)
 }
@@ -132,7 +147,7 @@ func TestAdminSchoolController_RemoveMember_LastSchoolDenied(t *testing.T) {
 	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodDelete, "/api/admin/schools/5/members/7", nil), 1)
 	ctx, _ := newSchoolMemberCtx(req, "5", "7")
 
-	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo, nil))
 	testsupport.AssertStatus(t, ctrl.RemoveMember, ctx, http.StatusForbidden)
 	repo.AssertNotCalled(t, "RemoveMember", mock.Anything, mock.Anything)
 }
@@ -151,7 +166,7 @@ func TestAdminSchoolController_RemoveMember_UnrestrictedCanRemoveLastSchool(t *t
 	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodDelete, "/api/admin/schools/5/members/7", nil), 1)
 	ctx, _ := newSchoolMemberCtx(req, "5", "7")
 
-	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo, nil))
 	testsupport.AssertStatus(t, ctrl.RemoveMember, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 }
@@ -171,7 +186,7 @@ func TestAdminSchoolController_AddMember_CannotDemotePlatformAdmin(t *testing.T)
 	req.Header.Set("Content-Type", "application/json")
 	ctx, _ := newSchoolMemberCtx(req, "5", "")
 
-	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo, nil))
 	testsupport.AssertStatus(t, ctrl.AddMember, ctx, http.StatusForbidden)
 	repo.AssertNotCalled(t, "AddMember", mock.Anything)
 }
@@ -189,7 +204,7 @@ func TestAdminSchoolController_RemoveMember_KeepsOtherSchools(t *testing.T) {
 	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodDelete, "/api/admin/schools/5/members/7", nil), 1)
 	ctx, _ := newSchoolMemberCtx(req, "5", "7")
 
-	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo, nil))
 	testsupport.AssertStatus(t, ctrl.RemoveMember, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 }
@@ -208,6 +223,9 @@ func TestAdminUserController_Update_RestrictedCannotGrantAdmin(t *testing.T) {
 	schoolID := uint(5)
 	userRepo.On("GetUserByID", uint(20)).
 		Return(&entity.User{ID: 20, SchoolID: &schoolID}, nil)
+	// 対象ユーザーの学園と一致する学校を返す（#1675 の学園一致検査を通す）。
+	// 403 の理由は is_admin 付与の禁止であり、学園不一致ではない。
+	schoolRepo.On("FindByID", schoolID).Return(&models.School{ID: schoolID}, nil)
 
 	body, _ := json.Marshal(map[string]any{"is_admin": true})
 	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/20", bytes.NewReader(body)), 1)
@@ -218,7 +236,7 @@ func TestAdminUserController_Update_RestrictedCannotGrantAdmin(t *testing.T) {
 	ctx.SetParamValues("20")
 
 	ctrl := admincontrollers.NewAdminUserController(userRepo, nil)
-	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo))
+	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo, nil))
 	testsupport.AssertStatus(t, ctrl.Update, ctx, http.StatusForbidden)
 	userRepo.AssertNotCalled(t, "UpdateUser", mock.Anything)
 }

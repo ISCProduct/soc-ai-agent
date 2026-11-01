@@ -5,6 +5,7 @@ import (
 	"Backend/internal/middleware"
 	"Backend/internal/services/school"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -286,6 +287,12 @@ func mapSchoolError(err error) error {
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	case errors.Is(err, school.ErrSchoolNameRequired), errors.Is(err, school.ErrSchoolOrgRequired):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	case errors.Is(err, school.ErrMemberNotFound), errors.Is(err, school.ErrMemberOrganizationMismatch):
+		// 「存在しない」と「他学園に存在する」を同じ応答にする。打ち分けると、担当校を持つ
+		// 管理者が任意の user_id を投げて他学園のユーザーの存在を判定できてしまう（#1675）。
+		// 運用で切り分けたいときのために、理由はログへ残す。
+		log.Printf("[Admin] school member assignment rejected: %v", err)
+		return echo.NewHTTPError(http.StatusBadRequest, "指定されたユーザーをこの学校の担当にできません")
 	default:
 		return httpapi.InternalError(err)
 	}

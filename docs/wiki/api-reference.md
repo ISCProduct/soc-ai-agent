@@ -283,6 +283,45 @@ Referer に user_id が残るだけです。
 （取得・回答保存・提出・結果）も現在の所属校と照合し、学校が変わった後の旧学校の受検は 404。
 運営標準（`school_id` が NULL）は学校に紐づかないので影響を受けない。
 
+テナント境界は解決時と読み取り時の二段で閉じる（#1675）。
+
+- 解決時: `SchoolRepository.FindByName(name, organizationID)` は学園内の学校しか返さない。
+  `organization_id` は必須で、`0` は既定組織として扱う（`users` の保存側と同じ正規化）。
+  学校名から `school_id` を解決する経路は新規登録・ゲスト昇格・プロフィール更新の3つで、
+  いずれも本人の学園を渡す。解決できなかった学校名はログに残す（黙って学校向け機能から外れると気づけない）。
+- 読み取り時: 担当校（`EchoAdminSchoolScope` の結果）で `users` を絞るクエリは、学校の
+  `organization_id` と本人の `organization_id` の一致も要求する。境界の判定をデータの綺麗さに
+  依存させないため。一覧系の4経路（ユーザー一覧・生徒一覧・応募一覧・面接集計）は
+  `repositories.scopeUsersBySchool` に一本化してある。**新しく `users.school_id` で絞る経路を
+  足すときは必ずここを通すこと。** 素の `school_id` で絞ると同じ穴がその経路に開く。
+  1件ごとの認可判定は `httpapi.EnsureAdminSchoolAccessForUser` に通す。対象ユーザーを読んでから
+  認可するすべての経路（学生詳細・面接動画・ユーザー編集/削除・面談記録の作成）がこれを使う。
+  素の `EnsureAdminSchoolAccess` は、学校に属する行（卒業生就職情報の `school_id` など、
+  管理画面で直接指定され自己申告でない値）専用。
+  応募の `FindOwnerSchoolID` はリポジトリ側で学校を学園一致つきに LEFT JOIN している。
+  無制限の管理者は学校で絞らないので、学園一致の判定にも入らない。
+- 認可には脚が2本ある。「対象ユーザーの学校が本人の学園のものか」だけでなく、
+  **「呼び出し元の担当校が自分の学園のものか」**も要る。`ListSchoolsForAdmin` は自分の学園の
+  学校だけを返す。ここを閉じないと、越境した `admin_school_memberships` の行が1つあるだけで
+  他学園の学校が担当校として通り、その学校の学生は（学校と学生の学園が揃うので）
+  対象ユーザー側の判定をすべて通過してしまう。
+- 担当校の割当（`POST /api/admin/schools/:id/members`）も学園をまたげない。
+  `SchoolService` はユーザー参照を渡さないと `AddMember` が失敗する（fail-close）。
+  拒否の応答は「存在しない」と「他学園に存在する」を区別しない（打ち分けると、
+  担当校を持つ管理者が他学園のユーザーの存在を判定できてしまう）。理由はログに残す。
+- 既存の越境データは migration `000050`（`users.school_id`）と `000051`
+  （`admin_school_memberships`）で外した。どちらも down は復元すると越境状態に戻るため no-op。
+- 解決の失敗とルックアップのエラーは区別する。`resolveSchoolID` はエラーを返し、プロフィール
+  更新は**エラー時に既存の `school_id` を保つ**。一時的な DB エラーで在学生が担当校の教員の
+  一覧から黙って消えないようにするため。学校名が解決できなかった場合（エラーではない）は
+  `school_id` が NULL になり、ログに残る。
+- 既存データ: 穴が開いていた間に入った越境行は migration `000050_repair_cross_organization_school_id`
+  で外した（`school_id` のみ NULL にし、自己申告の `school_name` は残す）。`users.school_id` を書くのは
+  プロフィール更新とゲスト昇格の2経路だけで、どちらも上記の解決を通るため、以後は越境行が生まれない。
+
+適性検査の可視判定（`AssessmentRepository.FindUserSchoolID` と `Service.session`）は独自に学園一致を
+見ており、上の4経路とは別に閉じている。
+
 ### 学校側（`X-Admin-Email` / `X-Admin-Token`、担当校スコープ。職員も担当校内で使える）
 
 | メソッド | パス | 内容 |

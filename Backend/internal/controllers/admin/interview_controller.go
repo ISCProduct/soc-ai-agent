@@ -76,7 +76,7 @@ func (c *AdminInterviewController) ensureSchoolAccessForUser(ctx echo.Context, o
 	if err != nil || owner == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
-	return httpapi.EnsureAdminSchoolAccess(ctx, c.schools, owner.SchoolID)
+	return httpapi.EnsureAdminSchoolAccessForUser(ctx, c.schools, owner.OrganizationID, owner.SchoolID)
 }
 
 // SetOpenAIClient OpenAIクライアントを注入する

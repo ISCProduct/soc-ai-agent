@@ -322,7 +322,7 @@ func main() {
 	// 全トラフィックが従量課金へ移る。日次/月次のUSD上限と分間レートで打ち切る(#1293)
 	aiClient.SetFallbackGuard(costs.NewOpenAIFallbackGuard(apiCallLogRepo))
 	schoolRepo := repositories.NewSchoolRepository(db)
-	schoolService := school.NewSchoolService(schoolRepo)
+	schoolService := school.NewSchoolService(schoolRepo, userRepo)
 	authService := auth.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	authService.SetDB(db)
 	authService.SetSchoolRepo(schoolRepo)

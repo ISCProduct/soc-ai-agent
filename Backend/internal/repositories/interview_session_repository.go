@@ -87,8 +87,10 @@ func (r *InterviewSessionRepository) CountAll(schoolID *uint, companyID *uint) (
 
 func applyInterviewSessionFilters(query *gorm.DB, schoolID, companyID *uint) *gorm.DB {
 	if schoolID != nil {
-		query = query.Joins("JOIN users ON users.id = interview_sessions.user_id").
-			Where("users.school_id = ?", *schoolID)
+		// 学園一致も要求する（#1675）。素の school_id で絞ると他学園の学生が集計に混ざる。
+		query = scopeUsersBySchool(
+			query.Joins("JOIN users ON users.id = interview_sessions.user_id"),
+			schoolID)
 	}
 	if companyID != nil {
 		query = query.Where("interview_sessions.company_id = ?", *companyID)

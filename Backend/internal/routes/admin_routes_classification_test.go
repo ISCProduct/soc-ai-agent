@@ -258,7 +258,7 @@ func newClassificationEcho(t *testing.T) (*echo.Echo, sqlmock.Sqlmock) {
 	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
 		staffWithSchoolID: {{ID: 5}},
 		adminWithSchoolID: {{ID: 5}},
-	}})
+	}}, nil)
 
 	e := echo.New()
 	registerAdminRoutesWithNilControllers(e.Group("/api"), repositories.NewUserRepository(db), schools, classificationAdminSecret)

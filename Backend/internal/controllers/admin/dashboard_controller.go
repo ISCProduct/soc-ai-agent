@@ -254,7 +254,7 @@ func (c *AdminDashboardController) UserSessions(ctx echo.Context) error {
 	if err != nil || target == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
-	if err := httpapi.EnsureAdminSchoolAccess(ctx, c.schools, target.SchoolID); err != nil {
+	if err := httpapi.EnsureAdminSchoolAccessForUser(ctx, c.schools, target.OrganizationID, target.SchoolID); err != nil {
 		return err
 	}
 

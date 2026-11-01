@@ -7,7 +7,7 @@ type SchoolRepository interface {
 	Create(school *models.School) error
 	Update(school *models.School) error
 	FindByID(id uint) (*models.School, error)
-	FindByName(name string) (*models.School, error)
+	FindByName(name string, organizationID uint) (*models.School, error)
 	List(limit, offset int) ([]models.School, int64, error)
 
 	AddMember(m *models.AdminSchoolMembership) error

@@ -51,7 +51,7 @@ func WithStaffUserID(r *http.Request, staffUserID uint) *http.Request {
 func NewUnrestrictedSchoolService(adminUserID uint) *school.SchoolService {
 	repo := &mocks.SchoolRepositoryMock{}
 	repo.On("ListSchoolsForAdmin", adminUserID).Return([]models.School{}, nil)
-	return school.NewSchoolService(repo)
+	return school.NewSchoolService(repo, nil)
 }
 
 // NewRestrictedSchoolService は担当校を持つadmin(=先生)のSchoolServiceを返す。
@@ -60,7 +60,7 @@ func NewRestrictedSchoolService(adminUserID, allowedSchoolID uint) *school.Schoo
 	repo := &mocks.SchoolRepositoryMock{}
 	repo.On("ListSchoolsForAdmin", adminUserID).
 		Return([]models.School{{ID: allowedSchoolID, Name: "担当校"}}, nil)
-	return school.NewSchoolService(repo)
+	return school.NewSchoolService(repo, nil)
 }
 
 // NewCtx はリクエストとレコーダーからecho.Contextを生成する

@@ -87,11 +87,16 @@ func TestGuidanceService_RejectsBadKind(t *testing.T) {
 func TestGuidanceService_ResolveStudentSchool(t *testing.T) {
 	schoolID := uint(7)
 	svc := NewGuidanceService(&stubGuidanceStore{}, &stubStudentByID{
-		user: &entity.User{ID: 3, Role: "student", SchoolID: &schoolID},
+		user: &entity.User{ID: 3, Role: "student", OrganizationID: 4, SchoolID: &schoolID},
 	})
-	got, err := svc.ResolveStudentSchool(3)
+	// 学園も返す。school_id を単体で返すと、呼び出し元が学園一致を検査せずに
+	// 担当校スコープの判定へ渡せてしまう（#1675）。
+	gotOrg, got, err := svc.ResolveStudentSchool(3)
 	if err != nil || got == nil || *got != 7 {
 		t.Fatalf("got=%v err=%v", got, err)
+	}
+	if gotOrg != 4 {
+		t.Fatalf("生徒の学園が返っていない: %d", gotOrg)
 	}
 }
 
@@ -110,7 +115,7 @@ func TestGuidanceService_ResolveStudentSchool_RejectsNonStudents(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc := NewGuidanceService(&stubGuidanceStore{}, &stubStudentByID{user: &tt.user})
-			if _, err := svc.ResolveStudentSchool(3); !errors.Is(err, ErrGuidanceStudentNotFound) {
+			if _, _, err := svc.ResolveStudentSchool(3); !errors.Is(err, ErrGuidanceStudentNotFound) {
 				t.Fatalf("err = %v, want ErrGuidanceStudentNotFound", err)
 			}
 		})
