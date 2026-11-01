@@ -36,9 +36,18 @@ func (r *SchoolRepository) FindByID(id uint) (*models.School, error) {
 	return &school, nil
 }
 
-func (r *SchoolRepository) FindByName(name string) (*models.School, error) {
+// FindByName は学園内の個別校を名前で引く。
+//
+// organizationID は必須。学校名は本人の自己申告（新規登録・プロフィール更新）から来るため、
+// 学園で絞らないと他学園の school_id を自分に付けられる（#1675 のテナント越境）。
+// 0 は既定組織として扱う。users の保存側（user_repository.go の CreateUser）と同じ正規化に
+// しておかないと、解決した学校と実際に保存される organization_id が食い違う。
+func (r *SchoolRepository) FindByName(name string, organizationID uint) (*models.School, error) {
+	if organizationID == 0 {
+		organizationID = models.DefaultOrganizationID
+	}
 	var school models.School
-	if err := r.db.Where("name = ?", name).First(&school).Error; err == nil {
+	if err := r.db.Where("organization_id = ? AND name = ?", organizationID, name).First(&school).Error; err == nil {
 		return &school, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
@@ -50,7 +59,7 @@ func (r *SchoolRepository) FindByName(name string) (*models.School, error) {
 	}
 
 	var schools []models.School
-	if err := r.db.Where("status = ?", models.SchoolStatusActive).Find(&schools).Error; err != nil {
+	if err := r.db.Where("organization_id = ? AND status = ?", organizationID, models.SchoolStatusActive).Find(&schools).Error; err != nil {
 		return nil, err
 	}
 	for i := range schools {

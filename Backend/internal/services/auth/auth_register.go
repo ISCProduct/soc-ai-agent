@@ -151,7 +151,7 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 			return nil, err
 		}
 		// 既定値で補完した名前ではなく、実際に送られてきた名前だけを反映する。
-		applyRegistrationToGuest(guest, req, requestedSchoolName, string(hashedPassword), s.resolveSchoolID(requestedSchoolName))
+		applyRegistrationToGuest(guest, req, requestedSchoolName, string(hashedPassword), s.resolveSchoolID(requestedSchoolName, guest.OrganizationID))
 		user = guest
 		promoting = true
 	} else {
@@ -162,7 +162,7 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 			IsGuest:                  false,
 			TargetLevel:              req.TargetLevel,
 			SchoolName:               req.SchoolName,
-			SchoolID:                 s.resolveSchoolID(req.SchoolName),
+			SchoolID:                 s.resolveSchoolID(req.SchoolName, tenantOrgID),
 			IsAdmin:                  false,
 			CertificationsAcquired:   req.CertificationsAcquired,
 			CertificationsInProgress: req.CertificationsInProgress,

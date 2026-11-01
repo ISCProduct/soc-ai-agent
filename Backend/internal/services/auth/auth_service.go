@@ -102,12 +102,18 @@ func (s *AuthService) SetSchoolRepo(repo repository.SchoolRepository) {
 
 // resolveSchoolID は school_name から school_id をベストエフォートで解決する。
 // 完全一致のあと正規化した表記ゆれでも照合する。一致しない・未設定・エラー時は nil。
-func (s *AuthService) resolveSchoolID(schoolName string) *uint {
+//
+// organizationID を必ず渡すこと。学校名は本人の自己申告なので、学園を跨いだ解決を許すと
+// 学生が自分の学校名を他学園の校名に書き換えるだけでその学校の school_id を得てしまう（#1675）。
+func (s *AuthService) resolveSchoolID(schoolName string, organizationID uint) *uint {
 	if s.schoolRepo == nil || schoolName == "" {
 		return nil
 	}
-	school, err := s.schoolRepo.FindByName(schoolName)
+	school, err := s.schoolRepo.FindByName(schoolName, organizationID)
 	if err != nil || school == nil {
+		// 解決できなかったことを残す。学校名の表記ゆれで school_id が付かないと
+		// 学校向け機能から黙って外れるため、気づけるようにしておく（#1675）。
+		log.Printf("[Auth] school_id unresolved: organization=%d name=%q err=%v", organizationID, schoolName, err)
 		return nil
 	}
 	return &school.ID

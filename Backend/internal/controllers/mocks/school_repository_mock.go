@@ -29,8 +29,8 @@ func (m *SchoolRepositoryMock) FindByID(id uint) (*models.School, error) {
 	return nil, args.Error(1)
 }
 
-func (m *SchoolRepositoryMock) FindByName(name string) (*models.School, error) {
-	args := m.Called(name)
+func (m *SchoolRepositoryMock) FindByName(name string, organizationID uint) (*models.School, error) {
+	args := m.Called(name, organizationID)
 	if v := args.Get(0); v != nil {
 		return v.(*models.School), args.Error(1)
 	}
