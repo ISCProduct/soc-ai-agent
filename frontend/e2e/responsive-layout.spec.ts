@@ -357,7 +357,7 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
   }
 
   test('教員モードのチップが見出しと同じ行に収まり、戻るボタンも列の右端に揃う', async ({ page }) => {
-    await setupAuth(page, { ...TEST_USER, role: 'teacher' })
+    await setupAuth(page, { ...TEST_USER, is_staff: true })
     await stubApi(page)
     await mockInterviewHistoryApi(page, [], 0)
 
