@@ -1338,6 +1338,105 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { description: 未提出または本人のセッションが無い }
 
+  # ── ability-assessments（能力検査 / 学生）─────────────────────
+  # 性格検査（/api/assessments）とパスを分ける。採点方式も結果の意味も違い、
+  # 能力検査の点数は user_weight_scores へ入れない（SOCAIAGENT-433）。
+  # 受検中のレスポンスに正解（correct_choice）は含めない。採点はサーバ側のみ。
+  /api/ability-assessments:
+    get:
+      tags: [assessments]
+      summary: 受けられる能力検査と自分の受検状況を一覧する
+      description: "受検中のまま制限時間を過ぎたものは `status: expired` で返す。"
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 能力検査の一覧（未受検が先） }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/ability-assessments/{templateId}/sessions:
+    post:
+      parameters: [{ in: path, name: templateId, required: true, schema: { type: integer } }]
+      tags: [assessments]
+      summary: 能力検査の受検を開始する（受検中があればそれを返す）
+      description: |
+        開始時に制限時間から締め切り（`deadline_at`）を凍結する。判定はサーバだけが行い、
+        クライアントのタイマーは表示用。制限時間を過ぎた受検中は再開できない（410）。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 問題（選択肢つき）・保存済みの回答・締め切り・残り秒 }
+        "400": { description: 検査の指定が正しくない }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 検査が無い }
+        "410": { description: 制限時間を過ぎている }
+
+  /api/ability-assessments/sessions/{sessionId}:
+    get:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 受検の現在の状態を取得する
+      description: 問題は `id` / `position` / `section` / `body` / `choices` だけを返す。正解は含めない。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 問題と保存済みの回答 }
+        "400": { description: 受検の指定が正しくない }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人の受検が無い }
+        "410": { description: 制限時間を過ぎている }
+
+  /api/ability-assessments/sessions/{sessionId}/answers/{questionId}:
+    put:
+      parameters:
+        - { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: questionId, required: true, schema: { type: integer } }
+      tags: [assessments]
+      summary: 1問の回答を保存する（自動保存・冪等）
+      description: |
+        `choice` は選択肢の 0 始まりの添字。0 を正当な値として受けるため、未指定とは区別する。
+        締め切りを過ぎた回答は受け付けない（410）。
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [choice]
+              properties:
+                choice: { type: integer, minimum: 0 }
+      responses:
+        "204": { description: 保存した }
+        "400": { description: 選択肢の範囲外、または検査に無い問題 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人の受検が無い }
+        "409": { description: すでに提出済み }
+        "410": { description: 制限時間を過ぎている }
+
+  /api/ability-assessments/sessions/{sessionId}/submit:
+    post:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 回答を採点して提出する
+      description: |
+        未回答は誤答扱いで、出題数には数える。締め切りを過ぎていても提出は受け付ける
+        （弾くと時間切れで結果が一切出ない）。締め切り後の新しい回答は保存されないので点数は増えない。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 提出した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人の受検が無い }
+        "409": { description: すでに提出済み }
+
+  /api/ability-assessments/sessions/{sessionId}/result:
+    get:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 提出済みの結果を取得する
+      description: section（verbal / numerical）別の正答数と出題数。偏差値・順位は返さない。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: section 別の正答数と出題数 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 未提出または本人の受検が無い }
+
   # ── assessments（学校側 / 先生） ─────────────────────
   /api/admin/assessment-templates:
     get:
