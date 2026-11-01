@@ -604,7 +604,7 @@ export default function SelectionScreen({
                 面接を開始する
               </Button>
               <Typography sx={{ fontSize: 12, textAlign: 'center', color: UI.inkFaint }}>
-                開始すると<Box component="a" href="#" sx={{ textDecoration: 'underline', color: 'inherit' }}>利用規約</Box>に同意したことになります
+                開始すると利用規約に同意したことになります
               </Typography>
             </Box>
           </Box>
