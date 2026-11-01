@@ -294,8 +294,14 @@ Referer に user_id が残るだけです。
   依存させないため。一覧系の4経路（ユーザー一覧・生徒一覧・応募一覧・面接集計）は
   `repositories.scopeUsersBySchool` に一本化してある。**新しく `users.school_id` で絞る経路を
   足すときは必ずここを通すこと。** 素の `school_id` で絞ると同じ穴がその経路に開く。
-  1件ごとの認可判定も同じ扱いで、`FindOwnerSchoolID`（応募詳細の閲覧・選考ステータス更新）は
-  学校を学園一致つきで LEFT JOIN し、一致しなければ未所属として扱う。
+  1件ごとの認可判定は `httpapi.EnsureAdminSchoolAccessForUser` に通す。対象ユーザーを読んでから
+  認可するすべての経路（学生詳細・面接動画・ユーザー編集/削除・面談記録の作成）がこれを使う。
+  素の `EnsureAdminSchoolAccess` は、学校に属する行（求人抑制など自己申告でない `school_id`）専用。
+  応募の `FindOwnerSchoolID` はリポジトリ側で学校を学園一致つきに LEFT JOIN している。
+  無制限の管理者は学校で絞らないので、学園一致の判定にも入らない。
+- 担当校の割当（`POST /api/admin/schools/:id/members`）も学園をまたげない。またげると、
+  他学園の職員に担当校を割り当てるだけでその学校の学生データへ到達させられる。
+  `SchoolService` はユーザー参照を渡さないと `AddMember` が失敗する（fail-close）。
 - 解決の失敗とルックアップのエラーは区別する。`resolveSchoolID` はエラーを返し、プロフィール
   更新は**エラー時に既存の `school_id` を保つ**。一時的な DB エラーで在学生が担当校の教員の
   一覧から黙って消えないようにするため。学校名が解決できなかった場合（エラーではない）は

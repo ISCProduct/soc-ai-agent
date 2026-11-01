@@ -44,7 +44,7 @@ func (c *AdminUserController) SetSchoolService(schools *school.SchoolService) {
 // ensureSchoolAccess は、対象ユーザーが呼び出し元admin(担当校制限がある場合)の担当校に
 // 属するかを検証する共通ヘルパーへの薄いラッパー。
 func (c *AdminUserController) ensureSchoolAccess(ctx echo.Context, target *entity.User) error {
-	return httpapi.EnsureAdminSchoolAccess(ctx, c.schools, target.SchoolID)
+	return httpapi.EnsureAdminSchoolAccessForUser(ctx, c.schools, target.OrganizationID, target.SchoolID)
 }
 
 type adminUserResponse struct {

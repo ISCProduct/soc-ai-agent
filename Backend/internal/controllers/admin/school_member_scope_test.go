@@ -52,6 +52,11 @@ func TestAdminSchoolController_AddMember_OtherSchoolDenied(t *testing.T) {
 	repo.AssertNotCalled(t, "AddMember", mock.Anything)
 }
 
+// stubUserReader は担当校割当の学園一致チェック用。学園は既定(0)同士で一致させる。
+type stubUserReader struct{ user *entity.User }
+
+func (s stubUserReader) GetUserByID(uint) (*entity.User, error) { return s.user, nil }
+
 // TestAdminSchoolController_AddMember_OwnSchoolAllowed は担当校への追加は通ることを検証する。
 func TestAdminSchoolController_AddMember_OwnSchoolAllowed(t *testing.T) {
 	repo := &mocks.SchoolRepositoryMock{}
@@ -70,7 +75,9 @@ func TestAdminSchoolController_AddMember_OwnSchoolAllowed(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	ctx, _ := newSchoolMemberCtx(req, "5", "")
 
-	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
+	// 担当校割当は対象ユーザーの学園と学校の学園が一致することを要求する（#1675）。
+	ctrl := admincontrollers.NewAdminSchoolController(
+		school.NewSchoolService(repo, stubUserReader{user: &entity.User{ID: 2}}))
 	testsupport.AssertStatus(t, ctrl.AddMember, ctx, http.StatusCreated)
 	repo.AssertExpectations(t)
 }
@@ -93,7 +100,9 @@ func TestAdminSchoolController_AddMember_UnrestrictedBootstrap(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	ctx, _ := newSchoolMemberCtx(req, "5", "")
 
-	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
+	// 担当校割当は対象ユーザーの学園と学校の学園が一致することを要求する（#1675）。
+	ctrl := admincontrollers.NewAdminSchoolController(
+		school.NewSchoolService(repo, stubUserReader{user: &entity.User{ID: 2}}))
 	testsupport.AssertStatus(t, ctrl.AddMember, ctx, http.StatusCreated)
 	repo.AssertExpectations(t)
 }
@@ -208,6 +217,9 @@ func TestAdminUserController_Update_RestrictedCannotGrantAdmin(t *testing.T) {
 	schoolID := uint(5)
 	userRepo.On("GetUserByID", uint(20)).
 		Return(&entity.User{ID: 20, SchoolID: &schoolID}, nil)
+	// 対象ユーザーの学園と一致する学校を返す（#1675 の学園一致検査を通す）。
+	// 403 の理由は is_admin 付与の禁止であり、学園不一致ではない。
+	schoolRepo.On("FindByID", schoolID).Return(&models.School{ID: schoolID}, nil)
 
 	body, _ := json.Marshal(map[string]any{"is_admin": true})
 	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/20", bytes.NewReader(body)), 1)

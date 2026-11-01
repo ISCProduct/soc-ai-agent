@@ -1,6 +1,7 @@
 package school
 
 import (
+	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"errors"
@@ -10,20 +11,39 @@ import (
 )
 
 var (
-	ErrSchoolNotFound         = errors.New("school not found")
-	ErrSchoolNameRequired     = errors.New("name is required")
-	ErrSchoolOrgRequired      = errors.New("organization_id is required")
-	ErrSchoolAlreadyAssigned  = errors.New("admin already assigned to this school")
-	ErrCompanyAlreadyApproved = errors.New("company already approved for this school")
+	ErrSchoolNotFound = errors.New("school not found")
+	// 担当校は学園をまたげない（#1675）。
+	ErrMemberOrganizationMismatch = errors.New("member belongs to another organization")
+	ErrMemberNotFound             = errors.New("member not found")
+	ErrSchoolNameRequired         = errors.New("name is required")
+	ErrSchoolOrgRequired          = errors.New("organization_id is required")
+	ErrSchoolAlreadyAssigned      = errors.New("admin already assigned to this school")
+	ErrCompanyAlreadyApproved     = errors.New("company already approved for this school")
 )
 
 // SchoolService は学園(Organization)配下の個別校・担当管理者・企業掲載承認リストを管理する。
-type SchoolService struct {
-	repo repository.SchoolRepository
+// UserReader は担当校割当の学園一致チェックに使う最小のユーザー参照（#1675）。
+// 省略可能にすると検査を飛ばせてしまうため、コンストラクタで必須にする。
+type UserReader interface {
+	GetUserByID(id uint) (*entity.User, error)
 }
 
-func NewSchoolService(repo repository.SchoolRepository) *SchoolService {
-	return &SchoolService{repo: repo}
+type SchoolService struct {
+	repo  repository.SchoolRepository
+	users UserReader
+}
+
+// NewSchoolService は学校サービスを作る。
+//
+// users は担当校割当（AddMember）の学園一致チェックに使う。渡さなかった場合 AddMember は
+// エラーで止まる（fail-close）。検査を飛ばして割当が通る方が危険なので、未注入を許さない。
+// AddMember を使わないテストは省略してよい。
+func NewSchoolService(repo repository.SchoolRepository, users ...UserReader) *SchoolService {
+	s := &SchoolService{repo: repo}
+	if len(users) > 0 {
+		s.users = users[0]
+	}
+	return s
 }
 
 type CreateSchoolInput struct {
@@ -74,6 +94,22 @@ func (s *SchoolService) AddMember(userID, schoolID uint) error {
 	if school == nil {
 		return ErrSchoolNotFound
 	}
+	// 担当校は学園をまたげない。またげると、他学園の職員に担当校を割り当てるだけで
+	// その学校の学生データへ到達させられる（#1675）。
+	if s.users == nil {
+		// 未注入のまま割当を通すと学園一致を検査できない。止める方を選ぶ。
+		return errors.New("school service is not configured with a user reader")
+	}
+	member, err := s.users.GetUserByID(userID)
+	if err != nil {
+		return err
+	}
+	if member == nil {
+		return ErrMemberNotFound
+	}
+	if member.OrganizationID != school.OrganizationID {
+		return ErrMemberOrganizationMismatch
+	}
 	if err := s.repo.AddMember(&models.AdminSchoolMembership{UserID: userID, SchoolID: schoolID}); err != nil {
 		if isDuplicateEntryErr(err) {
 			return ErrSchoolAlreadyAssigned
@@ -81,6 +117,26 @@ func (s *SchoolService) AddMember(userID, schoolID uint) error {
 		return err
 	}
 	return nil
+}
+
+// EffectiveSchoolID は、学校が本人の学園に属しているときだけ school_id を返す（#1675）。
+//
+// users.school_id はプロフィールの学校名（本人の自己申告）から解決される。解決側は
+// organization_id で絞り、過去の越境行も migration 000050 で外したが、1件ごとの認可判定を
+// データの綺麗さに依存させない。学園が一致しなければ nil =未所属として扱い、担当校ありの
+// 管理者・職員には見せない（fail-close）。
+func (s *SchoolService) EffectiveSchoolID(organizationID uint, schoolID *uint) (*uint, error) {
+	if schoolID == nil {
+		return nil, nil
+	}
+	school, err := s.repo.FindByID(*schoolID)
+	if err != nil {
+		return nil, err
+	}
+	if school == nil || school.OrganizationID != organizationID {
+		return nil, nil
+	}
+	return schoolID, nil
 }
 
 func (s *SchoolService) RemoveMember(userID, schoolID uint) error {

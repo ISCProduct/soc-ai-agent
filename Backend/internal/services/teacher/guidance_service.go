@@ -61,14 +61,18 @@ type GuidanceView struct {
 	CreatedAt           string   `json:"created_at"`
 }
 
-// ResolveStudentSchool は教員の学校スコープ検証用に生徒の school_id を返す。
+// ResolveStudentSchool は教員の学校スコープ検証用に生徒の学園と school_id を返す。
 // 対象は ListStudentsPaged と同じ在籍中の生徒に限る（教員・管理者・ゲスト・退会者は不可）。
-func (s *GuidanceService) ResolveStudentSchool(studentUserID uint) (*uint, error) {
+//
+// school_id を単体で返さないのは、呼び出し元が学園一致を検査せずに
+// 担当校スコープの判定へ渡せてしまうため（#1675）。学園と対で返し、
+// httpapi.EnsureAdminSchoolAccessForUser に通させる。
+func (s *GuidanceService) ResolveStudentSchool(studentUserID uint) (organizationID uint, schoolID *uint, err error) {
 	u, err := s.students.GetUserByID(studentUserID)
 	if err != nil || u == nil || u.Role != "student" || u.IsAdmin || u.IsGuest || u.IsWithdrawn() {
-		return nil, ErrGuidanceStudentNotFound
+		return 0, nil, ErrGuidanceStudentNotFound
 	}
-	return u.SchoolID, nil
+	return u.OrganizationID, u.SchoolID, nil
 }
 
 func (s *GuidanceService) Create(in CreateGuidanceInput) (*GuidanceView, error) {

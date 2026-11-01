@@ -108,6 +108,9 @@ func TestAdminDashboardController_UserSessions_SchoolAccessDenied(t *testing.T) 
 	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "user3@example.com", SchoolID: &otherSchoolID}, nil)
 	schoolRepo := &mocks.SchoolRepositoryMock{}
 	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
+	// 対象学生の学園と一致する学校を返す（#1675 の学園一致検査を通す）。
+	// ここで 403 になる理由は「担当校(1)に含まれない学校(99)だから」であり、学園不一致ではない。
+	schoolRepo.On("FindByID", otherSchoolID).Return(&models.School{ID: otherSchoolID}, nil)
 
 	ctrl := newAdminDashboardController(userRepo, nil, nil)
 	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo))

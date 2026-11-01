@@ -39,14 +39,14 @@ func (c *TeacherGuidanceController) Create(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
-	schoolID, err := c.svc.ResolveStudentSchool(uint(studentID))
+	studentOrgID, schoolID, err := c.svc.ResolveStudentSchool(uint(studentID))
 	if err != nil {
 		if errors.Is(err, teacher.ErrGuidanceStudentNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "生徒が見つかりません")
 		}
 		return httpapi.InternalError(err)
 	}
-	if err := httpapi.EnsureAdminSchoolAccess(ctx, c.schools, schoolID); err != nil {
+	if err := httpapi.EnsureAdminSchoolAccessForUser(ctx, c.schools, studentOrgID, schoolID); err != nil {
 		return err
 	}
 

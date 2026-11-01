@@ -399,6 +399,9 @@ func TestAdminUserController_Update_SchoolAccessDenied(t *testing.T) {
 
 	schoolRepo := &mocks.SchoolRepositoryMock{}
 	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
+	// 対象ユーザーの学園と一致する学校を返す（#1675 の学園一致検査を通す）。
+	// 403 の理由は「担当校(1)に含まれない学校(99)だから」であり、学園不一致ではない。
+	schoolRepo.On("FindByID", otherSchoolID).Return(&models.School{ID: otherSchoolID}, nil)
 
 	isAdmin := true
 	body, _ := json.Marshal(map[string]*bool{"is_admin": &isAdmin})
