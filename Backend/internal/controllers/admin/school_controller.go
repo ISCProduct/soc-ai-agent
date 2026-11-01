@@ -286,6 +286,11 @@ func mapSchoolError(err error) error {
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	case errors.Is(err, school.ErrSchoolNameRequired), errors.Is(err, school.ErrSchoolOrgRequired):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	case errors.Is(err, school.ErrMemberNotFound):
+		return echo.NewHTTPError(http.StatusNotFound, "対象のユーザーが見つかりません")
+	case errors.Is(err, school.ErrMemberOrganizationMismatch):
+		// 原因の分かるメッセージを返す。内部エラーに落とすと設定ミスと見分けられない（#1675）。
+		return echo.NewHTTPError(http.StatusBadRequest, "別の学園に所属するユーザーは、この学校の担当にできません")
 	default:
 		return httpapi.InternalError(err)
 	}

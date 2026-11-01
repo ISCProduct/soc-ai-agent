@@ -1,11 +1,14 @@
 package admin_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"Backend/domain/entity"
+	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/controllers/mocks"
 	"Backend/internal/controllers/testsupport"
@@ -95,5 +98,26 @@ func TestSchoolService_AddMemberFailsClosedWithoutUserReader(t *testing.T) {
 	if err := school.NewSchoolService(repo).AddMember(2, 5); err == nil {
 		t.Fatal("ユーザー参照が無いのに割当が通っている")
 	}
+	repo.AssertNotCalled(t, "AddMember")
+}
+
+// 学園をまたいだ割当は 400 で、原因の分かるメッセージを返す。
+// 内部エラー(500)に落とすと、設定ミスと見分けがつかない（#1675）。
+func TestAdminSchoolController_AddMember_CrossOrganizationIsBadRequest(t *testing.T) {
+	repo := &mocks.SchoolRepositoryMock{}
+	repo.On("ListSchoolsForAdmin", uint(1)).Return([]models.School{}, nil) // 無制限管理者
+	repo.On("FindByID", uint(5)).Return(&models.School{ID: 5, OrganizationID: 1}, nil)
+
+	body, _ := json.Marshal(map[string]any{"user_id": 2})
+	req := testsupport.WithAdminUserID(
+		httptest.NewRequest(http.MethodPost, "/api/admin/schools/5/members", bytes.NewReader(body)), 1)
+	req.Header.Set("Content-Type", "application/json")
+	ctx := testsupport.NewCtx(req, httptest.NewRecorder())
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("5")
+
+	ctrl := admincontrollers.NewAdminSchoolController(
+		school.NewSchoolService(repo, stubUserReader{user: &entity.User{ID: 2, OrganizationID: 9}}))
+	testsupport.AssertStatus(t, ctrl.AddMember, ctx, http.StatusBadRequest)
 	repo.AssertNotCalled(t, "AddMember")
 }
