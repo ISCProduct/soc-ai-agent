@@ -78,8 +78,11 @@ func (r *UserApplicationStatusRepository) FindAll(userID, companyID uint, status
 	// 担当校を持つ管理者(先生)には自校の生徒の応募だけを返す(#1157)。
 	// 呼び出し側の検証だけに頼らず、クエリ自体をスコープする。
 	if schoolID != nil {
-		q = q.Joins("JOIN users ON users.id = user_application_statuses.user_id").
-			Where("users.school_id = ?", *schoolID)
+		// 学園一致も要求する。素の school_id で絞ると、学校名を他学園の校名に
+		// 書き替えた学生の応募が他学園の職員の一覧に混ざる（#1675）。
+		q = scopeUsersBySchool(
+			q.Joins("JOIN users ON users.id = user_application_statuses.user_id"),
+			schoolID)
 	}
 	if userID != 0 {
 		q = q.Where("user_id = ?", userID)

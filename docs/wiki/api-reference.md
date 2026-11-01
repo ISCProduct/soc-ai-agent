@@ -289,9 +289,17 @@ Referer に user_id が残るだけです。
   `organization_id` は必須で、`0` は既定組織として扱う（`users` の保存側と同じ正規化）。
   学校名から `school_id` を解決する経路は新規登録・ゲスト昇格・プロフィール更新の3つで、
   いずれも本人の学園を渡す。解決できなかった学校名はログに残す（黙って学校向け機能から外れると気づけない）。
-- 読み取り時: 学校で絞る一覧は、学校の `organization_id` と本人の `organization_id` の一致も要求する。
-  解決側を直す前に入った行が残り得るため。担当校の学生・ユーザー一覧（`ListStudentsPaged` /
-  `ListUsersPaged`）は共通の絞り込みを通し、片方だけ閉じて別経路に穴が残らないようにする。
+- 読み取り時: 担当校（`EchoAdminSchoolScope` の結果）で `users` を絞るクエリは、学校の
+  `organization_id` と本人の `organization_id` の一致も要求する。境界の判定をデータの綺麗さに
+  依存させないため。該当は4経路（ユーザー一覧・生徒一覧・応募一覧・面接集計）で、
+  `repositories.scopeUsersBySchool` に一本化してある。**新しく `users.school_id` で絞る経路を
+  足すときは必ずここを通すこと。** 素の `school_id` で絞ると同じ穴がその経路に開く。
+- 既存データ: 穴が開いていた間に入った越境行は migration `000050_repair_cross_organization_school_id`
+  で外した（`school_id` のみ NULL にし、自己申告の `school_name` は残す）。`users.school_id` を書くのは
+  プロフィール更新とゲスト昇格の2経路だけで、どちらも上記の解決を通るため、以後は越境行が生まれない。
+
+適性検査の可視判定（`AssessmentRepository.FindUserSchoolID` と `Service.session`）は独自に学園一致を
+見ており、上の4経路とは別に閉じている。
 
 ### 学校側（`X-Admin-Email` / `X-Admin-Token`、担当校スコープ。職員も担当校内で使える）
 

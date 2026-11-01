@@ -80,3 +80,27 @@ func TestUpdateProfile_SchoolNameDoesNotResolveAcrossOrganizations(t *testing.T)
 		t.Fatalf("自学園の校名が解決されていない: %v", user.SchoolID)
 	}
 }
+
+// 学園を渡す経路は3つある（新規登録・ゲスト昇格・プロフィール更新）。
+// 登録と昇格で引数を取り違えても落ちるように、渡った学園を固定する。
+func TestRegister_PassesTenantOrganizationToSchoolResolution(t *testing.T) {
+	schools := &orgScopedSchoolRepo{schools: []models.School{
+		{ID: 101, Name: "自学園の校", OrganizationID: 3},
+		{ID: 202, Name: "他学園の校", OrganizationID: 9},
+	}}
+	service := NewAuthService(&userRepoAuthStub{}, &pendingRepoAuthStub{}, nil)
+	service.SetSchoolRepo(schools)
+
+	// サブドメインの学園は 3。他学園の校名を入れても解決されない。
+	_, _ = service.Register(RegisterRequest{
+		Email: "new@example.com", Password: "password123", Name: "新規",
+		TargetLevel: "新卒", SchoolName: "他学園の校",
+	}, 3, 0)
+
+	if schools.lastOrg != 3 {
+		t.Fatalf("登録時にサブドメインの学園が渡っていない: organizationID=%d", schools.lastOrg)
+	}
+	if schools.lastName != "他学園の校" {
+		t.Fatalf("解決対象の学校名が渡っていない: %q", schools.lastName)
+	}
+}

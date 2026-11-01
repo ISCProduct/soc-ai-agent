@@ -42,8 +42,9 @@ func TestFindAll_ScopedBySchool(t *testing.T) {
 	repo, mock, captured := newAppStatusRepo(t)
 	schoolID := uint(5)
 
-	mock.ExpectQuery("SELECT .* FROM `user_application_statuses` JOIN users ON users.id = user_application_statuses.user_id WHERE users.school_id = \\?").
-		WithArgs(schoolID).
+	// 学園一致の条件も入る（#1675）。素の school_id だけだと他学園の学生の応募が混ざる。
+	mock.ExpectQuery("SELECT .* FROM `user_application_statuses` JOIN users ON users.id = user_application_statuses.user_id WHERE users.school_id = \\? AND users.organization_id = \\(SELECT organization_id FROM schools WHERE id = \\?\\)").
+		WithArgs(schoolID, schoolID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "company_id", "status"}))
 
 	if _, err := repo.FindAll(0, 0, "", &schoolID); err != nil {

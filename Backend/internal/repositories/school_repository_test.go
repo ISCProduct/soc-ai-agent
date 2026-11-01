@@ -56,3 +56,22 @@ func TestSchoolRepository_FindByNameTreatsZeroAsDefaultOrganization(t *testing.T
 	require.Equal(t, uint(101), school.ID)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+// 同一学園内なら表記ゆれ（学校法人の接頭辞・空白）でも解決できる。
+// 学園で絞ったことで正規化経路の正常系まで閉じていないことを固定する。
+func TestSchoolRepository_FindByNameMatchesNormalizedWithinOrganization(t *testing.T) {
+	repo, mock := newSchoolRepo(t)
+
+	mock.ExpectQuery("SELECT \\* FROM `schools` WHERE organization_id = \\? AND name = \\?").
+		WithArgs(uint(7), "学校法人 テスト 校", 1).
+		WillReturnError(gorm.ErrRecordNotFound)
+	mock.ExpectQuery("SELECT \\* FROM `schools` WHERE organization_id = \\? AND status = \\?").
+		WithArgs(uint(7), models.SchoolStatusActive).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(301, "テスト校"))
+
+	school, err := repo.FindByName("学校法人 テスト 校", 7)
+	require.NoError(t, err)
+	require.NotNil(t, school, "同一学園内の表記ゆれは解決できること")
+	require.Equal(t, uint(301), school.ID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
