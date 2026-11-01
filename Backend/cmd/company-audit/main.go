@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -63,9 +64,8 @@ func main() {
 		return
 	}
 
-	var cs []models.Company
-	if err := db.Select("id", "name", "industry", "work_style", "website_url", "founded_year", "employee_count", "employee_count_basis").
-		Order("id").Find(&cs).Error; err != nil {
+	cs, err := loadAuditTargets(db)
+	if err != nil {
 		log.Fatalf("読み込み失敗: %v", err)
 	}
 
@@ -81,14 +81,14 @@ func main() {
 	fmt.Printf("対象: %d 社\n\n== industry の分布 ==\n", len(rows))
 	for _, d := range company.Distribution(industries) {
 		mark := "ゆれ"
-		if d.Value == "(空)" || company.IsIndustryOption(d.Value) {
+		if d.Value == "" || company.IsIndustryOption(d.Value) {
 			mark = "正規"
 		}
-		fmt.Printf("  %-4s %5d  %q\n", mark, d.Count, d.Value)
+		fmt.Printf("  %-4s %5d  %q\n", mark, d.Count, company.DisplayValue(d.Value))
 	}
 	fmt.Println("\n== work_style の分布 ==")
 	for _, d := range company.Distribution(workStyles) {
-		fmt.Printf("  %5d  %q\n", d.Count, d.Value)
+		fmt.Printf("  %5d  %q\n", d.Count, company.DisplayValue(d.Value))
 	}
 
 	var changes []company.AuditChange
@@ -147,15 +147,47 @@ func main() {
 	fmt.Printf("\n✓ %d 社へ適用しました。戻す値: %s\n", len(changes), *backup)
 }
 
+// loadAuditTargets は点検対象の企業を読む。
+//
+// 論理削除(is_active=false)された企業は分布・修正計画・--apply のいずれの対象にもしない。
+// CompanyRepository.FindAllActive と同じ条件で、wiki の「論理削除された企業は対象外」に合わせる。
+func loadAuditTargets(db *gorm.DB) ([]models.Company, error) {
+	var cs []models.Company
+	err := db.Select("id", "name", "industry", "work_style", "website_url", "founded_year", "employee_count", "employee_count_basis").
+		Where("is_active = ?", true).
+		Order("id").Find(&cs).Error
+	return cs, err
+}
+
 // runRestore は backup の After → Before へ戻す。現在値が After のままの行だけ戻す。
 func runRestore(db *gorm.DB, path string) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		log.Fatalf("backup 読み込み失敗: %v", err)
 	}
+	changes, err := parseBackup(b)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		return company.ApplyAuditChanges(tx, changes, true)
+	}); err != nil {
+		log.Fatalf("戻し失敗(全件ロールバック済み): %v", err)
+	}
+	fmt.Printf("✓ %d 社を元の値へ戻しました\n", len(changes))
+}
+
+// parseBackup は backup の JSON を復元用の changes へ変換する。
+//
+// --apply は修正対象が空のとき backup を作らないので、空の backup(null / [])は入力として
+// 成立しない。黙って成功扱いにすると「戻した」と誤解する。
+func parseBackup(b []byte) ([]company.AuditChange, error) {
 	var changes []company.AuditChange
 	if err := json.Unmarshal(b, &changes); err != nil {
-		log.Fatalf("backup の形式が不正です: %v", err)
+		return nil, fmt.Errorf("backup の形式が不正です: %w", err)
+	}
+	if len(changes) == 0 {
+		return nil, errors.New("backup に復元対象がありません")
 	}
 	// JSON の数値は float64 になる。整数列へ渡すので整数へ戻す。
 	for _, c := range changes {
@@ -167,12 +199,7 @@ func runRestore(db *gorm.DB, path string) {
 			}
 		}
 	}
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		return company.ApplyAuditChanges(tx, changes, true)
-	}); err != nil {
-		log.Fatalf("戻し失敗(全件ロールバック済み): %v", err)
-	}
-	fmt.Printf("✓ %d 社を元の値へ戻しました\n", len(changes))
+	return changes, nil
 }
 
 // writeNewFile は新規ファイルとして書く。既存ファイルがあれば失敗する(前回の戻し用データを消さない)。
@@ -211,6 +238,12 @@ func dbHost() string {
 		return h
 	}
 	return "localhost"
+}
+
+// dbAddr は接続先。DB_HOST=::1 のとき "::1:3306" を作るとドライバが接続先を取り違えるため、
+// IPv6 を角括弧で包む net.JoinHostPort を使う。
+func dbAddr() string {
+	return net.JoinHostPort(dbHost(), dbPort())
 }
 
 func dbPort() string {
@@ -253,7 +286,7 @@ func connectDB() (*gorm.DB, error) {
 	}
 	cfg := mysqldrv.NewConfig()
 	cfg.User, cfg.Passwd = user, os.Getenv("DB_PASSWORD")
-	cfg.Net, cfg.Addr, cfg.DBName = "tcp", dbHost()+":"+dbPort(), dbname
+	cfg.Net, cfg.Addr, cfg.DBName = "tcp", dbAddr(), dbname
 	cfg.ParseTime, cfg.Loc = true, time.Local
 	cfg.Params = map[string]string{"charset": "utf8mb4"}
 	return gorm.Open(mysql.Open(cfg.FormatDSN()), &gorm.Config{})

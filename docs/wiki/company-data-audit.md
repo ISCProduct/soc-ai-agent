@@ -16,7 +16,18 @@ go run ./cmd/company-audit --restore /tmp/company-before-YYYYMMDD.json
 ```
 
 接続先は `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME`(`cmd/migrate` と同じ)。実行のたびに接続先(ホスト・DB名・`APP_ENV`)を最初に表示する。
-backup はリポジトリ外(`/tmp` など)に置く(誤コミット防止)。
+
+### backup の保管
+
+backup は**元の値を戻せる唯一の入力**で、`--restore` はこれしか読まない。リポジトリ外(`/tmp` など)に書いて誤コミットを防ぐが、`/tmp` は再起動やコンテナの作り直しで消えるため、**適用したらその場で消えない場所へ写す**。
+
+```bash
+go run ./cmd/company-audit --apply --backup /tmp/company-before-20261101.json
+# 適用できたら、消えない場所へ写してから /tmp を信用しない
+cp /tmp/company-before-20261101.json ~/soc-ai-agent-backups/
+```
+
+写し終わるまで元のファイルを消さない。**戻す必要がないと確認できるまで保管する**(これを失うと、適用前の値はどこにも残らない)。
 
 ## 出力
 

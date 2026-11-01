@@ -68,6 +68,10 @@ func PlanFix(row AuditRow) (plan FixPlan, ok bool) {
 	}
 	if r.EmployeeCountBasis != row.EmployeeCountBasis {
 		plan.Changes["employee_count_basis"] = r.EmployeeCountBasis
+	} else if !isEmployeeCountBasisOption(row.EmployeeCountBasis) {
+		// sanitizeCompanyInfo は人数が 0 か範囲外のときだけ基準を空にするので、
+		// 人数が有効で基準が選択肢外(例: "unknown")の値は変更も報告もされず点検から漏れる。
+		plan.Unmapped["employee_count_basis"] = row.EmployeeCountBasis
 	}
 
 	return plan, len(plan.Changes) > 0 || len(plan.Unmapped) > 0
@@ -79,13 +83,12 @@ type ValueCount struct {
 	Count int
 }
 
-// Distribution は値ごとの件数を、多い順(同数は値の昇順)で返す。空文字は「(空)」に置き換える。
+// Distribution は値ごとの件数を、多い順(同数は値の昇順)で返す。
+// 値は変換しない。空文字を「(空)」へ置き換えてから数えると、実データの "(空)" と
+// 合算されて分布が読めなくなる(表示用の置き換えは DisplayValue で行う)。
 func Distribution(values []string) []ValueCount {
 	m := map[string]int{}
 	for _, v := range values {
-		if v == "" {
-			v = "(空)"
-		}
 		m[v]++
 	}
 	out := make([]ValueCount, 0, len(m))
@@ -99,6 +102,28 @@ func Distribution(values []string) []ValueCount {
 		return out[i].Value < out[j].Value
 	})
 	return out
+}
+
+// DisplayValue は分布の表示用。空文字だけ「(空)」にする。
+// 実データの "(空)" は "(空)" のまま出るので、件数は別々に並ぶ。
+func DisplayValue(v string) string {
+	if v == "" {
+		return "(空)"
+	}
+	return v
+}
+
+// employeeCountBasisOptions は employee_count_basis に入れてよい値。空は「不明」。
+var employeeCountBasisOptions = []string{"", "consolidated", "standalone"}
+
+// isEmployeeCountBasisOption は v が選択肢そのものかを返す。
+func isEmployeeCountBasisOption(v string) bool {
+	for _, o := range employeeCountBasisOptions {
+		if v == o {
+			return true
+		}
+	}
+	return false
 }
 
 // IsIndustryOption は v が業種の選択肢そのものかを返す(分布の「正規/ゆれ」判定用)。
