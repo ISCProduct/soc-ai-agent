@@ -72,18 +72,28 @@ export default function PageContent() {
             <Typography id="assessment-usage" variant="h6" component="h2" fontWeight="bold" mb={1}>
               この結果の使われ方
             </Typography>
-            <Typography variant="body2" component="ul" sx={{ pl: 2, m: 0, '& li': { mb: 0.5 } }}>
-              <li>AI相談（チャット診断）で分かった傾向と合わせて、おすすめ企業のマッチングに使います。</li>
-              <li>AI相談をまだ終えていない場合は、終えた時点でマッチングに反映されます。</li>
-              <li>この検査は1回ごとの記録です。合否の判定や、他の学生との比較には使いません。</li>
-            </Typography>
+            {result.scope === 'school' ? (
+              <Typography variant="body2" component="ul" sx={{ pl: 2, m: 0, '& li': { mb: 0.5 } }}>
+                <li>学校が用意した検査です。おすすめ企業の計算には使われません。</li>
+                <li>学校の先生には、受検したかどうかと、傾向の強い項目名が見えます。点数は見えません。</li>
+                <li>この検査は1回ごとの記録です。合否の判定や、他の学生との比較には使いません。</li>
+              </Typography>
+            ) : (
+              <Typography variant="body2" component="ul" sx={{ pl: 2, m: 0, '& li': { mb: 0.5 } }}>
+                <li>AI相談（チャット診断）で分かった傾向と合わせて、おすすめ企業のマッチングに使います。</li>
+                <li>AI相談をまだ終えていない場合は、終えた時点でマッチングに反映されます。</li>
+                <li>この検査は1回ごとの記録です。合否の判定や、他の学生との比較には使いません。</li>
+              </Typography>
+            )}
           </Paper>
 
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} mt={3}>
-            <Button variant="contained" onClick={() => router.push(getResultsPathOrChat())}>
-              マッチング結果を見る
-            </Button>
-            <Button variant="outlined" onClick={() => router.push('/assessments')}>
+            {result.scope !== 'school' && (
+              <Button variant="contained" onClick={() => router.push(getResultsPathOrChat())}>
+                マッチング結果を見る
+              </Button>
+            )}
+            <Button variant={result.scope === 'school' ? 'contained' : 'outlined'} onClick={() => router.push('/assessments')}>
               検査の一覧へ戻る
             </Button>
           </Stack>
