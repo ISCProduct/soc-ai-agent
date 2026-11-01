@@ -3,33 +3,31 @@
  */
 
 /**
- * AnalysisSidebar（PC常設サイドバー）のナビ項目の網羅性と現在地表示（#403）。
+ * AnalysisSidebar（ホーム画面専用サイドバー）のナビ項目の網羅性（#403）。
  *
  * 以前は SIDEBAR_NAV_ITEMS（lib/sidebar-nav.ts）に項目を追加しても、AnalysisSidebar 側は
  * 個別ハードコードのボタン列のため反映されず、「適性検査」「スカウト」への導線が無い状態に
  * なっていた。この回帰を検知するため、SIDEBAR_NAV_ITEMS 全件分のボタンが実際に描画される
- * ことを確認する。現在地ハイライト（GlobalNavMenu / StudentBottomNav と同じ aria-current）も
- * ここで押さえる。
+ * ことを確認する。
+ *
+ * 現在地ハイライトは追加しない: AnalysisSidebar は `frontend/app/page-content.tsx`（ホーム画面
+ * `/`）でしか描画されず、SIDEBAR_NAV_ITEMS に `/` はひとつも含まれないため、現在地判定は
+ * 常に「どれも現在地ではない」にしかならない。現在地ハイライトは GlobalNavMenu（ホーム以外の
+ * 全ページで表示される共通メニュー）側で既に実装・テスト済み（global-nav-menu.test.tsx）。
  */
 import { render, screen } from '@testing-library/react'
 import { AnalysisSidebar } from '@/components/AnalysisSidebar'
 import { SIDEBAR_NAV_ITEMS } from '@/lib/sidebar-nav'
 import type { User } from '@/lib/auth'
 
-let mockPathname = '/'
-const push = jest.fn()
-
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({ push, replace: jest.fn(), refresh: jest.fn() }),
-  usePathname: () => mockPathname,
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn(), refresh: jest.fn() }),
 }))
 
 const user = { user_id: 1, name: '山田太郎', email: 'student@example.com' } as unknown as User
 
 describe('AnalysisSidebar のナビ項目', () => {
   beforeEach(() => {
-    mockPathname = '/'
-    push.mockClear()
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
   })
 
@@ -40,57 +38,9 @@ describe('AnalysisSidebar のナビ項目', () => {
     }
   })
 
-  it('今いる画面のボタンに aria-current="page" が付く', () => {
-    mockPathname = '/schedule'
-    render(<AnalysisSidebar user={user} onLogout={jest.fn()} />)
-
-    const current = screen.getAllByRole('button', { name: /選考スケジュール/ })
-    expect(current.length).toBeGreaterThan(0)
-    for (const el of current) expect(el).toHaveAttribute('aria-current', 'page')
-
-    const others = screen.getAllByRole('button', { name: /企業相関図/ })
-    for (const el of others) expect(el).not.toHaveAttribute('aria-current')
-  })
-
-  it('/interview/history では「面接練習」ではなく「面接履歴」側が現在地になる（前方一致の重なり対策）', () => {
-    mockPathname = '/interview/history'
-    render(<AnalysisSidebar user={user} onLogout={jest.fn()} />)
-
-    for (const el of screen.getAllByRole('button', { name: /面接履歴/ })) {
-      expect(el).toHaveAttribute('aria-current', 'page')
-    }
-    for (const el of screen.getAllByRole('button', { name: /面接練習/ })) {
-      expect(el).not.toHaveAttribute('aria-current')
-    }
-  })
-
-  it('/whats-new（更新情報、SIDEBAR_NAV_ITEMS外の項目）でも現在地ハイライトが付く', () => {
-    mockPathname = '/whats-new'
-    render(<AnalysisSidebar user={user} onLogout={jest.fn()} />)
-
-    for (const el of screen.getAllByRole('button', { name: /更新情報/ })) {
-      expect(el).toHaveAttribute('aria-current', 'page')
-    }
-  })
-
-  it('管理者は /admin で管理者機能リンクに現在地ハイライトが付く', () => {
-    mockPathname = '/admin'
-    const admin = { ...user, is_admin: true } as unknown as User
-    render(<AnalysisSidebar user={admin} onLogout={jest.fn()} />)
-
-    for (const el of screen.getAllByRole('link', { name: /管理者機能/ })) {
-      expect(el).toHaveAttribute('aria-current', 'page')
-    }
-  })
-
-  it('ゲストは選考管理に居ても「表示中」にならない（ログイン誘導のTooltipと矛盾させない）', () => {
-    mockPathname = '/applications'
+  it('ゲストは選考管理にTooltipで「ログインが必要です」と出る（既存挙動の回帰確認）', () => {
     const guest = { ...user, is_guest: true } as unknown as User
     render(<AnalysisSidebar user={guest} onLogout={jest.fn()} />)
-
-    for (const el of screen.getAllByRole('button', { name: /選考管理/ })) {
-      expect(el).not.toHaveAttribute('aria-current')
-    }
     expect(screen.getAllByText('ログインが必要です').length).toBeGreaterThan(0)
   })
 })

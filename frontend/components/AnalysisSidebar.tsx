@@ -47,19 +47,17 @@ import {
     Quiz,
 } from '@mui/icons-material'
 import {authService, User} from '@/lib/auth'
-import {useRouter, usePathname} from 'next/navigation'
+import {useRouter} from 'next/navigation'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import {
   getApplicationsNavTarget,
   getTodayActionLabel,
   shouldShowResultsCta,
 } from '@/lib/sidebar-navigation'
-import { isCurrentNav, isCurrentNavExclusive, SIDEBAR_ADMIN_NAV, SIDEBAR_NAV_ITEMS } from '@/lib/sidebar-nav'
+import { SIDEBAR_ADMIN_NAV } from '@/lib/sidebar-nav'
 import { computeProgressTotals } from './mui-chat/utils'
 
 const DRAWER_WIDTH = 280
-
-const SIDEBAR_HREFS = SIDEBAR_NAV_ITEMS.map((i) => i.href)
 
 interface AnalysisStep {
     id: string
@@ -103,9 +101,6 @@ interface AnalysisSidebarProps {
 
 export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClose}: AnalysisSidebarProps) {
     const router = useRouter()
-    const pathname = usePathname() || ''
-    // /interview と /interview/history のように前方一致が重なるときは、より長い方だけを現在地にする（GlobalNavMenu と同じ判定）
-    const isCurrent = (href: string) => isCurrentNavExclusive(pathname, href, SIDEBAR_HREFS)
     const [messageCount, setMessageCount] = useState(0)
     const [questionCount, setQuestionCount] = useState(0)
     const [totalQuestions, setTotalQuestions] = useState(15)
@@ -243,10 +238,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
             overflowY: 'auto',
         },
     }
-
-    // ゲストは選考管理に入れずログイン導線へ飛ばされるため、ここに居ても「現在地」としては扱わない
-    // （selected/表示中とTooltipの「ログインが必要です」が同時に出る矛盾を避ける）
-    const applicationsCurrent = isCurrent('/applications') && !user.is_guest
 
     const drawerContent = (
             <Box sx={{p: 2}}>
@@ -406,8 +397,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             router.push(getResultsPathOrChat())
                             onMobileClose?.()
                         }}
-                        selected={isCurrent('/results')}
-                        aria-current={isCurrent('/results') ? 'page' : undefined}
                         sx={{ borderRadius: 1 }}
                     >
                         <ListItemIcon sx={{minWidth: 36}}>
@@ -415,10 +404,9 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="マッチング結果"
-                            secondary={isCurrent('/results') ? '表示中' : undefined}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
-                                fontWeight: isCurrent('/results') ? 700 : 500,
+                                fontWeight: 500,
                             }}
                         />
                     </ListItemButton>
@@ -434,8 +422,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                                 router.push(getApplicationsNavTarget(user.is_guest))
                                 onMobileClose?.()
                             }}
-                            selected={applicationsCurrent}
-                            aria-current={applicationsCurrent ? 'page' : undefined}
                             sx={{ borderRadius: 1 }}
                         >
                             <ListItemIcon sx={{minWidth: 36}}>
@@ -443,10 +429,10 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             </ListItemIcon>
                             <ListItemText
                                 primary="選考管理"
-                                secondary={user.is_guest ? 'ログインが必要です' : (applicationsCurrent ? '表示中' : undefined)}
+                                secondary={user.is_guest ? 'ログインが必要です' : undefined}
                                 primaryTypographyProps={{
                                     fontSize: '0.875rem',
-                                    fontWeight: applicationsCurrent ? 700 : 500,
+                                    fontWeight: 500,
                                 }}
                                 secondaryTypographyProps={{
                                     fontSize: '0.7rem',
@@ -459,8 +445,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 <ListItem disablePadding>
                     <ListItemButton
                         onClick={() => router.push('/correlation-diagram')}
-                        selected={isCurrent('/correlation-diagram')}
-                        aria-current={isCurrent('/correlation-diagram') ? 'page' : undefined}
                         sx={{
                             borderRadius: 1,
                         }}
@@ -470,10 +454,9 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="企業相関図"
-                            secondary={isCurrent('/correlation-diagram') ? '表示中' : undefined}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
-                                fontWeight: isCurrent('/correlation-diagram') ? 700 : 500,
+                                fontWeight: 500,
                             }}
                         />
                     </ListItemButton>
@@ -484,8 +467,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 <ListItem disablePadding>
                     <ListItemButton
                         onClick={() => router.push('/chat-history')}
-                        selected={isCurrent('/chat-history')}
-                        aria-current={isCurrent('/chat-history') ? 'page' : undefined}
                         sx={{
                             borderRadius: 1,
                         }}
@@ -495,10 +476,9 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="チャット履歴"
-                            secondary={isCurrent('/chat-history') ? '表示中' : undefined}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
-                                fontWeight: isCurrent('/chat-history') ? 700 : 500,
+                                fontWeight: 500,
                             }}
                         />
                     </ListItemButton>
@@ -507,8 +487,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 <ListItem disablePadding>
                     <ListItemButton
                         onClick={() => router.push('/resume')}
-                        selected={isCurrent('/resume')}
-                        aria-current={isCurrent('/resume') ? 'page' : undefined}
                         sx={{
                             borderRadius: 1,
                         }}
@@ -518,10 +496,9 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="履歴書レビュー"
-                            secondary={isCurrent('/resume') ? '表示中' : undefined}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
-                                fontWeight: isCurrent('/resume') ? 700 : 500,
+                                fontWeight: 500,
                             }}
                         />
                     </ListItemButton>
@@ -530,8 +507,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 <ListItem disablePadding>
                     <ListItemButton
                         onClick={() => router.push('/assessments')}
-                        selected={isCurrent('/assessments')}
-                        aria-current={isCurrent('/assessments') ? 'page' : undefined}
                         sx={{
                             borderRadius: 1,
                         }}
@@ -541,10 +516,9 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="適性検査"
-                            secondary={isCurrent('/assessments') ? '表示中' : undefined}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
-                                fontWeight: isCurrent('/assessments') ? 700 : 500,
+                                fontWeight: 500,
                             }}
                         />
                     </ListItemButton>
@@ -553,8 +527,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 <ListItem disablePadding>
                     <ListItemButton
                         onClick={() => router.push('/interview')}
-                        selected={isCurrent('/interview')}
-                        aria-current={isCurrent('/interview') ? 'page' : undefined}
                         sx={{
                             borderRadius: 1,
                         }}
@@ -564,10 +536,9 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="面接練習"
-                            secondary={isCurrent('/interview') ? '表示中' : undefined}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
-                                fontWeight: isCurrent('/interview') ? 700 : 500,
+                                fontWeight: 500,
                             }}
                         />
                     </ListItemButton>
@@ -576,8 +547,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 <ListItem disablePadding>
                     <ListItemButton
                         onClick={() => router.push('/interview/history')}
-                        selected={isCurrent('/interview/history')}
-                        aria-current={isCurrent('/interview/history') ? 'page' : undefined}
                         sx={{
                             borderRadius: 1,
                         }}
@@ -587,10 +556,9 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="面接履歴"
-                            secondary={isCurrent('/interview/history') ? '表示中' : undefined}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
-                                fontWeight: isCurrent('/interview/history') ? 700 : 500,
+                                fontWeight: 500,
                             }}
                         />
                     </ListItemButton>
@@ -599,8 +567,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 <ListItem disablePadding>
                     <ListItemButton
                         onClick={() => router.push('/es-rewrite')}
-                        selected={isCurrent('/es-rewrite')}
-                        aria-current={isCurrent('/es-rewrite') ? 'page' : undefined}
                         sx={{
                             borderRadius: 1,
                         }}
@@ -610,10 +576,9 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="ESリライト・添削"
-                            secondary={isCurrent('/es-rewrite') ? '表示中' : undefined}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
-                                fontWeight: isCurrent('/es-rewrite') ? 700 : 500,
+                                fontWeight: 500,
                             }}
                         />
                     </ListItemButton>
@@ -622,8 +587,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 <ListItem disablePadding>
                     <ListItemButton
                         onClick={() => router.push('/schedule')}
-                        selected={isCurrent('/schedule')}
-                        aria-current={isCurrent('/schedule') ? 'page' : undefined}
                         sx={{
                             borderRadius: 1,
                         }}
@@ -633,10 +596,9 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="選考スケジュール"
-                            secondary={isCurrent('/schedule') ? '表示中' : undefined}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
-                                fontWeight: isCurrent('/schedule') ? 700 : 500,
+                                fontWeight: 500,
                             }}
                         />
                     </ListItemButton>
@@ -645,8 +607,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 <ListItem disablePadding>
                     <ListItemButton
                         onClick={() => router.push('/scout')}
-                        selected={isCurrent('/scout')}
-                        aria-current={isCurrent('/scout') ? 'page' : undefined}
                         sx={{
                             borderRadius: 1,
                         }}
@@ -656,10 +616,9 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="スカウト"
-                            secondary={isCurrent('/scout') ? '表示中' : undefined}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
-                                fontWeight: isCurrent('/scout') ? 700 : 500,
+                                fontWeight: 500,
                             }}
                         />
                     </ListItemButton>
@@ -668,8 +627,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 <ListItem disablePadding>
                     <ListItemButton
                         onClick={() => router.push('/profile')}
-                        selected={isCurrent('/profile')}
-                        aria-current={isCurrent('/profile') ? 'page' : undefined}
                         sx={{
                             borderRadius: 1,
                         }}
@@ -679,10 +636,9 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="プロフィール設定"
-                            secondary={isCurrent('/profile') ? '表示中' : undefined}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
-                                fontWeight: isCurrent('/profile') ? 700 : 500,
+                                fontWeight: 500,
                             }}
                         />
                     </ListItemButton>
@@ -694,8 +650,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             router.push('/whats-new')
                             onMobileClose?.()
                         }}
-                        selected={isCurrentNav(pathname, '/whats-new')}
-                        aria-current={isCurrentNav(pathname, '/whats-new') ? 'page' : undefined}
                         sx={{
                             borderRadius: 1,
                         }}
@@ -705,10 +659,9 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="更新情報"
-                            secondary={isCurrentNav(pathname, '/whats-new') ? '表示中' : undefined}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
-                                fontWeight: isCurrentNav(pathname, '/whats-new') ? 700 : 500,
+                                fontWeight: 500,
                             }}
                         />
                     </ListItemButton>
@@ -721,8 +674,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             href={SIDEBAR_ADMIN_NAV.href}
                             prefetch
                             onClick={onMobileClose}
-                            selected={isCurrentNav(pathname, SIDEBAR_ADMIN_NAV.href)}
-                            aria-current={isCurrentNav(pathname, SIDEBAR_ADMIN_NAV.href) ? 'page' : undefined}
                             sx={{
                                 borderRadius: 1,
                             }}
@@ -732,7 +683,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             </ListItemIcon>
                             <ListItemText
                                 primary={SIDEBAR_ADMIN_NAV.label}
-                                secondary={isCurrentNav(pathname, SIDEBAR_ADMIN_NAV.href) ? '表示中' : undefined}
                                 primaryTypographyProps={{
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
