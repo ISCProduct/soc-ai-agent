@@ -32,10 +32,10 @@ func newSchoolTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 
 func TestSchoolService_ResolveAdminAccess_Unrestricted(t *testing.T) {
 	db, mock := newSchoolTestDB(t)
-	svc := school.NewSchoolService(repositories.NewSchoolRepository(db))
+	svc := school.NewSchoolService(repositories.NewSchoolRepository(db), nil)
 
 	mock.ExpectQuery("SELECT .* FROM `schools` JOIN admin_school_memberships").
-		WithArgs(uint(1)).
+		WithArgs(uint(1), uint(1)). // 学園一致のサブクエリで user_id を2回使う（#1675）
 		WillReturnRows(sqlmock.NewRows([]string{"id", "organization_id", "name", "status"}))
 
 	restricted, schoolIDs, err := svc.ResolveAdminAccess(1)
@@ -55,10 +55,10 @@ func TestSchoolService_ResolveAdminAccess_Unrestricted(t *testing.T) {
 
 func TestSchoolService_ResolveAdminAccess_Restricted(t *testing.T) {
 	db, mock := newSchoolTestDB(t)
-	svc := school.NewSchoolService(repositories.NewSchoolRepository(db))
+	svc := school.NewSchoolService(repositories.NewSchoolRepository(db), nil)
 
 	mock.ExpectQuery("SELECT .* FROM `schools` JOIN admin_school_memberships").
-		WithArgs(uint(2)).
+		WithArgs(uint(2), uint(2)). // 学園一致のサブクエリで user_id を2回使う（#1675）
 		WillReturnRows(sqlmock.NewRows([]string{"id", "organization_id", "name", "status"}).
 			AddRow(5, 2, "情報科学専門学校", "active"))
 
@@ -76,7 +76,7 @@ func TestSchoolService_ResolveAdminAccess_Restricted(t *testing.T) {
 
 func TestSchoolService_Create_Validation(t *testing.T) {
 	db, _ := newSchoolTestDB(t)
-	svc := school.NewSchoolService(repositories.NewSchoolRepository(db))
+	svc := school.NewSchoolService(repositories.NewSchoolRepository(db), nil)
 
 	if _, err := svc.Create(school.CreateSchoolInput{OrganizationID: 1, Name: ""}); !errors.Is(err, school.ErrSchoolNameRequired) {
 		t.Fatalf("got %v want ErrSchoolNameRequired", err)

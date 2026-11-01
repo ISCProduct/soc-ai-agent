@@ -51,7 +51,7 @@ func newSchoolScopeTestEcho(schools *school.SchoolService, adminUserID uint) (*e
 }
 
 func TestEchoAdminSchoolScope_UnrestrictedNoFilter(t *testing.T) {
-	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{}})
+	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{}}, nil)
 	e, rec := newSchoolScopeTestEcho(schools, 1)
 
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)
@@ -65,7 +65,7 @@ func TestEchoAdminSchoolScope_UnrestrictedNoFilter(t *testing.T) {
 func TestEchoAdminSchoolScope_RestrictedMissingSchoolID(t *testing.T) {
 	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
 		2: {{ID: 5}},
-	}})
+	}}, nil)
 	e, rec := newSchoolScopeTestEcho(schools, 2)
 
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)
@@ -79,7 +79,7 @@ func TestEchoAdminSchoolScope_RestrictedMissingSchoolID(t *testing.T) {
 func TestEchoAdminSchoolScope_RestrictedDeniedSchool(t *testing.T) {
 	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
 		2: {{ID: 5}},
-	}})
+	}}, nil)
 	e, rec := newSchoolScopeTestEcho(schools, 2)
 
 	req := httptest.NewRequest(http.MethodGet, "/x?school_id=6", nil)
@@ -93,7 +93,7 @@ func TestEchoAdminSchoolScope_RestrictedDeniedSchool(t *testing.T) {
 func TestEchoAdminSchoolScope_RestrictedAllowedSchool(t *testing.T) {
 	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
 		2: {{ID: 5}},
-	}})
+	}}, nil)
 	e, rec := newSchoolScopeTestEcho(schools, 2)
 
 	req := httptest.NewRequest(http.MethodGet, "/x?school_id=5", nil)
@@ -105,7 +105,7 @@ func TestEchoAdminSchoolScope_RestrictedAllowedSchool(t *testing.T) {
 }
 
 func TestEchoRequirePlatformAdmin_UnrestrictedOK(t *testing.T) {
-	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{}})
+	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{}}, nil)
 	e := echo.New()
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -126,7 +126,7 @@ func TestEchoRequirePlatformAdmin_UnrestrictedOK(t *testing.T) {
 func TestEchoRequirePlatformAdmin_RestrictedForbidden(t *testing.T) {
 	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
 		2: {{ID: 5}},
-	}})
+	}}, nil)
 	e := echo.New()
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -160,7 +160,7 @@ func stashPrincipal(e *echo.Echo, userID uint, isPlatform bool) {
 
 // 職員は担当校に限って教員ルートへ入れる。
 func TestSchoolScope_StaffAllowedOwnSchool(t *testing.T) {
-	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{3: {{ID: 5}}}})
+	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{3: {{ID: 5}}}}, nil)
 	e := echo.New()
 	stashPrincipal(e, 3, false)
 	e.GET("/x", func(c echo.Context) error { return c.String(http.StatusOK, "ok") }, routes.EchoAdminSchoolScope(schools))
@@ -173,7 +173,7 @@ func TestSchoolScope_StaffAllowedOwnSchool(t *testing.T) {
 
 // 職員が担当校0件だと「無制限」に化けず、school_id を付けても他校は弾かれる。
 func TestSchoolScope_StaffNoMembershipDenied(t *testing.T) {
-	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{}})
+	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{}}, nil)
 	e := echo.New()
 	stashPrincipal(e, 7, false)
 	e.GET("/x", func(c echo.Context) error { return c.String(http.StatusOK, "ok") }, routes.EchoAdminSchoolScope(schools))
@@ -186,7 +186,7 @@ func TestSchoolScope_StaffNoMembershipDenied(t *testing.T) {
 
 // 職員はプラットフォーム系ルートに入れない（担当校0件でも）。
 func TestPlatformAdmin_StaffForbidden(t *testing.T) {
-	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{}})
+	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{}}, nil)
 	e := echo.New()
 	stashPrincipal(e, 7, false)
 	e.GET("/x", func(c echo.Context) error { return c.String(http.StatusOK, "ok") }, routes.EchoRequirePlatformAdmin(schools))

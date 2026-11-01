@@ -113,7 +113,7 @@ func TestAdminDashboardController_UserSessions_SchoolAccessDenied(t *testing.T) 
 	schoolRepo.On("FindByID", otherSchoolID).Return(&models.School{ID: otherSchoolID}, nil)
 
 	ctrl := newAdminDashboardController(userRepo, nil, nil)
-	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo))
+	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo, nil))
 	testsupport.AssertStatus(t, ctrl.UserSessions, c, http.StatusForbidden)
 	userRepo.AssertExpectations(t)
 }

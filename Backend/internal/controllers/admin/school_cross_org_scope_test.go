@@ -3,6 +3,7 @@ package admin_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -45,7 +46,7 @@ func TestEnsureAdminSchoolAccessForUser_RejectsSchoolOutsideTargetOrganization(t
 			req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/", nil), 42)
 			ctx := testsupport.NewCtx(req, httptest.NewRecorder())
 
-			err := httpapi.EnsureAdminSchoolAccessForUser(ctx, school.NewSchoolService(repo), tt.targetOrgID, &schoolID)
+			err := httpapi.EnsureAdminSchoolAccessForUser(ctx, school.NewSchoolService(repo, nil), tt.targetOrgID, &schoolID)
 			if tt.wantHTTPCode == 0 {
 				if err != nil {
 					t.Fatalf("同一学園なら通すべき: %v", err)
@@ -70,7 +71,7 @@ func TestEnsureAdminSchoolAccessForUser_UnrestrictedAdminSkipsLookup(t *testing.
 	ctx := testsupport.NewCtx(req, httptest.NewRecorder())
 
 	schoolID := uint(5)
-	if err := httpapi.EnsureAdminSchoolAccessForUser(ctx, school.NewSchoolService(repo), 2, &schoolID); err != nil {
+	if err := httpapi.EnsureAdminSchoolAccessForUser(ctx, school.NewSchoolService(repo, nil), 2, &schoolID); err != nil {
 		t.Fatalf("無制限管理者は通すべき: %v", err)
 	}
 	repo.AssertNotCalled(t, "FindByID", schoolID)
@@ -83,7 +84,7 @@ func TestSchoolService_AddMemberRejectsCrossOrganization(t *testing.T) {
 	repo.On("FindByID", uint(5)).Return(&models.School{ID: 5, OrganizationID: 1}, nil)
 
 	svc := school.NewSchoolService(repo, stubUserReader{user: &entity.User{ID: 2, OrganizationID: 9}})
-	if err := svc.AddMember(2, 5); err != school.ErrMemberOrganizationMismatch {
+	if err := svc.AddMember(2, 5); !errors.Is(err, school.ErrMemberOrganizationMismatch) {
 		t.Fatalf("学園をまたいだ割当を許している: %v", err)
 	}
 	repo.AssertNotCalled(t, "AddMember")
@@ -95,8 +96,9 @@ func TestSchoolService_AddMemberFailsClosedWithoutUserReader(t *testing.T) {
 	repo := &mocks.SchoolRepositoryMock{}
 	repo.On("FindByID", uint(5)).Return(&models.School{ID: 5, OrganizationID: 1}, nil)
 
-	if err := school.NewSchoolService(repo).AddMember(2, 5); err == nil {
-		t.Fatal("ユーザー参照が無いのに割当が通っている")
+	// 「別の理由のエラー」で緑にならないよう、センチネルで固定する。
+	if err := school.NewSchoolService(repo, nil).AddMember(2, 5); !errors.Is(err, school.ErrUserReaderNotConfigured) {
+		t.Fatalf("未注入の fail-close になっていない: %v", err)
 	}
 	repo.AssertNotCalled(t, "AddMember")
 }
@@ -120,4 +122,89 @@ func TestAdminSchoolController_AddMember_CrossOrganizationIsBadRequest(t *testin
 		school.NewSchoolService(repo, stubUserReader{user: &entity.User{ID: 2, OrganizationID: 9}}))
 	testsupport.AssertStatus(t, ctrl.AddMember, ctx, http.StatusBadRequest)
 	repo.AssertNotCalled(t, "AddMember")
+}
+
+// 対象ユーザーを読んでから認可する経路は、学園が一致しない学校を担当校として通してはいけない（#1675）。
+//
+// ヘルパー単体のテストだけでは、呼び出し元が素の EnsureAdminSchoolAccess に戻る回帰を検出できない
+// （シグネチャが合うのでコンパイルも通る）。経路ごとに「学園不一致なら403」を固定する。
+// 通過側の確認はヘルパー単体のテストが両方向を押さえているので、ここでは重ねない
+// （後段の処理まで動かすとモックが際限なく増え、認可の検証がぼやける）。
+//
+// 条件は実際に報告された再現そのもの: 対象は担当校(5)に在籍しているように見えるが、
+// 学校の学園(1)と対象ユーザーの学園(9)が違う。包含判定だけでは弾けない。
+func TestAdminControllers_RejectCrossOrganizationTarget(t *testing.T) {
+	const (
+		adminID    = uint(42)
+		targetID   = uint(3)
+		schoolID   = uint(5)
+		schoolOrg  = uint(1)
+		foreignOrg = uint(9)
+	)
+
+	newSchools := func(repo *mocks.SchoolRepositoryMock) *school.SchoolService {
+		// 担当校ありの職員。担当校には対象の school_id が含まれている。
+		repo.On("ListSchoolsForAdmin", adminID).
+			Return([]models.School{{ID: schoolID, OrganizationID: schoolOrg}}, nil)
+		repo.On("FindByID", schoolID).
+			Return(&models.School{ID: schoolID, OrganizationID: schoolOrg}, nil)
+		return school.NewSchoolService(repo, nil)
+	}
+	foreignTarget := func() *entity.User {
+		sid := schoolID
+		return &entity.User{ID: targetID, Email: "t@example.com", Role: entity.UserRoleStudent,
+			OrganizationID: foreignOrg, SchoolID: &sid}
+	}
+	newReq := func(method string, body []byte) echo.Context {
+		var r *http.Request
+		if body == nil {
+			r = httptest.NewRequest(method, "/", nil)
+		} else {
+			r = httptest.NewRequest(method, "/", bytes.NewReader(body))
+			r.Header.Set("Content-Type", "application/json")
+		}
+		ctx := testsupport.NewCtx(testsupport.WithAdminUserID(r, adminID), httptest.NewRecorder())
+		ctx.SetParamNames("id")
+		ctx.SetParamValues("3")
+		return ctx
+	}
+	assertForbidden := func(t *testing.T, err error) {
+		t.Helper()
+		he, ok := err.(*echo.HTTPError)
+		if !ok || he.Code != http.StatusForbidden {
+			t.Fatalf("学園不一致を拒否していない: err=%v", err)
+		}
+	}
+
+	t.Run("学生詳細", func(t *testing.T) {
+		userRepo := &mocks.UserRepositoryMock{}
+		userRepo.On("GetUserByID", targetID).Return(foreignTarget(), nil)
+		ctrl := admincontrollers.NewAdminDashboardController(userRepo, nil, nil)
+		ctrl.SetSchoolService(newSchools(&mocks.SchoolRepositoryMock{}))
+		assertForbidden(t, ctrl.UserSessions(newReq(http.MethodGet, nil)))
+	})
+
+	t.Run("ユーザー編集", func(t *testing.T) {
+		userRepo := &mocks.UserRepositoryMock{}
+		userRepo.On("GetUserByID", targetID).Return(foreignTarget(), nil)
+		audit := &mocks.AuditLogServiceMock{}
+		ctrl := admincontrollers.NewAdminUserController(userRepo, audit)
+		ctrl.SetSchoolService(newSchools(&mocks.SchoolRepositoryMock{}))
+		body, _ := json.Marshal(map[string]any{"name": "x"})
+		assertForbidden(t, ctrl.Update(newReq(http.MethodPut, body)))
+	})
+
+	// 削除（Delete）は Update と同じ ensureSchoolAccess を通るので重ねない。
+	// 単体で呼ぶには削除サービスの注入が要り、認可の検証がぼやける。
+
+	t.Run("面接動画一覧", func(t *testing.T) {
+		userRepo := &mocks.UserRepositoryMock{}
+		userRepo.On("GetUserByID", targetID).Return(foreignTarget(), nil)
+		sessionRepo := &mocks.InterviewSessionRepositoryMock{}
+		sessionRepo.On("FindByID", uint(3)).Return(&models.InterviewSession{ID: 3, UserID: targetID}, nil)
+
+		ctrl := admincontrollers.NewAdminInterviewController(nil, nil, nil)
+		ctrl.SetSchoolAccess(userRepo, sessionRepo, newSchools(&mocks.SchoolRepositoryMock{}))
+		assertForbidden(t, ctrl.ListVideos(newReq(http.MethodGet, nil)))
+	})
 }

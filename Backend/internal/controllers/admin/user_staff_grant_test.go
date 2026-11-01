@@ -23,7 +23,7 @@ func newAdminUserController(userRepo *mocks.UserRepositoryMock, schoolRepo *mock
 	audit := &mocks.AuditLogServiceMock{}
 	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 	ctrl := admincontrollers.NewAdminUserController(userRepo, audit)
-	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo))
+	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo, nil))
 	return ctrl
 }
 

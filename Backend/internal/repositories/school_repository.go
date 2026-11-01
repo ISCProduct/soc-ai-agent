@@ -100,10 +100,22 @@ func (r *SchoolRepository) RemoveMember(userID, schoolID uint) error {
 	return nil
 }
 
+// ListSchoolsForAdmin は管理者・職員の担当校。自分の学園の学校だけを返す（#1675）。
+//
+// 認可には脚が2本ある。「対象ユーザーの学校が本人の学園のものか」と
+// 「呼び出し元の担当校が自分の学園のものか」。前者だけ閉じても、越境した
+// admin_school_memberships の行が1つあれば他学園の学校が担当校として通り、
+// その学校の学生は（学校と学生の学園が揃っているので）すべての判定を通過してしまう。
+//
+// ここは ResolveAccess / CanAdminAccessSchool / EchoAdminSchoolScope /
+// EnsureAdminSchoolAccessForUser の共通の土台なので、1箇所で全経路が閉じる。
+// 割当側（AddMember）のチェックは「これから作る行」しか守らないため、
+// 読み取り側でも学園一致を要求してデータの綺麗さに依存させない。
 func (r *SchoolRepository) ListSchoolsForAdmin(userID uint) ([]models.School, error) {
 	var schools []models.School
 	err := r.db.Joins("JOIN admin_school_memberships ON admin_school_memberships.school_id = schools.id").
 		Where("admin_school_memberships.user_id = ?", userID).
+		Where("schools.organization_id = (SELECT organization_id FROM users WHERE id = ?)", userID).
 		Order("schools.id ASC").
 		Find(&schools).Error
 	if err != nil {

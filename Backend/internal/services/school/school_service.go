@@ -15,19 +15,21 @@ var (
 	// 担当校は学園をまたげない（#1675）。
 	ErrMemberOrganizationMismatch = errors.New("member belongs to another organization")
 	ErrMemberNotFound             = errors.New("member not found")
-	ErrSchoolNameRequired         = errors.New("name is required")
-	ErrSchoolOrgRequired          = errors.New("organization_id is required")
-	ErrSchoolAlreadyAssigned      = errors.New("admin already assigned to this school")
-	ErrCompanyAlreadyApproved     = errors.New("company already approved for this school")
+	// ErrUserReaderNotConfigured は学園一致チェック用のユーザー参照が注入されていない状態。
+	// errors.Is で判定できるようにして、テストが「別の理由のエラー」で緑にならないようにする。
+	ErrUserReaderNotConfigured = errors.New("school service is not configured with a user reader")
+	ErrSchoolNameRequired      = errors.New("name is required")
+	ErrSchoolOrgRequired       = errors.New("organization_id is required")
+	ErrSchoolAlreadyAssigned   = errors.New("admin already assigned to this school")
+	ErrCompanyAlreadyApproved  = errors.New("company already approved for this school")
 )
 
-// SchoolService は学園(Organization)配下の個別校・担当管理者・企業掲載承認リストを管理する。
 // UserReader は担当校割当の学園一致チェックに使う最小のユーザー参照（#1675）。
-// 省略可能にすると検査を飛ばせてしまうため、コンストラクタで必須にする。
 type UserReader interface {
 	GetUserByID(id uint) (*entity.User, error)
 }
 
+// SchoolService は学園(Organization)配下の個別校・担当管理者・企業掲載承認リストを管理する。
 type SchoolService struct {
 	repo  repository.SchoolRepository
 	users UserReader
@@ -35,15 +37,12 @@ type SchoolService struct {
 
 // NewSchoolService は学校サービスを作る。
 //
-// users は担当校割当（AddMember）の学園一致チェックに使う。渡さなかった場合 AddMember は
-// エラーで止まる（fail-close）。検査を飛ばして割当が通る方が危険なので、未注入を許さない。
-// AddMember を使わないテストは省略してよい。
-func NewSchoolService(repo repository.SchoolRepository, users ...UserReader) *SchoolService {
-	s := &SchoolService{repo: repo}
-	if len(users) > 0 {
-		s.users = users[0]
-	}
-	return s
+// users は担当校割当（AddMember）の学園一致チェックに使う。AddMember を使わない呼び出し元は
+// nil を明示的に渡す（nil のときは AddMember がエラーで止まる = fail-close）。
+// 可変長にして省略できるようにすると渡し忘れをコンパイラが拾えないため、位置引数で必須にする。
+// 検査を飛ばして割当が通る方が危険なので、未注入を黙って許さない。
+func NewSchoolService(repo repository.SchoolRepository, users UserReader) *SchoolService {
+	return &SchoolService{repo: repo, users: users}
 }
 
 type CreateSchoolInput struct {
@@ -98,7 +97,7 @@ func (s *SchoolService) AddMember(userID, schoolID uint) error {
 	// その学校の学生データへ到達させられる（#1675）。
 	if s.users == nil {
 		// 未注入のまま割当を通すと学園一致を検査できない。止める方を選ぶ。
-		return errors.New("school service is not configured with a user reader")
+		return ErrUserReaderNotConfigured
 	}
 	member, err := s.users.GetUserByID(userID)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 
 	"Backend/internal/logger"
@@ -114,8 +115,8 @@ func EnsureAdminSchoolAccess(ctx echo.Context, schools *school.SchoolService, ta
 // EnsureAdminSchoolAccess に渡してはいけない。学校が本人の学園に属していなければ
 // 未所属として扱い、担当校ありの管理者・職員には見せない（fail-close）。
 // 対象ユーザーを読んでから認可を判定する経路は、必ずこちらを使うこと。
-// 学校に属する行（求人抑制など）の school_id は自己申告ではないので
-// EnsureAdminSchoolAccess のままでよい。
+// 学校に属する行（卒業生就職情報の graduate_employments.school_id など）は
+// 管理画面で直接指定される値で自己申告ではないため、EnsureAdminSchoolAccess のままでよい。
 //
 // 無制限の管理者は学校で絞らないため、学校の引き直しもしない（余分な問い合わせを避ける）。
 func EnsureAdminSchoolAccessForUser(ctx echo.Context, schools *school.SchoolService, targetOrganizationID uint, targetSchoolID *uint) error {
@@ -134,6 +135,12 @@ func EnsureAdminSchoolAccessForUser(ctx echo.Context, schools *school.SchoolServ
 	if !restricted {
 		return nil
 	}
+	// 拒否が確定している場合は学校を引かない。担当校0件の職員や、担当校に含まれない
+	// 学校を指す対象は、学園を確かめるまでもなく 403 になる。
+	if len(allowedSchoolIDs) == 0 || targetSchoolID == nil || !slices.Contains(allowedSchoolIDs, *targetSchoolID) {
+		return echo.NewHTTPError(http.StatusForbidden, "school access denied")
+	}
+	// 担当校に含まれていても、その学校が対象ユーザーの学園のものでなければ通さない。
 	effective, err := schools.EffectiveSchoolID(targetOrganizationID, targetSchoolID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
@@ -141,12 +148,7 @@ func EnsureAdminSchoolAccessForUser(ctx echo.Context, schools *school.SchoolServ
 	if effective == nil {
 		return echo.NewHTTPError(http.StatusForbidden, "school access denied")
 	}
-	for _, id := range allowedSchoolIDs {
-		if id == *effective {
-			return nil
-		}
-	}
-	return echo.NewHTTPError(http.StatusForbidden, "school access denied")
+	return nil
 }
 
 // AdminSchoolFilter は EchoAdminSchoolScope が設定した絞り込み対象(nilは絞り込みなし)を返す。

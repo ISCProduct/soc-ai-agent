@@ -412,7 +412,7 @@ func TestAdminUserController_Update_SchoolAccessDenied(t *testing.T) {
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
 	ctrl := admincontrollers.NewAdminUserController(repo, nil)
-	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo))
+	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo, nil))
 	testsupport.AssertStatus(t, ctrl.Update, ctx, http.StatusForbidden)
 	repo.AssertExpectations(t)
 }

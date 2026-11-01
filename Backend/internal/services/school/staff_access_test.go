@@ -18,13 +18,15 @@ func expectMemberships(mock sqlmock.Sqlmock, userID uint, schoolIDs ...uint) {
 	for _, id := range schoolIDs {
 		rows.AddRow(id, 1, "x", "active")
 	}
-	mock.ExpectQuery("SELECT .* FROM `schools` JOIN admin_school_memberships").
-		WithArgs(userID).WillReturnRows(rows)
+	// 担当校は自分の学園の学校だけ（#1675）。越境した membership 行を効かせないため、
+	// 学園一致のサブクエリが入ることを SQL で固定する。
+	mock.ExpectQuery("SELECT .* FROM `schools` JOIN admin_school_memberships ON admin_school_memberships.school_id = schools.id WHERE admin_school_memberships.user_id = \\? AND schools.organization_id = \\(SELECT organization_id FROM users WHERE id = \\?\\)").
+		WithArgs(userID, userID).WillReturnRows(rows)
 }
 
 func TestResolveAccess_PlatformAdminNoMemberships_Unrestricted(t *testing.T) {
 	db, mock := newSchoolTestDB(t)
-	svc := school.NewSchoolService(repositories.NewSchoolRepository(db))
+	svc := school.NewSchoolService(repositories.NewSchoolRepository(db), nil)
 	expectMemberships(mock, 1) // 0件
 	restricted, ids, err := svc.ResolveAccess(true, 1)
 	if err != nil {
@@ -37,7 +39,7 @@ func TestResolveAccess_PlatformAdminNoMemberships_Unrestricted(t *testing.T) {
 
 func TestResolveAccess_StaffNoMemberships_RestrictedEmpty(t *testing.T) {
 	db, mock := newSchoolTestDB(t)
-	svc := school.NewSchoolService(repositories.NewSchoolRepository(db))
+	svc := school.NewSchoolService(repositories.NewSchoolRepository(db), nil)
 	expectMemberships(mock, 2) // 0件
 	restricted, ids, err := svc.ResolveAccess(false, 2)
 	if err != nil {
@@ -50,7 +52,7 @@ func TestResolveAccess_StaffNoMemberships_RestrictedEmpty(t *testing.T) {
 
 func TestResolveAccess_StaffWithMemberships_RestrictedToThem(t *testing.T) {
 	db, mock := newSchoolTestDB(t)
-	svc := school.NewSchoolService(repositories.NewSchoolRepository(db))
+	svc := school.NewSchoolService(repositories.NewSchoolRepository(db), nil)
 	expectMemberships(mock, 3, 5)
 	restricted, ids, err := svc.ResolveAccess(false, 3)
 	if err != nil {
@@ -63,7 +65,7 @@ func TestResolveAccess_StaffWithMemberships_RestrictedToThem(t *testing.T) {
 
 func TestCanAdminAccessSchool_StaffNoMemberships_Denied(t *testing.T) {
 	db, mock := newSchoolTestDB(t)
-	svc := school.NewSchoolService(repositories.NewSchoolRepository(db))
+	svc := school.NewSchoolService(repositories.NewSchoolRepository(db), nil)
 	expectMemberships(mock, 2)
 	target := uint(5)
 	allowed, err := svc.CanAdminAccessSchool(false, 2, &target)
@@ -77,7 +79,7 @@ func TestCanAdminAccessSchool_StaffNoMemberships_Denied(t *testing.T) {
 
 func TestCanAdminAccessSchool_PlatformAdminNoMemberships_Allowed(t *testing.T) {
 	db, mock := newSchoolTestDB(t)
-	svc := school.NewSchoolService(repositories.NewSchoolRepository(db))
+	svc := school.NewSchoolService(repositories.NewSchoolRepository(db), nil)
 	expectMemberships(mock, 1)
 	target := uint(5)
 	allowed, err := svc.CanAdminAccessSchool(true, 1, &target)

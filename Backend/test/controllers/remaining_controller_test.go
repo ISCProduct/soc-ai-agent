@@ -86,7 +86,7 @@ func TestAdminInterviewController_ListVideos_SchoolAccessDenied(t *testing.T) {
 	// 対象学生の学園と一致する学校を返す（#1675 の学園一致検査を通す）。
 	// 403 の理由は「担当校(1)に含まれない学校(99)だから」であり、学園不一致ではない。
 	schoolRepo.On("FindByID", otherSchoolID).Return(&models.School{ID: otherSchoolID}, nil)
-	c.SetSchoolAccess(userRepo, sessionRepo, school.NewSchoolService(schoolRepo))
+	c.SetSchoolAccess(userRepo, sessionRepo, school.NewSchoolService(schoolRepo, nil))
 
 	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/sessions/5/videos", nil), 42)
 	rec := httptest.NewRecorder()
@@ -111,7 +111,7 @@ func TestAdminInterviewController_ListVideos_SchoolAccessAllowed(t *testing.T) {
 	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
 	// 対象学生の学園と一致する学校を返す（#1675 の学園一致検査を通す）。担当校(1)と一致するので許可。
 	schoolRepo.On("FindByID", ownSchoolID).Return(&models.School{ID: ownSchoolID}, nil)
-	c.SetSchoolAccess(userRepo, sessionRepo, school.NewSchoolService(schoolRepo))
+	c.SetSchoolAccess(userRepo, sessionRepo, school.NewSchoolService(schoolRepo, nil))
 	videoRepo.On("FindBySessionID", mock.Anything, uint(5)).Return([]models.InterviewVideo{}, nil)
 
 	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/sessions/5/videos", nil), 42)
@@ -138,7 +138,7 @@ func TestAdminInterviewController_VideoURL_SchoolAccessDenied(t *testing.T) {
 	// 対象学生の学園と一致する学校を返す（#1675 の学園一致検査を通す）。
 	// 403 の理由は「担当校(1)に含まれない学校(99)だから」。
 	schoolRepo.On("FindByID", otherSchoolID).Return(&models.School{ID: otherSchoolID}, nil)
-	c.SetSchoolAccess(userRepo, nil, school.NewSchoolService(schoolRepo))
+	c.SetSchoolAccess(userRepo, nil, school.NewSchoolService(schoolRepo, nil))
 
 	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/videos/7/url", nil), 42)
 	rec := httptest.NewRecorder()

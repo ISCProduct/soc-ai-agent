@@ -69,7 +69,11 @@ type GuidanceView struct {
 // httpapi.EnsureAdminSchoolAccessForUser に通させる。
 func (s *GuidanceService) ResolveStudentSchool(studentUserID uint) (organizationID uint, schoolID *uint, err error) {
 	u, err := s.students.GetUserByID(studentUserID)
-	if err != nil || u == nil || u.Role != "student" || u.IsAdmin || u.IsGuest || u.IsWithdrawn() {
+	if err != nil {
+		// DB 障害を「生徒が見つかりません」(404) に潰すと、ログにも残らず追跡できない。
+		return 0, nil, err
+	}
+	if u == nil || u.Role != "student" || u.IsAdmin || u.IsGuest || u.IsWithdrawn() {
 		return 0, nil, ErrGuidanceStudentNotFound
 	}
 	return u.OrganizationID, u.SchoolID, nil
