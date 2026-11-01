@@ -62,4 +62,16 @@ describe('LobbyScreen', () => {
     expect(screen.getByRole('button', { name: /再試行/ })).toBeInTheDocument()
     expect(container.querySelector('video')).not.toBeNull()
   })
+  // #1058: リンク風の見た目だけで押しても何も起きない項目を置いていた。
+  // 「実在するページだけを本物のリンクで出す」を守れているかを見る。
+  it('フッターには実在するページへのリンクだけが出る', () => {
+    renderScreen()
+
+    const footer = screen.getByRole('contentinfo')
+    const links = Array.from(footer.querySelectorAll('a'))
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/privacy'])
+    // ページの無い項目は、リンクでもテキストでも置かない（押せそうに見せない）
+    expect(footer.textContent).not.toContain('利用規約')
+    expect(footer.textContent).not.toContain('ヘルプ')
+  })
 })
