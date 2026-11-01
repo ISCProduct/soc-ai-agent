@@ -1338,6 +1338,75 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { description: 未提出または本人のセッションが無い }
 
+  # ── assessments（学校側 / 先生） ─────────────────────
+  /api/admin/assessment-templates:
+    get:
+      tags: [assessments]
+      summary: 学校独自の検査テンプレートを一覧する
+      description: |
+        担当校スコープが掛かる（`school_id` 必須）。運営標準は含まない。学校独自の結果は「おすすめ企業の計算には使われない」。
+      security: [{ adminAuth: [] }]
+      parameters: [{ in: query, name: school_id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: テンプレート一覧 }
+        "400": { description: school_id が無い・不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [assessments]
+      summary: 学校独自の検査テンプレートを作る
+      description: |
+        カテゴリは正典10個から選ぶ。`is_standard` は常に false で、マッチングには合流しない。
+        担当校・作成者は認証情報から決め、リクエスト本文の値は使わない。
+      security: [{ adminAuth: [] }]
+      parameters: [{ in: query, name: school_id, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, questions]
+              properties:
+                title: { type: string, maxLength: 100 }
+                description: { type: string, maxLength: 500 }
+                due_at: { type: string, format: date-time, description: 受検期限。現在より後 }
+                questions:
+                  type: array
+                  minItems: 1
+                  maxItems: 60
+                  items:
+                    type: object
+                    required: [body, weight_category]
+                    properties:
+                      body: { type: string, maxLength: 200 }
+                      weight_category: { type: string }
+                      reverse_scored: { type: boolean }
+      responses:
+        "201": { description: 作成した }
+        "400": { description: 入力不正（メッセージは先生にそのまま見せられる） }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 学校が無い }
+
+  /api/admin/assessment-templates/{id}/students:
+    get:
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: school_id, required: true, schema: { type: integer } }
+      tags: [assessments]
+      summary: 学校独自テンプレートの受検状況（学生ごと）
+      description: |
+        期限超過 → 未受検 → 途中 → 完了の順。スコアの生値は返さず、上位カテゴリ名だけを返す。
+        他校のテンプレートは 404。
+      security: [{ adminAuth: [] }]
+      responses:
+        "200": { description: 学生ごとの受検状況 }
+        "400": { description: IDまたは school_id が不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: この学校のテンプレートが無い }
+
   # ── resume ─────────────────────────────────────────
   /api/resume/upload:
     post:
