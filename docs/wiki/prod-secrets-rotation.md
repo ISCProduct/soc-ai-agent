@@ -15,9 +15,30 @@ tfvars が空でも plan に差分は出ない。
 | `soc-app/oauth` | `google_client_secret` / `github_client_secret` | 各 OAuth アプリ | 初回のみ |
 | `soc-app/admin` | `admin_secret` | 自動生成（`random_password`） | 初回のみ |
 | `soc-app/admin` | `user_secret` / `company_user_secret` / `oauth_state_secret` / `token_encryption_key` | 自動生成 | 初回のみ |
+| `soc-app/service-secret` | `service_secret` | 自動生成（`random_password`） | 初回のみ |
 
 `admin_secret` は **staging と別値**にする。staging が漏れても本番の管理者権限に波及させないため。
-CI（`sync-whats-new`）は本番向けには Secrets Manager から読むので、既知の固定値である必要はない。
+
+## `admin_secret` と `service_secret` の役割分担（#1158）
+
+| | `admin_secret`（`ADMIN_SECRET`） | `service_secret`（`SERVICE_SECRET`） |
+|---|---|---|
+| 用途 | 管理者/職員トークン（`X-Admin-Token`）のHMAC鍵 | CI・運用からのサービス間呼び出し（`X-Admin-Secret`）の共有シークレット |
+| 漏えい時の影響 | `/api/admin/*` の全権限 | 更新情報の取り込みと学習データの件数取得のみ |
+| CI が知るか | **知らない**（渡さない） | 知る（本番は Secrets Manager から読む） |
+
+もともとこの2つは `ADMIN_SECRET` 1本で兼用されていた。CI が既知の値で
+`/api/admin/whats-new/ingest` を叩く必要があるため、その要件のために
+HMAC鍵の露出面まで CI へ広がっていた。シークレットを分けて解消済み。
+
+`SERVICE_SECRET` が未設定でもバックエンドは起動する（Terraform apply より先に
+新しいイメージがデプロイされても本番が落ちないようにするため）。その場合は
+サービス間エンドポイントが 503 で fail-close し、取り込みは次回の実行で回収される。
+**`ADMIN_SECRET` へのフォールバックは実装されていない。**
+
+プレースホルダー（`change-me-service-secret`）のまま、または `ADMIN_SECRET` と同値の場合も
+**未設定と同じ扱い**（503 で fail-close）になる。`.env.example` の値は公開されているので、
+通ってしまうと `/api/admin/whats-new/ingest` と `/api/admin/training/stats` を誰でも叩ける。
 
 `ignore_changes` は `secret_string` 全体にかかるため、**秘密でない値も Terraform からは変更できない**。
 `google_client_id` / `github_client_id` は tfvars を書き換えても plan に差分が出ず無言で無視される。
@@ -27,12 +48,17 @@ OAuth アプリを作り直して client_id が変わった場合も、下の CL
 
 `terraform apply` では更新されない。AWS CLI で直接書き換える。
 
-`admin_secret` を変える場合は、**先に CI が Secrets Manager を読めることを確認する**。
-読めないまま回すと CI は旧値（staging 共用の値）でフォールバックし、本番への
-更新情報の取り込みが 403 になる。手元で確認するなら次のとおり。
+`admin_secret` は CI に渡していないので、ローテーションしても CI 側の設定変更は要らない
+（管理者は再ログインが必要になる）。
+
+`service_secret` を変える場合は、**先に CI が Secrets Manager を読めることを確認する**。
+読めないと CI は本番への取り込みを行わず、**ジョブをエラーにする**（権限不足やシークレット
+未作成は放置しても直らないため、警告では流さない。`prod-uptime-scheduler` 側は Discord へ通知する）。
+値を書き換える対象は `soc-app/service-secret` で、キーは `service_secret`（下の手順の
+`--secret-id` とキー名を読み替える）。手元で確認するなら次のとおり。
 
 ```bash
-aws secretsmanager get-secret-value --secret-id soc-app/admin --query SecretString --output text >/dev/null \
+aws secretsmanager get-secret-value --secret-id soc-app/service-secret --query SecretString --output text >/dev/null \
   && echo "読めた（CI のロールでも同じ権限があるか確認すること）"
 ```
 
@@ -76,17 +102,41 @@ unset NEW_SECRET
 
 **旧キーの失効は必ず最後**。先に失効させると、新デプロイが失敗したときに戻す先が無くなる。
 
-## `admin_secret` を変えたあとの後始末
+## `service_secret` を変えたあとの後始末
 
-リポジトリシークレット `ADMIN_SECRET` は **staging 専用**に戻す（本番値を入れない）。
-CI は本番向けには Secrets Manager から読み、読めないときだけこのシークレットへ
-フォールバックする。本番値が残っていると、権限不調に気づかないまま動いてしまう。
+リポジトリシークレット `SERVICE_SECRET` は **staging 専用**（本番値を入れない）。
+CI は本番向けには Secrets Manager だけを見る（フォールバックは無い）ので、
+本番値を GitHub 側に置く理由は無い。
 
-取り込みが 401/403/503 になった場合、CI は警告では流さずエラーにする。
+**`SERVICE_SECRET` は repository secret として登録し、`production` 環境
+（Environment secrets）には登録しないこと。** GitHub では environment secret が
+同名の repository secret を上書きするため、`production` 環境に入れると
+staging 向けの取り込みが本番の値で送られて 403 になる。
+この罠を踏めないように、staging への取り込みは `environment` を宣言しない
+別ジョブ（`sync-whats-new-staging`）へ分けてある。`environment` 付きのジョブが
+`secrets.SERVICE_SECRET` を参照していないことは
+`automation/test/whats-new-ingest-auth-failure-test.sh` が検査する。
+
+リポジトリシークレット `ADMIN_SECRET` は**不要**になった。CI は参照していないので削除してよい。
+
+取り込みが 401/403 になった場合、Secrets Manager から `service_secret` を読めなかった場合、
+および **`SERVICE_SECRET` 未設定の 503** の場合、CI は警告では流さずエラーにする
+（staging への取り込みも同じ扱い）。
+
+503 はステータスだけでは判断できない。`api.shukatsu-ai.jp` は CloudFront を経由せず
+ALB 直結（`prod/main.tf` の `aws_route53_record.backend`）で、ALB も healthy target が
+ゼロなら自分で 503 を返すため、「停止中」と「設定不備」が同じ 503 に見える。
+設定不備の方は `EchoStaticSecretAuth` がレスポンス本文に
+`SERVICE_SECRET_NOT_CONFIGURED` を入れるので、CI はそれが有るときだけ失敗させる。
+**このコード文字列はワークフローが grep している。変えるなら両方そろえること**
+（`automation/test/whats-new-ingest-auth-failure-test.sh` が対応関係を固定している）。
 - `prod-uptime-scheduler`（本番起動時の回収）はジョブを失敗させ、Discord へ通知する
-- `deployment` の `sync-whats-new` はジョブを失敗表示にする（ジョブ自体が
+- `deployment` の `sync-whats-new`（本番）/ `sync-whats-new-staging`（staging）/
+  `sync-whats-new-develop`（develop→staging）はジョブを失敗表示にする（ジョブ自体が
   `continue-on-error` なのでデプロイは止まらない。通知は飛ばないので、
   デプロイ後にジョブの結果を見ること）
+- リポジトリシークレット `SERVICE_SECRET` が未登録のときは、staging が停止中でも
+  ステップ冒頭で落とす（「届かなかった」のではなく「鍵を持っていない」ため）
 
 「停止中で届かない」と区別するための設計なので、これらが出たら鍵の不一致か
 本番側の未設定を疑うこと。
@@ -109,7 +159,7 @@ Terraform は値を管理しないので、**Secrets Manager 側が空のまま�
 気づかないまま「起動はするが AI 機能が全部無効」になる。
 
 ```bash
-for id in soc-app/openai soc-app/email soc-app/oauth soc-app/admin; do
+for id in soc-app/openai soc-app/email soc-app/oauth soc-app/admin soc-app/service-secret; do
   echo "--- $id"
   aws secretsmanager get-secret-value --secret-id "$id" --query SecretString --output text \
     | python3 -c "import json,sys; print({k: ('設定済み' if v else '空') for k, v in json.load(sys.stdin).items()})"

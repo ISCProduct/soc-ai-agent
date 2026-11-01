@@ -36,13 +36,22 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 |---|---|---|
 | ユーザー | `X-User-Token` | 学生・教員。ログインで発行される短TTLのJWT |
 | 管理者 | `X-Admin-Email` + `X-Admin-Token` | 管理画面。管理者本人の認証 |
-| サービス間 | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない |
+| サービス間 | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない。照合値は `SERVICE_SECRET`（`ADMIN_SECRET` とは別値、#1158） |
 | 企業ポータル | Cookie 3本 | `company_user_id` / `company_user_token` / `company_refresh_token` |
 
 テナントを切り替える場合は `X-Tenant-Slug` を併せて送ります。
 
 実装は `Backend/internal/routes/echo_adapter.go` の `EchoUserAuth` /
 `EchoAdminAuth` / `EchoStaticSecretAuth` です。
+
+`EchoStaticSecretAuth`（サービス間）が照合するのは `SERVICE_SECRET` で、
+`EchoAdminAuth`（管理者トークンのHMAC鍵）が使う `ADMIN_SECRET` とは別の値です。
+CI は既知の値でサービス間エンドポイントを叩く必要があるため、兼用すると
+HMAC鍵の露出面が CI まで広がります（#1158）。`SERVICE_SECRET` が未設定の場合は
+503 で拒否し、`ADMIN_SECRET` へのフォールバックはしません。プレースホルダー
+（`change-me-service-secret`）のままの場合と `ADMIN_SECRET` と同値の場合も未設定扱いです。
+この 503 の本文には `"code": "SERVICE_SECRET_NOT_CONFIGURED"` が入ります。ALB が
+healthy target ゼロで返す 503 と区別するためで、CI がこのコードを見ています。
 
 ### ロールと職員（staff）
 
@@ -249,6 +258,43 @@ Referer に user_id が残るだけです。
 求人は同 JOIN の `LEFT JOIN ... IS NULL` で学生一覧から除外される（#1508）。
 
 ---
+
+## 適性検査（#1678 / #1675）
+
+学生に性格検査を配信する。名称は `assessment` で統一する（`aptitude` はチャット分析のフェーズ名で別物）。
+スキーマは `migrations/000048_assessments`（第1段）と `000049_assessment_school_templates`（第2段）。
+
+### 学生向け（`X-User-Token`）
+
+| メソッド | パス | 内容 |
+| --- | --- | --- |
+| GET | `/api/assessments` | 受けられる検査と自分の受検状況。運営標準 + 自分の学校の独自テンプレートだけ（他校のものは出ない） |
+| POST | `/api/assessments/:templateId/sessions` | 受検開始（受検中があればそれを返す）。他校の独自テンプレートは 404 |
+| GET | `/api/assessments/sessions/:sessionId` | 受検セッションと保存済みの回答 |
+| PUT | `/api/assessments/sessions/:sessionId/answers/:questionId` | 1問の回答保存（冪等） |
+| POST | `/api/assessments/sessions/:sessionId/submit` | 提出（二重提出は 409） |
+| GET | `/api/assessments/sessions/:sessionId/result` | 結果。`scope` が `standard` / `school` |
+
+一覧の各行に `scope`・`due_at`・`overdue` がある。期限を過ぎても受検・提出はできる（`overdue` は表示用）。
+
+学校独自テンプレートの可視範囲は `users.school_id` をそのまま信用しない。`school_id` はプロフィールの
+学校名から更新される（自己申告）ため、学校の `organization_id` が本人の `organization_id` と一致する
+ときだけ所属校として扱い、一致しなければ運営標準だけを見せる。受検セッションの各操作
+（取得・回答保存・提出・結果）も現在の所属校と照合し、学校が変わった後の旧学校の受検は 404。
+運営標準（`school_id` が NULL）は学校に紐づかないので影響を受けない。
+
+### 学校側（`X-Admin-Email` / `X-Admin-Token`、担当校スコープ。職員も担当校内で使える）
+
+| メソッド | パス | 内容 |
+| --- | --- | --- |
+| GET | `/api/admin/assessment-templates?school_id=` | 学校独自テンプレートの一覧 + 選択できる正典カテゴリ（`categories`） |
+| POST | `/api/admin/assessment-templates?school_id=` | 作成。1〜60問、カテゴリは正典10個のみ。入力不正は 400（メッセージはそのまま画面に出せる） |
+| GET | `/api/admin/assessment-templates/:id/students?school_id=` | 学生ごとの受検状況。他校のテンプレートは 404 |
+
+- `school_id` は必須（システム管理者でも。未指定は 400）。担当校外は 403。
+- 担当校・作成者・`is_standard` は認証情報から決める。リクエスト本文の値は使わない。
+- 受検状況は 期限超過 → 未受検 → 途中 → 完了 の順。**スコアの生値は返さず**、提出済みの学生の上位2カテゴリ名だけ返す（数字を並べると成績表として読まれ、学生が正直に答えなくなるため）。
+- 学生の対象は `school_id` と `organization_id` が一致する在籍中（退会済みを除く）の `student` ロール。
 
 ## 選考管理（#201）
 

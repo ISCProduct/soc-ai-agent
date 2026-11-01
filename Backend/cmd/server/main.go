@@ -657,6 +657,8 @@ func main() {
 	matchingService.SetAssessmentScoreReader(assessmentRepo)
 	assessmentService := assessmentsvc.NewService(assessmentRepo, matchingService, userWeightScoreRepo)
 	routes.SetupAssessmentRoutes(api, assessmentcontrollers.NewController(assessmentService), cfg.UserSecret, userDeletionService, organizationService)
+	// 適性検査 第2段（#1675）。学校独自テンプレートはマッチングに合流させない
+	routes.SetupAssessmentSchoolRoutes(api, assessmentcontrollers.NewSchoolController(assessmentsvc.NewSchoolService(assessmentRepo)), userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupESRoutes(api, esRewriteController, esReviewController)
@@ -705,12 +707,12 @@ func main() {
 	adminTrainingController := admincontrollers.NewAdminTrainingController(training.NewService(db))
 	// stats は件数しか返さない(個人情報を含まない)。運用から機械的に叩けるよう、
 	// whats-new/ingest と同じサービス間認証にする。管理者になりすます形を避ける。
-	api.GET("/admin/training/stats", adminTrainingController.Stats, routes.EchoStaticSecretAuth(cfg.AdminSecret))
+	api.GET("/admin/training/stats", adminTrainingController.Stats, routes.EchoStaticSecretAuth(cfg.ServiceSecret))
 	// export は候補者の発話と選考結果を返すので、管理者本人の認証を要求する。
 	adminEntry.GET("/training/export", adminTrainingController.Export)
 	// CI(GitHub Actions)からのマシン間呼び出しのため、ログインユーザー前提のEchoAdminAuthではなく
 	// 共有シークレットのみで認証する(#861)
-	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.AdminSecret))
+	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.ServiceSecret))
 
 	// 以下の定期実行は safego 経由で起動する。素の go だと 1 回の panic で
 	// Backend プロセスが丸ごと落ち、全ユーザーが 502 になる(#1405, #1446)。
