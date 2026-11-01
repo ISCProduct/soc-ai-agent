@@ -210,7 +210,13 @@ jobs:
           # 前回デプロイの auto-stop が起動キックの後に desired を 0 へ戻すことがある(#1693)。
           # 待機中も desired を見て、0 なら上げ直す（自己修復）。
           # desired=0 の直後でも終了処理が始まるまで EC2 は running のままなので、
-          # running だけで抜けるとこの後のデプロイ中に唯一の台が落とされる。desired を先に見る。
+          # desired が 0 の周回では state を見ない。running で抜けてしまうと、
+          # これから落とされる台へ配ってデプロイ中にアプリが消える。
+          #
+          # 抜けたかどうかは READY で持ち、STATE はログ用に留める。STATE だけで事後判定
+          # すると、タイムアウトまで desired が 0 のままでも「running だから成功」と
+          # 読んでしまい、周回中の desired チェックが無意味になる。
+          READY=no
           for i in $(seq 1 20); do
             DESIRED=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "${PROJECT_NAME}-app" \
               --query 'AutoScalingGroups[0].DesiredCapacity' --output text 2>/dev/null || echo "unknown")
@@ -218,16 +224,25 @@ jobs:
               echo "ASG desired が 0 に戻っていたため 1 に上げ直します"
               aws autoscaling update-auto-scaling-group --auto-scaling-group-name "${PROJECT_NAME}-app" \
                 --min-size 1 --desired-capacity 1
+              # この周回は state を読まない。前の周回の値を残すと、失敗メッセージが
+              # 数分前の状態を今の状態として見せてしまう。
+              STATE=unread
+            else
+              # 一時的なAPIエラーでステップごと落とさない（既定シェルは -e のため、
+              # ガードが無いと describe の失敗1回で自己修復の待機が打ち切られる）。
+              STATE=$(aws ec2 describe-instances \
+                --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
+                --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "unknown")
+              if [ "$STATE" == "running" ]; then
+                READY=yes
+                break
+              fi
             fi
-            STATE=$(aws ec2 describe-instances \
-              --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
-              --query 'Reservations[0].Instances[0].State.Name' --output text)
-            [ "$STATE" == "running" ] && [ "$DESIRED" != "0" ] && break
-            echo "EC2 state: $STATE desired: $DESIRED (waiting...)"
+            echo "EC2 state: ${STATE:-unknown} desired: $DESIRED (waiting...)"
             sleep 15
           done
-          if [ "$STATE" != "running" ]; then
-            echo "staging instance did not become running in time" >&2
+          if [ "$READY" != "yes" ]; then
+            echo "staging instance did not become running in time (state: ${STATE:-unknown}, desired: ${DESIRED:-unknown})" >&2
             exit 1
           fi
 
