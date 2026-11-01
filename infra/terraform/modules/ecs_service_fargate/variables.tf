@@ -86,6 +86,18 @@ variable "secret_arns" {
   default     = []
 }
 
+# count/for_each の判定に使う。secret_arns が compact() を通っていて、同一 apply 内で
+# 作成されるリソース(例: 新しい Secrets Manager シークレット)の ARN を含むと、
+# compact() は要素を落とすかどうかが決まらずリスト長ごと unknown になる。
+# Terraform は unknown な count を許さないので plan が Invalid count argument で止まる。
+# modules/ecs_service と同じ逃げ道を用意し、呼び出し側が静的に分かっている真偽値を渡せるようにする。
+# null のままなら従来どおり length(secret_arns) で判定する(既存の呼び出し元の挙動は変わらない)。
+variable "create_secrets_policy" {
+  type        = bool
+  description = "secret_arnsを読むIAMポリシーを作成するか(secret_arnsの中身が同一apply内で未確定でも安全に判定できるよう明示的に指定する。nullなら件数で判定)"
+  default     = null
+}
+
 variable "s3_bucket_arn" {
   type        = string
   description = "Optional S3 bucket ARN for task role"

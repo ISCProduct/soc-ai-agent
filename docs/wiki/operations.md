@@ -838,6 +838,13 @@ SSM パラメータの中身は `random_password.bff_internal_token` と同じ�
 `deployment.yml` は **running のインスタンス全台**へ SSH するので、ASG が複数台へ
 増えていても配り漏れは出ない。
 
+同じ経路を `SERVICE_SECRET`（CI・運用からのサービス間呼び出し用。#1158）にも使う。
+出どころは `var.service_secret_plain` で、新規インスタンスは user_data、稼働中インスタンスは
+SSM `/<project>/service-secret` から受け取る。届いていないと staging への更新情報の
+取り込みが 503 のまま回復しない（`X-Admin-Secret` が照合するのは `ADMIN_SECRET` ではなく
+`SERVICE_SECRET`）。SSM 経由で配るシークレットを増やしたときの継ぎ足しの足し忘れは
+`automation/test/staging-env-topup-test.sh` が検出する。
+
 デプロイを待たずに確認するなら。**トークンの値そのものは表示しない**
 （端末のスクロールバック・セッション録画・貼り付けたログに残り、拾った者は
 公開 backend ALB へ任意の `X-Client-IP` を送って送信元IPを詐称できる）。

@@ -18,10 +18,15 @@ type Config struct {
 	GBizInfoBaseURL   string
 	GBizInfoToken     string
 	AdminSecret       string
+	ServiceSecret     string
 	UserSecret        string
 	CompanyUserSecret string
 	OAuthStateSecret  string
 }
+
+// serviceSecretPlaceholder は .env.example / docs の例に入っている値。
+// 公開されているため、これが設定されている状態は未設定と同じ扱いにする(#1158)。
+const serviceSecretPlaceholder = "change-me-service-secret"
 
 func LoadConfig() (*Config, error) {
 	env := os.Getenv("APP_ENV")
@@ -35,6 +40,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	adminSecret := os.Getenv("ADMIN_SECRET")
+	serviceSecret := os.Getenv("SERVICE_SECRET")
 	userSecret := os.Getenv("USER_SECRET")
 	companyUserSecret := os.Getenv("COMPANY_USER_SECRET")
 	oauthStateSecret := os.Getenv("OAUTH_STATE_SECRET")
@@ -73,6 +79,28 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
+	// SERVICE_SECRET は「CIが既知の値で叩くための静的共有シークレット」で、
+	// ADMIN_SECRET(管理者/職員トークンのHMAC鍵)とは別の値でなければ分離した意味が無い(#1158)。
+	// 次のどちらかなら未設定として扱い、EchoStaticSecretAuth に503で fail-close させる。
+	//   - .env.example のプレースホルダーのまま: 公開されている値なので、そのまま本番へ出ると
+	//     /api/admin/whats-new/ingest と /api/admin/training/stats を誰でも叩ける
+	//   - ADMIN_SECRET と同値: 兼用へ戻っており、HMAC鍵の露出面がCIまで広がる
+	// 本番の必須チェック(log.Fatalf)には入れない。Terraform apply より先に新しいイメージが
+	// デプロイされた時点で本番が起動不能になる方が影響が大きい(COMPANY_USER_SECRET の
+	// 追加漏れで実際に起きた)。未設定でも落ちるのはサービス間呼び出しだけで、取りこぼしは
+	// 次回の取り込みで回収される。ADMIN_SECRET へのフォールバックはしない。
+	if serviceSecret == serviceSecretPlaceholder {
+		log.Println("WARNING: SERVICE_SECRET が .env.example のプレースホルダーのままです。未設定として扱います。")
+		serviceSecret = ""
+	}
+	if serviceSecret != "" && serviceSecret == adminSecret {
+		log.Println("WARNING: SERVICE_SECRET が ADMIN_SECRET と同値です。CIが知る共有シークレットと管理者トークンのHMAC鍵は別値にしてください。未設定として扱います。")
+		serviceSecret = ""
+	}
+	if serviceSecret == "" {
+		log.Println("WARNING: SERVICE_SECRET が未設定です。CI・運用からのサービス間呼び出し(X-Admin-Secret)は503で拒否されます。")
+	}
+
 	cfg := &Config{
 		DBUser:            os.Getenv("DB_USER"),
 		DBPass:            os.Getenv("DB_PASSWORD"),
@@ -83,6 +111,7 @@ func LoadConfig() (*Config, error) {
 		GBizInfoBaseURL:   get("GBIZINFO_BASE_URL", ""),
 		GBizInfoToken:     getFirst("GBIZINFO_API_KEY", "GBIZINFO_API_TOKEN"),
 		AdminSecret:       adminSecret,
+		ServiceSecret:     serviceSecret,
 		UserSecret:        userSecret,
 		CompanyUserSecret: companyUserSecret,
 		OAuthStateSecret:  oauthStateSecret,
