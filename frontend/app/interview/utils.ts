@@ -48,22 +48,6 @@ export function mergeResolvedCompany(
 }
 
 /**
- * 面接アバターの性別を交互に切り替える。
- * localStorage のカウンタを進め、偶数目は female / 奇数目は male。
- */
-export function getNextAvatarGender(): 'male' | 'female' {
-  try {
-    const key = 'interview_avatar_index'
-    const current = Number(localStorage.getItem(key) || '0')
-    const next = current + 1
-    localStorage.setItem(key, String(next))
-    return next % 2 === 0 ? 'female' : 'male'
-  } catch {
-    return 'male'
-  }
-}
-
-/**
  * start-turn / turn に渡す企業情報テキストを組み立てる。
  */
 export function buildCompanyInfo(company: InterviewCompany | null | undefined): string {
