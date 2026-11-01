@@ -135,6 +135,11 @@ jobs:
       - name: 本番 uptime 判定のテスト
         run: ./automation/test/prod-uptime-decision-test.sh
 
+      # ブランチ作成→処理中、PR オープン→PR確認待ちの Backlog 同期。
+      # 後退させない・push で戻さない、が崩れるとレビュー待ちの課題が処理中へ戻る。
+      - name: PR → Backlog ステータス同期の検査
+        run: python3 automation/test/pr-to-backlog-status-test.py
+
       # 本番反映済み issue の解決ロジック。
       # 誤検出すると無関係な issue を閉じ、取りこぼすと開いたまま溜まる。
       - name: デプロイ済み issue 解決の自己チェック
@@ -147,6 +152,12 @@ jobs:
       - name: 本番デプロイのRDSガード検査
         run: ./automation/test/prod-deploy-db-guard-test.sh
 
+      # デプロイ後に本番を desired=0 へ戻す判定。失効済みの override を
+      # 「起動指示」と読むと、停止日のデプロイが本番を起動したまま終わり
+      # 次の毎時5分まで Fargate と RDS が課金される（2026-10-31 に発生）。
+      - name: 本番デプロイ後の停止判定のテスト
+        run: ./automation/test/prod-deploy-scale-down-test.sh
+
       # サーキットブレーカーの戻し先イメージがECRから消えていると、起動不能なタスク定義を
       # 指したまま残る（#1518）。停止日は desired=0 なので次の稼働日まで気づけない。
       - name: タスク定義イメージ存在検査のテスト
@@ -157,6 +168,28 @@ jobs:
       # 本番は SHA タグしか push しないため稼働中イメージが巻き戻る/存在せず落ちる。
       - name: ECS update-service のリビジョン指定検査
         run: ./automation/test/ecs-update-service-revision-test.sh
+
+      # SSM 経由で全台へ配る staging のシークレットが、稼働中インスタンスにも届くこと。
+      # ASG は version=$Latest でも既存インスタンスを置換しないため、user_data への
+      # 追記だけでは稼働中の .env に反映されず「新規インスタンスだけ動く」状態になる。
+      - name: staging の .env 継ぎ足し検査
+        run: ./automation/test/staging-env-topup-test.sh
+
+      # SERVICE_SECRET の例示値が「弾かれる値」と一致していること。
+      # example をコピーしたまま apply すると、リポジトリを読める第三者が
+      # サービス間エンドポイントを叩ける状態になる。
+      - name: SERVICE_SECRET のプレースホルダー整合検査
+        run: ./automation/test/service-secret-placeholder-test.sh
+
+      # 更新情報の取り込みで「鍵が違う/読めない」が warning のまま緑で終わらないこと。
+      # ジョブは continue-on-error なので、昇格させないと永久に反映されないまま気づけない。
+      - name: 更新情報の取り込みの認証失敗検査
+        run: ./automation/test/whats-new-ingest-auth-failure-test.sh
+
+      # 同一 apply 内で作るシークレットの ARN を count の判定に使っていないこと。
+      # compact() 越しに unknown が混ざると plan が Invalid count argument で止まる。
+      - name: ECSシークレットポリシーのcount判定検査
+        run: ./automation/test/ecs-secrets-policy-count-test.sh
 
       - name: Dependabot 互換性の検査
         run: ./automation/test/dependabot-workflow-test.sh
@@ -174,6 +207,11 @@ jobs:
       # ステージングの起動/停止判定。間違えると開発中に環境が理由不明で落ちる。
       - name: ステージング uptime 判定のテスト
         run: ./automation/test/staging-uptime-decision-test.sh
+
+      # staging 起動待ちの判定。前回の auto-stop と重なると desired が 0 に戻され、
+      # state だけを見て抜けると「これから落とされる台」へデプロイする（#1693）。
+      - name: ステージング起動待ち判定のテスト
+        run: ./automation/test/staging-infra-wait-test.sh
 
       # Discordコマンド登録の失敗理由が表示されること。
       # 以前は curl -sf で握り潰しており、登録できない原因が追えなかった。
@@ -205,6 +243,12 @@ jobs:
       # 同じ穴が4イメージに残っていた（#1477）。
       - name: Dockerfile の非root実行の検査
         run: ./automation/test/dockerfile-nonroot-test.sh
+
+      # 静的エラーページの文言と OGP。terraform が file() で読んで S3 へ配るので、
+      # ここが崩れると本番の停止中案内がそのまま崩れる。検査自体は前からあったが
+      # どこからも呼ばれておらず、文言を変えても誰も気づけなかった。
+      - name: 静的エラーページの検査
+        run: ./infra/scripts/verify-error-pages.sh
 
       - name: ワークフロー埋め込み Python の構文チェック
         run: |
@@ -277,6 +321,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # eslint はこれまでCIのどのジョブでも実行していなかった。
+      # CLAUDE.md は「PR時: Go/FEのLint & Test」と書いているが実態が伴っておらず、
+      # eslint プラグインの版上げPRを「CI緑だから」で通す判断ができなかった。
+      # 既存ジョブへステップとして足す（別ジョブにすると npm ci がもう一度走る）。
+      - name: Run lint
+        run: npm run lint
 
       - name: Run unit tests
         run: npm test -- --no-coverage

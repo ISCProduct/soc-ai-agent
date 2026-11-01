@@ -1,4 +1,4 @@
-import type { ChoiceOption } from './types'
+import type { ChoiceOption, Message } from './types'
 
 export const makeMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
@@ -282,4 +282,49 @@ export function messageAccessibleLabel(role: 'user' | 'assistant', at: Date): st
   if (Number.isNaN(at.getTime())) return who
   const time = `${at.getHours()}時${String(at.getMinutes()).padStart(2, '0')}分`
   return `${who}、${time}`
+}
+
+/**
+ * 履歴1件の最小形。lib/api の ChatHistory から表示に使う分だけ取る。
+ * utils を API 型に結びつけないため構造で受ける。
+ */
+type ChatHistoryEntry = {
+  id: number | string
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+}
+
+/**
+ * API の履歴を表示用メッセージへ移す。
+ *
+ * 0件のときは空配列を返し、挨拶は入れない。履歴の有無で
+ * Loading と初回表示を切り替えるのは呼び出し側の責務。
+ */
+export function historyToMessages(history: ChatHistoryEntry[] | null | undefined): Message[] {
+  if (!history || history.length === 0) return []
+  return history.map((msg) => ({
+    id: String(msg.id),
+    role: msg.role,
+    content: msg.content,
+    timestamp: new Date(msg.created_at),
+  }))
+}
+
+/**
+ * 分析完了の案内を見分ける目印。
+ *
+ * 履歴の最後がこれなら、復元した時点で完了扱いにする。
+ * 文字列一致で見るのは、履歴APIが完了フラグを返さないため。
+ */
+export const HISTORY_COMPLETION_MARKERS = [
+  '分析が完了しました',
+  '全てのフェーズが完了',
+  '最適な企業をマッチング',
+] as const
+
+/** 分析完了の案内か */
+export function isHistoryCompletionMessage(content: string | undefined | null): boolean {
+  if (!content) return false
+  return HISTORY_COMPLETION_MARKERS.some((marker) => content.includes(marker))
 }

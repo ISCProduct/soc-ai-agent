@@ -221,13 +221,24 @@ func Diff(prev, cur *Summary) (regs []Regression, warnings []string) {
 		regs = append(regs, Regression{Metric: "レイテンシ(p95)", Prev: float64(prev.LatencyP95MS), Cur: float64(cur.LatencyP95MS),
 			Reason: fmt.Sprintf("%.2f倍に増えた", float64(cur.LatencyP95MS)/float64(prev.LatencyP95MS))})
 	}
-	if prev.CostPerCallUSD > 0 {
+	// 前回が $0 でも絶対増は判定できる。ゲートを比率から絶対増に変えた時点で
+	// 「前回 > 0」の前提は要らなくなったが、比率時代のガードが残っていて、
+	// ローカルモデルや無料経路の $0 と比べると月 +$500 でも緑で通っていた。
+	// これはこのゲートが見逃してはいけない増加そのものである（#1598）。
+	if !costComparable(prev, cur) {
+		warnings = append(warnings, "コストは比較できない（前回は1件も計測できておらず、$0 は「無料だった」ではなく「測れていない」）")
+	} else {
 		perCall := cur.CostPerCallUSD - prev.CostPerCallUSD
 		monthly := perCall * assumedMonthlyCalls
 		if monthly >= costWorseMonthlyUSD-eps {
+			// 前回が $0 だと比率は定義できない。+Inf倍と出すより理由から落とす。
+			ratio := ""
+			if prev.CostPerCallUSD > 0 {
+				ratio = fmt.Sprintf("%.2f倍・", cur.CostPerCallUSD/prev.CostPerCallUSD)
+			}
 			regs = append(regs, Regression{Metric: "コスト(1件)", Prev: prev.CostPerCallUSD, Cur: cur.CostPerCallUSD,
-				Reason: fmt.Sprintf("%.2f倍・1件 %+.5f$・月%d件で %+.2f$ が閾値 %.2f$ 以上",
-					cur.CostPerCallUSD/prev.CostPerCallUSD, perCall, assumedMonthlyCalls, monthly, costWorseMonthlyUSD)})
+				Reason: fmt.Sprintf("%s1件 %+.5f$・月%d件で %+.2f$ が閾値 %.2f$ 以上",
+					ratio, perCall, assumedMonthlyCalls, monthly, costWorseMonthlyUSD)})
 		}
 	}
 	return regs, warnings
@@ -240,6 +251,21 @@ func Diff(prev, cur *Summary) (regs []Regression, warnings []string) {
 // 必ず劣化を誤検知する。未計測が片側にでもあれば比較しない。
 func lengthComparable(prev, cur *Summary) bool {
 	return prev.LengthMetricsMeasured && cur.LengthMetricsMeasured
+}
+
+// costComparable は前回のコストを比較に使えるかを返す。
+//
+// 1件も計測できていない実行（#1634）の $0 は「無料だった」ではなく
+// 「測れていない」。そのまま比べると今回のコスト全額が増加として出て、
+// 設定の問題を費用の劣化と読み違える。
+//
+// 確かめるのは前回が $0 のときだけでよい。$0 より大きければ計測できているし、
+// 計測できた実行の $0（無料経路・ローカルモデル）は比較に使える。
+// 今回も $0 なら増加のしようが無いので、警告を出さず比較できるものとして扱う。
+// コストを記録していない古い結果JSONどうしを並べたときに、増えてもいないのに
+// 毎回「比較できない」と出るのを避ける。
+func costComparable(prev, cur *Summary) bool {
+	return prev.CostPerCallUSD > 0 || prev.MeasuredRuns > 0 || cur.CostPerCallUSD == 0
 }
 
 func absDiff(a, b float64) float64 {
@@ -277,10 +303,15 @@ func PrintDiff(w io.Writer, prev, cur *Summary) bool {
 	}
 	row("再現性(平均σ)", prev.MeanScoreStdDev, cur.MeanScoreStdDev, false)
 	fmt.Fprintf(w, "%-18s %10d %10d %+10d\n", "p95(ms)", prev.LatencyP95MS, cur.LatencyP95MS, cur.LatencyP95MS-prev.LatencyP95MS)
-	fmt.Fprintf(w, "%-18s %10.5f %10.5f %+10.5f\n", "コスト/件($)", prev.CostPerCallUSD, cur.CostPerCallUSD, cur.CostPerCallUSD-prev.CostPerCallUSD)
-	fmt.Fprintf(w, "%-18s %10.2f %10.2f %+10.2f\n", fmt.Sprintf("月%d件換算($)", assumedMonthlyCalls),
-		prev.CostPerCallUSD*assumedMonthlyCalls, cur.CostPerCallUSD*assumedMonthlyCalls,
-		(cur.CostPerCallUSD-prev.CostPerCallUSD)*assumedMonthlyCalls)
+	// 前回が未計測のときは行自体を出さない。交絡（#1593）と同じ理由で、
+	// 「0.00 → 500.00 +500.00」と並べながら「劣化は検知されませんでした」と
+	// 続く表は、警告を読み飛ばすと増加を見逃したようにも、無視したようにも読める。
+	if costComparable(prev, cur) {
+		fmt.Fprintf(w, "%-18s %10.5f %10.5f %+10.5f\n", "コスト/件($)", prev.CostPerCallUSD, cur.CostPerCallUSD, cur.CostPerCallUSD-prev.CostPerCallUSD)
+		fmt.Fprintf(w, "%-18s %10.2f %10.2f %+10.2f\n", fmt.Sprintf("月%d件換算($)", assumedMonthlyCalls),
+			prev.CostPerCallUSD*assumedMonthlyCalls, cur.CostPerCallUSD*assumedMonthlyCalls,
+			(cur.CostPerCallUSD-prev.CostPerCallUSD)*assumedMonthlyCalls)
+	}
 
 	if len(regs) == 0 {
 		fmt.Fprintln(w, "\n劣化は検知されませんでした")
@@ -288,7 +319,10 @@ func PrintDiff(w io.Writer, prev, cur *Summary) bool {
 	}
 	fmt.Fprintln(w, "\n劣化を検知しました:")
 	for _, r := range regs {
-		fmt.Fprintf(w, "  %s: %.3f → %.3f（%s）\n", r.Metric, r.Prev, r.Cur, r.Reason)
+		// %.3f だと 1件 $0.00062 → $0.00088 が「0.001 → 0.001」になり、
+		// なぜ劣化と判定したかが読めない。%g は有効数字で出すので、
+		// サブセントのコストも ms 単位のレイテンシも同じ書式で扱える（#1598）。
+		fmt.Fprintf(w, "  %s: %.5g → %.5g（%s）\n", r.Metric, r.Prev, r.Cur, r.Reason)
 	}
 	return true
 }

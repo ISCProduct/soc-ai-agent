@@ -56,6 +56,10 @@ SERVER_PORT=8080
 ADMIN_SECRET=change-me-admin-secret
 USER_SECRET=change-me-user-secret
 
+# CI・運用からのサービス間呼び出し（X-Admin-Secret）用の共有シークレット
+# ADMIN_SECRET とは別値にする（#1158）。未設定なら該当APIは503になる
+SERVICE_SECRET=change-me-service-secret
+
 # OpenAI API キー（必須）
 OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 OPENAI_MODEL=gpt-4o-mini
