@@ -283,6 +283,25 @@ Referer に user_id が残るだけです。
 （取得・回答保存・提出・結果）も現在の所属校と照合し、学校が変わった後の旧学校の受検は 404。
 運営標準（`school_id` が NULL）は学校に紐づかないので影響を受けない。
 
+### 能力検査（学生向け、`X-User-Token`）
+
+性格検査とはパスを分ける（SOCAIAGENT-433）。能力検査の点数は `user_weight_scores` に入らず、マッチングには使わない。
+
+| メソッド | パス | 内容 |
+| --- | --- | --- |
+| GET | `/api/ability-assessments` | 受けられる能力検査と自分の受検状況。受検中のまま制限時間を過ぎたものは `status: expired` |
+| POST | `/api/ability-assessments/:templateId/sessions` | 受検開始（受検中があればそれを返す）。制限時間を過ぎた受検中は 410 |
+| GET | `/api/ability-assessments/sessions/:sessionId` | 問題と保存済みの回答。**正解は含まない** |
+| PUT | `/api/ability-assessments/sessions/:sessionId/answers/:questionId` | 1問の回答保存（冪等）。本文は `{"choice": 0始まりの添字}` |
+| POST | `/api/ability-assessments/sessions/:sessionId/submit` | 提出（二重提出は 409） |
+| GET | `/api/ability-assessments/sessions/:sessionId/result` | section 別の正答数と出題数 |
+
+- 受検中のレスポンスに `correct_choice` は出さない。採点はサーバ側のみ。
+- 制限時間はサーバが決める（開始時に `deadline_at` を凍結）。超過後の取得・回答・再開は **410**。
+  404（無い）・409（提出済み）と区別して返す。
+- **提出は締め切り後も 200 で通る。** 締め切り時点の回答で採点する。
+- 未回答は誤答扱いだが出題数には数える。
+
 ### 学校側（`X-Admin-Email` / `X-Admin-Token`、担当校スコープ。職員も担当校内で使える）
 
 | メソッド | パス | 内容 |
