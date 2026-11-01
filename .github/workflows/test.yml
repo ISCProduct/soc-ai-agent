@@ -169,6 +169,28 @@ jobs:
       - name: ECS update-service のリビジョン指定検査
         run: ./automation/test/ecs-update-service-revision-test.sh
 
+      # SSM 経由で全台へ配る staging のシークレットが、稼働中インスタンスにも届くこと。
+      # ASG は version=$Latest でも既存インスタンスを置換しないため、user_data への
+      # 追記だけでは稼働中の .env に反映されず「新規インスタンスだけ動く」状態になる。
+      - name: staging の .env 継ぎ足し検査
+        run: ./automation/test/staging-env-topup-test.sh
+
+      # SERVICE_SECRET の例示値が「弾かれる値」と一致していること。
+      # example をコピーしたまま apply すると、リポジトリを読める第三者が
+      # サービス間エンドポイントを叩ける状態になる。
+      - name: SERVICE_SECRET のプレースホルダー整合検査
+        run: ./automation/test/service-secret-placeholder-test.sh
+
+      # 更新情報の取り込みで「鍵が違う/読めない」が warning のまま緑で終わらないこと。
+      # ジョブは continue-on-error なので、昇格させないと永久に反映されないまま気づけない。
+      - name: 更新情報の取り込みの認証失敗検査
+        run: ./automation/test/whats-new-ingest-auth-failure-test.sh
+
+      # 同一 apply 内で作るシークレットの ARN を count の判定に使っていないこと。
+      # compact() 越しに unknown が混ざると plan が Invalid count argument で止まる。
+      - name: ECSシークレットポリシーのcount判定検査
+        run: ./automation/test/ecs-secrets-policy-count-test.sh
+
       - name: Dependabot 互換性の検査
         run: ./automation/test/dependabot-workflow-test.sh
 
@@ -185,6 +207,11 @@ jobs:
       # ステージングの起動/停止判定。間違えると開発中に環境が理由不明で落ちる。
       - name: ステージング uptime 判定のテスト
         run: ./automation/test/staging-uptime-decision-test.sh
+
+      # staging 起動待ちの判定。前回の auto-stop と重なると desired が 0 に戻され、
+      # state だけを見て抜けると「これから落とされる台」へデプロイする（#1693）。
+      - name: ステージング起動待ち判定のテスト
+        run: ./automation/test/staging-infra-wait-test.sh
 
       # Discordコマンド登録の失敗理由が表示されること。
       # 以前は curl -sf で握り潰しており、登録できない原因が追えなかった。
@@ -216,6 +243,12 @@ jobs:
       # 同じ穴が4イメージに残っていた（#1477）。
       - name: Dockerfile の非root実行の検査
         run: ./automation/test/dockerfile-nonroot-test.sh
+
+      # 静的エラーページの文言と OGP。terraform が file() で読んで S3 へ配るので、
+      # ここが崩れると本番の停止中案内がそのまま崩れる。検査自体は前からあったが
+      # どこからも呼ばれておらず、文言を変えても誰も気づけなかった。
+      - name: 静的エラーページの検査
+        run: ./infra/scripts/verify-error-pages.sh
 
       - name: ワークフロー埋め込み Python の構文チェック
         run: |
