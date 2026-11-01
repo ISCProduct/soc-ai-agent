@@ -210,7 +210,13 @@ jobs:
           # 前回デプロイの auto-stop が起動キックの後に desired を 0 へ戻すことがある(#1693)。
           # 待機中も desired を見て、0 なら上げ直す（自己修復）。
           # desired=0 の直後でも終了処理が始まるまで EC2 は running のままなので、
-          # running だけで抜けるとこの後のデプロイ中に唯一の台が落とされる。desired を先に見る。
+          # desired が 0 の周回では state を見ない。running で抜けてしまうと、
+          # これから落とされる台へ配ってデプロイ中にアプリが消える。
+          #
+          # 抜けたかどうかは READY で持ち、STATE はログ用に留める。STATE だけで事後判定
+          # すると、タイムアウトまで desired が 0 のままでも「running だから成功」と
+          # 読んでしまい、周回中の desired チェックが無意味になる。
+          READY=no
           for i in $(seq 1 20); do
             DESIRED=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "${PROJECT_NAME}-app" \
               --query 'AutoScalingGroups[0].DesiredCapacity' --output text 2>/dev/null || echo "unknown")
@@ -218,16 +224,25 @@ jobs:
               echo "ASG desired が 0 に戻っていたため 1 に上げ直します"
               aws autoscaling update-auto-scaling-group --auto-scaling-group-name "${PROJECT_NAME}-app" \
                 --min-size 1 --desired-capacity 1
+              # この周回は state を読まない。前の周回の値を残すと、失敗メッセージが
+              # 数分前の状態を今の状態として見せてしまう。
+              STATE=unread
+            else
+              # 一時的なAPIエラーでステップごと落とさない（既定シェルは -e のため、
+              # ガードが無いと describe の失敗1回で自己修復の待機が打ち切られる）。
+              STATE=$(aws ec2 describe-instances \
+                --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
+                --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "unknown")
+              if [ "$STATE" == "running" ]; then
+                READY=yes
+                break
+              fi
             fi
-            STATE=$(aws ec2 describe-instances \
-              --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
-              --query 'Reservations[0].Instances[0].State.Name' --output text)
-            [ "$STATE" == "running" ] && [ "$DESIRED" != "0" ] && break
-            echo "EC2 state: $STATE desired: $DESIRED (waiting...)"
+            echo "EC2 state: ${STATE:-unknown} desired: $DESIRED (waiting...)"
             sleep 15
           done
-          if [ "$STATE" != "running" ]; then
-            echo "staging instance did not become running in time" >&2
+          if [ "$READY" != "yes" ]; then
+            echo "staging instance did not become running in time (state: ${STATE:-unknown}, desired: ${DESIRED:-unknown})" >&2
             exit 1
           fi
 
@@ -335,20 +350,52 @@ jobs:
               # 検証に失敗して X-Client-IP が捨てられる（負荷試験でASGが3台まで増えると顕在化）。
               # terraform が作った SSM パラメータ(= user_data が新規インスタンスへ配るのと
               # 同じ値)を読み、既存の値があっても上書きして全台を揃える。
-              BFF_TOKEN=$(aws ssm get-parameter --region ${{ env.AWS_REGION }} --name /${{ env.PROJECT_NAME }}/bff-internal-token --query Parameter.Value --output text 2>/dev/null || true)
+              #
+              # 一時的な API エラーで取りこぼすと、次のデプロイまで古い値が残る。
+              # 数回だけ読み直す。恒久的な失敗(権限・パラメータ未作成)はリトライでは
+              # 直らないので、下の WARN へ落として .env は触らない(デプロイは落とさない)。
+              BFF_TOKEN=""
+              for _ in 1 2 3; do
+                BFF_TOKEN=$(aws ssm get-parameter --region ${{ env.AWS_REGION }} --name /${{ env.PROJECT_NAME }}/bff-internal-token --query Parameter.Value --output text 2>/dev/null || true)
+                if [ -n "$BFF_TOKEN" ] && [ "$BFF_TOKEN" != None ]; then break; fi
+                sleep 3
+              done
               if [ -n "$BFF_TOKEN" ] && [ "$BFF_TOKEN" != None ]; then
                 if [ -f .env ]; then
                   sed -i /^BFF_INTERNAL_TOKEN=/d .env
-                  echo BFF_INTERNAL_TOKEN=$BFF_TOKEN >> .env
+                  # 引用する。値に空白やタブが入ると単語分割され、echo が単一スペースへ
+                  # 詰め直すので .env の値が SSM の値と一致しなくなる。
+                  echo "BFF_INTERNAL_TOKEN=$BFF_TOKEN" >> .env
                 fi
               else
                 # 新規インスタンスは user_data が同じ値を既に書いているので .env は触らない。
                 # 黙って進むと不一致に気付けないため、理由をログへ残す。
                 echo "WARN: SSM /${{ env.PROJECT_NAME }}/bff-internal-token を読めませんでした（terraform apply 未実施の可能性）。.env は変更しません" >&2
               fi
+              # CIからのサービス間呼び出し用の共有シークレット(#1158)。BFF_INTERNAL_TOKEN と
+              # 同じ事情で、user_data への追記だけでは稼働中インスタンスに届かない
+              # （ASG は version=$Latest でも既存インスタンスを置換しない）。
+              # 届かないと staging への更新情報の取り込みが 503 のまま回復しない。
+              # 一時的な API エラーで取りこぼすと、次のデプロイまで古い値が残り、
+              # staging への取り込みが 401/403 のままになる。数回だけ読み直す。
+              SERVICE_SECRET_VALUE=""
+              for _ in 1 2 3; do
+                SERVICE_SECRET_VALUE=$(aws ssm get-parameter --region ${{ env.AWS_REGION }} --name /${{ env.PROJECT_NAME }}/service-secret --query Parameter.Value --output text 2>/dev/null || true)
+                if [ -n "$SERVICE_SECRET_VALUE" ] && [ "$SERVICE_SECRET_VALUE" != None ]; then break; fi
+                sleep 3
+              done
+              if [ -n "$SERVICE_SECRET_VALUE" ] && [ "$SERVICE_SECRET_VALUE" != None ]; then
+                if [ -f .env ]; then
+                  sed -i /^SERVICE_SECRET=/d .env
+                  echo "SERVICE_SECRET=$SERVICE_SECRET_VALUE" >> .env
+                fi
+              else
+                # 新規インスタンスは user_data が同じ値を既に書いているので .env は触らない。
+                echo "WARN: SSM /${{ env.PROJECT_NAME }}/service-secret を読めませんでした（terraform apply 未実施の可能性）。.env は変更しません" >&2
+              fi
               # staging は常に ALB -> edge nginx -> frontend の2段(terraform と同値)
               if [ -f .env ] && ! grep -q ^TRUSTED_PROXY_HOPS= .env; then
-                echo TRUSTED_PROXY_HOPS=2 >> .env
+                echo "TRUSTED_PROXY_HOPS=2" >> .env
               fi
               df -h /
               # 稼働中イメージは prune できない。先に down してから空ける。
@@ -1166,14 +1213,18 @@ jobs:
   # 本番(Fargate)は展示会時のみ起動(desired_countは変更しない)のため、
   # デプロイ直後に到達できない場合がある。pr_numberでべき等なので、
   # 失敗しても後続の実行(展示会起動時など)で取りこぼしなく再取り込みされる。
-  # stagingにも同じmain由来の内容を反映し、本番が停止中でもstagingで確認できるようにする。
+  #
+  # staging への取り込みは sync-whats-new-staging へ分けてある。こちらは
+  # environment: production を宣言しており、GitHub では environment secret が
+  # 同名のリポジトリシークレットを上書きするため、将来 production 環境に
+  # SERVICE_SECRET が登録されると staging へ本番の値を送って黙って止まる(#1158)。
   sync-whats-new:
     needs: deploy-production
     if: github.ref_name == 'main' && always() && needs.deploy-production.result == 'success'
-    name: Sync whats-new from merged PRs
+    name: Sync whats-new from merged PRs (production)
     runs-on: ubuntu-latest
     continue-on-error: true
-    # 本番の admin_secret を Secrets Manager から読むため、production の認証情報を使う(#1158)。
+    # 本番の service_secret を Secrets Manager から読むため、production の認証情報を使う(#1158)。
     # リポジトリ既定の認証情報はECSクラスタ作成前の古い値で、本番リソースを引けない。
     environment: production
     steps:
@@ -1194,30 +1245,34 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
 
+      # このジョブは environment: production なので、リポジトリシークレットを
+      # 参照してはいけない(同名の environment secret に上書きされる)。
+      # 本番の鍵は Secrets Manager から読む。staging の鍵はこのジョブでは使わない。
       - name: Fetch recently merged PRs and ingest
         env:
           GH_TOKEN: ${{ github.token }}
           PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
-          # staging 側は引き続きリポジトリシークレットを使う。
-          # 本番と staging で別値にするのが #1158 の目的。
-          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
           PROD_API_BASE: https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }}
-          STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
         run: |
-          # 本番の admin_secret は Secrets Manager を正とする(#1158)。
-          # 読めない場合だけリポジトリシークレットへフォールバックする(移行期間の両対応)。
+          # 本番の service_secret は Secrets Manager(soc-app/service-secret)が正(#1158)。
+          # リポジトリシークレットへのフォールバックは持たない。本番の値は Terraform の
+          # random_password で自動生成されるので、GitHub 側に同じ値は存在し得ない。
           # 失敗理由(AccessDenied / ResourceNotFound / ExpiredToken)が分からないと
           # 警告を見ても何を直せばよいか判断できない。stderr は残す(値は stdout 側)。
           sm_err=$(mktemp)
-          PROD_ADMIN_SECRET=$(aws secretsmanager get-secret-value \
-            --secret-id "${PROJECT_NAME:-soc-app}/admin" --query SecretString --output text 2>"$sm_err" \
-            | python3 -c "import json,sys; print(json.load(sys.stdin).get('admin_secret',''))" 2>>"$sm_err" || true)
-          if [ -n "$PROD_ADMIN_SECRET" ]; then
-            echo "::add-mask::$PROD_ADMIN_SECRET"
+          PROD_SERVICE_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id "${PROJECT_NAME:-soc-app}/service-secret" --query SecretString --output text 2>"$sm_err" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('service_secret',''))" 2>>"$sm_err" || true)
+          lookup_failed=0
+          if [ -n "$PROD_SERVICE_SECRET" ]; then
+            echo "::add-mask::$PROD_SERVICE_SECRET"
           else
-            echo "::warning::Secrets Manager から admin_secret を読めませんでした。リポジトリシークレットで続行します(IAMに secretsmanager:GetSecretValue を確認してください)"
+            # 「停止中で届かない」と違い、IAM権限不足やシークレット未作成は放っておいても
+            # 直らない。回収経路(prod-uptime-scheduler)も同じ値を読むので、警告で流すと
+            # 誰も気づかないまま更新情報が永久に反映されない(#1290 と同じ症状)。
+            echo "::error::Secrets Manager から service_secret を読めませんでした。本番への取り込みができません(IAMに secretsmanager:GetSecretValue があるか、soc-app/service-secret が存在するかを確認してください)"
             sed 's/^/  aws: /' "$sm_err"
-            PROD_ADMIN_SECRET="$ADMIN_SECRET"
+            lookup_failed=1
           fi
           rm -f "$sm_err"
 
@@ -1239,40 +1294,127 @@ jobs:
           # 気づけない。実際にそれで、運用作業がユーザー向け更新情報に出たまま残った(#1290)。
           # 取りこぼしは prod-uptime-scheduler.yml が本番起動時に回収する。
           # 「停止中で届かない」と「鍵が違って拒否された」は対処が別物。
-          # 後者を warning で流すと、admin_secret のローテーション後に更新情報が
+          # 後者を warning で流すと、service_secret のローテーション後に更新情報が
           # 反映されないまま誰も気づかない(#1290 と同じ症状)。
           #
-          # 503 は拾わない。CloudFront が ALB の 500/502/503/504 をすべて 503 へ
-          # 差し替えるため(modules/cloudfront_app_proxy)、503 はほぼ「オリジンが
-          # 応答しない」を意味する。バックエンドの「ADMIN_SECRET 未設定」も 503 だが、
-          # ローリング更新中やタスク停止中に必ず踏むので、ここで落とすと
-          # 正常なデプロイが赤くなる(実際に本番デプロイで踏んだ)。
-          prod_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
+          # 503 は本文で切り分ける。api.* は CloudFront を経由せず ALB 直結
+          # (infra/terraform/environments/prod/main.tf の aws_route53_record.backend が
+          # module.alb.alb_dns_name を alias にしている。CloudFront が噛むのはフロント側だけ)。
+          # ただし ALB も healthy target がゼロなら自分で 503 を返すので、
+          # ステータスだけでは「停止中」と「SERVICE_SECRET 未設定」が区別できない。
+          # 後者は EchoStaticSecretAuth が本文に SERVICE_SECRET_NOT_CONFIGURED を入れるので
+          # (Backend/internal/routes/echo_adapter.go)、それが有るときだけ落とす。
+          # 一律で落とすと、ローリング更新中やタスク停止中の 503 で正常なデプロイが
+          # 赤くなる(実際に本番デプロイで踏んだ)。
+          #
+          # service_secret が読めなかった場合は叩かない。値が無いまま送ると必ず 403 になり、
+          # 「鍵の不一致」と「鍵が読めない」を区別できなくなる。上で error を出してあり、
+          # prod_rejected を立てたまま最後にジョブを落とす。
+          prod_rejected=$lookup_failed
+          if [ "$lookup_failed" = "0" ]; then
+            prod_resp=$(mktemp)
+            prod_code=$(curl -s -o "$prod_resp" -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
+              -H "Content-Type: application/json" \
+              -H "X-Admin-Secret: $PROD_SERVICE_SECRET" \
+              -d @"$payload" \
+              --max-time 60 || true)
+            case "$prod_code" in
+              2*) ;;
+              401|403)
+                echo "::error::本番への更新情報の取り込みが $prod_code で拒否されました。service_secret が本番の値と一致していません(SERVICE_SECRET の注入とローテーション後の CI 設定を確認してください)"
+                prod_rejected=1
+                ;;
+              503)
+                if grep -q SERVICE_SECRET_NOT_CONFIGURED "$prod_resp"; then
+                  echo "::error::本番の SERVICE_SECRET が未設定です(503)。terraform apply でタスク定義へ注入してからデプロイし直してください"
+                  prod_rejected=1
+                else
+                  echo "::warning::本番への更新情報の取り込みに失敗しました(HTTP 503 / 停止中・ローリング更新中の可能性)。本番起動時に回収されます。"
+                fi
+                ;;
+              *)
+                echo "::warning::本番への更新情報の取り込みに失敗しました(HTTP $prod_code / 停止中の可能性)。本番起動時に回収されます。"
+                ;;
+            esac
+            rm -f "$prod_resp"
+          fi
+
+          [ "$prod_rejected" = "0" ]
+
+  # main 由来の更新情報を staging にも反映し、本番が停止中でも staging で確認できるようにする。
+  #
+  # sync-whats-new から分けてあるのは、あちらが environment: production を宣言して
+  # いるため。GitHub では environment secret が同名のリポジトリシークレットを
+  # 上書きするので、同じジョブで staging 用の secrets.SERVICE_SECRET を読むと、
+  # production 環境に SERVICE_SECRET が登録された時点で staging へ本番の値を送って
+  # しまい、403 で黙って止まる(#1158)。「production 環境に登録しない」という運用
+  # ルールに頼るのではなく、ジョブの境界で踏めないようにする。
+  #
+  # 実行順は本番側と独立でよい。ingest は pr_number でべき等なので、どちらが先でも
+  # 結果は変わらない。それぞれのジョブが自分の失敗を自分で報告する。
+  sync-whats-new-staging:
+    needs: deploy-production
+    if: github.ref_name == 'main' && always() && needs.deploy-production.result == 'success'
+    name: Sync whats-new from merged PRs (staging)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      # collect_whats_new_sources.py と、それが読む resolve_deployed_issues.py を使う。
+      # squash マージのコミット題名から元PR番号を辿るため、履歴も要る。
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Fetch recently merged PRs and ingest into staging
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVICE_SECRET: ${{ secrets.SERVICE_SECRET }}
+          STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
+        run: |
+          # 未登録だと staging が停止中のとき警告だけで終わり、設定漏れに気づけない。
+          # 「届かなかった」のではなく「鍵を持っていない」ので、先に落とす。
+          if [ -z "$SERVICE_SECRET" ]; then
+            echo "::error::リポジトリシークレット SERVICE_SECRET が未登録です。staging の service_secret_plain と同じ値を登録してください(#1158)"
+            exit 1
+          fi
+
+          # 傘PRは要約対象にせず、中身の個別PRを送る(sync-whats-new と同じ理由)。
+          sources=$(python3 .github/scripts/collect_whats_new_sources.py)
+
+          # ペイロードは argv に乗せない。PR本文を含むと ARG_MAX を超える。
+          payload=$(mktemp)
+          printf '{"sources": %s}' "$sources" > "$payload"
+
+          # 「停止中で届かない」と「鍵が違う/未登録」は対処が別物。後者を warning で
+          # 流すと設定漏れに気づけない。staging の api も ALB 直結(edge nginx が噛むのは
+          # frontend だけ)なので、設定不備の503は本文で見分けられる。
+          stg_resp=$(mktemp)
+          stg_code=$(curl -s -o "$stg_resp" -w '%{http_code}' -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
-            -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
+            -H "X-Admin-Secret: $SERVICE_SECRET" \
             -d @"$payload" \
             --max-time 60 || true)
-          prod_rejected=0
-          case "$prod_code" in
+          stg_rejected=0
+          case "$stg_code" in
             2*) ;;
             401|403)
-              echo "::error::本番への更新情報の取り込みが $prod_code で拒否されました。admin_secret が本番の値と一致していません(ローテーション後の CI 設定を確認してください)"
-              prod_rejected=1
+              echo "::error::stagingへの更新情報の取り込みが $stg_code で拒否されました。リポジトリシークレット SERVICE_SECRET が staging の値と一致していません"
+              stg_rejected=1
+              ;;
+            503)
+              if grep -q SERVICE_SECRET_NOT_CONFIGURED "$stg_resp"; then
+                echo "::error::staging の SERVICE_SECRET が未設定です(503)。staging の terraform apply とデプロイ(.env の継ぎ足し)を確認してください"
+                stg_rejected=1
+              else
+                echo "::warning::stagingへの更新情報の取り込みに失敗しました(HTTP 503 / 停止中の可能性)。"
+              fi
               ;;
             *)
-              echo "::warning::本番への更新情報の取り込みに失敗しました(HTTP $prod_code / 停止中の可能性)。本番起動時に回収されます。"
+              echo "::warning::stagingへの更新情報の取り込みに失敗しました(HTTP $stg_code / 停止中の可能性)。"
               ;;
           esac
-
-          curl -sf -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
-            -H "Content-Type: application/json" \
-            -H "X-Admin-Secret: $ADMIN_SECRET" \
-            -d @"$payload" \
-            --max-time 60 \
-            || echo "::warning::stagingへの更新情報の取り込みに失敗しました(停止中の可能性)。"
-
-          # staging まで流し終えてから落とす。先に exit すると staging の取り込みも飛ぶ。
-          [ "$prod_rejected" = "0" ]
+          rm -f "$stg_resp"
+          [ "$stg_rejected" = "0" ]
 
   # 本番へ反映された issue を閉じる。
   #
@@ -1419,14 +1561,26 @@ jobs:
           # ジョブを失敗させる。conclusion が空のときは API 障害のほか、run が実行中
           # のこともあり区別できない。実行中だった run がのちに失敗しても、このジョブ
           # では検知できない（警告の run を後から確認する）。
-          unreadable=()
+          # 1件ずつ起動して完了を待つと、20件で15分のタイムアウトを超える
+          # （2026-10-19・10-30・10-31 のデプロイが cancelled になった）。
+          # 先に全部起動してから、順に結果を待つ。同期ワークフロー同士は独立している。
+          run_ids=()
+          run_prs=()
           for pr in "${prs[@]}"; do
-            echo "Backlog同期を再実行します: PR #$pr"
+            echo "Backlog同期を起動します: PR #$pr"
             run_url="$(gh workflow run pr-to-backlog.yml \
               --repo "${{ github.repository }}" \
               --ref main \
               -f pr_number="$pr")"
-            run_id="${run_url##*/}"
+            run_ids+=("${run_url##*/}")
+            run_prs+=("$pr")
+          done
+
+          unreadable=()
+          for i in "${!run_ids[@]}"; do
+            run_id="${run_ids[$i]}"
+            pr="${run_prs[$i]}"
+            echo "Backlog同期の完了を待ちます: PR #$pr / run $run_id"
 
             watched=0
             for attempt in 1 2 3; do
@@ -1476,9 +1630,15 @@ jobs:
       - name: Fetch recently merged PRs (base develop) and ingest into staging
         env:
           GH_TOKEN: ${{ github.token }}
-          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          SERVICE_SECRET: ${{ secrets.SERVICE_SECRET }}
           STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
         run: |
+          # 未登録だと staging が停止中のとき警告だけで終わり、設定漏れに気づけない。
+          if [ -z "$SERVICE_SECRET" ]; then
+            echo "::error::リポジトリシークレット SERVICE_SECRET が未登録です。staging の service_secret_plain と同じ値を登録してください(#1158)"
+            exit 1
+          fi
+
           sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base develop --limit 20 \
             --json number,title,body,mergedAt \
             --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
@@ -1490,9 +1650,29 @@ jobs:
           payload=$(mktemp)
           printf '{"sources": %s}' "$sources" > "$payload"
 
-          curl -sf -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
+          # 「停止中で届かない」と「鍵が違う/未登録」は対処が別物。後者を握りつぶすと
+          # リポジトリシークレット SERVICE_SECRET の設定漏れに気づけない。
+          stg_resp=$(mktemp)
+          stg_code=$(curl -s -o "$stg_resp" -w '%{http_code}' -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
-            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            -H "X-Admin-Secret: $SERVICE_SECRET" \
             -d @"$payload" \
-            --max-time 60 \
-            || echo "stagingへの取り込みに失敗しました(停止中の可能性)。スキップします。"
+            --max-time 60 || true)
+          case "$stg_code" in
+            2*) ;;
+            401|403)
+              echo "::error::stagingへの更新情報の取り込みが $stg_code で拒否されました。リポジトリシークレット SERVICE_SECRET が staging の値と一致していません"
+              exit 1
+              ;;
+            503)
+              # ALB の 503(停止中)と区別する。設定不備は本文で名乗る。
+              if grep -q SERVICE_SECRET_NOT_CONFIGURED "$stg_resp"; then
+                echo "::error::staging の SERVICE_SECRET が未設定です(503)。staging の terraform apply とデプロイ(.env の継ぎ足し)を確認してください"
+                exit 1
+              fi
+              echo "::warning::stagingへの取り込みに失敗しました(HTTP 503 / 停止中の可能性)。スキップします。"
+              ;;
+            *)
+              echo "::warning::stagingへの取り込みに失敗しました(HTTP $stg_code / 停止中の可能性)。スキップします。"
+              ;;
+          esac
