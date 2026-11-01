@@ -231,6 +231,15 @@ variable "service_secret_plain" {
     condition     = !can(regex("[\r\n]", var.service_secret_plain))
     error_message = "service_secret_plain に改行を含めないでください。この値は .env の1行として書き込まれます(#1158)。"
   }
+
+  # Compose は .env の引用なしの値に含まれる $ を変数として展開する。未定義の名前は
+  # 空文字になるため、コンテナが受け取る値と CI が送る値がずれて 403 になる。
+  # 本番側は random_password(special = false)なので $ は生成されないが、
+  # staging の値は手入力なのでここが実質の防御になる。
+  validation {
+    condition     = !can(regex("[$]", var.service_secret_plain))
+    error_message = "service_secret_plain に $ を含めないでください。Compose が .env の値を展開し、CI の値と一致しなくなります(#1158)。"
+  }
 }
 
 # AI面接の音声認識モデル。既定はコード側と同じ gpt-transcribe。

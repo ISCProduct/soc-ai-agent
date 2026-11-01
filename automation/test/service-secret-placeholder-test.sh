@@ -92,6 +92,15 @@ else
   echo "ok   staging/variables.tf の validation が改行を弾いている"
 fi
 
+# $ を弾くこと。Compose が .env の引用なしの値を展開するので、含むと値がずれる。
+if ! strip_comments < "$TFVARIABLES" | grep -q 'regex("\[[$]\]", var.service_secret_plain)'; then
+  echo "FAIL staging/variables.tf の validation が \$ を含む値を弾いていない"
+  echo "     (Compose が .env の値を展開するので、コンテナが受け取る値とCIの値がずれる)"
+  fail=$((fail + 1))
+else
+  echo "ok   staging/variables.tf の validation が \$ を含む値を弾いている"
+fi
+
 if [ "$fail" -gt 0 ]; then
   echo "FAILED ($fail)"
   exit 1

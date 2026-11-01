@@ -108,6 +108,15 @@ unset NEW_SECRET
 CI は本番向けには Secrets Manager だけを見る（フォールバックは無い）ので、
 本番値を GitHub 側に置く理由は無い。
 
+**`SERVICE_SECRET` は repository secret として登録し、`production` 環境
+（Environment secrets）には登録しないこと。** GitHub では environment secret が
+同名の repository secret を上書きするため、`production` 環境に入れると
+staging 向けの取り込みが本番の値で送られて 403 になる。
+この罠を踏めないように、staging への取り込みは `environment` を宣言しない
+別ジョブ（`sync-whats-new-staging`）へ分けてある。`environment` 付きのジョブが
+`secrets.SERVICE_SECRET` を参照していないことは
+`automation/test/whats-new-ingest-auth-failure-test.sh` が検査する。
+
 リポジトリシークレット `ADMIN_SECRET` は**不要**になった。CI は参照していないので削除してよい。
 
 取り込みが 401/403 になった場合、Secrets Manager から `service_secret` を読めなかった場合、
@@ -122,9 +131,12 @@ ALB 直結（`prod/main.tf` の `aws_route53_record.backend`）で、ALB も hea
 **このコード文字列はワークフローが grep している。変えるなら両方そろえること**
 （`automation/test/whats-new-ingest-auth-failure-test.sh` が対応関係を固定している）。
 - `prod-uptime-scheduler`（本番起動時の回収）はジョブを失敗させ、Discord へ通知する
-- `deployment` の `sync-whats-new` はジョブを失敗表示にする（ジョブ自体が
+- `deployment` の `sync-whats-new`（本番）/ `sync-whats-new-staging`（staging）/
+  `sync-whats-new-develop`（develop→staging）はジョブを失敗表示にする（ジョブ自体が
   `continue-on-error` なのでデプロイは止まらない。通知は飛ばないので、
   デプロイ後にジョブの結果を見ること）
+- リポジトリシークレット `SERVICE_SECRET` が未登録のときは、staging が停止中でも
+  ステップ冒頭で落とす（「届かなかった」のではなく「鍵を持っていない」ため）
 
 「停止中で届かない」と区別するための設計なので、これらが出たら鍵の不一致か
 本番側の未設定を疑うこと。

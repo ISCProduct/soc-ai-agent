@@ -74,6 +74,13 @@ for res in $resources; do
     continue
   fi
 
+  # 一時的な API エラーで取りこぼすと、次のデプロイまで古い値が残る。読み直すこと。
+  # 読み取り行の直前が for ループであることを見る（恒久的な失敗は下の WARN へ落ちる）。
+  if ! grep -B3 -- "--name /\${{ env.PROJECT_NAME }}/$param" <<< "$SSH_BODY" | grep -qE "^[[:space:]]*for .* in "; then
+    echo "FAIL SSM /$param の読み取りに読み直しが無い（一時的なAPIエラーで古い値が残る）"
+    fail=$((fail + 1))
+  fi
+
   # 既存の値を消してから書き直すこと。append だけだと古い行が勝ち、全台が揃わない。
   if ! grep -q "/^${envvar}=/d" <<< "$SSH_BODY"; then
     echo "FAIL $envvar の継ぎ足しが既存行を削除していない（古い値が残り全台で揃わない）"

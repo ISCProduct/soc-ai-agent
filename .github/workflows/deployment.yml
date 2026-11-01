@@ -350,7 +350,16 @@ jobs:
               # 検証に失敗して X-Client-IP が捨てられる（負荷試験でASGが3台まで増えると顕在化）。
               # terraform が作った SSM パラメータ(= user_data が新規インスタンスへ配るのと
               # 同じ値)を読み、既存の値があっても上書きして全台を揃える。
-              BFF_TOKEN=$(aws ssm get-parameter --region ${{ env.AWS_REGION }} --name /${{ env.PROJECT_NAME }}/bff-internal-token --query Parameter.Value --output text 2>/dev/null || true)
+              #
+              # 一時的な API エラーで取りこぼすと、次のデプロイまで古い値が残る。
+              # 数回だけ読み直す。恒久的な失敗(権限・パラメータ未作成)はリトライでは
+              # 直らないので、下の WARN へ落として .env は触らない(デプロイは落とさない)。
+              BFF_TOKEN=""
+              for _ in 1 2 3; do
+                BFF_TOKEN=$(aws ssm get-parameter --region ${{ env.AWS_REGION }} --name /${{ env.PROJECT_NAME }}/bff-internal-token --query Parameter.Value --output text 2>/dev/null || true)
+                if [ -n "$BFF_TOKEN" ] && [ "$BFF_TOKEN" != None ]; then break; fi
+                sleep 3
+              done
               if [ -n "$BFF_TOKEN" ] && [ "$BFF_TOKEN" != None ]; then
                 if [ -f .env ]; then
                   sed -i /^BFF_INTERNAL_TOKEN=/d .env
@@ -367,7 +376,14 @@ jobs:
               # 同じ事情で、user_data への追記だけでは稼働中インスタンスに届かない
               # （ASG は version=$Latest でも既存インスタンスを置換しない）。
               # 届かないと staging への更新情報の取り込みが 503 のまま回復しない。
-              SERVICE_SECRET_VALUE=$(aws ssm get-parameter --region ${{ env.AWS_REGION }} --name /${{ env.PROJECT_NAME }}/service-secret --query Parameter.Value --output text 2>/dev/null || true)
+              # 一時的な API エラーで取りこぼすと、次のデプロイまで古い値が残り、
+              # staging への取り込みが 401/403 のままになる。数回だけ読み直す。
+              SERVICE_SECRET_VALUE=""
+              for _ in 1 2 3; do
+                SERVICE_SECRET_VALUE=$(aws ssm get-parameter --region ${{ env.AWS_REGION }} --name /${{ env.PROJECT_NAME }}/service-secret --query Parameter.Value --output text 2>/dev/null || true)
+                if [ -n "$SERVICE_SECRET_VALUE" ] && [ "$SERVICE_SECRET_VALUE" != None ]; then break; fi
+                sleep 3
+              done
               if [ -n "$SERVICE_SECRET_VALUE" ] && [ "$SERVICE_SECRET_VALUE" != None ]; then
                 if [ -f .env ]; then
                   sed -i /^SERVICE_SECRET=/d .env
@@ -1197,11 +1213,15 @@ jobs:
   # 本番(Fargate)は展示会時のみ起動(desired_countは変更しない)のため、
   # デプロイ直後に到達できない場合がある。pr_numberでべき等なので、
   # 失敗しても後続の実行(展示会起動時など)で取りこぼしなく再取り込みされる。
-  # stagingにも同じmain由来の内容を反映し、本番が停止中でもstagingで確認できるようにする。
+  #
+  # staging への取り込みは sync-whats-new-staging へ分けてある。こちらは
+  # environment: production を宣言しており、GitHub では environment secret が
+  # 同名のリポジトリシークレットを上書きするため、将来 production 環境に
+  # SERVICE_SECRET が登録されると staging へ本番の値を送って黙って止まる(#1158)。
   sync-whats-new:
     needs: deploy-production
     if: github.ref_name == 'main' && always() && needs.deploy-production.result == 'success'
-    name: Sync whats-new from merged PRs
+    name: Sync whats-new from merged PRs (production)
     runs-on: ubuntu-latest
     continue-on-error: true
     # 本番の service_secret を Secrets Manager から読むため、production の認証情報を使う(#1158)。
@@ -1225,16 +1245,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
 
+      # このジョブは environment: production なので、リポジトリシークレットを
+      # 参照してはいけない(同名の environment secret に上書きされる)。
+      # 本番の鍵は Secrets Manager から読む。staging の鍵はこのジョブでは使わない。
       - name: Fetch recently merged PRs and ingest
         env:
           GH_TOKEN: ${{ github.token }}
           PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
-          # staging 側はリポジトリシークレットを使う。本番と staging で別値にするのが #1158 の目的。
-          # ここで使うのは SERVICE_SECRET(サービス間呼び出し用)で、管理者トークンの
-          # HMAC鍵である ADMIN_SECRET はCIには渡さない。
-          SERVICE_SECRET: ${{ secrets.SERVICE_SECRET }}
           PROD_API_BASE: https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }}
-          STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
         run: |
           # 本番の service_secret は Secrets Manager(soc-app/service-secret)が正(#1158)。
           # リポジトリシークレットへのフォールバックは持たない。本番の値は Terraform の
@@ -1321,11 +1339,55 @@ jobs:
             rm -f "$prod_resp"
           fi
 
-          # staging も「停止中で届かない」と「鍵が違う/未登録」を分ける。送る鍵が
-          # ADMIN_SECRET から SERVICE_SECRET へ変わったので、リポジトリシークレット
-          # SERVICE_SECRET の未登録や値違いを「停止中かも」で流すと気づけない。
-          # staging の api も ALB 直結(edge nginx が噛むのは frontend だけ)なので、
-          # 本番と同じく本文で設定不備の503を見分けられる。
+          [ "$prod_rejected" = "0" ]
+
+  # main 由来の更新情報を staging にも反映し、本番が停止中でも staging で確認できるようにする。
+  #
+  # sync-whats-new から分けてあるのは、あちらが environment: production を宣言して
+  # いるため。GitHub では environment secret が同名のリポジトリシークレットを
+  # 上書きするので、同じジョブで staging 用の secrets.SERVICE_SECRET を読むと、
+  # production 環境に SERVICE_SECRET が登録された時点で staging へ本番の値を送って
+  # しまい、403 で黙って止まる(#1158)。「production 環境に登録しない」という運用
+  # ルールに頼るのではなく、ジョブの境界で踏めないようにする。
+  #
+  # 実行順は本番側と独立でよい。ingest は pr_number でべき等なので、どちらが先でも
+  # 結果は変わらない。それぞれのジョブが自分の失敗を自分で報告する。
+  sync-whats-new-staging:
+    needs: deploy-production
+    if: github.ref_name == 'main' && always() && needs.deploy-production.result == 'success'
+    name: Sync whats-new from merged PRs (staging)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      # collect_whats_new_sources.py と、それが読む resolve_deployed_issues.py を使う。
+      # squash マージのコミット題名から元PR番号を辿るため、履歴も要る。
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Fetch recently merged PRs and ingest into staging
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVICE_SECRET: ${{ secrets.SERVICE_SECRET }}
+          STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
+        run: |
+          # 未登録だと staging が停止中のとき警告だけで終わり、設定漏れに気づけない。
+          # 「届かなかった」のではなく「鍵を持っていない」ので、先に落とす。
+          if [ -z "$SERVICE_SECRET" ]; then
+            echo "::error::リポジトリシークレット SERVICE_SECRET が未登録です。staging の service_secret_plain と同じ値を登録してください(#1158)"
+            exit 1
+          fi
+
+          # 傘PRは要約対象にせず、中身の個別PRを送る(sync-whats-new と同じ理由)。
+          sources=$(python3 .github/scripts/collect_whats_new_sources.py)
+
+          # ペイロードは argv に乗せない。PR本文を含むと ARG_MAX を超える。
+          payload=$(mktemp)
+          printf '{"sources": %s}' "$sources" > "$payload"
+
+          # 「停止中で届かない」と「鍵が違う/未登録」は対処が別物。後者を warning で
+          # 流すと設定漏れに気づけない。staging の api も ALB 直結(edge nginx が噛むのは
+          # frontend だけ)なので、設定不備の503は本文で見分けられる。
           stg_resp=$(mktemp)
           stg_code=$(curl -s -o "$stg_resp" -w '%{http_code}' -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
@@ -1352,9 +1414,7 @@ jobs:
               ;;
           esac
           rm -f "$stg_resp"
-
-          # staging まで流し終えてから落とす。先に exit すると staging の取り込みも飛ぶ。
-          [ "$prod_rejected" = "0" ] && [ "$stg_rejected" = "0" ]
+          [ "$stg_rejected" = "0" ]
 
   # 本番へ反映された issue を閉じる。
   #
@@ -1573,6 +1633,12 @@ jobs:
           SERVICE_SECRET: ${{ secrets.SERVICE_SECRET }}
           STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
         run: |
+          # 未登録だと staging が停止中のとき警告だけで終わり、設定漏れに気づけない。
+          if [ -z "$SERVICE_SECRET" ]; then
+            echo "::error::リポジトリシークレット SERVICE_SECRET が未登録です。staging の service_secret_plain と同じ値を登録してください(#1158)"
+            exit 1
+          fi
+
           sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base develop --limit 20 \
             --json number,title,body,mergedAt \
             --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')

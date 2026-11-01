@@ -13,6 +13,13 @@
 # 鍵が ADMIN_SECRET から SERVICE_SECRET へ分離された(#1158)ことで、
 # 「リポジトリシークレットの登録漏れ」という新しい失敗の仕方も増えている。
 #
+# ジョブの作りも見る:
+#   - environment: を宣言したジョブで secrets.SERVICE_SECRET を参照しないこと。
+#     GitHub では environment secret が同名のリポジトリシークレットを上書きするため、
+#     production 環境に SERVICE_SECRET が登録された時点で staging へ本番の値が飛ぶ。
+#   - secrets.SERVICE_SECRET を使うステップは、未登録(空)なら error で落とすこと。
+#     staging が停止中だと警告だけで終わり、設定漏れに気づけない。
+#
 # 使い方: ./automation/test/whats-new-ingest-auth-failure-test.sh
 
 set -uo pipefail
@@ -125,6 +132,60 @@ done
 
 if [ "$checked" -eq 0 ]; then
   echo "FAIL ingest を呼ぶステップが1件も見つからない（抽出条件が壊れている）"
+  fail=$((fail + 1))
+fi
+
+# --- ジョブの作り: environment を持つジョブは secrets.SERVICE_SECRET を参照しない ---
+WF="$ROOT/.github/workflows/deployment.yml"
+jobs_checked=0
+while IFS=$'\t' read -r job has_env has_secret; do
+  jobs_checked=$((jobs_checked + 1))
+  if [ "$has_env" = "1" ] && [ "$has_secret" = "1" ]; then
+    echo "FAIL $job: environment を宣言したジョブが secrets.SERVICE_SECRET を参照している"
+    echo "     (environment secret が同名のリポジトリシークレットを上書きするため、"
+    echo "      その環境に SERVICE_SECRET が登録されると別環境の値を送って黙って止まる)"
+    fail=$((fail + 1))
+  fi
+done < <(awk '
+  /^  [a-z0-9_-]+:[[:space:]]*$/ {
+    if (job != "") printf "%s\t%d\t%d\n", job, env, sec
+    job = $1; sub(/:$/, "", job); env = 0; sec = 0; next
+  }
+  job != "" {
+    if ($0 ~ /^[[:space:]]*#/) next
+    if ($0 ~ /^    environment:/) env = 1
+    if ($0 ~ /secrets\.SERVICE_SECRET/) sec = 1
+  }
+  END { if (job != "") printf "%s\t%d\t%d\n", job, env, sec }
+' "$WF")
+if [ "$jobs_checked" -eq 0 ]; then
+  echo "FAIL deployment.yml からジョブを1件も抽出できない（検査条件が壊れている）"
+  fail=$((fail + 1))
+else
+  echo "ok   environment 付きジョブが secrets.SERVICE_SECRET を参照していない（$jobs_checked ジョブ）"
+fi
+
+# --- secrets.SERVICE_SECRET を使うステップは未登録(空)なら error で落とす ---
+secret_steps=0
+while read -r start; do
+  end=$(awk -v s="$start" 'NR > s && /^      - name: /{print NR - 1; exit}' "$WF")
+  [ -n "$end" ] || end=$(wc -l < "$WF")
+  body=$(sed -n "${start},${end}p" "$WF" | strip_comments)
+  grep -q 'secrets.SERVICE_SECRET' <<< "$body" || continue
+  secret_steps=$((secret_steps + 1))
+  name=$(sed -n "${start}p" "$WF" | sed 's/^ *- name: //')
+  if ! grep -q 'if \[ -z "\$SERVICE_SECRET" \]' <<< "$body"; then
+    echo "FAIL $name: SERVICE_SECRET が未登録(空)のときに落としていない"
+    fail=$((fail + 1))
+  elif ! grep -A3 'if \[ -z "\$SERVICE_SECRET" \]' <<< "$body" | grep -q '::error::'; then
+    echo "FAIL $name: SERVICE_SECRET 未登録を ::error:: にしていない"
+    fail=$((fail + 1))
+  else
+    echo "ok   $name: SERVICE_SECRET 未登録で落とす"
+  fi
+done < <(grep -n '^      - name: ' "$WF" | cut -d: -f1)
+if [ "$secret_steps" -eq 0 ]; then
+  echo "FAIL secrets.SERVICE_SECRET を使うステップが1件も見つからない（検査条件が壊れている）"
   fail=$((fail + 1))
 fi
 
