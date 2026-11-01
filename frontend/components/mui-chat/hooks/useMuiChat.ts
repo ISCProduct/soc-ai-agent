@@ -15,11 +15,13 @@ import {
   readStoredJobCategoryId,
   writeStoredJobCategoryId,
   computeProgressTotals,
-  shouldAutoScrollToBottom,
+  historyToMessages,
+  isHistoryCompletionMessage,
   findLastAssistantQuestionMessage,
   isValidationFeedbackMessage,
   isValidationTerminationMessage,
 } from '../utils'
+import { useChatAutoScroll } from './useChatAutoScroll'
 import type { Message, PhaseProgress, ProgressTotals, ChoiceOption } from '../types'
 
 /**
@@ -54,9 +56,9 @@ export function useMuiChat() {
    */
   const [historyLoading, setHistoryLoading] = useState(true)
   const [jobCategoryId, setJobCategoryId] = useState(0)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const messagesAreaRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  // 一覧の ref とスクロール（動きを減らす設定への対応を含む）は専用フックへ。
+  const { messagesEndRef, messagesAreaRef } = useChatAutoScroll(messages, isLoading)
 
   const progressTotals: ProgressTotals = computeProgressTotals({
     phases: phaseProgresses,
@@ -73,34 +75,12 @@ export function useMuiChat() {
   const isSessionExpiredError = (error: unknown): boolean =>
     error instanceof UserFacingApiError && (error.status === 401 || error.status === 403)
 
-  const scrollToBottomIfNeeded = () => {
-    const area = messagesAreaRef.current
-    if (area) {
-      const allow = shouldAutoScrollToBottom({
-        scrollHeight: area.scrollHeight,
-        scrollTop: area.scrollTop,
-        clientHeight: area.clientHeight,
-      })
-      if (!allow) return
-    }
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
-
-  useEffect(() => {
-    scrollToBottomIfNeeded()
-  }, [messages, isLoading])
-
   const applyHistoryOrGreeting = useCallback((history: Awaited<ReturnType<typeof getChatHistory>>) => {
     setHistoryLoadError(null)
-    if (history && history.length > 0) {
-      const restoredMessages: Message[] = history.map((msg) => ({
-        id: String(msg.id),
-        role: msg.role,
-        content: msg.content,
-        timestamp: new Date(msg.created_at),
-      }))
+    const restoredMessages = historyToMessages(history)
+    if (restoredMessages.length > 0) {
       setMessages(restoredMessages)
-      const userQuestionCount = history.filter((msg) => msg.role === 'user').length
+      const userQuestionCount = restoredMessages.filter((msg) => msg.role === 'user').length
       setQuestionCount(userQuestionCount)
 
       const savedTotalQuestions = sessionStorage.getItem('totalQuestions')
@@ -127,13 +107,8 @@ export function useMuiChat() {
         )
       }, 100)
 
-      const lastMessage = history[history.length - 1]
-      const isCompletionMessage =
-        lastMessage?.content?.includes('分析が完了しました') ||
-        lastMessage?.content?.includes('全てのフェーズが完了') ||
-        lastMessage?.content?.includes('最適な企業をマッチング')
-
-      if (isCompletionMessage) {
+      const lastMessage = restoredMessages[restoredMessages.length - 1]
+      if (isHistoryCompletionMessage(lastMessage?.content)) {
         setAnalysisComplete(true)
         setAllPhasesCompleted(true)
       }
