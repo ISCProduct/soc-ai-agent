@@ -244,6 +244,12 @@ jobs:
       - name: Dockerfile の非root実行の検査
         run: ./automation/test/dockerfile-nonroot-test.sh
 
+      # 静的エラーページの文言と OGP。terraform が file() で読んで S3 へ配るので、
+      # ここが崩れると本番の停止中案内がそのまま崩れる。検査自体は前からあったが
+      # どこからも呼ばれておらず、文言を変えても誰も気づけなかった。
+      - name: 静的エラーページの検査
+        run: ./infra/scripts/verify-error-pages.sh
+
       - name: ワークフロー埋め込み Python の構文チェック
         run: |
           python3 - <<'PYEOF'

@@ -1222,6 +1222,6 @@ GET /api/admin/audit-logs
 
 frontend は CloudFront 経由で、ALB が 500/502/503/504 を返すと
 `s3://soc-app-errors-production/service-unavailable.html` へフェイルオーバーする
-（`enable_error_fallback`、既定 `true`）。学生には「接続できません」の案内が出る。
+（`enable_error_fallback`、既定 `true`）。学生には「ただいまメンテナンス中です」の案内が出る。
 
 API (`api.shukatsu-ai.jp`) は JSON を返す前提のため対象外で、素の503になる。
