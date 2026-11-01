@@ -1,5 +1,6 @@
 import {
   BOTTOM_NAV_HEIGHT,
+  isCurrentNavExclusive,
   SIDEBAR_ADMIN_NAV,
   SIDEBAR_NAV_ITEMS,
   shouldShowStudentBottomNav,
@@ -44,5 +45,25 @@ describe('sidebar-nav', () => {
     expect(shouldShowStudentBottomNav('/admin/costs')).toBe(false)
     expect(shouldShowStudentBottomNav('/')).toBe(true)
     expect(shouldShowStudentBottomNav('/interview/history')).toBe(true)
+  })
+
+  describe('isCurrentNavExclusive（#403: /interview と /interview/history の重なり対策）', () => {
+    const hrefs = SIDEBAR_NAV_ITEMS.map((i) => i.href)
+
+    it('前方一致が重ならないときは isCurrentNav と同じ', () => {
+      expect(isCurrentNavExclusive('/resume', '/resume', hrefs)).toBe(true)
+      expect(isCurrentNavExclusive('/resume/edit', '/resume', hrefs)).toBe(true)
+      expect(isCurrentNavExclusive('/schedule', '/resume', hrefs)).toBe(false)
+    })
+
+    it('/interview/history では /interview 側を現在地にしない', () => {
+      expect(isCurrentNavExclusive('/interview/history', '/interview', hrefs)).toBe(false)
+      expect(isCurrentNavExclusive('/interview/history', '/interview/history', hrefs)).toBe(true)
+    })
+
+    it('/interview 配下（履歴以外）では /interview 側を現在地にする', () => {
+      expect(isCurrentNavExclusive('/interview/session/1', '/interview', hrefs)).toBe(true)
+      expect(isCurrentNavExclusive('/interview', '/interview', hrefs)).toBe(true)
+    })
   })
 })

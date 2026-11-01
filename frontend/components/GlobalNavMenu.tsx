@@ -30,7 +30,7 @@ import QuizIcon from '@mui/icons-material/Quiz'
 import {
   GLOBAL_NAV_HOME_ITEMS,
   SIDEBAR_NAV_ITEMS,
-  isCurrentNav,
+  isCurrentNavExclusive,
   shouldShowStudentBottomNav,
 } from '@/lib/sidebar-nav'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
@@ -89,8 +89,7 @@ export function GlobalNavMenu() {
           <List component="nav" aria-label="画面の切り替え">
             {[...GLOBAL_NAV_HOME_ITEMS, ...SIDEBAR_NAV_ITEMS].map((item) => {
               // /interview と /interview/history のように前方一致が重なるときは、より長い方だけを現在地にする
-              const current = isCurrentNav(pathname, item.href) &&
-                ![...SIDEBAR_NAV_ITEMS].some((o) => o.href.length > item.href.length && isCurrentNav(pathname, o.href))
+              const current = isCurrentNavExclusive(pathname, item.href, SIDEBAR_NAV_ITEMS.map((o) => o.href))
               return (
                 <ListItem key={item.href} disablePadding>
                   <ListItemButton
