@@ -18,6 +18,12 @@ WF="$ROOT/.github/workflows/deployment.yml"
 TF="$ROOT/infra/terraform/environments/staging/main.tf"
 TPL="$ROOT/infra/terraform/environments/staging/app_user_data.sh.tftpl"
 
+# コメント行を落とす。説明コメントに同じ語が出るだけで検査が通ってしまうと、
+# 実際の判定を消しても落ちない「固めたつもり」のテストになる（#1909 レビュー指摘）。
+# 落とすのは行まるごとのコメントだけ。行末コメントは残るが、ここで突き合わせるのは
+# いずれもコード構造の一部（grep のコマンド行・HCL の式）なので行末コメントには現れない。
+strip_comments() { grep -vE '^[[:space:]]*#' || true; }
+
 fail=0
 checked=0
 
@@ -29,7 +35,7 @@ if [ -z "$SSH_STEP" ]; then
 fi
 SSH_END=$(awk -v s="$SSH_STEP" 'NR > s && /^      - name: /{print NR; exit}' "$WF")
 [ -n "$SSH_END" ] || SSH_END=$(wc -l < "$WF")
-SSH_BODY=$(sed -n "${SSH_STEP},${SSH_END}p" "$WF")
+SSH_BODY=$(sed -n "${SSH_STEP},${SSH_END}p" "$WF" | strip_comments)
 
 # staging が作る SSM パラメータのリソース名を列挙する。
 resources=$(grep -oE 'resource "aws_ssm_parameter" "[a-z0-9_]+"' "$TF" | sed -E 's/.*"([a-z0-9_]+)"$/\1/')
@@ -54,13 +60,15 @@ for res in $resources; do
   checked=$((checked + 1))
 
   # 新規インスタンス向け(user_data)に配られていること。
-  if ! grep -qE "^${envvar}=" "$TPL"; then
+  if ! strip_comments < "$TPL" | grep -qE "^${envvar}="; then
     echo "FAIL $envvar が app_user_data.sh.tftpl に無い（新規インスタンスへ配られない）"
     fail=$((fail + 1))
   fi
 
   # 稼働中インスタンス向けに SSM から読んでいること。
-  if ! grep -q "/\${{ env.PROJECT_NAME }}/$param" <<< "$SSH_BODY"; then
+  # パラメータ名は読めなかったときの WARN メッセージにも出るので、パス単体で探すと
+  # 実際の get-parameter を消しても通ってしまう。同じ行に両方あることを見る。
+  if ! grep "aws ssm get-parameter" <<< "$SSH_BODY" | grep -qF "/\${{ env.PROJECT_NAME }}/$param"; then
     echo "FAIL SSM /\${{ env.PROJECT_NAME }}/$param を Deploy via SSH が読んでいない（稼働中インスタンスに届かない）"
     fail=$((fail + 1))
     continue
@@ -83,7 +91,7 @@ for res in $resources; do
   fi
 
   # インスタンスロールに読み取り許可があること。無いと本番相当の環境で必ず空になる。
-  if ! grep -q "aws_ssm_parameter.$res.arn" "$TF"; then
+  if ! strip_comments < "$TF" | grep -q "aws_ssm_parameter.$res.arn"; then
     echo "FAIL aws_ssm_parameter.$res の読み取り許可が IAM ポリシーに無い"
     fail=$((fail + 1))
   fi
@@ -95,7 +103,7 @@ done
 # 引用が無いと bash が値の $ / `...` / \ を展開してから書き込むため、
 # シークレットに $(...) が含まれると cloud-init の root 権限で実行され、
 # 未定義の $name が含まれると set -u でそこで落ちて docker compose まで到達しない。
-if grep -qE "cat > /opt/app/\.env <<'[A-Za-z]+'" "$TPL"; then
+if strip_comments < "$TPL" | grep -qE "cat > /opt/app/\.env <<'[A-Za-z]+'"; then
   echo "ok   .env のヒアドキュメント区切り文字が引用されている"
 else
   echo "FAIL .env のヒアドキュメント区切り文字が引用されていない（値の \$ や \$(...) が bash に展開される）"

@@ -17,6 +17,12 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
+# コメント行を落とす。説明コメントに同じ語が出るだけで検査が通ってしまうと、
+# 実際の判定を消しても落ちない「固めたつもり」のテストになる（#1909 レビュー指摘）。
+# 落とすのは行まるごとのコメントだけ。行末コメントは残るが、ここで突き合わせるのは
+# いずれもコード構造の一部（grep のコマンド行・HCL の式）なので行末コメントには現れない。
+strip_comments() { grep -vE '^[[:space:]]*#' || true; }
+
 fail=0
 checked=0
 
@@ -38,7 +44,7 @@ for tf in "$ROOT"/infra/terraform/environments/*/main.tf; do
       needs_flag=1
     elif [[ "$arns_expr" =~ local\.([a-z0-9_]+) ]]; then
       localname="${BASH_REMATCH[1]}"
-      if grep -qE "^[[:space:]]*${localname}[[:space:]]*=[[:space:]]*compact\(" "$tf"; then
+      if strip_comments < "$tf" | grep -qE "^[[:space:]]*${localname}[[:space:]]*=[[:space:]]*compact\("; then
         needs_flag=1
       fi
     fi
@@ -63,7 +69,7 @@ for tf in "$ROOT"/infra/terraform/environments/*/main.tf; do
       if ($0 ~ /secret_arns[[:space:]]*=/) arns = $0
       if ($0 ~ /create_secrets_policy[[:space:]]*=/) flag = 1
     }
-  ' "$tf")
+  ' <(strip_comments < "$tf"))
 done
 
 if [ "$checked" -eq 0 ]; then
@@ -74,10 +80,11 @@ fi
 # モジュール側に逃げ道（create_secrets_policy）があること。
 for mod in "$ROOT"/infra/terraform/modules/ecs_service "$ROOT"/infra/terraform/modules/ecs_service_fargate; do
   [ -d "$mod" ] || continue
-  if ! grep -q 'variable "create_secrets_policy"' "$mod/variables.tf"; then
+  if ! strip_comments < "$mod/variables.tf" | grep -q 'variable "create_secrets_policy"'; then
     echo "FAIL $(basename "$mod"): create_secrets_policy が無い（呼び出し側が件数判定を明示できない）"
     fail=$((fail + 1))
-  elif ! grep -q "create_secrets_policy" "$mod/main.tf"; then
+  # count の式そのものに入っていること。コメントや説明文では通らない。
+  elif ! strip_comments < "$mod/main.tf" | grep -qE "^[[:space:]]*count[[:space:]]*=.*create_secrets_policy"; then
     echo "FAIL $(basename "$mod"): create_secrets_policy を count の判定に使っていない"
     fail=$((fail + 1))
   else

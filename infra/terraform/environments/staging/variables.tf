@@ -222,6 +222,15 @@ variable "service_secret_plain" {
     condition     = var.service_secret_plain != "change-me-service-secret" && !can(regex("[<>]", var.service_secret_plain))
     error_message = "service_secret_plain がプレースホルダーのままです。terraform.tfvars.example の値をコピーしただけだと、リポジトリを読める第三者がサービス間エンドポイントを叩けます(#1158)。"
   }
+
+  # 改行は引用では防げない。この値は .env の1行として書かれ、デプロイ時の継ぎ足しも
+  # `echo "SERVICE_SECRET=$..." >> .env` の1行なので、改行が入ると2行目以降が
+  # 別の環境変数として読まれる（CI と値が一致せず、取り込みが静かに 403 になる）。
+  # SSM へ載る前に plan で止める。
+  validation {
+    condition     = !can(regex("[\r\n]", var.service_secret_plain))
+    error_message = "service_secret_plain に改行を含めないでください。この値は .env の1行として書き込まれます(#1158)。"
+  }
 }
 
 # AI面接の音声認識モデル。既定はコード側と同じ gpt-transcribe。
