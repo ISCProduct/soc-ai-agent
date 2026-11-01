@@ -202,43 +202,42 @@ variable "service_secret_plain" {
   description = "CIからのサービス間呼び出し(X-Admin-Secret)用の共有シークレット(平文)。GitHubのリポジトリシークレット SERVICE_SECRET と同じ値にする。admin_secret_plain とは必ず別値にする(#1158)"
   sensitive   = true
 
-  # 既定値を持たせない。空のまま apply すると SERVICE_SECRET も aws_ssm_parameter も空になり、
-  # CI の取り込みが 503 で拒否される（CI 側は警告で流すので気づきにくい）。
+  # 既定値を持たせない。空のまま apply すると SERVICE_SECRET も aws_ssm_parameter も
+  # 空になり、CI の取り込みが 503 で拒否される（CI 側は警告で流すので気づきにくい）。
   # plan の時点で止めて、tfvars への設定漏れをその場で分かるようにする。
   #
-  # 空文字だけでは足りない。terraform.tfvars.example をそのままコピーして apply すると
-  # 例示値が本物の SERVICE_SECRET として .env と SSM へ入り、リポジトリを読める第三者が
+  # 条件は「禁止したい文字を1つずつ足す」形ではなく許可リスト1本にしている。
+  # この値は .env の1行として書かれ、Compose がそれを読むため、壊れ方が何通りもある:
+  #   - `$`      : Compose が引用なしの値を変数展開する（未定義名は空文字になる）
+  #   - `#`      : Compose が ` #` 以降をインラインコメントとして落とす
+  #   - 改行     : 2行目以降が別の環境変数として読まれる（引用では防げない）
+  #   - 空白/タブ: 値の途中で切れる・詰められる
+  #   - "None"   : AWS CLI が null を None と出すため、デプロイ側の
+  #                `[ "$X" != None ]` 判定が「未取得」と誤認し、稼働中インスタンスの
+  #                .env を更新しない。新規インスタンスは user_data 経由で None を
+  #                受け取るので、staging の値が新旧インスタンスで二つに分かれる
+  # 1つずつ禁止していくと、次に別の文字で同じ穴が開く。文字種と最小長で一度に閉じる。
+  #
+  # 文字種は本番の random_password(special = false → 英数字のみ)と、
+  # terraform.tfvars.example が案内している生成方法
+  # (`python3 -c "import secrets; print(secrets.token_urlsafe(36))"` → 英数字 + `_` `-`)
+  # の両方を通す範囲。最小長32は token_urlsafe(24) の長さで、本番の 48 より緩い下限。
+  # 上の壊れ方はすべてこの1本で落ちる（"None" は長さと文字種の両方で落ちる）。
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_-]{32,}$", var.service_secret_plain))
+    error_message = "service_secret_plain は英数字・アンダースコア・ハイフンのみ32文字以上にしてください。.env の1行として Compose が読むため、$ ・ # ・空白・改行を含む値は壊れます。生成例: python3 -c \"import secrets; print(secrets.token_urlsafe(36))\" (#1158)"
+  }
+
+  # 形式は正しいが公開されている値を弾く。上の許可リストとは目的が違うので別に持つ。
+  # terraform.tfvars.example をそのままコピーして apply すると、例示値が本物の
+  # SERVICE_SECRET として .env と SSM へ入り、リポジトリを読める第三者が
   # /api/admin/whats-new/ingest と /api/admin/training/stats を叩けてしまう。
   # 例示値は Backend/.env.example と同じ change-me-service-secret に揃えてあり
   # (Backend/internal/config/config.go の serviceSecretPlaceholder と同値)、ここで弾く。
-  # 山括弧を含む値も `<...>` 形のプレースホルダーなので弾く。
   # 対応関係は automation/test/service-secret-placeholder-test.sh が固定している。
   validation {
-    condition     = length(var.service_secret_plain) > 0
-    error_message = "service_secret_plain は必須です。GitHub のリポジトリシークレット SERVICE_SECRET と同じ値を tfvars に設定してください(#1158)。"
-  }
-
-  validation {
-    condition     = var.service_secret_plain != "change-me-service-secret" && !can(regex("[<>]", var.service_secret_plain))
+    condition     = var.service_secret_plain != "change-me-service-secret"
     error_message = "service_secret_plain がプレースホルダーのままです。terraform.tfvars.example の値をコピーしただけだと、リポジトリを読める第三者がサービス間エンドポイントを叩けます(#1158)。"
-  }
-
-  # 改行は引用では防げない。この値は .env の1行として書かれ、デプロイ時の継ぎ足しも
-  # `echo "SERVICE_SECRET=$..." >> .env` の1行なので、改行が入ると2行目以降が
-  # 別の環境変数として読まれる（CI と値が一致せず、取り込みが静かに 403 になる）。
-  # SSM へ載る前に plan で止める。
-  validation {
-    condition     = !can(regex("[\r\n]", var.service_secret_plain))
-    error_message = "service_secret_plain に改行を含めないでください。この値は .env の1行として書き込まれます(#1158)。"
-  }
-
-  # Compose は .env の引用なしの値に含まれる $ を変数として展開する。未定義の名前は
-  # 空文字になるため、コンテナが受け取る値と CI が送る値がずれて 403 になる。
-  # 本番側は random_password(special = false)なので $ は生成されないが、
-  # staging の値は手入力なのでここが実質の防御になる。
-  validation {
-    condition     = !can(regex("[$]", var.service_secret_plain))
-    error_message = "service_secret_plain に $ を含めないでください。Compose が .env の値を展開し、CI の値と一致しなくなります(#1158)。"
   }
 }
 

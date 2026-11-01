@@ -66,39 +66,69 @@ else
   echo "ok   staging/variables.tf の validation が同じ値を弾いている"
 fi
 
-# 空文字も弾くこと（空のまま apply すると SSM パラメータまで空になる）。
-if ! strip_comments < "$TFVARIABLES" | grep -q "length(var.service_secret_plain) > 0"; then
-  echo "FAIL staging/variables.tf の validation が空文字を弾いていない"
+# 許可リスト1本で形式を縛っていること。
+#
+# `.env` の1行として Compose が読む値なので、壊れ方が何通りもある（$ / # / 改行 /
+# 空白 / "None"）。禁止文字を1つずつ足す形は次の文字で同じ穴が開くため、
+# 文字種と最小長の許可リストに置き換えてある。条件の構成要素を個別に見る:
+#   - アンカー（^ と $）: 無いと部分一致になり、禁止文字を含む値が通る
+#   - 文字クラス        : 緩めると $ や # が通る
+#   - 最小長            : 無いと "None" や短い値が通る
+allow=$(strip_comments < "$TFVARIABLES" | grep -oE 'regex\("[^"]*", var\.service_secret_plain\)' | head -1)
+if [ -z "$allow" ]; then
+  echo "FAIL staging/variables.tf に service_secret_plain の形式を縛る regex が無い"
   fail=$((fail + 1))
 else
-  echo "ok   staging/variables.tf の validation が空文字を弾いている"
-fi
+  pattern=${allow#regex(\"}
+  pattern=${pattern%%\", var.service_secret_plain)}
+  echo "ok   形式の許可リスト: $pattern"
 
-# 山括弧（`<...>` 形のプレースホルダー）を弾くこと。
-if ! strip_comments < "$TFVARIABLES" | grep -q 'regex("\[<>\]", var.service_secret_plain)'; then
-  echo "FAIL staging/variables.tf の validation が山括弧を含む値を弾いていない"
-  echo "     (example を `<...>` 形に書き換えた人が同じ穴を開けられる)"
-  fail=$((fail + 1))
-else
-  echo "ok   staging/variables.tf の validation が山括弧を含む値を弾いている"
-fi
+  case "$pattern" in
+    "^"*) ;;
+    *) echo "FAIL 許可リストが先頭アンカー(^)で始まっていない（部分一致になり禁止文字が通る）"; fail=$((fail + 1)) ;;
+  esac
+  case "$pattern" in
+    *'$') ;;
+    *) echo "FAIL 許可リストが末尾アンカー(\$)で終わっていない（末尾に何でも付けられる）"; fail=$((fail + 1)) ;;
+  esac
+  # 文字クラスに $ / # / 空白 / 改行 を含む書き方になっていないこと。
+  if printf '%s' "$pattern" | grep -qE '\[[^]]*[$#[:space:]\\][^]]*\]'; then
+    echo "FAIL 許可リストの文字クラスが広すぎる（\$ / # / 空白 / エスケープを許している）"
+    fail=$((fail + 1))
+  fi
+  # 最小長の指定があること（"None" のような短い値を落とすため）。
+  if ! printf '%s' "$pattern" | grep -qE '\{[0-9]+,?[0-9]*\}'; then
+    echo "FAIL 許可リストに最小長の指定が無い（\"None\" や短い値が通る）"
+    fail=$((fail + 1))
+  else
+    minlen=$(printf '%s' "$pattern" | grep -oE '\{[0-9]+' | head -1 | tr -d '{')
+    if [ "$minlen" -lt 24 ]; then
+      echo "FAIL 許可リストの最小長が短すぎる（$minlen。本番は random_password length=48）"
+      fail=$((fail + 1))
+    else
+      echo "ok   最小長 $minlen 文字以上を要求している"
+    fi
+  fi
 
-# 改行を弾くこと。引用では防げず、.env の2行目以降が別の環境変数として読まれる。
-if ! strip_comments < "$TFVARIABLES" | grep -q 'regex("\[.r.n\]", var.service_secret_plain)'; then
-  echo "FAIL staging/variables.tf の validation が改行を弾いていない"
-  echo "     (.env の1行として書かれるので、改行が入ると2行目以降が別の変数になる)"
-  fail=$((fail + 1))
-else
-  echo "ok   staging/variables.tf の validation が改行を弾いている"
-fi
-
-# $ を弾くこと。Compose が .env の引用なしの値を展開するので、含むと値がずれる。
-if ! strip_comments < "$TFVARIABLES" | grep -q 'regex("\[[$]\]", var.service_secret_plain)'; then
-  echo "FAIL staging/variables.tf の validation が \$ を含む値を弾いていない"
-  echo "     (Compose が .env の値を展開するので、コンテナが受け取る値とCIの値がずれる)"
-  fail=$((fail + 1))
-else
-  echo "ok   staging/variables.tf の validation が \$ を含む値を弾いている"
+  # 実際に代表的な値を分類できること。grep -E で同じパターンを当てて突き合わせる。
+  # （terraform は RE2、grep -E は POSIX ERE だが、この許可リストが使う構文は共通部分に収まる）
+  check_pattern() {
+    local label="$1" value="$2" want="$3" got
+    if printf '%s' "$value" | grep -qE "$pattern"; then got=通る; else got=弾く; fi
+    if [ "$got" != "$want" ]; then
+      echo "FAIL 許可リストが '$label' を $want べきだが $got"
+      fail=$((fail + 1))
+    fi
+  }
+  good=$(printf 'a%.0s' $(seq 1 48))
+  check_pattern "英数字48文字(本番のrandom_password相当)" "$good" 通る
+  check_pattern "空文字" "" 弾く
+  check_pattern "None(AWS CLIがnullを出す文字列)" "None" 弾く
+  check_pattern "\$ を含む値" "${good}\$x" 弾く
+  check_pattern "# を含む値" "${good}#x" 弾く
+  check_pattern "空白を含む値" "${good} x" 弾く
+  check_pattern "山括弧のプレースホルダー" "<SERVICE_SECRET>" 弾く
+  echo "ok   代表的な壊れた値(空 / None / \$ / # / 空白 / 山括弧)をすべて弾く"
 fi
 
 if [ "$fail" -gt 0 ]; then

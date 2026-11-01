@@ -43,7 +43,7 @@ fi
 echo "ok   設定不備の503のコード: $NOT_CONFIGURED_CODE"
 
 check_step() {
-  local label="$1" body="$2" bad=0 code
+  local label="$1" body="$2" wf="$3" bad=0 code
   checked=$((checked + 1))
   # 以降の検査はコメントを落とした行だけを見る。
   code=$(strip_comments <<< "$body")
@@ -83,6 +83,21 @@ check_step() {
     echo "FAIL $label: 401/403 の分岐 $arms 件のうち ::error:: にしているのは $arms_with_error 件（warning だと誰も気づかない）"
     fail=$((fail + 1)); bad=1
   fi
+  # error を出すだけでステップが成功したままだと誰も止まらない。失敗を記録すること
+  # （*_rejected=1 / GITHUB_OUTPUT への rejected= / その場で exit のいずれか）。
+  local arms_with_mark
+  arms_with_mark=$(awk '
+    index($0, "401|403)") { inarm = 1; found = 0; next }
+    inarm {
+      if (index($0, "_rejected=1") || index($0, "rejected=$") || index($0, "exit 1")) found = 1
+      if (index($0, ";;")) { if (found) n++; inarm = 0 }
+    }
+    END { if (inarm && found) n++; print n + 0 }
+  ' <<< "$code")
+  if [ "$arms_with_mark" != "$arms" ]; then
+    echo "FAIL $label: 401/403 の分岐 $arms 件のうち失敗を記録しているのは $arms_with_mark 件（error を出すだけではステップが成功で終わる）"
+    fail=$((fail + 1)); bad=1
+  fi
 
   # 設定不備の503を本文で見分けていること。ステータスだけで一律 warning にすると、
   # SERVICE_SECRET が未注入のまま更新情報が永久に反映されない。
@@ -95,19 +110,63 @@ check_step() {
     echo "FAIL $label: ingest のレスポンス本文を保存していない（設定不備の503を見分けられない）"
     fail=$((fail + 1)); bad=1
   fi
+  local judge blk
   for v in $respvars; do
-    if ! grep -qE "grep +(-[a-zA-Z]+ +)*$NOT_CONFIGURED_CODE +\"\\\$$v\"" <<< "$code"; then
-      echo "FAIL $label: \$$v の本文で設定不備の503($NOT_CONFIGURED_CODE)を見分けていない"
+    judge="grep +(-[a-zA-Z]+ +)*$NOT_CONFIGURED_CODE +.[$]$v."
+    if ! grep -qE "$judge" <<< "$code"; then
+      echo "FAIL $label: $v の本文で設定不備の503($NOT_CONFIGURED_CODE)を見分けていない"
+      fail=$((fail + 1)); bad=1
+      continue
+    fi
+    # 判定の直後で error を出し、失敗を記録していること（構成要素を個別に見る）。
+    blk=$(grep -A6 -E "$judge" <<< "$code")
+    if ! grep -q "::error::" <<< "$blk"; then
+      echo "FAIL $label: $v の設定不備503を ::error:: にしていない"
+      fail=$((fail + 1)); bad=1
+    fi
+    if ! grep -qE "(_rejected=1|rejected=[$]|exit 1)" <<< "$blk"; then
+      echo "FAIL $label: $v の設定不備503で失敗を記録していない（警告のまま成功で終わる）"
+      fail=$((fail + 1)); bad=1
+    fi
+  done
+
+  # 失敗の記録が最後まで伝わること。*_rejected を立てても誰も見ていなければ無意味。
+  local var
+  for var in $(grep -oE "[a-z_]+_rejected=1" <<< "$code" | sed "s/=1$//" | sort -u); do
+    if ! grep -qE "\\[ *.[$]$var. *=" <<< "$code"; then
+      echo "FAIL $label: $var を立てているが最後に判定していない（ステップが成功で終わる）"
       fail=$((fail + 1)); bad=1
     fi
   done
 
   # Secrets Manager から鍵を読む経路があるなら、読めなかった場合も error にすること。
   if grep -q "get-secret-value" <<< "$code"; then
-    if ! grep -B2 -A6 "get-secret-value" <<< "$code" | grep -q '::error::'; then
-      # 読み取り失敗の分岐はブロック後半にあることもあるので、ブロック全体も見る。
-      if ! grep -q '::error::.*読めませんでした' <<< "$code"; then
-        echo "FAIL $label: Secrets Manager から鍵を読めなかった場合が ::error:: になっていない"
+    if ! grep -q '::error::.*読めませんでした' <<< "$code"; then
+      echo "FAIL $label: Secrets Manager から鍵を読めなかった場合が ::error:: になっていない"
+      fail=$((fail + 1)); bad=1
+    else
+      # error を出すだけでなく、失敗として記録すること。
+      # ステップ全体を見ると他の分岐の *_rejected=1 に一致してしまうので、
+      # 読み取り失敗の分岐の前後だけを見る（記録が error の前にある書き方もある）。
+      local smblk
+      smblk=$(grep -B4 -A4 '::error::.*読めませんでした' <<< "$code")
+      if ! grep -qE "(lookup_failed=1|_rejected=1|rejected=[$]|exit [1-9])" <<< "$smblk"; then
+        echo "FAIL $label: 鍵を読めなかった場合に失敗を記録していない（警告のまま成功で終わる）"
+        fail=$((fail + 1)); bad=1
+      fi
+    fi
+    # 記録した失敗がステップの失敗へ繋がっていること。lookup_failed を立てても、
+    # それが「curl を呼ぶかどうか」の判定にしか使われていないとステップは成功で終わる。
+    # 経路は2つ: ①GITHUB_OUTPUT へ出して後段のステップが落とす
+    #            ②その場で *_rejected へ代入して最後の判定に乗せる
+    if grep -q 'lookup_failed=1' <<< "$code"; then
+      if grep -q 'lookup_failed=1" >> "$GITHUB_OUTPUT' <<< "$code"; then
+        if ! grep -qE "outputs\.lookup_failed" "$wf"; then
+          echo "FAIL $label: lookup_failed を出力しているが、それを見て失敗させるステップが無い"
+          fail=$((fail + 1)); bad=1
+        fi
+      elif ! grep -qE '_rejected=\$lookup_failed' <<< "$code"; then
+        echo "FAIL $label: lookup_failed を立てているが失敗判定へ繋げていない（ステップが成功で終わる）"
         fail=$((fail + 1)); bad=1
       fi
     fi
@@ -126,7 +185,7 @@ for wf in "$ROOT/.github/workflows/deployment.yml" "$ROOT/.github/workflows/prod
     body=$(sed -n "${start},${end}p" "$wf")
     grep -q "whats-new/ingest" <<< "$body" || continue
     name=$(sed -n "${start}p" "$wf" | sed 's/^ *- name: //')
-    check_step "$wfname / $name" "$body"
+    check_step "$wfname / $name" "$body" "$wf"
   done < <(grep -n '^      - name: ' "$wf" | cut -d: -f1)
 done
 
@@ -174,15 +233,24 @@ while read -r start; do
   grep -q 'secrets.SERVICE_SECRET' <<< "$body" || continue
   secret_steps=$((secret_steps + 1))
   name=$(sed -n "${start}p" "$WF" | sed 's/^ *- name: //')
+  # ガード節は「節そのもの」「::error::」「exit」を**個別に**見る。
+  # 節ごと消すケースだけを試すと、exit だけ消えて空の鍵で curl を呼ぶ形を見逃す。
+  guard_ok=1
   if ! grep -q 'if \[ -z "\$SERVICE_SECRET" \]' <<< "$body"; then
-    echo "FAIL $name: SERVICE_SECRET が未登録(空)のときに落としていない"
-    fail=$((fail + 1))
-  elif ! grep -A3 'if \[ -z "\$SERVICE_SECRET" \]' <<< "$body" | grep -q '::error::'; then
-    echo "FAIL $name: SERVICE_SECRET 未登録を ::error:: にしていない"
-    fail=$((fail + 1))
+    echo "FAIL $name: SERVICE_SECRET が未登録(空)かどうかを確認していない"
+    fail=$((fail + 1)); guard_ok=0
   else
-    echo "ok   $name: SERVICE_SECRET 未登録で落とす"
+    guard=$(grep -A4 'if \[ -z "\$SERVICE_SECRET" \]' <<< "$body")
+    if ! grep -q '::error::' <<< "$guard"; then
+      echo "FAIL $name: SERVICE_SECRET 未登録を ::error:: にしていない"
+      fail=$((fail + 1)); guard_ok=0
+    fi
+    if ! grep -qE '^[[:space:]]*exit [1-9]' <<< "$guard"; then
+      echo "FAIL $name: SERVICE_SECRET 未登録で exit していない（空の鍵で curl を呼び、停止中なら成功で終わる）"
+      fail=$((fail + 1)); guard_ok=0
+    fi
   fi
+  [ "$guard_ok" = "1" ] && echo "ok   $name: SERVICE_SECRET 未登録で error を出して落とす"
 done < <(grep -n '^      - name: ' "$WF" | cut -d: -f1)
 if [ "$secret_steps" -eq 0 ]; then
   echo "FAIL secrets.SERVICE_SECRET を使うステップが1件も見つからない（検査条件が壊れている）"
