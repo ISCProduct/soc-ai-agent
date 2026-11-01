@@ -105,18 +105,22 @@ func (s *AuthService) SetSchoolRepo(repo repository.SchoolRepository) {
 //
 // organizationID を必ず渡すこと。学校名は本人の自己申告なので、学園を跨いだ解決を許すと
 // 学生が自分の学校名を他学園の校名に書き換えるだけでその学校の school_id を得てしまう（#1675）。
-func (s *AuthService) resolveSchoolID(schoolName string, organizationID uint) *uint {
+// 戻り値の error は「解決できなかった」ではなく「解決を試みられなかった」を表す。
+// 一時的な DB エラーで既存の school_id を消さないため、呼び出し元が区別できるようにする。
+// 見つからない場合は (nil, nil)。
+func (s *AuthService) resolveSchoolID(schoolName string, organizationID uint) (*uint, error) {
 	if s.schoolRepo == nil || schoolName == "" {
-		return nil
+		return nil, nil
 	}
 	school, err := s.schoolRepo.FindByName(schoolName, organizationID)
-	if err != nil || school == nil {
-		// 解決できなかったことを残す。学校名の表記ゆれで school_id が付かないと
-		// 学校向け機能から黙って外れるため、気づけるようにしておく（#1675）。
-		log.Printf("[Auth] school_id unresolved: organization=%d name=%q err=%v", organizationID, schoolName, err)
-		return nil
+	if err != nil {
+		log.Printf("[Auth] school_id lookup failed: organization=%d name=%q err=%v", organizationID, schoolName, err)
+		return nil, err
 	}
-	return &school.ID
+	if school == nil {
+		return nil, nil
+	}
+	return &school.ID, nil
 }
 
 // issueRefreshToken はリフレッシュトークンを発行する（サービス未注入時は空文字を返す）

@@ -58,17 +58,8 @@ func TestSchoolScopedQueries_RequireSameOrganization(t *testing.T) {
 		require.NoError(t, mock.ExpectationsWereMet())
 	})
 
-	t.Run("応募一覧", func(t *testing.T) {
-		db, mock := newMockDB(t)
-		mock.ExpectQuery("FROM `user_application_statuses` JOIN users.*users\\.school_id = \\?.*"+orgSub).
-			WithArgs(schoolID, schoolID).
-			WillReturnRows(sqlmock.NewRows([]string{"id"}))
-
-		_, err := NewUserApplicationStatusRepository(db).FindAll(0, 0, "", &schoolID)
-		require.NoError(t, err)
-		require.NoError(t, mock.ExpectationsWereMet())
-	})
-
+	// 応募一覧（FindAll）と1件ごとの認可判定（FindOwnerSchoolID）は
+	// application_status_scope_test.go が同じ条件を固定しているので、ここでは重ねない。
 	t.Run("面接集計", func(t *testing.T) {
 		db, mock := newMockDB(t)
 		mock.ExpectQuery("SELECT count\\(\\*\\) FROM `interview_sessions`.*JOIN users.*users\\.school_id = \\?.*"+orgSub).

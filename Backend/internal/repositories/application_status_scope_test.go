@@ -86,7 +86,8 @@ func TestFindAll_NoSchoolFilterKeepsQueryUnchanged(t *testing.T) {
 func TestFindOwnerSchoolID(t *testing.T) {
 	repo, mock, _ := newAppStatusRepo(t)
 
-	mock.ExpectQuery("SELECT users.school_id AS school_id FROM `user_application_statuses` JOIN users ON users.id = user_application_statuses.user_id WHERE user_application_statuses.id = \\?").
+	// 学校は本人の学園に属するものだけ所属校として認める（#1675）。
+	mock.ExpectQuery("SELECT s.id AS school_id FROM `user_application_statuses` JOIN users ON users.id = user_application_statuses.user_id LEFT JOIN schools s ON s.id = users.school_id AND s.organization_id = users.organization_id WHERE user_application_statuses.id = \\?").
 		WithArgs(uint(42), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"school_id"}).AddRow(9))
 
@@ -107,7 +108,8 @@ func TestFindOwnerSchoolID(t *testing.T) {
 func TestFindOwnerSchoolID_NullSchool(t *testing.T) {
 	repo, mock, _ := newAppStatusRepo(t)
 
-	mock.ExpectQuery("SELECT users.school_id AS school_id FROM `user_application_statuses`").
+	// 学園が一致しない場合もここに合流する（s.id が NULL になる / #1675）。
+	mock.ExpectQuery("SELECT s.id AS school_id FROM `user_application_statuses`.*LEFT JOIN schools s ON s.id = users.school_id AND s.organization_id = users.organization_id").
 		WithArgs(uint(43), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"school_id"}).AddRow(nil))
 

@@ -218,10 +218,11 @@ func (r *AssessmentRepository) LatestStandardScores(userID uint) (map[string]flo
 // FindUserSchoolID は学生の所属校。未設定なら nil（運営標準だけ見える）。
 //
 // users.school_id は本人が送ったプロフィールの学校名から更新される（auth_profile.go）。
-// SchoolRepository.FindByName は学園で絞っていないので、別学園の学生が学校名を対象校と
-// 同じにすれば、その学校の school_id を自分に付けられる。school_id をそのまま信用すると
-// それだけで他学園の学校独自テンプレート（問題文・受検）に到達できるため、
-// 学校の学園が本人の学園と一致するときだけ返す。一致しなければ nil =運営標準だけ（#1675）。
+// 解決側（SchoolRepository.FindByName）は学園で絞っており、過去の越境行も
+// migration 000050 で外したが、境界の判定をデータの綺麗さに依存させない。
+// school_id をそのまま信用すると、1行でも越境行があれば他学園の学校独自テンプレート
+// （問題文・受検）に到達できる。学校の学園が本人の学園と一致するときだけ返し、
+// 一致しなければ nil =運営標準だけ（#1675）。
 func (r *AssessmentRepository) FindUserSchoolID(userID uint) (*uint, error) {
 	var u struct {
 		SchoolID       *uint

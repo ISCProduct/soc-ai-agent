@@ -6,8 +6,10 @@
 -- 自分に付けられた。解決側は同じ修正で塞いだが、塞ぐ前に入った行はデータとして残る。
 --
 -- この UPDATE が安全な理由:
---   * users.school_id を書くのは auth_profile.go と guest_promotion.go の2箇所だけで、
---     どちらも resolveSchoolID 経由。管理画面から学園をまたいで割り当てる経路は無い。
+--   * users.school_id を書くのは3箇所（auth_profile.go のプロフィール更新、
+--     guest_promotion.go のゲスト昇格、auth_register.go の新規作成）だけで、
+--     いずれも resolveSchoolID 経由。管理画面から学園をまたいで割り当てる経路は無く、
+--     学校名から school_id を埋め直すマイグレーションも無い。
 --     つまり学園をまたいだ school_id は、すべてこの不具合の産物である。
 --   * users.organization_id と schools.organization_id はどちらも NOT NULL
 --     （000004 で既存ユーザーは organization_id=1 に埋められている）。

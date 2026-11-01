@@ -52,11 +52,11 @@ func TestUpdateProfile_SchoolNameDoesNotResolveAcrossOrganizations(t *testing.T)
 		ID:              1,
 		Email:           "student@example.com",
 		Name:            "学生",
-		OrganizationID:  1, // 自分は学園1
+		OrganizationID:  3, // 既定組織(1)だと DefaultOrganizationID への定数置換を検出できない
 		EmailVerifiedAt: &now,
 	}
 	schools := &orgScopedSchoolRepo{schools: []models.School{
-		{ID: 101, Name: "自学園の校", OrganizationID: 1},
+		{ID: 101, Name: "自学園の校", OrganizationID: 3},
 		{ID: 202, Name: "他学園の校", OrganizationID: 9},
 	}}
 	service := NewAuthService(&userRepoAuthStub{user: user}, &pendingRepoAuthStub{}, nil)
@@ -65,7 +65,7 @@ func TestUpdateProfile_SchoolNameDoesNotResolveAcrossOrganizations(t *testing.T)
 	if _, err := service.UpdateProfile(UpdateProfileRequest{UserID: 1, SchoolName: "他学園の校"}); err != nil {
 		t.Fatalf("UpdateProfile failed: %v", err)
 	}
-	if schools.lastOrg != 1 {
+	if schools.lastOrg != 3 {
 		t.Fatalf("解決時に本人の学園が渡っていない: organizationID=%d", schools.lastOrg)
 	}
 	if user.SchoolID != nil {
@@ -102,5 +102,40 @@ func TestRegister_PassesTenantOrganizationToSchoolResolution(t *testing.T) {
 	}
 	if schools.lastName != "他学園の校" {
 		t.Fatalf("解決対象の学校名が渡っていない: %q", schools.lastName)
+	}
+}
+
+// ゲスト昇格はゲスト自身の学園で解決する（tenantOrgID ではない）。
+// 引数を取り違えると越境が戻るため、渡った学園と既存値の保持を固定する。
+func TestRegister_GuestPromotionResolvesWithinGuestOrganization(t *testing.T) {
+	now := time.Now()
+	existing := uint(101)
+	// ゲストはメール未設定（既存ユーザー扱いにならないようにする）。
+	guest := &entity.User{
+		ID:              5,
+		Name:            "ゲスト",
+		IsGuest:         true,
+		OrganizationID:  3,
+		SchoolID:        &existing,
+		EmailVerifiedAt: &now,
+	}
+	schools := &orgScopedSchoolRepo{schools: []models.School{
+		{ID: 101, Name: "自学園の校", OrganizationID: 3},
+		{ID: 202, Name: "他学園の校", OrganizationID: 9},
+	}}
+	service := NewAuthService(&userRepoAuthStub{user: guest}, &pendingRepoAuthStub{}, nil)
+	service.SetSchoolRepo(schools)
+
+	// サブドメインが学園9でも、昇格はゲストの学園(3)で解決する。
+	_, _ = service.Register(RegisterRequest{
+		Email: "promoted@example.com", Password: "password123", Name: "昇格後",
+		TargetLevel: "新卒", SchoolName: "他学園の校",
+	}, 9, guest.ID)
+
+	if schools.lastOrg != 3 {
+		t.Fatalf("昇格でゲストの学園が渡っていない: organizationID=%d", schools.lastOrg)
+	}
+	if guest.SchoolID == nil || *guest.SchoolID != existing {
+		t.Fatalf("解決できないときは既存の school_id を保つべき: %v", guest.SchoolID)
 	}
 }

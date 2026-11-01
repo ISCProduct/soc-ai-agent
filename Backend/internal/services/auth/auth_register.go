@@ -151,10 +151,15 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 			return nil, err
 		}
 		// 既定値で補完した名前ではなく、実際に送られてきた名前だけを反映する。
-		applyRegistrationToGuest(guest, req, requestedSchoolName, string(hashedPassword), s.resolveSchoolID(requestedSchoolName, guest.OrganizationID))
+		// 解決できなかった場合（エラー含む）は nil が渡り、applyRegistrationToGuest 側で
+		// 既存の school_id を保つ。
+		guestSchoolID, _ := s.resolveSchoolID(requestedSchoolName, guest.OrganizationID)
+		applyRegistrationToGuest(guest, req, requestedSchoolName, string(hashedPassword), guestSchoolID)
 		user = guest
 		promoting = true
 	} else {
+		// 新規作成なので保つべき既存値は無い。解決できなければ nil のままにする。
+		newUserSchoolID, _ := s.resolveSchoolID(req.SchoolName, tenantOrgID)
 		user = &entity.User{
 			Email:                    req.Email,
 			Password:                 string(hashedPassword),
@@ -162,7 +167,7 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 			IsGuest:                  false,
 			TargetLevel:              req.TargetLevel,
 			SchoolName:               req.SchoolName,
-			SchoolID:                 s.resolveSchoolID(req.SchoolName, tenantOrgID),
+			SchoolID:                 newUserSchoolID,
 			IsAdmin:                  false,
 			CertificationsAcquired:   req.CertificationsAcquired,
 			CertificationsInProgress: req.CertificationsInProgress,
