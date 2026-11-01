@@ -87,9 +87,12 @@ export function firstUnansweredPage(session: AssessmentSession): number {
   return idx === -1 ? pages - 1 : Math.floor(idx / QUESTIONS_PER_PAGE)
 }
 
-/** 期限の表示用。日本語の日付と時刻まで出す（日付だけだと当日の締切時刻が分からない）。 */
+/**
+ * 期限の表示用。年・日付・時刻まで出す。
+ * 日付だけだと当日の締切時刻が分からず、年が無いと年明けの期限を今年と読み違える。
+ */
 export function formatDueAt(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleString('ja-JP', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }

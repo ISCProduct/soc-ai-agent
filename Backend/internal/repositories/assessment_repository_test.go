@@ -225,3 +225,50 @@ func TestAssessmentRepository_CreateSchoolTemplateForcesNonStandard(t *testing.T
 	require.False(t, tpl.IsStandard, "呼び出し側が true を渡しても標準にはしない")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+// FindUserSchoolID は users.school_id をそのまま信用しない（#1675）。
+//
+// users.school_id は本人が送ったプロフィールの学校名から更新され（auth_profile.go）、
+// 解決に使う SchoolRepository.FindByName は学園で絞っていない。そのため別学園の学生でも
+// 学校名を対象校と同じにすれば、その学校の school_id を自分に付けられる。
+// school_id を返してしまうと、それだけで他学園の学校独自テンプレート（問題文・受検）に届く。
+func TestAssessmentRepository_FindUserSchoolIDChecksOrganization(t *testing.T) {
+	tests := []struct {
+		name       string
+		userOrg    uint
+		schoolID   any // nil なら学校未設定
+		schoolOrg  *uint
+		wantSchool *uint
+	}{
+		{name: "学園が一致すれば所属校を返す", userOrg: 1, schoolID: int64(5), schoolOrg: ptrUint(1), wantSchool: ptrUint(5)},
+		{name: "別学園の学校IDは返さない", userOrg: 2, schoolID: int64(5), schoolOrg: ptrUint(1), wantSchool: nil},
+		{name: "学校未設定は運営標準だけ", userOrg: 1, schoolID: nil, schoolOrg: nil, wantSchool: nil},
+		{name: "学校が存在しなければ運営標準だけ", userOrg: 1, schoolID: int64(5), schoolOrg: nil, wantSchool: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, mock := newAssessmentRepo(t)
+			userRows := sqlmock.NewRows([]string{"school_id", "organization_id"}).AddRow(tt.schoolID, int64(tt.userOrg))
+			mock.ExpectQuery("SELECT .*`users`").WillReturnRows(userRows)
+			if tt.schoolID != nil {
+				if tt.schoolOrg == nil {
+					mock.ExpectQuery("SELECT .*`schools`").WillReturnError(gorm.ErrRecordNotFound)
+				} else {
+					mock.ExpectQuery("SELECT .*`schools`").
+						WillReturnRows(sqlmock.NewRows([]string{"id", "organization_id"}).AddRow(int64(5), int64(*tt.schoolOrg)))
+				}
+			}
+			got, err := repo.FindUserSchoolID(9)
+			require.NoError(t, err)
+			if tt.wantSchool == nil {
+				require.Nil(t, got, "他学園・未設定では school_id を返してはいけない")
+			} else {
+				require.NotNil(t, got)
+				require.Equal(t, *tt.wantSchool, *got)
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func ptrUint(v uint) *uint { return &v }

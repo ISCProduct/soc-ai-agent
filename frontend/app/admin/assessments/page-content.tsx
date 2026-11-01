@@ -1,8 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Button, Card, CardContent, Paper, Stack, Typography } from '@mui/material'
-import { authService } from '@/lib/auth'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
@@ -31,23 +30,27 @@ export default function PageContent() {
   const [statusLoading, setStatusLoading] = useState(false)
   const [statusError, setStatusError] = useState<string | null>(null)
 
-  useEffect(() => {
-    const user = authService.getStoredUser()
-    if (!user?.is_admin && !user?.is_staff) window.location.href = '/'
-  }, [])
+  // 要求ごとの世代。学校や検査を切り替えると前の要求が走ったまま残るので、
+  // 応答が後から届いても最新の世代以外は state を触らせない（後着の上書きを防ぐ）。
+  const loadGen = useRef(0)
+  const statusGen = useRef(0)
 
   const load = useCallback(async () => {
     if (schoolId === undefined) return
+    const gen = ++loadGen.current
     setLoading(true)
     setError(null)
     try {
       const data = await listSchoolTemplates(schoolId)
+      if (gen !== loadGen.current) return
       setTemplates(data.templates ?? [])
       setCategories(data.categories ?? [])
     } catch {
+      if (gen !== loadGen.current) return
       setError('検査の一覧を読み込めませんでした')
     } finally {
-      setLoading(false)
+      // 古い要求で Loading を解除すると、新しい要求の読み込み中に一覧が一瞬消える
+      if (gen === loadGen.current) setLoading(false)
     }
   }, [schoolId])
 
@@ -60,16 +63,20 @@ export default function PageContent() {
 
   const openStatuses = async (templateId: number) => {
     if (schoolId === undefined) return
+    const gen = ++statusGen.current
     setSelected(templateId)
     setStatuses(null)
     setStatusLoading(true)
     setStatusError(null)
     try {
-      setStatuses(await listStudentStatuses(schoolId, templateId))
+      const data = await listStudentStatuses(schoolId, templateId)
+      if (gen !== statusGen.current) return
+      setStatuses(data)
     } catch {
+      if (gen !== statusGen.current) return
       setStatusError('受検状況を読み込めませんでした')
     } finally {
-      setStatusLoading(false)
+      if (gen === statusGen.current) setStatusLoading(false)
     }
   }
 

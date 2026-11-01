@@ -49,7 +49,7 @@ func (f *fakeSchoolRepo) ListQuestions(uint, int) ([]models.AssessmentQuestion, 
 func (f *fakeSchoolRepo) ListSchoolStudents(uint, uint) ([]repositories.SchoolStudent, error) {
 	return nil, nil
 }
-func (f *fakeSchoolRepo) ListSessionsByTemplate(uint) ([]models.AssessmentSession, error) {
+func (f *fakeSchoolRepo) ListSessionsByTemplate(uint, uint, uint) ([]models.AssessmentSession, error) {
 	return nil, nil
 }
 func (f *fakeSchoolRepo) CountAnswersBySessions([]uint) (map[uint]int, error) { return nil, nil }

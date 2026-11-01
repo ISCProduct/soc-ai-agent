@@ -337,12 +337,39 @@ func (s *Service) Result(userID uint, publicID string) (*ResultView, error) {
 	return out, nil
 }
 
+// session は本人の受検だけを返す。受検の問題・回答・結果の入口（Get / SaveAnswer /
+// Submit / Result）はすべてここを通る。
+//
+// 学校独自テンプレートの受検は、開始後に学校が変わったら続けさせない。
+// users.school_id は本人のプロフィール更新で変わるので（auth_profile.go）、
+// 本人確認だけだと転校・学校名の付け替えのあとも旧学校の問題文と結果を読めてしまう。
+// 現在の所属校と一致しない学校独自テンプレートは存在しない扱い（#1675）。
 func (s *Service) session(userID uint, publicID string) (*models.AssessmentSession, error) {
 	sess, err := s.repo.FindSessionByPublicID(userID, publicID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
 	}
-	return sess, err
+	if err != nil {
+		return nil, err
+	}
+	t, err := s.repo.FindTemplate(sess.TemplateID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if t.SchoolID == nil {
+		return sess, nil // 運営標準は学校に紐づかない
+	}
+	schoolID, err := s.repo.FindUserSchoolID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if schoolID == nil || *schoolID != *t.SchoolID {
+		return nil, ErrNotFound
+	}
+	return sess, nil
 }
 
 func (s *Service) answers(sessionID uint) (map[uint]int, error) {

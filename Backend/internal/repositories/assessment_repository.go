@@ -216,10 +216,33 @@ func (r *AssessmentRepository) LatestStandardScores(userID uint) (map[string]flo
 }
 
 // FindUserSchoolID は学生の所属校。未設定なら nil（運営標準だけ見える）。
+//
+// users.school_id は本人が送ったプロフィールの学校名から更新される（auth_profile.go）。
+// SchoolRepository.FindByName は学園で絞っていないので、別学園の学生が学校名を対象校と
+// 同じにすれば、その学校の school_id を自分に付けられる。school_id をそのまま信用すると
+// それだけで他学園の学校独自テンプレート（問題文・受検）に到達できるため、
+// 学校の学園が本人の学園と一致するときだけ返す。一致しなければ nil =運営標準だけ（#1675）。
 func (r *AssessmentRepository) FindUserSchoolID(userID uint) (*uint, error) {
-	var u struct{ SchoolID *uint }
-	if err := r.db.Table("users").Select("school_id").Where("id = ?", userID).Take(&u).Error; err != nil {
+	var u struct {
+		SchoolID       *uint
+		OrganizationID uint
+	}
+	if err := r.db.Table("users").Select("school_id", "organization_id").Where("id = ?", userID).Take(&u).Error; err != nil {
 		return nil, err
+	}
+	if u.SchoolID == nil {
+		return nil, nil
+	}
+	orgID, err := r.FindSchoolOrganizationID(*u.SchoolID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 学校が消えている。独自テンプレートの持ち主がいないので運営標準だけ見せる。
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if orgID != u.OrganizationID {
+		return nil, nil
 	}
 	return u.SchoolID, nil
 }
@@ -282,10 +305,21 @@ func (r *AssessmentRepository) ListSchoolStudents(schoolID, organizationID uint)
 	return out, err
 }
 
-// ListSessionsByTemplate はテンプレートの全受検（ユーザーごとの最新を選ぶのは呼び出し側）。id 降順。
-func (r *AssessmentRepository) ListSessionsByTemplate(templateID uint) ([]models.AssessmentSession, error) {
+// ListSessionsByTemplate はテンプレートの受検のうち、在籍学生ごとの最新1件だけを返す。id 降順。
+//
+// 全件を読んで呼び出し側で最新を選ぶと、再受検や退籍学生の履歴が増えるほど
+// 読み取り量とメモリが増える。学生ごとの最大 id を DB 側で絞り、
+// 先生向け一覧に出す在籍学生（退会済み・職員を除く）に限定する。
+func (r *AssessmentRepository) ListSessionsByTemplate(templateID, schoolID, organizationID uint) ([]models.AssessmentSession, error) {
 	var ss []models.AssessmentSession
-	err := r.db.Where("template_id = ?", templateID).Order("id DESC").Find(&ss).Error
+	latest := r.db.Table("assessment_sessions").Select("MAX(id) AS id").
+		Where("template_id = ?", templateID).Group("user_id")
+	err := r.db.Table("assessment_sessions AS s").Select("s.*").
+		Joins("JOIN users AS u ON u.id = s.user_id").
+		Where("s.id IN (?)", latest).
+		Where("u.school_id = ? AND u.organization_id = ? AND u.role = ? AND u.withdrawn_at IS NULL",
+			schoolID, organizationID, models.UserRoleStudent).
+		Order("s.id DESC").Find(&ss).Error
 	return ss, err
 }
 

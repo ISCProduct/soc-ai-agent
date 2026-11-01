@@ -40,7 +40,7 @@ type SchoolRepository interface {
 	FindSchoolTemplate(id, schoolID uint) (*models.AssessmentTemplate, error)
 	ListQuestions(templateID uint, version int) ([]models.AssessmentQuestion, error)
 	ListSchoolStudents(schoolID, organizationID uint) ([]repositories.SchoolStudent, error)
-	ListSessionsByTemplate(templateID uint) ([]models.AssessmentSession, error)
+	ListSessionsByTemplate(templateID, schoolID, organizationID uint) ([]models.AssessmentSession, error)
 	CountAnswersBySessions(sessionIDs []uint) (map[uint]int, error)
 	ListResultsBySessions(sessionIDs []uint) (map[uint]map[string]float64, error)
 }
@@ -223,11 +223,11 @@ func (s *SchoolService) StudentStatuses(schoolID, templateID uint) (*StudentStat
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := s.repo.ListSessionsByTemplate(t.ID)
+	sessions, err := s.repo.ListSessionsByTemplate(t.ID, schoolID, orgID)
 	if err != nil {
 		return nil, err
 	}
-	// 学生ごとの最新の受検（ListSessionsByTemplate は id 降順）。学校の在籍学生だけ使う。
+	// 学生ごとの最新の受検。在籍学生ごとの最新1件に絞るのは DB 側（ListSessionsByTemplate）。
 	latest := map[uint]models.AssessmentSession{}
 	var sessionIDs []uint
 	for _, ss := range sessions {
