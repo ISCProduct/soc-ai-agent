@@ -244,11 +244,9 @@ func (s *InterviewService) ListSessions(userID uint, all bool, limit int, offset
 	return toSessionResponses(sessions), total, nil
 }
 
+// GetSessionDetail は面接詳細を返す。教員用レポートを含めるかは呼び出し元の実ロールで
+// サーバー側が決める（クライアント送信の値は使わない。#1814）。
 func (s *InterviewService) GetSessionDetail(userID uint, sessionID uint) (*InterviewDetailResponse, error) {
-	return s.GetSessionDetailWithRole(userID, sessionID, "student")
-}
-
-func (s *InterviewService) GetSessionDetailWithRole(userID uint, sessionID uint, role string) (*InterviewDetailResponse, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -268,12 +266,7 @@ func (s *InterviewService) GetSessionDetailWithRole(userID uint, sessionID uint,
 		}
 		report = nil
 	}
-	// 教員以外には教員用レポートを返さない
-	if report != nil && role != "teacher" {
-		sanitized := *report
-		sanitized.TeacherReportJSON = ""
-		report = &sanitized
-	}
+	report = s.redactTeacherReport(userID, report)
 	return &InterviewDetailResponse{
 		Session:    *toSessionResponse(session),
 		Utterances: utterances,
