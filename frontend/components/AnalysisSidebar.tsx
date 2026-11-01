@@ -59,19 +59,7 @@ import { computeProgressTotals } from './mui-chat/utils'
 
 const DRAWER_WIDTH = 280
 
-const NAV_ICONS: Record<(typeof SIDEBAR_NAV_ITEMS)[number]['href'], React.ReactNode> = {
-    '/correlation-diagram': <BorderAll color="primary"/>,
-    '/chat-history': <History color="primary"/>,
-    '/resume': <Description color="primary"/>,
-    '/assessments': <Quiz color="primary"/>,
-    '/interview': <RecordVoiceOver color="primary"/>,
-    '/interview/history': <Assessment color="primary"/>,
-    '/es-rewrite': <EditNote color="primary"/>,
-    '/schedule': <CalendarMonth color="primary"/>,
-    '/applications': <Assignment color="primary"/>,
-    '/scout': <MailOutline color="primary"/>,
-    '/profile': <ManageAccounts color="primary"/>,
-}
+const SIDEBAR_HREFS = SIDEBAR_NAV_ITEMS.map((i) => i.href)
 
 interface AnalysisStep {
     id: string
@@ -116,7 +104,6 @@ interface AnalysisSidebarProps {
 export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClose}: AnalysisSidebarProps) {
     const router = useRouter()
     const pathname = usePathname() || ''
-    const SIDEBAR_HREFS = SIDEBAR_NAV_ITEMS.map((i) => i.href)
     // /interview と /interview/history のように前方一致が重なるときは、より長い方だけを現在地にする（GlobalNavMenu と同じ判定）
     const isCurrent = (href: string) => isCurrentNavExclusive(pathname, href, SIDEBAR_HREFS)
     const [messageCount, setMessageCount] = useState(0)
@@ -256,6 +243,10 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
             overflowY: 'auto',
         },
     }
+
+    // ゲストは選考管理に入れずログイン導線へ飛ばされるため、ここに居ても「現在地」としては扱わない
+    // （selected/表示中とTooltipの「ログインが必要です」が同時に出る矛盾を避ける）
+    const applicationsCurrent = isCurrent('/applications') && !user.is_guest
 
     const drawerContent = (
             <Box sx={{p: 2}}>
@@ -443,8 +434,8 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                                 router.push(getApplicationsNavTarget(user.is_guest))
                                 onMobileClose?.()
                             }}
-                            selected={isCurrent('/applications')}
-                            aria-current={isCurrent('/applications') ? 'page' : undefined}
+                            selected={applicationsCurrent}
+                            aria-current={applicationsCurrent ? 'page' : undefined}
                             sx={{ borderRadius: 1 }}
                         >
                             <ListItemIcon sx={{minWidth: 36}}>
@@ -452,10 +443,10 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             </ListItemIcon>
                             <ListItemText
                                 primary="選考管理"
-                                secondary={user.is_guest ? 'ログインが必要です' : (isCurrent('/applications') ? '表示中' : undefined)}
+                                secondary={user.is_guest ? 'ログインが必要です' : (applicationsCurrent ? '表示中' : undefined)}
                                 primaryTypographyProps={{
                                     fontSize: '0.875rem',
-                                    fontWeight: isCurrent('/applications') ? 700 : 500,
+                                    fontWeight: applicationsCurrent ? 700 : 500,
                                 }}
                                 secondaryTypographyProps={{
                                     fontSize: '0.7rem',

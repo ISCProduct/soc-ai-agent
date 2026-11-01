@@ -63,4 +63,34 @@ describe('AnalysisSidebar のナビ項目', () => {
       expect(el).not.toHaveAttribute('aria-current')
     }
   })
+
+  it('/whats-new（更新情報、SIDEBAR_NAV_ITEMS外の項目）でも現在地ハイライトが付く', () => {
+    mockPathname = '/whats-new'
+    render(<AnalysisSidebar user={user} onLogout={jest.fn()} />)
+
+    for (const el of screen.getAllByRole('button', { name: /更新情報/ })) {
+      expect(el).toHaveAttribute('aria-current', 'page')
+    }
+  })
+
+  it('管理者は /admin で管理者機能リンクに現在地ハイライトが付く', () => {
+    mockPathname = '/admin'
+    const admin = { ...user, is_admin: true } as unknown as User
+    render(<AnalysisSidebar user={admin} onLogout={jest.fn()} />)
+
+    for (const el of screen.getAllByRole('link', { name: /管理者機能/ })) {
+      expect(el).toHaveAttribute('aria-current', 'page')
+    }
+  })
+
+  it('ゲストは選考管理に居ても「表示中」にならない（ログイン誘導のTooltipと矛盾させない）', () => {
+    mockPathname = '/applications'
+    const guest = { ...user, is_guest: true } as unknown as User
+    render(<AnalysisSidebar user={guest} onLogout={jest.fn()} />)
+
+    for (const el of screen.getAllByRole('button', { name: /選考管理/ })) {
+      expect(el).not.toHaveAttribute('aria-current')
+    }
+    expect(screen.getAllByText('ログインが必要です').length).toBeGreaterThan(0)
+  })
 })
