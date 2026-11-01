@@ -208,6 +208,11 @@ jobs:
       - name: ステージング uptime 判定のテスト
         run: ./automation/test/staging-uptime-decision-test.sh
 
+      # staging 起動待ちの判定。前回の auto-stop と重なると desired が 0 に戻され、
+      # state だけを見て抜けると「これから落とされる台」へデプロイする（#1693）。
+      - name: ステージング起動待ち判定のテスト
+        run: ./automation/test/staging-infra-wait-test.sh
+
       # Discordコマンド登録の失敗理由が表示されること。
       # 以前は curl -sf で握り潰しており、登録できない原因が追えなかった。
       - name: Discord コマンド登録スクリプトのテスト
