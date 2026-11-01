@@ -45,6 +45,14 @@ export function isCurrentNav(pathname: string, href: string): boolean {
   return href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`)
 }
 
+/**
+ * `allHrefs` の中に前方一致が重なる項目があるとき（例: /interview と /interview/history）、
+ * 最も長く一致する項目だけを現在地とする。GlobalNavMenu / AnalysisSidebar で共通利用（#403）。
+ */
+export function isCurrentNavExclusive(pathname: string, href: string, allHrefs: readonly string[]): boolean {
+  return isCurrentNav(pathname, href) && !allHrefs.some((o) => o.length > href.length && isCurrentNav(pathname, o))
+}
+
 const HIDE_BOTTOM_NAV = [
   '/login',
   '/forgot-password',

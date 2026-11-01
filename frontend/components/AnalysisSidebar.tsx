@@ -54,24 +54,10 @@ import {
   getTodayActionLabel,
   shouldShowResultsCta,
 } from '@/lib/sidebar-navigation'
-import { SIDEBAR_ADMIN_NAV, SIDEBAR_NAV_ITEMS } from '@/lib/sidebar-nav'
+import { SIDEBAR_ADMIN_NAV } from '@/lib/sidebar-nav'
 import { computeProgressTotals } from './mui-chat/utils'
 
 const DRAWER_WIDTH = 280
-
-const NAV_ICONS: Record<(typeof SIDEBAR_NAV_ITEMS)[number]['href'], React.ReactNode> = {
-    '/correlation-diagram': <BorderAll color="primary"/>,
-    '/chat-history': <History color="primary"/>,
-    '/resume': <Description color="primary"/>,
-    '/assessments': <Quiz color="primary"/>,
-    '/interview': <RecordVoiceOver color="primary"/>,
-    '/interview/history': <Assessment color="primary"/>,
-    '/es-rewrite': <EditNote color="primary"/>,
-    '/schedule': <CalendarMonth color="primary"/>,
-    '/applications': <Assignment color="primary"/>,
-    '/scout': <MailOutline color="primary"/>,
-    '/profile': <ManageAccounts color="primary"/>,
-}
 
 interface AnalysisStep {
     id: string
@@ -520,6 +506,26 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
 
                 <ListItem disablePadding>
                     <ListItemButton
+                        onClick={() => router.push('/assessments')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <Quiz color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="適性検査"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
                         onClick={() => router.push('/interview')}
                         sx={{
                             borderRadius: 1,
@@ -590,6 +596,26 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="選考スケジュール"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/scout')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <MailOutline color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="スカウト"
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
