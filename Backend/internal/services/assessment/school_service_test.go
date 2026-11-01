@@ -174,6 +174,7 @@ func (m *memSchoolRepo) ListSchoolStudents(schoolID, orgID uint) ([]repositories
 	return m.students[key(schoolID, orgID)], nil
 }
 func key(s, o uint) string { b, _ := json.Marshal([2]uint{s, o}); return string(b) }
+
 // ListSessionsByTemplate は本物と同じ契約にする（在籍学生ごとの最新1件だけ、id 降順）。
 // ここを「全件返す」ままにすると、絞り込みを DB 側へ移した変更がテストで検知できない。
 func (m *memSchoolRepo) ListSessionsByTemplate(tid, schoolID, orgID uint) ([]models.AssessmentSession, error) {
