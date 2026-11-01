@@ -41,6 +41,15 @@ func (f *fakeRepo) FindSessionByPublicID(userID uint, publicID string) (*models.
 	return nil, gorm.ErrRecordNotFound
 }
 
+// 受検の入口（Service.session）は、学校独自テンプレートの受検を現在の所属校と
+// 照合するためにテンプレートと所属校を引く（#1675）。ここでは運営標準（school_id は NULL）
+// を返し、学校の照合に入らない経路を再現する。
+func (f *fakeRepo) FindTemplate(id uint) (*models.AssessmentTemplate, error) {
+	return &models.AssessmentTemplate{ID: id, Version: 1, IsStandard: true}, nil
+}
+
+func (f *fakeRepo) FindUserSchoolID(uint) (*uint, error) { return nil, nil }
+
 func (f *fakeRepo) ListQuestions(uint, int) ([]models.AssessmentQuestion, error) {
 	return []models.AssessmentQuestion{
 		{ID: 1, WeightCategory: "チームワーク志向"},

@@ -22,6 +22,7 @@ type memRepo struct {
 	// chatScores は提出後も消えてはいけないチャット由来のスコア
 	chatScores    map[string]float64
 	writtenScores map[string]map[string]float64 // scoreSessionID -> category -> score
+	userSchools   map[uint]uint                 // user -> school（未設定は運営標準だけ見える）
 }
 
 func newMemRepo() *memRepo {
@@ -36,11 +37,34 @@ func newMemRepo() *memRepo {
 		results:       map[uint]map[string]float64{},
 		chatScores:    map[string]float64{"技術志向": 40},
 		writtenScores: map[string]map[string]float64{},
+		userSchools:   map[uint]uint{},
 	}
 }
 
-func (m *memRepo) ListTemplates() ([]models.AssessmentTemplate, error) {
-	return []models.AssessmentTemplate{m.templates[1]}, nil
+func visibleTo(t models.AssessmentTemplate, schoolID *uint) bool {
+	return t.SchoolID == nil || (schoolID != nil && *t.SchoolID == *schoolID)
+}
+func (m *memRepo) ListTemplates(schoolID *uint) ([]models.AssessmentTemplate, error) {
+	var out []models.AssessmentTemplate
+	for id := uint(1); id <= uint(len(m.templates)); id++ {
+		if t, ok := m.templates[id]; ok && visibleTo(t, schoolID) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+func (m *memRepo) FindVisibleTemplate(id uint, schoolID *uint) (*models.AssessmentTemplate, error) {
+	t, ok := m.templates[id]
+	if !ok || !visibleTo(t, schoolID) {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &t, nil
+}
+func (m *memRepo) FindUserSchoolID(userID uint) (*uint, error) {
+	if sid, ok := m.userSchools[userID]; ok {
+		return &sid, nil
+	}
+	return nil, nil
 }
 func (m *memRepo) FindTemplate(id uint) (*models.AssessmentTemplate, error) {
 	t, ok := m.templates[id]
@@ -109,14 +133,16 @@ func (m *memRepo) CountAnswersBySessions(ids []uint) (map[uint]int, error) {
 	}
 	return out, nil
 }
-func (m *memRepo) Submit(s *models.AssessmentSession, scores map[string]float64, scoreSessionID string) error {
+func (m *memRepo) Submit(s *models.AssessmentSession, scores map[string]float64, scoreSessionID string, writeScores bool) error {
 	if s.Status != models.AssessmentStatusInProgress {
 		return ErrAlreadySubmitted
 	}
 	now := time.Now()
 	s.Status, s.SubmittedAt = models.AssessmentStatusSubmitted, &now
 	m.results[s.ID] = scores
-	m.writtenScores[scoreSessionID] = scores
+	if writeScores {
+		m.writtenScores[scoreSessionID] = scores
+	}
 	return nil
 }
 func (m *memRepo) FindResult(sessionID uint) (map[string]float64, error) {
@@ -339,5 +365,78 @@ func TestService_ListAndResultBeforeSubmit(t *testing.T) {
 	}
 	if _, err := svc.Result(7, s.SessionID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("提出前に結果が見えた: %v", err)
+	}
+}
+
+// 学校独自テンプレートの受検は、学校が変わったら続けられない（#1675）。
+//
+// users.school_id は本人のプロフィール更新で変わる（auth_profile.go）。本人確認だけだと
+// 転校・学校名の付け替えのあとも旧学校の問題文・回答・結果を読め、提出もできてしまう。
+// 入口は session() に集約されているので、そこを通る4経路すべてで塞がることを見る。
+func TestService_SchoolTemplateSessionBlockedAfterSchoolChange(t *testing.T) {
+	const (
+		student    = uint(7)
+		schoolA    = uint(1)
+		schoolB    = uint(2)
+		templateID = uint(2)
+	)
+	setup := func() (*Service, *memRepo, string) {
+		repo := newMemRepo()
+		sid := schoolA
+		repo.templates[templateID] = models.AssessmentTemplate{ID: templateID, Title: "A校の独自検査", Version: 1, SchoolID: &sid}
+		repo.questions = append(repo.questions,
+			models.AssessmentQuestion{ID: 20, TemplateID: templateID, TemplateVersion: 1, Position: 1, WeightCategory: "技術志向"})
+		repo.userSchools[student] = schoolA
+		svc, _ := newTestService(repo, "")
+		view, err := svc.Start(student, templateID)
+		if err != nil {
+			t.Fatalf("A校在籍のうちは開始できるはず: %v", err)
+		}
+		return svc, repo, view.SessionID
+	}
+
+	// 前提: 在籍中は読める（この確認が無いと、下の4件は常に通る無意味なテストになる）
+	svc, repo, publicID := setup()
+	if _, err := svc.Get(student, publicID); err != nil {
+		t.Fatalf("A校在籍中は受検を開けるはず: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		call func(svc *Service, publicID string) error
+	}{
+		{"状態の取得", func(s *Service, p string) error { _, err := s.Get(student, p); return err }},
+		{"回答の保存", func(s *Service, p string) error { return s.SaveAnswer(student, p, 20, 3) }},
+		{"提出", func(s *Service, p string) error { _, err := s.Submit(context.Background(), student, p); return err }},
+		{"結果の取得", func(s *Service, p string) error { _, err := s.Result(student, p); return err }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo, publicID := setup()
+			repo.userSchools[student] = schoolB // 転校（または学校名の付け替え）
+			if err := tt.call(svc, publicID); !errors.Is(err, ErrNotFound) {
+				t.Errorf("転校後の%sが通った err=%v want %v", tt.name, err, ErrNotFound)
+			}
+		})
+	}
+
+	// 所属校が消えた（nil）場合も続けさせない
+	svc, repo, publicID = setup()
+	delete(repo.userSchools, student)
+	if _, err := svc.Get(student, publicID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("所属校なしで受検を開けた err=%v want %v", err, ErrNotFound)
+	}
+
+	// 運営標準（school_id が NULL）は学校に紐づかないので、学校が変わっても続けられる
+	repo = newMemRepo()
+	repo.userSchools[student] = schoolA
+	svc, _ = newTestService(repo, "")
+	std, err := svc.Start(student, 1)
+	if err != nil {
+		t.Fatalf("標準検査の開始に失敗: %v", err)
+	}
+	repo.userSchools[student] = schoolB
+	if _, err := svc.Get(student, std.SessionID); err != nil {
+		t.Errorf("転校で運営標準の受検まで塞がっている: %v", err)
 	}
 }

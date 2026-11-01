@@ -27,7 +27,7 @@ info:
     |---|---|---|
     | `userToken` | `X-User-Token` | 学生・教員。ログインで発行される短TTLのJWT |
     | `adminAuth` | `X-Admin-Email` + `X-Admin-Token` | 管理画面。管理者本人の認証 |
-    | `serviceSecret` | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない |
+    | `serviceSecret` | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない。値は `SERVICE_SECRET`（`ADMIN_SECRET` とは別値） |
     | `companyCookie` | Cookie | 企業ポータル。httpOnly Cookie 3本 |
 
     テナントの切り替えが必要な場合は `X-Tenant-Slug` を併せて送る。
@@ -126,6 +126,11 @@ components:
       type: apiKey
       in: header
       name: X-Admin-Secret
+      description: |
+        ヘッダ名は歴史的に `X-Admin-Secret` だが、照合する値は `SERVICE_SECRET` であり
+        管理者トークンのHMAC鍵 `ADMIN_SECRET` とは別値（#1158）。未設定なら 503 で拒否し、
+        本文に `"code": "SERVICE_SECRET_NOT_CONFIGURED"` を入れる（ALB が healthy target
+        ゼロで返す 503 と区別するため。CI がこのコードを見ている）。
     companyCookie:
       type: apiKey
       in: cookie
@@ -1071,10 +1076,10 @@ paths:
     get:
       tags: [interviews]
       summary: セッション詳細
+      description: report.teacher_report_json は職員・管理者にのみ含まれる（認証ユーザーの実ロールで決まる。#1814）。
       security: [{ userToken: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
-        - { in: query, name: role, schema: { type: string } }
       responses:
         "200": { description: 詳細 }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -1332,6 +1337,75 @@ paths:
         "200": { description: カテゴリ別スコア }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { description: 未提出または本人のセッションが無い }
+
+  # ── assessments（学校側 / 先生） ─────────────────────
+  /api/admin/assessment-templates:
+    get:
+      tags: [assessments]
+      summary: 学校独自の検査テンプレートを一覧する
+      description: |
+        担当校スコープが掛かる（`school_id` 必須）。運営標準は含まない。学校独自の結果は「おすすめ企業の計算には使われない」。
+      security: [{ adminAuth: [] }]
+      parameters: [{ in: query, name: school_id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: テンプレート一覧 }
+        "400": { description: school_id が無い・不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [assessments]
+      summary: 学校独自の検査テンプレートを作る
+      description: |
+        カテゴリは正典10個から選ぶ。`is_standard` は常に false で、マッチングには合流しない。
+        担当校・作成者は認証情報から決め、リクエスト本文の値は使わない。
+      security: [{ adminAuth: [] }]
+      parameters: [{ in: query, name: school_id, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, questions]
+              properties:
+                title: { type: string, maxLength: 100 }
+                description: { type: string, maxLength: 500 }
+                due_at: { type: string, format: date-time, description: 受検期限。現在より後 }
+                questions:
+                  type: array
+                  minItems: 1
+                  maxItems: 60
+                  items:
+                    type: object
+                    required: [body, weight_category]
+                    properties:
+                      body: { type: string, maxLength: 200 }
+                      weight_category: { type: string }
+                      reverse_scored: { type: boolean }
+      responses:
+        "201": { description: 作成した }
+        "400": { description: 入力不正（メッセージは先生にそのまま見せられる） }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 学校が無い }
+
+  /api/admin/assessment-templates/{id}/students:
+    get:
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: school_id, required: true, schema: { type: integer } }
+      tags: [assessments]
+      summary: 学校独自テンプレートの受検状況（学生ごと）
+      description: |
+        期限超過 → 未受検 → 途中 → 完了の順。スコアの生値は返さず、上位カテゴリ名だけを返す。
+        他校のテンプレートは 404。
+      security: [{ adminAuth: [] }]
+      responses:
+        "200": { description: 学生ごとの受検状況 }
+        "400": { description: IDまたは school_id が不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: この学校のテンプレートが無い }
 
   # ── resume ─────────────────────────────────────────
   /api/resume/upload:
@@ -3566,7 +3640,7 @@ paths:
       tags: [admin-training]
       summary: 学習データの件数
       description: |
-        件数しか返さず個人情報を含まないため、`X-Admin-Secret` によるサービス間認証にしている。運用から機械的に叩けるようにするためで、管理者になりすます形を避けている。
+        件数しか返さず個人情報を含まないため、`X-Admin-Secret` によるサービス間認証にしている。運用から機械的に叩けるようにするためで、管理者になりすます形を避けている。照合する値は `SERVICE_SECRET`（`ADMIN_SECRET` とは別値、#1158）。
       security: [{ serviceSecret: [] }]
       responses:
         "200":
@@ -3578,7 +3652,7 @@ paths:
       tags: [release-notes]
       summary: リリースノートを取り込む
       description: |
-        CI（GitHub Actions）からのマシン間呼び出しのため、共有シークレットのみで認証する（#861）。
+        CI（GitHub Actions）からのマシン間呼び出しのため、共有シークレットのみで認証する（#861）。照合する値は `SERVICE_SECRET` で、管理者トークンのHMAC鍵 `ADMIN_SECRET` とは分けてある（#1158）。
       security: [{ serviceSecret: [] }]
       responses:
         "200":

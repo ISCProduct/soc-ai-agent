@@ -422,7 +422,6 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
           PROD_API_BASE: https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }}
         run: |
           # backend のタスク起動とヘルスチェック通過を待つ。
@@ -440,19 +439,26 @@ jobs:
           fi
           echo "healthy=1" >> "$GITHUB_OUTPUT"
 
-          # 本番の admin_secret は Secrets Manager を正とする(#1158)。
-          # 読めない場合だけリポジトリシークレットへフォールバックする(移行期間の両対応)。
+          # 本番の service_secret は Secrets Manager(soc-app/service-secret)が正(#1158)。
+          # CIが知るべきこの値と、管理者トークンのHMAC鍵である ADMIN_SECRET は別物。
+          # 本番の値は Terraform の random_password で自動生成されるため、リポジトリ
+          # シークレットへのフォールバックは持たない(同じ値が GitHub 側に存在し得ない)。
           # 失敗理由(AccessDenied / ResourceNotFound / ExpiredToken)を残す。値は stdout 側。
           sm_err=$(mktemp)
-          PROD_ADMIN_SECRET=$(aws secretsmanager get-secret-value \
-            --secret-id "${PROJECT_NAME:-soc-app}/admin" --query SecretString --output text 2>"$sm_err" \
-            | python3 -c "import json,sys; print(json.load(sys.stdin).get('admin_secret',''))" 2>>"$sm_err" || true)
-          if [ -n "$PROD_ADMIN_SECRET" ]; then
-            echo "::add-mask::$PROD_ADMIN_SECRET"
+          PROD_SERVICE_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id "${PROJECT_NAME:-soc-app}/service-secret" --query SecretString --output text 2>"$sm_err" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('service_secret',''))" 2>>"$sm_err" || true)
+          if [ -n "$PROD_SERVICE_SECRET" ]; then
+            echo "::add-mask::$PROD_SERVICE_SECRET"
           else
-            echo "::warning::Secrets Manager から admin_secret を読めませんでした。リポジトリシークレットで続行します(IAMに secretsmanager:GetSecretValue を確認してください)"
+            # ここは最後の回収経路。IAM権限不足やシークレット未作成は放っておいても直らず、
+            # 警告で流すと更新情報が永久に反映されないまま誰も気づけない(#1290 と同じ症状)。
+            # このステップは continue-on-error なので、出力で下の失敗ステップへ伝える。
+            echo "lookup_failed=1" >> "$GITHUB_OUTPUT"
+            echo "::error::Secrets Manager から service_secret を読めませんでした(IAMに secretsmanager:GetSecretValue があるか、soc-app/service-secret が存在するかを確認してください)"
             sed 's/^/  aws: /' "$sm_err"
-            PROD_ADMIN_SECRET="$ADMIN_SECRET"
+            rm -f "$sm_err"
+            exit 0
           fi
           rm -f "$sm_err"
 
@@ -460,14 +466,34 @@ jobs:
             --json number,title,body,mergedAt \
             --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
 
+          # ペイロードは argv に乗せない。PR本文を含むと ARG_MAX を超え、
+          # 「curl: Argument list too long」で curl 自体が起動しない。空の HTTP
+          # コードが下の *) に落ちて「停止中の可能性」という無関係な警告に化け、
+          # 本番・staging とも取り込みが黙って飛ぶ(60件で実際に踏んだ)。
+          payload=$(mktemp)
+          printf '{"sources": %s}' "$sources" > "$payload"
+
           # 起動確認済みの状態で 401/403 なら「停止中」ではなく鍵の不一致。
           # ここは最後の回収経路なので、warning で流すと誰も気づけない。
-          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
+          # 503 は本文で切り分ける。api.* は ALB 直結(prod/main.tf の
+          # aws_route53_record.backend)で、ALB も healthy target ゼロなら 503 を返すため、
+          # ステータスだけでは SERVICE_SECRET 未設定と区別できない。
+          resp=$(mktemp)
+          code=$(curl -s -o "$resp" -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
-            -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
-            -d "{\"sources\": $sources}" \
+            -H "X-Admin-Secret: $PROD_SERVICE_SECRET" \
+            -d @"$payload" \
             --max-time 60 || true)
+          if [ "$code" = "503" ] && grep -q SERVICE_SECRET_NOT_CONFIGURED "$resp"; then
+            # 設定不備は放置しても直らない。拒否と同じ扱いで失敗へ昇格させる。
+            # 下の失敗ステップへ実際のコードを渡す(503 のまま。嘘の 403 にはしない)。
+            echo "rejected=$code" >> "$GITHUB_OUTPUT"
+            echo "::error::本番の SERVICE_SECRET が未設定です(503)。terraform apply でタスク定義へ注入してからデプロイし直してください"
+            code=handled
+          fi
+          rm -f "$resp"
           case "$code" in
+            handled) ;;
             2*)
               echo "更新情報を取り込みました"
               ;;
@@ -475,7 +501,7 @@ jobs:
               # このステップは continue-on-error なので、ここで exit しても
               # ジョブは落ちない。下の「失敗させる」ステップへ出力で伝える。
               echo "rejected=$code" >> "$GITHUB_OUTPUT"
-              echo "::error::更新情報の取り込みが $code で拒否されました(admin_secret が本番の値と一致していない、または未設定)"
+              echo "::error::更新情報の取り込みが $code で拒否されました(service_secret が本番の値と一致していない、または SERVICE_SECRET が未注入)"
               ;;
             *)
               echo "::warning::更新情報の取り込みに失敗しました(HTTP $code / 次回起動時に回収されます)"
@@ -492,12 +518,22 @@ jobs:
           echo "::error::本番を起動しましたが backend の /health が 200 を返しませんでした"
           exit 1
 
+      # 鍵そのものが読めないのも、放っておいて直るものではない。
+      # 取り込みを一度もできないまま緑で終わるのを防ぐ。
+      - name: service_secret を読めなかったら失敗させる
+        if: steps.whatsnew.outputs.lookup_failed == '1'
+        run: |
+          reason="Secrets Manager から service_secret を読めず、本番への更新情報の取り込みができませんでした(IAM権限 / soc-app/service-secret の存在を確認してください)"
+          echo "$reason" > "$RUNNER_TEMP/alert-reason.txt"
+          echo "::error::$reason"
+          exit 1
+
       # 鍵の不一致は「停止中で届かない」と違い、放っておいても直らない。
       # ここが最後の回収経路なので、警告で流すと更新情報が出ないまま気づけない。
       - name: 更新情報の取り込みが拒否されたら失敗させる
         if: steps.whatsnew.outputs.rejected != ''
         run: |
-          reason="本番への更新情報の取り込みが HTTP ${{ steps.whatsnew.outputs.rejected }} で拒否されました(admin_secret の不一致または未設定)"
+          reason="本番への更新情報の取り込みが HTTP ${{ steps.whatsnew.outputs.rejected }} で拒否されました(service_secret の不一致または未設定)"
           echo "$reason" > "$RUNNER_TEMP/alert-reason.txt"
           echo "::error::$reason"
           exit 1
