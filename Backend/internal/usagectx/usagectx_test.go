@@ -33,6 +33,18 @@ func TestFeature(t *testing.T) {
 	}
 }
 
+func TestPromptVersionFromContext(t *testing.T) {
+	ctx := WithPromptVersion(context.Background(), "matching_reason", "v3", "candidate")
+	if got := PromptVersionFromContext(ctx); got != (PromptVersion{
+		Stage: "matching_reason", Version: "v3", Variant: "candidate",
+	}) {
+		t.Fatalf("PromptVersionFromContext()=%+v", got)
+	}
+	if got := PromptVersionFromContext(context.Background()); got != (PromptVersion{}) {
+		t.Fatalf("未設定の版=%+v", got)
+	}
+}
+
 // TestActor は実行主体と配賦先の出し入れを検証する。
 // バッチ経路は主体を持たないため、nil のまま記録されることが正しい。
 func TestActor(t *testing.T) {

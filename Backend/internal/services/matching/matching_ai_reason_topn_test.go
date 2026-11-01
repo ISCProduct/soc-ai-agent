@@ -68,6 +68,9 @@ func TestCalculateMatching_AIReasonOnlyForTopN(t *testing.T) {
 
 	t.Setenv("MATCHING_REASON_USE_AI", "true")
 	t.Setenv("MATCHING_REASON_AI_TOP_N", "5")
+	t.Setenv("PROMPT_VERSION", "v2")
+	t.Setenv("PROMPT_VERSION_MATCHING_REASON", "")
+	t.Setenv("PROMPT_AB_MATCHING_REASON", "")
 
 	var calls atomic.Int32
 	srv := newCountingLLMServer(t, &calls)
@@ -88,10 +91,18 @@ func TestCalculateMatching_AIReasonOnlyForTopN(t *testing.T) {
 	}
 
 	aiCount := 0
+	versionCount := 0
 	for _, m := range matchRepo.captured {
 		if m.MatchReason == aiReasonText {
+			if m.MatchReasonPromptVersion != "v2" {
+				t.Fatalf("company %d の版=%q want v2", m.CompanyID, m.MatchReasonPromptVersion)
+			}
 			aiCount++
+			versionCount++
 			continue
+		}
+		if m.MatchReasonPromptVersion != "" {
+			t.Fatalf("AI対象外のcompany %d に版が設定されている: %q", m.CompanyID, m.MatchReasonPromptVersion)
 		}
 		// AI 対象外はテンプレ理由を保存しない。
 		// 表示されるのは上位N件だけで、読み出し側が BuildMatchReason を呼び直すため
@@ -104,6 +115,9 @@ func TestCalculateMatching_AIReasonOnlyForTopN(t *testing.T) {
 	}
 	if aiCount != topN {
 		t.Fatalf("AI理由が入ったマッチ数=%d want %d", aiCount, topN)
+	}
+	if versionCount != topN {
+		t.Fatalf("AI理由と版が両方記録された件数=%d want %d", versionCount, topN)
 	}
 
 	// AI 理由が入ったのはスコア上位N件であること
@@ -119,6 +133,9 @@ func TestCalculateMatching_AIReasonOnlyForTopN(t *testing.T) {
 // 「CalculateMatching 中に外部LLMが走らないこと」を引き継ぐ。
 func TestCalculateMatching_NoAICallsWhenFlagOff(t *testing.T) {
 	t.Setenv("MATCHING_REASON_USE_AI", "")
+	t.Setenv("PROMPT_VERSION", "v2")
+	t.Setenv("PROMPT_VERSION_MATCHING_REASON", "")
+	t.Setenv("PROMPT_AB_MATCHING_REASON", "")
 
 	var calls atomic.Int32
 	srv := newCountingLLMServer(t, &calls)
@@ -139,6 +156,9 @@ func TestCalculateMatching_NoAICallsWhenFlagOff(t *testing.T) {
 	for _, m := range matchRepo.captured {
 		if strings.TrimSpace(m.MatchReason) != "" {
 			t.Fatalf("company %d に理由が保存されている: %q", m.CompanyID, m.MatchReason)
+		}
+		if m.MatchReasonPromptVersion != "" {
+			t.Fatalf("AI対象外のcompany %d に版が設定されている: %q", m.CompanyID, m.MatchReasonPromptVersion)
 		}
 	}
 }
