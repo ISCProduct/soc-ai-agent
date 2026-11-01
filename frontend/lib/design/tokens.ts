@@ -25,6 +25,11 @@ export const UI = Object.fromEntries(
 export const CONTENT_MAX_WIDTH = 1200
 
 /**
+ * 管理画面とは別の画面なので、幅の変更が相互に波及しないよう専用の定数にする。
+ */
+export const INTERVIEW_HISTORY_CONTENT_MAX_WIDTH = 1100
+
+/**
  * 適合度の共通スケール。結果画面でのみ使う。
  *
  * 数値を単独で大きく出すと、78 と 71 の差が実際より大きく見える。

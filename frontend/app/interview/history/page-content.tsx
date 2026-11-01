@@ -23,7 +23,7 @@ import { interviewApi, InterviewDetail, InterviewSession, InterviewTrendPoint, T
 import InterviewSummary from '../components/InterviewSummary'
 import { parseJsonSafe } from '@/lib/interview/utils'
 
-import { UI } from '@/lib/design/tokens'
+import { INTERVIEW_HISTORY_CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ListSkeleton } from '@/components/common/ListSkeleton'
 
@@ -121,22 +121,26 @@ export default function PageContent() {
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: UI.paper }}>
       {/* Header */}
-      <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 2, sm: 3, lg: 8 }, py: 2, bgcolor: UI.field, borderBottom: `1px solid ${UI.ruleSoft}` }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Box sx={{ color: UI.mark }}><PsychologyIcon sx={{ fontSize: 32 }} /></Box>
-          <Typography component="h1" sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: UI.ink }}>面接履歴</Typography>
-          {isTeacher && (
-            <Chip label="教員モード" size="small" sx={{ bgcolor: '#3b82f6', color: '#fff', fontWeight: 700, ml: 1 }} />
-          )}
+      <Box component="header" sx={{ py: 2, bgcolor: UI.field, borderBottom: `1px solid ${UI.ruleSoft}` }}>
+        <Box sx={{ maxWidth: INTERVIEW_HISTORY_CONTENT_MAX_WIDTH, mx: 'auto', width: '100%', px: { xs: 2, md: 4 } }}>
+          <Box data-testid="history-header-row" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box sx={{ color: UI.mark }}><PsychologyIcon sx={{ fontSize: 32 }} /></Box>
+              <Typography component="h1" sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: UI.ink }}>面接履歴</Typography>
+              {isTeacher && (
+                <Chip label="教員モード" size="small" sx={{ bgcolor: '#3b82f6', color: '#fff', fontWeight: 700, ml: 1 }} />
+              )}
+            </Box>
+            {/* 既定の40x40ではモバイルのタップ領域が足りない（#1481） */}
+            <IconButton onClick={() => router.push('/interview')} aria-label="面接画面へ戻る" sx={{ bgcolor: UI.tint, color: UI.inkSoft, width: 44, height: 44 }}>
+              <ArrowBackIcon />
+            </IconButton>
+          </Box>
         </Box>
-        {/* 既定の40x40ではモバイルのタップ領域が足りない（#1481） */}
-        <IconButton onClick={() => router.push('/interview')} aria-label="面接画面へ戻る" sx={{ bgcolor: UI.tint, color: UI.inkSoft, width: 44, height: 44 }}>
-          <ArrowBackIcon />
-        </IconButton>
       </Box>
 
       {/* Trend chart */}
-      <Box sx={{ maxWidth: 1100, mx: 'auto', px: { xs: 2, md: 4 }, pt: { xs: 2, md: 4 }, pb: 0 }}>
+      <Box sx={{ maxWidth: INTERVIEW_HISTORY_CONTENT_MAX_WIDTH, mx: 'auto', px: { xs: 2, md: 4 }, pt: { xs: 2, md: 4 }, pb: 0 }}>
         <Paper elevation={0} sx={{ p: { xs: 2, md: 3 }, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }} flexWrap="wrap" gap={1}>
             <Typography sx={{ fontWeight: 700, fontSize: 16 }}>パフォーマンストレンド</Typography>
@@ -173,7 +177,7 @@ export default function PageContent() {
         </Paper>
       </Box>
 
-      <Box sx={{ display: 'flex', maxWidth: 1100, mx: 'auto', p: { xs: 2, md: 4 }, gap: 3, flexDirection: { xs: 'column', md: 'row' }, alignItems: 'flex-start' }}>
+      <Box sx={{ display: 'flex', maxWidth: INTERVIEW_HISTORY_CONTENT_MAX_WIDTH, mx: 'auto', p: { xs: 2, md: 4 }, gap: 3, flexDirection: { xs: 'column', md: 'row' }, alignItems: 'flex-start' }}>
         {/* Session list */}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>セッション一覧</Typography>

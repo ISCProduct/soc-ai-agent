@@ -5,6 +5,10 @@ export type MockUser = {
   email: string
   name: string
   is_guest: boolean
+  role?: 'student' | 'teacher' | 'staff'
+  // 画面の教員判定はサーバーの実ロール（is_staff / is_admin）で行う（#1908）。
+  // role だけを渡しても教員扱いにはならない。
+  is_staff?: boolean
   is_admin?: boolean
   token: string
   user_token: string
@@ -71,6 +75,8 @@ export async function setupAuth(page: Page, user: MockUser = TEST_USER) {
         email: u.email,
         name: u.name,
         is_guest: u.is_guest,
+        role: u.role,
+        is_staff: u.is_staff,
         is_admin: u.is_admin,
       }
       sessionStorage.setItem('user', JSON.stringify(userData))
