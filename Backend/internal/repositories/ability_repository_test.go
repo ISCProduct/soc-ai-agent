@@ -41,12 +41,24 @@ func TestAbilityRepository_CreateSessionDuplicateActive(t *testing.T) {
 func TestAbilityRepository_UpsertAnswerIsIdempotent(t *testing.T) {
 	repo, mock := newAbilityRepo(t)
 	for range 2 {
-		mock.ExpectBegin()
-		mock.ExpectExec("INSERT INTO `ability_answers`.*ON DUPLICATE KEY UPDATE `choice`=VALUES\\(`choice`\\),`updated_at`=VALUES\\(`updated_at`\\)").
+		mock.ExpectExec("INSERT INTO `ability_answers`.*ON DUPLICATE KEY UPDATE").
 			WillReturnResult(sqlmock.NewResult(1, 1))
-		mock.ExpectCommit()
 		require.NoError(t, repo.UpsertAnswer(3, 11, 2))
 	}
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 保存は「受検中で、まだ締め切り前」を SQL の条件に入れた1文で行う。
+//
+// サービス側で確認してから書く形だと、確認と書き込みの間に提出が確定したり
+// 締め切りを過ぎたりしたとき、採点に入らない回答が保存される。
+// 条件を SELECT 側に持たせ、合わなければ 0 行で返る形になっていることを見る。
+func TestAbilityRepository_UpsertAnswerIsConditional(t *testing.T) {
+	repo, mock := newAbilityRepo(t)
+	mock.ExpectExec("INSERT INTO `ability_answers`.*FROM `ability_sessions`.*WHERE s.id = \\? AND s.status = \\? AND \\(s.deadline_at IS NULL OR s.deadline_at >= \\?\\)").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	err := repo.UpsertAnswer(3, 11, 2)
+	require.ErrorIs(t, err, ErrAbilityAnswerRejected)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -59,8 +71,39 @@ func TestAbilityRepository_SubmitIsConditional(t *testing.T) {
 	mock.ExpectExec("UPDATE `ability_sessions` SET .*WHERE id = \\? AND status = \\?").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()
-	err := repo.Submit(sess, map[string]any{"verbal": map[string]int{"correct": 1, "total": 1}})
+	err := repo.Submit(sess, func(map[uint]int) (map[string]any, error) {
+		t.Error("状態を切り替えられなかったのに採点した")
+		return nil, nil
+	})
 	require.ErrorIs(t, err, ErrAbilityAlreadySubmitted)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 採点は「提出済みへ切り替えたあとに読んだ回答」で行う。
+//
+// 先に採点する形だと、切り替え前に確定した回答を取りこぼしたり、
+// 切り替え後に保存された回答が採点に入らないまま残ったりする。
+// UPDATE → SELECT(answers) → INSERT(results) の順になっていることを見る。
+func TestAbilityRepository_SubmitScoresInsideTransaction(t *testing.T) {
+	repo, mock := newAbilityRepo(t)
+	sess := &models.AbilitySession{ID: 5, UserID: 7, Status: models.AbilityStatusInProgress}
+
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `ability_sessions`").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT \\* FROM `ability_answers` WHERE session_id = \\?").
+		WithArgs(uint(5)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "session_id", "question_id", "choice"}).
+			AddRow(1, 5, 11, 2).AddRow(2, 5, 12, 0))
+	mock.ExpectExec("INSERT INTO `ability_results`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	var got map[uint]int
+	err := repo.Submit(sess, func(answers map[uint]int) (map[string]any, error) {
+		got = answers
+		return map[string]any{"verbal": map[string]int{"correct": 1, "total": 2}}, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, map[uint]int{11: 2, 12: 0}, got, "トランザクション内で読んだ回答が採点へ渡る")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -72,10 +115,14 @@ func TestAbilityRepository_SubmitDoesNotTouchUserWeightScores(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE `ability_sessions`").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT \\* FROM `ability_answers`").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "session_id", "question_id", "choice"}))
 	mock.ExpectExec("INSERT INTO `ability_results`").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	// user_weight_scores への発行を期待に入れていないので、触れば ExpectationsWereMet が落ちる。
-	require.NoError(t, repo.Submit(sess, map[string]any{"verbal": map[string]int{"correct": 1, "total": 1}}))
+	require.NoError(t, repo.Submit(sess, func(map[uint]int) (map[string]any, error) {
+		return map[string]any{"verbal": map[string]int{"correct": 1, "total": 1}}, nil
+	}))
 	require.NoError(t, mock.ExpectationsWereMet())
 	require.Equal(t, models.AbilityStatusSubmitted, sess.Status)
 }

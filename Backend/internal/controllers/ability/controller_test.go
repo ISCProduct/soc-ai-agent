@@ -74,11 +74,13 @@ func (f *fakeRepo) ListAnswers(uint) ([]models.AbilityAnswer, error) {
 	return out, nil
 }
 
-func (f *fakeRepo) Submit(s *models.AbilitySession, _ map[string]any) error {
+func (f *fakeRepo) Submit(s *models.AbilitySession, score func(map[uint]int) (map[string]any, error)) error {
 	now := time.Now()
 	s.Status = models.AbilityStatusSubmitted
 	s.SubmittedAt = &now
-	return nil
+	// 本物はトランザクション内で回答を読んで採点する。ここでも同じ順序で呼ぶ。
+	_, err := score(f.answers)
+	return err
 }
 
 func (f *fakeRepo) FindResult(uint) (map[string]any, error) {

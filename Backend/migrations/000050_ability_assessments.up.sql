@@ -96,10 +96,16 @@ CREATE TABLE IF NOT EXISTS `ability_results` (
 -- 運営標準の能力検査（v1）。言語6問・非言語6問、制限15分。
 -- 問題は自作。SPI・玉手箱等の既存問題は著作権上流用できない（SOCAIAGENT-433）。
 -- この12問は動作確認と初期提供のための最小セットで、出題数と難易度の調整は別途行う。
+-- 途中で失敗して version 50 が dirty になった後、force で 49 へ戻して up を
+-- 再実行することがある。そのとき一意制約で再び落ちないよう、どちらの INSERT も
+-- 既存行があれば更新で通す。
 INSERT INTO `ability_templates` (`slug`, `title`, `description`, `version`, `time_limit_seconds`, `created_at`, `updated_at`)
 VALUES ('standard-ability-v1', '能力検査（言語・非言語）',
         '言語6問・非言語6問の基礎的な問題です。制限時間は15分で、時間になると自動的に締め切られます。結果は言語・非言語それぞれの正答数で表示し、企業へのおすすめ計算には使いません。',
-        1, 900, NOW(3), NOW(3));
+        1, 900, NOW(3), NOW(3))
+ON DUPLICATE KEY UPDATE
+  `title` = VALUES(`title`), `description` = VALUES(`description`),
+  `time_limit_seconds` = VALUES(`time_limit_seconds`), `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `ability_questions` (`template_id`, `template_version`, `position`, `section`, `body`, `choices`, `correct_choice`, `created_at`)
 SELECT t.`id`, 1, q.`position`, q.`section`, q.`body`, q.`choices`, q.`correct_choice`, NOW(3)
@@ -132,4 +138,8 @@ JOIN (
   UNION ALL SELECT 12, 'numerical', '5人の中から2人を選ぶ組み合わせは何通りあるか。',
          JSON_ARRAY('10通り', '20通り', '15通り', '25通り'), 0
 ) q
-WHERE t.`slug` = 'standard-ability-v1';
+WHERE t.`slug` = 'standard-ability-v1'
+ON DUPLICATE KEY UPDATE
+  -- 結合先の ability_templates にも section / body があるので、対象表の列を名指しする。
+  `section` = q.`section`, `body` = q.`body`,
+  `choices` = q.`choices`, `correct_choice` = q.`correct_choice`;

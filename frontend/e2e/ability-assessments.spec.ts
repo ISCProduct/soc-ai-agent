@@ -7,6 +7,9 @@ const QUESTIONS = [
   { id: 202, position: 2, section: 'numerical', body: '原価800円の商品に25%の利益を見込んだ売価はいくらか。', choices: ['825円', '1000円', '1025円', '1200円'] },
 ]
 
+/** 正解の添字。サーバ側だけが持つ情報なので、モックの中にだけ置く。 */
+const CORRECT: Record<number, number> = { 201: 0, 202: 1 }
+
 type MockOptions = { remainingSeconds?: number; gone?: boolean }
 
 /**
@@ -74,10 +77,18 @@ async function mockBackend(page: Page, opts: MockOptions = {}) {
       return json(route, { session_id: SESSION_ID })
     }
     if (req.method() === 'GET' && path === `/sessions/${SESSION_ID}/result`) {
+      // 保存済みの回答から数える。固定値を返すと、正解を選んでも誤った表示を
+      // 検証することになり、採点の回帰を検出できない。
+      const sections: Record<string, { correct: number; total: number }> = {}
+      for (const q of QUESTIONS) {
+        const s = (sections[q.section] ??= { correct: 0, total: 0 })
+        s.total++
+        if (state.answers[String(q.id)] === CORRECT[q.id]) s.correct++
+      }
       return json(route, {
         session_id: SESSION_ID,
         title: '能力検査（言語・非言語）',
-        sections: { verbal: { correct: 1, total: 1 }, numerical: { correct: 0, total: 1 } },
+        sections,
         order: ['verbal', 'numerical'],
       })
     }
@@ -126,8 +137,9 @@ test.describe('能力検査', () => {
     await expect(page).toHaveURL(new RegExp(`/ability-assessments/${SESSION_ID}/result$`))
 
     // 分野別の正答数。偏差値・順位は出さない
+    // どちらも正解を選んだので 1/1。固定値ではなく保存済みの回答から数えている
     await expect(page.getByTestId('ability-section-verbal')).toContainText('1 / 1 問')
-    await expect(page.getByTestId('ability-section-numerical')).toContainText('0 / 1 問')
+    await expect(page.getByTestId('ability-section-numerical')).toContainText('1 / 1 問')
     await expect(page.getByRole('heading', { name: 'この結果の使われ方' })).toBeVisible()
     await expect(page.getByText(/おすすめ企業の計算には使いません/)).toBeVisible()
     await expect(page.locator('body')).not.toContainText('偏差値')
@@ -141,7 +153,7 @@ test.describe('能力検査', () => {
     await page.getByRole('button', { name: '受検を始める' }).click()
     await choose(page, '「審議」の意味', '物事をよく調べて話し合うこと')
 
-    await page.getByRole('button', { name: /中断して一覧へ戻る/ }).click()
+    await page.getByRole('button', { name: '中断して一覧へ戻る' }).click()
     await expect(page.getByTestId('ability-status')).toContainText('受検中')
     await expect(page.getByTestId('ability-meta')).toContainText('2問中 1問 回答済み')
 

@@ -42,11 +42,15 @@ export default function PageContent() {
   const [submitting, setSubmitting] = useState(false)
   // 締め切りを過ぎたことに気づいた状態。以降は回答させず、提出だけを促す。
   const [timeUp, setTimeUp] = useState(false)
+  // 中断の確認中。保存キューを待っている間に二重で押させない。
+  const [leaving, setLeaving] = useState(false)
   const [remaining, setRemaining] = useState<number | null>(null)
   // 同じ問題への保存は直列に送る。後から選んだ値が先に届いて古い値で上書きされるのを防ぐ。
   const queues = useRef<Record<string, Promise<void>>>({})
   // 最後の保存が失敗している問題。提出直前に見る（state は submit のクロージャでは古いため ref で持つ）。
   const failed = useRef(new Set<string>())
+  // timeUp の最新値。非同期の待機後に読むので、クロージャに閉じ込めた値は使わない。
+  const timeUpRef = useRef(false)
   const headingRef = useRef<HTMLHeadingElement>(null)
 
   const load = useCallback(async () => {
@@ -64,6 +68,7 @@ export default function PageContent() {
     } catch (e) {
       if (e instanceof AbilityApiError && e.status === 410) {
         // 締め切り済み。問題は読めないが、答えた分で提出はできる。
+        timeUpRef.current = true
         setTimeUp(true)
         setLoadError(null)
         setSession(null)
@@ -86,6 +91,7 @@ export default function PageContent() {
   useEffect(() => {
     if (remaining === null) return
     if (remaining <= 0) {
+      timeUpRef.current = true
       setTimeUp(true)
       return
     }
@@ -111,6 +117,7 @@ export default function PageContent() {
         if (queues.current[key] !== run) return
         // 410 は時間切れ。保存の失敗として見せると「選び直せ」と誤解させる。
         if (e instanceof AbilityApiError && e.status === 410) {
+          timeUpRef.current = true
           setTimeUp(true)
           setRemaining(0)
           failed.current.delete(key)
@@ -129,14 +136,43 @@ export default function PageContent() {
     headingRef.current?.focus()
   }
 
+  /**
+   * 中断して一覧へ戻る。保存の結果を確かめてから移動する。
+   * 待たずに遷移すると画面が消え、保存に失敗しても誰も気づけない。
+   * 学生は保存済みと思って離れ、再開時にサーバーの古い回答が出る。
+   */
+  const leave = async () => {
+    setLeaving(true)
+    setSubmitError(null)
+    await drainQueues()
+    // 待つ前に読んだ値では判断しない（待っている間に失敗が増えうる）
+    if (!timeUpRef.current && failed.current.size > 0) {
+      setSubmitError('保存できていない回答があります。「保存できませんでした」と出ている問題を選び直してから中断してください')
+      setLeaving(false)
+      return
+    }
+    router.push('/ability-assessments')
+  }
+
+  /** 保存キューが空になるまで待つ。待っている間に追加された保存も待つ。 */
+  const drainQueues = async () => {
+    for (let i = 0; i < 20; i++) {
+      const pending = Object.values(queues.current)
+      if (pending.length === 0) break
+      await Promise.all(pending)
+      // 待っている間に新しい保存が積まれていないか確かめる
+      if (Object.values(queues.current).every((p) => pending.includes(p))) break
+    }
+  }
+
   const submit = async () => {
     setSubmitting(true)
     setSubmitError(null)
     try {
-      await Promise.all(Object.values(queues.current))
+      await drainQueues()
       // 画面で選び直した回答が保存できていないまま提出すると、サーバーに残る古い回答で採点が確定する。
       // 時間切れのときは選び直せないので、この確認は行わない（提出を妨げない）。
-      if (!timeUp && failed.current.size > 0) {
+      if (!timeUpRef.current && failed.current.size > 0) {
         setSubmitError('保存できていない回答があります。「保存できませんでした」と出ている問題を選び直してから提出してください')
         setSubmitting(false)
         return
@@ -246,7 +282,9 @@ export default function PageContent() {
           const state = saveState[key]
           return (
             <Paper key={q.id} variant="outlined" sx={{ p: 2 }}>
-              <FormControl component="fieldset" fullWidth disabled={timeUp}>
+              {/* 提出中・中断確認中は選び直させない。提出のPOSTが新しいPUTを追い越すと、
+                  画面に出ている選択と採点された回答が食い違う。 */}
+              <FormControl component="fieldset" fullWidth disabled={timeUp || submitting || leaving}>
                 <FormLabel component="legend" sx={{ color: 'text.primary', fontWeight: 'bold', mb: 1 }}>
                   <Typography component="span" variant="caption" color="text.secondary" display="block">
                     {SECTION_LABEL[q.section] ?? q.section}
@@ -264,9 +302,19 @@ export default function PageContent() {
                 <Typography variant="caption" role="status" color={state === 'error' ? 'error' : 'text.secondary'}>
                   {state === 'saving' && '保存しています…'}
                   {state === 'saved' && '✓ 保存しました'}
-                  {state === 'error' && !timeUp && '× 保存できませんでした。もう一度選んでください（それまでに答えた内容は保存されています）'}
+                  {state === 'error' && !timeUp && '× 保存できませんでした。それまでに答えた内容は保存されています'}
                   {state === 'error' && timeUp && '× 制限時間を過ぎたため、この回答は記録されていません'}
                 </Typography>
+                {/* MUI の RadioGroup は同じ値を選び直しても onChange が出ない。
+                    「もう一度選んでください」だけだと、同じ選択肢に戻したい学生は
+                    別の選択肢を経由するか再読み込みするまで提出できなくなる。 */}
+                {state === 'error' && !timeUp && answers[key] !== undefined && (
+                  <Box mt={0.5}>
+                    <Button size="small" variant="outlined" disabled={submitting || leaving} onClick={() => answer(q.id, answers[key])}>
+                      この回答をもう一度保存する
+                    </Button>
+                  </Box>
+                )}
               </FormControl>
             </Paper>
           )
@@ -299,7 +347,9 @@ export default function PageContent() {
         </Typography>
       )}
       <Box mt={3}>
-        <Button onClick={() => router.push('/ability-assessments')}>中断して一覧へ戻る（回答は保存済み）</Button>
+        <Button disabled={leaving || submitting} onClick={() => void leave()}>
+          {leaving ? '保存を確認しています…' : '中断して一覧へ戻る'}
+        </Button>
       </Box>
       <BottomNavSpacer />
     </Box>

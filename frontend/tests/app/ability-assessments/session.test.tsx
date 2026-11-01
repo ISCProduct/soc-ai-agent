@@ -138,6 +138,71 @@ describe('能力検査の受検画面', () => {
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/ability-assessments/sess-1/result'))
   })
 
+  it('提出中は選び直させない（提出のPOSTが新しいPUTを追い越すのを防ぐ）', async () => {
+    let releaseSubmit: () => void = () => {}
+    mockApi.mockImplementation(async (path, init) => {
+      if (!init) return view() as never
+      if (path.endsWith('/submit')) {
+        await new Promise<void>((r) => { releaseSubmit = r })
+        return undefined as never
+      }
+      return undefined as never
+    })
+    await act(async () => { render(<PageContent />) })
+    const choice = await screen.findByLabelText('調べて話し合う')
+    await act(async () => { fireEvent.click(choice) })
+
+    // 1問目で提出まで進める
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '次へ' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '提出する' })) })
+
+    // 提出が終わるまで選択肢は無効
+    expect(screen.getByLabelText('825円')).toBeDisabled()
+    await act(async () => { releaseSubmit() })
+  })
+
+  it('中断は保存の結果を待ち、失敗があれば遷移しない', async () => {
+    mockApi.mockImplementation(async (path, init) => {
+      if (!init) return view() as never
+      if (path.includes('/answers/')) throw new AbilityApiError(500, 'boom')
+      return undefined as never
+    })
+    await act(async () => { render(<PageContent />) })
+    const choice = await screen.findByLabelText('調べて話し合う')
+    await act(async () => { fireEvent.click(choice) })
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '中断して一覧へ戻る' })) })
+
+    expect(push).not.toHaveBeenCalledWith('/ability-assessments')
+    expect(screen.getByText(/保存できていない回答があります/)).toBeInTheDocument()
+  })
+
+  it('中断のラベルで「保存済み」と断定しない', async () => {
+    mockSession(view())
+    await act(async () => { render(<PageContent />) })
+    const leave = await screen.findByRole('button', { name: '中断して一覧へ戻る' })
+    expect(leave.textContent).not.toContain('保存済み')
+  })
+
+  it('保存が失敗したら、同じ回答を再送できる', async () => {
+    let fail = true
+    mockApi.mockImplementation(async (path, init) => {
+      if (!init) return view() as never
+      if (path.includes('/answers/') && fail) throw new AbilityApiError(500, 'boom')
+      return undefined as never
+    })
+    await act(async () => { render(<PageContent />) })
+    const choice = await screen.findByLabelText('調べて話し合う')
+    await act(async () => { fireEvent.click(choice) })
+    expect(screen.getByText(/保存できませんでした/)).toBeInTheDocument()
+
+    // 同じ選択肢を選び直しても RadioGroup の onChange は出ないので、明示的な再送を置く
+    fail = false
+    const retry = screen.getByRole('button', { name: 'この回答をもう一度保存する' })
+    await act(async () => { fireEvent.click(retry) })
+    expect(screen.getByText('✓ 保存しました')).toBeInTheDocument()
+  })
+
   it('選んだ添字をそのまま送る（0 も送る）', async () => {
     mockSession(view())
     await act(async () => { render(<PageContent />) })

@@ -31,7 +31,7 @@ type Repository interface {
 	UpsertAnswer(sessionID, questionID uint, choice int) error
 	ListAnswers(sessionID uint) ([]models.AbilityAnswer, error)
 	CountAnswersBySessions(sessionIDs []uint) (map[uint]int, error)
-	Submit(s *models.AbilitySession, scores map[string]any) error
+	Submit(s *models.AbilitySession, score func(answers map[uint]int) (map[string]any, error)) error
 	FindResult(sessionID uint) (map[string]any, error)
 }
 
@@ -199,6 +199,11 @@ func (s *Service) Get(userID uint, publicID string) (*SessionView, error) {
 }
 
 // SaveAnswer は1問の自動保存。同じ選択の再送は何度来ても結果が変わらない。
+//
+// 状態と締め切りをここでも見るのは、エラーを区別して返すため（409 と 410）。
+// 実際に書くかどうかは repo.UpsertAnswer の条件付き書き込みが決める。
+// ここの確認だけに頼ると、確認してから書くまでの間に提出が確定したり
+// 締め切りを過ぎたりしたとき、採点に入らない回答が保存される。
 func (s *Service) SaveAnswer(userID uint, publicID string, questionID uint, choice int) error {
 	sess, err := s.session(userID, publicID)
 	if err != nil {
@@ -226,17 +231,39 @@ func (s *Service) SaveAnswer(userID uint, publicID string, questionID uint, choi
 		if !ok {
 			return ErrInvalidChoice
 		}
-		return s.repo.UpsertAnswer(sess.ID, questionID, choice)
+		err = s.repo.UpsertAnswer(sess.ID, questionID, choice)
+		if errors.Is(err, repositories.ErrAbilityAnswerRejected) {
+			// 書く直前に状態が変わっていた。読み直して 409 / 410 を決める。
+			return s.rejectedReason(userID, publicID)
+		}
+		return err
 	}
 	// 別の検査・別の版の問への回答は受け付けない
 	return ErrInvalidChoice
+}
+
+// rejectedReason は条件付き書き込みが通らなかった理由を、セッションを読み直して決める。
+// 読み直せないときは締め切り扱いにする（受け付けなかったことは確かなので、
+// 「保存できた」と誤解させるより「締め切った」と伝える方が実害が小さい）。
+func (s *Service) rejectedReason(userID uint, publicID string) error {
+	sess, err := s.session(userID, publicID)
+	if err != nil {
+		return ErrDeadlinePassed
+	}
+	if sess.Status != models.AbilityStatusInProgress {
+		return ErrAlreadySubmitted
+	}
+	return ErrDeadlinePassed
 }
 
 // Submit は回答を採点して確定する。未回答は誤答扱いで、出題数には数える。
 //
 // 締め切りを過ぎていても提出は受け付ける。締め切り時点の回答で採点されるため、
 // ここで弾くと「時間切れで結果が一切出ない」になり、受検した意味が無くなる。
-// 締め切り後の新しい回答は SaveAnswer が拒否しているので、点数は増えない。
+//
+// 採点は repo.Submit のトランザクションの中で行う。提出済みへ切り替えたあとに
+// 回答を読むので、採点した集合と保存されている回答が必ず一致する
+// （ここで先に採点すると、その後に確定した回答が保存だけされて採点に入らない）。
 func (s *Service) Submit(userID uint, publicID string) (map[string]SectionScore, error) {
 	sess, err := s.session(userID, publicID)
 	if err != nil {
@@ -249,19 +276,21 @@ func (s *Service) Submit(userID uint, publicID string) (map[string]SectionScore,
 	if err != nil {
 		return nil, err
 	}
-	answers, err := s.answers(sess.ID)
+
+	var scores map[string]SectionScore
+	err = s.repo.Submit(sess, func(answers map[uint]int) (map[string]any, error) {
+		sc, err := ScoreAnswers(qs, answers)
+		if err != nil {
+			return nil, err
+		}
+		scores = sc
+		payload := make(map[string]any, len(sc))
+		for k, v := range sc {
+			payload[k] = v
+		}
+		return payload, nil
+	})
 	if err != nil {
-		return nil, err
-	}
-	scores, err := ScoreAnswers(qs, answers)
-	if err != nil {
-		return nil, err
-	}
-	payload := make(map[string]any, len(scores))
-	for k, v := range scores {
-		payload[k] = v
-	}
-	if err := s.repo.Submit(sess, payload); err != nil {
 		return nil, err
 	}
 	return scores, nil
