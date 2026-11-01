@@ -327,6 +327,8 @@
 
 /* 面接官ステージ(主役、16:9)。アバターは全面、自分のカメラは右上のPiP */
 .stageCard {
+  /* PiP の幅。stageTop の右インセットと共有し、狭い画面で面接官ラベルの幅を無駄に削らない。 */
+  --pip-width: clamp(120px, 28%, 224px);
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -349,15 +351,15 @@
   position: absolute;
   top: 12px;
   left: 12px;
-  right: 240px;
+  /* PiP(右12px + --pip-width)の手前で止める。固定値(240px)だと PiP が縮む狭い画面でも
+     同じだけ空け、nowrap の面接官ラベル(会社名)が無駄に切れていた。 */
+  right: calc(24px + var(--pip-width));
 }
 .pipCard {
   position: absolute;
   top: 12px;
   right: 12px;
-  width: 28%;
-  min-width: 120px;
-  max-width: 224px;
+  width: var(--pip-width);
   aspect-ratio: 16 / 10;
   border-radius: 8px;
   overflow: hidden;
