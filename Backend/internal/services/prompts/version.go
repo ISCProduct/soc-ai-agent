@@ -64,7 +64,6 @@ func promptVersionForStage(stage Stage) string {
 		}
 		warnPromptVersionOnce(stage, "unregistered stage version")
 	}
-
 	globalVersion := strings.TrimSpace(os.Getenv("PROMPT_VERSION"))
 	if globalVersion == "" {
 		globalVersion = strings.TrimSpace(PromptVersion)

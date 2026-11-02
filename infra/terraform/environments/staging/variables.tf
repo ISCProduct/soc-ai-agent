@@ -138,6 +138,18 @@ variable "openai_secret_arn" {
   default     = ""
 }
 
+variable "prompt_version" {
+  type        = string
+  description = "後方互換の共通プロンプト版。現在登録済みの版は v2 のみ"
+  default     = "v2"
+}
+
+variable "prompt_versions" {
+  type        = map(string)
+  description = "工程別プロンプト版。現在登録済みの版は v2 のみ"
+  default     = {}
+}
+
 variable "frontend_api_base_url" {
   type        = string
   description = "NEXT_PUBLIC_API_BASE_URL. Leave empty to use http://<eip>:8080"

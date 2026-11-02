@@ -336,6 +336,20 @@ jobs:
               chmod +x /tmp/edge-sync/ensure-edge-compose.sh
               /tmp/edge-sync/ensure-edge-compose.sh /opt/app/docker-compose.yml
               cd /opt/app
+              # 従来の共通プロンプト版設定 (#1778)。工程別設定は明示したものだけを使い、
+              # 未指定なら PROMPT_VERSION を参照する。
+              for key in PROMPT_VERSION; do
+                if [ -f .env ] && ! grep -q "^${key}=" .env; then
+                  echo "${key}=v2" >> .env
+                fi
+              done
+              # 以前の user_data が全工程に自動注入していた v2 は工程別 override ではない。
+              # 残しておくと将来 PROMPT_VERSION を一括変更しても v2 に固定されるため取り除く。
+              for key in PROMPT_VERSION_QUESTION_GENERATION PROMPT_VERSION_SCORE_EVALUATION PROMPT_VERSION_MATCHING_REASON PROMPT_VERSION_COMPANY_EXTRACTION; do
+                if [ -f .env ]; then
+                  sed -i "/^${key}=v2$/d" .env
+                fi
+              done
               # 既存インスタンスの .env は S3_BUCKET のみ。アプリは AWS_S3_BUCKET を読む。
               if [ -f .env ] && grep -q '^S3_BUCKET=' .env && ! grep -q '^AWS_S3_BUCKET=' .env; then
                 echo "AWS_S3_BUCKET=$(grep '^S3_BUCKET=' .env | cut -d= -f2-)" >> .env

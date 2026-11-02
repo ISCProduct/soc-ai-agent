@@ -38,7 +38,7 @@ var upsertAssignments = clause.AssignmentColumns([]string{
 })
 
 var upsertAssignmentsWithPromptVersion = append(
-	upsertAssignments,
+	append([]clause.Assignment(nil), upsertAssignments...),
 	clause.Assignment{
 		Column: clause.Column{Name: "match_reason_prompt_version"},
 		Value:  gorm.Expr("IF(VALUES(match_reason_prompt_version) <> '', VALUES(match_reason_prompt_version), match_reason_prompt_version)"),

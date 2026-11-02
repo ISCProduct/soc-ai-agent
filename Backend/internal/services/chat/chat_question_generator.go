@@ -266,6 +266,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	questionText = strings.TrimSpace(questionText)
 	questionText = strings.Trim(questionText, `"「」`)
 
+	promptVersion := assignment.Version
 	// フォールバック: AIが空を返した場合は簡易質問を使用する
 	if questionText == "" {
 		fallbackQuestion := s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
@@ -274,6 +275,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		} else {
 			questionText = "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
 		}
+		promptVersion = ""
 	}
 
 	// 選択肢必須フェーズで選択肢がない場合は再生成
@@ -381,7 +383,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		QuestionText:  questionText,
 		Weight:        7, // 戦略的質問は重み高め
 		IsAnswered:    false,
-		PromptVersion: assignment.Version,
+		PromptVersion: promptVersion,
 		ContextData:   fmt.Sprintf(`{"target_category": "%s", "purpose": "%s"}`, targetCategory, questionPurpose),
 	}
 

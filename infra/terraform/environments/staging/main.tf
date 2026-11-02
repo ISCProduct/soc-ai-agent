@@ -395,6 +395,8 @@ resource "aws_launch_template" "app" {
     gbizinfo_api_key         = var.gbizinfo_api_key
     gbizinfo_base_url        = var.gbizinfo_base_url
     openai_model             = var.openai_model
+    prompt_version           = var.prompt_version
+    prompt_versions          = var.prompt_versions
     resend_api_key           = var.resend_api_key_plain
     google_client_id         = var.google_client_id
     google_client_secret     = var.google_client_secret

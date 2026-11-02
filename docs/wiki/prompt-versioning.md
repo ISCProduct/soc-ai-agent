@@ -10,6 +10,11 @@ AI呼び出しの `api_call_logs` に `prompt_stage`、`prompt_version`、`promp
 現時点で実装済みの各工程の本文は `v2` のみである。未登録の版名は `v2` にフォールバックし、
 `PROMPT_VERSION` は従来どおり全工程共通の設定として受け付けるが、登録済みの本文だけが有効になる。
 工程別設定 `PROMPT_VERSION_<STAGE>` は共通設定より優先する。
+工程別設定は `PROMPT_VERSION_<STAGE>` で指定でき、従来の `PROMPT_VERSION` は共通設定として
+後方互換を維持する。標準設定の例は `.env.example`、開発用の例は `Backend/.env.example`、
+staging / production の設定経路は `infra/terraform/environments/` を参照する。
+Terraform の `prompt_versions` は指定された工程だけ環境変数に出力する。工程別指定がなければ
+共通の `prompt_version` が使われる。
 
 候補版本文が存在しない状態でA/B割当を行うと、同じ本文を異なる版として記録して評価を誤るため、
 `PROMPT_AB_<STAGE>` は現在無効である。異なる候補本文を追加し、版ごとの本文選択と評価が検証された後に

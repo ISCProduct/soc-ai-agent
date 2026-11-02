@@ -53,6 +53,10 @@ AWS_REGION=${aws_region}
 AWS_S3_BUCKET=${s3_bucket}
 S3_BUCKET=${s3_bucket}
 OPENAI_API_KEY=${openai_api_key}
+PROMPT_VERSION=${prompt_version}
+%{ for stage, version in prompt_versions }
+PROMPT_VERSION_${upper(stage)}=${version}
+%{ endfor }
 HOUJIN_BANGOU_APP_ID=${houjin_bangou_app_id}
 GBIZINFO_API_KEY=${gbizinfo_api_key}
 GBIZINFO_BASE_URL=${gbizinfo_base_url}

@@ -6,6 +6,10 @@ db_instance_class = "db.t4g.micro"
 db_name          = "app_db"
 
 domain_name = "shukatsu-ai.jp"
+
+# 全工程共通の既定値。工程別 override が必要なときだけ指定する。
+# prompt_version  = "v2"
+# prompt_versions = { question_generation = "v2" }
 # 既定: stg.shukatsu-ai.jp（FE） / api-stg.shukatsu-ai.jp（BE）
 # staging_subdomain     = "stg"
 # staging_api_subdomain = "api-stg"
