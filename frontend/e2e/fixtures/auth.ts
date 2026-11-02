@@ -40,7 +40,9 @@ export const TEST_ADMIN: MockUser = {
   name: '管理者',
   is_guest: false,
   is_admin: true,
-  token: 'admin-token-abc123',
+  // 管理画面は "<発行時刻>.<署名>" 以外を期限切れとみなして本文を出さない（SOCAIAGENT-476）。
+  // 署名は見ない。発行時刻だけ今にして、取り直しの通信を走らせない。
+  token: `${Math.floor(Date.now() / 1000)}.e2e-admin`,
   user_token: testJwt(99),
 }
 
