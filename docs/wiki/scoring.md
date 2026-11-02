@@ -57,7 +57,9 @@ UserCompanyMatch（総合マッチ度 0-100）
 
 - 各カテゴリ: **0〜100**
 - チャット進捗の「評価済み」判定は **score ≠ 0** の件数（`countEvaluatedCategories`。レスポンスの `evaluated_categories`）
-- 診断品質のフラグ（`no_measured_axes` / `few_measured_axes`）が使う「計測済み軸数」は **行がある軸の数**（値が0でも数える。`measuredAxisCount`）。上と数え方が違うため、score が 0 の軸があると同じセッションでも数は一致しない
+- 診断品質が使う「計測済み軸数」は **行がある軸の数**（値が0でも数える。`measuredAxisCount`）。上と数え方が違うため、score が 0 の軸があると同じセッションでも数は一致しない。用途は2つ
+  - フラグ `no_measured_axes`（0件）/ `few_measured_axes`（4未満）。どちらも `ForcesProvisional`（`diagnosis/provisional.go`）で暫定表示を強制する
+  - 信頼度の基準値（計測済み軸数 × 10、上限100）
 - マッチングでは未計測カテゴリを中立50で埋めず、平均から除外する（#1124）
 
 ### データ構造（`UserWeightScore`）
@@ -426,7 +428,7 @@ func scoredMatch(userScores map[string]float64, category string, companyWeight f
 診断完了後の品質ジョブはスコアを**自動補正せず**、`diagnosis_quality_reports` に confidence / flags を保存する。
 `GET /api/chat/recommendations` は次のいずれかで `is_provisional=true` とする。
 
-- 評価カテゴリ数（score ≠ 0 の件数）が 4 未満
+- 評価カテゴリ数（score ≠ 0 の件数）が 4 未満（計測済み軸数が4未満のときは、別経路で `few_measured_axes` フラグが立ち、これも暫定表示になる）
 - 上位マッチの最小 `matched_axis_count` が 4 未満
 - 診断信頼度が 55 未満、または薄い根拠フラグ（`thin_chat_evidence` / `mostly_choice_only` 等）
 
