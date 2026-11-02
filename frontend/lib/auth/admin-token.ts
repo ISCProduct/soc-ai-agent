@@ -1,5 +1,6 @@
 // Backend の defaultAdminTokenTTL（Backend/internal/middleware/admin_token.go）と同じ7日。
-// ADMIN_TOKEN_TTL_HOURS でサーバ側だけ短くした場合、ここは追従しない。
+// ADMIN_TOKEN_TTL_HOURS でサーバ側だけ短くすると、ここは追従せず期限切れを新しいと誤判定して
+// 管理画面が 403 になる。短縮するときはこの定数も同時に変更すること（Backend/.env.example 参照）。
 export const ADMIN_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60
 
 // 期限の1時間前から取り直す。ログインセッション（1時間）の更新より長く放置しない。

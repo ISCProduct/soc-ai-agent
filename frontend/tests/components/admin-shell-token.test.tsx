@@ -3,9 +3,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { AdminShell } from '@/components/admin/AdminShell'
 import { authService } from '@/lib/auth'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 
+let mockPathname = '/admin'
 jest.mock('next/navigation', () => ({
-  usePathname: () => '/admin',
+  usePathname: () => mockPathname,
 }))
 
 jest.mock('@/lib/admin/school-access', () => ({
@@ -23,8 +25,13 @@ jest.mock('@/lib/auth', () => ({
 }))
 
 describe('AdminShell の管理者トークン確認', () => {
+  beforeEach(() => {
+    ;(getAdminSchoolAccess as jest.Mock).mockResolvedValue({ restricted: true, schools: [] })
+  })
+
   afterEach(() => {
-    jest.clearAllMocks()
+    mockPathname = '/admin'
+    jest.resetAllMocks()
   })
 
   it('期限が近いでなければ本文を出す', async () => {
@@ -58,5 +65,33 @@ describe('AdminShell の管理者トークン確認', () => {
     await waitFor(() => {
       expect(screen.getByText('管理の本文')).toBeInTheDocument()
     })
+  })
+  it('表示中の画面遷移で期限が近づいても、本文を隠さず背景で取り直す', async () => {
+    getStoredToken.mockReturnValue(`${Math.floor(Date.now() / 1000)}.current`)
+    const { rerender } = render(<AdminShell><p>管理の本文</p></AdminShell>)
+    expect(await screen.findByText('管理の本文')).toBeInTheDocument()
+
+    getStoredToken.mockReturnValue(`${Math.floor(Date.now() / 1000) - 8 * 24 * 60 * 60}.old`)
+    ensureFreshAdminToken.mockReturnValue(new Promise<void>(() => {}))
+    mockPathname = '/admin/other'
+    rerender(<AdminShell><p>管理の本文</p></AdminShell>)
+
+    expect(ensureFreshAdminToken).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('管理の本文')).toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('表示中の背景更新が失敗しても、本文はエラー画面に切り替えない', async () => {
+    getStoredToken.mockReturnValue(`${Math.floor(Date.now() / 1000)}.current`)
+    const { rerender } = render(<AdminShell><p>管理の本文</p></AdminShell>)
+    expect(await screen.findByText('管理の本文')).toBeInTheDocument()
+
+    getStoredToken.mockReturnValue(`${Math.floor(Date.now() / 1000) - 8 * 24 * 60 * 60}.old`)
+    ensureFreshAdminToken.mockRejectedValue(new Error('down'))
+    mockPathname = '/admin/other'
+    rerender(<AdminShell><p>管理の本文</p></AdminShell>)
+
+    await waitFor(() => expect(ensureFreshAdminToken).toHaveBeenCalledTimes(1))
+    expect(screen.getByText('管理の本文')).toBeInTheDocument()
   })
 })

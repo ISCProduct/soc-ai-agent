@@ -54,13 +54,15 @@ export function AdminShell({ children }: { children: ReactNode }) {
         alive = false
       }
     }
-    setAdminTokenPhase('pending')
+    // 表示中（ready）の遷移では本文を隠さない。隠すとアンマウントされ、遷移先の入力が消える。
+    // 背景で取り直し、失敗してもまだ有効なトークンで動いている間は ready のまま残す。
+    setAdminTokenPhase((phase) => (phase === 'ready' ? phase : 'pending'))
     authService.ensureFreshAdminToken()
       .then(() => {
         if (alive) setAdminTokenPhase('ready')
       })
       .catch(() => {
-        if (alive) setAdminTokenPhase('error')
+        if (alive) setAdminTokenPhase((phase) => (phase === 'ready' ? phase : 'error'))
       })
     return () => {
       alive = false

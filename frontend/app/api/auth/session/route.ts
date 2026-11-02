@@ -42,6 +42,9 @@ export async function POST(request: NextRequest) {
   setSessionCookies(response, String(userId), userToken, refreshToken)
   if (typeof adminToken === 'string' && adminToken !== '') {
     setAdminTokenCookie(response, adminToken)
+  } else {
+    // 管理者の次に同じブラウザで別の利用者が入ると、前の管理者トークンが最大30日残る。
+    response.cookies.delete('admin_token')
   }
   return response
 }

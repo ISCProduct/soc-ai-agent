@@ -21,6 +21,9 @@ function storageMock(): Storage {
 }
 
 describe('authService.ensureFreshAdminToken', () => {
+  const originalFetch = global.fetch
+  const staleToken = () => `${Math.floor(Date.now() / 1000) - 8 * 24 * 60 * 60}.old`
+
   beforeEach(() => {
     Object.defineProperty(window, 'localStorage', { value: storageMock(), configurable: true })
     Object.defineProperty(window, 'sessionStorage', { value: storageMock(), configurable: true })
@@ -28,6 +31,7 @@ describe('authService.ensureFreshAdminToken', () => {
 
   afterEach(() => {
     jest.restoreAllMocks()
+    global.fetch = originalFetch
   })
 
   it('期限が近いトークンはセッションAPIの新しい値で置き換える', async () => {
@@ -71,5 +75,52 @@ describe('authService.ensureFreshAdminToken', () => {
 
     await expect(authService.ensureFreshAdminToken()).rejects.toThrow(/再ログイン/)
     expect(authService.getStoredToken()).toBe(stale)
+  })
+  it.each([401, 500])('セッションAPIが %i を返したら失敗にし、古いトークンを残す', async (status) => {
+    const stale = staleToken()
+    window.localStorage.setItem('token', stale)
+    global.fetch = jest.fn(async () => ({ ok: false, status, json: async () => ({}) })) as unknown as typeof fetch
+
+    await expect(authService.ensureFreshAdminToken()).rejects.toThrow(/再ログイン/)
+    expect(authService.getStoredToken()).toBe(stale)
+  })
+
+  it('返ってきたトークンも期限切れなら失敗にし、ストレージを書き換えない', async () => {
+    const stale = staleToken()
+    window.localStorage.setItem('token', stale)
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      json: async () => ({ token: `${Math.floor(Date.now() / 1000) - 9 * 24 * 60 * 60}.older` }),
+    })) as unknown as typeof fetch
+
+    await expect(authService.ensureFreshAdminToken()).rejects.toThrow(/再ログイン/)
+    expect(authService.getStoredToken()).toBe(stale)
+  })
+
+  it('失敗したあとの再呼び出しは、もう一度セッションAPIを呼ぶ', async () => {
+    window.localStorage.setItem('token', staleToken())
+    const fresh = `${Math.floor(Date.now() / 1000)}.new`
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: fresh }) })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    await expect(authService.ensureFreshAdminToken()).rejects.toThrow()
+    await authService.ensureFreshAdminToken()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(authService.getStoredToken()).toBe(fresh)
+  })
+
+  it('同時に呼ばれても、セッションAPIは1回だけ呼ぶ', async () => {
+    window.localStorage.setItem('token', staleToken())
+    const fresh = `${Math.floor(Date.now() / 1000)}.new`
+    const fetchMock = jest.fn(async () => ({ ok: true, json: async () => ({ token: fresh }) }))
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    await Promise.all([authService.ensureFreshAdminToken(), authService.ensureFreshAdminToken()])
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

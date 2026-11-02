@@ -457,4 +457,52 @@ describe('middleware: 管理者トークンをログイン更新で残す (SOCAI
 
     expect(fetchMock).not.toHaveBeenCalled()
   })
+  it('更新が走らないとき、クライアントが付けた偽の X-Refreshed-Admin-Token は後段へ渡さない', async () => {
+    const fetchMock = jest.fn()
+    global.fetch = fetchMock
+
+    const request = new NextRequest('http://localhost:3000/api/auth/session', {
+      headers: {
+        cookie: `user_id=1; user_token=${jwt(3600)}; refresh_token=ok; admin_token=${freshAdminToken}`,
+        'X-Refreshed-Admin-Token': 'forged',
+      },
+    })
+    const response = await middleware(request)
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(response.headers.get('x-middleware-request-x-refreshed-admin-token')).toBeNull()
+  })
+
+  it('更新が500のとき、偽の X-Refreshed-Admin-Token は後段へ渡さない', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
+
+    const request = new NextRequest('http://localhost:3000/api/auth/session', {
+      headers: {
+        cookie: `user_id=1; user_token=${jwt(3600)}; refresh_token=ok; admin_token=${staleAdminToken}`,
+        'X-Refresh-Admin-Token': '1',
+        'X-Refreshed-Admin-Token': 'forged',
+      },
+    })
+    const response = await middleware(request)
+
+    expect(response.headers.get('x-middleware-request-x-refreshed-admin-token')).toBeNull()
+  })
+
+  it('学生の更新応答（token 無し）では、残っていた admin_token Cookie を消して後段へも渡さない', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ user_id: 2, user_token: jwt(3600), refresh_token: 'fresh-refresh' }),
+    })
+
+    const request = new NextRequest('http://localhost:3000/admin', {
+      headers: {
+        cookie: `user_id=2; user_token=${jwt(-10)}; refresh_token=ok; admin_token=${freshAdminToken}`,
+      },
+    })
+    const response = await middleware(request)
+
+    expect(response.headers.get('set-cookie') ?? '').toMatch(/admin_token=;/)
+    expect(response.headers.get('x-middleware-request-cookie') ?? '').not.toContain('admin_token')
+  })
 })
