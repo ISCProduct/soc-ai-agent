@@ -89,6 +89,53 @@ func EchoUserAuth(userSecret string, access auth.UserAccessGuard, orgs ...Organi
 	}
 }
 
+// EchoOptionalUserAuth は X-User-Token があれば実行者を載せ、無ければ素通りする（#1531）。
+//
+// ES添削は未ログインでも使える経路として開いている（認証を必須にすると、
+// ログイン前に試してもらう導線が壊れる）。一方で結果を履歴として残すには
+// 実行者が要る。そこで「あれば使う、無ければ従来どおり」にする。
+//
+// 壊れたトークン・退会済みユーザーは 401 ではなく「未ログイン」として扱う。
+// ここで弾くと、トークンの期限が切れただけで添削そのものが使えなくなる。
+// 本人として保存されないだけで、機能は従来どおり動く方を選ぶ。
+//
+// 必須認証が要る経路には使わないこと。EchoUserAuth と違って素通りする。
+func EchoOptionalUserAuth(userSecret string, access auth.UserAccessGuard, orgs ...OrganizationIDResolver) echo.MiddlewareFunc {
+	var resolver OrganizationIDResolver
+	if len(orgs) > 0 {
+		resolver = orgs[0]
+	}
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			token := c.Request().Header.Get("X-User-Token")
+			if userSecret == "" || token == "" {
+				return next(c)
+			}
+			userID, _, err := middleware.ParseJWT(token, userSecret)
+			if err != nil {
+				return next(c)
+			}
+			if access != nil {
+				if err := access.EnsureActiveUser(userID); err != nil {
+					return next(c)
+				}
+			}
+			ctx := context.WithValue(c.Request().Context(), middleware.UserIDContextKey, userID)
+			var orgID uint
+			if resolver != nil {
+				if resolved, err := resolver.ResolveOrganizationID(userID); err == nil && resolved > 0 {
+					orgID = resolved
+					ctx = context.WithValue(ctx, middleware.OrganizationIDContextKey, orgID)
+				}
+			}
+			// AI利用量の配賦先も載せる（#1294）。未ログインのときは従来どおり NULL のまま。
+			ctx = usagectx.WithActor(ctx, userID, orgID)
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	}
+}
+
 // EchoTenantResolver は X-Tenant-Slug ヘッダー(学園サブドメインラベル)から組織を解決し、
 // リクエストコンテキストへ載せるEcho nativeミドルウェア。
 // ヘッダー未指定の場合は何もしない（テナント概念のないアクセスとの後方互換のため）。

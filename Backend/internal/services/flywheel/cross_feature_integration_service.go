@@ -190,6 +190,62 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromResumeReview(
 	return nil
 }
 
+// ── ES添削 → UserWeightScore ───────────────────────────────────────────────
+
+// UpdateScoresFromESReview は ES添削の評価を UserWeightScore へ反映する（#1531）。
+//
+// 書き込み先は「本人の最新のチャット診断セッション」で、専用のセッションは作らない。
+// FindLatestByUser は最新1行のセッションを選んでそのセッションのスコアを全件返すため、
+// ES専用セッションを作ると「最新セッション＝ESの2カテゴリだけ」になり、
+// 残り8カテゴリが欠落して中立50で埋められる。マッチングが静かに歪むので、
+// 履歴書と同じく既存の診断セッションへ移動平均で合流させる。
+//
+// 診断セッションがまだ無い（チャット診断を一度もしていない）利用者には何も書かない。
+// 欠けたカテゴリだけのセッションを作る方が害が大きい。
+func (s *CrossFeatureIntegrationService) UpdateScoresFromESReview(userID uint, review *models.ESReview) error {
+	if review == nil {
+		return nil
+	}
+	sessionID, ok, err := s.esTargetSession(userID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		log.Printf("[CrossFeature] ES添削(es_review_id=%d): 診断セッションが無いため user_weight_scores へ反映しない\n", review.ID)
+		return nil
+	}
+
+	// 対応表と式は esScoreMapping / mapESScore（score_mapping.go）に集約している。
+	for _, mapped := range mapESScore(
+		int(review.SpecificityScore), int(review.StarScore), int(review.LengthBalanceScore),
+	) {
+		if err := s.applyMovingAverage(userID, sessionID, mapped.category, mapped.score); err != nil {
+			log.Printf("[CrossFeature] es→score update failed (cat=%s): %v\n", mapped.category, err)
+		}
+	}
+	return nil
+}
+
+// esTargetSession は ES添削の反映先セッションを返す。見つからなければ ok=false。
+//
+// 専用セッションを作らないことがこの関数の責務。作ってしまうと FindLatestByUser が
+// 「最新セッション＝ESの2カテゴリだけ」を返し、残り8カテゴリが中立50で埋められる。
+// 切り出してあるのは、この判断をテストから直接確かめられるようにするため
+// （反映側はエラーをログに流すので、書き込みの有無だけでは検証が効かない）。
+func (s *CrossFeatureIntegrationService) esTargetSession(userID uint) (string, bool, error) {
+	sessionID, err := s.weightScoreRepo.FindLatestDiagnosisSessionID(userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("診断セッションの取得エラー: %w", err)
+	}
+	if sessionID == "" {
+		return "", false, nil
+	}
+	return sessionID, true, nil
+}
+
 // ── チャット分析スコア → 面接コンテキスト ────────────────────────────────
 
 // BuildInterviewContextFromScores チャット分析スコアを面接システムプロンプト用テキストに変換する

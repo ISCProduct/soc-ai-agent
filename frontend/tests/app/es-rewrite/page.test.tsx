@@ -360,3 +360,79 @@ describe('ESRewritePage 設問の文字数上限 (#1523)', () => {
     expect(screen.getByRole('button', { name: '添削する' })).not.toBeDisabled()
   })
 })
+
+// 同一設問の前回との差分（#1531）。
+// 前回が無い項目に ±0 を出すと「評価された結果の±0」と「比べる相手がいない」が
+// 区別できなくなるため、何も出さないことまで固定する。
+describe('ESRewritePage 前回との差分 (#1531)', () => {
+  const baseResult = {
+    specificity_score: 7,
+    star_score: 6,
+    company_fit_score: null,
+    length_balance_score: 5,
+    feedback: 'フィードバック本文',
+    improved_text: '改善後の文章',
+  }
+
+  const reviewWith = async (result: Record<string, unknown>) => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => result })
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: '元の文章です。' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+    await screen.findByText('添削スコア')
+  }
+
+  beforeEach(() => {
+    global.fetch = jest.fn()
+  })
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  it('設問を送信本文に載せる', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => baseResult })
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: '元の文章です。' },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/学生時代に力を入れたことを教えてください/), {
+      target: { value: '学生時代に力を入れたことは？' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+    await screen.findByText('添削スコア')
+
+    const body = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body)
+    expect(body.question).toBe('学生時代に力を入れたことは？')
+  })
+
+  it('前回がある項目は増減を出す', async () => {
+    await reviewWith({
+      ...baseResult,
+      previous: {
+        id: 1,
+        created_at: '2026-10-01T00:00:00Z',
+        question: '設問',
+        question_type: 'ガクチカ',
+        specificity_score: 4, // 7 - 4 = +3
+        star_score: 6, // 変化なし
+        length_balance_score: 8, // 5 - 8 = -3
+      },
+    })
+
+    expect(screen.getByText('▲3')).toBeInTheDocument()
+    expect(screen.getByText('±0')).toBeInTheDocument()
+    expect(screen.getByText('▼3')).toBeInTheDocument()
+    expect(screen.getByText(/同じ設問の前回/)).toBeInTheDocument()
+  })
+
+  it('前回が無ければ増減を出さない', async () => {
+    await reviewWith(baseResult)
+
+    expect(screen.queryByText('±0')).not.toBeInTheDocument()
+    expect(screen.queryByText(/同じ設問の前回/)).not.toBeInTheDocument()
+  })
+})

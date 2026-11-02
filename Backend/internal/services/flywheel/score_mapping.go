@@ -52,6 +52,53 @@ var resumeScoreMapping = []struct {
 	// 書類が綺麗なだけで技術志向が高いことにされ、マッチングを歪めていた。
 }
 
+// ── ES添削 → 10カテゴリ ─────────────────────────────────────────────────
+
+// esScoreMapping は ES添削の評価を反映するカテゴリと強さ（#1531）。
+//
+// 履歴書と同じ方針で、説明できないカテゴリには載せない。
+// RAG が返すのは specificity / star / length_balance / company_fit の4項目（各1〜10）。
+var esScoreMapping = []struct {
+	category string
+	weight   float64
+	// source は 1〜10 の評価から「そのカテゴリの素点」を取り出す関数。
+	source func(specificity, star, lengthBalance int) int
+}{
+	// コミュニケーション力: ES は読み手を説得するための文章そのもので、
+	// STAR（相手に伝わる順序で組み立てられているか）と具体性（根拠を示せているか）は
+	// 伝達の質を直接測っている。ただし観測できるのは書面に限られ、対話は含まれないため
+	// 等倍にはしない。履歴書（0.6）より強くするのは、履歴書の評価が書式・正確性に
+	// 寄っているのに対し、ES の評価軸は表現そのものだから。
+	{"コミュニケーション力", 0.8, func(specificity, star, _ int) int { return (specificity + star) / 2 }},
+	// 細部志向: 指定字数に収めることは「要件への注意」がそのまま出る。
+	// ただし測れているのはこの1点だけなので、中立50寄りに圧縮して弱く反映する。
+	{"細部志向", 0.6, func(_, _, lengthBalance int) int { return lengthBalance }},
+	// 企業適合性（company_fit_score）は載せない。企業名を指定した添削でしか付かず、
+	// 指定した人だけスコアが動くと、企業名を入れたかどうかでマッチングが変わってしまう。
+	// 技術志向にも載せない。文章の完成度と技術への関心を結び付ける根拠が無い（#1528 と同じ理由）。
+}
+
+// esRawToHundred は RAG の 1〜10 評価を 0〜100 へ移す。
+// 1 を 0、10 を 100 に写すので、中央の 5.5 がちょうど中立50になる。
+func esRawToHundred(raw int) int {
+	raw = clampInt(raw, 1, 10)
+	return (raw - 1) * 100 / 9
+}
+
+// mapESScore は ES添削の評価から各カテゴリの反映値（0〜100）を返す。
+//
+// 式は履歴書と同じ 50 + (素点 - 50) * weight。中立50を基準に上下対称なので、
+// 低い評価はきちんと低く反映される（上方バイアスを作らない）。
+func mapESScore(specificity, star, lengthBalance int) []categoryScore {
+	out := make([]categoryScore, 0, len(esScoreMapping))
+	for _, m := range esScoreMapping {
+		raw := esRawToHundred(m.source(specificity, star, lengthBalance))
+		v := neutralScore + float64(raw-neutralScore)*m.weight
+		out = append(out, categoryScore{category: m.category, score: clampInt(int(math.Round(v)), 0, 100)})
+	}
+	return out
+}
+
 // critical 指摘のペナルティ。1件あたり criticalPenaltyPerItem 点引き、
 // criticalPenaltyMax で止める。上限を置くのは、critical が10件あっても
 // 「書類が荒い」以上の情報は増えず、レビュースコア本体の寄与を消し切って

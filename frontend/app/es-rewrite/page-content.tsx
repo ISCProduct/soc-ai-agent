@@ -102,6 +102,19 @@ type ReviewResult = CharLimitResult & {
   company_strategy?: string | null
   // 企業情報の取得元。"none" なら企業適合性を評価していない(#1524)
   company_context_source?: 'company_brief' | 'cache' | 'web_search' | 'none'
+  // 同一設問の前回の添削(#1531)。初回・未ログイン・設問未入力のときは付かない。
+  previous?: PreviousReview | null
+}
+
+type PreviousReview = {
+  id: number
+  created_at: string
+  question: string
+  question_type: string
+  specificity_score: number
+  star_score: number
+  length_balance_score: number
+  company_fit_score?: number | null
 }
 
 // マーカーは S / T / A / R の頭文字を使う。
@@ -120,6 +133,29 @@ const STAR_LABELS: { key: keyof StarBreakdown; label: string; color: string; ini
  * 字数はサーバが数えた値をそのまま出す（改行と前後の空白を数えない数え方は
  * RAG 側の count_es_chars が唯一の定義。画面で数え直すと定義が二重になる）。
  */
+// ScoreDelta は同一設問の前回スコアとの差（#1531）。
+// 前回が無い項目は何も出さない。0 を出すと「評価された結果の±0」と
+// 「比べる相手がいない」が区別できなくなる。
+function ScoreDelta({ current, previous }: { current: number; previous: number | null | undefined }) {
+  if (previous == null) return null
+  const diff = current - previous
+  if (diff === 0) {
+    return <Typography sx={{ fontSize: 12, fontWeight: 600, color: UI.inkFaint }}>±0</Typography>
+  }
+  const up = diff > 0
+  return (
+    <Typography sx={{ fontSize: 12, fontWeight: 700, color: up ? '#15803d' : '#b91c1c' }}>
+      {up ? '▲' : '▼'}{Math.abs(diff)}
+    </Typography>
+  )
+}
+
+function formatPreviousDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '前回'
+  return d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'numeric', day: 'numeric' })
+}
+
 function CharCountNote({ result, charLimit }: { result: CharLimitResult; charLimit: number | null }) {
   const length = result.improved_text_length
   if (typeof length !== 'number' || length <= 0) return null
@@ -155,6 +191,9 @@ function ESRewriteContent() {
   const [mode, setMode] = useState<'rewrite' | 'review'>('rewrite')
   const [originalText, setOriginalText] = useState('')
   const [questionType, setQuestionType] = useState('学チカ')
+  // 設問文。同一設問の前回結果と突き合わせるキーになる(#1531)。
+  // 種別だけだと「学チカ」と「ガクチカ」が別扱いになり、差分が永久に出ない。
+  const [question, setQuestion] = useState('')
   const [techStack, setTechStack] = useState('')
   const [companyName, setCompanyName] = useState(searchParams.get('company_name') || '')
   const [loading, setLoading] = useState(false)
@@ -223,6 +262,7 @@ function ESRewriteContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           es_text: originalText,
+          question,
           question_type: questionType,
           company_name: companyName,
           ...charLimitBody,
@@ -340,6 +380,20 @@ function ESRewriteContent() {
                   />
                 ))}
               </Box>
+            </Box>
+
+            {/* 設問（#1531） */}
+            <Box sx={{ mb: 2.5 }}>
+              <TextField
+                fullWidth
+                size="small"
+                label="設問（任意）"
+                placeholder="例: 学生時代に力を入れたことを教えてください"
+                value={question}
+                onChange={e => setQuestion(e.target.value)}
+                inputProps={{ maxLength: 500 }}
+                helperText="同じ設問で添削し直すと、前回のスコアと比べられます"
+              />
             </Box>
 
             {/* ES本文 */}
@@ -512,7 +566,12 @@ function ESRewriteContent() {
             <Stack spacing={2}>
               {/* Score gauges */}
               <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `2px solid ${UI.mark}`, bgcolor: `color-mix(in srgb, ${UI.mark} 2%, transparent)` }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 17, color: UI.mark, mb: 2.5 }}>添削スコア</Typography>
+                <Typography sx={{ fontWeight: 700, fontSize: 17, color: UI.mark, mb: reviewResult.previous ? 1 : 2.5 }}>添削スコア</Typography>
+                {reviewResult.previous && (
+                  <Typography sx={{ fontSize: 12, color: UI.inkFaint, mb: 2 }}>
+                    同じ設問の前回（{formatPreviousDate(reviewResult.previous.created_at)}）と比べています
+                  </Typography>
+                )}
                 <Stack spacing={2}>
                   {SCORE_ITEMS.map(({ key, label, color }) => {
                     const score = reviewResult[key]
@@ -525,7 +584,10 @@ function ESRewriteContent() {
                       <Box key={key}>
                         <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
                           <Typography sx={{ fontSize: 13, fontWeight: 600, color: UI.inkSoft }}>{label}</Typography>
-                          <Typography sx={{ fontSize: 13, fontWeight: 700, color }}>{score} / 10</Typography>
+                          <Stack direction="row" spacing={1} alignItems="baseline">
+                            <ScoreDelta current={score} previous={reviewResult.previous?.[key] ?? null} />
+                            <Typography sx={{ fontSize: 13, fontWeight: 700, color }}>{score} / 10</Typography>
+                          </Stack>
                         </Stack>
                         <LinearProgress
                           variant="determinate"

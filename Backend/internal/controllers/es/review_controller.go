@@ -1,8 +1,11 @@
 package es
 
 import (
+	"Backend/internal/middleware"
+	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/ragclient"
+	"Backend/internal/services/esreview"
 	"Backend/internal/usagectx"
 	"bytes"
 	"encoding/json"
@@ -20,14 +23,24 @@ type ESReviewController struct {
 	// openaiClient は生成には使わない。RAG が実行した生成のトークン使用量を
 	// api_call_logs へ記録するためだけに持つ(#1533)。nil でも動く。
 	openaiClient *openai.Client
+	// reviews は添削結果の永続化(#1531)。未注入なら保存しない（従来どおり転送だけ）。
+	reviews *esreview.Service
 }
 
 func NewESReviewController(openaiClient *openai.Client) *ESReviewController {
 	return &ESReviewController{openaiClient: openaiClient}
 }
 
+// SetReviewService は添削結果の永続化を注入する(#1531、オプション)。
+func (c *ESReviewController) SetReviewService(s *esreview.Service) {
+	c.reviews = s
+}
+
 type esReviewRequest struct {
-	ESText       string `json:"es_text"`
+	ESText string `json:"es_text"`
+	// Question は利用者が入力した設問文(#1531)。同一設問の前回結果と突き合わせるのに使う。
+	// 種別だけだと「学チカ」と「ガクチカ」が別扱いになり差分が出ない。未指定でも添削はできる。
+	Question     string `json:"question"`
 	QuestionType string `json:"question_type"`
 	CompanyName  string `json:"company_name"`
 	// CharLimit / CharLimitMode は設問の文字数上限(#1523)。
@@ -62,6 +75,12 @@ type esReviewRAGResponse struct {
 	CharLimitSatisfied *bool             `json:"char_limit_satisfied"`
 	Star               starBreakdown     `json:"star"`
 	Usage              *esReviewRAGUsage `json:"usage"`
+	// 永続化に使う評価項目(#1531)。
+	SpecificityScore   int    `json:"specificity_score"`
+	StarScore          int    `json:"star_score"`
+	LengthBalanceScore int    `json:"length_balance_score"`
+	CompanyFitScore    *int   `json:"company_fit_score"`
+	Feedback           string `json:"feedback"`
 }
 
 // Review POST /api/es/review
@@ -89,9 +108,87 @@ func (c *ESReviewController) Review(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if status != http.StatusOK {
+		return ctx.JSONBlob(status, respBody)
+	}
 
-	// RAGからのレスポンスをそのままクライアントへ転送（usage だけは取り除く）
+	// 添削が成功したときだけ履歴に残す(#1531)。失敗した応答まで残すと、
+	// 前回との差分が「失敗した回」と比較されて意味を失う。
+	respBody = c.persist(ctx, req, respBody)
 	return ctx.JSONBlob(status, respBody)
+}
+
+// persist は添削結果を保存し、同一設問の前回結果を previous として本文へ足す。
+//
+// 保存できなくても添削そのものは成立しているので、本文はそのまま返す。
+// 履歴が残らないことより、添削が使えなくなることの方が重い。
+func (c *ESReviewController) persist(ctx echo.Context, req esReviewRequest, body []byte) []byte {
+	if c.reviews == nil {
+		return body
+	}
+	// 未ログインでも使える経路なので、実行者が取れないときは保存しない(#1531)。
+	userID, ok := middleware.UserIDFromContext(ctx.Request().Context())
+	if !ok || userID == 0 {
+		return body
+	}
+	var parsed esReviewRAGResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		log.Printf("[ESReview] RAG応答を解釈できず保存をスキップ user=%d: %v", userID, err)
+		return body
+	}
+	orgID, _ := middleware.OrganizationIDFromContext(ctx.Request().Context())
+	if orgID == 0 {
+		orgID = models.DefaultOrganizationID
+	}
+	var charLimit *uint
+	if req.CharLimit != nil && *req.CharLimit > 0 {
+		v := uint(*req.CharLimit)
+		charLimit = &v
+	}
+
+	_, previous, err := c.reviews.Save(esreview.Input{
+		UserID:             userID,
+		OrganizationID:     orgID,
+		Question:           req.Question,
+		QuestionType:       req.QuestionType,
+		CompanyName:        req.CompanyName,
+		ESText:             req.ESText,
+		CharLimit:          charLimit,
+		CharLimitMode:      req.CharLimitMode,
+		SpecificityScore:   parsed.SpecificityScore,
+		StarScore:          parsed.StarScore,
+		LengthBalanceScore: parsed.LengthBalanceScore,
+		CompanyFitScore:    parsed.CompanyFitScore,
+		Feedback:           parsed.Feedback,
+		ImprovedText:       parsed.ImprovedText,
+	})
+	if err != nil {
+		log.Printf("[ESReview] 保存に失敗 user=%d: %v", userID, err)
+		return body
+	}
+	if previous == nil {
+		return body
+	}
+	return withPrevious(body, previous)
+}
+
+// withPrevious は本文に previous を足す。解釈できない本文は触らずに返す
+// （表示を壊さないことを優先し、差分だけ諦める）。
+func withPrevious(body []byte, previous *models.ESReview) []byte {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return body
+	}
+	encoded, err := json.Marshal(previous)
+	if err != nil {
+		return body
+	}
+	raw["previous"] = encoded
+	merged, err := json.Marshal(raw)
+	if err != nil {
+		return body
+	}
+	return merged
 }
 
 // postESReview は RAG の /es/review を呼び、(ステータス, 本文, エラー) を返す。

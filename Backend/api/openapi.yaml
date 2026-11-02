@@ -3215,6 +3215,35 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/admin/teacher/students/{id}/es-reviews:
+    get:
+      tags: [admin-analytics]
+      summary: 学生のES添削履歴
+      description: |
+        担当校に在籍する学生の ES添削履歴を新しい順に返す（#1531）。
+
+        担当校スコープが掛かる。学校での絞り込みは学園一致つきで行うため、
+        プロフィールの学校名（自己申告）を他学園の校名に書き替えた学生の履歴は混ざらない（#1675）。
+        担当校外・他学園の学生は 404 ではなく空配列で返す（存在を明かさないため）。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: school_id
+          schema:
+            type: integer
+          description: 担当校。担当校ありの管理者・職員は必須
+      responses:
+        "200":
+          description: 成功
+        "400": { description: 学生IDまたは school_id が不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   /api/admin/applications:
     get:
       tags: [admin-analytics]
