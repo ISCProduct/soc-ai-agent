@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import {
   SERVER_BACKEND_URL,
   clearSessionCookies,
+  setAdminTokenCookie,
   setSessionCookies,
 } from '@/lib/auth/session-cookies'
 
@@ -19,20 +20,29 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
+  // middleware がこのリクエストで取り直した値を優先する。Cookie は更新前のまま届く。
+  const adminToken =
+    request.headers.get('X-Refreshed-Admin-Token') ||
+    request.cookies.get('admin_token')?.value
+
   return NextResponse.json({
     user_id: Number(userId),
     user_token: userToken,
+    ...(adminToken ? { token: adminToken } : {}),
   })
 }
 
 export async function POST(request: NextRequest) {
-  const { userId, userToken, refreshToken } = await request.json()
+  const { userId, userToken, refreshToken, adminToken } = await request.json()
   if (!userId || !userToken) {
     return NextResponse.json({ error: 'userId and userToken are required' }, { status: 400 })
   }
 
   const response = NextResponse.json({ ok: true })
   setSessionCookies(response, String(userId), userToken, refreshToken)
+  if (typeof adminToken === 'string' && adminToken !== '') {
+    setAdminTokenCookie(response, adminToken)
+  }
   return response
 }
 
