@@ -2,6 +2,7 @@
 
 import { useEffect, type Dispatch, type KeyboardEvent, type SetStateAction } from 'react'
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -71,6 +72,8 @@ export interface SelectionScreenProps {
   setSelectedPosition: Dispatch<SetStateAction<Position>>
   companyHints: CompanyHints | null
   hintsLoading: boolean
+  hintsError?: string | null
+  onRetryHints?: () => void
   questionDurationSeconds: number
   onStartInterview: () => void
 }
@@ -105,6 +108,8 @@ export default function SelectionScreen({
   setSelectedPosition,
   companyHints,
   hintsLoading,
+  hintsError = null,
+  onRetryHints = () => {},
   questionDurationSeconds,
   onStartInterview,
 }: SelectionScreenProps) {
@@ -545,6 +550,13 @@ export default function SelectionScreen({
                       <CircularProgress size={14} sx={{ color: '#d97706' }} />
                       <Typography sx={{ fontSize: 12, color: '#92400e' }}>企業情報を読み込み中...</Typography>
                     </Box>
+                  ) : hintsError ? (
+                    <Alert
+                      severity="error"
+                      action={<Button color="inherit" size="small" onClick={onRetryHints}>再試行</Button>}
+                    >
+                      面接傾向を取得できませんでした。面接は開始できます。{hintsError}
+                    </Alert>
                   ) : companyHints && (companyHints.style_tags.length > 0 || companyHints.top_questions.length > 0 || companyHints.company_brief) ? (
                     <Stack spacing={1.5}>
                       {companyHints.company_brief ? (
@@ -591,7 +603,7 @@ export default function SelectionScreen({
                 variant="contained"
                 fullWidth
                 endIcon={<ArrowForwardIcon />}
-                disabled={!interviewCompany}
+                disabled={!interviewCompany || hintsLoading}
                 onClick={() => { void handleStartInterview() }}
                 sx={{
                   bgcolor: UI.mark, '&:hover': { bgcolor: `color-mix(in srgb, ${UI.mark} 88%, transparent)` },
@@ -601,7 +613,7 @@ export default function SelectionScreen({
                   '&:disabled': { bgcolor: UI.ruleSoft, color: UI.inkFaint, boxShadow: 'none' },
                 }}
               >
-                面接を開始する
+                {hintsLoading ? '企業の面接傾向を取得中...' : '面接を開始する'}
               </Button>
               <Typography sx={{ fontSize: 12, textAlign: 'center', color: UI.inkFaint }}>
                 開始すると利用規約に同意したことになります

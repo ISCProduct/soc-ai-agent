@@ -29,6 +29,10 @@ func (r *interviewCompanyQuestionRepoStub) FindByID(uint) (*models.InterviewComp
 	return r.question, nil
 }
 
+func (r *interviewCompanyQuestionRepoStub) FindByIDForCompany(uint, uint) (*models.InterviewCompanyQuestion, error) {
+	return r.question, nil
+}
+
 func (r *interviewCompanyQuestionRepoStub) Create(*models.InterviewCompanyQuestion) error {
 	return nil
 }

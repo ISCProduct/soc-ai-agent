@@ -72,7 +72,7 @@ func Inventory() []Route {
 	// nil を渡すとそのブロックが登録されず、カタログから静かに漏れる。
 	// ゼロ値のポインタは非 nil なのでブロックを通り、ハンドラは値として
 	// 受け取るだけなので中身は呼ばれない。
-	SetupCompanyAuthRoutes(api, nil, nil, nil,
+	SetupCompanyAuthRoutes(api, nil, nil, &companycontrollers.CompanyPortalInterviewQuestionController{}, nil,
 		&companycontrollers.CompanyPortalApplicationController{},
 		&companycontrollers.CompanyPortalJobController{},
 		&companycontrollers.CompanyPortalProfileController{},

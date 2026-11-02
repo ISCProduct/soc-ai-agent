@@ -2,6 +2,7 @@ package interview
 
 import (
 	"Backend/internal/models"
+	"context"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -9,13 +10,16 @@ import (
 )
 
 const (
-	questionSourceCustom   = "custom"
-	questionSourceTopic    = "topic"
-	questionSourceFollowUp = "follow_up"
+	questionSourceCustom    = "custom"
+	questionSourceGenerated = "generated"
+	questionSourceTopic     = "topic"
+	questionSourceFollowUp  = "follow_up"
 
-	questionStatusPending  = "pending"
-	questionStatusAsked    = "asked"
-	questionStatusAnswered = "answered"
+	questionStatusPending     = "pending"
+	questionStatusAsked       = "asked"
+	questionStatusAnswered    = "answered"
+	maxGeneratedQuestionHints = 5
+	maxGeneratedQuestionRunes = 300
 
 	// maxFollowUpDepth は1トピックあたりの深掘り回数の上限。
 	// 元は2（合計3ターン）だったが、体感が長すぎるという報告(#910)を受けて1に短縮した。
@@ -38,14 +42,53 @@ var weakSignalPattern = regexp.MustCompile(`担当|開発|改善`)
 var numberedCountPattern = regexp.MustCompile(`[0-9０-９一二三四五六七八九十百千万]+\s*(件|人)`)
 
 type questionDirective struct {
-	Text        string
-	Source      string
-	Category    string
-	IsDeepening bool
+	Text           string
+	Source         string
+	Category       string
+	IsDeepening    bool
+	TotalQuestions int
 }
 
-// BuildQuestionQueue は必須カスタム質問→標準トピック→推奨カスタム質問の順でキューを構築する。
-func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompanyQuestion) []models.InterviewQuestionState {
+type companyQuestionHintsContextKey struct{}
+
+// WithCompanyQuestionHints はRAGが調査した質問候補を面接計画のcontextに設定する。
+func WithCompanyQuestionHints(ctx context.Context, hints []string) context.Context {
+	return context.WithValue(ctx, companyQuestionHintsContextKey{}, normalizeCompanyQuestionHints(hints))
+}
+
+func companyQuestionHintsFromContext(ctx context.Context) []string {
+	hints, _ := ctx.Value(companyQuestionHintsContextKey{}).([]string)
+	return hints
+}
+
+func normalizeCompanyQuestionHints(hints []string) []string {
+	normalized := make([]string, 0, min(len(hints), maxGeneratedQuestionHints))
+	seen := make(map[string]struct{}, len(hints))
+	for _, hint := range hints {
+		hint = strings.TrimSpace(hint)
+		if hint == "" {
+			continue
+		}
+		runes := []rune(hint)
+		if len(runes) > maxGeneratedQuestionRunes {
+			hint = string(runes[:maxGeneratedQuestionRunes])
+		}
+		key := strings.ToLower(hint)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, hint)
+		if len(normalized) == maxGeneratedQuestionHints {
+			break
+		}
+	}
+	return normalized
+}
+
+// BuildQuestionQueue は必須質問→企業別候補→標準トピック→推奨質問の順でキューを構築する。
+// 保存済み質問がある場合は、生成候補を追加しない。
+func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompanyQuestion, generatedHints ...string) []models.InterviewQuestionState {
 	states := make([]models.InterviewQuestionState, 0)
 	order := 0
 
@@ -70,6 +113,19 @@ func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompan
 	}
 
 	appendCustom(true)
+	if len(customQuestions) == 0 {
+		for _, hint := range normalizeCompanyQuestionHints(generatedHints) {
+			states = append(states, models.InterviewQuestionState{
+				SessionID:    sessionID,
+				Source:       questionSourceGenerated,
+				Category:     "企業別質問",
+				QuestionText: hint,
+				Status:       questionStatusPending,
+				SortOrder:    order,
+			})
+			order++
+		}
+	}
 	for _, topic := range interviewTopics {
 		states = append(states, models.InterviewQuestionState{
 			SessionID:    sessionID,
@@ -85,12 +141,49 @@ func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompan
 	return states
 }
 
+type InterviewAnswerEvaluation struct {
+	Score           int
+	DeepeningPoints []string
+}
+
+// EvaluateInterviewAnswer はキーワードと回答の長さだけを使って軽量評価する。
+// 音声ターンごとの追加LLM呼び出しを避けるため、評価自体は決定的に行う。
+func EvaluateInterviewAnswer(answer string) InterviewAnswerEvaluation {
+	trimmed := strings.TrimSpace(answer)
+	evaluation := InterviewAnswerEvaluation{DeepeningPoints: make([]string, 0, 2)}
+	if trimmed == "" || trimmed == "（聞き取れませんでした）" {
+		evaluation.DeepeningPoints = append(evaluation.DeepeningPoints, "回答の具体例")
+		return evaluation
+	}
+
+	if utf8.RuneCountInString(trimmed) >= minDeepeningRunes {
+		evaluation.Score += 40
+	} else {
+		evaluation.DeepeningPoints = append(evaluation.DeepeningPoints, "回答の具体例")
+	}
+	if strongSignalPattern.MatchString(trimmed) || numberedCountPattern.MatchString(trimmed) {
+		evaluation.Score += 40
+	} else if len(weakSignalPattern.FindAllString(trimmed, -1)) >= 2 {
+		evaluation.Score += 40
+	} else {
+		evaluation.DeepeningPoints = append(evaluation.DeepeningPoints, "具体的な行動や成果")
+	}
+	if evaluation.Score > 100 {
+		evaluation.Score = 100
+	}
+	return evaluation
+}
+
 // NeedsDeepening は回答が抽象的すぎて追質問が必要かを判定する。
 func NeedsDeepening(answer string, depth int) bool {
 	if depth >= maxFollowUpDepth {
 		return false
 	}
 	trimmed := strings.TrimSpace(answer)
+	evaluation := EvaluateInterviewAnswer(trimmed)
+	if evaluation.Score >= 80 && len(evaluation.DeepeningPoints) == 0 {
+		return false
+	}
 	if trimmed == "" || trimmed == "（聞き取れませんでした）" {
 		return true
 	}

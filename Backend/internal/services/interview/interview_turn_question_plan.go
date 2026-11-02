@@ -31,9 +31,14 @@ func (s *InterviewService) advanceQuestionPlan(
 	if err != nil {
 		return nil, err
 	}
+	totalQuestions := int(count)
 	if count == 0 {
-		customQuestions := s.fetchCustomQuestions(companyID, position)
-		queue := BuildQuestionQueue(session.ID, customQuestions)
+		customQuestions, err := s.fetchCustomQuestions(companyID, position)
+		if err != nil {
+			return nil, err
+		}
+		queue := BuildQuestionQueue(session.ID, customQuestions, companyQuestionHintsFromContext(ctx)...)
+		totalQuestions = len(queue)
 		if err := s.questionStateRepo.CreateBatch(queue); err != nil {
 			return nil, err
 		}
@@ -68,10 +73,11 @@ func (s *InterviewService) advanceQuestionPlan(
 					return nil, err
 				}
 				return &questionDirective{
-					Text:        followUpText,
-					Source:      questionSourceFollowUp,
-					Category:    asked.Category,
-					IsDeepening: true,
+					Text:           followUpText,
+					Source:         questionSourceFollowUp,
+					Category:       asked.Category,
+					IsDeepening:    true,
+					TotalQuestions: totalQuestions + 1,
 				}, nil
 			}
 		}
@@ -81,6 +87,7 @@ func (s *InterviewService) advanceQuestionPlan(
 	if err != nil {
 		return nil, err
 	}
+	totalQuestions = len(states)
 	next := selectNextPending(states)
 	if next == nil {
 		return nil, nil
@@ -90,9 +97,10 @@ func (s *InterviewService) advanceQuestionPlan(
 		return nil, err
 	}
 	return &questionDirective{
-		Text:     next.QuestionText,
-		Source:   next.Source,
-		Category: next.Category,
+		Text:           next.QuestionText,
+		Source:         next.Source,
+		Category:       next.Category,
+		TotalQuestions: totalQuestions,
 	}, nil
 }
 

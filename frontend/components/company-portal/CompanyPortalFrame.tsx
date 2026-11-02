@@ -21,6 +21,7 @@ const NAV = [
   { href: '/company-portal', label: 'ホーム' },
   { href: '/company-portal/jobs', label: '求人' },
   { href: '/company-portal/applications', label: '応募者' },
+  { href: '/company-portal/interview-questions', label: '面接質問' },
   { href: '/company-portal/students', label: '学生を探す' },
   { href: '/company-portal/scouts', label: 'スカウト' },
 ] as const

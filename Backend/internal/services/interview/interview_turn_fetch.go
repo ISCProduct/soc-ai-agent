@@ -12,16 +12,11 @@ import (
 )
 
 // fetchCustomQuestions は企業別カスタム質問を取得する。未登録時は空スライスを返す。
-func (s *InterviewService) fetchCustomQuestions(companyID uint, position string) []models.InterviewCompanyQuestion {
+func (s *InterviewService) fetchCustomQuestions(companyID uint, position string) ([]models.InterviewCompanyQuestion, error) {
 	if s.companyQuestionRepo == nil || companyID == 0 {
-		return nil
+		return nil, nil
 	}
-	qs, err := s.companyQuestionRepo.FindByCompanyAndPosition(companyID, position)
-	if err != nil {
-		log.Printf("[Interview] fetchCustomQuestions error: %v", err)
-		return nil
-	}
-	return qs
+	return s.companyQuestionRepo.FindByCompanyAndPosition(companyID, position)
 }
 
 // fetchSkillScores はユーザーのGitHubスキルスコアを取得する。未登録時は空スライスを返す。

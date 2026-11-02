@@ -171,11 +171,17 @@ func (s *InterviewService) Turn(
 	companyReadingResolved = companyContext.readingResolved
 
 	// 企業別カスタム質問とGitHubスキルスコアを取得
-	customQuestions := s.fetchCustomQuestions(companyID, position)
+	customQuestions, err := s.fetchCustomQuestions(companyID, position)
+	if err != nil {
+		return nil, err
+	}
 	skillScores := s.fetchSkillScores(userID)
 	directive, err := s.advanceQuestionPlan(ctx, session, companyID, position, companyName, userText, false)
 	if err != nil {
 		log.Printf("[Interview] advanceQuestionPlan error: %v", err)
+	}
+	if directive != nil && directive.TotalQuestions > 0 {
+		totalQuestions = directive.TotalQuestions
 	}
 
 	// 履歴はクライアントから受け取らず、保存済みの発話から組み直す（#1636）。
@@ -249,6 +255,7 @@ func (s *InterviewService) Turn(
 		result.QuestionSource = directive.Source
 		result.QuestionCategory = directive.Category
 		result.IsDeepening = directive.IsDeepening
+		result.TotalQuestions = directive.TotalQuestions
 	}
 	return result, nil
 }
@@ -294,11 +301,17 @@ func (s *InterviewService) StartTurn(
 	companyInfo = s.resolveCompanyInfo(companyID, companyName, companyInfo)
 
 	// 企業別カスタム質問とGitHubスキルスコアを取得
-	customQuestions := s.fetchCustomQuestions(companyID, position)
+	customQuestions, err := s.fetchCustomQuestions(companyID, position)
+	if err != nil {
+		return nil, err
+	}
 	skillScores := s.fetchSkillScores(userID)
 	directive, err := s.advanceQuestionPlan(ctx, session, companyID, position, companyName, "", true)
 	if err != nil {
 		log.Printf("[Interview] advanceQuestionPlan error: %v", err)
+	}
+	if directive != nil && directive.TotalQuestions > 0 {
+		totalQuestions = directive.TotalQuestions
 	}
 
 	systemPromptStart := buildInterviewSystemPrompt(
@@ -359,6 +372,7 @@ func (s *InterviewService) StartTurn(
 		result.QuestionSource = directive.Source
 		result.QuestionCategory = directive.Category
 		result.IsDeepening = directive.IsDeepening
+		result.TotalQuestions = directive.TotalQuestions
 	}
 	return result, nil
 }
