@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"net/http"
 )
 
 type contextKey string
@@ -62,37 +61,13 @@ func GenerateUserToken(userID uint, email, secret string) string {
 	return token
 }
 
-// VerifyUserToken はJWTトークンを検証する（後方互換性のため残存）
+// VerifyUserToken は発行済みJWTが期待したユーザーのものかを検証する。
+// 本番経路の認証は EchoUserAuth が担うため、ここはテストが発行結果を
+// 確かめるためだけに使う（services/auth/auth_service_token_test.go）。
 func VerifyUserToken(token string, userID uint, _ string, secret string) bool {
 	parsedID, _, err := ParseJWT(token, secret)
 	if err != nil {
 		return false
 	}
 	return parsedID == userID
-}
-
-// UserAuthFunc は X-User-Token ヘッダーのJWTを検証し、ユーザーIDをコンテキストに保存するミドルウェア
-// userSecret が未設定の場合はフェイルクローズ（503）として動作する
-func UserAuthFunc(userSecret string, next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if userSecret == "" {
-			http.Error(w, "Service Unavailable: authentication not configured", http.StatusServiceUnavailable)
-			return
-		}
-
-		token := r.Header.Get("X-User-Token")
-		if token == "" {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		userID, _, err := ParseJWT(token, userSecret)
-		if err != nil {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		ctx := context.WithValue(r.Context(), UserIDContextKey, userID)
-		next(w, r.WithContext(ctx))
-	}
 }

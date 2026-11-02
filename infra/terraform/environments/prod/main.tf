@@ -8,7 +8,7 @@ locals {
   backend_domain  = "api.${var.domain_name}"
 
   backend_secret_arns = compact(concat(
-    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn, aws_secretsmanager_secret.admin.arn, aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn, aws_secretsmanager_secret.bff_internal.arn],
+    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn, aws_secretsmanager_secret.admin.arn, aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn, aws_secretsmanager_secret.bff_internal.arn, aws_secretsmanager_secret.service_secret.arn],
     # 法人番号API / gBizINFO(#1360)。AWS 側には既にあったがコードに無く、
     # apply すると実行ロールからこの2つの取得許可が外れ、次のタスク起動が失敗する状態だった。
     [aws_secretsmanager_secret.houjin_bangou.arn, aws_secretsmanager_secret.gbizinfo.arn],
@@ -98,6 +98,13 @@ locals {
     ],
     [
       {
+        # CI(sync-whats-new 等)が X-Admin-Secret で叩くための共有シークレット(#1158)。
+        # ADMIN_SECRET(管理者トークンのHMAC鍵)とは別のシークレットに分けてある。
+        # 未設定でも起動はする（その場合はサービス間呼び出しが503で拒否されるだけ）。
+        name      = "SERVICE_SECRET"
+        valueFrom = "${aws_secretsmanager_secret.service_secret.arn}:service_secret::"
+      },
+      {
         name      = "RAG_INTERNAL_TOKEN"
         valueFrom = "${aws_secretsmanager_secret.rag_internal.arn}:rag_internal_token::"
       },
@@ -127,8 +134,9 @@ locals {
 
 # 本番未起動状態の初回構築時に見落とされていた認証系シークレット。
 # staging(app_user_data.sh.tftpl)と同じくrandom_passwordで自動生成する。
-# ADMIN_SECRETのみCI(sync-whats-newジョブ)から既知の値で呼べる必要があるため
-# var.admin_secret(固定値、stagingと同じ値を設定)を使う。
+# ADMIN_SECRET も本番専用の値を自動生成する(下の random_password.admin_secret)。
+# 「CIから既知の値で呼べる必要がある」のは ADMIN_SECRET ではなく SERVICE_SECRET
+# (soc-app/service-secret)の役目で、CIはそれを Secrets Manager から読む(#1158)。
 resource "random_password" "user_secret" {
   length  = 48
   special = false
@@ -559,6 +567,40 @@ resource "aws_secretsmanager_secret_version" "rag_internal" {
   })
 }
 
+# CI・運用からのサービス間呼び出し(X-Admin-Secret)用の共有シークレット(#1158)。
+#
+# ADMIN_SECRET は管理者/職員トークンのHMAC鍵で、漏れると /api/admin/* の全権限が取れる。
+# 一方 CI(sync-whats-new / prod-uptime-scheduler)は更新情報の取り込みを既知の値で
+# 叩く必要がある。同じ値を兼用していたため、CIが知るべき値のためにHMAC鍵の露出面まで
+# 広がっていた。用途ごとに別のシークレットへ分ける。
+#
+# soc-app/admin へキーを足す形にはしない。あちらの secret_version には
+# ignore_changes = [secret_string] が付いていて一度しか書かれないため、
+# キーを足しても apply では実体に反映されない(#1158 が届かなかった原因)。
+resource "random_password" "service_secret" {
+  length  = 48
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "service_secret" {
+  name = "${var.project_name}/service-secret"
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "service_secret" {
+  secret_id = aws_secretsmanager_secret.service_secret.id
+  secret_string = jsonencode({
+    service_secret = random_password.service_secret.result
+  })
+
+  lifecycle {
+    # 値の管理をTerraformから外す(#1158)。これが無いと、AWS CLI でローテーションした値を
+    # 次の apply が random_password の値へ黙って巻き戻す。ローテーション手順は
+    # docs/wiki/prod-secrets-rotation.md。
+    ignore_changes = [secret_string]
+  }
+}
+
 # frontend(BFF) -> backend の内部認証トークン(#1407)。
 # backend の ALB はインターネット直結なので、X-Client-IP は誰でも送れる。
 # このトークンが一致したときだけ backend が X-Client-IP を実クライアントIPとして採用し、
@@ -642,6 +684,10 @@ module "backend" {
   s3_bucket_arn     = module.s3.bucket_arn
   secret_arns       = local.backend_secret_arns
   secrets           = local.backend_secrets
+  # backend_secret_arns は compact() を通るため、新しいシークレットを1つ足した apply では
+  # リスト長が unknown になり、モジュール側の count が plan 時に評価できない。
+  # 中身が必ず1件以上あることは静的に分かっているので、ここで真偽値を渡す。
+  create_secrets_policy = true
   environment = {
     APP_ENV                     = "production"
     AWS_REGION                  = var.region
@@ -769,6 +815,9 @@ module "rag_review" {
     [aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
   ))
+  # 上の compact() は未作成リソースの ARN が混ざるとリスト長ごと unknown になる。
+  # 固定2件が必ず入るので、件数判定をここで明示する(module.backend と同じ理由)。
+  create_secrets_policy = true
   secrets = [
     {
       name = "OPENAI_API_KEY"

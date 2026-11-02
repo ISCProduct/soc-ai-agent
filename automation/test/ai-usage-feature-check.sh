@@ -7,7 +7,7 @@
 # 追加時点で落とす。
 #
 # 判定: AI クライアント呼び出しの直前5行以内に usagectx.WithFeature があること。
-# 除外: internal/openai（記録層そのもの）と internal/ai（ctx を素通しするアダプタ）。
+# 除外: internal/openai（記録層そのもの）。
 #
 # 使い方: ./automation/test/ai-usage-feature-check.sh
 
@@ -17,8 +17,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 hits=$(grep -rn -E "\.(ChatCompletionJSON|ResponsesWithTemperature|CreateEmbeddings?)\(" \
   "$ROOT/Backend/internal" "$ROOT/Backend/cmd" --include="*.go" \
   | grep -v "_test.go" \
-  | grep -v "/internal/openai/" \
-  | grep -v "/internal/ai/" || true)
+  | grep -v "/internal/openai/" || true)
 
 total=$(printf '%s\n' "$hits" | grep -c . || true)
 

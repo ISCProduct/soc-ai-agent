@@ -124,7 +124,7 @@ export default function PageContent() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { fetchQuestions() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchQuestions() }, [id])
 
   const openCreate = () => {
     setEditingId(null)

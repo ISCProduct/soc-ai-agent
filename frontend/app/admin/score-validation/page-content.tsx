@@ -104,7 +104,7 @@ function CorrelationTab({ headers }: { headers: Record<string, string> }) {
       .then(d => setData(d))
       .catch(() => setError('相関データの取得に失敗しました'))
       .finally(() => setLoading(false))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   if (loading) return <Box textAlign="center" py={6}><CircularProgress /></Box>
   if (error) return <Alert severity="error">{error}</Alert>
@@ -177,7 +177,7 @@ function PhaseMetricsTab({ headers }: { headers: Record<string, string> }) {
       .then(d => setData(d))
       .catch(() => setError('フェーズ別メトリクスの取得に失敗しました'))
       .finally(() => setLoading(false))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   if (loading) return <Box textAlign="center" py={6}><CircularProgress /></Box>
   if (error) return <Alert severity="error">{error}</Alert>
@@ -243,7 +243,7 @@ function ABTestTab({ headers }: { headers: Record<string, string> }) {
       .then(d => setVariants(d.experiments ?? []))
       .catch(() => setError('バリアント一覧の取得に失敗しました'))
       .finally(() => setLoading(false))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => { fetchVariants() }, [fetchVariants])
 
@@ -253,7 +253,7 @@ function ABTestTab({ headers }: { headers: Record<string, string> }) {
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
       .then(d => setResults(d.results ?? []))
       .catch(() => setResults([]))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => { if (selectedExp) fetchResults(selectedExp) }, [selectedExp, fetchResults])
 
@@ -435,7 +435,7 @@ function CalibrationTab({ headers }: { headers: Record<string, string> }) {
       .then(d => setHistory(d.history ?? []))
       .catch(() => setError('キャリブレーション履歴の取得に失敗しました'))
       .finally(() => setLoading(false))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => { fetchHistory() }, [fetchHistory])
 

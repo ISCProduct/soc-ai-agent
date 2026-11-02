@@ -11,7 +11,14 @@ export interface AssessmentSummary {
   session_id?: string
   answered_count: number
   submitted_at?: string
+  /** standard=運営標準 / school=学校独自（マッチングには使われない） */
+  scope: AssessmentScope
+  /** 受検期限（ISO）。無ければ期限なし */
+  due_at?: string
+  overdue: boolean
 }
+
+export type AssessmentScope = 'standard' | 'school'
 
 export interface AssessmentQuestion {
   id: number
@@ -33,6 +40,7 @@ export interface AssessmentResult {
   title: string
   submitted_at?: string
   scores: { category: string; score: number }[]
+  scope: AssessmentScope
 }
 
 export const QUESTIONS_PER_PAGE = 2
@@ -77,4 +85,14 @@ export function firstUnansweredPage(session: AssessmentSession): number {
   const idx = session.questions.findIndex((q) => session.answers[String(q.id)] === undefined)
   const pages = Math.max(1, Math.ceil(session.questions.length / QUESTIONS_PER_PAGE))
   return idx === -1 ? pages - 1 : Math.floor(idx / QUESTIONS_PER_PAGE)
+}
+
+/**
+ * 期限の表示用。年・日付・時刻まで出す。
+ * 日付だけだと当日の締切時刻が分からず、年が無いと年明けの期限を今年と読み違える。
+ */
+export function formatDueAt(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString('ja-JP', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }

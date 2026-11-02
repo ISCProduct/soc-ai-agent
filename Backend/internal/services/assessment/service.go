@@ -24,8 +24,10 @@ var (
 
 // Repository はサービスが使う永続化の面。
 type Repository interface {
-	ListTemplates() ([]models.AssessmentTemplate, error)
+	ListTemplates(schoolID *uint) ([]models.AssessmentTemplate, error)
 	FindTemplate(id uint) (*models.AssessmentTemplate, error)
+	FindVisibleTemplate(id uint, schoolID *uint) (*models.AssessmentTemplate, error)
+	FindUserSchoolID(userID uint) (*uint, error)
 	ListQuestions(templateID uint, version int) ([]models.AssessmentQuestion, error)
 	ListSessionsByUser(userID uint) ([]models.AssessmentSession, error)
 	FindInProgressSession(userID, templateID uint) (*models.AssessmentSession, error)
@@ -34,7 +36,7 @@ type Repository interface {
 	UpsertAnswer(sessionID, questionID uint, value int) error
 	ListAnswers(sessionID uint) ([]models.AssessmentAnswer, error)
 	CountAnswersBySessions(sessionIDs []uint) (map[uint]int, error)
-	Submit(s *models.AssessmentSession, scores map[string]float64, scoreSessionID string) error
+	Submit(s *models.AssessmentSession, scores map[string]float64, scoreSessionID string, writeScores bool) error
 	FindResult(sessionID uint) (map[string]float64, error)
 }
 
@@ -74,11 +76,33 @@ type TemplateStatus struct {
 	SessionID     string     `json:"session_id,omitempty"`
 	AnsweredCount int        `json:"answered_count"`
 	SubmittedAt   *time.Time `json:"submitted_at,omitempty"`
+	// Scope は standard（運営標準）か school（学校独自）。学校独自は「おすすめ企業の計算には使われない」旨を画面に出す。
+	Scope string `json:"scope"`
+	// DueAt は受検期限。Overdue は期限を過ぎていて未提出のとき true。
+	DueAt   *time.Time `json:"due_at,omitempty"`
+	Overdue bool       `json:"overdue"`
+}
+
+// 検査の提供元（TemplateStatus.Scope）。
+const (
+	ScopeStandard = "standard"
+	ScopeSchool   = "school"
+)
+
+func scopeOf(t models.AssessmentTemplate) string {
+	if t.SchoolID != nil {
+		return ScopeSchool
+	}
+	return ScopeStandard
 }
 
 // List は学生の検査一覧。未受検・受検中を先に、提出済みを後に並べる。
 func (s *Service) List(userID uint) ([]TemplateStatus, error) {
-	templates, err := s.repo.ListTemplates()
+	schoolID, err := s.repo.FindUserSchoolID(userID)
+	if err != nil {
+		return nil, err
+	}
+	templates, err := s.repo.ListTemplates(schoolID)
 	if err != nil {
 		return nil, err
 	}
@@ -112,13 +136,15 @@ func (s *Service) List(userID uint) ([]TemplateStatus, error) {
 		if err != nil {
 			return nil, err
 		}
-		st := TemplateStatus{TemplateID: t.ID, Title: t.Title, Description: t.Description, QuestionCount: len(qs), Status: StatusNotStarted}
+		st := TemplateStatus{TemplateID: t.ID, Title: t.Title, Description: t.Description, QuestionCount: len(qs), Status: StatusNotStarted,
+			Scope: scopeOf(t), DueAt: t.DueAt}
 		if hasSession {
 			st.Status = ss.Status
 			st.SessionID = ss.PublicID
 			st.AnsweredCount = counts[ss.ID]
 			st.SubmittedAt = ss.SubmittedAt
 		}
+		st.Overdue = isOverdue(t.DueAt, st.Status, time.Now())
 		if st.Status == StatusSubmitted {
 			done = append(done, st)
 		} else {
@@ -145,7 +171,12 @@ type SessionView struct {
 
 // Start は受検を始める。同じ検査の受検中があればそれを返す（やり直しで回答を失わない）。
 func (s *Service) Start(userID, templateID uint) (*SessionView, error) {
-	t, err := s.repo.FindTemplate(templateID)
+	schoolID, err := s.repo.FindUserSchoolID(userID)
+	if err != nil {
+		return nil, err
+	}
+	// 他校の独自テンプレートは存在しない扱い（404）。
+	t, err := s.repo.FindVisibleTemplate(templateID, schoolID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
 	}
@@ -234,7 +265,12 @@ func (s *Service) Submit(ctx context.Context, userID uint, publicID string) (map
 	if err != nil {
 		return nil, err
 	}
-	if err := s.repo.Submit(sess, scores, "assessment:"+sess.PublicID); err != nil {
+	t, err := s.repo.FindTemplate(sess.TemplateID)
+	if err != nil {
+		return nil, err
+	}
+	// 学校独自テンプレートはマッチングに使わないので user_weight_scores へは書かない（#1675）。
+	if err := s.repo.Submit(sess, scores, "assessment:"+sess.PublicID, t.IsStandard); err != nil {
 		return nil, err
 	}
 	s.rematch(ctx, userID, sess.TemplateID)
@@ -271,6 +307,8 @@ type ResultView struct {
 	Title       string          `json:"title"`
 	SubmittedAt *time.Time      `json:"submitted_at,omitempty"`
 	Scores      []CategoryScore `json:"scores"`
+	// Scope は standard / school。結果画面の「この結果の使われ方」を出し分ける（学校独自はマッチングに使わない）。
+	Scope string `json:"scope"`
 }
 
 // Result は提出済みの結果。カテゴリは正典の順に並べる（順位付けしない）。
@@ -290,7 +328,7 @@ func (s *Service) Result(userID uint, publicID string) (*ResultView, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &ResultView{SessionID: sess.PublicID, Title: t.Title, SubmittedAt: sess.SubmittedAt, Scores: []CategoryScore{}}
+	out := &ResultView{SessionID: sess.PublicID, Title: t.Title, SubmittedAt: sess.SubmittedAt, Scores: []CategoryScore{}, Scope: scopeOf(*t)}
 	for _, c := range valueobject.AllWeightCategories() {
 		if v, ok := m[string(c)]; ok {
 			out.Scores = append(out.Scores, CategoryScore{Category: string(c), Score: v})
@@ -299,12 +337,39 @@ func (s *Service) Result(userID uint, publicID string) (*ResultView, error) {
 	return out, nil
 }
 
+// session は本人の受検だけを返す。受検の問題・回答・結果の入口（Get / SaveAnswer /
+// Submit / Result）はすべてここを通る。
+//
+// 学校独自テンプレートの受検は、開始後に学校が変わったら続けさせない。
+// users.school_id は本人のプロフィール更新で変わるので（auth_profile.go）、
+// 本人確認だけだと転校・学校名の付け替えのあとも旧学校の問題文と結果を読めてしまう。
+// 現在の所属校と一致しない学校独自テンプレートは存在しない扱い（#1675）。
 func (s *Service) session(userID uint, publicID string) (*models.AssessmentSession, error) {
 	sess, err := s.repo.FindSessionByPublicID(userID, publicID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
 	}
-	return sess, err
+	if err != nil {
+		return nil, err
+	}
+	t, err := s.repo.FindTemplate(sess.TemplateID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if t.SchoolID == nil {
+		return sess, nil // 運営標準は学校に紐づかない
+	}
+	schoolID, err := s.repo.FindUserSchoolID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if schoolID == nil || *schoolID != *t.SchoolID {
+		return nil, ErrNotFound
+	}
+	return sess, nil
 }
 
 func (s *Service) answers(sessionID uint) (map[uint]int, error) {
@@ -333,4 +398,9 @@ func (s *Service) view(sess *models.AssessmentSession, title string) (*SessionVi
 		v.Questions = append(v.Questions, QuestionView{ID: q.ID, Position: q.Position, Body: q.Body})
 	}
 	return v, nil
+}
+
+// isOverdue は期限を過ぎていて未提出か。提出済みは期限後に出していても超過扱いにしない。
+func isOverdue(due *time.Time, status string, now time.Time) bool {
+	return due != nil && status != StatusSubmitted && now.After(*due)
 }

@@ -30,18 +30,20 @@ test.describe('学生画面の配色トークン', () => {
 
     await useMode(page, 'high-contrast')
     await page.goto('/es-rewrite')
-    expect((await colorsOf(page, 'ES添削・リライト')).color).toBe('rgb(0, 0, 0)')
+    // 表示設定はマウント後に localStorage を読んで切り替わる。
+    // 本文が見えた直後に読むと、切替前の色で落ちることがある。
+    await expect.poll(async () => (await colorsOf(page, 'ES添削・リライト')).color).toBe('rgb(0, 0, 0)')
   })
 
   test('AI面接: 高コントラストで本文色と地の色が切り替わる', async ({ page }) => {
     await useMode(page, 'high-contrast')
     await page.goto('/interview')
     await expect(page.locator('body')).toBeVisible()
-    const vars = await page.evaluate(() => {
+    // 同上。CSS変数は切替前だと既定の #0f172a / #f4f7fb のまま読める。
+    await expect.poll(async () => page.evaluate(() => {
       const cs = getComputedStyle(document.documentElement)
       return { ink: cs.getPropertyValue('--ui-ink').trim(), paper: cs.getPropertyValue('--ui-paper').trim() }
-    })
-    expect(vars).toEqual({ ink: '#000000', paper: '#ffffff' })
+    })).toEqual({ ink: '#000000', paper: '#ffffff' })
   })
 
   test('地の色はテーマ1箇所から配られ、既定は #f4f7fb', async ({ page }) => {

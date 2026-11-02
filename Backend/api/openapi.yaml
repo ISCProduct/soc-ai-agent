@@ -27,7 +27,7 @@ info:
     |---|---|---|
     | `userToken` | `X-User-Token` | 学生・教員。ログインで発行される短TTLのJWT |
     | `adminAuth` | `X-Admin-Email` + `X-Admin-Token` | 管理画面。管理者本人の認証 |
-    | `serviceSecret` | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない |
+    | `serviceSecret` | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない。値は `SERVICE_SECRET`（`ADMIN_SECRET` とは別値） |
     | `companyCookie` | Cookie | 企業ポータル。httpOnly Cookie 3本 |
 
     テナントの切り替えが必要な場合は `X-Tenant-Slug` を併せて送る。
@@ -126,6 +126,11 @@ components:
       type: apiKey
       in: header
       name: X-Admin-Secret
+      description: |
+        ヘッダ名は歴史的に `X-Admin-Secret` だが、照合する値は `SERVICE_SECRET` であり
+        管理者トークンのHMAC鍵 `ADMIN_SECRET` とは別値（#1158）。未設定なら 503 で拒否し、
+        本文に `"code": "SERVICE_SECRET_NOT_CONFIGURED"` を入れる（ALB が healthy target
+        ゼロで返す 503 と区別するため。CI がこのコードを見ている）。
     companyCookie:
       type: apiKey
       in: cookie
@@ -1071,10 +1076,10 @@ paths:
     get:
       tags: [interviews]
       summary: セッション詳細
+      description: report.teacher_report_json は職員・管理者にのみ含まれる（認証ユーザーの実ロールで決まる。#1814）。
       security: [{ userToken: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
-        - { in: query, name: role, schema: { type: string } }
       responses:
         "200": { description: 詳細 }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -1332,6 +1337,174 @@ paths:
         "200": { description: カテゴリ別スコア }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { description: 未提出または本人のセッションが無い }
+
+  # ── ability-assessments（能力検査 / 学生）─────────────────────
+  # 性格検査（/api/assessments）とパスを分ける。採点方式も結果の意味も違い、
+  # 能力検査の点数は user_weight_scores へ入れない（SOCAIAGENT-433）。
+  # 受検中のレスポンスに正解（correct_choice）は含めない。採点はサーバ側のみ。
+  /api/ability-assessments:
+    get:
+      tags: [assessments]
+      summary: 受けられる能力検査と自分の受検状況を一覧する
+      description: "受検中のまま制限時間を過ぎたものは `status: expired` で返す。"
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 能力検査の一覧（未受検が先） }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/ability-assessments/{templateId}/sessions:
+    post:
+      parameters: [{ in: path, name: templateId, required: true, schema: { type: integer } }]
+      tags: [assessments]
+      summary: 能力検査の受検を開始する（受検中があればそれを返す）
+      description: |
+        開始時に制限時間から締め切り（`deadline_at`）を凍結する。判定はサーバだけが行い、
+        クライアントのタイマーは表示用。制限時間を過ぎた受検中は再開できない（410）。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 問題（選択肢つき）・保存済みの回答・締め切り・残り秒 }
+        "400": { description: 検査の指定が正しくない }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 検査が無い }
+        "410": { description: 制限時間を過ぎている }
+
+  /api/ability-assessments/sessions/{sessionId}:
+    get:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 受検の現在の状態を取得する
+      description: 問題は `id` / `position` / `section` / `body` / `choices` だけを返す。正解は含めない。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 問題と保存済みの回答 }
+        "400": { description: 受検の指定が正しくない }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人の受検が無い }
+        "410": { description: 制限時間を過ぎている }
+
+  /api/ability-assessments/sessions/{sessionId}/answers/{questionId}:
+    put:
+      parameters:
+        - { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: questionId, required: true, schema: { type: integer } }
+      tags: [assessments]
+      summary: 1問の回答を保存する（自動保存・冪等）
+      description: |
+        `choice` は選択肢の 0 始まりの添字。0 を正当な値として受けるため、未指定とは区別する。
+        締め切りを過ぎた回答は受け付けない（410）。
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [choice]
+              properties:
+                choice: { type: integer, minimum: 0 }
+      responses:
+        "204": { description: 保存した }
+        "400": { description: 選択肢の範囲外、または検査に無い問題 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人の受検が無い }
+        "409": { description: すでに提出済み }
+        "410": { description: 制限時間を過ぎている }
+
+  /api/ability-assessments/sessions/{sessionId}/submit:
+    post:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 回答を採点して提出する
+      description: |
+        未回答は誤答扱いで、出題数には数える。締め切りを過ぎていても提出は受け付ける
+        （弾くと時間切れで結果が一切出ない）。締め切り後の新しい回答は保存されないので点数は増えない。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 提出した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人の受検が無い }
+        "409": { description: すでに提出済み }
+
+  /api/ability-assessments/sessions/{sessionId}/result:
+    get:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 提出済みの結果を取得する
+      description: section（verbal / numerical）別の正答数と出題数。偏差値・順位は返さない。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: section 別の正答数と出題数 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 未提出または本人の受検が無い }
+
+  # ── assessments（学校側 / 先生） ─────────────────────
+  /api/admin/assessment-templates:
+    get:
+      tags: [assessments]
+      summary: 学校独自の検査テンプレートを一覧する
+      description: |
+        担当校スコープが掛かる（`school_id` 必須）。運営標準は含まない。学校独自の結果は「おすすめ企業の計算には使われない」。
+      security: [{ adminAuth: [] }]
+      parameters: [{ in: query, name: school_id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: テンプレート一覧 }
+        "400": { description: school_id が無い・不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [assessments]
+      summary: 学校独自の検査テンプレートを作る
+      description: |
+        カテゴリは正典10個から選ぶ。`is_standard` は常に false で、マッチングには合流しない。
+        担当校・作成者は認証情報から決め、リクエスト本文の値は使わない。
+      security: [{ adminAuth: [] }]
+      parameters: [{ in: query, name: school_id, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, questions]
+              properties:
+                title: { type: string, maxLength: 100 }
+                description: { type: string, maxLength: 500 }
+                due_at: { type: string, format: date-time, description: 受検期限。現在より後 }
+                questions:
+                  type: array
+                  minItems: 1
+                  maxItems: 60
+                  items:
+                    type: object
+                    required: [body, weight_category]
+                    properties:
+                      body: { type: string, maxLength: 200 }
+                      weight_category: { type: string }
+                      reverse_scored: { type: boolean }
+      responses:
+        "201": { description: 作成した }
+        "400": { description: 入力不正（メッセージは先生にそのまま見せられる） }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 学校が無い }
+
+  /api/admin/assessment-templates/{id}/students:
+    get:
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: school_id, required: true, schema: { type: integer } }
+      tags: [assessments]
+      summary: 学校独自テンプレートの受検状況（学生ごと）
+      description: |
+        期限超過 → 未受検 → 途中 → 完了の順。スコアの生値は返さず、上位カテゴリ名だけを返す。
+        他校のテンプレートは 404。
+      security: [{ adminAuth: [] }]
+      responses:
+        "200": { description: 学生ごとの受検状況 }
+        "400": { description: IDまたは school_id が不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: この学校のテンプレートが無い }
 
   # ── resume ─────────────────────────────────────────
   /api/resume/upload:
@@ -3566,7 +3739,7 @@ paths:
       tags: [admin-training]
       summary: 学習データの件数
       description: |
-        件数しか返さず個人情報を含まないため、`X-Admin-Secret` によるサービス間認証にしている。運用から機械的に叩けるようにするためで、管理者になりすます形を避けている。
+        件数しか返さず個人情報を含まないため、`X-Admin-Secret` によるサービス間認証にしている。運用から機械的に叩けるようにするためで、管理者になりすます形を避けている。照合する値は `SERVICE_SECRET`（`ADMIN_SECRET` とは別値、#1158）。
       security: [{ serviceSecret: [] }]
       responses:
         "200":
@@ -3578,7 +3751,7 @@ paths:
       tags: [release-notes]
       summary: リリースノートを取り込む
       description: |
-        CI（GitHub Actions）からのマシン間呼び出しのため、共有シークレットのみで認証する（#861）。
+        CI（GitHub Actions）からのマシン間呼び出しのため、共有シークレットのみで認証する（#861）。照合する値は `SERVICE_SECRET` で、管理者トークンのHMAC鍵 `ADMIN_SECRET` とは分けてある（#1158）。
       security: [{ serviceSecret: [] }]
       responses:
         "200":

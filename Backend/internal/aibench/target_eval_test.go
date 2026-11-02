@@ -292,8 +292,18 @@ func TestEvaluateESResponse(t *testing.T) {
 		{
 			// es_review.py は出力上限に到達したときだけ 422 を返す
 			name: "422は出力上限到達", status: http.StatusUnprocessableEntity,
-			body:       []byte(`{"detail":"添削コメントが長くなりすぎて..."}`),
+			body:       []byte(`{"detail":"添削コメントが長くなりすぎて最後まで生成できませんでした。もう一度お試しください。"}`),
 			wantBroken: true, wantReason: BrokenTruncated,
+		},
+		{
+			name: "422の入力バリデーション失敗", status: http.StatusUnprocessableEntity,
+			body:       []byte(`{"detail":[{"type":"string_too_long","loc":["body","es_text"],"msg":"String should have at most 6000 characters"}]}`),
+			wantBroken: true, wantReason: BrokenValidation,
+		},
+		{
+			name: "422の未知のエラーは出力打ち切り扱いにしない", status: http.StatusUnprocessableEntity,
+			body:       []byte(`{"detail":"unknown client error"}`),
+			wantBroken: true, wantReason: BrokenCallFailed,
 		},
 		{
 			name: "500のJSON解析失敗はJSON不正", status: http.StatusInternalServerError,

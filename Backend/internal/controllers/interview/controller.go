@@ -554,11 +554,8 @@ func (c *InterviewController) Get(ctx echo.Context) error {
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	role := ctx.QueryParam("role")
-	if role == "" {
-		role = "student"
-	}
-	resp, err := c.interviewService.GetSessionDetailWithRole(userID, sessionID, role)
+	// 教員用レポートの開示可否は実ロールからサービス側で決める。role クエリは認可に使わない(#1814)。
+	resp, err := c.interviewService.GetSessionDetail(userID, sessionID)
 	if err != nil {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())

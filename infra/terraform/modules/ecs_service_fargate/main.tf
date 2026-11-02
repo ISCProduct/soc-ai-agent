@@ -28,7 +28,7 @@ resource "aws_iam_role_policy_attachment" "execution" {
 }
 
 resource "aws_iam_role_policy" "execution_secrets" {
-  count = length(var.secret_arns) > 0 ? 1 : 0
+  count = (var.create_secrets_policy != null ? var.create_secrets_policy : length(var.secret_arns) > 0) ? 1 : 0
 
   name = "${var.project_name}-${var.service_name}-secrets"
   role = aws_iam_role.execution.id

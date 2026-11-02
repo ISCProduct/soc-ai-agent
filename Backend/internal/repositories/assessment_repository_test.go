@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"database/sql/driver"
 	"errors"
 	"testing"
 
@@ -58,7 +59,7 @@ func TestAssessmentRepository_SubmitTwiceRollsBack(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()
 
-	err := repo.Submit(&models.AssessmentSession{ID: 3, UserID: 7, Status: models.AssessmentStatusInProgress}, map[string]float64{"技術志向": 50}, "assessment:x")
+	err := repo.Submit(&models.AssessmentSession{ID: 3, UserID: 7, Status: models.AssessmentStatusInProgress}, map[string]float64{"技術志向": 50}, "assessment:x", true)
 	require.True(t, errors.Is(err, ErrAssessmentAlreadySubmitted), "err = %v", err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -79,7 +80,7 @@ func TestAssessmentRepository_SubmitWritesAssessmentRowsOnly(t *testing.T) {
 	mock.ExpectCommit()
 
 	s := &models.AssessmentSession{ID: 3, UserID: 7, Status: models.AssessmentStatusInProgress}
-	require.NoError(t, repo.Submit(s, map[string]float64{"技術志向": 62.5}, "assessment:x"))
+	require.NoError(t, repo.Submit(s, map[string]float64{"技術志向": 62.5}, "assessment:x", true))
 	require.Equal(t, models.AssessmentStatusSubmitted, s.Status)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -92,7 +93,7 @@ func TestAssessmentRepository_SubmitRejectsUnknownCategory(t *testing.T) {
 	mock.ExpectExec("INSERT INTO `assessment_results`").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectRollback()
 
-	err := repo.Submit(&models.AssessmentSession{ID: 3, UserID: 7}, map[string]float64{"やる気": 50}, "assessment:x")
+	err := repo.Submit(&models.AssessmentSession{ID: 3, UserID: 7}, map[string]float64{"やる気": 50}, "assessment:x", true)
 	require.Error(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -140,3 +141,134 @@ func TestUserWeightScoreRepository_LatestQueriesExcludeAssessment(t *testing.T) 
 	require.Error(t, err) // 行なし
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+// 学校独自テンプレートの提出は結果だけ残し、user_weight_scores へは何も書かない（#1675）。
+// sqlmock は想定外の SQL（user_weight_scores への INSERT）が来ると失敗する。
+func TestAssessmentRepository_SubmitWithoutMergeSkipsWeightScores(t *testing.T) {
+	repo, mock := newAssessmentRepo(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `assessment_sessions`").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO `assessment_results`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	s := &models.AssessmentSession{ID: 3, UserID: 7, Status: models.AssessmentStatusInProgress}
+	require.NoError(t, repo.Submit(s, map[string]float64{"技術志向": 62.5}, "assessment:x", false))
+	require.Equal(t, models.AssessmentStatusSubmitted, s.Status)
+	require.NotNil(t, s.SubmittedAt)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 学生に見せる検査は、運営標準 + 本人の学校だけ。学校未設定なら運営標準だけ。
+func TestAssessmentRepository_ListTemplatesScopedBySchool(t *testing.T) {
+	school := uint(10)
+	tests := []struct {
+		name     string
+		schoolID *uint
+		query    string
+		args     []driver.Value
+	}{
+		{"学校あり", &school, "WHERE school_id IS NULL OR school_id = \\?", []driver.Value{10}},
+		{"学校なし", nil, "WHERE school_id IS NULL ORDER BY", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, mock := newAssessmentRepo(t)
+			exp := mock.ExpectQuery(tt.query)
+			if tt.args != nil {
+				exp.WithArgs(tt.args...)
+			}
+			exp.WillReturnRows(sqlmock.NewRows([]string{"id"}))
+			_, err := repo.ListTemplates(tt.schoolID)
+			require.NoError(t, err)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+// 他校の独自テンプレートは受検を始められない。条件に school_id が入っていることを固定する。
+func TestAssessmentRepository_FindVisibleTemplateScopedBySchool(t *testing.T) {
+	repo, mock := newAssessmentRepo(t)
+	mock.ExpectQuery("WHERE id = \\? AND \\(\\(school_id IS NULL OR school_id = \\?\\)\\)").
+		WithArgs(5, 10, 1).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	school := uint(10)
+	_, err := repo.FindVisibleTemplate(5, &school)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 先生向けの学生一覧は学校 + 学園 + 学生ロール + 退会除外で絞る。
+func TestAssessmentRepository_ListSchoolStudentsTenantConditions(t *testing.T) {
+	repo, mock := newAssessmentRepo(t)
+	mock.ExpectQuery("FROM `users` WHERE school_id = \\? AND organization_id = \\? AND role = \\? AND withdrawn_at IS NULL").
+		WithArgs(10, 3, models.UserRoleStudent).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(1, "学生A"))
+	got, err := repo.ListSchoolStudents(10, 3)
+	require.NoError(t, err)
+	require.Equal(t, []SchoolStudent{{ID: 1, Name: "学生A"}}, got)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 学校独自テンプレートは is_standard=false で作り、問題を同じトランザクションで入れる。
+func TestAssessmentRepository_CreateSchoolTemplateForcesNonStandard(t *testing.T) {
+	repo, mock := newAssessmentRepo(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO `assessment_templates`").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "s", "t", "", 1, false, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(5, 1))
+	mock.ExpectExec("INSERT INTO `assessment_questions`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	sid, org := uint(10), uint(3)
+	tpl := &models.AssessmentTemplate{SchoolID: &sid, OrganizationID: &org, Slug: "s", Title: "t", Version: 1, IsStandard: true}
+	err := repo.CreateSchoolTemplate(tpl, []models.AssessmentQuestion{{Position: 1, Body: "q", WeightCategory: "技術志向"}})
+	require.NoError(t, err)
+	require.False(t, tpl.IsStandard, "呼び出し側が true を渡しても標準にはしない")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// FindUserSchoolID は users.school_id をそのまま信用しない（#1675）。
+//
+// users.school_id は本人が送ったプロフィールの学校名から更新され（auth_profile.go）、
+// 解決に使う SchoolRepository.FindByName は学園で絞っていない。そのため別学園の学生でも
+// 学校名を対象校と同じにすれば、その学校の school_id を自分に付けられる。
+// school_id を返してしまうと、それだけで他学園の学校独自テンプレート（問題文・受検）に届く。
+func TestAssessmentRepository_FindUserSchoolIDChecksOrganization(t *testing.T) {
+	tests := []struct {
+		name       string
+		userOrg    uint
+		schoolID   any // nil なら学校未設定
+		schoolOrg  *uint
+		wantSchool *uint
+	}{
+		{name: "学園が一致すれば所属校を返す", userOrg: 1, schoolID: int64(5), schoolOrg: ptrUint(1), wantSchool: ptrUint(5)},
+		{name: "別学園の学校IDは返さない", userOrg: 2, schoolID: int64(5), schoolOrg: ptrUint(1), wantSchool: nil},
+		{name: "学校未設定は運営標準だけ", userOrg: 1, schoolID: nil, schoolOrg: nil, wantSchool: nil},
+		{name: "学校が存在しなければ運営標準だけ", userOrg: 1, schoolID: int64(5), schoolOrg: nil, wantSchool: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, mock := newAssessmentRepo(t)
+			userRows := sqlmock.NewRows([]string{"school_id", "organization_id"}).AddRow(tt.schoolID, int64(tt.userOrg))
+			mock.ExpectQuery("SELECT .*`users`").WillReturnRows(userRows)
+			if tt.schoolID != nil {
+				if tt.schoolOrg == nil {
+					mock.ExpectQuery("SELECT .*`schools`").WillReturnError(gorm.ErrRecordNotFound)
+				} else {
+					mock.ExpectQuery("SELECT .*`schools`").
+						WillReturnRows(sqlmock.NewRows([]string{"id", "organization_id"}).AddRow(int64(5), int64(*tt.schoolOrg)))
+				}
+			}
+			got, err := repo.FindUserSchoolID(9)
+			require.NoError(t, err)
+			if tt.wantSchool == nil {
+				require.Nil(t, got, "他学園・未設定では school_id を返してはいけない")
+			} else {
+				require.NotNil(t, got)
+				require.Equal(t, *tt.wantSchool, *got)
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func ptrUint(v uint) *uint { return &v }
