@@ -66,3 +66,31 @@ func TestESReviewRepository_FindPreviousReturnsNilWhenAbsent(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, got)
 }
+
+// スコアの二重計上を防ぐ判定は、本人の中で本文のハッシュを引く（#1531）。
+// 自分自身に当たらないよう id < excludeID で絞る。
+func TestESReviewRepository_HasSameTextBefore(t *testing.T) {
+	repo, mock := newESReviewRepo(t)
+
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `es_reviews` WHERE user_id = \\? AND es_text_hash = \\? AND id < \\?").
+		WithArgs(uint(9001), "abc123", uint(42), 1). // 末尾は Limit(1)
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	seen, err := repo.HasSameTextBefore(9001, "abc123", 42)
+	require.NoError(t, err)
+	require.True(t, seen)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 「新しい順」は作成時刻で決める。id だけで並べると、バックデートされた行の
+// 表示順が仕様の文言とずれる。
+func TestESReviewRepository_OrdersByCreatedAt(t *testing.T) {
+	repo, mock := newESReviewRepo(t)
+
+	mock.ExpectQuery("ORDER BY e.created_at DESC, e.id DESC").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	_, err := repo.ListForSchoolStudent(9001, 101, 0)
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

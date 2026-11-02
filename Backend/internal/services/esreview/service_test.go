@@ -9,10 +9,12 @@ import (
 )
 
 type repoStub struct {
-	created   []*models.ESReview
-	previous  *models.ESReview
-	createErr error
-	nextID    uint
+	created     []*models.ESReview
+	previous    *models.ESReview
+	createErr   error
+	nextID      uint
+	seenHashes  map[string]bool
+	sameTextErr error
 }
 
 func (r *repoStub) Create(v *models.ESReview) error {
@@ -27,6 +29,13 @@ func (r *repoStub) Create(v *models.ESReview) error {
 
 func (r *repoStub) FindPreviousByQuestion(uint, string, uint) (*models.ESReview, error) {
 	return r.previous, nil
+}
+
+func (r *repoStub) HasSameTextBefore(_ uint, textHash string, _ uint) (bool, error) {
+	if r.sameTextErr != nil {
+		return false, r.sameTextErr
+	}
+	return r.seenHashes[textHash], nil
 }
 
 type scoreStub struct{ calls int }
@@ -82,33 +91,76 @@ func TestSave_EmptyCompanyStaysNil(t *testing.T) {
 }
 
 // 同じ本文を出し直しただけならスコアは動かさない（#1531）。
-// 移動平均なので、同じESを繰り返すだけで対象カテゴリを上限へ寄せられる。
-func TestSave_SkipsScoreUpdateWhenTextUnchanged(t *testing.T) {
-	scores := &scoreStub{}
-	repo := &repoStub{previous: &models.ESReview{ID: 9, ESText: "本文"}}
+//
+// 判定は本文のハッシュで行う。設問に紐づけると、本文を変えずに設問のラベルを
+// 変えるだけで何度でも加点できる（設問を空にすれば引き当て自体が飛ぶ）。
+// 設問や種別は添削結果に影響しない任意入力なので、鍵にしてはいけない。
+func TestSave_SkipsScoreUpdateWhenSameTextSeenBefore(t *testing.T) {
+	hash := models.HashESText("本文")
+	tests := []struct {
+		name     string
+		question string
+		qType    string
+	}{
+		{"同じ設問", "設問", "ガクチカ"},
+		// ここが T3 の見つけた抜け道。設問を変えても本文が同じなら加点しない。
+		{"設問だけ変える", "別の設問", "ガクチカ"},
+		{"設問を空にする", "", "その他"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scores := &scoreStub{}
+			repo := &repoStub{seenHashes: map[string]bool{hash: true}}
+			in := baseInput()
+			in.Question, in.QuestionType = tt.question, tt.qType
 
-	if _, _, err := NewService(repo, scores).Save(baseInput()); err != nil {
-		t.Fatalf("Save が失敗: %v", err)
-	}
-	if scores.calls != 0 {
-		t.Fatalf("同じ本文なのにスコアを反映している: %d回", scores.calls)
-	}
-	// 履歴そのものは残す。利用者から見れば添削は行われている。
-	if len(repo.created) != 1 {
-		t.Fatalf("履歴は残すべき: %d件", len(repo.created))
+			if _, _, err := NewService(repo, scores).Save(in); err != nil {
+				t.Fatalf("Save が失敗: %v", err)
+			}
+			if scores.calls != 0 {
+				t.Fatalf("同じ本文なのにスコアを反映している: %d回", scores.calls)
+			}
+			// 履歴そのものは残す。利用者から見れば添削は行われている。
+			if len(repo.created) != 1 {
+				t.Fatalf("履歴は残すべき: %d件", len(repo.created))
+			}
+		})
 	}
 }
 
-// 本文が変わっていればスコアを反映する。
-func TestSave_AppliesScoreWhenTextChanged(t *testing.T) {
+// 初めて見る本文ならスコアを反映する。
+func TestSave_AppliesScoreForNewText(t *testing.T) {
 	scores := &scoreStub{}
-	repo := &repoStub{previous: &models.ESReview{ID: 9, ESText: "前回の本文"}}
+	repo := &repoStub{seenHashes: map[string]bool{}}
 
 	if _, _, err := NewService(repo, scores).Save(baseInput()); err != nil {
 		t.Fatalf("Save が失敗: %v", err)
 	}
 	if scores.calls != 1 {
 		t.Fatalf("スコアが反映されていない: %d回", scores.calls)
+	}
+}
+
+// 重複判定ができないときは反映しない。二重に積む方が戻せない。
+func TestSave_SkipsScoreWhenDuplicateCheckFails(t *testing.T) {
+	scores := &scoreStub{}
+	repo := &repoStub{sameTextErr: errors.New("db down")}
+
+	if _, _, err := NewService(repo, scores).Save(baseInput()); err != nil {
+		t.Fatalf("Save が失敗: %v", err)
+	}
+	if scores.calls != 0 {
+		t.Fatalf("判定できないのに反映している: %d回", scores.calls)
+	}
+}
+
+// 前後の空白だけの違いは同じ本文とみなす。
+func TestHashESText_IgnoresSurroundingSpace(t *testing.T) {
+	if models.HashESText("  本文  ") != models.HashESText("本文") {
+		t.Error("前後の空白で別の本文になっている")
+	}
+	if models.HashESText("本文A") == models.HashESText("本文B") {
+		t.Error("別の本文が同じハッシュになっている")
 	}
 }
 

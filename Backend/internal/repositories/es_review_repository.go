@@ -39,6 +39,20 @@ func (r *ESReviewRepository) FindPreviousByQuestion(userID uint, questionKey str
 	return &review, nil
 }
 
+// HasSameTextBefore は本人が同じ本文を既に添削済みかを返す。
+//
+// スコアを二重に積ませないための判定。設問や種別は添削結果に影響しない任意入力なので、
+// それらを鍵にすると本文を変えずにラベルだけ変えて何度でも加点できる（実測で確認）。
+// excludeID には今回保存した行を渡す。渡さないと自分自身に当たって常に true になる。
+func (r *ESReviewRepository) HasSameTextBefore(userID uint, textHash string, excludeID uint) (bool, error) {
+	var count int64
+	err := r.db.Model(&models.ESReview{}).
+		Where("user_id = ? AND es_text_hash = ? AND id < ?", userID, textHash, excludeID).
+		Limit(1).
+		Count(&count).Error
+	return count > 0, err
+}
+
 // ListByUser は学校で絞らずに添削履歴を新しい順に返す。
 //
 // 担当校を持たない無制限管理者の経路でだけ使う（学校で絞る経路は ListForSchoolStudent）。
@@ -53,7 +67,9 @@ func (r *ESReviewRepository) ListByUser(userID uint, limit int) ([]models.ESRevi
 		Select("e.*").
 		Joins("JOIN users u ON u.id = e.user_id").
 		Where("e.user_id = ? AND u.withdrawn_at IS NULL", userID).
-		Order("e.id DESC").
+		// 「新しい順」は作成時刻で決める。id を第2キーにするのは、同一時刻でも
+		// 並びが揺れないようにするため。
+		Order("e.created_at DESC, e.id DESC").
 		Limit(limit).
 		Find(&reviews).Error
 	return reviews, err
@@ -80,7 +96,8 @@ func (r *ESReviewRepository) ListForSchoolStudent(studentUserID, schoolID uint, 
 		Where("e.user_id = ? AND u.school_id = ? AND e.organization_id = u.organization_id", studentUserID, schoolID).
 		Where("u.role = ? AND u.is_guest = ? AND u.is_admin = ? AND u.withdrawn_at IS NULL",
 			models.UserRoleStudent, false, false).
-		Order("e.id DESC").
+		// 「新しい順」は作成時刻で決める。id は同一時刻での揺れ止め。
+		Order("e.created_at DESC, e.id DESC").
 		Limit(limit).
 		Find(&reviews).Error
 	return reviews, err

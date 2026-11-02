@@ -1,6 +1,8 @@
 package models
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"time"
 	"unicode"
@@ -22,7 +24,9 @@ type ESReview struct {
 	QuestionType string  `gorm:"type:varchar(50);not null" json:"question_type"`
 	CompanyName  *string `gorm:"type:varchar(255)" json:"company_name,omitempty"`
 	ESText       string  `gorm:"type:text;not null" json:"es_text"`
-	CharLimit    *uint   `json:"char_limit,omitempty"`
+	// ESTextHash は本文の SHA-256。同じ本文を二度スコアに乗せないための鍵。
+	ESTextHash string `gorm:"type:char(64);not null" json:"-"`
+	CharLimit  *uint  `json:"char_limit,omitempty"`
 	// CharLimitMode は "within"（以内）か "around"（程度）。未指定なら nil。
 	CharLimitMode *string `gorm:"type:varchar(20)" json:"char_limit_mode,omitempty"`
 
@@ -39,6 +43,15 @@ type ESReview struct {
 }
 
 func (ESReview) TableName() string { return "es_reviews" }
+
+// HashESText は本文を突き合わせるための鍵を返す。
+//
+// 前後の空白だけの違いは同じ本文とみなす。それ以上は正規化しない
+// （中身が変わっていれば別の文章として扱う）。
+func HashESText(text string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(text)))
+	return hex.EncodeToString(sum[:])
+}
 
 // NormalizeESQuestion は設問文を突き合わせ用のキーに正規化する。
 //

@@ -12,6 +12,8 @@ import (
 type Repository interface {
 	Create(review *models.ESReview) error
 	FindPreviousByQuestion(userID uint, questionKey string, excludeID uint) (*models.ESReview, error)
+	// HasSameTextBefore は本人が同じ本文を既に添削済みか。スコアの二重計上を防ぐ。
+	HasSameTextBefore(userID uint, textHash string, excludeID uint) (bool, error)
 }
 
 // ScoreUpdater は user_weight_scores への反映面。
@@ -64,6 +66,7 @@ func (s *Service) Save(in Input) (*models.ESReview, *models.ESReview, error) {
 		// 利用者の入力で履歴機能だけが死ぬ経路を作らない。
 		QuestionType:       truncateRunes(in.QuestionType, 50),
 		ESText:             in.ESText,
+		ESTextHash:         models.HashESText(in.ESText),
 		CharLimit:          in.CharLimit,
 		SpecificityScore:   clampScore(in.SpecificityScore),
 		StarScore:          clampScore(in.StarScore),
@@ -99,12 +102,27 @@ func (s *Service) Save(in Input) (*models.ESReview, *models.ESReview, error) {
 	}
 
 	// 同じ本文を出し直しただけなら、新しい情報は何も得られていないのでスコアは動かさない。
-	// 移動平均（既存0.7/新規0.3）なので、同じESを10回出すだけで対象カテゴリが
-	// 50 から 89 まで寄る。ES添削はテキストボックスで何度でも押せるため、
-	// 履歴書（PDFアップロードが要る）より摩擦がない。
-	// 本文を少しずつ変えて繰り返す経路までは塞げない（残存リスクとして記録）。
-	sameAsPrevious := previous != nil && previous.ESText == review.ESText
-	if s.scores != nil && !sameAsPrevious {
+	// 移動平均（既存0.7/新規0.3）なので、同じESを繰り返すだけで対象カテゴリを上限へ寄せられる。
+	// ES添削はテキストボックスで何度でも押せるため、履歴書（PDFアップロードが要る）より摩擦がない。
+	//
+	// 判定は**本文のハッシュ**で行い、設問には紐づけない。設問や種別は添削結果に
+	// 影響しない任意入力なので、設問を鍵にすると本文を変えずにラベルを変えるだけで
+	// 何度でも加点できる（設問を空にすれば引き当て自体が飛ぶ）。実測で確認した経路。
+	//
+	// 残るのは「本文を少しずつ書き換えて繰り返す」経路。中身が変われば別の文章として
+	// 評価するのは仕様どおりで、ここは塞げない。
+	alreadyScored := false
+	if s.repo != nil {
+		seen, err := s.repo.HasSameTextBefore(in.UserID, review.ESTextHash, review.ID)
+		if err != nil {
+			// 判定できないときは反映しない。二重に積む方が戻せない。
+			log.Printf("[ESReview] 本文の重複判定に失敗 user=%d review=%d: %v", in.UserID, review.ID, err)
+			alreadyScored = true
+		} else {
+			alreadyScored = seen
+		}
+	}
+	if s.scores != nil && !alreadyScored {
 		if err := s.scores.UpdateScoresFromESReview(in.UserID, review); err != nil {
 			log.Printf("[ESReview] スコア反映に失敗 user=%d review=%d: %v", in.UserID, review.ID, err)
 		}

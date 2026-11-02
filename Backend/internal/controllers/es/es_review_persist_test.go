@@ -19,6 +19,7 @@ type esRepoSpy struct {
 	created  []*models.ESReview
 	previous *models.ESReview
 	nextID   uint
+	seenText bool
 }
 
 func (s *esRepoSpy) Create(r *models.ESReview) error {
@@ -31,6 +32,8 @@ func (s *esRepoSpy) Create(r *models.ESReview) error {
 func (s *esRepoSpy) FindPreviousByQuestion(userID uint, questionKey string, excludeID uint) (*models.ESReview, error) {
 	return s.previous, nil
 }
+
+func (s *esRepoSpy) HasSameTextBefore(uint, string, uint) (bool, error) { return s.seenText, nil }
 
 type scoreSpy struct{ calls int }
 
