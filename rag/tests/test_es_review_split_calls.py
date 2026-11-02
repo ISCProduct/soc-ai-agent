@@ -129,23 +129,23 @@ def test_second_length_on_review_stage_returns_422_without_shorten_advice(monkey
 
 
 @pytest.mark.parametrize("chars", [14, _ES_TEXT_MAX_LENGTH])
-def test_second_length_on_improved_stage_advises_shortening(chars, monkeypatch):
-    """第2呼び出し(改善文)の上限到達はESの短縮を案内し、無駄な再試行をしない(L1)。
+def test_second_length_on_improved_stage_keeps_the_warning(chars, monkeypatch):
+    """上限なしの改善文が出力上限で切れても 422 にしない（#1606）。
 
-    改善文の段は max_tokens を渡さない（#1564）ので引き上げ余地が無く、同じ結果になる
-    再試行は短いESでも長いESでも行わない。評価1回 + 改善文1回の計2回で 422 を返す。
+    422 にすると本文も「短い」警告も届かない。max_tokens は渡さない（#1564）ので
+    同じ呼び出しの中では引き上げない。空の結果は短いので、作り直しを1回だけ試みる。
     """
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    client = _mock_client(["stop", "length"])
+    client = _mock_client(["stop", "length", "length"])
 
-    with pytest.raises(HTTPException) as exc_info:
-        _run(client, es_text="あ" * chars)
+    result = _run(client, es_text="あ" * chars)
 
-    assert exc_info.value.status_code == 422
-    assert exc_info.value.detail == _TOO_LONG_MESSAGE
-    assert client.chat.completions.create.call_count == 2
-    improved_call = client.chat.completions.create.call_args_list[1]
-    assert "max_tokens" not in improved_call.kwargs
+    assert result.improved_text == ""
+    assert result.improved_length_satisfied is False
+    # 評価1 + 改善文1 + 短いときの作り直し1
+    assert client.chat.completions.create.call_count == 3
+    for improved_call in client.chat.completions.create.call_args_list[1:]:
+        assert "max_tokens" not in improved_call.kwargs
 
 
 @pytest.mark.parametrize(

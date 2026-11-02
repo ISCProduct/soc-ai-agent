@@ -18,7 +18,6 @@ from services.es_review import (
     _MAX_SHORT_TEXT_RETRIES,
     _MAX_CHAR_LIMIT_RETRIES,
     _STAR_TEXT_CHARS,
-    _TOO_LONG_MESSAGE,
     _char_limit_bounds,
     _improved_length_bounds,
     _improved_length_floor,
@@ -249,6 +248,8 @@ def test_no_char_limit_leaves_satisfied_null(monkeypatch):
     # 「学生時代に力を入れたことは、」は14字。目標は切り上げた110〜130%
     assert "元の文章は14字です。改善後は16〜19字" in prompts[0]
     assert "要約して短くしないでください" in prompts[0]
+    # 「文字数は〜にする」に文を入れると「してくださいにする」になる
+    assert "してくださいにする" not in prompts[0]
     assert "【設問の文字数上限】" not in prompts[0]
 
 
@@ -338,6 +339,100 @@ def test_short_text_retry_failure_keeps_the_first_text(monkeypatch):
     assert result.improved_text_length == 360
     assert result.improved_length_satisfied is False
     assert result.improved_text == "あ" * 360
+
+
+def _review_then_improved(payloads):
+    """評価は固定。改善文の呼び出しごとに payloads を順に返す。"""
+    pending = list(payloads)
+
+    def _create(**kwargs):
+        user = next(msg["content"] for msg in kwargs["messages"] if msg["role"] == "user")
+        if "【添削フィードバック】" not in user:
+            content = json.dumps(_REVIEW_PAYLOAD, ensure_ascii=False)
+        else:
+            content = json.dumps(pending.pop(0), ensure_ascii=False)
+        return MagicMock(
+            choices=[MagicMock(message=MagicMock(content=content), finish_reason="stop")],
+            usage=MagicMock(prompt_tokens=100, completion_tokens=200),
+        )
+
+    client = MagicMock()
+    client.chat.completions.create.side_effect = _create
+    return client
+
+
+def test_shorter_or_empty_retry_keeps_the_first_text_and_star(monkeypatch):
+    """作り直しが空・より短い・同じ長さなら、1回目の本文と STAR を残す。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    first_star = {"situation": "最初の状況", "task": "課題", "action": "行動", "result": "成果"}
+    cases = [
+        {"improved_text": "あ" * 200, "star": {"situation": "捨てる", "task": "", "action": "", "result": ""}},
+        {"improved_text": "", "star": {"situation": "捨てる", "task": "", "action": "", "result": ""}},
+        {"improved_text": "あ" * 360},
+    ]
+    for second in cases:
+        client = _review_then_improved([
+            {"improved_text": "あ" * 360, "star": first_star},
+            second,
+        ])
+        result = _run(client, es_text="あ" * 6000)
+        assert result.improved_text == "あ" * 360
+        assert result.improved_text_length == 360
+        assert result.improved_length_satisfied is False
+        assert result.star.situation == "最初の状況"
+
+
+def test_length_equal_to_floor_is_not_regenerated(monkeypatch):
+    """元の字数ちょうどは短い扱いにしない。>= を > にすると作り直しが入る。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    client = _client([100])
+
+    result = _run(client, es_text="あ" * 100)
+
+    assert len(_improved_calls(client)) == 1
+    assert result.improved_text_length == 100
+    assert result.improved_length_satisfied is True
+
+
+def test_short_text_retry_stops_at_exact_deadline(monkeypatch):
+    """ちょうど45秒でも次の呼び出しは始めない。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    client = _client([360, 11000])
+    ticks = iter([0.0, 45.0])
+    monkeypatch.setattr("services.es_review.time.monotonic", lambda: next(ticks, 999.0))
+
+    result = _run(client, es_text="あ" * 6000)
+
+    assert len(_improved_calls(client)) == 1
+    assert result.improved_text_length == 360
+    assert result.improved_length_satisfied is False
+
+
+def test_truncated_first_improved_text_returns_the_warning(monkeypatch):
+    """上限なしの最初の改善文が出力上限で切れても 422 にせず、短い警告を返す。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    def _create(**kwargs):
+        user = next(msg["content"] for msg in kwargs["messages"] if msg["role"] == "user")
+        if "【添削フィードバック】" not in user:
+            content = json.dumps(_REVIEW_PAYLOAD, ensure_ascii=False)
+            finish = "stop"
+        else:
+            content = "not-json"
+            finish = "length"
+        return MagicMock(
+            choices=[MagicMock(message=MagicMock(content=content), finish_reason=finish)],
+            usage=MagicMock(prompt_tokens=10, completion_tokens=20),
+        )
+
+    client = MagicMock()
+    client.chat.completions.create.side_effect = _create
+
+    result = _run(client, es_text="あ" * 100)
+
+    assert result.improved_text == ""
+    assert result.improved_length_satisfied is False
+    assert result.improved_text_length == 0
 
 
 def test_short_text_retry_stops_at_deadline(monkeypatch):
@@ -573,8 +668,20 @@ def test_regeneration_runs_within_deadline(monkeypatch):
 
 
 def test_retry_deadline_is_pinned():
-    """実効タイムアウト60秒(#1556)に対する余裕。緩めると504で結果が届かなくなる。"""
+    """次の呼び出しを始める判断は45秒のまま。呼び出し自体の60秒は別。"""
     assert _CHAR_LIMIT_RETRY_DEADLINE_SEC == 45.0
+
+
+def test_worse_char_limit_retry_keeps_the_first_text(monkeypatch):
+    """空、または前回より長い作り直しは採用しない。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr("services.es_review.time.monotonic", lambda: 0.0)
+    for lengths in ([900, 0], [900, 950]):
+        client = _client(lengths)
+        result = _run(client, char_limit=400)
+        assert result.improved_text_length == 900
+        assert result.char_limit_satisfied is False
+        assert result.improved_text == "あ" * 900
 
 
 # ---- 422 の案内文（#1523: 指定字数のときは「文字数を減らして」では直らない） ----
@@ -620,11 +727,11 @@ def test_char_limit_truncation_message_does_not_ask_to_shorten_es(monkeypatch):
     assert "上限を緩める" in exc_info.value.detail
 
 
-def test_without_char_limit_keeps_shorten_message(monkeypatch):
-    """上限未指定のときは従来どおりES本文の短縮を案内する(#1521)。"""
+def test_without_char_limit_truncated_improved_text_returns_the_warning(monkeypatch):
+    """上限未指定で改善文が切れても 422 にせず、短い警告を残す（#1606）。"""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
-    with pytest.raises(HTTPException) as exc_info:
-        _run(_truncating_client(), es_text="あ" * 3000)
+    result = _run(_truncating_client(), es_text="あ" * 3000)
 
-    assert exc_info.value.detail == _TOO_LONG_MESSAGE
+    assert result.improved_text == ""
+    assert result.improved_length_satisfied is False
