@@ -41,6 +41,18 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 
 テナントを切り替える場合は `X-Tenant-Slug` を併せて送ります。
 
+### 管理者トークンの更新（SOCAIAGENT-476）
+
+管理者トークンは `"<発行時刻>.<HMAC>"` 形式で、既定の有効期間は7日です（`ADMIN_TOKEN_TTL_HOURS`）。
+ログインセッションの更新（`/api/auth/refresh`）のたびに再発行され、フロントの httpOnly Cookie
+`admin_token` に保持します。
+
+- `GET /api/auth/session`（フロントの Route Handler）は、管理者の場合に応答へ `token` を含めます。
+  管理画面（`AdminShell`）は、期限の1時間前から `X-Refresh-Admin-Token: 1` を付けて取り直します。
+- `POST /api/auth/session` で `adminToken` が無いとき、`DELETE` のときは `admin_token` Cookie を削除します。
+- フロントは7日固定（`frontend/lib/auth/admin-token.ts`）で期限を判定するため、
+  `ADMIN_TOKEN_TTL_HOURS` を短縮するときはフロント側も同時に変更してください。
+
 実装は `Backend/internal/routes/echo_adapter.go` の `EchoUserAuth` /
 `EchoAdminAuth` / `EchoStaticSecretAuth` です。
 
