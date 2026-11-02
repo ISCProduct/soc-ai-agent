@@ -347,6 +347,98 @@ describe('ESRewritePage 設問の文字数上限 (#1523)', () => {
     expect(body).not.toHaveProperty('char_limit_mode')
     expect(screen.getByText(/250 文字/)).toBeInTheDocument()
     expect(screen.queryByText(/指定字数に収まりませんでした/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/元の文章より短くなりました/)).not.toBeInTheDocument()
+  })
+
+  it('改善文が元より短いときは、提出前に見比べるよう伝える', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7, star_score: 6, length_balance_score: 5,
+        feedback: 'f', improved_text: 'あ'.repeat(360),
+        improved_text_length: 360, char_limit_satisfied: null,
+        improved_length_satisfied: false,
+      }),
+    })
+    setup('ES添削')
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    await screen.findByText('添削スコア')
+    expect(screen.getByText(/360 文字/)).toBeInTheDocument()
+    const warning = screen.getByText(/元の文章より短くなりました/)
+    expect(warning.closest('[role="status"]')).not.toBeNull()
+    expect(screen.getByText(/このまま提出せず/)).toBeInTheDocument()
+  })
+
+  it.each([
+    ['null', null],
+    ['true', true],
+  ])('improved_length_satisfied が %s のときは短さの警告を出さない', async (_label, value) => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7, star_score: 6, length_balance_score: 5,
+        feedback: 'f', improved_text: 'あ'.repeat(250),
+        improved_text_length: 250, char_limit_satisfied: null,
+        improved_length_satisfied: value,
+      }),
+    })
+    setup('ES添削')
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    await screen.findByText('添削スコア')
+    expect(screen.queryByText(/元の文章より短くなりました/)).not.toBeInTheDocument()
+  })
+
+  it('キーが無いときは短さの警告を出さない', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7, star_score: 6, length_balance_score: 5,
+        feedback: 'f', improved_text: 'あ'.repeat(250),
+        improved_text_length: 250, char_limit_satisfied: null,
+      }),
+    })
+    setup('ES添削')
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    await screen.findByText('添削スコア')
+    expect(screen.queryByText(/元の文章より短くなりました/)).not.toBeInTheDocument()
+  })
+
+  it('字数が0でも短いと分かっているときは警告だけ出す', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7, star_score: 6, length_balance_score: 5,
+        feedback: 'f', improved_text: '',
+        improved_text_length: 0, char_limit_satisfied: null,
+        improved_length_satisfied: false,
+      }),
+    })
+    setup('ES添削')
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    await screen.findByText('添削スコア')
+    expect(screen.queryByText(/^0 文字/)).not.toBeInTheDocument()
+    expect(screen.getByText(/元の文章より短くなりました/).closest('[role="status"]')).not.toBeNull()
+  })
+
+  it('ESリライトでも短いときは見比べるよう伝える', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        rewritten_text: 'あ'.repeat(200),
+        star: { situation: 'S', task: 'T', action: 'A', result: 'R' },
+        improved_text_length: 200, char_limit_satisfied: null,
+        improved_length_satisfied: false,
+      }),
+    })
+    setup('ESリライト（STAR法）')
+    fireEvent.click(screen.getByRole('button', { name: '書き直す' }))
+
+    await screen.findByText('リライト後')
+    expect(screen.getByText(/元の文章より短くなりました/).closest('[role="status"]')).not.toBeNull()
   })
 
   it('範囲外の上限は送信させない（RAGのバリデーション422を踏ませない）', () => {

@@ -34,14 +34,21 @@ type esReviewResponse struct {
 	Feedback           string  `json:"feedback"`
 	ImprovedText       string  `json:"improved_text"`
 	CompanyStrategy    *string `json:"company_strategy"`
+	// RAG が足し上げた実トークン。作り直し（3回目）もここに入る。
+	// 公開APIは転送前に usage を落とすので、ハーネスは /es/review を直接見る。
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		Calls            int `json:"calls"`
+	} `json:"usage"`
 }
 
 // ES添削の指示遵守の許容範囲。
 //
-// プロンプトは feedback を「400字程度」、improved_text を「元の文字数の
-// 110〜130%を目安」と指示している。「程度」「目安」なので幅を持たせるが、
-// 幅の根拠をここに書いておく。数字を動かすと遵守率も動くため、
-// 実行間で比較するには固定されていることが前提。
+// プロンプトは feedback を「400字程度」、improved_text を元の110〜130%と
+// 字数で指示している（#1606）。「程度」なので幅を持たせるが、幅の根拠を
+// ここに書いておく。数字を動かすと遵守率も動くため、実行間で比較するには
+// 固定されていることが前提。比率そのものは Observation に残す。
 const (
 	esFeedbackMinChars = 250 // 400字の約6割。これ未満は助言として薄い
 	esFeedbackMaxChars = 700 // 400字の約1.75倍。これ以上は読まれない
@@ -97,10 +104,12 @@ func (t *esTarget) Name() string     { return TargetES }
 func (t *esTarget) Model() string    { return t.model }
 func (t *esTarget) Endpoint() string { return t.baseURL + "/es/review" }
 
-// EstimateTokens は事前のコスト概算。
+// EstimateTokens は usage が無いときの事前概算。
 //
 // ES添削は #1521 で2回の呼び出しに分割されている（評価＋改善文）。
 // 入力はどちらもES本文を含むので2倍、出力は評価の約900字と改善文の約130%で見る。
+// 短い改善文の作り直し（#1606 の3回目）はここには含めない。実数はレスポンスの
+// usage を evaluateESResponse が読む。
 func (t *esTarget) EstimateTokens(c Case) (int, int) {
 	es := ApproxTokensJA(c.Input.ESText)
 	// 600 はプロンプト定型文ぶん（2回合計）の概算。
@@ -170,6 +179,12 @@ func evaluateESResponse(o Observation, c Case, status int, body []byte) Observat
 		o.Broken, o.BrokenReason, o.Error = true, BrokenJSONInvalid, err.Error()
 		return o
 	}
+	// 概算のまま残すと、長文ほど起きる3回目の呼び出しがコストから抜ける。
+	if resp.Usage != nil && (resp.Usage.PromptTokens > 0 || resp.Usage.CompletionTokens > 0) {
+		o.PromptTokens = resp.Usage.PromptTokens
+		o.CompletionTokens = resp.Usage.CompletionTokens
+		o.TokensEstimated = false
+	}
 	if resp.SpecificityScore == nil || resp.StarScore == nil || resp.LengthBalanceScore == nil {
 		o.Broken, o.BrokenReason, o.Error = true, BrokenSchema, "スコアのキーが欠けている"
 		return o
@@ -188,7 +203,10 @@ func evaluateESResponse(o Observation, c Case, status int, body []byte) Observat
 		o.Violations = append(o.Violations, "feedback_length")
 	}
 	if src := runeLen(c.Input.ESText); src > 0 {
-		ratio := float64(runeLen(resp.ImprovedText)) / float64(src)
+		improved := runeLen(resp.ImprovedText)
+		ratio := float64(improved) / float64(src)
+		o.ImprovedChars = improved
+		o.ImprovedTextRatio = ratio
 		if ratio < esImprovedMinRatio || ratio > esImprovedMaxRatio {
 			o.Violations = append(o.Violations, "improved_text_ratio")
 		}

@@ -38,7 +38,9 @@ _REVIEW_PAYLOAD = {
     "feedback": "具体性を高めましょう",
     "company_strategy": "企業対策の助言",
 }
-_IMPROVED_PAYLOAD = {"improved_text": "改善後の文章"}
+# 既定の入力（14字）以上の長さにする。短いと #1606 の作り直しが入り、
+# 「通常は2呼び出し」のテストが別の理由で落ちる。
+_IMPROVED_PAYLOAD = {"improved_text": "改善後の文章。具体的な行動を書き足した。"}
 
 
 def _chat_response(payload: dict, finish_reason: str = "stop") -> MagicMock:
@@ -91,7 +93,7 @@ def test_review_is_split_into_two_calls(monkeypatch):
 
     assert client.chat.completions.create.call_count == 2
     assert result.feedback == "具体性を高めましょう"
-    assert result.improved_text == "改善後の文章"
+    assert result.improved_text == "改善後の文章。具体的な行動を書き足した。"
 
 
 def test_retry_once_on_length_finish_reason(monkeypatch):
@@ -105,7 +107,7 @@ def test_retry_once_on_length_finish_reason(monkeypatch):
     assert client.chat.completions.create.call_count == 3
     first, retried = client.chat.completions.create.call_args_list[:2]
     assert retried.kwargs["max_tokens"] > first.kwargs["max_tokens"]
-    assert result.improved_text == "改善後の文章"
+    assert result.improved_text == "改善後の文章。具体的な行動を書き足した。"
 
 
 def test_second_length_on_review_stage_returns_422_without_shorten_advice(monkeypatch):
@@ -127,23 +129,23 @@ def test_second_length_on_review_stage_returns_422_without_shorten_advice(monkey
 
 
 @pytest.mark.parametrize("chars", [14, _ES_TEXT_MAX_LENGTH])
-def test_second_length_on_improved_stage_advises_shortening(chars, monkeypatch):
-    """第2呼び出し(改善文)の上限到達はESの短縮を案内し、無駄な再試行をしない(L1)。
+def test_second_length_on_improved_stage_keeps_the_warning(chars, monkeypatch):
+    """上限なしの改善文が出力上限で切れても 422 にしない（#1606）。
 
-    改善文の段は max_tokens を渡さない（#1564）ので引き上げ余地が無く、同じ結果になる
-    再試行は短いESでも長いESでも行わない。評価1回 + 改善文1回の計2回で 422 を返す。
+    422 にすると本文も「短い」警告も届かない。max_tokens は渡さない（#1564）ので
+    同じ呼び出しの中では引き上げない。空の結果は短いので、作り直しを1回だけ試みる。
     """
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    client = _mock_client(["stop", "length"])
+    client = _mock_client(["stop", "length", "length"])
 
-    with pytest.raises(HTTPException) as exc_info:
-        _run(client, es_text="あ" * chars)
+    result = _run(client, es_text="あ" * chars)
 
-    assert exc_info.value.status_code == 422
-    assert exc_info.value.detail == _TOO_LONG_MESSAGE
-    assert client.chat.completions.create.call_count == 2
-    improved_call = client.chat.completions.create.call_args_list[1]
-    assert "max_tokens" not in improved_call.kwargs
+    assert result.improved_text == ""
+    assert result.improved_length_satisfied is False
+    # 評価1 + 改善文1 + 短いときの作り直し1
+    assert client.chat.completions.create.call_count == 3
+    for improved_call in client.chat.completions.create.call_args_list[1:]:
+        assert "max_tokens" not in improved_call.kwargs
 
 
 @pytest.mark.parametrize(
@@ -207,8 +209,17 @@ def test_improved_text_budget_does_not_depend_on_input_length(chars, monkeypatch
 
     _run(client, es_text="あ" * chars)
 
-    improved_call = client.chat.completions.create.call_args_list[1]
-    assert "max_tokens" not in improved_call.kwargs
+    # 長文では改善文が短く返り、#1606 の作り直しが1回入る。その呼び出しにも
+    # max_tokens を渡さない（渡すと入力長で天井に張り付く #1564 が戻る）。
+    improved_calls = [
+        call for call in client.chat.completions.create.call_args_list
+        if "【添削フィードバック】" in next(
+            msg["content"] for msg in call.kwargs["messages"] if msg["role"] == "user"
+        )
+    ]
+    assert improved_calls
+    for call in improved_calls:
+        assert "max_tokens" not in call.kwargs
 
 
 def test_no_company_context_nulls_company_fields(monkeypatch):
@@ -266,7 +277,7 @@ def test_non_numeric_score_falls_back_to_default(monkeypatch):
         _REVIEW_PAYLOAD["specificity_score"] = 7
 
     assert result.specificity_score == 5
-    assert result.improved_text == "改善後の文章"
+    assert result.improved_text == "改善後の文章。具体的な行動を書き足した。"
 
 
 def test_non_numeric_company_fit_becomes_null(monkeypatch):
@@ -332,7 +343,8 @@ def test_prompt_injection_guard_on_both_calls(monkeypatch):
 
     _run(client, es_text=injected)
 
-    assert client.chat.completions.create.call_count == 2
+    # 注入文は改善文スタブより長いので、短さの作り直しが1回入る。そのプロンプトも囲む。
+    assert client.chat.completions.create.call_count == 3
     for call in client.chat.completions.create.call_args_list:
         messages = call.kwargs["messages"]
         user = next(msg["content"] for msg in messages if msg["role"] == "user")

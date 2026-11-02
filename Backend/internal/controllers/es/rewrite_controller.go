@@ -43,6 +43,8 @@ type esRewriteResponse struct {
 	// 字数の結果(#1523)。既存キーは変えず追加だけしている
 	ImprovedTextLength int   `json:"improved_text_length"`
 	CharLimitSatisfied *bool `json:"char_limit_satisfied"`
+	// 改善文が元の文章以上か。char_limit 指定時は null（#1606）
+	ImprovedLengthSatisfied *bool `json:"improved_length_satisfied"`
 }
 
 // Rewrite POST /api/es/rewrite
@@ -88,9 +90,10 @@ func (c *ESRewriteController) Rewrite(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, esRewriteResponse{
-		RewrittenText:      rag.ImprovedText,
-		Star:               rag.Star,
-		ImprovedTextLength: rag.ImprovedTextLength,
-		CharLimitSatisfied: rag.CharLimitSatisfied,
+		RewrittenText:           rag.ImprovedText,
+		Star:                    rag.Star,
+		ImprovedTextLength:      rag.ImprovedTextLength,
+		CharLimitSatisfied:      rag.CharLimitSatisfied,
+		ImprovedLengthSatisfied: rag.ImprovedLengthSatisfied,
 	})
 }
