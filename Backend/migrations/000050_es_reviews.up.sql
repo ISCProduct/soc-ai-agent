@@ -38,6 +38,8 @@ CREATE TABLE `es_reviews` (
   -- 前回結果の引き当て（本人の同一設問を新しい順に1件）。
   KEY `idx_es_reviews_user_question` (`user_id`,`question_key`,`id`),
   -- 教員向けの履歴一覧（本人の全件を新しい順）。
+  -- InnoDB の二次索引は末尾に主キーを含むので実質 (user_id) と等価だが、
+  -- 「id の降順で引く」意図を読めるように明示しておく。
   KEY `idx_es_reviews_user_created` (`user_id`,`id`),
   CONSTRAINT `fk_es_reviews_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_es_reviews_organization` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`)

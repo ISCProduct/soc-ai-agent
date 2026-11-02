@@ -61,18 +61,26 @@ var resumeScoreMapping = []struct {
 var esScoreMapping = []struct {
 	category string
 	weight   float64
-	// source は 1〜10 の評価から「そのカテゴリの素点」を取り出す関数。
-	source func(specificity, star, lengthBalance int) int
+	// source は 1〜10 の評価から「そのカテゴリの素点（0〜100）」を返す。
+	//
+	// 平均は必ず 0〜100 へ移してから取る。1〜10 の整数のまま平均すると
+	// (6+5)/2 が 5 に切り捨てられ、本来ちょうど中立（5.5）の入力が 45 になる。
+	// 中位の添削を繰り返すだけでスコアが下へ寄り、マッチングが一方向に歪む。
+	source func(specificity, star, lengthBalance int) float64
 }{
 	// コミュニケーション力: ES は読み手を説得するための文章そのもので、
 	// STAR（相手に伝わる順序で組み立てられているか）と具体性（根拠を示せているか）は
 	// 伝達の質を直接測っている。ただし観測できるのは書面に限られ、対話は含まれないため
 	// 等倍にはしない。履歴書（0.6）より強くするのは、履歴書の評価が書式・正確性に
 	// 寄っているのに対し、ES の評価軸は表現そのものだから。
-	{"コミュニケーション力", 0.8, func(specificity, star, _ int) int { return (specificity + star) / 2 }},
+	{"コミュニケーション力", 0.8, func(specificity, star, _ int) float64 {
+		return (esRawToHundred(specificity) + esRawToHundred(star)) / 2
+	}},
 	// 細部志向: 指定字数に収めることは「要件への注意」がそのまま出る。
 	// ただし測れているのはこの1点だけなので、中立50寄りに圧縮して弱く反映する。
-	{"細部志向", 0.6, func(_, _, lengthBalance int) int { return lengthBalance }},
+	{"細部志向", 0.6, func(_, _, lengthBalance int) float64 {
+		return esRawToHundred(lengthBalance)
+	}},
 	// 企業適合性（company_fit_score）は載せない。企業名を指定した添削でしか付かず、
 	// 指定した人だけスコアが動くと、企業名を入れたかどうかでマッチングが変わってしまう。
 	// 技術志向にも載せない。文章の完成度と技術への関心を結び付ける根拠が無い（#1528 と同じ理由）。
@@ -80,9 +88,10 @@ var esScoreMapping = []struct {
 
 // esRawToHundred は RAG の 1〜10 評価を 0〜100 へ移す。
 // 1 を 0、10 を 100 に写すので、中央の 5.5 がちょうど中立50になる。
-func esRawToHundred(raw int) int {
+// 整数で割ると中立がずれるため float64 で返す（丸めは mapESScore の最後で一度だけ）。
+func esRawToHundred(raw int) float64 {
 	raw = clampInt(raw, 1, 10)
-	return (raw - 1) * 100 / 9
+	return float64(raw-1) * 100 / 9
 }
 
 // mapESScore は ES添削の評価から各カテゴリの反映値（0〜100）を返す。
@@ -92,8 +101,8 @@ func esRawToHundred(raw int) int {
 func mapESScore(specificity, star, lengthBalance int) []categoryScore {
 	out := make([]categoryScore, 0, len(esScoreMapping))
 	for _, m := range esScoreMapping {
-		raw := esRawToHundred(m.source(specificity, star, lengthBalance))
-		v := neutralScore + float64(raw-neutralScore)*m.weight
+		raw := m.source(specificity, star, lengthBalance)
+		v := neutralScore + (raw-neutralScore)*m.weight
 		out = append(out, categoryScore{category: m.category, score: clampInt(int(math.Round(v)), 0, 100)})
 	}
 	return out

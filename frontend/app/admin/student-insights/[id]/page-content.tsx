@@ -33,7 +33,9 @@ type ESReview = {
   es_text: string
 }
 
-const SCORE_LABELS: { key: keyof ESReview; label: string }[] = [
+type ScoreKey = 'specificity_score' | 'star_score' | 'length_balance_score' | 'company_fit_score'
+
+const SCORE_LABELS: { key: ScoreKey; label: string }[] = [
   { key: 'specificity_score', label: '具体性' },
   { key: 'star_score', label: 'STAR' },
   { key: 'length_balance_score', label: '文字数' },
@@ -83,8 +85,14 @@ function Content({ studentId }: { studentId: string }) {
 
   const load = useCallback(async (isCancelled?: () => boolean) => {
     if (schoolRequired === null) return
-    // 担当校を持つ管理者は school_id が必須（無いと400）。確定するまで取得しない。
-    if (schoolRequired && schoolId === undefined) return
+    // 担当校を持つ管理者は school_id が必須（無いと400）。
+    // ここで黙って return すると loading が初期値 true のままスピナーが回り続け、
+    // 直リンクやブックマークで開いた教員に何も説明が出ない（復帰手段も無い）。
+    if (schoolRequired && schoolId === undefined) {
+      setLoading(false)
+      setError('担当校が指定されていません。学生一覧から開いてください。')
+      return
+    }
     setLoading(true)
     setError('')
     try {
@@ -120,14 +128,19 @@ function Content({ studentId }: { studentId: string }) {
       <MuiLink component={NextLink} href="/admin/student-insights" sx={{ fontSize: 14 }}>
         ← 学生一覧へ戻る
       </MuiLink>
-      <Typography variant="h5" sx={{ fontWeight: 700, mt: 2, mb: 3 }}>
+      <Typography variant="h5" sx={{ fontWeight: 700, mt: 2, mb: 1 }}>
+        学生の詳細
+      </Typography>
+      {/* いまはES添削の履歴だけ。他の情報を足すときはここに節を増やす。 */}
+      <Typography variant="h6" sx={{ fontWeight: 700, mb: 3 }}>
         ES添削の履歴
       </Typography>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-
       {loading ? (
         <Stack alignItems="center" sx={{ py: 6 }}><CircularProgress /></Stack>
+      ) : error ? (
+        // エラーと「履歴なし」を同時に出すと、どちらを信じるか分からない。
+        <Alert severity="error">{error}</Alert>
       ) : reviews.length === 0 ? (
         <Alert severity="info">
           この学生のES添削の履歴はまだありません。担当校外・他学園の学生の履歴は表示されません。

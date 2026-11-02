@@ -76,9 +76,13 @@ type esReviewRAGResponse struct {
 	Star               starBreakdown     `json:"star"`
 	Usage              *esReviewRAGUsage `json:"usage"`
 	// 永続化に使う評価項目(#1531)。
-	SpecificityScore   int    `json:"specificity_score"`
-	StarScore          int    `json:"star_score"`
-	LengthBalanceScore int    `json:"length_balance_score"`
+	//
+	// 必須の3項目もポインタで受ける。値型だと項目が欠けた応答で 0 になり、
+	// 丸めて 1（最低評価）として履歴とスコアに流れる。欠落を最低評価として
+	// 記録するのは「基準の無い減点」で、履歴書が #1529 で明示的に避けた判断と逆向き。
+	SpecificityScore   *int   `json:"specificity_score"`
+	StarScore          *int   `json:"star_score"`
+	LengthBalanceScore *int   `json:"length_balance_score"`
 	CompanyFitScore    *int   `json:"company_fit_score"`
 	Feedback           string `json:"feedback"`
 }
@@ -136,10 +140,21 @@ func (c *ESReviewController) persist(ctx echo.Context, req esReviewRequest, body
 		log.Printf("[ESReview] RAG応答を解釈できず保存をスキップ user=%d: %v", userID, err)
 		return body
 	}
-	orgID, _ := middleware.OrganizationIDFromContext(ctx.Request().Context())
-	if orgID == 0 {
-		orgID = models.DefaultOrganizationID
+	// 組織が確定しないまま保存すると、既定組織の行として永続化され、
+	// 教員向けクエリの学園一致条件に永久に当たらなくなる（誰も気づけない）。
+	// 添削そのものは返すので、保存だけ諦める（#1531）。
+	orgID, ok := middleware.OrganizationIDFromContext(ctx.Request().Context())
+	if !ok || orgID == 0 {
+		log.Printf("[ESReview] 組織が解決できないため保存をスキップ user=%d", userID)
+		return body
 	}
+	// 評価が1つでも欠けた応答は履歴に残さない。差分もスコア連携も評価を前提にしており、
+	// 欠けた行を残すと「最低評価の回」として後から比較されてしまう。
+	if parsed.SpecificityScore == nil || parsed.StarScore == nil || parsed.LengthBalanceScore == nil {
+		log.Printf("[ESReview] RAG応答に評価が欠けているため保存をスキップ user=%d", userID)
+		return body
+	}
+
 	var charLimit *uint
 	if req.CharLimit != nil && *req.CharLimit > 0 {
 		v := uint(*req.CharLimit)
@@ -155,9 +170,9 @@ func (c *ESReviewController) persist(ctx echo.Context, req esReviewRequest, body
 		ESText:             req.ESText,
 		CharLimit:          charLimit,
 		CharLimitMode:      req.CharLimitMode,
-		SpecificityScore:   parsed.SpecificityScore,
-		StarScore:          parsed.StarScore,
-		LengthBalanceScore: parsed.LengthBalanceScore,
+		SpecificityScore:   *parsed.SpecificityScore,
+		StarScore:          *parsed.StarScore,
+		LengthBalanceScore: *parsed.LengthBalanceScore,
 		CompanyFitScore:    parsed.CompanyFitScore,
 		Feedback:           parsed.Feedback,
 		ImprovedText:       parsed.ImprovedText,
@@ -172,6 +187,22 @@ func (c *ESReviewController) persist(ctx echo.Context, req esReviewRequest, body
 	return withPrevious(body, previous)
 }
 
+// esReviewPrevious は前回の添削のうち差分表示に使う項目だけ(#1531)。
+//
+// models.ESReview をそのまま返すと ES本文・改善文・フィードバック全文まで
+// レスポンスに乗る。本人のデータなので漏洩ではないが、画面が使うのは
+// 日付とスコアだけで、無駄に重い。
+type esReviewPrevious struct {
+	ID                 uint   `json:"id"`
+	CreatedAt          string `json:"created_at"`
+	Question           string `json:"question"`
+	QuestionType       string `json:"question_type"`
+	SpecificityScore   uint8  `json:"specificity_score"`
+	StarScore          uint8  `json:"star_score"`
+	LengthBalanceScore uint8  `json:"length_balance_score"`
+	CompanyFitScore    *uint8 `json:"company_fit_score"`
+}
+
 // withPrevious は本文に previous を足す。解釈できない本文は触らずに返す
 // （表示を壊さないことを優先し、差分だけ諦める）。
 func withPrevious(body []byte, previous *models.ESReview) []byte {
@@ -179,7 +210,16 @@ func withPrevious(body []byte, previous *models.ESReview) []byte {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return body
 	}
-	encoded, err := json.Marshal(previous)
+	encoded, err := json.Marshal(esReviewPrevious{
+		ID:                 previous.ID,
+		CreatedAt:          previous.CreatedAt.Format(time.RFC3339),
+		Question:           previous.Question,
+		QuestionType:       previous.QuestionType,
+		SpecificityScore:   previous.SpecificityScore,
+		StarScore:          previous.StarScore,
+		LengthBalanceScore: previous.LengthBalanceScore,
+		CompanyFitScore:    previous.CompanyFitScore,
+	})
 	if err != nil {
 		return body
 	}

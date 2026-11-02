@@ -411,6 +411,10 @@ components:
       required: [es_text, question_type]
       properties:
         es_text: { type: string }
+        question:
+          type: string
+          maxLength: 500
+          description: "設問文（任意 / #1531）。同一設問の前回結果と突き合わせるキー。種別だけだと「学チカ」と「ガクチカ」が別扱いになる"
         question_type: { type: string }
         company_name: { type: string }
         char_limit: { type: integer, nullable: true }
@@ -423,6 +427,23 @@ components:
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
         star: { $ref: "#/components/schemas/StarBreakdown" }
+        previous:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/ESReviewPrevious" }]
+          description: "同一設問の前回の添削（#1531）。初回・未ログイン・設問未入力のときは付かない"
+
+    ESReviewPrevious:
+      type: object
+      description: "前回の添削のうち差分表示に使う項目だけ（#1531）。本文は含めない"
+      properties:
+        id: { type: integer }
+        created_at: { type: string, format: date-time }
+        question: { type: string }
+        question_type: { type: string }
+        specificity_score: { type: integer }
+        star_score: { type: integer }
+        length_balance_score: { type: integer }
+        company_fit_score: { type: integer, nullable: true }
 
     ResumeStatus:
       type: object
@@ -1597,7 +1618,11 @@ paths:
     post:
       tags: [es]
       summary: エントリーシートを添削する
-      description: "**未ログインでも使える。** 認証は付けず、レート制限のみ（#1154）。"
+      description: |
+        **未ログインでも使える。** 認証は必須にしない（必須にするとログイン前に試す導線が壊れる）。
+        ただし `X-User-Token` があれば実行者として扱い、添削結果を履歴に残す（#1531）。
+        壊れたトークン・退会済み・所属学園が確定しない場合も 401 にはせず、保存だけ行わない。
+        コスト濫用はレート制限で止める（#1154）。
       requestBody:
         required: true
         content:

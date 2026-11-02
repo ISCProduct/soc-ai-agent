@@ -39,13 +39,23 @@ func (r *ESReviewRepository) FindPreviousByQuestion(userID uint, questionKey str
 	return &review, nil
 }
 
-// ListByUser は本人の添削履歴を新しい順に返す（学生自身の画面用）。
+// ListByUser は学校で絞らずに添削履歴を新しい順に返す。
+//
+// 担当校を持たない無制限管理者の経路でだけ使う（学校で絞る経路は ListForSchoolStudent）。
+// 全テナント横断で見えるのは ListStudentsPaged の前例どおりだが、退会済みは除く。
+// 退会の猶予期間中のデータは閲覧不可が方針（docs/wiki/data-privacy.md）。
 func (r *ESReviewRepository) ListByUser(userID uint, limit int) ([]models.ESReview, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	var reviews []models.ESReview
-	err := r.db.Where("user_id = ?", userID).Order("id DESC").Limit(limit).Find(&reviews).Error
+	err := r.db.Table("es_reviews AS e").
+		Select("e.*").
+		Joins("JOIN users u ON u.id = e.user_id").
+		Where("e.user_id = ? AND u.withdrawn_at IS NULL", userID).
+		Order("e.id DESC").
+		Limit(limit).
+		Find(&reviews).Error
 	return reviews, err
 }
 

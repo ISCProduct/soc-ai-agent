@@ -56,11 +56,13 @@ func NewService(repo Repository, scores ScoreUpdater) *Service {
 func (s *Service) Save(in Input) (*models.ESReview, *models.ESReview, error) {
 	question := strings.TrimSpace(in.Question)
 	review := &models.ESReview{
-		UserID:             in.UserID,
-		OrganizationID:     in.OrganizationID,
-		Question:           truncateRunes(question, 500),
-		QuestionKey:        models.NormalizeESQuestion(question),
-		QuestionType:       in.QuestionType,
+		UserID:         in.UserID,
+		OrganizationID: in.OrganizationID,
+		Question:       truncateRunes(question, 500),
+		QuestionKey:    models.NormalizeESQuestion(question),
+		// 列長を超えると INSERT が落ち、添削は返るのに履歴だけ黙って残らない。
+		// 利用者の入力で履歴機能だけが死ぬ経路を作らない。
+		QuestionType:       truncateRunes(in.QuestionType, 50),
 		ESText:             in.ESText,
 		CharLimit:          in.CharLimit,
 		SpecificityScore:   clampScore(in.SpecificityScore),
@@ -69,7 +71,7 @@ func (s *Service) Save(in Input) (*models.ESReview, *models.ESReview, error) {
 		Feedback:           in.Feedback,
 		ImprovedText:       in.ImprovedText,
 	}
-	if name := strings.TrimSpace(in.CompanyName); name != "" {
+	if name := truncateRunes(strings.TrimSpace(in.CompanyName), 255); name != "" {
 		review.CompanyName = &name
 	}
 	if mode := strings.TrimSpace(in.CharLimitMode); mode != "" {
@@ -96,7 +98,13 @@ func (s *Service) Save(in Input) (*models.ESReview, *models.ESReview, error) {
 		}
 	}
 
-	if s.scores != nil {
+	// 同じ本文を出し直しただけなら、新しい情報は何も得られていないのでスコアは動かさない。
+	// 移動平均（既存0.7/新規0.3）なので、同じESを10回出すだけで対象カテゴリが
+	// 50 から 89 まで寄る。ES添削はテキストボックスで何度でも押せるため、
+	// 履歴書（PDFアップロードが要る）より摩擦がない。
+	// 本文を少しずつ変えて繰り返す経路までは塞げない（残存リスクとして記録）。
+	sameAsPrevious := previous != nil && previous.ESText == review.ESText
+	if s.scores != nil && !sameAsPrevious {
 		if err := s.scores.UpdateScoresFromESReview(in.UserID, review); err != nil {
 			log.Printf("[ESReview] スコア反映に失敗 user=%d review=%d: %v", in.UserID, review.ID, err)
 		}

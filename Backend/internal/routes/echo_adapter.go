@@ -112,7 +112,10 @@ func EchoOptionalUserAuth(userSecret string, access auth.UserAccessGuard, orgs .
 				return next(c)
 			}
 			userID, _, err := middleware.ParseJWT(token, userSecret)
-			if err != nil {
+			// userID == 0 も弾く。ParseJWT は失敗時に 0 を返す約束だが、
+			// その内部規約に依存せずここで閉じる（依存すると、約束が変わったときに
+			// 誰のものか分からない実行者が載る）。
+			if err != nil || userID == 0 {
 				return next(c)
 			}
 			if access != nil {
@@ -120,12 +123,26 @@ func EchoOptionalUserAuth(userSecret string, access auth.UserAccessGuard, orgs .
 					return next(c)
 				}
 			}
-			ctx := context.WithValue(c.Request().Context(), middleware.UserIDContextKey, userID)
 			var orgID uint
 			if resolver != nil {
-				if resolved, err := resolver.ResolveOrganizationID(userID); err == nil && resolved > 0 {
-					orgID = resolved
-					ctx = context.WithValue(ctx, middleware.OrganizationIDContextKey, orgID)
+				resolved, err := resolver.ResolveOrganizationID(userID)
+				if err != nil || resolved == 0 {
+					// 組織が確定しない実行者は載せない。載せると、呼び出し側が
+					// 「本人は分かったが所属は分からない」状態で保存先を決めることになり、
+					// 既定組織へ倒すなどして別学園の行として永続化されうる（#1531）。
+					// 無効化された組織・一時的な DB 障害もここに入る。
+					return next(c)
+				}
+				orgID = resolved
+			}
+			ctx := context.WithValue(c.Request().Context(), middleware.UserIDContextKey, userID)
+			if orgID > 0 {
+				ctx = context.WithValue(ctx, middleware.OrganizationIDContextKey, orgID)
+				// テナントを跨いだアクセスは本人の所属として扱わない。
+				// 他学園のサブドメインから送られた添削が本人の学園の履歴に混ざると、
+				// 帰属が追えなくなる（EchoUserAuth は同じ状況を 403 にしている）。
+				if tenantOrgID, ok := middleware.TenantOrganizationIDFromContext(ctx); ok && tenantOrgID != orgID {
+					return next(c)
 				}
 			}
 			// AI利用量の配賦先も載せる（#1294）。未ログインのときは従来どおり NULL のまま。
