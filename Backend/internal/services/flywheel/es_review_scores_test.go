@@ -1,6 +1,7 @@
 package flywheel
 
 import (
+	"errors"
 	"testing"
 
 	"Backend/internal/models"
@@ -88,6 +89,24 @@ func TestUpdateScoresFromESReview_WritesIntoLatestDiagnosisSession(t *testing.T)
 	applied, err := svc.UpdateScoresFromESReview(testUserID, newESReview())
 	require.NoError(t, err)
 	require.True(t, applied)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 1カテゴリも書けなかったときは「反映した」と返さない。
+// 返してしまうと呼び出し元が反映済みとして記録し、その本文が以後スコアへ乗らない。
+func TestUpdateScoresFromESReview_AllWritesFailIsNotApplied(t *testing.T) {
+	svc, mock := newCrossFeatureService(t)
+
+	mock.ExpectQuery("SELECT \\* FROM `user_weight_scores`").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "session_id"}).AddRow(1, testSessionID))
+	for range 2 {
+		mock.ExpectQuery("SELECT \\* FROM `user_weight_scores`").
+			WillReturnError(errors.New("db down"))
+	}
+
+	applied, err := svc.UpdateScoresFromESReview(testUserID, newESReview())
+	require.Error(t, err)
+	require.False(t, applied)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

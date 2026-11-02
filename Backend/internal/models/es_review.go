@@ -83,12 +83,15 @@ func HashESText(text string) string {
 // 先頭255文字が一致する設問はまず同じものとみなしてよい。
 func NormalizeESQuestion(question string) string {
 	var b strings.Builder
-	for _, r := range question {
+	// 全角半角の揺れ（ＰＲ/PR、？/?）を先に畳む。HashESText と同じ NFKC。
+	for _, r := range norm.NFKC.String(question) {
 		if unicode.IsSpace(r) {
 			continue
 		}
 		// 句読点・記号の揺れ（「？」「?」「。」の有無）は同一設問とみなす。
-		if unicode.IsPunct(r) || unicode.IsSymbol(r) {
+		// ただし + と # は残す。落とすと「C++言語」「C#」「C言語」が同じキーになり、
+		// 別の設問の「前回」として差分が出てしまう。
+		if (unicode.IsPunct(r) || unicode.IsSymbol(r)) && r != '+' && r != '#' {
 			continue
 		}
 		b.WriteRune(unicode.ToLower(r))

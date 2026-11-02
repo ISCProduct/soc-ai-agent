@@ -3,6 +3,7 @@ package esreview
 import (
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 )
 
 type repoStub struct {
+	lockBusy      bool
 	created       []*models.ESReview
 	previous      *models.ESReview
 	createErr     error
@@ -44,6 +46,14 @@ func (r *repoStub) HasScoredSameText(_ uint, textHash string, _ uint) (bool, err
 
 func (r *repoStub) LastScoredAt(uint, uint) (*time.Time, error) {
 	return r.lastScoredAt, r.lastScoredErr
+}
+
+func (r *repoStub) WithUserScoringLock(_ uint, fn func()) (bool, error) {
+	if r.lockBusy {
+		return false, nil
+	}
+	fn()
+	return true, nil
 }
 
 func (r *repoStub) MarkScored(id uint, at time.Time) error {
@@ -306,5 +316,117 @@ func TestSave_DoesNotMarkScoredWhenNotApplied(t *testing.T) {
 	}
 	if len(repo.marked) != 0 {
 		t.Fatalf("反映していないのに記録している: %v", repo.marked)
+	}
+}
+
+// ロックを取れなかったときは反映を見送る。二重に積むより、次回に回す方が安全。
+func TestSave_SkipsScoreWhenScoringLockIsBusy(t *testing.T) {
+	repo := &repoStub{lockBusy: true}
+	scores := &scoreStub{}
+	review, _, err := NewService(repo, scores).Save(baseInput())
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if review == nil || len(repo.created) != 1 {
+		t.Fatal("ロックが取れなくても履歴は保存する")
+	}
+	if scores.calls != 0 || len(repo.marked) != 0 {
+		t.Fatalf("ロック未取得なのに反映した: calls=%d marked=%v", scores.calls, repo.marked)
+	}
+}
+
+// 判定と記録が別クエリなので、並行に来ると両方が「未反映」と見て二重に加点する。
+// 実際のDBと同じく「記録されるのは反映の後」にして、直列化されていることを確かめる。
+type concurrentRepo struct {
+	repoStub
+	lock     sync.Mutex // 実装の GET_LOCK 相当
+	mu       sync.Mutex // スタブ自身のデータ保護
+	scoredAt *time.Time
+}
+
+func (r *concurrentRepo) Create(v *models.ESReview) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.repoStub.Create(v)
+}
+
+func (r *concurrentRepo) LastScoredAt(uint, uint) (*time.Time, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.scoredAt, nil
+}
+
+func (r *concurrentRepo) MarkScored(uint, time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	r.scoredAt = &now
+	return nil
+}
+
+func (r *concurrentRepo) WithUserScoringLock(_ uint, fn func()) (bool, error) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	fn()
+	return true, nil
+}
+
+type slowScoreStub struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (s *slowScoreStub) UpdateScoresFromESReview(uint, *models.ESReview) (bool, error) {
+	time.Sleep(30 * time.Millisecond) // 判定と記録の間に他のリクエストが割り込める幅
+	s.mu.Lock()
+	s.calls++
+	s.mu.Unlock()
+	return true, nil
+}
+
+func TestSave_ConcurrentRequestsScoreOnlyOnce(t *testing.T) {
+	repo := &concurrentRepo{}
+	scores := &slowScoreStub{}
+	svc := NewService(repo, scores)
+
+	var wg sync.WaitGroup
+	for i := range 5 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			in := baseInput()
+			in.ESText = "本文" + strings.Repeat("あ", i+1) // 本文を変えても間隔制限で止まること
+			if _, _, err := svc.Save(in); err != nil {
+				t.Errorf("Save: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if scores.calls != 1 {
+		t.Fatalf("並行5本でスコアは1回だけ反映する想定が %d 回", scores.calls)
+	}
+}
+
+// 列を超える長さで INSERT が落ちると履歴だけ黙って残らない。保存側で丸める。
+func TestSave_TruncatesLongTexts(t *testing.T) {
+	repo := &repoStub{}
+	in := baseInput()
+	in.ESText = strings.Repeat("あ", maxStoredTextRunes+500)
+	in.Feedback = strings.Repeat("い", maxStoredTextRunes+500)
+	in.ImprovedText = strings.Repeat("う", maxStoredTextRunes+500)
+
+	review, _, err := NewService(repo, nil).Save(in)
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	for name, got := range map[string]string{"es_text": review.ESText, "feedback": review.Feedback, "improved_text": review.ImprovedText} {
+		if n := len([]rune(got)); n != maxStoredTextRunes {
+			t.Errorf("%s は %d 文字に丸めるべきが %d 文字", name, maxStoredTextRunes, n)
+		}
+	}
+	// 重複判定は丸める前の全文で取る（丸めた後だと長文同士が同一視される）。
+	if review.ESTextHash != models.HashESText(in.ESText) {
+		t.Error("ハッシュは丸める前の全文で取る")
 	}
 }

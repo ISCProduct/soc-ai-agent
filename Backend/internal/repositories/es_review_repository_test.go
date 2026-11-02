@@ -113,3 +113,36 @@ func TestESReviewRepository_OrdersByCreatedAt(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+// 同一ユーザーの反映を直列化するロック（GET_LOCK）。取れたときだけ fn を呼び、必ず解放する。
+func TestESReviewRepository_WithUserScoringLock(t *testing.T) {
+	tests := []struct {
+		name       string
+		lockResult any
+		wantCalled bool
+	}{
+		{"取得できれば実行して解放する", int64(1), true},
+		{"タイムアウトなら実行しない", int64(0), false},
+		{"NULL（エラー）なら実行しない", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, mock := newESReviewRepo(t)
+			mock.ExpectQuery("SELECT GET_LOCK").
+				WithArgs("es_review_score:7", 5).
+				WillReturnRows(sqlmock.NewRows([]string{"GET_LOCK"}).AddRow(tt.lockResult))
+			if tt.wantCalled {
+				mock.ExpectExec("SELECT RELEASE_LOCK").
+					WithArgs("es_review_score:7").
+					WillReturnResult(sqlmock.NewResult(0, 0))
+			}
+
+			called := false
+			acquired, err := repo.WithUserScoringLock(7, func() { called = true })
+			require.NoError(t, err)
+			require.Equal(t, tt.wantCalled, acquired)
+			require.Equal(t, tt.wantCalled, called)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}

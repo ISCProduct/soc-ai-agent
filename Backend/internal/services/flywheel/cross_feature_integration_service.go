@@ -218,12 +218,20 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromESReview(userID uint, r
 	}
 
 	// 対応表と式は esScoreMapping / mapESScore（score_mapping.go）に集約している。
+	applied, failed := 0, 0
 	for _, mapped := range mapESScore(
 		int(review.SpecificityScore), int(review.StarScore), int(review.LengthBalanceScore),
 	) {
 		if err := s.applyMovingAverage(userID, sessionID, mapped.category, mapped.score); err != nil {
+			failed++
 			log.Printf("[CrossFeature] es→score update failed (cat=%s): %v\n", mapped.category, err)
+			continue
 		}
+		applied++
+	}
+	// 1カテゴリも書けていないのに「反映済み」と記録すると、その本文が以後乗らない。
+	if applied == 0 && failed > 0 {
+		return false, fmt.Errorf("ES添削のスコア反映が全件失敗 (es_review_id=%d)", review.ID)
 	}
 	return true, nil
 }

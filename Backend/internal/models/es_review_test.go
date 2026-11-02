@@ -22,6 +22,10 @@ func TestNormalizeESQuestion(t *testing.T) {
 		{"英字の大小", "Why our company?", "why our company", true},
 		{"別の設問", "学生時代に力を入れたことは", "当社を志望する理由は", false},
 		{"前後の空白", "  自己PRをどうぞ  ", "自己PRをどうぞ", true},
+		{"全角英数と半角英数", "ＰＲを書いてください", "PRを書いてください", true},
+		{"全角の疑問符と半角", "志望理由は？", "志望理由は?", true},
+		{"C++とCは別の設問", "C++言語の経験", "C言語の経験", false},
+		{"C#とCは別の設問", "C#の経験", "Cの経験", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

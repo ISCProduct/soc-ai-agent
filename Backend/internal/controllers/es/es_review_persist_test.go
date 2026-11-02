@@ -40,6 +40,11 @@ func (s *esRepoSpy) LastScoredAt(uint, uint) (*time.Time, error) { return nil, n
 
 func (s *esRepoSpy) MarkScored(uint, time.Time) error { return nil }
 
+func (s *esRepoSpy) WithUserScoringLock(_ uint, fn func()) (bool, error) {
+	fn()
+	return true, nil
+}
+
 type scoreSpy struct{ calls int }
 
 func (s *scoreSpy) UpdateScoresFromESReview(uint, *models.ESReview) (bool, error) {

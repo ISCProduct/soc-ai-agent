@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"Backend/internal/models"
@@ -72,6 +73,37 @@ func (r *ESReviewRepository) LastScoredAt(userID, excludeID uint) (*time.Time, e
 		return nil, err
 	}
 	return row.ScoredAt, nil
+}
+
+// scoringLockWaitSeconds は同一ユーザーの反映待ちの上限。超えたら反映を見送る
+// （待ち続けるより、二重に積まない方を選ぶ）。
+const scoringLockWaitSeconds = 5
+
+// WithUserScoringLock は同一ユーザーの「反映してよいかの判定→反映→記録」を直列化して fn を実行する。
+//
+// 判定と記録が別のクエリなので、並行に2本来ると両方が「未反映」と見て二重に加点する
+// （ダブルクリック・複数タブ・リトライ・本文を少し変えた並列送信。24時間の間隔制限も効かない）。
+// 行ロックでなく GET_LOCK にしているのは、反映側の書き込みが users を外部キーで参照するため、
+// users 行を排他ロックしたまま反映すると自分自身と待ち合わせてしまうから。
+// 取得できなかったときは fn を呼ばず false を返す。
+func (r *ESReviewRepository) WithUserScoringLock(userID uint, fn func()) (bool, error) {
+	name := fmt.Sprintf("es_review_score:%d", userID)
+	acquired := false
+	err := r.db.Connection(func(tx *gorm.DB) error {
+		var got *int
+		if err := tx.Raw("SELECT GET_LOCK(?, ?)", name, scoringLockWaitSeconds).Scan(&got).Error; err != nil {
+			return err
+		}
+		if got == nil || *got != 1 {
+			return nil
+		}
+		acquired = true
+		// 解放に失敗しても接続が閉じれば外れる。fn の結果は妨げない。
+		defer tx.Exec("SELECT RELEASE_LOCK(?)", name)
+		fn()
+		return nil
+	})
+	return acquired, err
 }
 
 // MarkScored はスコアへ反映したことを記録する。

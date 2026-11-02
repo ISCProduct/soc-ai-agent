@@ -19,7 +19,13 @@ type Repository interface {
 	LastScoredAt(userID, excludeID uint) (*time.Time, error)
 	// MarkScored は反映したことを記録する。
 	MarkScored(id uint, at time.Time) error
+	// WithUserScoringLock は同一ユーザーの反映判定〜記録を直列化して fn を実行する。
+	// ロックを取れなかったとき fn は呼ばれず acquired=false になる。
+	WithUserScoringLock(userID uint, fn func()) (acquired bool, err error)
 }
+
+// maxStoredTextRunes は本文・フィードバック・改善文として保存する最大文字数。
+const maxStoredTextRunes = 20000
 
 // scoreInterval は ES添削がスコアを動かせる間隔。
 //
@@ -79,15 +85,17 @@ func (s *Service) Save(in Input) (*models.ESReview, *models.ESReview, error) {
 		QuestionKey:    models.NormalizeESQuestion(question),
 		// 列長を超えると INSERT が落ち、添削は返るのに履歴だけ黙って残らない。
 		// 利用者の入力で履歴機能だけが死ぬ経路を作らない。
-		QuestionType:       truncateRunes(in.QuestionType, 50),
-		ESText:             in.ESText,
+		QuestionType: truncateRunes(in.QuestionType, 50),
+		// 列は text（65,535バイト）。日本語は1文字3バイトなので約21,000文字で INSERT が落ち、
+		// 添削は返るのに履歴だけ黙って残らない。ハッシュは丸める前の全文で取る。
+		ESText:             truncateRunes(in.ESText, maxStoredTextRunes),
 		ESTextHash:         models.HashESText(in.ESText),
 		CharLimit:          in.CharLimit,
 		SpecificityScore:   clampScore(in.SpecificityScore),
 		StarScore:          clampScore(in.StarScore),
 		LengthBalanceScore: clampScore(in.LengthBalanceScore),
-		Feedback:           in.Feedback,
-		ImprovedText:       in.ImprovedText,
+		Feedback:           truncateRunes(in.Feedback, maxStoredTextRunes),
+		ImprovedText:       truncateRunes(in.ImprovedText, maxStoredTextRunes),
 	}
 	if name := truncateRunes(strings.TrimSpace(in.CompanyName), 255); name != "" {
 		review.CompanyName = &name
@@ -129,22 +137,40 @@ func (s *Service) Save(in Input) (*models.ESReview, *models.ESReview, error) {
 	// 別の本文になる。実際に、不可視文字を1つ足す・全角半角を変える・NFD にするだけで
 	// 何度でも積める経路がテストで再現した。内容の判定は「同じ文章」を弾く層にとどめ、
 	// 積み上げの速度は時間で縛る。
-	if s.scores != nil && s.shouldScore(in.UserID, review) {
-		applied, err := s.scores.UpdateScoresFromESReview(in.UserID, review)
+	if s.scores != nil {
+		// 判定から記録までを同一ユーザーで直列化する。別々のクエリなので、並行に来ると
+		// 両方が「未反映」と見て二重に加点してしまう。
+		acquired, err := s.repo.WithUserScoringLock(in.UserID, func() {
+			if s.shouldScore(in.UserID, review) {
+				s.applyScore(in.UserID, review)
+			}
+		})
 		switch {
 		case err != nil:
-			log.Printf("[ESReview] スコア反映に失敗 user=%d review=%d: %v", in.UserID, review.ID, err)
-		case !applied:
-			// 反映しなかった行を「反映済み」にすると、その本文が以後永久に乗らない。
-			// 診断セッションができてから同じ本文を出し直せば反映される。
-		default:
-			if err := s.repo.MarkScored(review.ID, time.Now()); err != nil {
-				// 記録できないと次回も反映できてしまう。気づけるようにログへ残す。
-				log.Printf("[ESReview] 反映時刻の記録に失敗 user=%d review=%d: %v", in.UserID, review.ID, err)
-			}
+			log.Printf("[ESReview] 反映の排他に失敗 user=%d review=%d: %v", in.UserID, review.ID, err)
+		case !acquired:
+			// 二重に積むより見送る方が安全。履歴は保存済みで、次回の添削で反映される。
+			log.Printf("[ESReview] 同一ユーザーの反映待ちが解けず見送り user=%d review=%d", in.UserID, review.ID)
 		}
 	}
 	return review, previous, nil
+}
+
+// applyScore はスコアへ反映し、反映できたときだけ記録する。
+func (s *Service) applyScore(userID uint, review *models.ESReview) {
+	applied, err := s.scores.UpdateScoresFromESReview(userID, review)
+	switch {
+	case err != nil:
+		log.Printf("[ESReview] スコア反映に失敗 user=%d review=%d: %v", userID, review.ID, err)
+	case !applied:
+		// 反映しなかった行を「反映済み」にすると、その本文が以後永久に乗らない。
+		// 診断セッションができてから同じ本文を出し直せば反映される。
+	default:
+		if err := s.repo.MarkScored(review.ID, time.Now()); err != nil {
+			// 記録できないと次回も反映できてしまう。気づけるようにログへ残す。
+			log.Printf("[ESReview] 反映時刻の記録に失敗 user=%d review=%d: %v", userID, review.ID, err)
+		}
+	}
 }
 
 // shouldScore はこの添削をスコアへ反映してよいかを返す。
