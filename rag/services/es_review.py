@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 
-from models import ESReviewResponse, ESReviewUsage, ESStarBreakdown
+from models import ESReviewFeedbackItem, ESReviewResponse, ESReviewUsage, ESStarBreakdown
 from services.sanitize import _sanitize_company_name_for_query, _wrap_untrusted_text
 
 logger = logging.getLogger("main")
@@ -23,7 +23,8 @@ logger = logging.getLogger("main")
 # プロンプト版:
 #   v2 で「評価＋対策」と「改善文」の2呼び出しに分割した(#1521)
 #   v3 で文字数上限の指示(#1523)とSTAR分解(#1533)を第2呼び出しへ統合した
-_PROMPT_VERSION = "es_review_v3"
+#   v4 で評価ごとの原文引用と改善ヒントを追加した(#1532)
+_PROMPT_VERSION = "es_review_v4"
 
 # 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測レートは素材で大きく散る
 # （英数混在 0.20 / 日本語＋英数 0.53 / 漢字かな混在 0.78〜0.81 / ひらがな主体 0.91 /
@@ -43,8 +44,8 @@ _JP_TOKENS_PER_CHAR = 0.85
 _IMPROVED_TEXT_RATIO = 1.3
 # JSONのキー・括弧・エスケープ分の固定オーバーヘッド
 _JSON_OVERHEAD_TOKENS = 120
-# feedback(400字) + company_strategy(400字) + 余裕
-_REVIEW_TEXT_CHARS = 900
+# feedback(400字) + company_strategy(400字) + feedback_items(880字) + 余裕
+_REVIEW_TEXT_CHARS = 1800
 # STAR分解4項目（各100字以内）の説明文ぶん。第2呼び出しの予算に上乗せする(#1533)
 _STAR_TEXT_CHARS = 400
 # 1回の出力に許す上限（再試行時の引き上げもここで打ち止め）。
@@ -235,6 +236,69 @@ def _clamp_company_fit(value: Any) -> Optional[int]:
         return None
 
 
+_FEEDBACK_SCORE_KEYS = {
+    "specificity_score",
+    "star_score",
+    "company_fit_score",
+    "length_balance_score",
+}
+
+
+def _parse_feedback_items(
+    value: Any,
+    source_text: str,
+    include_company_fit: bool,
+) -> List[ESReviewFeedbackItem]:
+    """モデルが返した引用を原文で検証し、誤った位置へのリンクを防ぐ(#1532)。"""
+    if not isinstance(value, list):
+        return []
+
+    items: List[ESReviewFeedbackItem] = []
+    seen_score_keys: set[str] = set()
+    for candidate in value[:4]:
+        if not isinstance(candidate, dict):
+            continue
+        score_key = candidate.get("score_key")
+        source_excerpt = candidate.get("source_excerpt")
+        issue = candidate.get("issue")
+        suggestion = candidate.get("suggestion")
+        if (
+            not isinstance(score_key, str)
+            or score_key not in _FEEDBACK_SCORE_KEYS
+            or (score_key == "company_fit_score" and not include_company_fit)
+            or score_key in seen_score_keys
+            or not isinstance(source_excerpt, str)
+            or not isinstance(issue, str)
+            or not isinstance(suggestion, str)
+        ):
+            continue
+
+        source_excerpt = source_excerpt.strip()
+        issue = issue.strip()
+        suggestion = suggestion.strip()
+        if (
+            not source_excerpt
+            or len(source_excerpt) > 70
+            or not issue
+            or len(issue) > 80
+            or not suggestion
+            or len(suggestion) > 80
+            or source_excerpt not in source_text
+        ):
+            continue
+
+        items.append(
+            ESReviewFeedbackItem(
+                score_key=score_key,
+                source_excerpt=source_excerpt,
+                issue=issue,
+                suggestion=suggestion,
+            )
+        )
+        seen_score_keys.add(score_key)
+    return items
+
+
 def _parse_star(value: Any) -> ESStarBreakdown:
     """STAR分解を取り出す。欠けていても落とさず空文字で返す(#1533)。"""
     if not isinstance(value, dict):
@@ -353,9 +417,9 @@ def _run_es_review(
         else '"company_strategy": null'
     )
     feedback_hint = (
-        "具体性・STAR準拠・企業適合性・文字数について400字程度でアドバイス。企業特化のアドバイスを含めてください"
+        "具体性・STAR準拠・企業適合性・文字数について400字程度で総評。企業特化の観点も含めてください"
         if has_company_context
-        else "具体性・STAR準拠・文字数について400字程度でアドバイス。企業情報は与えられていないため、企業適合性には触れないでください"
+        else "具体性・STAR準拠・文字数について400字程度で総評。企業情報はないため企業適合性には触れないでください"
     )
     # 文字数バランスの採点基準。指定字数があるならそれに対する評価にする(#1523)
     length_balance_hint = (
@@ -382,8 +446,20 @@ def _run_es_review(
   {company_fit_key},
   "length_balance_score": <{length_balance_hint}>,
   "feedback": "<{feedback_hint}>",
+  "feedback_items": [
+    {{
+      "score_key": "<specificity_score | star_score | company_fit_score | length_balance_score>",
+      "source_excerpt": "<ES文章から一字一句そのまま抜き出した70字以内の箇所>",
+      "issue": "<その箇所に対する具体的な指摘。80字以内>",
+      "suggestion": "<改善すると評価が上がる書き方。80字以内>"
+    }}
+  ],
   {company_strategy_key}
-}}"""
+}}
+
+feedback_items は評価した項目ごとに最大1件、合計最大4件にしてください。企業情報がなく企業適合性を採点しない場合、その項目は含めないでください。
+source_excerpt は【ES文章】内の連続した文章を正確に引用してください。言い換えや推測した文章を引用してはいけません。
+該当箇所を特定できない場合は、その項目を出力しないでください。"""
     )
 
     # --- 第2呼び出し: improved_text + STAR分解（第1のfeedbackを改善の観点として渡す） ---
@@ -528,6 +604,11 @@ def _run_es_review(
             company_fit_score=_clamp_company_fit(company_fit),
             length_balance_score=_clamp_score(review_data.get("length_balance_score", 5)),
             feedback=feedback,
+            feedback_items=_parse_feedback_items(
+                review_data.get("feedback_items"),
+                es_text,
+                include_company_fit=has_company_context,
+            ),
             improved_text=improved_text,
             company_strategy=str(company_strategy) if company_strategy is not None else None,
             company_context_source=company_context_source if has_company_context else "none",

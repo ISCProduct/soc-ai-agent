@@ -423,6 +423,19 @@ components:
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
         star: { $ref: "#/components/schemas/StarBreakdown" }
+        feedback_items:
+          type: array
+          description: 原文の該当箇所と評価根拠に結びついた指摘
+          items:
+            type: object
+            required: [score_key, source_excerpt, issue, suggestion]
+            properties:
+              score_key:
+                type: string
+                enum: [specificity_score, star_score, company_fit_score, length_balance_score]
+              source_excerpt: { type: string, description: 原文からの連続した引用 }
+              issue: { type: string }
+              suggestion: { type: string }
 
     ResumeStatus:
       type: object

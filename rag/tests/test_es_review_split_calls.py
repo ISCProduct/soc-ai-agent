@@ -36,6 +36,26 @@ _REVIEW_PAYLOAD = {
     "company_fit_score": 8,
     "length_balance_score": 5,
     "feedback": "具体性を高めましょう",
+    "feedback_items": [
+        {
+            "score_key": "specificity_score",
+            "source_excerpt": "学生時代に力を入れたこと",
+            "issue": "行動の具体性が不足しています。",
+            "suggestion": "実際に行った工夫を加えましょう。",
+        },
+        {
+            "score_key": "star_score",
+            "source_excerpt": "実際にはない引用",
+            "issue": "根拠のない箇所です。",
+            "suggestion": "この項目は表示しないでください。",
+        },
+        {
+            "score_key": "company_fit_score",
+            "source_excerpt": "学生時代に力を入れたこと",
+            "issue": "企業の人物像との接点が伝わりません。",
+            "suggestion": "企業情報と経験の接点を加えましょう。",
+        },
+    ],
     "company_strategy": "企業対策の助言",
 }
 _IMPROVED_PAYLOAD = {"improved_text": "改善後の文章"}
@@ -91,7 +111,12 @@ def test_review_is_split_into_two_calls(monkeypatch):
 
     assert client.chat.completions.create.call_count == 2
     assert result.feedback == "具体性を高めましょう"
+    assert len(result.feedback_items) == 1
+    assert result.feedback_items[0].source_excerpt == "学生時代に力を入れたこと"
     assert result.improved_text == "改善後の文章"
+    first_prompt = client.chat.completions.create.call_args_list[0].kwargs["messages"][1]["content"]
+    assert '"feedback_items"' in first_prompt
+    assert "一字一句そのまま" in first_prompt
 
 
 def test_retry_once_on_length_finish_reason(monkeypatch):
@@ -151,7 +176,7 @@ def test_second_length_on_improved_stage_advises_shortening(chars, monkeypatch):
     [
         (0, 400),  # 下限
         (100, 400),  # 下限
-        (_REVIEW_TEXT_CHARS, 885),  # 本番で唯一この関数を使う経路（評価の段）
+        (_REVIEW_TEXT_CHARS, 1650),  # 本番で唯一この関数を使う経路（評価の段）
         (1000, 970),
         (20000, _MAX_OUTPUT_TOKENS),  # 天井で打ち止め
     ],
@@ -173,9 +198,9 @@ def test_review_budget_covers_measured_token_rate():
     """
     assert _JP_TOKENS_PER_CHAR >= 0.85
     budget = _estimate_max_tokens(_REVIEW_TEXT_CHARS)
-    # feedback 400字 + company_strategy 400字 を最も重い素材（半角カナ 1.71 tok/char・実測）
-    # で書かれても、再試行1回の引き上げ（2倍）までに収まること
-    assert budget * 2 > 800 * 1.71
+    # feedback 400字 + company_strategy 400字 + 指摘4件(各220字)を
+    # 最も重い素材（半角カナ 1.71 tok/char・実測）で書かれても、再試行1回分までに収まる。
+    assert budget * 2 > 1680 * 1.71
     assert budget * 2 <= _MAX_OUTPUT_TOKENS
 
 
@@ -243,6 +268,7 @@ def test_company_context_present_keeps_company_fields(monkeypatch):
     assert result.company_fit_score == 8
     assert result.company_strategy == "企業対策の助言"
     assert result.company_context_source == "web_search"
+    assert any(item.score_key == "company_fit_score" for item in result.feedback_items)
     review_user = next(
         msg["content"]
         for msg in client.chat.completions.create.call_args_list[0].kwargs["messages"]
