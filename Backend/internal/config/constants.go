@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -89,7 +90,7 @@ func AssessmentScoreMergeEnabled() bool {
 // 閉じている間は POST /api/applications が 403 を返し、画面は「準備中」で無効表示になる。
 // 登録済みの応募の閲覧・辞退・内定承諾は影響を受けない。
 func StudentApplyEnabled() bool {
-	v, err := strconv.ParseBool(os.Getenv("STUDENT_APPLY_ENABLED"))
+	v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("STUDENT_APPLY_ENABLED")))
 	return err == nil && v
 }
 

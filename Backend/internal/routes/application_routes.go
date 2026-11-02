@@ -47,7 +47,7 @@ func SetupApplicationRoutes(
 func requireStudentApply(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if !config.StudentApplyEnabled() {
-			return c.JSON(http.StatusForbidden, map[string]string{"error": "応募は現在受け付けていません"})
+			return echo.NewHTTPError(http.StatusForbidden, "応募は現在受け付けていません")
 		}
 		return next(c)
 	}
