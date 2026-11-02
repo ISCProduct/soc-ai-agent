@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
@@ -68,17 +69,35 @@ func TestESReviewRepository_FindPreviousReturnsNilWhenAbsent(t *testing.T) {
 }
 
 // スコアの二重計上を防ぐ判定は、本人の中で本文のハッシュを引く（#1531）。
+//
+// 「反映済みか」で引くのが要点。保存済みかで引くと、診断セッションが無くて反映
+// できなかった添削が「計上済み」と誤判定され、その本文が以後永久に乗らない。
 // 自分自身に当たらないよう id < excludeID で絞る。
-func TestESReviewRepository_HasSameTextBefore(t *testing.T) {
+func TestESReviewRepository_HasScoredSameText(t *testing.T) {
 	repo, mock := newESReviewRepo(t)
 
-	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `es_reviews` WHERE user_id = \\? AND es_text_hash = \\? AND id < \\?").
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `es_reviews` WHERE user_id = \\? AND es_text_hash = \\? AND id < \\? AND scored_at IS NOT NULL").
 		WithArgs(uint(9001), "abc123", uint(42), 1). // 末尾は Limit(1)
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 
-	seen, err := repo.HasSameTextBefore(9001, "abc123", 42)
+	seen, err := repo.HasScoredSameText(9001, "abc123", 42)
 	require.NoError(t, err)
 	require.True(t, seen)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 直近の反映時刻も「反映済みの行」からだけ引く。
+func TestESReviewRepository_LastScoredAt(t *testing.T) {
+	repo, mock := newESReviewRepo(t)
+	at := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery("SELECT MAX\\(scored_at\\) AS scored_at FROM `es_reviews` WHERE user_id = \\? AND id < \\? AND scored_at IS NOT NULL").
+		WithArgs(uint(9001), uint(42), 1).
+		WillReturnRows(sqlmock.NewRows([]string{"scored_at"}).AddRow(at))
+
+	got, err := repo.LastScoredAt(9001, 42)
+	require.NoError(t, err)
+	require.NotNil(t, got)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

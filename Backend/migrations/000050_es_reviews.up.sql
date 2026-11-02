@@ -36,13 +36,19 @@ CREATE TABLE `es_reviews` (
   `company_fit_score` tinyint unsigned DEFAULT NULL,
   `feedback` text NOT NULL,
   `improved_text` text NOT NULL,
+  -- スコアへ反映した時刻。反映していない行は NULL（#1531）。
+  -- 「直近いつ反映したか」を引くために持つ。反映の有無を行に残さないと、
+  -- 反映されなかった添削が「計上済み」と誤判定され、以後その本文が永久に乗らない。
+  `scored_at` datetime(3) DEFAULT NULL,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
   PRIMARY KEY (`id`),
   -- 前回結果の引き当て（本人の同一設問を新しい順に1件）。
   KEY `idx_es_reviews_user_question` (`user_id`,`question_key`,`id`),
-  -- 同じ本文を既に評価済みかの判定（本人の中で引く）。
+  -- 同じ本文を既にスコアへ乗せたかの判定（本人の中で引く）。
   KEY `idx_es_reviews_user_text` (`user_id`,`es_text_hash`),
+  -- 直近の反映時刻を引く。
+  KEY `idx_es_reviews_user_scored` (`user_id`,`scored_at`),
   -- 教員向けの履歴一覧（本人の全件を新しい順）。
   -- InnoDB の二次索引は末尾に主キーを含むので実質 (user_id) と等価だが、
   -- 「id の降順で引く」意図を読めるように明示しておく。

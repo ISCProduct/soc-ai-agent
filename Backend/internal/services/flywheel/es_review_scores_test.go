@@ -29,7 +29,9 @@ func TestUpdateScoresFromESReview_NoDiagnosisSessionWritesNothing(t *testing.T) 
 	mock.ExpectQuery("SELECT \\* FROM `user_weight_scores`").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "session_id"}))
 
-	require.NoError(t, svc.UpdateScoresFromESReview(testUserID, newESReview()))
+	applied, err := svc.UpdateScoresFromESReview(testUserID, newESReview())
+	require.NoError(t, err)
+	require.False(t, applied, "反映していないので false を返すべき")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -83,13 +85,17 @@ func TestUpdateScoresFromESReview_WritesIntoLatestDiagnosisSession(t *testing.T)
 		mock.ExpectCommit()
 	}
 
-	require.NoError(t, svc.UpdateScoresFromESReview(testUserID, newESReview()))
+	applied, err := svc.UpdateScoresFromESReview(testUserID, newESReview())
+	require.NoError(t, err)
+	require.True(t, applied)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 // nil は何もしない（呼び出し側が保存に失敗した場合など）。
 func TestUpdateScoresFromESReview_NilReviewIsNoop(t *testing.T) {
 	svc, mock := newCrossFeatureService(t)
-	require.NoError(t, svc.UpdateScoresFromESReview(testUserID, nil))
+	applied, err := svc.UpdateScoresFromESReview(testUserID, nil)
+	require.NoError(t, err)
+	require.False(t, applied)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

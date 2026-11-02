@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // ESReview は ES添削1回分の入力と結果（#1531）。
@@ -24,9 +26,11 @@ type ESReview struct {
 	QuestionType string  `gorm:"type:varchar(50);not null" json:"question_type"`
 	CompanyName  *string `gorm:"type:varchar(255)" json:"company_name,omitempty"`
 	ESText       string  `gorm:"type:text;not null" json:"es_text"`
-	// ESTextHash は本文の SHA-256。同じ本文を二度スコアに乗せないための鍵。
+	// ESTextHash は正規化した本文の SHA-256。同じ本文を二度スコアに乗せないための鍵。
 	ESTextHash string `gorm:"type:char(64);not null" json:"-"`
-	CharLimit  *uint  `json:"char_limit,omitempty"`
+	// ScoredAt はスコアへ反映した時刻。反映していなければ nil。
+	ScoredAt  *time.Time `json:"-"`
+	CharLimit *uint      `json:"char_limit,omitempty"`
 	// CharLimitMode は "within"（以内）か "around"（程度）。未指定なら nil。
 	CharLimitMode *string `gorm:"type:varchar(20)" json:"char_limit_mode,omitempty"`
 
@@ -46,10 +50,26 @@ func (ESReview) TableName() string { return "es_reviews" }
 
 // HashESText は本文を突き合わせるための鍵を返す。
 //
-// 前後の空白だけの違いは同じ本文とみなす。それ以上は正規化しない
-// （中身が変わっていれば別の文章として扱う）。
+// 「見た目が同じ本文」を同じ鍵にする。ここを緩くすると、不可視文字を1つ足す・
+// 全角半角を変える・NFD にするだけで別の本文として何度でもスコアを積めてしまう
+// （いずれもテストで実際に再現した経路）。
+//
+// ただし正規化をどれだけ強めても、一語でも書き換えられれば別の鍵になる。
+// 内容の判定だけでは原理的に塞がらないので、反映の頻度そのものにも上限を置く
+// （esreview.Service の scoreInterval）。ここはあくまで「同じ文章の出し直し」を
+// 弾くための層。
 func HashESText(text string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(text)))
+	// NFKC: 全角半角・合成文字の違いを畳む。
+	normalized := norm.NFKC.String(text)
+	var b strings.Builder
+	for _, r := range normalized {
+		// Cf（書式用の不可視文字: ZWSP・BOM・soft hyphen・word joiner など）を落とす。
+		if unicode.Is(unicode.Cf, r) || unicode.IsSpace(r) {
+			continue
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:])
 }
 

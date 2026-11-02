@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"Backend/internal/middleware"
 	"Backend/internal/models"
@@ -33,11 +34,18 @@ func (s *esRepoSpy) FindPreviousByQuestion(userID uint, questionKey string, excl
 	return s.previous, nil
 }
 
-func (s *esRepoSpy) HasSameTextBefore(uint, string, uint) (bool, error) { return s.seenText, nil }
+func (s *esRepoSpy) HasScoredSameText(uint, string, uint) (bool, error) { return s.seenText, nil }
+
+func (s *esRepoSpy) LastScoredAt(uint, uint) (*time.Time, error) { return nil, nil }
+
+func (s *esRepoSpy) MarkScored(uint, time.Time) error { return nil }
 
 type scoreSpy struct{ calls int }
 
-func (s *scoreSpy) UpdateScoresFromESReview(uint, *models.ESReview) error { s.calls++; return nil }
+func (s *scoreSpy) UpdateScoresFromESReview(uint, *models.ESReview) (bool, error) {
+	s.calls++
+	return true, nil
+}
 
 // newReviewCtxWithUser は実行者を積んだコンテキストを作る。
 // orgID=0 は「本人は分かったが所属が確定しない」状態（EchoOptionalUserAuth では

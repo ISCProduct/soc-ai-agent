@@ -4,6 +4,7 @@ package esreview
 import (
 	"log"
 	"strings"
+	"time"
 
 	"Backend/internal/models"
 )
@@ -12,13 +13,27 @@ import (
 type Repository interface {
 	Create(review *models.ESReview) error
 	FindPreviousByQuestion(userID uint, questionKey string, excludeID uint) (*models.ESReview, error)
-	// HasSameTextBefore は本人が同じ本文を既に添削済みか。スコアの二重計上を防ぐ。
-	HasSameTextBefore(userID uint, textHash string, excludeID uint) (bool, error)
+	// HasScoredSameText は本人が同じ本文で既にスコアへ反映済みか。
+	HasScoredSameText(userID uint, textHash string, excludeID uint) (bool, error)
+	// LastScoredAt は本人が直近で反映した時刻。まだ無ければ nil。
+	LastScoredAt(userID, excludeID uint) (*time.Time, error)
+	// MarkScored は反映したことを記録する。
+	MarkScored(id uint, at time.Time) error
 }
+
+// scoreInterval は ES添削がスコアを動かせる間隔。
+//
+// 本文の正規化をどれだけ強めても、一語でも書き換えられれば別の本文になる。
+// 内容の判定だけでは積み上げを止められないので、反映の頻度そのものに上限を置く。
+// 移動平均（既存0.7/新規0.3）で上限へ寄せるには10回ほど要るため、1日1回なら
+// 意図的に積んでも2週間近くかかり、正当な推敲（1日1回でも十分に反映される）は妨げない。
+const scoreInterval = 24 * time.Hour
 
 // ScoreUpdater は user_weight_scores への反映面。
 type ScoreUpdater interface {
-	UpdateScoresFromESReview(userID uint, review *models.ESReview) error
+	// 戻り値の bool は「実際に反映したか」。診断セッションが無いなどで反映しなかった
+	// 場合に false を返す。true のときだけ反映済みとして記録する。
+	UpdateScoresFromESReview(userID uint, review *models.ESReview) (bool, error)
 }
 
 // Input は1回の添削の入力と結果。コントローラが RAG の応答から詰める。
@@ -101,33 +116,57 @@ func (s *Service) Save(in Input) (*models.ESReview, *models.ESReview, error) {
 		}
 	}
 
-	// 同じ本文を出し直しただけなら、新しい情報は何も得られていないのでスコアは動かさない。
-	// 移動平均（既存0.7/新規0.3）なので、同じESを繰り返すだけで対象カテゴリを上限へ寄せられる。
-	// ES添削はテキストボックスで何度でも押せるため、履歴書（PDFアップロードが要る）より摩擦がない。
+	// スコアへ反映してよいかを2段で判定する（#1531）。
 	//
-	// 判定は**本文のハッシュ**で行い、設問には紐づけない。設問や種別は添削結果に
-	// 影響しない任意入力なので、設問を鍵にすると本文を変えずにラベルを変えるだけで
-	// 何度でも加点できる（設問を空にすれば引き当て自体が飛ぶ）。実測で確認した経路。
+	// 移動平均（既存0.7/新規0.3）なので、ESを繰り返し出すだけで対象カテゴリを
+	// 上限へ寄せられる。ES添削はテキストボックスで何度でも押せるため、
+	// 履歴書（PDFアップロードが要る）より摩擦がない。
 	//
-	// 残るのは「本文を少しずつ書き換えて繰り返す」経路。中身が変われば別の文章として
-	// 評価するのは仕様どおりで、ここは塞げない。
-	alreadyScored := false
-	if s.repo != nil {
-		seen, err := s.repo.HasSameTextBefore(in.UserID, review.ESTextHash, review.ID)
-		if err != nil {
-			// 判定できないときは反映しない。二重に積む方が戻せない。
-			log.Printf("[ESReview] 本文の重複判定に失敗 user=%d review=%d: %v", in.UserID, review.ID, err)
-			alreadyScored = true
-		} else {
-			alreadyScored = seen
-		}
-	}
-	if s.scores != nil && !alreadyScored {
-		if err := s.scores.UpdateScoresFromESReview(in.UserID, review); err != nil {
+	//  1. 同じ本文で既に反映済みなら動かさない（同じ文章の出し直しに新しい情報は無い）
+	//  2. 直近の反映から scoreInterval 以内なら動かさない
+	//
+	// 2 が要るのは、1 だけでは止まらないから。本文を正規化しても一語書き換えれば
+	// 別の本文になる。実際に、不可視文字を1つ足す・全角半角を変える・NFD にするだけで
+	// 何度でも積める経路がテストで再現した。内容の判定は「同じ文章」を弾く層にとどめ、
+	// 積み上げの速度は時間で縛る。
+	if s.scores != nil && s.shouldScore(in.UserID, review) {
+		applied, err := s.scores.UpdateScoresFromESReview(in.UserID, review)
+		switch {
+		case err != nil:
 			log.Printf("[ESReview] スコア反映に失敗 user=%d review=%d: %v", in.UserID, review.ID, err)
+		case !applied:
+			// 反映しなかった行を「反映済み」にすると、その本文が以後永久に乗らない。
+			// 診断セッションができてから同じ本文を出し直せば反映される。
+		default:
+			if err := s.repo.MarkScored(review.ID, time.Now()); err != nil {
+				// 記録できないと次回も反映できてしまう。気づけるようにログへ残す。
+				log.Printf("[ESReview] 反映時刻の記録に失敗 user=%d review=%d: %v", in.UserID, review.ID, err)
+			}
 		}
 	}
 	return review, previous, nil
+}
+
+// shouldScore はこの添削をスコアへ反映してよいかを返す。
+// 判定できないときは false（二重に積む方が戻せない）。
+func (s *Service) shouldScore(userID uint, review *models.ESReview) bool {
+	scored, err := s.repo.HasScoredSameText(userID, review.ESTextHash, review.ID)
+	if err != nil {
+		log.Printf("[ESReview] 本文の重複判定に失敗 user=%d review=%d: %v", userID, review.ID, err)
+		return false
+	}
+	if scored {
+		return false
+	}
+	last, err := s.repo.LastScoredAt(userID, review.ID)
+	if err != nil {
+		log.Printf("[ESReview] 直近の反映時刻の取得に失敗 user=%d review=%d: %v", userID, review.ID, err)
+		return false
+	}
+	if last != nil && time.Since(*last) < scoreInterval {
+		return false
+	}
+	return true
 }
 
 // clampScore は RAG の 1〜10 評価を範囲内に収める。

@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"errors"
+	"time"
 
 	"Backend/internal/models"
 
@@ -39,18 +40,43 @@ func (r *ESReviewRepository) FindPreviousByQuestion(userID uint, questionKey str
 	return &review, nil
 }
 
-// HasSameTextBefore は本人が同じ本文を既に添削済みかを返す。
+// HasScoredSameText は本人が同じ本文で既にスコアへ反映済みかを返す。
 //
-// スコアを二重に積ませないための判定。設問や種別は添削結果に影響しない任意入力なので、
-// それらを鍵にすると本文を変えずにラベルだけ変えて何度でも加点できる（実測で確認）。
+// 「反映済みか」で引くのが要点。保存済みかで引くと、診断セッションが無くて反映
+// できなかった添削が「計上済み」と誤判定され、その本文が以後永久にスコアへ乗らない。
 // excludeID には今回保存した行を渡す。渡さないと自分自身に当たって常に true になる。
-func (r *ESReviewRepository) HasSameTextBefore(userID uint, textHash string, excludeID uint) (bool, error) {
+func (r *ESReviewRepository) HasScoredSameText(userID uint, textHash string, excludeID uint) (bool, error) {
 	var count int64
 	err := r.db.Model(&models.ESReview{}).
-		Where("user_id = ? AND es_text_hash = ? AND id < ?", userID, textHash, excludeID).
+		Where("user_id = ? AND es_text_hash = ? AND id < ? AND scored_at IS NOT NULL",
+			userID, textHash, excludeID).
 		Limit(1).
 		Count(&count).Error
 	return count > 0, err
+}
+
+// LastScoredAt は本人が直近でスコアへ反映した時刻。まだ無ければ nil。
+//
+// 反映の頻度に上限を置くために使う。本文の正規化をどれだけ強めても、
+// 一語書き換えれば別の本文になるので、内容の判定だけでは積み上げを止められない。
+func (r *ESReviewRepository) LastScoredAt(userID, excludeID uint) (*time.Time, error) {
+	var row struct{ ScoredAt *time.Time }
+	err := r.db.Model(&models.ESReview{}).
+		Select("MAX(scored_at) AS scored_at").
+		Where("user_id = ? AND id < ? AND scored_at IS NOT NULL", userID, excludeID).
+		Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return row.ScoredAt, nil
+}
+
+// MarkScored はスコアへ反映したことを記録する。
+func (r *ESReviewRepository) MarkScored(id uint, at time.Time) error {
+	return r.db.Model(&models.ESReview{}).Where("id = ?", id).Update("scored_at", at).Error
 }
 
 // ListByUser は学校で絞らずに添削履歴を新しい順に返す。

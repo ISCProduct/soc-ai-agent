@@ -202,17 +202,19 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromResumeReview(
 //
 // 診断セッションがまだ無い（チャット診断を一度もしていない）利用者には何も書かない。
 // 欠けたカテゴリだけのセッションを作る方が害が大きい。
-func (s *CrossFeatureIntegrationService) UpdateScoresFromESReview(userID uint, review *models.ESReview) error {
+// 戻り値の bool は「実際に反映したか」。呼び出し元はこれを見て反映済みの記録を残す。
+// 反映していないのに記録すると、その本文が以後永久にスコアへ乗らない。
+func (s *CrossFeatureIntegrationService) UpdateScoresFromESReview(userID uint, review *models.ESReview) (bool, error) {
 	if review == nil {
-		return nil
+		return false, nil
 	}
 	sessionID, ok, err := s.esTargetSession(userID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !ok {
 		log.Printf("[CrossFeature] ES添削(es_review_id=%d): 診断セッションが無いため user_weight_scores へ反映しない\n", review.ID)
-		return nil
+		return false, nil
 	}
 
 	// 対応表と式は esScoreMapping / mapESScore（score_mapping.go）に集約している。
@@ -223,7 +225,7 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromESReview(userID uint, r
 			log.Printf("[CrossFeature] es→score update failed (cat=%s): %v\n", mapped.category, err)
 		}
 	}
-	return nil
+	return true, nil
 }
 
 // esTargetSession は ES添削の反映先セッションを返す。見つからなければ ok=false。
