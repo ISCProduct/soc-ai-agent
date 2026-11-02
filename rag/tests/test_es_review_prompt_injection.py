@@ -238,8 +238,8 @@ def test_rewrite_path_inputs_are_wrapped(monkeypatch):
         )
 
     calls = mock_client.chat.completions.create.call_args_list
-    # 評価1 + 改善文(初回 + 再生成2回) = 4回。すべてで囲みとsystemの禁止指示が効く
-    assert len(calls) == 4
+    # 評価1 + 改善文1 + 作り直し1。同じ600字は短くなっていないので、2回目の作り直しは始めない。
+    assert len(calls) == 3
     improved_messages = []
     for call_kwargs in (c.kwargs for c in calls):
         user_message = next(m["content"] for m in call_kwargs["messages"] if m["role"] == "user")
@@ -251,7 +251,8 @@ def test_rewrite_path_inputs_are_wrapped(monkeypatch):
         if "【添削フィードバック】" in user_message:
             improved_messages.append(user_message)
 
-    assert len(improved_messages) == 3
+    assert len(improved_messages) == 2
+    assert "600字" in improved_messages[1]
     for user_message in improved_messages:
         assert injected_tech in user_message
         assert re.search(r"UNTRUSTED_技術スタック_[0-9a-f]+_START", user_message)
