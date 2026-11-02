@@ -84,6 +84,15 @@ func AssessmentScoreMergeEnabled() bool {
 	return err != nil || v
 }
 
+// StudentApplyEnabled は学生が企業へ応募登録できるか（SOCAIAGENT-403）。
+// 既定は閉じている。方針として応募機能を開く時点で STUDENT_APPLY_ENABLED=true にする。
+// 閉じている間は POST /api/applications が 403 を返し、画面は「準備中」で無効表示になる。
+// 登録済みの応募の閲覧・辞退・内定承諾は影響を受けない。
+func StudentApplyEnabled() bool {
+	v, err := strconv.ParseBool(os.Getenv("STUDENT_APPLY_ENABLED"))
+	return err == nil && v
+}
+
 func RelationGraphMaxDepth() int { return getIntOrDefault("RELATION_GRAPH_MAX_DEPTH", 4) }
 func RelationGraphMaxNodes() int { return getIntOrDefault("RELATION_GRAPH_MAX_NODES", 60) }
 

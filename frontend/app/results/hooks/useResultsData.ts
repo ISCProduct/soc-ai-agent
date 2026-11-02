@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { sendAnalysisReport } from '@/lib/api'
 import { fetchWithTimeout } from '@/lib/fetch-timeout'
 import { authService } from '@/lib/auth'
+import { fetchApplyEnabled } from '@/lib/apply-availability'
 import { needsLowMatchConfirm } from '@/lib/low-match'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import {
@@ -58,6 +59,8 @@ export function useResultsData() {
   const [emailSending, setEmailSending] = useState(false)
   const [favoritingId, setFavoritingId] = useState<number | null>(null)
   const [applyingId, setApplyingId] = useState<number | null>(null)
+  // 応募を受け付けているか。取得できるまでは閉じている扱い（SOCAIAGENT-403）
+  const [applyEnabled, setApplyEnabled] = useState(false)
   // 低マッチ確認ダイアログの対象。null なら非表示（#1028）
   const [lowMatchTarget, setLowMatchTarget] = useState<Company | null>(null)
   const [snackbar, setSnackbar] = useState<SnackbarState>({
@@ -298,6 +301,17 @@ export function useResultsData() {
     }
   }
 
+  useEffect(() => {
+    if (!mounted) return
+    let alive = true
+    fetchApplyEnabled(authService.getUserFetchHeaders()).then((enabled) => {
+      if (alive) setApplyEnabled(enabled)
+    })
+    return () => {
+      alive = false
+    }
+  }, [mounted])
+
   // マッチ度が低い企業は一度確認する(#1028)。ブロックはしない。
   // 応募処理そのものは runApply のまま変えず、前段に確認だけを挟む。
   const handleApply = async (e: MouseEvent, company: Company) => {
@@ -307,7 +321,7 @@ export function useResultsData() {
       setSnackbar({ open: true, message: GUEST_APPLICATIONS_DISABLED_REASON, severity: 'error' })
       return
     }
-    if (!company.matchId || company.isApplied || applyingId !== null) return
+    if (!applyEnabled || !company.matchId || company.isApplied || applyingId !== null) return
     if (needsLowMatchConfirm(company.matchScore, company.matchedAxisCount)) {
       setLowMatchTarget(company)
       return
@@ -399,6 +413,7 @@ export function useResultsData() {
     emailSending,
     favoritingId,
     applyingId,
+    applyEnabled,
     snackbar,
     isGuestUser,
     handleSendEmail,

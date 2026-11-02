@@ -331,9 +331,18 @@ Referer に user_id が残るだけです。
 
 | メソッド | パス | 概要 |
 |---------|------|------|
-| POST | `/api/applications` | 応募登録 |
+| POST | `/api/applications` | 応募登録。`STUDENT_APPLY_ENABLED` が `true` でない間は 403 |
+| GET | `/api/applications/availability` | 応募を受け付けているか（`{"enabled": bool}`）。画面のボタン表示に使う |
 | GET | `/api/applications` | 選考一覧 |
 | PUT | `/api/applications/{id}` | ステータス更新 |
+
+### 応募の開閉（SOCAIAGENT-403）
+
+学生の新規応募は既定で閉じている。開くときは Backend の環境変数 `STUDENT_APPLY_ENABLED=true` を設定して再起動する。
+
+- フロントは実行時に `GET /api/applications/availability` で取得する。再ビルドは不要。
+- 閉じている間、マッチング結果の応募ボタンは「応募は準備中」で無効になる。取得に失敗したときも閉じている側に倒す。
+- 登録済みの応募の閲覧・辞退・内定承諾、企業側の選考管理は影響を受けない。
 
 ### ステータス一覧
 ```
