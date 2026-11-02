@@ -357,6 +357,8 @@ export function useResultsData() {
           actionLabel: '選考管理を見る',
         })
       } else {
+        // 403 は「受付が閉じた」とは限らない（他人の match への応募もある）。決めつけず取り直す。
+        if (res.status === 403) setApplyEnabled(await fetchApplyEnabled(authService.getUserFetchHeaders()))
         let message = '応募に失敗しました'
         try {
           const err = await res.json()
