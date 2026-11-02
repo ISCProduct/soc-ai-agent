@@ -39,6 +39,7 @@ describe('ResultsListView', () => {
         applyingId={null}
         snackbar={{ open: false, message: '', severity: 'success' }}
         isGuestUser={false}
+        applyEnabled
         onCloseSnackbar={noop}
         onBack={noop}
         onReset={noop}
@@ -149,5 +150,24 @@ describe('ResultsListView', () => {
     })
     const alert = screen.getByRole('alert')
     expect(within(alert).queryByRole('button', { name: '選考管理を見る' })).not.toBeInTheDocument()
+  })
+
+  // SOCAIAGENT-403: 応募を閉じている間は「準備中」で無効にする。応募済みの表示は変えない。
+  it('応募を閉じている間は「応募は準備中」で無効になり、押しても onApply を呼ばない', () => {
+    const onApply = jest.fn()
+    renderList({ applyEnabled: false, onApply })
+
+    const button = screen.getByRole('button', { name: '応募は準備中' })
+    expect(button).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '応募する' })).not.toBeInTheDocument()
+    fireEvent.click(button)
+    expect(onApply).not.toHaveBeenCalled()
+  })
+
+  it('応募を閉じていても、応募済みの企業は「応募済み」のまま表示する', () => {
+    renderList({ applyEnabled: false, companies: [{ ...sampleCompany, isApplied: true }] })
+
+    expect(screen.getByRole('button', { name: '応募済み' })).toBeDisabled()
+    expect(screen.queryByText('応募は準備中')).not.toBeInTheDocument()
   })
 })

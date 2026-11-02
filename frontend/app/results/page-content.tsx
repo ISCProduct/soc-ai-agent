@@ -75,6 +75,7 @@ function ResultsContent() {
     applyingId,
     snackbar,
     isGuestUser,
+    applyEnabled,
     handleSendEmail,
     handleBack,
     handleReset,
@@ -163,6 +164,7 @@ function ResultsContent() {
       applyingId={applyingId}
       snackbar={snackbar}
       isGuestUser={isGuestUser}
+      applyEnabled={applyEnabled}
       onCloseSnackbar={handleCloseSnackbar}
       onBack={handleBack}
       onReset={handleReset}

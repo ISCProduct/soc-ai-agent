@@ -4109,11 +4109,15 @@ paths:
     post:
       tags: [applications]
       summary: 応募する
+      description: |
+        応募を閉じている間（`STUDENT_APPLY_ENABLED` が `true` でない既定の状態）は 403 を返す。
+        開いているかは `GET /api/applications/availability` で分かる。
       security: [{ userToken: [] }]
       responses:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
     get:
       tags: [applications]
       summary: 自分の応募一覧
@@ -4127,6 +4131,24 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Application"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/applications/availability:
+    get:
+      tags: [applications]
+      summary: 応募を受け付けているか
+      description: 画面の応募ボタンを有効にするかの判定に使う。環境変数 `STUDENT_APPLY_ENABLED` の値を返す。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: { type: boolean }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/applications/correlation:
