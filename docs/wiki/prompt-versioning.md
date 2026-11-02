@@ -7,18 +7,18 @@ AI呼び出しの `api_call_logs` に `prompt_stage`、`prompt_version`、`promp
 実際に使った本文の版を記録する。
 マッチング理由の版は `api_call_logs` と同じ素の版名（例: `v2`）で保持する。
 
-現時点で実装済みの各工程の本文は `v2` のみである。未登録の版名は `v2` にフォールバックし、
-`PROMPT_VERSION` は従来どおり全工程共通の設定として受け付けるが、登録済みの本文だけが有効になる。
-工程別設定 `PROMPT_VERSION_<STAGE>` は共通設定より優先する。
-工程別設定は `PROMPT_VERSION_<STAGE>` で指定でき、従来の `PROMPT_VERSION` は共通設定として
-後方互換を維持する。標準設定の例は `.env.example`、開発用の例は `Backend/.env.example`、
-staging / production の設定経路は `infra/terraform/environments/` を参照する。
-Terraform の `prompt_versions` は指定された工程だけ環境変数に出力する。工程別指定がなければ
-共通の `prompt_version` が使われる。
+`PROMPT_VERSION_<STAGE>` は工程別の版ラベル、`PROMPT_VERSION` は後方互換の共通ラベルである。
+工程別設定が共通設定に優先し、どちらも未設定なら `v2` を記録する。ラベルは英数字で始まり、
+英数字・`.`・`_`・`-` のみ、最大64文字を指定できる。不正な工程別値は共通値へ、不正な共通値は
+既定値へフォールバックする。
 
-候補版本文が存在しない状態でA/B割当を行うと、同じ本文を異なる版として記録して評価を誤るため、
-`PROMPT_AB_<STAGE>` は現在無効である。異なる候補本文を追加し、版ごとの本文選択と評価が検証された後に
-A/B割当を再導入する。
+ラベルはデプロイ済みのプロンプト本文を識別する運用メタデータであり、環境変数だけで本文を切り替える
+機能ではない。プロンプト本文を変更するときは対応する工程のラベルも同じリリースで更新する。
+prod / staging の設定経路は `infra/terraform/environments/` を参照する。
+
+異なる候補本文と本文選択経路が存在しないため、`PROMPT_AB_<STAGE>` によるA/B振り分けは未対応である。
+現状の `prompt_variant` は `control` のみを記録する。候補本文の導入時に、本文選択・割当・出力記録の
+一貫性をテストしたうえでA/B振り分けを追加する。
 
 質問生成、AI評価スコア、企業情報、マッチング理由は、出力レコードにも版を保持する。
 AIを使わないルール評価や選択肢回答は版を記録しない。マッチング再計算で新しいAI理由が
@@ -27,4 +27,4 @@ AI呼び出しは `unknown` として保存し、未計測経路を識別でき�
 
 `prompt_stage` は機能配賦用の `feature` とは異なる分析軸であり、1工程が複数の機能に対応する場合がある。
 例: `question_generation` → `chat_question`、`score_evaluation` → `chat_answer_eval`、
-`company_extraction` → `company_parse` など。
+`company_extraction` → `company_parse` / `company_search`。未計測経路は `unknown` として記録する。

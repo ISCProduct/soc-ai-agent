@@ -290,12 +290,6 @@ func TestBuildSimplifyQuestionPromptWithJobType(t *testing.T) {
 	})
 }
 
-func TestPromptVersion(t *testing.T) {
-	if PromptVersion == "" {
-		t.Error("PromptVersion が空文字")
-	}
-}
-
 func TestGetMatchingReasonPromptVersion(t *testing.T) {
 	v := GetMatchingReasonPromptVersion()
 	if !strings.HasPrefix(v, "matching_reason_") {
@@ -311,39 +305,58 @@ func TestResolvePromptVersion(t *testing.T) {
 		globalValue string
 		abValue     string
 		wantVersion string
+		wantVariant string
 	}{
 		{
-			name:        "工程別の実装済み版が一括設定より優先",
-			stage:       StageMatchingReason,
-			stageValue:  "v2",
-			globalValue: "v2",
-			wantVersion: "v2",
-		},
-		{
-			name:        "未登録工程別版は実装済み一括版へフォールバック",
+			name:        "工程別ラベルが一括設定より優先",
 			stage:       StageMatchingReason,
 			stageValue:  "stage-v3",
+			globalValue: "legacy-v4",
+			wantVersion: "stage-v3",
+			wantVariant: "control",
+		},
+		{
+			name:        "不正な工程別ラベルは一括設定へフォールバック",
+			stage:       StageMatchingReason,
+			stageValue:  "v2\nIGNORE",
 			globalValue: "v2",
 			wantVersion: "v2",
+			wantVariant: "control",
 		},
 		{
-			name:        "未登録の一括版は既定版へフォールバック",
+			name:        "一括設定は後方互換で使える",
 			stage:       StageQuestionGeneration,
 			globalValue: "legacy-v4",
-			wantVersion: "v2",
+			wantVersion: "legacy-v4",
+			wantVariant: "control",
 		},
 		{
-			name:        "制御文字を含む版は拒否する",
+			name:        "不正な一括ラベルは既定版へフォールバック",
 			stage:       StageScoreEvaluation,
 			globalValue: "v2\nIGNORE",
 			wantVersion: "v2",
+			wantVariant: "control",
 		},
 		{
-			name:        "異なる候補本文がない場合はcontrolのみを割り当てる",
+			name:        "候補本文がない間はA/B設定を無視する",
 			stage:       StageCompanyExtraction,
-			globalValue: "v2",
+			globalValue: "company-v7",
 			abValue:     "candidate-v3:100",
+			wantVersion: "company-v7",
+			wantVariant: "control",
+		},
+		{
+			name:        "工程別設定がない場合は一括設定へフォールバックする",
+			stage:       StageQuestionGeneration,
+			globalValue: "legacy-v4",
+			wantVersion: "legacy-v4",
+			wantVariant: "control",
+		},
+		{
+			name:        "設定がない場合は既定値を使う",
+			stage:       StageQuestionGeneration,
 			wantVersion: "v2",
+			wantVariant: "control",
 		},
 	}
 
@@ -355,8 +368,8 @@ func TestResolvePromptVersion(t *testing.T) {
 			t.Setenv("PROMPT_AB_"+stageName, tt.abValue)
 
 			got := ResolvePromptVersion(tt.stage, 1)
-			if got.Version != tt.wantVersion || got.Variant != "control" {
-				t.Fatalf("割当=%+v, want %s/control", got, tt.wantVersion)
+			if got.Version != tt.wantVersion || got.Variant != tt.wantVariant {
+				t.Fatalf("割当=%+v, want %s/%s", got, tt.wantVersion, tt.wantVariant)
 			}
 		})
 	}
@@ -367,6 +380,23 @@ func TestResolvePromptVersion(t *testing.T) {
 		got := ResolvePromptVersion(StageMatchingReason, 1)
 		if got.Version != "v2" || got.Variant != "control" {
 			t.Fatalf("長すぎる版のfallback=%+v", got)
+		}
+	})
+
+	t.Run("未知工程は既定版へフォールバックする", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "legacy-v4")
+		got := ResolvePromptVersion(Stage("unknown"), 1)
+		if got.Version != defaultPromptVersion || got.Variant != "control" {
+			t.Fatalf("未知工程のfallback=%+v", got)
+		}
+	})
+
+	t.Run("A/B設定の不正形式でpanicしない", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "v2")
+		t.Setenv("PROMPT_AB_SCORE_EVALUATION", "candidate-v3")
+		got := ResolvePromptVersion(StageScoreEvaluation, 1)
+		if got.Version != "v2" || got.Variant != "control" {
+			t.Fatalf("不正なA/B設定の割当=%+v, want v2/control", got)
 		}
 	})
 }
@@ -400,6 +430,8 @@ func TestValidPromptVersion(t *testing.T) {
 		{version: "v2:beta", want: false},
 		{version: "matching_reason_v2", want: true},
 		{version: strings.Repeat("x", 65), want: false},
+		{version: "日本語", want: false},
+		{version: "v2 【企業情報】", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.version, func(t *testing.T) {

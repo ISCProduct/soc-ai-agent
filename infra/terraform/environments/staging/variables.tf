@@ -140,13 +140,13 @@ variable "openai_secret_arn" {
 
 variable "prompt_version" {
   type        = string
-  description = "後方互換の共通プロンプト版。現在登録済みの版は v2 のみ"
+  description = "後方互換の共通プロンプト版ラベル。本文を変更するリリースと同時に更新する"
   default     = "v2"
 }
 
 variable "prompt_versions" {
   type        = map(string)
-  description = "工程別プロンプト版。現在登録済みの版は v2 のみ"
+  description = "工程別プロンプト版ラベル。本文を変更するリリースと同時に更新する"
   default     = {}
 }
 

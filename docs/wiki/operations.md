@@ -13,6 +13,7 @@
    - [エラートラッキング(Sentry)の有効化](#34-エラートラッキングsentryの有効化-1185)
    - [エラートラッキング（Sentry）](#34-エラートラッキングsentry619--1185)
    - [クライアントIPをBFFからBackendへ引き継ぐ](#35-クライアントipをbffからbackendへ引き継ぐ-1407)
+   - [プロンプト版ラベルの切り替えと比較](#36-プロンプト版ラベルの切り替えと比較-1778)
 4. [障害対応](#4-障害対応)
 5. [データベース管理](#5-データベース管理)
 6. [管理画面操作](#6-管理画面操作)
@@ -310,6 +311,30 @@ curl -X POST http://localhost:8080/api/admin/score-validation/calibration/run \
 ---
 
 ## 3. 監視項目
+
+### 3.6 プロンプト版ラベルの切り替えと比較 (#1778)
+
+版ラベルはプロンプト本文を識別する運用メタデータである。本文を変更するリリースでは、同じリリースで
+`PROMPT_VERSION_<STAGE>` も更新する。工程別値は `PROMPT_VERSION` より優先され、未設定時は `v2`。
+設定例と Terraform 変数は `.env.example` と `infra/terraform/environments/` を参照する。
+
+デプロイ後、利用ログの工程別件数と版ラベルを確認する:
+
+```sql
+SELECT prompt_stage, prompt_version, prompt_variant, COUNT(*) AS calls
+FROM api_call_logs
+WHERE called_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY
+GROUP BY prompt_stage, prompt_version, prompt_variant
+ORDER BY prompt_stage, prompt_version, prompt_variant;
+```
+
+質問・評価・企業情報・マッチング理由の生成結果に記録されたラベルは、それぞれ
+`ai_generated_questions.prompt_version`、`user_weight_scores.prompt_version`、
+`companies.info_prompt_version`、`user_company_matches.match_reason_prompt_version` で確認する。
+現在は異なる候補本文がないためA/B振り分けは未対応で、`prompt_variant` は `control` のみとなる。
+`prompt_stage='unknown'` は工程メタデータが付与されていない呼び出しを表す。
+
+詳細は [プロンプト版の記録](./prompt-versioning.md) を参照。
 
 ### APIコスト監視
 

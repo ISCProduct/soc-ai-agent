@@ -11,36 +11,37 @@ import (
 	"Backend/internal/usagectx"
 )
 
-// Stage は独立して切り替え可能なプロンプト工程を表す。
+// Stage はプロンプト版を記録する工程を表す。
 type Stage string
 
 const (
-	// Stage は usagectx.Feature とは別の分析軸。question_generation は chat_question、
-	// score_evaluation は chat_answer_eval、matching_reason は matching_reason、
-	// company_extraction は company_search / company_parse のAI呼び出しに対応する。
+	// Stage は usagectx.Feature とは別の分析軸。1つの工程が複数の機能に対応する場合がある。
 	StageQuestionGeneration Stage = "question_generation"
 	StageScoreEvaluation    Stage = "score_evaluation"
 	StageMatchingReason     Stage = "matching_reason"
 	StageCompanyExtraction  Stage = "company_extraction"
 )
 
-// VersionAssignment は工程に割り当てられた版とA/B群を表す。
+// VersionAssignment は工程に割り当てられた版ラベルと実験群を表す。
 type VersionAssignment struct {
 	Version string
 	Variant string
 }
+
+const defaultPromptVersion = "v2"
 
 var (
 	promptVersionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 	warnedPromptSettings sync.Map
 )
 
-// ResolvePromptVersion は工程別設定と実装済みの本文からプロンプト版を決める。
+// ResolvePromptVersion は工程別設定、共通設定、既定値の順に版ラベルを解決する。
 //
-// 候補本文が実装されるまでは、全ての利用者に実在するcontrol版のみを割り当てる。
+// ラベルはデプロイされた本文の識別子であり、本文自体はコードで管理する。
+// 異なる候補本文がない間はA/B群を作らず、常にcontrolを返す。
 func ResolvePromptVersion(stage Stage, _ uint) VersionAssignment {
 	if strings.TrimSpace(os.Getenv("PROMPT_AB_"+strings.ToUpper(string(stage)))) != "" {
-		warnPromptVersionOnce(stage, "A/B assignment requires a registered candidate prompt")
+		warnPromptVersionOnce(stage, "A/B assignment requires a candidate prompt")
 	}
 	return VersionAssignment{Version: promptVersionForStage(stage), Variant: "control"}
 }
@@ -52,29 +53,26 @@ func WithPromptVersion(ctx context.Context, stage Stage, subjectID uint) (contex
 }
 
 func promptVersionForStage(stage Stage) string {
-	if !hasVersionedPrompt(stage, "v2") {
+	if !knownPromptStage(stage) {
 		warnPromptVersionOnce(stage, "unknown stage")
-		return "v2"
+		return defaultPromptVersion
 	}
 
 	stageVersion := strings.TrimSpace(os.Getenv("PROMPT_VERSION_" + strings.ToUpper(string(stage))))
 	if stageVersion != "" {
-		if validPromptVersion(stageVersion) && hasVersionedPrompt(stage, stageVersion) {
+		if validPromptVersion(stageVersion) {
 			return stageVersion
 		}
-		warnPromptVersionOnce(stage, "unregistered stage version")
+		warnPromptVersionOnce(stage, "invalid stage version")
 	}
 	globalVersion := strings.TrimSpace(os.Getenv("PROMPT_VERSION"))
-	if globalVersion == "" {
-		globalVersion = strings.TrimSpace(PromptVersion)
-	}
 	if globalVersion != "" {
-		if validPromptVersion(globalVersion) && hasVersionedPrompt(stage, globalVersion) {
+		if validPromptVersion(globalVersion) {
 			return globalVersion
 		}
-		warnPromptVersionOnce(stage, "unregistered global version")
+		warnPromptVersionOnce(stage, "invalid global version")
 	}
-	return "v2"
+	return defaultPromptVersion
 }
 
 func validPromptVersion(version string) bool {
@@ -86,11 +84,7 @@ func FormatMatchingReasonPromptVersion(version string) string {
 	return "matching_reason_" + version
 }
 
-// hasVersionedPrompt は、工程ごとに本文が存在する版だけを許可する。
-func hasVersionedPrompt(stage Stage, version string) bool {
-	if version != "v2" {
-		return false
-	}
+func knownPromptStage(stage Stage) bool {
 	switch stage {
 	case StageQuestionGeneration, StageScoreEvaluation, StageMatchingReason, StageCompanyExtraction:
 		return true
