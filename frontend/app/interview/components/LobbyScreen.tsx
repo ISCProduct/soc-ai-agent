@@ -1,6 +1,7 @@
 'use client'
 
 import type { ReactNode, RefObject } from 'react'
+import Link from 'next/link'
 import {
   Box,
   Button,
@@ -240,12 +241,21 @@ export default function LobbyScreen({
       </Box>
 
       {/* Footer */}
+      {/*
+        リンク風の見た目だけで href も onClick も無い項目を置いていた（#1058）。
+        押しても何も起きず、Typography なので Tab フォーカスも当たらない。
+        LandingFooter と同じ方針で、実在するページだけを本物のリンクで出す。
+        利用規約・ヘルプはページが無いので載せない。作ったら足すこと。
+      */}
       <Box component="footer" sx={{ py: 2.5, display: 'flex', justifyContent: 'center', gap: 4 }}>
-        {['プライバシー', '利用規約', 'ヘルプ'].map(label => (
-          <Typography key={label} variant="body2" sx={{ color: 'text.secondary', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}>
-            {label}
-          </Typography>
-        ))}
+        <Typography
+          component={Link}
+          href="/privacy"
+          variant="body2"
+          sx={{ color: 'text.secondary', '&:hover': { textDecoration: 'underline' } }}
+        >
+          プライバシーポリシー
+        </Typography>
       </Box>
 
       {consentDialog}

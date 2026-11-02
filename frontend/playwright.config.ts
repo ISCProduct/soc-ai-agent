@@ -19,6 +19,7 @@ export default defineConfig({
     'chat-ui-states.spec.ts',
     'correlation-diagram-a11y.spec.ts',
     'assessments.spec.ts',
+    'ability-assessments.spec.ts',
     'schedule.spec.ts',
     'admin.spec.ts',
     'public-pages.spec.ts',
