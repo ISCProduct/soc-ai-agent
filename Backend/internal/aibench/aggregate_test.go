@@ -633,3 +633,52 @@ func TestPrintDiff劣化行がサブセントのコストを丸めない(t *test
 		t.Errorf("劣化行に丸めていないコストが無い:\n%s", out)
 	}
 }
+
+func TestAggregateペア一致率(t *testing.T) {
+	// 良2・中1・悪1。良の一方(g2)が悪より低く付く（人の判断と逆転する）。
+	obs := []Observation{
+		{CaseID: "g1", Label: LabelGood, Score: 0.9},
+		{CaseID: "g2", Label: LabelGood, Score: 0.1},
+		{CaseID: "m1", Label: LabelMid, Score: 0.5},
+		{CaseID: "b1", Label: LabelBad, Score: 0.2},
+	}
+	s := Aggregate(TargetChatAnswer, "m", "e", "t", obs)
+	// 異なるラベルの組: g1-m1 ○, g1-b1 ○, g2-m1 ×, g2-b1 ×, m1-b1 ○ → 3/5
+	if s.PairwiseComparable != 5 {
+		t.Errorf("PairwiseComparable = %d, want 5", s.PairwiseComparable)
+	}
+	if got := s.PairwiseAgreement; got < 0.599 || got > 0.601 {
+		t.Errorf("PairwiseAgreement = %v, want 0.6", got)
+	}
+}
+
+func TestDiffペア一致率(t *testing.T) {
+	has := func(regs []Regression) bool {
+		for _, r := range regs {
+			if r.Metric == "ペア一致率" {
+				return true
+			}
+		}
+		return false
+	}
+	base := Summary{Target: TargetChatAnswer, Model: "m", Cases: 30}
+	mk := func(a float64, n int) *Summary {
+		s := base
+		s.PairwiseAgreement, s.PairwiseComparable = a, n
+		return &s
+	}
+
+	if regs, _ := Diff(mk(0.90, 300), mk(0.70, 300)); !has(regs) {
+		t.Error("0.20 下がったら劣化として検知するべき")
+	}
+	if regs, _ := Diff(mk(0.90, 300), mk(0.85, 300)); has(regs) {
+		t.Error("0.05 の低下は劣化にしない")
+	}
+	// 旧 JSON（この項目が無い = 組数 0）とは比べない。0 → 0.9 が「改善」に見えるのも防ぐ。
+	if regs, _ := Diff(mk(0, 0), mk(0.50, 300)); has(regs) {
+		t.Error("前回が未計測なら比べない")
+	}
+	if regs, _ := Diff(mk(0.90, 300), mk(0, 0)); has(regs) {
+		t.Error("今回が未計測なら比べない")
+	}
+}
