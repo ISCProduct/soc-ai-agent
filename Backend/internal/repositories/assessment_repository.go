@@ -219,7 +219,7 @@ func (r *AssessmentRepository) LatestStandardScores(userID uint) (map[string]flo
 //
 // users.school_id は本人が送ったプロフィールの学校名から更新される（auth_profile.go）。
 // 解決側（SchoolRepository.FindByName）は学園で絞っており、過去の越境行も
-// migration 000050 で外したが、境界の判定をデータの綺麗さに依存させない。
+// migration 000051 で外したが、境界の判定をデータの綺麗さに依存させない。
 // school_id をそのまま信用すると、1行でも越境行があれば他学園の学校独自テンプレート
 // （問題文・受検）に到達できる。学校の学園が本人の学園と一致するときだけ返し、
 // 一致しなければ nil =運営標準だけ（#1675）。

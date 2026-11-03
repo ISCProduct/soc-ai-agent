@@ -321,13 +321,13 @@ Referer に user_id が残るだけです。
   `SchoolService` はユーザー参照を渡さないと `AddMember` が失敗する（fail-close）。
   拒否の応答は「存在しない」と「他学園に存在する」を区別しない（打ち分けると、
   担当校を持つ管理者が他学園のユーザーの存在を判定できてしまう）。理由はログに残す。
-- 既存の越境データは migration `000050`（`users.school_id`）と `000051`
+- 既存の越境データは migration `000051`（`users.school_id`）と `000052`
   （`admin_school_memberships`）で外した。どちらも down は復元すると越境状態に戻るため no-op。
 - 解決の失敗とルックアップのエラーは区別する。`resolveSchoolID` はエラーを返し、プロフィール
   更新は**エラー時に既存の `school_id` を保つ**。一時的な DB エラーで在学生が担当校の教員の
   一覧から黙って消えないようにするため。学校名が解決できなかった場合（エラーではない）は
   `school_id` が NULL になり、ログに残る。
-- 既存データ: 穴が開いていた間に入った越境行は migration `000050_repair_cross_organization_school_id`
+- 既存データ: 穴が開いていた間に入った越境行は migration `000051_repair_cross_organization_school_id`
   で外した（`school_id` のみ NULL にし、自己申告の `school_name` は残す）。`users.school_id` を書くのは
   プロフィール更新とゲスト昇格の2経路だけで、どちらも上記の解決を通るため、以後は越境行が生まれない。
 

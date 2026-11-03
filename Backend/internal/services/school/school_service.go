@@ -121,7 +121,7 @@ func (s *SchoolService) AddMember(userID, schoolID uint) error {
 // EffectiveSchoolID は、学校が本人の学園に属しているときだけ school_id を返す（#1675）。
 //
 // users.school_id はプロフィールの学校名（本人の自己申告）から解決される。解決側は
-// organization_id で絞り、過去の越境行も migration 000050 で外したが、1件ごとの認可判定を
+// organization_id で絞り、過去の越境行も migration 000051 で外したが、1件ごとの認可判定を
 // データの綺麗さに依存させない。学園が一致しなければ nil =未所属として扱い、担当校ありの
 // 管理者・職員には見せない（fail-close）。
 func (s *SchoolService) EffectiveSchoolID(organizationID uint, schoolID *uint) (*uint, error) {
