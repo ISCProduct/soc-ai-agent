@@ -27,6 +27,26 @@ strip_comments() { grep -vE '^[[:space:]]*#' || true; }
 fail=0
 checked=0
 
+# app_env シークレットの中身(secret_version の jsonencode)だけを見る。
+# 他のリソースに同じ名前の属性があっても拾わないため。
+APP_ENV_BODY=$(awk '
+  /resource "aws_secretsmanager_secret_version" "app_env"/ { inside = 1 }
+  inside && /lifecycle[[:space:]]*\{/ { exit }
+  inside { print }
+' "$TF" | strip_comments)
+if [ -z "$APP_ENV_BODY" ]; then
+  echo "FAIL main.tf に aws_secretsmanager_secret_version.app_env が無い（検査条件が壊れている）"
+  exit 1
+fi
+
+# user_data が app_env を取得して .env に展開していること。
+if strip_comments < "$TPL" | grep -q 'get-secret-value' && strip_comments < "$TPL" | grep -q 'to_entries'; then
+  echo "ok   user_data が app_env を取得して .env へ展開している"
+else
+  echo "FAIL app_user_data.sh.tftpl が app_env を取得して .env へ展開していない"
+  fail=$((fail + 1))
+fi
+
 # 「Deploy via SSH」ステップの本体だけを見る。他のジョブの SSM 参照を拾わないため。
 SSH_STEP=$(grep -n 'name: Deploy via SSH' "$WF" | head -1 | cut -d: -f1)
 if [ -z "$SSH_STEP" ]; then
@@ -59,9 +79,12 @@ for res in $resources; do
   envvar=$(printf '%s' "$param" | tr 'a-z-' 'A-Z_')
   checked=$((checked + 1))
 
-  # 新規インスタンス向け(user_data)に配られていること。
-  if ! strip_comments < "$TPL" | grep -qE "^${envvar}="; then
-    echo "FAIL $envvar が app_user_data.sh.tftpl に無い（新規インスタンスへ配られない）"
+  # 新規インスタンス向けに配られていること。値は user_data に載せず、Secrets Manager の
+  # app_env に入れて起動時に取得する(#1158)。app_env のキー(env 変数名の小文字)に
+  # 無ければ、新規インスタンスの .env に入らない。
+  key=$(printf '%s' "$param" | tr '-' '_')
+  if ! printf '%s\n' "$APP_ENV_BODY" | grep -qE "^[[:space:]]*${key}[[:space:]]*="; then
+    echo "FAIL $key が app_env シークレットに無い（新規インスタンスへ配られない）"
     fail=$((fail + 1))
   fi
 
@@ -110,7 +133,7 @@ done
 # 引用が無いと bash が値の $ / `...` / \ を展開してから書き込むため、
 # シークレットに $(...) が含まれると cloud-init の root 権限で実行され、
 # 未定義の $name が含まれると set -u でそこで落ちて docker compose まで到達しない。
-if strip_comments < "$TPL" | grep -qE "cat > /opt/app/\.env <<'[A-Za-z]+'"; then
+if strip_comments < "$TPL" | grep -qE "cat >{1,2} /opt/app/\.env <<'[A-Za-z]+'"; then
   echo "ok   .env のヒアドキュメント区切り文字が引用されている"
 else
   echo "FAIL .env のヒアドキュメント区切り文字が引用されていない（値の \$ や \$(...) が bash に展開される）"
