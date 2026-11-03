@@ -46,3 +46,7 @@ service_secret_plain = "change-me-service-secret"
 # 未設定でも /prod は動作するが、反映は次の毎時実行(最大1時間後)になる。
 # github_dispatch_token = "<GitHub Fine-grained PAT: Actions=Read and write>"
 # github_dispatch_repo  = "ISCProduct/soc-ai-agent"
+#
+# /link で Backlog のメンバー一覧を引くAPIキー(読み取りのみ)。
+# 未設定なら /link /unlink /link-list は「利用できません」を返す。他のコマンドには影響しない。
+# backlog_api_key = "<Backlog API キー>"

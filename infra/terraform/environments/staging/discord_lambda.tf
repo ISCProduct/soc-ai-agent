@@ -72,6 +72,13 @@ resource "aws_iam_role_policy" "discord_lambda" {
           "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/staging-uptime",
         ]
       },
+      {
+        # /link で作る Discord ↔ Backlog の対応表(JSON 1本)。
+        Sid      = "LinkParameter"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter", "ssm:PutParameter"]
+        Resource = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/discord-backlog-links"]
+      },
     ]
   })
 }
@@ -113,6 +120,7 @@ resource "aws_lambda_function" "discord" {
       DISCORD_ALLOWED_ROLE_ID = var.discord_allowed_role_id
       GITHUB_DISPATCH_TOKEN   = var.github_dispatch_token
       GITHUB_DISPATCH_REPO    = var.github_dispatch_repo
+      BACKLOG_API_KEY         = var.backlog_api_key
     }
   }
 

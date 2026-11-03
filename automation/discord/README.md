@@ -64,3 +64,20 @@ rm ~/Library/LaunchAgents/jp.soc-ai-agent.progress-reminder.plist
 仕様参照:
 - https://docs.discord.com/developers/resources/webhook
 - https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule
+
+## Discord ↔ Backlog の紐づけ（/link）
+
+Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確認をするための対応表。
+管理者ロール（`DISCORD_ALLOWED_ROLE_ID`）だけが操作できる。
+
+| コマンド | 内容 |
+|---|---|
+| `/link member:@誰か backlog:名前` | 紐づける。`backlog` は入力すると Backlog のメンバーが候補に出る。名前は完全一致 |
+| `/unlink member:@誰か` | 解除する |
+| `/link-list` | 一覧を本人にだけ表示する |
+
+- 表は SSM Parameter `/soc-app/discord-backlog-links` に JSON で持つ。突き合わせは Backlog のユーザーID。
+- 同じ Backlog ユーザーを別の Discord ユーザーに紐づけることはできない（先に `/unlink`）。
+- 4KB の上限があり、40人強まで。超える場合は DynamoDB へ移す。
+- 有効にするには Lambda に `BACKLOG_API_KEY`（terraform の `backlog_api_key`）が要る。未設定なら `/link` 系は「利用できません」を返す。
+- コマンドの追加後に `automation/discord/register-commands.sh` を再実行する。
