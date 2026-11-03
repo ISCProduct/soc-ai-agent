@@ -89,6 +89,7 @@ describe('authService.saveAuth', () => {
       userId: 42,
       userToken: 'user-token',
       refreshToken: 'refresh-token',
+      adminToken: 'admin-token',
     })
   })
 

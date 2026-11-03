@@ -2,6 +2,7 @@ package main
 
 import (
 	"Backend/internal/config"
+	abilitycontrollers "Backend/internal/controllers/ability"
 	admincontrollers "Backend/internal/controllers/admin"
 	applicationcontrollers "Backend/internal/controllers/application"
 	assessmentcontrollers "Backend/internal/controllers/assessment"
@@ -27,6 +28,7 @@ import (
 	"Backend/internal/routes"
 	"Backend/internal/safego"
 	"Backend/internal/scraper"
+	abilitysvc "Backend/internal/services/ability"
 	"Backend/internal/services/admin"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/application"
@@ -659,6 +661,12 @@ func main() {
 	routes.SetupAssessmentRoutes(api, assessmentcontrollers.NewController(assessmentService), cfg.UserSecret, userDeletionService, organizationService)
 	// 適性検査 第2段（#1675）。学校独自テンプレートはマッチングに合流させない
 	routes.SetupAssessmentSchoolRoutes(api, assessmentcontrollers.NewSchoolController(assessmentsvc.NewSchoolService(assessmentRepo)), userRepo, schoolService, cfg.AdminSecret)
+
+	// 適性検査 第3段: 能力検査（SOCAIAGENT-433）。言語・非言語の正答数を独立スコアとして持つ。
+	// user_weight_scores へは書かない（10カテゴリへ変換する方法が無い）ので、
+	// matchingService へは繋がない。性格検査とはテーブル・型・パスを分けている。
+	abilityRepo := repositories.NewAbilityRepository(db)
+	routes.SetupAbilityRoutes(api, abilitycontrollers.NewController(abilitysvc.NewService(abilityRepo)), cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupESRoutes(api, esRewriteController, esReviewController)
