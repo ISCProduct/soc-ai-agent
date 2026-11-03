@@ -101,6 +101,50 @@ COMMANDS='[
     ]
   },
   {
+    "name": "link",
+    "description": "DiscordメンバーをBacklogのメンバーに紐づけます(通知のメンションと本人確認に使います)",
+    "type": 1,
+    "dm_permission": false,
+    "default_member_permissions": "0",
+    "options": [
+      {
+        "name": "member",
+        "description": "Discordのメンバー",
+        "type": 6,
+        "required": true
+      },
+      {
+        "name": "backlog",
+        "description": "Backlogでの名前(候補から選択)",
+        "type": 3,
+        "required": true,
+        "autocomplete": true
+      }
+    ]
+  },
+  {
+    "name": "unlink",
+    "description": "DiscordメンバーとBacklogの紐づけを解除します",
+    "type": 1,
+    "dm_permission": false,
+    "default_member_permissions": "0",
+    "options": [
+      {
+        "name": "member",
+        "description": "Discordのメンバー",
+        "type": 6,
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "link-list",
+    "description": "DiscordとBacklogの紐づけ一覧を表示します",
+    "type": 1,
+    "dm_permission": false,
+    "default_member_permissions": "0"
+  },
+  {
     "name": "prod",
     "description": "本番環境を起動/停止します",
     "type": 1,
