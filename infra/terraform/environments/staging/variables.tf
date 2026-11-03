@@ -269,6 +269,13 @@ variable "github_dispatch_token" {
   default     = ""
 }
 
+variable "backlog_api_key" {
+  type        = string
+  sensitive   = true
+  description = "Discordの /link で Backlog のメンバー一覧を引くためのAPIキー(読み取りのみ)。未設定なら /link 系は「利用できません」を返す"
+  default     = ""
+}
+
 variable "github_dispatch_repo" {
   type        = string
   description = "workflow_dispatch の対象リポジトリ(owner/repo)"

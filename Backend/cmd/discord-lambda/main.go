@@ -57,6 +57,16 @@ func main() {
 		os.Getenv("DISCORD_ALLOWED_ROLE_ID"),
 	)
 
+	// /link 系。BACKLOG_API_KEY が無ければ付けない(コマンドは「利用できません」を返す)。
+	// 他のコマンドを巻き込んで起動失敗にはしない。
+	if backlog := discord.NewBacklogClientFromEnv(); backlog != nil {
+		links, err := discord.NewLinkServiceFromEnv(ctx)
+		if err != nil {
+			log.Fatalf("LinkService の初期化に失敗しました: %v", err)
+		}
+		handler.WithLinks(links, backlog)
+	}
+
 	lambda.Start(newLambdaHandler(handler, discord.NewWorkflowDispatcherFromEnv()))
 }
 
