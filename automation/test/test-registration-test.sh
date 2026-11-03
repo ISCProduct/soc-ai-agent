@@ -19,7 +19,10 @@ for f in automation/test/*.sh automation/test/*.py; do
   [ -e "$f" ] || continue
   checked=$((checked + 1))
   name=$(basename "$f")
-  if ! grep -qF "$name" <<< "$workflow_code"; then
+  # 部分一致にしない。prod-ci-test.sh の登録で ci-test.sh が通ってしまうため、
+  # 前後がファイル名に使う文字でないことを見る（"." は \ で字面どおりに扱う）。
+  pattern="(^|[^A-Za-z0-9_.-])${name//./\\.}([^A-Za-z0-9_-]|$)"
+  if ! grep -qE "$pattern" <<< "$workflow_code"; then
     echo "FAIL $name がどのワークフローからも呼ばれていない（test.yml にステップを足すこと）"
     fail=$((fail + 1))
   fi
