@@ -515,7 +515,27 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             <Quiz color="primary"/>
                         </ListItemIcon>
                         <ListItemText
-                            primary="適性検査"
+                            primary="適性検査（性格）"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/ability-assessments')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <Quiz color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="適性検査（能力）"
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,

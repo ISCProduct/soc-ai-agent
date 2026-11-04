@@ -45,6 +45,7 @@ const NAV_ICONS: Record<NavHref, React.ReactNode> = {
   '/chat-history': <HistoryIcon color="primary" />,
   '/resume': <DescriptionIcon color="primary" />,
   '/assessments': <QuizIcon color="primary" />,
+  '/ability-assessments': <QuizIcon color="primary" />,
   '/interview': <RecordVoiceOverIcon color="primary" />,
   '/interview/history': <AssessmentIcon color="primary" />,
   '/es-rewrite': <EditNoteIcon color="primary" />,

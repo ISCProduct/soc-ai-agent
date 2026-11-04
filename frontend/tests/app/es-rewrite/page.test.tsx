@@ -360,3 +360,109 @@ describe('ESRewritePage 設問の文字数上限 (#1523)', () => {
     expect(screen.getByRole('button', { name: '添削する' })).not.toBeDisabled()
   })
 })
+
+describe('ESRewritePage 差分と指摘アンカー (#1532)', () => {
+  beforeEach(() => {
+    global.fetch = jest.fn()
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  it('原文と改善文の追加・削除を示し、指摘から添削時の原文へ移動できる', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7,
+        star_score: 6,
+        company_fit_score: null,
+        length_balance_score: 5,
+        feedback: '行動を具体的に説明しましょう。',
+        improved_text: '私は主体的に取り組みました。',
+        feedback_items: [
+          {
+            score_key: 'specificity_score',
+            source_excerpt: '頑張りました',
+            issue: '行動の具体性が不足しています。',
+            suggestion: 'どのように取り組んだかを書きましょう。',
+          },
+        ],
+      }),
+    })
+
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    const originalField = screen.getByPlaceholderText(/チームで開発した経験があります/)
+    fireEvent.change(originalField, { target: { value: '私は頑張りました。' } })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    await screen.findByText('添削スコア')
+    expect(document.querySelector('del')).toHaveTextContent('頑張り')
+    expect(document.querySelector('ins')).toHaveTextContent('主体的に取り組み')
+    expect(document.querySelector('ins')).toHaveStyle({ textDecoration: 'underline' })
+
+    const sourceLink = screen.getByRole('link', { name: '原文の該当箇所を見る' })
+    expect(sourceLink).toHaveAttribute('href', '#es-original-anchor-0')
+    const anchor = document.getElementById('es-original-anchor-0')
+    expect(anchor).toHaveTextContent('頑張り')
+
+    fireEvent.change(originalField, { target: { value: '別の文章に変更しました。' } })
+    expect(anchor).toHaveTextContent('頑張り')
+
+    fireEvent.click(sourceLink)
+    expect(document.activeElement).toBe(anchor)
+  })
+
+  it('差分が簡易表示になる場合はその旨を通知する', async () => {
+    const original = '。'.repeat(2100)
+    const improved = '、'.repeat(2100)
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7,
+        star_score: 6,
+        company_fit_score: null,
+        length_balance_score: 5,
+        feedback: 'フィードバック',
+        improved_text: improved,
+        feedback_items: [],
+      }),
+    })
+
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: original },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    expect(
+      await screen.findByText(/文章が長いため差分を簡易表示しています/),
+    ).toBeInTheDocument()
+  })
+
+  it('変更がない場合は差分がないことを通知する', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7,
+        star_score: 6,
+        company_fit_score: null,
+        length_balance_score: 5,
+        feedback: 'フィードバック',
+        improved_text: '文章はそのままです。',
+        feedback_items: [],
+      }),
+    })
+
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: '文章はそのままです。' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    expect(await screen.findByText('改善前後に差分はありませんでした。')).toBeInTheDocument()
+  })
+})

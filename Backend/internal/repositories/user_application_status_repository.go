@@ -78,8 +78,11 @@ func (r *UserApplicationStatusRepository) FindAll(userID, companyID uint, status
 	// 担当校を持つ管理者(先生)には自校の生徒の応募だけを返す(#1157)。
 	// 呼び出し側の検証だけに頼らず、クエリ自体をスコープする。
 	if schoolID != nil {
-		q = q.Joins("JOIN users ON users.id = user_application_statuses.user_id").
-			Where("users.school_id = ?", *schoolID)
+		// 学園一致も要求する。素の school_id で絞ると、学校名を他学園の校名に
+		// 書き替えた学生の応募が他学園の職員の一覧に混ざる（#1675）。
+		q = scopeUsersBySchool(
+			q.Joins("JOIN users ON users.id = user_application_statuses.user_id"),
+			schoolID)
 	}
 	if userID != 0 {
 		q = q.Where("user_id = ?", userID)
@@ -107,9 +110,15 @@ func (r *UserApplicationStatusRepository) FindOwnerSchoolID(applicationID uint) 
 	var row struct {
 		SchoolID *uint
 	}
+	// 学校は本人の学園に属するものだけ所属校として認める（#1675）。
+	// 一覧と違いここは1件ごとの認可判定（応募詳細の閲覧・選考ステータス更新）なので、
+	// 素の users.school_id を信じると、学校名を他学園の校名に書き替えた学生の応募を
+	// その学校の職員が操作できる。学園が一致しなければ school_id は NULL になり、
+	// 未所属（担当校ありの管理者には見せない）と同じ扱いに合流する。
 	err := r.db.Model(&models.UserApplicationStatus{}).
-		Select("users.school_id AS school_id").
+		Select("s.id AS school_id").
 		Joins("JOIN users ON users.id = user_application_statuses.user_id").
+		Joins("LEFT JOIN schools s ON s.id = users.school_id AND s.organization_id = users.organization_id").
 		Where("user_application_statuses.id = ?", applicationID).
 		Take(&row).Error
 	if err != nil {

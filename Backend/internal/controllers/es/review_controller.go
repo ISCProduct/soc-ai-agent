@@ -39,12 +39,13 @@ type esReviewRequest struct {
 // esReviewRAGRequest は RAG の /es/review へ送る本文。
 // ES添削・ESリライトの両タブが同じ経路・同じプロンプトを使う(#1533)。
 type esReviewRAGRequest struct {
-	ESText        string `json:"es_text"`
-	QuestionType  string `json:"question_type"`
-	CompanyName   string `json:"company_name,omitempty"`
-	TechStack     string `json:"tech_stack,omitempty"`
-	CharLimit     *int   `json:"char_limit,omitempty"`
-	CharLimitMode string `json:"char_limit_mode,omitempty"`
+	ESText               string `json:"es_text"`
+	QuestionType         string `json:"question_type"`
+	CompanyName          string `json:"company_name,omitempty"`
+	TechStack            string `json:"tech_stack,omitempty"`
+	CharLimit            *int   `json:"char_limit,omitempty"`
+	CharLimitMode        string `json:"char_limit_mode,omitempty"`
+	IncludeFeedbackItems bool   `json:"include_feedback_items"`
 }
 
 // esReviewRAGUsage は RAG が返すトークン使用量（公開APIへは出さない / #1533）。
@@ -70,6 +71,8 @@ func (c *ESReviewController) Review(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
+	// 形式チェックの位置は、利用者が送った原文（trim 前）を基準にする（#1530）
+	rawText := req.ESText
 	req.ESText = strings.TrimSpace(req.ESText)
 	if req.ESText == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "es_text is required")
@@ -80,18 +83,29 @@ func (c *ESReviewController) Review(ctx echo.Context) error {
 
 	log.Printf("es_review: rag request question_type=%q company=%q char_limit=%v", req.QuestionType, req.CompanyName, req.CharLimit)
 	status, respBody, err := postESReview(ctx, esReviewRAGRequest{
-		ESText:        req.ESText,
-		QuestionType:  req.QuestionType,
-		CompanyName:   req.CompanyName,
-		CharLimit:     req.CharLimit,
-		CharLimitMode: req.CharLimitMode,
+		ESText:               req.ESText,
+		QuestionType:         req.QuestionType,
+		CompanyName:          req.CompanyName,
+		CharLimit:            req.CharLimit,
+		CharLimitMode:        req.CharLimitMode,
+		IncludeFeedbackItems: true,
 	}, c.openaiClient, usagectx.FeatureESReview)
 	if err != nil {
 		return err
 	}
 
-	// RAGからのレスポンスをそのままクライアントへ転送（usage だけは取り除く）
-	return ctx.JSONBlob(status, respBody)
+	if status != http.StatusOK {
+		// RAG の案内文（422 など）はそのまま利用者へ渡す
+		return ctx.JSONBlob(status, respBody)
+	}
+	// RAG の応答（usage は取り除き済み）に、原文の形式チェック結果を足して返す（#1530）
+	body, err := withFormatFindings(respBody, formatFindings(rawText, req.CharLimit, req.CharLimitMode))
+	if err != nil {
+		// 形式チェックは付加機能なので、RAG の応答が想定外の形でも添削結果はそのまま返す
+		log.Printf("es_review: format_findings を付けられないため RAG の応答を素通しする: %v", err)
+		return ctx.JSONBlob(status, respBody)
+	}
+	return ctx.JSONBlob(status, body)
 }
 
 // postESReview は RAG の /es/review を呼び、(ステータス, 本文, エラー) を返す。

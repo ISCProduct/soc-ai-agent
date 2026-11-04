@@ -56,7 +56,10 @@ UserCompanyMatch（総合マッチ度 0-100）
 ### スコアの範囲
 
 - 各カテゴリ: **0〜100**
-- チャット進捗の「評価済み」判定は **score ≠ 0** の件数
+- チャット進捗の「評価済み」判定は **score ≠ 0** の件数（`countEvaluatedCategories`。レスポンスの `evaluated_categories`）
+- 診断品質が使う「計測済み軸数」は **行がある軸の数**（値が0でも数える。`measuredAxisCount`）。上と数え方が違うため、score が 0 の軸があると同じセッションでも数は一致しない。用途は2つ
+  - フラグ `no_measured_axes`（0件）/ `few_measured_axes`（4未満）。どちらも `ForcesProvisional`（`diagnosis/provisional.go`）で暫定表示を強制する
+  - 信頼度の基準値（計測済み軸数 × 10、上限100）
 - マッチングでは未計測カテゴリを中立50で埋めず、平均から除外する（#1124）
 
 ### データ構造（`UserWeightScore`）
@@ -248,6 +251,36 @@ PRD でも「初期データ投入作業自体はスコープ外」としてい�
 - **学校独自テンプレートはマッチングに使わない。** 提出しても `user_weight_scores` へは書かず（結果は `assessment_results` にだけ残る）、
   マッチングの再計算も走らない。A校の80点とB校の80点は別物で、学校が増えるほど精度が静かに劣化するため
 
+### 能力検査はスコアに入らない（SOCAIAGENT-433）
+
+能力検査（言語・非言語）は **`user_weight_scores` に一切書かない**。言語・非言語の正答率を
+技術志向やチームワーク志向へ変換する方法が無く、無理に載せると10カテゴリの意味が崩れる。
+マッチングに効かせたい場合は `CompanyWeightProfile` 側に「能力検査重視度」を足す別課題になる。
+
+これを分岐ではなくスキーマと型で成立させるため、性格検査とテーブル・サービス・API を分けている。
+
+| | 性格検査 | 能力検査 |
+|---|---|---|
+| テーブル | `assessment_*` | `ability_*` |
+| API | `/api/assessments` | `/api/ability-assessments` |
+| 画面 | `/assessments` | `/ability-assessments` |
+| 採点 | リッカート5段階（逆転項目あり）→ カテゴリ別 0〜100 | 4択の正誤 → section 別の正答数 |
+| `user_weight_scores` | `source='assessment'` で書く | **書かない** |
+| マッチング | 標準セットのみ合流 | 使わない |
+| 制限時間 | なし（受検期限は別） | あり。サーバが締め切る |
+
+能力検査で気をつける点。
+
+- **正解（`correct_choice`）はレスポンスに出さない。** 受検中に返す型（`AbilityQuestionView`）が
+  `id` / `position` / `section` / `body` / `choices` しか持たない。採点はサーバ側のみ
+- **制限時間はサーバが決める。** 開始時に `ability_sessions.deadline_at` を凍結し、超過後の取得・回答・
+  再開は 410。クライアントのタイマーは表示用（`remaining_seconds`）で、判定には使わない
+- **提出は締め切り後も受け付ける。** 弾くと時間切れで結果が一切出ず、受検した意味が無くなる。
+  締め切り後の新しい回答は保存されないので点数は増えない
+- **未回答は誤答扱いだが出題数には数える。** 分母から外すと、飛ばした学生の正答率が上がる
+- 結果は section 別の「何問中何問」だけ。偏差値・順位・他の学生との比較は出さない
+  （母集団の無い偏差値は実力の差より揺れの方が大きく出る）
+
 ## 3. 企業プロファイル（CompanyWeightProfile）
 
 各企業は 10 カテゴリそれぞれに「重視度（0〜100）」を持ちます。
@@ -395,7 +428,7 @@ func scoredMatch(userScores map[string]float64, category string, companyWeight f
 診断完了後の品質ジョブはスコアを**自動補正せず**、`diagnosis_quality_reports` に confidence / flags を保存する。
 `GET /api/chat/recommendations` は次のいずれかで `is_provisional=true` とする。
 
-- 評価カテゴリ数が 4 未満
+- 評価カテゴリ数（score ≠ 0 の件数）が 4 未満（計測済み軸数が4未満のときは、別経路で `few_measured_axes` フラグが立ち、これも暫定表示になる）
 - 上位マッチの最小 `matched_axis_count` が 4 未満
 - 診断信頼度が 55 未満、または薄い根拠フラグ（`thin_chat_evidence` / `mostly_choice_only` 等）
 

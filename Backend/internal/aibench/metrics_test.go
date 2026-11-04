@@ -119,3 +119,30 @@ func TestApproxTokensJA(t *testing.T) {
 		})
 	}
 }
+
+func TestPairwiseAgreement(t *testing.T) {
+	// ラベル: 悪=1 中=2 良=3
+	tests := []struct {
+		name     string
+		labels   []float64
+		scores   []float64
+		want     float64
+		wantComp int
+	}{
+		{name: "完全に順序どおり", labels: []float64{1, 2, 3}, scores: []float64{0.1, 0.5, 0.9}, want: 1, wantComp: 3},
+		{name: "完全に逆", labels: []float64{1, 2, 3}, scores: []float64{0.9, 0.5, 0.1}, want: 0, wantComp: 3},
+		{name: "全部同点は当てずっぽうと同じ0.5", labels: []float64{1, 2, 3}, scores: []float64{0.5, 0.5, 0.5}, want: 0.5, wantComp: 3},
+		{name: "同じラベルの組は比べない", labels: []float64{3, 3, 1}, scores: []float64{0.2, 0.9, 0.1}, want: 1, wantComp: 2},
+		{name: "1組だけ逆転(良の一方が悪より低い)", labels: []float64{3, 3, 1}, scores: []float64{0.9, 0.05, 0.1}, want: 0.5, wantComp: 2},
+		{name: "ラベルが1種類なら比べる組が無い", labels: []float64{2, 2}, scores: []float64{0.1, 0.9}, want: 0, wantComp: 0},
+		{name: "長さが違う入力は0を返す", labels: []float64{1, 2}, scores: []float64{0.1}, want: 0, wantComp: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, comp := PairwiseAgreement(tt.labels, tt.scores)
+			if math.Abs(got-tt.want) > 1e-9 || comp != tt.wantComp {
+				t.Errorf("PairwiseAgreement = %v (%d組), want %v (%d組)", got, comp, tt.want, tt.wantComp)
+			}
+		})
+	}
+}

@@ -398,6 +398,28 @@ components:
         char_limit: { type: integer, nullable: true, description: "設問の文字数上限（#1523）" }
         char_limit_mode: { type: string }
 
+    FormatFinding:
+      type: object
+      description: |
+        形式チェック（#1530）の指摘1件。LLM を使わずルールだけで判定する。
+        位置 `start` / `end` は、リクエストで送った原文（trim 前）を UTF-16 のコード単位で数えた位置（`end` は含まない）。
+        JavaScript の文字列の添字と同じ単位。
+      required: [rule, severity, start, end, message, fix]
+      properties:
+        rule:
+          type: string
+          enum: [mixed_width, mixed_numeral, mixed_era, mixed_style, date_order, char_limit]
+        severity:
+          type: string
+          enum: [critical, warning, info]
+          description: 履歴書の AI 指摘と同じ3値（重大 / 注意 / 情報）
+        start: { type: integer }
+        end: { type: integer }
+        message: { type: string, description: 何が問題か }
+        fix: { type: string, description: どう直すか }
+        page_hint: { type: integer, description: 履歴書のみ。ES では省略される }
+        block_index: { type: integer, description: 履歴書のみ。ES では省略される }
+
     ESRewriteResponse:
       type: object
       properties:
@@ -405,6 +427,10 @@ components:
         star: { $ref: "#/components/schemas/StarBreakdown" }
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
+        format_findings:
+          type: array
+          description: 原文の形式チェック（#1530）。重要度順（同じなら出現位置順）。指摘が無いときは空配列
+          items: { $ref: "#/components/schemas/FormatFinding" }
 
     ESReviewRequest:
       type: object
@@ -422,7 +448,25 @@ components:
         improved_text: { type: string }
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
+        format_findings:
+          type: array
+          description: 原文の形式チェック（#1530）。重要度順（同じなら出現位置順）。指摘が無いときは空配列。RAG の応答が想定外の形のときは付かず、RAG の応答をそのまま返す
+          items: { $ref: "#/components/schemas/FormatFinding" }
         star: { $ref: "#/components/schemas/StarBreakdown" }
+        feedback_items:
+          type: array
+          maxItems: 4
+          description: 原文の該当箇所と評価根拠に結びついた指摘
+          items:
+            type: object
+            required: [score_key, source_excerpt, issue, suggestion]
+            properties:
+              score_key:
+                type: string
+                enum: [specificity_score, star_score, company_fit_score, length_balance_score]
+              source_excerpt: { type: string, maxLength: 120, description: 原文からの連続した引用 }
+              issue: { type: string, maxLength: 80 }
+              suggestion: { type: string, maxLength: 80 }
 
     ResumeStatus:
       type: object
@@ -1337,6 +1381,105 @@ paths:
         "200": { description: カテゴリ別スコア }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { description: 未提出または本人のセッションが無い }
+
+  # ── ability-assessments（能力検査 / 学生）─────────────────────
+  # 性格検査（/api/assessments）とパスを分ける。採点方式も結果の意味も違い、
+  # 能力検査の点数は user_weight_scores へ入れない（SOCAIAGENT-433）。
+  # 受検中のレスポンスに正解（correct_choice）は含めない。採点はサーバ側のみ。
+  /api/ability-assessments:
+    get:
+      tags: [assessments]
+      summary: 受けられる能力検査と自分の受検状況を一覧する
+      description: "受検中のまま制限時間を過ぎたものは `status: expired` で返す。"
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 能力検査の一覧（未受検が先） }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/ability-assessments/{templateId}/sessions:
+    post:
+      parameters: [{ in: path, name: templateId, required: true, schema: { type: integer } }]
+      tags: [assessments]
+      summary: 能力検査の受検を開始する（受検中があればそれを返す）
+      description: |
+        開始時に制限時間から締め切り（`deadline_at`）を凍結する。判定はサーバだけが行い、
+        クライアントのタイマーは表示用。制限時間を過ぎた受検中は再開できない（410）。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 問題（選択肢つき）・保存済みの回答・締め切り・残り秒 }
+        "400": { description: 検査の指定が正しくない }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 検査が無い }
+        "410": { description: 制限時間を過ぎている }
+
+  /api/ability-assessments/sessions/{sessionId}:
+    get:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 受検の現在の状態を取得する
+      description: 問題は `id` / `position` / `section` / `body` / `choices` だけを返す。正解は含めない。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 問題と保存済みの回答 }
+        "400": { description: 受検の指定が正しくない }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人の受検が無い }
+        "410": { description: 制限時間を過ぎている }
+
+  /api/ability-assessments/sessions/{sessionId}/answers/{questionId}:
+    put:
+      parameters:
+        - { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: questionId, required: true, schema: { type: integer } }
+      tags: [assessments]
+      summary: 1問の回答を保存する（自動保存・冪等）
+      description: |
+        `choice` は選択肢の 0 始まりの添字。0 を正当な値として受けるため、未指定とは区別する。
+        締め切りを過ぎた回答は受け付けない（410）。
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [choice]
+              properties:
+                choice: { type: integer, minimum: 0 }
+      responses:
+        "204": { description: 保存した }
+        "400": { description: 選択肢の範囲外、または検査に無い問題 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人の受検が無い }
+        "409": { description: すでに提出済み }
+        "410": { description: 制限時間を過ぎている }
+
+  /api/ability-assessments/sessions/{sessionId}/submit:
+    post:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 回答を採点して提出する
+      description: |
+        未回答は誤答扱いで、出題数には数える。締め切りを過ぎていても提出は受け付ける
+        （弾くと時間切れで結果が一切出ない）。締め切り後の新しい回答は保存されないので点数は増えない。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 提出した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人の受検が無い }
+        "409": { description: すでに提出済み }
+
+  /api/ability-assessments/sessions/{sessionId}/result:
+    get:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 提出済みの結果を取得する
+      description: section（verbal / numerical）別の正答数と出題数。偏差値・順位は返さない。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: section 別の正答数と出題数 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 未提出または本人の受検が無い }
 
   # ── assessments（学校側 / 先生） ─────────────────────
   /api/admin/assessment-templates:
@@ -4010,11 +4153,15 @@ paths:
     post:
       tags: [applications]
       summary: 応募する
+      description: |
+        応募を閉じている間（`STUDENT_APPLY_ENABLED` が `true` でない既定の状態）は 403 を返す。
+        開いているかは `GET /api/applications/availability` で分かる。
       security: [{ userToken: [] }]
       responses:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
     get:
       tags: [applications]
       summary: 自分の応募一覧
@@ -4028,6 +4175,24 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Application"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/applications/availability:
+    get:
+      tags: [applications]
+      summary: 応募を受け付けているか
+      description: 画面の応募ボタンを有効にするかの判定に使う。環境変数 `STUDENT_APPLY_ENABLED` の値を返す。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: { type: boolean }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/applications/correlation:

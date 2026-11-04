@@ -28,11 +28,18 @@ export function setSessionCookies(
   }
 }
 
+// 管理者トークン（X-Admin-Token）。ログインセッションの更新のたびに再発行される（#476）。
+// httpOnly にして、クライアントは GET /api/auth/session 経由でだけ読む。
+export function setAdminTokenCookie(response: NextResponse, adminToken: string): void {
+  response.cookies.set('admin_token', adminToken, SESSION_COOKIE_OPTIONS)
+}
+
 // セッションCookieをすべて削除する
 export function clearSessionCookies(response: NextResponse): void {
   response.cookies.delete('user_id')
   response.cookies.delete('user_token')
   response.cookies.delete('refresh_token')
+  response.cookies.delete('admin_token')
 }
 
 // 企業ユーザー用セッションCookie（company_user_id / company_user_token / company_refresh_token）を設定する（#1091）

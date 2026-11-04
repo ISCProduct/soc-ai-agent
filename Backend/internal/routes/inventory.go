@@ -85,6 +85,7 @@ func Inventory() []Route {
 	SetupCollectiveInsightRoutes(api, nil, "", nil, nil)
 	SetupAssessmentRoutes(api, nil, "", nil, nil)
 	SetupAssessmentSchoolRoutes(api, nil, nil, nil, "")
+	SetupAbilityRoutes(api, nil, "", nil, nil)
 
 	out := make([]Route, 0, len(e.Routes())+len(mainGoRoutes))
 	for _, r := range e.Routes() {

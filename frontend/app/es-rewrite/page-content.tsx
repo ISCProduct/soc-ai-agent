@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { memo, Suspense, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Alert,
@@ -26,6 +26,7 @@ import RateReviewIcon from '@mui/icons-material/RateReview'
 import { PageLoading } from '@/components/common/PageLoading'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import { CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
+import { createTextDiff, findUniqueTextRange, type DiffSegment } from './text-diff'
 
 const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
 
@@ -100,9 +101,145 @@ type ReviewResult = CharLimitResult & {
   feedback: string
   improved_text: string
   company_strategy?: string | null
+  feedback_items?: ReviewFeedbackItem[]
   // 企業情報の取得元。"none" なら企業適合性を評価していない(#1524)
   company_context_source?: 'company_brief' | 'cache' | 'web_search' | 'none'
 }
+
+type ReviewFeedbackItem = {
+  score_key: 'specificity_score' | 'star_score' | 'company_fit_score' | 'length_balance_score'
+  source_excerpt: string
+  issue: string
+  suggestion: string
+}
+
+type AnchoredFeedbackItem = ReviewFeedbackItem & {
+  index: number
+  anchorId: string
+  start: number
+  end: number
+}
+
+const FEEDBACK_SCORE_LABELS: Record<ReviewFeedbackItem['score_key'], string> = {
+  specificity_score: '具体性',
+  star_score: 'STAR法準拠',
+  company_fit_score: '企業適合性',
+  length_balance_score: '文字数バランス',
+}
+
+const NO_ANCHORED_FEEDBACK: AnchoredFeedbackItem[] = []
+
+const HighlightedDiffText = memo(function HighlightedDiffText({
+  segments,
+  anchors = NO_ANCHORED_FEEDBACK,
+  ariaLabel,
+}: {
+  segments: DiffSegment[]
+  anchors?: AnchoredFeedbackItem[]
+  ariaLabel: string
+}) {
+  const renderedAnchors = new Set<string>()
+
+  return (
+    <Box
+      role="group"
+      aria-label={ariaLabel}
+      sx={{ fontSize: 14, lineHeight: 1.9, color: UI.ink, whiteSpace: 'pre-wrap' }}
+    >
+      {segments.flatMap((segment, segmentIndex) => {
+        const intersectingAnchors = anchors.filter(
+          anchor => anchor.start < segment.end && anchor.end > segment.start,
+        )
+        const boundaries = new Set([segment.start, segment.end])
+        for (const anchor of intersectingAnchors) {
+          boundaries.add(Math.max(segment.start, anchor.start))
+          boundaries.add(Math.min(segment.end, anchor.end))
+        }
+        const sortedBoundaries = [...boundaries].sort((a, b) => a - b)
+
+        return sortedBoundaries.slice(0, -1).map((start, partIndex) => {
+          const end = sortedBoundaries[partIndex + 1]
+          const text = segment.text.slice(start - segment.start, end - segment.start)
+          const activeAnchors = intersectingAnchors.filter(
+            anchor => anchor.start < end && anchor.end > start,
+          )
+          const newAnchorIds = activeAnchors
+            .filter(anchor => !renderedAnchors.has(anchor.anchorId))
+            .map(anchor => anchor.anchorId)
+          for (const anchor of activeAnchors) renderedAnchors.add(anchor.anchorId)
+          const anchorId = newAnchorIds[0]
+          const anchorProps = anchorId
+            ? { id: anchorId, 'data-es-feedback-anchor': 'true', tabIndex: -1 }
+            : {}
+          const anchorMarkers = newAnchorIds.slice(1).map(anchorId => (
+            <Box
+              key={anchorId}
+              component="span"
+              id={anchorId}
+              data-es-feedback-anchor="true"
+              tabIndex={-1}
+              sx={{ display: 'inline-block', width: 0, height: '1em', overflow: 'hidden', scrollMarginTop: '96px' }}
+            />
+          ))
+          const anchorStyle = activeAnchors.length > 0
+            ? { boxShadow: `inset 0 -2px ${UI.mark}`, scrollMarginTop: '96px' }
+            : {}
+
+          if (segment.kind === 'removed') {
+            return (
+              <Box
+                key={`${segmentIndex}-${partIndex}`}
+                component="del"
+                {...anchorProps}
+                sx={{
+                  bgcolor: '#fee2e2',
+                  color: '#991b1b',
+                  textDecoration: 'line-through',
+                  borderRadius: 0.5,
+                  ...anchorStyle,
+                }}
+              >
+                {anchorMarkers}
+                {text}
+              </Box>
+            )
+          }
+          if (segment.kind === 'added') {
+            return (
+              <Box
+                key={`${segmentIndex}-${partIndex}`}
+                component="ins"
+                {...anchorProps}
+                sx={{
+                  bgcolor: '#dcfce7',
+                  color: '#166534',
+                  textDecoration: 'underline',
+                  textUnderlineOffset: '2px',
+                  borderRadius: 0.5,
+                  ...anchorStyle,
+                }}
+              >
+                {anchorMarkers}
+                {text}
+              </Box>
+            )
+          }
+          return (
+            <Box
+              key={`${segmentIndex}-${partIndex}`}
+              component="span"
+              {...anchorProps}
+              sx={anchorStyle}
+            >
+              {anchorMarkers}
+              {text}
+            </Box>
+          )
+        })
+      })}
+    </Box>
+  )
+})
 
 // マーカーは S / T / A / R の頭文字を使う。
 // 📍🎯⚡📊 を当てていたが、絵文字と項目の対応に意味が無く、
@@ -160,6 +297,7 @@ function ESRewriteContent() {
   const [loading, setLoading] = useState(false)
   const [rewriteResult, setRewriteResult] = useState<RewriteResult | null>(null)
   const [reviewResult, setReviewResult] = useState<ReviewResult | null>(null)
+  const [reviewedOriginalText, setReviewedOriginalText] = useState('')
   // 添削リクエストに使った企業名。入力欄はあとから編集できるため結果と一緒に保持する
   const [reviewedCompany, setReviewedCompany] = useState('')
   // 設問の文字数上限(#1523)。数値入力は空文字も扱うため文字列で持つ
@@ -213,6 +351,7 @@ function ESRewriteContent() {
 
   const handleReview = async () => {
     if (!originalText.trim()) return
+    const submittedText = originalText
     setLoading(true)
     setError(null)
     setReviewResult(null)
@@ -222,7 +361,7 @@ function ESRewriteContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          es_text: originalText,
+          es_text: submittedText,
           question_type: questionType,
           company_name: companyName,
           ...charLimitBody,
@@ -230,6 +369,7 @@ function ESRewriteContent() {
       })
       if (!res.ok) throw new Error(await readApiErrorMessage(res, '添削に失敗しました。再試行してください。'))
       setReviewedCompany(companyName.trim())
+      setReviewedOriginalText(submittedText)
       setRequestedCharLimit(charLimitInvalid ? null : parsedCharLimit)
       setReviewResult(await res.json())
     } catch (e: unknown) {
@@ -246,6 +386,23 @@ function ESRewriteContent() {
   }
 
   const result = mode === 'rewrite' ? rewriteResult : reviewResult
+  const reviewDiff = useMemo(
+    () => reviewResult ? createTextDiff(reviewedOriginalText, reviewResult.improved_text) : null,
+    [reviewResult, reviewedOriginalText],
+  )
+  const anchoredFeedback = useMemo(() => {
+    if (!reviewResult) return []
+    return (reviewResult.feedback_items ?? []).flatMap((item, index) => {
+      const range = findUniqueTextRange(reviewedOriginalText, item.source_excerpt)
+      if (!range) return []
+      return [{
+        ...item,
+        index,
+        ...range,
+        anchorId: `es-original-anchor-${index}`,
+      }]
+    })
+  }, [reviewResult, reviewedOriginalText])
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: UI.paper }}>
@@ -571,6 +728,53 @@ function ESRewriteContent() {
                 <Typography variant="body2" sx={{ color: UI.inkSoft, lineHeight: 1.8 }}>
                   {reviewResult.feedback}
                 </Typography>
+                {anchoredFeedback.length > 0 && (
+                  <Box sx={{ mt: 2 }}>
+                    <Typography sx={{ fontWeight: 700, fontSize: 14, mb: 1 }}>
+                      指摘と改善のヒント
+                    </Typography>
+                    <Stack spacing={1.5}>
+                      {anchoredFeedback.map(item => (
+                        <Box
+                          key={item.index}
+                          sx={{ borderLeft: `3px solid ${UI.mark}`, pl: 1.5, py: 0.25 }}
+                        >
+                          <Typography sx={{ fontSize: 12, fontWeight: 700, color: UI.mark, mb: 0.5 }}>
+                            {FEEDBACK_SCORE_LABELS[item.score_key]}
+                          </Typography>
+                          <Typography variant="body2" sx={{ color: UI.ink, lineHeight: 1.7 }}>
+                            {item.issue}
+                          </Typography>
+                          <Typography
+                            component="blockquote"
+                            sx={{
+                              m: 0,
+                              mt: 0.75,
+                              pl: 1,
+                              borderLeft: `2px solid ${UI.ruleSoft}`,
+                              color: UI.inkFaint,
+                              fontSize: 13,
+                            }}
+                          >
+                            「{item.source_excerpt}」
+                          </Typography>
+                          <Typography variant="body2" sx={{ color: UI.inkSoft, lineHeight: 1.7, mt: 0.5 }}>
+                            改善のヒント：{item.suggestion}
+                          </Typography>
+                          <Button
+                            component="a"
+                            href={`#${item.anchorId}`}
+                            size="small"
+                            onClick={() => document.getElementById(item.anchorId)?.focus({ preventScroll: true })}
+                            sx={{ mt: 0.5, px: 0, minWidth: 0, textTransform: 'none' }}
+                          >
+                            原文の該当箇所を見る
+                          </Button>
+                        </Box>
+                      ))}
+                    </Stack>
+                  </Box>
+                )}
               </Paper>
 
               {reviewResult.company_strategy && (
@@ -599,15 +803,43 @@ function ESRewriteContent() {
                       </IconButton>
                     </Tooltip>
                   </Box>
-                  <Typography sx={{ fontSize: 14, lineHeight: 1.9, color: UI.ink, whiteSpace: 'pre-wrap' }}>
-                    {reviewResult.improved_text}
+                  <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: 'wrap' }}>
+                    <Chip size="small" label="追加" sx={{ bgcolor: '#dcfce7', color: '#166534' }} />
+                    <Chip size="small" label="削除" sx={{ bgcolor: '#fee2e2', color: '#991b1b' }} />
+                  </Stack>
+                  {reviewDiff?.usedFallback && (
+                    <Alert severity="warning" role="status" sx={{ mb: 1.5 }}>
+                      文章が長いため差分を簡易表示しています。変更箇所を正確に示していない場合があります。
+                    </Alert>
+                  )}
+                  {reviewDiff &&
+                    !reviewDiff.original.some(segment => segment.kind === 'removed') &&
+                    !reviewDiff.improved.some(segment => segment.kind === 'added') && (
+                      <Alert severity="info" role="status" sx={{ mb: 1.5 }}>
+                        改善前後に差分はありませんでした。
+                      </Alert>
+                    )}
+                  <Typography sx={{ fontSize: 12, fontWeight: 700, color: UI.inkFaint, mb: 0.5 }}>
+                    改善後（追加をハイライト）
                   </Typography>
+                  {reviewDiff && (
+                    <HighlightedDiffText
+                      segments={reviewDiff.improved}
+                      ariaLabel="追加箇所を示した改善後テキスト"
+                    />
+                  )}
                   <CharCountNote result={reviewResult} charLimit={requestedCharLimit} />
                   <Divider sx={{ my: 2 }} />
-                  <Typography sx={{ fontWeight: 700, fontSize: 13, mb: 1, color: UI.inkFaint }}>元の文章</Typography>
-                  <Typography variant="body2" sx={{ color: UI.inkFaint, lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>
-                    {originalText}
+                  <Typography sx={{ fontWeight: 700, fontSize: 13, mb: 1, color: UI.inkFaint }}>
+                    元の文章（削除をハイライト）
                   </Typography>
+                  {reviewDiff && (
+                    <HighlightedDiffText
+                      segments={reviewDiff.original}
+                      anchors={anchoredFeedback}
+                      ariaLabel="削除箇所と指摘箇所を示した元の文章"
+                    />
+                  )}
                 </Paper>
               )}
             </Stack>
