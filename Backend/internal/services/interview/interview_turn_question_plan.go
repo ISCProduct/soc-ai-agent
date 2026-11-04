@@ -55,14 +55,15 @@ func (s *InterviewService) advanceQuestionPlan(
 				}
 				parentID := asked.ID
 				followUp := &models.InterviewQuestionState{
-					SessionID:     session.ID,
-					Source:        questionSourceFollowUp,
-					Category:      asked.Category,
-					QuestionText:  followUpText,
-					Status:        questionStatusAsked,
-					ParentStateID: &parentID,
-					Depth:         asked.Depth + 1,
-					SortOrder:     asked.SortOrder,
+					SessionID:         session.ID,
+					Source:            questionSourceFollowUp,
+					Category:          asked.Category,
+					CompanyQuestionID: asked.CompanyQuestionID,
+					QuestionText:      followUpText,
+					Status:            questionStatusAsked,
+					ParentStateID:     &parentID,
+					Depth:             asked.Depth + 1,
+					SortOrder:         asked.SortOrder,
 				}
 				if err := s.questionStateRepo.Create(followUp); err != nil {
 					return nil, err
