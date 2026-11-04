@@ -42,6 +42,8 @@ type questionDirective struct {
 	Source      string
 	Category    string
 	IsDeepening bool
+	// CompanyQuestionID は元の企業別カスタム質問（評価したい観点の引き先）。標準トピックでは nil
+	CompanyQuestionID *uint
 }
 
 // BuildQuestionQueue は必須カスタム質問→標準トピック→推奨カスタム質問の順でキューを構築する。
