@@ -250,6 +250,11 @@ jobs:
       - name: 静的エラーページの検査
         run: ./infra/scripts/verify-error-pages.sh
 
+      # automation/test のスクリプトがワークフローから呼ばれていること。
+      # 手で並べているため、足して登録を忘れると CI で一度も走らない。
+      - name: 検査スクリプトの登録漏れ検査
+        run: ./automation/test/test-registration-test.sh
+
       - name: ワークフロー埋め込み Python の構文チェック
         run: |
           python3 - <<'PYEOF'
@@ -282,6 +287,31 @@ jobs:
           print(f"検査したブロック数: {checked}")
           sys.exit(1 if ng else 0)
           PYEOF
+
+  # Terraform の構文と整形。インフラの変更は apply するまで壊れていることに気づけない。
+  # backend を使わない init なので認証情報は要らない（plan / apply はここでは行わない）。
+  terraform-check:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - name: fmt
+        run: terraform fmt -check -recursive infra/terraform
+
+      - name: validate
+        run: |
+          for d in bootstrap environments/staging environments/prod; do
+            echo "== $d"
+            (cd "infra/terraform/$d" && terraform init -backend=false -input=false >/dev/null && terraform validate)
+          done
 
   dependency-review:
     name: Dependency Review

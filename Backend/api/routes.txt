@@ -116,6 +116,7 @@ GET /api/admin/score-validation/variants/results
 GET /api/admin/scraper-sessions
 POST /api/admin/scraper-sessions
 DELETE /api/admin/scraper-sessions/:site_key
+GET /api/admin/teacher/students/:id/es-reviews
 POST /api/admin/teacher/students/:id/guidances
 GET /api/admin/teacher/students/tendency-analysis
 GET /api/admin/training/export

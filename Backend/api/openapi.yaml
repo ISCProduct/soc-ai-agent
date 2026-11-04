@@ -414,6 +414,28 @@ components:
             この質問で評価したい観点（#1092）。AI 面接官の system プロンプトへ、質問と同じ非信頼テキストの囲みの中で渡し、応募者には伝えないよう指示する。
             前後の空白は落とし、空文字は未設定（null）として保存する。更新で空文字を送ると消える。300字を超えると 400
 
+    FormatFinding:
+      type: object
+      description: |
+        形式チェック（#1530）の指摘1件。LLM を使わずルールだけで判定する。
+        位置 `start` / `end` は、リクエストで送った原文（trim 前）を UTF-16 のコード単位で数えた位置（`end` は含まない）。
+        JavaScript の文字列の添字と同じ単位。
+      required: [rule, severity, start, end, message, fix]
+      properties:
+        rule:
+          type: string
+          enum: [mixed_width, mixed_numeral, mixed_era, mixed_style, date_order, char_limit]
+        severity:
+          type: string
+          enum: [critical, warning, info]
+          description: 履歴書の AI 指摘と同じ3値（重大 / 注意 / 情報）
+        start: { type: integer }
+        end: { type: integer }
+        message: { type: string, description: 何が問題か }
+        fix: { type: string, description: どう直すか }
+        page_hint: { type: integer, description: 履歴書のみ。ES では省略される }
+        block_index: { type: integer, description: 履歴書のみ。ES では省略される }
+
     ESRewriteResponse:
       type: object
       properties:
@@ -421,12 +443,20 @@ components:
         star: { $ref: "#/components/schemas/StarBreakdown" }
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
+        format_findings:
+          type: array
+          description: 原文の形式チェック（#1530）。重要度順（同じなら出現位置順）。指摘が無いときは空配列
+          items: { $ref: "#/components/schemas/FormatFinding" }
 
     ESReviewRequest:
       type: object
       required: [es_text, question_type]
       properties:
         es_text: { type: string }
+        question:
+          type: string
+          maxLength: 500
+          description: "設問文（任意 / #1531）。同一設問の前回結果と突き合わせるキー。種別だけだと「学チカ」と「ガクチカ」が別扱いになる"
         question_type: { type: string }
         company_name: { type: string }
         char_limit: { type: integer, nullable: true }
@@ -438,7 +468,42 @@ components:
         improved_text: { type: string }
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
+        format_findings:
+          type: array
+          description: 原文の形式チェック（#1530）。重要度順（同じなら出現位置順）。指摘が無いときは空配列。RAG の応答が想定外の形のときは付かず、RAG の応答をそのまま返す
+          items: { $ref: "#/components/schemas/FormatFinding" }
         star: { $ref: "#/components/schemas/StarBreakdown" }
+        feedback_items:
+          type: array
+          maxItems: 4
+          description: 原文の該当箇所と評価根拠に結びついた指摘
+          items:
+            type: object
+            required: [score_key, source_excerpt, issue, suggestion]
+            properties:
+              score_key:
+                type: string
+                enum: [specificity_score, star_score, company_fit_score, length_balance_score]
+              source_excerpt: { type: string, maxLength: 120, description: 原文からの連続した引用 }
+              issue: { type: string, maxLength: 80 }
+              suggestion: { type: string, maxLength: 80 }
+        previous:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/ESReviewPrevious" }]
+          description: "同一設問の前回の添削（#1531）。初回・未ログイン・設問未入力のときは付かない"
+
+    ESReviewPrevious:
+      type: object
+      description: "前回の添削のうち差分表示に使う項目だけ（#1531）。本文は含めない"
+      properties:
+        id: { type: integer }
+        created_at: { type: string, format: date-time }
+        question: { type: string }
+        question_type: { type: string }
+        specificity_score: { type: integer }
+        star_score: { type: integer }
+        length_balance_score: { type: integer }
+        company_fit_score: { type: integer, nullable: true }
 
     ResumeStatus:
       type: object
@@ -1613,7 +1678,11 @@ paths:
     post:
       tags: [es]
       summary: エントリーシートを添削する
-      description: "**未ログインでも使える。** 認証は付けず、レート制限のみ（#1154）。"
+      description: |
+        **未ログインでも使える。** 認証は必須にしない（必須にするとログイン前に試す導線が壊れる）。
+        ただし `X-User-Token` があれば実行者として扱い、添削結果を履歴に残す（#1531）。
+        壊れたトークン・退会済み・所属学園が確定しない場合も 401 にはせず、保存だけ行わない。
+        コスト濫用はレート制限で止める（#1154）。
       requestBody:
         required: true
         content:
@@ -3238,6 +3307,35 @@ paths:
       responses:
         "200":
           description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/teacher/students/{id}/es-reviews:
+    get:
+      tags: [admin-analytics]
+      summary: 学生のES添削履歴
+      description: |
+        担当校に在籍する学生の ES添削履歴を新しい順に返す（#1531）。
+
+        担当校スコープが掛かる。学校での絞り込みは学園一致つきで行うため、
+        プロフィールの学校名（自己申告）を他学園の校名に書き替えた学生の履歴は混ざらない（#1675）。
+        担当校外・他学園の学生は 404 ではなく空配列で返す（存在を明かさないため）。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: school_id
+          schema:
+            type: integer
+          description: 担当校。担当校ありの管理者・職員は必須
+      responses:
+        "200":
+          description: 成功
+        "400": { description: 学生IDまたは school_id が不正 }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
