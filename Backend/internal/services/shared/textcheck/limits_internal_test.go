@@ -14,7 +14,7 @@ import (
 func TestCharLimit_MatchesRAGDefinition(t *testing.T) {
 	src, err := os.ReadFile("../../../../../rag/services/es_review.py")
 	if err != nil {
-		t.Skipf("RAG のソースが読めないため省略: %v", err)
+		t.Fatalf("RAG のソースが読めない（rag/ が無いと字数定義の食い違いを検出できない）: %v", err)
 	}
 	s := string(src)
 

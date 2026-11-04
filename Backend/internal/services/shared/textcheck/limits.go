@@ -10,16 +10,24 @@ import (
 
 // DateOrder は期間の書き方（「2020年4月〜2021年3月」）で、開始が終了より後になっている矛盾を見る。
 // 和暦は西暦に直して比べる。月が片方に無いときは年だけで比べる。
+//
+// 区切りは記号（〜 ～ ~ － -）だけにする。「から」を区切りにすると、
+// 「2020年から2019年の売上を比べた」のような正しい文を重大な矛盾と誤る。
 type DateOrder struct{}
+
+func (DateOrder) Name() string { return "date_order" }
 
 const datePattern = `(?:(令和|平成|昭和)(元|[0-9]+)|([0-9]{4}))年(?:\s*([0-9]{1,2})月)?`
 
-var dateRangeRe = regexp.MustCompile(datePattern + `\s*(?:〜|～|~|－|-|ー|から)\s*` + datePattern)
+var dateRangeRe = regexp.MustCompile(datePattern + `\s*(?:〜|～|~|－|-)\s*` + datePattern)
 
 var eraBase = map[string]int{"令和": 2018, "平成": 1988, "昭和": 1925}
 
-func (DateOrder) Check(text string) []Finding {
+func (r DateOrder) Check(text string) []Finding {
+	// 全角数字を半角に直してから照合する。全角数字も半角数字も UTF-16 で1単位なので、
+	// 直した後の文字列で求めた位置は元の文字列でもそのまま使える。
 	s := normalizeDigits(text)
+	p := newPositions(s)
 	var out []Finding
 	for _, m := range dateRangeRe.FindAllStringSubmatchIndex(s, -1) {
 		y1, m1 := yearMonth(s, m, 1)
@@ -27,14 +35,24 @@ func (DateOrder) Check(text string) []Finding {
 		if !(y1 > y2 || (y1 == y2 && m1 > 0 && m2 > 0 && m1 > m2)) {
 			continue
 		}
-		sp := runeSpan(s, m[0], m[1])
+		sp := p.bytes(m[0], m[1])
 		out = append(out, Finding{
-			Rule: "date_order", Severity: SeverityCritical, Start: sp.start, End: sp.end,
+			Rule: r.Name(), Severity: SeverityCritical, Start: sp.start, End: sp.end,
 			Message: fmt.Sprintf("期間の開始（%s）が終了（%s）より後になっています", formatYM(y1, m1), formatYM(y2, m2)),
 			Fix:     "開始と終了の年月を確認する",
 		})
 	}
 	return out
+}
+
+// normalizeDigits は全角数字を半角に置き換える。
+func normalizeDigits(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= '０' && r <= '９' {
+			return '0' + (r - '０')
+		}
+		return r
+	}, s)
 }
 
 // yearMonth は datePattern の4グループ（first 番目から）を西暦の年と月に直す。月が無ければ0。
@@ -76,6 +94,8 @@ type CharLimit struct {
 	Mode  string // "within" | "around"。未知の値は within 扱い（RAG と同じ）
 }
 
+func (CharLimit) Name() string { return "char_limit" }
+
 // charLimitRange は (目標下限の比率, 許容上限の比率)。
 var charLimitRange = map[string][2]float64{
 	"within": {0.85, 1.00},
@@ -84,6 +104,7 @@ var charLimitRange = map[string][2]float64{
 
 // CountChars は RAG の count_es_chars と同じ数え方で文字数を返す。
 // 改行と前後の空白は数えず、それ以外（全角・半角・記号・文中の空白）は1文字と数える。
+// Python の len と同じく、文字（コードポイント）単位で数える。
 func CountChars(text string) int {
 	t := strings.NewReplacer("\r", "", "\n", "").Replace(text)
 	return utf8.RuneCountInString(strings.TrimSpace(t))
@@ -104,17 +125,17 @@ func (c CharLimit) Check(text string) []Finding {
 	}
 	n := CountChars(text)
 	low, high := c.bounds()
-	end := utf8.RuneCountInString(text)
+	end := newPositions(text).length()
 	switch {
 	case n > high:
 		return []Finding{{
-			Rule: "char_limit", Severity: SeverityCritical, Start: 0, End: end,
+			Rule: c.Name(), Severity: SeverityCritical, Start: 0, End: end,
 			Message: fmt.Sprintf("字数が上限を超えています（%d字 / 上限 %d字）", n, high),
 			Fix:     fmt.Sprintf("%d字以内に削る", high),
 		}}
 	case n < low:
 		return []Finding{{
-			Rule: "char_limit", Severity: SeverityWarning, Start: 0, End: end,
+			Rule: c.Name(), Severity: SeverityWarning, Start: 0, End: end,
 			Message: fmt.Sprintf("字数が少なすぎます（%d字 / 目安 %d字以上）", n, low),
 			Fix:     fmt.Sprintf("%d字以上に書き足す", low),
 		}}

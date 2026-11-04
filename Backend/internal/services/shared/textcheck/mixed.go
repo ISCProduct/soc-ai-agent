@@ -8,16 +8,18 @@ import (
 	"unicode"
 )
 
-func findSpans(re *regexp.Regexp, s string) []span {
+func findSpans(re *regexp.Regexp, s string, p positions) []span {
 	var out []span
 	for _, m := range re.FindAllStringIndex(s, -1) {
-		out = append(out, runeSpan(s, m[0], m[1]))
+		out = append(out, p.bytes(m[0], m[1]))
 	}
 	return out
 }
 
 // MixedWidth は英数字の全角・半角の混在を見る。数字と英字は別々に判定する。
 type MixedWidth struct{}
+
+func (MixedWidth) Name() string { return "mixed_width" }
 
 var widthPairs = []struct {
 	label      string
@@ -27,10 +29,11 @@ var widthPairs = []struct {
 	{"英字", regexp.MustCompile(`[A-Za-z]+`), regexp.MustCompile(`[Ａ-Ｚａ-ｚ]+`)},
 }
 
-func (MixedWidth) Check(text string) []Finding {
+func (r MixedWidth) Check(text string) []Finding {
+	p := newPositions(text)
 	var out []Finding
-	for _, p := range widthPairs {
-		half, full := findSpans(p.half, text), findSpans(p.full, text)
+	for _, pair := range widthPairs {
+		half, full := findSpans(pair.half, text, p), findSpans(pair.full, text, p)
 		// 同数なら全角側を指摘し、半角にそろえるよう促す
 		flagged, isFull := pickMinority(full, half)
 		to := "全角"
@@ -39,9 +42,9 @@ func (MixedWidth) Check(text string) []Finding {
 		}
 		for _, sp := range flagged {
 			out = append(out, Finding{
-				Rule: "mixed_width", Severity: SeverityWarning, Start: sp.start, End: sp.end,
-				Message: fmt.Sprintf("%sの全角と半角が混在しています（全角 %d 箇所・半角 %d 箇所）", p.label, len(full), len(half)),
-				Fix:     fmt.Sprintf("%sを%sにそろえる", p.label, to),
+				Rule: r.Name(), Severity: SeverityWarning, Start: sp.start, End: sp.end,
+				Message: fmt.Sprintf("%sの全角と半角が混在しています（全角 %d 箇所・半角 %d 箇所）", pair.label, len(full), len(half)),
+				Fix:     fmt.Sprintf("%sを%sにそろえる", pair.label, to),
 			})
 		}
 	}
@@ -53,10 +56,21 @@ func (MixedWidth) Check(text string) []Finding {
 //
 // 数字の直後の1文字（「年」「人」「つ」など）を「数える対象」とみなし、同じ対象が
 // 算用数字と漢数字の両方で現れたときだけ指摘する。「三年間」と「3年」は指摘し、
-// 「一つ」だけなら指摘しない。前が漢字の漢数字（「統一」「第一」）は熟語の一部として数えない。
+// 「一つ」だけなら指摘しない。次のものは数えない。
+//   - 前が漢字の漢数字（「統一」「第一」）: 熟語の一部
+//   - 1文字だけの「一」「十」「百」「千」「万」: 「十分」「一番」「百貨店」「万全」など
+//     熟語に使われることが多く、「十分」と「5分」を混在と言うと誤った修正を促す
+//   - 4桁の西暦の年（「2020年」）と元号の年（「令和2年」）: 年の表記は mixed_era が見る。
+//     数えると「2020年に入社」と「三年間」を同じ「年」の混在と誤る
 type MixedNumeral struct{}
 
-const kanjiNumerals = "〇一二三四五六七八九十百千万"
+func (MixedNumeral) Name() string { return "mixed_numeral" }
+
+const (
+	kanjiNumerals = "〇一二三四五六七八九十百千万"
+	// 1文字だけなら熟語の可能性が高いので数えない字
+	idiomaticKanjiNumerals = "一十百千万"
+)
 
 func isArabicDigit(r rune) bool  { return (r >= '0' && r <= '9') || (r >= '０' && r <= '９') }
 func isKanjiNumeral(r rune) bool { return strings.ContainsRune(kanjiNumerals, r) }
@@ -64,8 +78,20 @@ func isJapaneseWord(r rune) bool {
 	return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana)
 }
 
-func (MixedNumeral) Check(text string) []Finding {
+func precededByEra(rs []rune, i int) bool {
+	if i < 2 {
+		return false
+	}
+	switch string(rs[i-2 : i]) {
+	case "令和", "平成", "昭和":
+		return true
+	}
+	return false
+}
+
+func (r MixedNumeral) Check(text string) []Finding {
 	rs := []rune(text)
+	p := newPositions(text)
 	type forms struct{ arabic, kanji []span }
 	byKey := map[rune]*forms{}
 	for i := 0; i < len(rs); {
@@ -78,16 +104,23 @@ func (MixedNumeral) Check(text string) []Finding {
 		for j < len(rs) && ((kanji && isKanjiNumeral(rs[j])) || (!kanji && isArabicDigit(rs[j]))) {
 			j++
 		}
-		if j < len(rs) && isJapaneseWord(rs[j]) && !isKanjiNumeral(rs[j]) {
+		counted := j < len(rs) && isJapaneseWord(rs[j]) && !isKanjiNumeral(rs[j])
+		switch {
+		case kanji && j-i == 1 && strings.ContainsRune(idiomaticKanjiNumerals, rs[i]):
+			counted = false
+		case !kanji && counted && rs[j] == '年' && (j-i == 4 || precededByEra(rs, i)):
+			counted = false
+		}
+		if counted {
 			f := byKey[rs[j]]
 			if f == nil {
 				f = &forms{}
 				byKey[rs[j]] = f
 			}
 			if kanji {
-				f.kanji = append(f.kanji, span{i, j + 1})
+				f.kanji = append(f.kanji, p.runes(i, j+1))
 			} else {
-				f.arabic = append(f.arabic, span{i, j + 1})
+				f.arabic = append(f.arabic, p.runes(i, j+1))
 			}
 		}
 		i = j
@@ -110,7 +143,7 @@ func (MixedNumeral) Check(text string) []Finding {
 		}
 		for _, sp := range flagged {
 			out = append(out, Finding{
-				Rule: "mixed_numeral", Severity: SeverityWarning, Start: sp.start, End: sp.end,
+				Rule: r.Name(), Severity: SeverityWarning, Start: sp.start, End: sp.end,
 				Message: fmt.Sprintf("「%c」の数が算用数字と漢数字で混在しています（算用数字 %d 箇所・漢数字 %d 箇所）", k, len(f.arabic), len(f.kanji)),
 				Fix:     fmt.Sprintf("%sにそろえる", to),
 			})
@@ -123,13 +156,16 @@ func (MixedNumeral) Check(text string) []Finding {
 // MixedEra は和暦と西暦の混在を見る。
 type MixedEra struct{}
 
+func (MixedEra) Name() string { return "mixed_era" }
+
 var (
 	warekiRe  = regexp.MustCompile(`(令和|平成|昭和)(元|[0-9０-９]+)年`)
 	seirekiRe = regexp.MustCompile(`[0-9０-９]{4}年`)
 )
 
-func (MixedEra) Check(text string) []Finding {
-	wareki, seireki := findSpans(warekiRe, text), findSpans(seirekiRe, text)
+func (r MixedEra) Check(text string) []Finding {
+	p := newPositions(text)
+	wareki, seireki := findSpans(warekiRe, text, p), findSpans(seirekiRe, text, p)
 	// 同数なら和暦側を指摘し、西暦にそろえるよう促す
 	flagged, isWareki := pickMinority(wareki, seireki)
 	to := "和暦"
@@ -139,7 +175,7 @@ func (MixedEra) Check(text string) []Finding {
 	var out []Finding
 	for _, sp := range flagged {
 		out = append(out, Finding{
-			Rule: "mixed_era", Severity: SeverityWarning, Start: sp.start, End: sp.end,
+			Rule: r.Name(), Severity: SeverityWarning, Start: sp.start, End: sp.end,
 			Message: fmt.Sprintf("和暦と西暦が混在しています（和暦 %d 箇所・西暦 %d 箇所）", len(wareki), len(seireki)),
 			Fix:     fmt.Sprintf("%sにそろえる", to),
 		})
@@ -152,6 +188,8 @@ func (MixedEra) Check(text string) []Finding {
 // 「。」「！」「？」で終わる文だけを、文末で分類する。体言止め・疑問文など
 // どちらとも言えない文は数えない。改行だけで終わる行（箇条書き・見出し）は文とみなさない。
 type MixedStyle struct{}
+
+func (MixedStyle) Name() string { return "mixed_style" }
 
 const (
 	styleNone = iota
@@ -180,12 +218,13 @@ func classifyEnding(s string) int {
 
 func isSentenceEnd(r rune) bool { return strings.ContainsRune("。！？!?", r) }
 
-func (MixedStyle) Check(text string) []Finding {
+func (r MixedStyle) Check(text string) []Finding {
 	rs := []rune(text)
+	p := newPositions(text)
 	var polite, plain []span
 	start := 0
-	for i, r := range rs {
-		if !isSentenceEnd(r) {
+	for i, c := range rs {
+		if !isSentenceEnd(c) {
 			continue
 		}
 		s := start
@@ -197,9 +236,9 @@ func (MixedStyle) Check(text string) []Finding {
 		})
 		switch classifyEnding(body) {
 		case stylePolite:
-			polite = append(polite, span{s, i + 1})
+			polite = append(polite, p.runes(s, i+1))
 		case stylePlain:
-			plain = append(plain, span{s, i + 1})
+			plain = append(plain, p.runes(s, i+1))
 		}
 		start = i + 1
 	}
@@ -212,7 +251,7 @@ func (MixedStyle) Check(text string) []Finding {
 	var out []Finding
 	for _, sp := range flagged {
 		out = append(out, Finding{
-			Rule: "mixed_style", Severity: SeverityWarning, Start: sp.start, End: sp.end,
+			Rule: r.Name(), Severity: SeverityWarning, Start: sp.start, End: sp.end,
 			Message: fmt.Sprintf("です・ます調とである調が混在しています（です・ます %d 文・である %d 文）", len(polite), len(plain)),
 			Fix:     fmt.Sprintf("%sにそろえる", to),
 		})
