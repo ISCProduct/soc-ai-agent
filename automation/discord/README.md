@@ -88,6 +88,7 @@ Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確
 
 - 対象ステータス: 未対応・処理中・PR確認待ち。保留・処理済み・ステージング反映以降は対象外。
 - 担当者は `/link` で紐づけた人にメンションする。未登録の人は名前だけで、「Discord未登録」と出る。
+- 「PR確認待ち」の課題があるときは、レビュアー（terraform の `backlog_reviewer_ids`、既定は大橋和幸）にもメンションして、レビューを促す。レビュアー本人が担当の課題は対象にしない。
 - 対象が無い日は何も投稿しない。
 - 投稿先は Webhook（terraform の `discord_reminder_webhook_url`）。未設定なら動かない。
 - 手動確認（投稿しない）: Lambda を `{"source":"backlog-deadline-reminder","dry_run":true}` で invoke すると、投稿予定の本文が返る。

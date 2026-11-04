@@ -21,7 +21,8 @@ import (
 // 未対応(1) 処理中(2) PR確認待ち(416375)。保留・処理済み・ステージング反映以降は、
 // 期限を過ぎていても「着手を促す」意味が無いので対象外にする。
 const (
-	statusOpen = 1
+	statusOpen     = 1
+	statusPRReview = 416375 // PR確認待ち
 	// remindSoonDays は「期限が近い」とみなす日数（当日を含めて2日後まで）。
 	remindSoonDays = 2
 	// 1通の上限は2000文字。メンションや改行の余裕を見て切る。
@@ -29,7 +30,7 @@ const (
 	issueURLFormat     = "%s/view/%s"
 )
 
-var defaultRemindStatusIDs = []int{statusOpen, 2, 416375}
+var defaultRemindStatusIDs = []int{statusOpen, 2, statusPRReview}
 
 // BacklogIssue は期限リマインドに使う課題の最小情報。
 type BacklogIssue struct {
@@ -94,6 +95,7 @@ type ReminderService struct {
 	links      LinkLister
 	webhookURL string
 	issueBase  string // 課題リンクの基点（https://iwasaki-ac.backlog.com）
+	reviewers  []int  // PR確認待ちの課題でレビューを促す Backlog ユーザーID
 	http       *http.Client
 }
 
@@ -115,12 +117,24 @@ func NewReminderServiceFromEnv(backlog *BacklogClient, links *LinkService) *Remi
 		links:      links,
 		webhookURL: hook,
 		issueBase:  backlog.baseURL,
+		reviewers:  parseIDs(os.Getenv("BACKLOG_REVIEWER_IDS")),
 		http: &http.Client{
 			Timeout: 5 * time.Second,
 			// リダイレクト先へ Webhook のトークンごと送らない。
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 	}
+}
+
+// parseIDs は "1,2" 形式の Backlog ユーザーID。数値でないものは捨てる。
+func parseIDs(raw string) []int {
+	var ids []int
+	for _, p := range strings.Split(raw, ",") {
+		if n, err := strconv.Atoi(strings.TrimSpace(p)); err == nil {
+			ids = append(ids, n)
+		}
+	}
+	return ids
 }
 
 // ReminderResult は実行結果。DryRun のときは Messages が投稿予定の本文。
@@ -144,13 +158,13 @@ func (s *ReminderService) Run(ctx context.Context, dryRun bool) (*ReminderResult
 	if err != nil {
 		return nil, err
 	}
-	msgs := BuildReminder(issues, links, today, s.issueBase)
+	msgs := BuildReminder(issues, links, today, s.issueBase, s.reviewers)
 	res := &ReminderResult{Issues: len(issues), Messages: msgs}
 	if dryRun || len(msgs) == 0 {
 		return res, nil
 	}
 	for _, m := range msgs {
-		if err := s.post(ctx, m, mentionIDs(issues, links)); err != nil {
+		if err := s.post(ctx, m, mentionIDs(issues, links, s.reviewers)); err != nil {
 			return res, err
 		}
 		res.Posted = true
@@ -160,20 +174,28 @@ func (s *ReminderService) Run(ctx context.Context, dryRun bool) (*ReminderResult
 
 // mentionIDs は本文に出てくる Discord ID。allowed_mentions に渡し、
 // 課題名などに混ざった @everyone や別人のメンションを無効にする。
-func mentionIDs(issues []BacklogIssue, links map[string]Link) []string {
+func mentionIDs(issues []BacklogIssue, links map[string]Link, reviewers []int) []string {
 	byBacklog := map[int]string{}
 	for id, l := range links {
 		byBacklog[l.BacklogID] = id
 	}
 	seen := map[string]bool{}
 	var ids []string
-	for _, i := range issues {
-		if i.Assignee == nil {
-			continue
-		}
-		if d, ok := byBacklog[i.Assignee.ID]; ok && !seen[d] {
+	add := func(backlogID int) {
+		if d, ok := byBacklog[backlogID]; ok && !seen[d] {
 			seen[d] = true
 			ids = append(ids, d)
+		}
+	}
+	for _, i := range issues {
+		if i.Assignee != nil {
+			add(i.Assignee.ID)
+		}
+	}
+	// レビュー依頼の宛先。PR確認待ちが1件も無い日はメンションしない。
+	if len(reviewTargets(issues, reviewers)) > 0 {
+		for _, r := range reviewers {
+			add(r)
 		}
 	}
 	sort.Strings(ids)
@@ -215,7 +237,7 @@ func (s *ReminderService) post(ctx context.Context, content string, mentions []s
 
 // BuildReminder は担当者ごとにまとめた投稿本文を返す。対象が無ければ nil。
 // 1通に収まらない場合は担当者の区切りで分割する。
-func BuildReminder(issues []BacklogIssue, links map[string]Link, today, issueBase string) []string {
+func BuildReminder(issues []BacklogIssue, links map[string]Link, today, issueBase string, reviewers []int) []string {
 	if len(issues) == 0 {
 		return nil
 	}
@@ -250,6 +272,31 @@ func BuildReminder(issues []BacklogIssue, links map[string]Link, today, issueBas
 		g.lines = append(g.lines, issueLine(i, today, issueBase))
 	}
 
+	// レビュー依頼ブロック。PR確認待ちの課題があるときだけ、レビュアーに促す。
+	var reviewBlock string
+	if targets := reviewTargets(issues, reviewers); len(targets) > 0 {
+		var mentions []string
+		for _, r := range reviewers {
+			if d, ok := byBacklog[r]; ok {
+				mentions = append(mentions, "<@"+d+">")
+			}
+		}
+		if len(mentions) == 0 {
+			// 宛先が未登録だとメンションできない。黙って落とさず /link を促す。
+			mentions = append(mentions, "**レビュアー** (Discord未登録。/link で紐づけてください)")
+		}
+		var b strings.Builder
+		b.WriteString("👀 **レビュー依頼** " + strings.Join(mentions, " ") + " PR確認待ちです。レビューをお願いします。\n")
+		for _, i := range targets {
+			who := "担当なし"
+			if i.Assignee != nil {
+				who = oneLine(i.Assignee.Name)
+			}
+			b.WriteString(fmt.Sprintf("・[%s](<%s>) %s — 担当: %s\n", i.IssueKey, fmt.Sprintf(issueURLFormat, issueBase, i.IssueKey), oneLine(i.Summary), who))
+		}
+		reviewBlock = b.String()
+	}
+
 	header := "📅 **Backlog 期限リマインド** (" + md(today) + ")\n"
 	footer := "\n着手していない・間に合わない場合は、このチャンネルで相談してください。"
 	var msgs []string
@@ -263,7 +310,34 @@ func BuildReminder(issues []BacklogIssue, links map[string]Link, today, issueBas
 		}
 		cur += block
 	}
+	if reviewBlock != "" {
+		if len(cur)+len(reviewBlock)+len(footer) > reminderChunkChars && cur != header {
+			msgs = append(msgs, cur)
+			cur = ""
+		}
+		cur += reviewBlock
+	}
 	return append(msgs, cur+footer)
+}
+
+// reviewTargets は、レビューを促す対象の課題（PR確認待ち）。
+// レビュアー本人が担当の課題は除く。自分の PR を自分でレビューする依頼にならないように。
+func reviewTargets(issues []BacklogIssue, reviewers []int) []BacklogIssue {
+	if len(reviewers) == 0 {
+		return nil
+	}
+	isReviewer := map[int]bool{}
+	for _, r := range reviewers {
+		isReviewer[r] = true
+	}
+	var out []BacklogIssue
+	for _, i := range issues {
+		if i.Status.ID != statusPRReview || (i.Assignee != nil && isReviewer[i.Assignee.ID]) {
+			continue
+		}
+		out = append(out, i)
+	}
+	return out
 }
 
 func md(date string) string {

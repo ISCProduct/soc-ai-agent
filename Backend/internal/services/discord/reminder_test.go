@@ -29,7 +29,7 @@ var remindLinks = map[string]Link{"111": {BacklogID: 1, Name: "大橋和幸"}}
 const base = "https://x.backlog.com"
 
 func TestBuildReminder_対象が無ければ何も作らない(t *testing.T) {
-	if got := BuildReminder(nil, remindLinks, "2026-11-04", base); got != nil {
+	if got := BuildReminder(nil, remindLinks, "2026-11-04", base, nil); got != nil {
 		t.Errorf("nil でない: %v", got)
 	}
 }
@@ -41,7 +41,7 @@ func TestBuildReminder_期限の表示と担当者のまとめ(t *testing.T) {
 		issue("P-3", "明日", "2026-11-05", 2, 2, "山田太郎"),
 		issue("P-4", "明後日", "2026-11-06", 2, 0, ""),
 	}
-	out := strings.Join(BuildReminder(issues, remindLinks, "2026-11-04", base), "\n")
+	out := strings.Join(BuildReminder(issues, remindLinks, "2026-11-04", base, nil), "\n")
 	for _, want := range []string{
 		"<@111>",                // 登録済みはメンション
 		"期限切れ 2日",               // 期限切れ
@@ -68,7 +68,7 @@ func TestBuildReminder_期限の表示と担当者のまとめ(t *testing.T) {
 }
 
 func TestBuildReminder_件名のメンションを無効にする(t *testing.T) {
-	out := strings.Join(BuildReminder([]BacklogIssue{issue("P-1", "@everyone 確認\n改行", "2026-11-04", 2, 1, "大橋和幸")}, remindLinks, "2026-11-04", base), "")
+	out := strings.Join(BuildReminder([]BacklogIssue{issue("P-1", "@everyone 確認\n改行", "2026-11-04", 2, 1, "大橋和幸")}, remindLinks, "2026-11-04", base, nil), "")
 	if strings.Contains(out, "@everyone") || strings.Contains(out, "確認\n改行") {
 		t.Errorf("件名がそのまま出ている: %s", out)
 	}
@@ -79,7 +79,7 @@ func TestBuildReminder_長いときは担当者の区切りで分割する(t *te
 	for i := 0; i < 40; i++ {
 		issues = append(issues, issue("P-"+strings.Repeat("9", 3)+string(rune('A'+i%26)), strings.Repeat("あ", 60), "2026-11-04", 2, 100+i, "メンバー"+string(rune('A'+i%26))+strings.Repeat("x", i)))
 	}
-	msgs := BuildReminder(issues, nil, "2026-11-04", base)
+	msgs := BuildReminder(issues, nil, "2026-11-04", base, nil)
 	if len(msgs) < 2 {
 		t.Fatalf("分割されない: %d通", len(msgs))
 	}
@@ -218,5 +218,75 @@ func TestBacklogClient_OpenIssuesDueBy_検索条件(t *testing.T) {
 	}
 	if got := strings.Join(gotIssues["statusId[]"], ","); got != "1,2,416375" {
 		t.Errorf("対象ステータスが違う(保留・処理済み以降を含めない): %s", got)
+	}
+}
+
+// reviewerLinks は 大橋(Backlog ID 1) が Discord 111、山田(ID 2) が Discord 222。
+var reviewerLinks = map[string]Link{"111": {BacklogID: 1, Name: "大橋和幸"}, "222": {BacklogID: 2, Name: "山田太郎"}}
+
+func TestBuildReminder_PR確認待ちはレビュアーにメンションする(t *testing.T) {
+	issues := []BacklogIssue{
+		issue("P-1", "レビュー待ち", "2026-11-04", statusPRReview, 2, "山田太郎"),
+		issue("P-2", "処理中", "2026-11-04", 2, 2, "山田太郎"),
+	}
+	out := strings.Join(BuildReminder(issues, reviewerLinks, "2026-11-04", base, []int{1}), "\n")
+	if !strings.Contains(out, "👀 **レビュー依頼** <@111> PR確認待ちです") {
+		t.Errorf("レビュアーへの依頼が無い:\n%s", out)
+	}
+	// 依頼ブロックに載るのはPR確認待ちだけ。処理中は載らない。
+	review := out[strings.Index(out, "👀"):]
+	if !strings.Contains(review, "P-1") || strings.Contains(review, "P-2") {
+		t.Errorf("依頼ブロックの対象がPR確認待ちだけでない:\n%s", review)
+	}
+	if !strings.Contains(review, "担当: 山田太郎") || strings.Contains(review, "<@222>") {
+		t.Errorf("担当者はメンションせず名前だけで出す:\n%s", review)
+	}
+}
+
+func TestBuildReminder_PR確認待ちが無ければレビュー依頼を出さない(t *testing.T) {
+	out := strings.Join(BuildReminder([]BacklogIssue{issue("P-2", "x", "2026-11-04", 2, 2, "山田太郎")}, reviewerLinks, "2026-11-04", base, []int{1}), "")
+	if strings.Contains(out, "レビュー依頼") || strings.Contains(out, "<@111>") {
+		t.Errorf("PR確認待ちが無いのにレビュー依頼が出た:\n%s", out)
+	}
+}
+
+func TestBuildReminder_レビュアー本人の課題は依頼の対象にしない(t *testing.T) {
+	out := strings.Join(BuildReminder([]BacklogIssue{issue("P-1", "x", "2026-11-04", statusPRReview, 1, "大橋和幸")}, reviewerLinks, "2026-11-04", base, []int{1}), "")
+	if strings.Contains(out, "レビュー依頼") {
+		t.Errorf("自分のPRを自分に依頼している:\n%s", out)
+	}
+}
+
+func TestBuildReminder_レビュアー未登録なら黙って落とさずリンク登録を促す(t *testing.T) {
+	out := strings.Join(BuildReminder([]BacklogIssue{issue("P-1", "x", "2026-11-04", statusPRReview, 2, "山田太郎")}, map[string]Link{"222": {BacklogID: 2, Name: "山田太郎"}}, "2026-11-04", base, []int{1}), "")
+	if !strings.Contains(out, "レビュアー** (Discord未登録") {
+		t.Errorf("未登録の通知が無い:\n%s", out)
+	}
+}
+
+func TestBuildReminder_レビュアー未設定なら従来どおり(t *testing.T) {
+	out := strings.Join(BuildReminder([]BacklogIssue{issue("P-1", "x", "2026-11-04", statusPRReview, 2, "山田太郎")}, reviewerLinks, "2026-11-04", base, nil), "")
+	if strings.Contains(out, "レビュー依頼") {
+		t.Errorf("レビュアー未設定なのに依頼が出た:\n%s", out)
+	}
+}
+
+func TestMentionIDs_レビュアーはPR確認待ちがある日だけ許可する(t *testing.T) {
+	withPR := []BacklogIssue{issue("P-1", "x", "2026-11-04", statusPRReview, 2, "山田太郎")}
+	if got := strings.Join(mentionIDs(withPR, reviewerLinks, []int{1}), ","); got != "111,222" {
+		t.Errorf("レビュアーと担当者の許可が揃っていない: %s", got)
+	}
+	noPR := []BacklogIssue{issue("P-1", "x", "2026-11-04", 2, 2, "山田太郎")}
+	if got := strings.Join(mentionIDs(noPR, reviewerLinks, []int{1}), ","); got != "222" {
+		t.Errorf("PR確認待ちが無いのにレビュアーを許可している: %s", got)
+	}
+}
+
+func TestParseIDs(t *testing.T) {
+	if got := parseIDs(" 1, 2 ,x,,3"); len(got) != 3 || got[0] != 1 || got[2] != 3 {
+		t.Errorf("parseIDs = %v", got)
+	}
+	if parseIDs("") != nil {
+		t.Errorf("空は nil")
 	}
 }
