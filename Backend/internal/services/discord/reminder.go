@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // 期限リマインドの対象にするステータス。
@@ -25,6 +26,8 @@ const (
 	statusPRReview = 416375 // PR確認待ち
 	// remindSoonDays は「期限が近い」とみなす日数（当日を含めて2日後まで）。
 	remindSoonDays = 2
+	// issueFetchLimit は Backlog API の1回の取得件数（API の上限は100）。
+	issueFetchLimit = 100
 	// 1通の上限は2000文字。メンションや改行の余裕を見て切る。
 	reminderChunkChars = 1800
 	issueURLFormat     = "%s/view/%s"
@@ -76,7 +79,7 @@ func (c *BacklogClient) OpenIssuesDueBy(ctx context.Context, until string) ([]Ba
 	q.Set("dueDateUntil", until)
 	q.Set("sort", "dueDate")
 	q.Set("order", "asc")
-	q.Set("count", "100") // 上限。超えたら古い期限切れから100件が出る
+	q.Set("count", strconv.Itoa(issueFetchLimit)) // 超えたら古い期限切れから出る。Run が注意書きを足す
 	var issues []BacklogIssue
 	if err := c.get(ctx, "/issues", q, &issues); err != nil {
 		return nil, err
@@ -112,12 +115,17 @@ func NewReminderServiceFromEnv(backlog *BacklogClient, links *LinkService) *Remi
 		log.Printf("[Reminder] DISCORD_REMINDER_WEBHOOK_URL が Discord の Webhook URL の形式ではありません")
 		return nil
 	}
+	reviewers := parseIDs(os.Getenv("BACKLOG_REVIEWER_IDS"))
+	if raw := strings.TrimSpace(os.Getenv("BACKLOG_REVIEWER_IDS")); raw != "" && len(reviewers) == 0 {
+		// 打ち間違いで黙ってレビュー依頼が無効にならないよう、理由を残す。
+		log.Printf("[Reminder] BACKLOG_REVIEWER_IDS に有効な Backlog ユーザーIDがありません（レビュー依頼は付きません）")
+	}
 	return &ReminderService{
 		issues:     backlog,
 		links:      links,
 		webhookURL: hook,
 		issueBase:  backlog.baseURL,
-		reviewers:  parseIDs(os.Getenv("BACKLOG_REVIEWER_IDS")),
+		reviewers:  reviewers,
 		http: &http.Client{
 			Timeout: 5 * time.Second,
 			// リダイレクト先へ Webhook のトークンごと送らない。
@@ -159,6 +167,10 @@ func (s *ReminderService) Run(ctx context.Context, dryRun bool) (*ReminderResult
 		return nil, err
 	}
 	msgs := BuildReminder(issues, links, today, s.issueBase, s.reviewers)
+	if len(issues) >= issueFetchLimit && len(msgs) > 0 {
+		// 取得上限に達すると、期限が後の課題が出ていない可能性がある。黙って落とさず知らせる。
+		msgs[len(msgs)-1] += fmt.Sprintf("\n⚠️ 取得上限(%d件)に達しました。一部の課題が出ていない可能性があります。", issueFetchLimit)
+	}
 	res := &ReminderResult{Issues: len(issues), Messages: msgs}
 	if dryRun || len(msgs) == 0 {
 		return res, nil
@@ -235,8 +247,18 @@ func (s *ReminderService) post(ctx context.Context, content string, mentions []s
 	return nil
 }
 
+// section は見出し(担当者・レビュー依頼)と、その下に並ぶ課題の行。
+type section struct {
+	head  string
+	lines []string
+}
+
 // BuildReminder は担当者ごとにまとめた投稿本文を返す。対象が無ければ nil。
-// 1通に収まらない場合は担当者の区切りで分割する。
+//
+// 1通は Discord の上限(2000文字)に収める。上限は「文字数」で数える(len はバイト数で、
+// 日本語では3倍に数えてしまう)。1人の課題が多くて1通に収まらないときは、課題の行で
+// 区切り、続きの通にも見出しを付け直す。担当者の区切りだけで分けると、1人で14件並ぶ
+// 日に1ブロックが上限を超え、Discord に拒否されて1通も届かない。
 func BuildReminder(issues []BacklogIssue, links map[string]Link, today, issueBase string, reviewers []int) []string {
 	if len(issues) == 0 {
 		return nil
@@ -246,11 +268,7 @@ func BuildReminder(issues []BacklogIssue, links map[string]Link, today, issueBas
 		byBacklog[l.BacklogID] = id
 	}
 
-	type group struct {
-		label string
-		lines []string
-	}
-	groups := map[string]*group{}
+	groups := map[string]*section{}
 	var order []string
 	for _, i := range issues {
 		key, label := "none", "**担当者なし**"
@@ -260,65 +278,69 @@ func BuildReminder(issues []BacklogIssue, links map[string]Link, today, issueBas
 				label = "<@" + d + ">"
 			} else {
 				// 未登録の人はメンションできない。名前だけ出し、/link を促す。
-				label = "**" + i.Assignee.Name + "** (Discord未登録)"
+				label = "**" + oneLine(i.Assignee.Name) + "** (Discord未登録)"
 			}
 		}
 		g, ok := groups[key]
 		if !ok {
-			g = &group{label: label}
+			g = &section{head: label}
 			groups[key] = g
 			order = append(order, key)
 		}
 		g.lines = append(g.lines, issueLine(i, today, issueBase))
 	}
+	var sections []section
+	for _, k := range order {
+		sections = append(sections, *groups[k])
+	}
 
-	// レビュー依頼ブロック。PR確認待ちの課題があるときだけ、レビュアーに促す。
-	var reviewBlock string
+	// レビュー依頼。PR確認待ちの課題があるときだけ、レビュアーに促す。
 	if targets := reviewTargets(issues, reviewers); len(targets) > 0 {
 		var mentions []string
 		for _, r := range reviewers {
 			if d, ok := byBacklog[r]; ok {
 				mentions = append(mentions, "<@"+d+">")
+			} else {
+				// 未登録のレビュアーを黙って落とさない。複数人を設定していても1人ずつ促す。
+				mentions = append(mentions, fmt.Sprintf("**レビュアー(Backlog ID %d)** (Discord未登録。/link で紐づけてください)", r))
 			}
 		}
-		if len(mentions) == 0 {
-			// 宛先が未登録だとメンションできない。黙って落とさず /link を促す。
-			mentions = append(mentions, "**レビュアー** (Discord未登録。/link で紐づけてください)")
-		}
-		var b strings.Builder
-		b.WriteString("👀 **レビュー依頼** " + strings.Join(mentions, " ") + " PR確認待ちです。レビューをお願いします。\n")
+		sec := section{head: "👀 **レビュー依頼** " + strings.Join(mentions, " ") + " PR確認待ちです。レビューをお願いします。"}
 		for _, i := range targets {
 			who := "担当なし"
 			if i.Assignee != nil {
 				who = oneLine(i.Assignee.Name)
 			}
-			b.WriteString(fmt.Sprintf("・[%s](<%s>) %s — 担当: %s\n", i.IssueKey, fmt.Sprintf(issueURLFormat, issueBase, i.IssueKey), oneLine(i.Summary), who))
+			sec.lines = append(sec.lines, fmt.Sprintf("・[%s](<%s>) %s — 担当: %s", i.IssueKey, fmt.Sprintf(issueURLFormat, issueBase, i.IssueKey), oneLine(i.Summary), who))
 		}
-		reviewBlock = b.String()
+		sections = append(sections, sec)
 	}
 
 	header := "📅 **Backlog 期限リマインド** (" + md(today) + ")\n"
 	footer := "\n着手していない・間に合わない場合は、このチャンネルで相談してください。"
 	var msgs []string
 	cur := header
-	for _, k := range order {
-		g := groups[k]
-		block := g.label + "\n" + strings.Join(g.lines, "\n") + "\n"
-		if len(cur)+len(block)+len(footer) > reminderChunkChars && cur != header {
-			msgs = append(msgs, cur)
-			cur = ""
+	for _, sec := range sections {
+		needHead := true
+		for _, ln := range sec.lines {
+			add := ln + "\n"
+			if needHead {
+				add = sec.head + "\n" + add
+			}
+			if runeLen(cur)+runeLen(add)+runeLen(footer) > reminderChunkChars && cur != "" && cur != header {
+				msgs = append(msgs, cur)
+				cur = ""
+				add = sec.head + "\n" + ln + "\n" // 続きの通にも見出しを付ける
+			}
+			cur += add
+			needHead = false
 		}
-		cur += block
-	}
-	if reviewBlock != "" {
-		if len(cur)+len(reviewBlock)+len(footer) > reminderChunkChars && cur != header {
-			msgs = append(msgs, cur)
-			cur = ""
-		}
-		cur += reviewBlock
 	}
 	return append(msgs, cur+footer)
 }
+
+// runeLen は Discord が数える「文字数」。
+func runeLen(s string) int { return utf8.RuneCountInString(s) }
 
 // reviewTargets は、レビューを促す対象の課題（PR確認待ち）。
 // レビュアー本人が担当の課題は除く。自分の PR を自分でレビューする依頼にならないように。
