@@ -107,6 +107,9 @@ func (h *Handler) handleAutocomplete(ctx context.Context, interaction *Interacti
 		Type: ResponseTypeAutocompleteResult,
 		Data: &InteractionResponseData{Choices: []Choice{}},
 	}
+	if interaction.Data != nil && interaction.Data.Name == CommandNameDeadline {
+		return h.deadlineAutocomplete(ctx, interaction, empty)
+	}
 	if interaction.Data == nil || interaction.Data.Name != CommandNameLink ||
 		!h.hasAllowedRole(interaction) || h.backlog == nil {
 		return empty
@@ -127,6 +130,41 @@ func (h *Handler) handleAutocomplete(ctx context.Context, interaction *Interacti
 	}
 	for _, name := range SuggestBacklogUsers(users, typed) {
 		empty.Data.Choices = append(empty.Data.Choices, Choice{Name: name, Value: name})
+	}
+	return empty
+}
+
+// deadlineAutocomplete は /deadline の issue 引数に、呼び出した本人の課題を候補で出す。
+// 他人の課題は出さない。紐づけが無い人には何も出さない。
+func (h *Handler) deadlineAutocomplete(ctx context.Context, interaction *Interaction, empty *InteractionResponse) *InteractionResponse {
+	if h.deadlines == nil || h.links == nil || interaction.Member == nil || interaction.Member.User == nil {
+		return empty
+	}
+	typed := ""
+	for _, o := range interaction.Data.Options {
+		if o.Focused && o.Name == OptionNameIssue {
+			typed, _ = o.Value.(string)
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, applyTimeout)
+	defer cancel()
+	links, err := h.links.List(ctx)
+	if err != nil {
+		log.Printf("[Discord] deadline autocomplete links error: %v", err)
+		return empty
+	}
+	me, ok := links[interaction.Member.User.ID]
+	if !ok {
+		return empty
+	}
+	issues, err := h.deadlines.OpenIssuesByAssignee(ctx, me.BacklogID)
+	if err != nil {
+		log.Printf("[Discord] deadline autocomplete issues error: %v", err)
+		return empty
+	}
+	empty.Data.Choices = suggestOwnIssues(issues, typed)
+	if empty.Data.Choices == nil {
+		empty.Data.Choices = []Choice{}
 	}
 	return empty
 }

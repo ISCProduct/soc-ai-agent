@@ -111,6 +111,14 @@ type InteractionResponseData struct {
 	Components []Component `json:"components,omitempty"`
 	// Choices はオートコンプリートの候補。
 	Choices []Choice `json:"choices,omitempty"`
+	// AllowedMentions を指定すると、本文中のメンションで通知が飛ぶ範囲を絞れる。
+	AllowedMentions *AllowedMentions `json:"allowed_mentions,omitempty"`
+}
+
+// AllowedMentions の Parse を空にすると、本文に <@id> や @everyone があっても通知しない。
+// 利用者の入力（理由など）を含む公開メッセージで、意図しないメンションを防ぐ。
+type AllowedMentions struct {
+	Parse []string `json:"parse"` // omitempty にしない。空配列を送ることに意味がある
 }
 
 // Choice はオートコンプリートの1候補。
@@ -131,6 +139,10 @@ const (
 	CommandNameLink           = "link"
 	CommandNameLinkList       = "link-list"
 	CommandNameUnlink         = "unlink"
+	CommandNameDeadline       = "deadline"
+	OptionNameIssue           = "issue"
+	OptionNameDate            = "date"
+	OptionNameReason          = "reason"
 	OptionNameMember          = "member"
 	OptionNameBacklog         = "backlog"
 	OptionNameState           = "state"

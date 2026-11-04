@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -197,17 +198,41 @@ func (c *BacklogClient) Users(ctx context.Context) ([]BacklogUser, error) {
 	return users, nil
 }
 
+// ProjectKey と BaseURL は main から /deadline の設定に渡すための参照。
+func (c *BacklogClient) ProjectKey() string { return c.projectKey }
+func (c *BacklogClient) BaseURL() string    { return c.baseURL }
+
+// backlogStatusError は Backlog API が 200 以外を返したときのエラー。
+// 呼び出し側が 404(課題なし)や 400(受け付けられない値)を言い分けるために型を持つ。
+type backlogStatusError struct{ Status int }
+
+func (e *backlogStatusError) Error() string {
+	return fmt.Sprintf("Backlog API が %d を返しました", e.Status)
+}
+
 // get は Backlog API を GET して out に読み込む。
+func (c *BacklogClient) get(ctx context.Context, path string, q url.Values, out any) error {
+	return c.do(ctx, http.MethodGet, path, q, nil, out)
+}
+
+// do は Backlog API を呼ぶ。form があればフォームのボディで送る（PATCH 等）。out が nil なら応答は読まない。
 // apiKey はクエリ文字列で渡す（Backlog の仕様）。url.Error にURLごと入るので、
 // エラーに丸ごと包むとログにキーが残る。理由だけを取り出す。
-func (c *BacklogClient) get(ctx context.Context, path string, q url.Values, out any) error {
+func (c *BacklogClient) do(ctx context.Context, method, path string, q, form url.Values, out any) error {
 	if q == nil {
 		q = url.Values{}
 	}
 	q.Set("apiKey", c.apiKey)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v2"+path+"?"+q.Encode(), nil)
+	var body io.Reader
+	if form != nil {
+		body = strings.NewReader(form.Encode())
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/api/v2"+path+"?"+q.Encode(), body)
 	if err != nil {
 		return errors.New("Backlog API のリクエスト作成に失敗しました")
+	}
+	if form != nil {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -219,7 +244,10 @@ func (c *BacklogClient) get(ctx context.Context, path string, q url.Values, out 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Backlog API が %d を返しました", resp.StatusCode)
+		return &backlogStatusError{Status: resp.StatusCode}
+	}
+	if out == nil {
+		return nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		return fmt.Errorf("Backlog API の応答を読めませんでした: %w", err)
