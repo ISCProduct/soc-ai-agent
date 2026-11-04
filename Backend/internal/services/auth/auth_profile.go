@@ -65,7 +65,15 @@ func (s *AuthService) UpdateProfile(req UpdateProfileRequest) (*AuthResponse, er
 	}
 	// Always persist the provided school name, even when it is an empty string.
 	user.SchoolName = req.SchoolName
-	user.SchoolID = s.resolveSchoolID(req.SchoolName)
+	// 一時的な DB エラーで在学生の school_id を消さない。消すと担当校の教員の一覧から
+	// 黙って外れる。解決を試みられたときだけ反映する（ゲスト昇格と同じ方針 / #1675）。
+	if schoolID, err := s.resolveSchoolID(req.SchoolName, user.OrganizationID); err == nil {
+		if schoolID == nil {
+			log.Printf("[Auth] school_id unresolved on profile update: user=%d organization=%d name=%q",
+				user.ID, user.OrganizationID, req.SchoolName)
+		}
+		user.SchoolID = schoolID
+	}
 	user.CertificationsAcquired = req.CertificationsAcquired
 	user.CertificationsInProgress = req.CertificationsInProgress
 
