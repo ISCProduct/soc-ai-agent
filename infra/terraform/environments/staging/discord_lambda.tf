@@ -123,6 +123,7 @@ resource "aws_lambda_function" "discord" {
       BACKLOG_API_KEY         = var.backlog_api_key
 
       DISCORD_REMINDER_WEBHOOK_URL = var.discord_reminder_webhook_url
+      BACKLOG_REVIEWER_IDS         = var.backlog_reviewer_ids
     }
   }
 

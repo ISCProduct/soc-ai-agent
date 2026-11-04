@@ -283,6 +283,12 @@ variable "discord_reminder_webhook_url" {
   default     = ""
 }
 
+variable "backlog_reviewer_ids" {
+  type        = string
+  description = "PR確認待ちの課題でレビューを促す Backlog ユーザーID(カンマ区切り)。空なら促さない"
+  default     = "2505302"
+}
+
 variable "github_dispatch_repo" {
   type        = string
   description = "workflow_dispatch の対象リポジトリ(owner/repo)"
