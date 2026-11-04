@@ -39,8 +39,8 @@ test.describe('職務経歴書レビューフロー', () => {
     const reviewBody = JSON.stringify({
       review: { id: 1, score: 78, summary: '全体的にバランスの取れた経歴書です。' },
       items: [
-        { id: 1, page_number: 1, severity: 'info', message: '具体的な数値を追加すると改善されます', suggestion: '売上10%増などの数値を記載してください' },
-        { id: 2, page_number: 2, severity: 'warning', message: '成果の記述が不足しています', suggestion: '担当プロジェクトの成果を追記してください' },
+        { id: 1, page_number: 1, severity: 'info', message: '具体的な数値を追加すると改善されます', suggestion: '売上10%増などの数値を記載してください', quote: '売上を伸ばしました', rewrite: '店舗売上を前年比10%伸ばしました' },
+        { id: 2, page_number: 2, severity: 'warning', message: '成果の記述が不足しています', suggestion: '担当プロジェクトの成果を追記してください', quote: '開発を担当しました', rewrite: '3名でWebの機能開発を1年担当しました' },
       ],
       annotated_available: false,
     })
@@ -74,6 +74,8 @@ test.describe('職務経歴書レビューフロー', () => {
       await page.getByLabel(/応募職種/).fill('エンジニア')
       await reviewBtn.click()
       await expect(page.getByText('全体的にバランスの取れた経歴書です。')).toBeVisible({ timeout: 10000 })
+      await expect(page.getByText('店舗売上を前年比10%伸ばしました')).toBeVisible()
+      await expect(page.getByText(/AIの提案です/)).toBeVisible()
     }
   })
 })

@@ -89,4 +89,66 @@ describe('ResumeReviewResults', () => {
     )
     expect(screen.queryByText('評価の内訳')).not.toBeInTheDocument()
   })
+
+  it('原文と書き換え案を、AIの提案として見比べられる', () => {
+    const review = buildReview({ score: 80 })
+    review.items = [
+      {
+        id: 1,
+        page_number: 2,
+        severity: 'warning',
+        message: '成果が伝わりにくいです',
+        suggestion: '数値と期間を足す',
+        quote: '売上を伸ばしました',
+        rewrite: '店舗売上を1年で前年比120%に伸ばしました',
+      },
+    ]
+
+    render(
+      <ResumeReviewResults
+        review={review}
+        scoresBefore={null}
+        scoresAfter={null}
+        annotateError=""
+        onDownload={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('原文')).toBeInTheDocument()
+    expect(screen.getByText('売上を伸ばしました')).toBeInTheDocument()
+    expect(screen.getByText('書き換え案')).toBeInTheDocument()
+    expect(screen.getByText('店舗売上を1年で前年比120%に伸ばしました')).toBeInTheDocument()
+    expect(screen.getByText(/AIの提案です。事実と違う内容になっていないか/)).toBeInTheDocument()
+    expect(screen.getByText('補足: 数値と期間を足す')).toBeInTheDocument()
+    expect(screen.queryByText(/改善案:/)).not.toBeInTheDocument()
+  })
+
+  it('読み取りが不確かな行には書き換え案を出さない', () => {
+    const review = buildReview({ score: 80 })
+    review.items = [
+      {
+        id: 1,
+        page_number: 1,
+        severity: 'info',
+        message: 'この行は判読できません',
+        quote: '売土を伸ばしましt',
+        rewrite: '売上を伸ばしました',
+        rewrite_withheld: 'low_ocr_confidence',
+      },
+    ]
+
+    render(
+      <ResumeReviewResults
+        review={review}
+        scoresBefore={null}
+        scoresAfter={null}
+        annotateError=""
+        onDownload={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('売土を伸ばしましt')).toBeInTheDocument()
+    expect(screen.getByText(/読み取りの信頼度が低いため、書き換え案は出していません/)).toBeInTheDocument()
+    expect(screen.queryByText('売上を伸ばしました')).not.toBeInTheDocument()
+  })
 })

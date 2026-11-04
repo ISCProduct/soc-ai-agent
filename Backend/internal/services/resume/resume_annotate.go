@@ -121,6 +121,8 @@ type ocrPayload struct {
 			BlockIndex int       `json:"block_index"`
 			Text       string    `json:"text"`
 			BBox       []float64 `json:"bbox"`
+			// Confidence は PaddleOCR の行スコア。無い行は不明（書き換えを禁止しない）。
+			Confidence *float64 `json:"confidence"`
 		} `json:"blocks"`
 	} `json:"pages"`
 }
@@ -157,6 +159,7 @@ func (s *ResumeService) extractTextBlocks(doc *models.ResumeDocument, pdfPath st
 				BlockIndex: block.BlockIndex,
 				Text:       block.Text,
 				BBox:       string(bbox),
+				Confidence: normalizeOCRScorePtr(block.Confidence),
 			})
 		}
 	}
@@ -171,19 +174,7 @@ func (s *ResumeService) annotatePDF(inputPath string, doc *models.ResumeDocument
 		}
 		return inputPath, storedPath, nil
 	}
-	payload := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		bboxInfo := decodeBBoxInfo(item.BBox)
-		payload = append(payload, map[string]any{
-			"page_number": item.PageNumber,
-			"bbox":        bboxInfo.BBox,
-			"page_width":  bboxInfo.PageWidth,
-			"page_height": bboxInfo.PageHeight,
-			"severity":    item.Severity,
-			"message":     item.Message,
-			"suggestion":  item.Suggestion,
-		})
-	}
+	payload := annotationPayload(items)
 
 	itemsPath := filepath.Join(filepath.Dir(inputPath), fmt.Sprintf("review_items_%d.json", review.ID))
 	data, _ := json.Marshal(payload)
@@ -215,6 +206,36 @@ func (s *ResumeService) annotatePDF(inputPath string, doc *models.ResumeDocument
 		return "", "", err
 	}
 	return outputPath, storedPath, nil
+}
+
+// annotationPayload は注釈PDFへ渡す指摘。原文と置き換え文を落とすと、
+// 画面には出るのにPDFの一覧が説明文だけになる（#1942）。
+func annotationPayload(items []models.ResumeReviewItem) []map[string]any {
+	payload := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		bboxInfo := decodeBBoxInfo(item.BBox)
+		payload = append(payload, map[string]any{
+			"page_number":      item.PageNumber,
+			"bbox":             bboxInfo.BBox,
+			"page_width":       bboxInfo.PageWidth,
+			"page_height":      bboxInfo.PageHeight,
+			"severity":         item.Severity,
+			"message":          item.Message,
+			"suggestion":       item.Suggestion,
+			"quote":            item.Quote,
+			"rewrite":          item.Rewrite,
+			"rewrite_withheld": item.RewriteWithheld,
+		})
+	}
+	return payload
+}
+
+// normalizeOCRScorePtr は JSON の認識スコアを 0〜1 に限る。範囲外は不明。
+func normalizeOCRScorePtr(score *float64) *float64 {
+	if score == nil {
+		return nil
+	}
+	return normalizeOCRScore(*score)
 }
 
 type bboxInfo struct {

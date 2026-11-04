@@ -45,6 +45,24 @@ const (
 	// 4行までにしているのは、履歴書の記入欄が数行で折り返す前提と、
 	// 窓を広げるほど無関係な行を巻き込んだ窓が増えて誤紐づけの危険が上がるため。
 	quoteMaxWindowBlocks = 4
+
+	// OCRRewriteMinConfidence は書き換え案を出してよい認識スコアの下限（0〜1）。
+	//
+	// PaddleOCR の行スコアは 0〜1 で、活字の履歴書は概ね 0.9 前後に集まる。
+	// 0.6 未満は欠落や別字が混ざる帯なので、その行の文字を根拠にした
+	// 置き換え文は出さない（#1942）。信頼度が NULL の行（#1942 以前、平文入力）は
+	// 不明であり、低いとは扱わない。
+	//
+	// 0.599 は捨て、0.6 は残す。定数をこの外へ動かすと
+	// TestOCRRewriteMinConfidenceBoundary が落ちる。
+	OCRRewriteMinConfidence = 0.6
+
+	// lowConfidenceMark はプロンプト上で「この行を書き換えない」と示す印。
+	// 本文の一部ではない。モデルが quote に写しても、照合は印を除いた本文で行う。
+	lowConfidenceMark = "[低信頼]"
+
+	// rewriteWithheldLowOCR は書き換えを空にした理由。画面と注釈PDFが同じ値を見る。
+	rewriteWithheldLowOCR = "low_ocr_confidence"
 )
 
 // fallbackResumeReview / fallbackResumeReviewDetailed は削除した（#1529）。
@@ -56,23 +74,62 @@ const (
 // ヒューリスティックな指摘生成（buildHeuristicItems / classifyBlock）も
 // 呼び出し元が無くなったため併せて削除した。
 
+// blockConfidenceTooLow は、認識スコアが下限未満で書き換え案を出してはいけない行かを返す。
+// スコアが無い行は不明なので false（書き換えを禁止しない）。
+func blockConfidenceTooLow(confidence *float64) bool {
+	return confidence != nil && *confidence < OCRRewriteMinConfidence
+}
+
+// normalizeOCRScore は 0〜1 の認識スコアだけを残す。範囲外は不明（nil）にする。
+// 0 は有効な「読めなかった」なので nil にしない。
+func normalizeOCRScore(score float64) *float64 {
+	if score < 0 || score > 1 {
+		return nil
+	}
+	v := score
+	return &v
+}
+
 func buildResumeText(blocks []models.ResumeTextBlock, maxLen int) string {
 	if len(blocks) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	for _, block := range blocks {
-		line := strings.TrimSpace(block.Text)
+		line := formatReviewBlockLine(block)
 		if line == "" {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("[P%dB%d] %s\n", block.PageNumber, block.BlockIndex, line))
+		b.WriteString(line)
+		b.WriteByte('\n')
 		if b.Len() >= maxLen {
 			break
 		}
 	}
 	return b.String()
 }
+
+// formatReviewBlockLine はプロンプトへ載せる1行を作る。
+// 下限未満の行には lowConfidenceMark を付け、モデルへ書き換えを出させない。
+func formatReviewBlockLine(block models.ResumeTextBlock) string {
+	line := strings.TrimSpace(block.Text)
+	if line == "" {
+		return ""
+	}
+	if blockConfidenceTooLow(block.Confidence) {
+		return fmt.Sprintf("[P%dB%d] %s %s", block.PageNumber, block.BlockIndex, lowConfidenceMark, line)
+	}
+	return fmt.Sprintf("[P%dB%d] %s", block.PageNumber, block.BlockIndex, line)
+}
+
+// reviewRewriteInstruction は初回・やり直しの両方に載せる書き換えの契約。
+func reviewRewriteInstruction() string {
+	return fmt.Sprintf(`rewriteはquoteをそのまま置き換えられる完成した一文にしてください。説明文や「〜するとよい」はrewriteに書かずsuggestionに書いてください。
+行頭に %s が付く行はOCRの誤認識の可能性があるため、その行をquoteに選んでもrewriteは空文字にしてください。誤読した文字を直した文を出してはいけません。`, lowConfidenceMark)
+}
+
+// reviewItemJSONExample は出力例。初回とやり直しで欄が食い違うと、片方だけ rewrite が欠ける。
+const reviewItemJSONExample = `{"quote":"本文中の一文","message":"指摘","suggestion":"直し方の説明","rewrite":"置き換え後の一文","severity":"info|warning|critical","page_hint":1,"block_index":1}`
 
 // decodeJSON はレビューJSONを読む。
 //
@@ -153,12 +210,27 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 		if severity == "" {
 			severity = "info"
 		}
+		quote := strings.TrimSpace(item.Quote)
+		if quote == "" {
+			quote = strings.TrimSpace(block.Text)
+		}
+		rewrite := strings.TrimSpace(item.Rewrite)
+		withheld := ""
+		// モデルが誤認識行へ書き換えを出しても、ここで捨てる。
+		// プロンプトの印は守られないことがあるため、保存前に必ず見る。
+		if blockConfidenceTooLow(block.Confidence) {
+			rewrite = ""
+			withheld = rewriteWithheldLowOCR
+		}
 		result = append(result, models.ResumeReviewItem{
-			PageNumber: block.PageNumber,
-			BBox:       block.BBox,
-			Severity:   severity,
-			Message:    item.Message,
-			Suggestion: item.Suggestion,
+			PageNumber:      block.PageNumber,
+			BBox:            block.BBox,
+			Severity:        severity,
+			Message:         item.Message,
+			Suggestion:      item.Suggestion,
+			Quote:           quote,
+			Rewrite:         rewrite,
+			RewriteWithheld: withheld,
 		})
 	}
 	return result
@@ -344,11 +416,12 @@ func buildBlockList(blocks []models.ResumeTextBlock) string {
 	}
 	var b strings.Builder
 	for _, block := range blocks {
-		line := strings.TrimSpace(block.Text)
+		line := formatReviewBlockLine(block)
 		if line == "" {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("[P%dB%d] %s\n", block.PageNumber, block.BlockIndex, line))
+		b.WriteString(line)
+		b.WriteByte('\n')
 	}
 	return b.String()
 }
