@@ -60,6 +60,22 @@ type LLMStructuredSummary struct {
 	RecommendedWorkingStyle string   `json:"recommended_working_style"`
 }
 
+func analysisSummaryResponseSchema() *openai.ResponseSchema {
+	return &openai.ResponseSchema{
+		Name: "analysis_summary",
+		Schema: json.RawMessage(`{
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["strengths", "concerns", "recommended_working_style"],
+			"properties": {
+				"strengths": {"type": "array", "items": {"type": "string"}},
+				"concerns": {"type": "array", "items": {"type": "string"}},
+				"recommended_working_style": {"type": "string"}
+			}
+		}`),
+	}
+}
+
 type AnalysisSummary struct {
 	Scores                AnalysisScores          `json:"scores"`
 	Progress              AnalysisProgress        `json:"progress"`
@@ -227,7 +243,7 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 			userPrompt := "解析メタ情報: " + string(contextBytes) + "\n\n直近のユーザーメッセージ:\n" + userContext
 
 			aiCtx := usagectx.WithFeature(context.Background(), usagectx.FeatureAnalysisScoring)
-			raw, err := s.aiClient.ChatCompletionJSON(aiCtx, systemPrompt, userPrompt, 0.2, 400)
+			raw, err := s.aiClient.ChatCompletionWithSchema(aiCtx, systemPrompt, userPrompt, 0.2, 400, analysisSummaryResponseSchema())
 			if err == nil && strings.TrimSpace(raw) != "" {
 				// パースを試みる
 				var parsed LLMStructuredSummary
