@@ -135,6 +135,7 @@ POST /api/applications
 PUT /api/applications/:id
 POST /api/applications/:id/accept
 POST /api/applications/:id/withdraw
+GET /api/applications/availability
 GET /api/applications/correlation
 GET /api/assessments
 POST /api/assessments/:templateId/sessions

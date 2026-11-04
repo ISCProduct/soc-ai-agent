@@ -174,7 +174,7 @@ PUT /api/collective-insights/consent
 
 ### AI出力評価用のゴールデンセット（#1525）
 
-ES添削・履歴書レビュー・面接レポートの品質を測る評価ハーネス
+ES添削・履歴書レビュー・面接レポート・チャット診断の回答評価の品質を測る評価ハーネス
 （`Backend/cmd/aibench` / `docs/research/ai-eval/`）が使う入力セット。
 
 | 項目 | 決めたこと |
