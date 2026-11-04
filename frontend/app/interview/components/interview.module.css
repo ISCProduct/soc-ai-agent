@@ -320,6 +320,10 @@
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+  /* 自分のカメラ(.pipCard)と字幕(.captionBox)をステージに重ねるときの基準。
+     ステージは最初の子で幅100%なので、ここを基準にしても見た目はステージ基準と同じ。
+     狭い画面では重ねるのをやめ、この列に普通に並べる。 */
+  position: relative;
 }
 @media (min-width: 1200px) {
   .leftStage { flex: 0 0 58%; }
@@ -351,21 +355,36 @@
   position: absolute;
   top: 12px;
   left: 12px;
-  /* PiP(右12px + --pip-width)の手前で止める。固定値(240px)だと PiP が縮む狭い画面でも
-     同じだけ空け、nowrap の面接官ラベル(会社名)が無駄に切れていた。 */
-  right: calc(24px + var(--pip-width));
-}
-.pipCard {
-  position: absolute;
-  top: 12px;
   right: 12px;
-  width: var(--pip-width);
-  aspect-ratio: 16 / 10;
+}
+/*
+ * 自分のカメラ。面接練習では自分の映り・姿勢を確認することが目的の一つなので、
+ * 小窓にできるのは姿勢が見える大きさが残る幅のときだけにする。
+ * --pip-width は clamp(120px, 28%, 224px) で、28%が120pxを下回るのはステージ幅
+ * 430px あたり。幅360pxの電話では約120pxしかなく、姿勢を見られない。
+ * そこで 600px 未満ではステージ外に出し、ステージの下へフル幅(16:9)で置く。
+ */
+.pipCard {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
   border-radius: 8px;
   overflow: hidden;
   background: var(--surface-container-lowest);
   border: 2px solid rgba(142, 213, 255, 0.4);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+@media (min-width: 600px) {
+  .pipCard {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: var(--pip-width);
+    aspect-ratio: 16 / 10;
+  }
+  /* PiP(右12px + --pip-width)の手前で止める。固定値(240px)だと PiP が縮む幅でも
+     同じだけ空け、nowrap の面接官ラベル(会社名)が無駄に切れていた。 */
+  .stageTop { right: calc(24px + var(--pip-width)); }
 }
 .pipLabel {
   position: absolute;
@@ -454,11 +473,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/*
+ * 発話中の字幕。最大3行あり、狭い画面でステージ内に重ねるとステージ下部の大半を覆って
+ * 面接官の口が見えなくなる。PiPと同じ境界で、狭い画面ではステージの下に出す。
+ */
 .captionBox {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -467,6 +487,14 @@
   border: 1px solid rgba(56, 189, 248, 0.3);
   border-radius: 10px;
   padding: 10px 14px;
+}
+@media (min-width: 600px) {
+  .captionBox {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+  }
 }
 .captionEyebrowRow {
   display: flex;

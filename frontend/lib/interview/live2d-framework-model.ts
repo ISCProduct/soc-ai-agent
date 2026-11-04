@@ -83,32 +83,45 @@ export class Live2DFrameworkModel extends CubismUserModel {
     model.loadModel(mocBuffer)
     if (!model.getModel()) throw new Error('moc3の読み込みに失敗した（壊れているか非対応バージョン）')
 
-    const drawableIds: string[] = Array.from(model.getModel().getModel().drawables.ids)
-    const eyesClosed = drawableIds.indexOf(OVERLAY_MESH_IDS.eyesClosed)
-    const mouthOpen = drawableIds.indexOf(OVERLAY_MESH_IDS.mouthOpen)
-    if (eyesClosed >= 0 && mouthOpen >= 0) model.overlayIndices = { eyesClosed, mouthOpen }
+    // ここから先で投げると、直前に読んだmocのネイティブメモリが解放されないまま残る
+    // （面接画面を開き直すたびに増える）。失敗時は必ず release してから投げ直す。
+    try {
+      const drawableIds: string[] = Array.from(model.getModel().getModel().drawables.ids)
+      const eyesClosed = drawableIds.indexOf(OVERLAY_MESH_IDS.eyesClosed)
+      const mouthOpen = drawableIds.indexOf(OVERLAY_MESH_IDS.mouthOpen)
+      if (eyesClosed >= 0 && mouthOpen >= 0) model.overlayIndices = { eyesClosed, mouthOpen }
 
-    const physicsFileName = setting.getPhysicsFileName()
-    if (physicsFileName) {
-      const physicsBuffer = await fetchArrayBuffer(`${modelDir}${physicsFileName}`)
-      model.loadPhysics(physicsBuffer, physicsBuffer.byteLength)
+      const physicsFileName = setting.getPhysicsFileName()
+      if (physicsFileName) {
+        // physicsは任意（READMEの必須成果物ではない）。取得できないときは揺れなしで描画を続ける。
+        // ここで投げるとテクスチャが揃っていてもAvatar2Dへ落ちてしまう。
+        try {
+          const physicsBuffer = await fetchArrayBuffer(`${modelDir}${physicsFileName}`)
+          model.loadPhysics(physicsBuffer, physicsBuffer.byteLength)
+        } catch (err) {
+          console.warn(`[Live2D] ${physicsFileName} を読み込めなかったので揺れなしで描画する`, err)
+        }
+      }
+
+      model.createRenderer(Math.max(1, initialWidthPx), Math.max(1, initialHeightPx))
+      const renderer = model.getRenderer()
+      renderer.startUp(gl)
+      renderer.loadShaders(shaderPath)
+      renderer.setIsPremultipliedAlpha(true)
+
+      const textureCount = setting.getTextureCount()
+      for (let i = 0; i < textureCount; i++) {
+        const textureFileName = setting.getTextureFileName(i)
+        if (!textureFileName) continue
+        const texture = await loadTexture(gl, `${modelDir}${textureFileName}`)
+        renderer.bindTexture(i, texture)
+      }
+
+      return model
+    } catch (err) {
+      model.release()
+      throw err
     }
-
-    model.createRenderer(Math.max(1, initialWidthPx), Math.max(1, initialHeightPx))
-    const renderer = model.getRenderer()
-    renderer.startUp(gl)
-    renderer.loadShaders(shaderPath)
-    renderer.setIsPremultipliedAlpha(true)
-
-    const textureCount = setting.getTextureCount()
-    for (let i = 0; i < textureCount; i++) {
-      const textureFileName = setting.getTextureFileName(i)
-      if (!textureFileName) continue
-      const texture = await loadTexture(gl, `${modelDir}${textureFileName}`)
-      renderer.bindTexture(i, texture)
-    }
-
-    return model
   }
 
   /** 面接官として使えるか判定するための情報（`live2d-params.ts`の`inspectLive2DModel`にそのまま渡せる形）。 */

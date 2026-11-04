@@ -138,6 +138,7 @@ export default function Live2DAvatar({
       // `Live2DCubismCore`（Core読込後に生えるグローバル）を参照するため、
       // Core読込より前に静的importすると ReferenceError になる。動的importする。
       const { ensureCubismFramework, Live2DFrameworkModel } = await import('@/lib/interview/live2d-framework-model')
+      if (disposed) return
       ensureCubismFramework()
 
       const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true }) as WebGLRenderingContext | null
@@ -177,8 +178,8 @@ export default function Live2DAvatar({
 
       const levelHistory: { t: number; v: number }[] = []
       let levelPeak = 0
-      const tick = (nowMs: number) => {
-        if (disposed || !model) return
+      const drawFrame = (nowMs: number) => {
+        if (!model) return
         const now = nowMs / 1000
         const dt = lastTime === 0 ? 0 : Math.min(now - lastTime, 0.1)
         lastTime = now
@@ -216,13 +217,25 @@ export default function Live2DAvatar({
         gl.viewport(0, 0, canvas.width, canvas.height)
         gl.clear(gl.COLOR_BUFFER_BIT)
         model.draw(gl, canvas.width, canvas.height, 0.98, FACE_ZOOM, FACE_FOCUS_Y)
+      }
 
+      const tick = (nowMs: number) => {
+        if (disposed || !model) return
+        try {
+          drawFrame(nowMs)
+        } catch (err) {
+          // 例外のままだと次フレームを要求できず、画面が止まったまま理由も出ない。
+          bail('描画中に例外が出た', err)
+          return
+        }
         rafId = requestAnimationFrame(tick)
       }
       rafId = requestAnimationFrame(tick)
     }
 
-    setup()
+    // Framework の動的import失敗や startUp の例外は setup 内の try/catch を通らず、
+    // 未処理のPromise拒否になって Avatar2D へ切り替わらない。最後の受け皿。
+    setup().catch((err) => bail('Live2Dを初期化できなかった', err))
 
     const resizeObserver = new ResizeObserver(resize)
     resizeObserver.observe(container)
