@@ -1,7 +1,7 @@
 # 実装に登録されている全エンドポイント。
 # 手で編集しない。次のコマンドで生成する:
 #   cd Backend && go test ./internal/routes/ -run TestRouteCatalog -update
-# 合計 281 本
+# 合計 282 本
 GET /api/ability-assessments
 POST /api/ability-assessments/:templateId/sessions
 GET /api/ability-assessments/sessions/:sessionId
@@ -134,6 +134,7 @@ POST /api/applications
 PUT /api/applications/:id
 POST /api/applications/:id/accept
 POST /api/applications/:id/withdraw
+GET /api/applications/availability
 GET /api/applications/correlation
 GET /api/assessments
 POST /api/assessments/:templateId/sessions

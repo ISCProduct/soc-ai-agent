@@ -1,3 +1,4 @@
+import { adminTokenNeedsRefresh } from './admin-token'
 import { BACKEND_URL } from '../backend-url'
 import { AUTH_REFRESH_TIMEOUT_MS, fetchAndReadWithTimeout, fetchWithTimeout } from '../fetch-timeout'
 import { extractTenantSlug } from '../tenant'
@@ -92,6 +93,36 @@ const USER_TOKEN_REFRESH_MARGIN_SECONDS = 120
 function persistUserToken(token: string) {
   getSessionStorage()?.setItem(AUTH_USER_TOKEN_KEY, token)
   getLocalStorage()?.setItem(AUTH_USER_TOKEN_KEY, token)
+}
+
+function persistAdminToken(token: string) {
+  getSessionStorage()?.setItem(AUTH_TOKEN_KEY, token)
+  getLocalStorage()?.setItem(AUTH_TOKEN_KEY, token)
+}
+
+let adminTokenRefreshInFlight: Promise<void> | null = null
+
+async function pullAdminToken(): Promise<void> {
+  const data = await fetchAndReadWithTimeout(
+    '/api/auth/session',
+    {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { 'X-Refresh-Admin-Token': '1' },
+    },
+    AUTH_REFRESH_TIMEOUT_MS,
+    async (res): Promise<{ token?: string }> => {
+      if (!res.ok) {
+        throw new Error('管理者セッションを更新できませんでした。再ログインしてください。')
+      }
+      return res.json()
+    },
+  )
+  if (!data.token || adminTokenNeedsRefresh(data.token)) {
+    throw new Error('管理者セッションを更新できませんでした。再ログインしてください。')
+  }
+  persistAdminToken(data.token)
 }
 
 /** JWT の exp を検証なしで読み、期限切れ（または間もなく期限切れ）か判定する */
@@ -391,6 +422,7 @@ export const authService = {
               userId,
               userToken: authResponse.user_token,
               refreshToken: authResponse.refresh_token,
+              ...(authResponse.token ? { adminToken: authResponse.token } : {}),
             }),
           },
           AUTH_REFRESH_TIMEOUT_MS,
@@ -475,6 +507,23 @@ export const authService = {
       throw new Error('Unauthorized: ログインの有効期限が切れました。再ログインしてください。')
     }
     persistUserToken(data.user_token)
+  },
+
+  /**
+   * 管理者トークンが期限間近なら、ログインセッションの更新で発行された新しい値を
+   * ストレージへ写す（SOCAIAGENT-476）。
+   *
+   * 管理APIは localStorage の token を X-Admin-Token に載せる。Cookie だけ新しくても
+   * 画面は7日前の値を送り続け、403 になる。
+   */
+  async ensureFreshAdminToken(): Promise<void> {
+    if (!adminTokenNeedsRefresh(this.getStoredToken())) return
+    if (!adminTokenRefreshInFlight) {
+      adminTokenRefreshInFlight = pullAdminToken().finally(() => {
+        adminTokenRefreshInFlight = null
+      })
+    }
+    await adminTokenRefreshInFlight
   },
 
   // 管理者APIリクエスト用のヘッダーを返す（X-Admin-Email + X-Admin-Token）

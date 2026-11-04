@@ -4,8 +4,10 @@ import { useEffect, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
+  Alert,
   AppBar,
   Box,
+  Button,
   Divider,
   Drawer,
   IconButton,
@@ -16,6 +18,8 @@ import {
   Typography,
 } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
+import { authService } from '@/lib/auth'
+import { adminTokenNeedsRefresh } from '@/lib/auth/admin-token'
 import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import { ADMIN_COLORS } from '@/lib/design-tokens'
 import { activeAdminNavItem, visibleAdminNav } from '@/lib/admin-nav'
@@ -37,8 +41,36 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() || ''
   const [isPlatform, setIsPlatform] = useState<boolean | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // 期限が切れた管理者トークンのまま子画面を描くと、開いた瞬間に 403 になる。
+  // 確認が終わるまで本文は出さない。
+  const [adminTokenPhase, setAdminTokenPhase] = useState<'pending' | 'ready' | 'error'>('pending')
+  const [adminTokenAttempt, setAdminTokenAttempt] = useState(0)
 
   useEffect(() => {
+    let alive = true
+    if (!adminTokenNeedsRefresh(authService.getStoredToken())) {
+      setAdminTokenPhase('ready')
+      return () => {
+        alive = false
+      }
+    }
+    // 表示中（ready）の遷移では本文を隠さない。隠すとアンマウントされ、遷移先の入力が消える。
+    // 背景で取り直し、失敗してもまだ有効なトークンで動いている間は ready のまま残す。
+    setAdminTokenPhase((phase) => (phase === 'ready' ? phase : 'pending'))
+    authService.ensureFreshAdminToken()
+      .then(() => {
+        if (alive) setAdminTokenPhase('ready')
+      })
+      .catch(() => {
+        if (alive) setAdminTokenPhase((phase) => (phase === 'ready' ? phase : 'error'))
+      })
+    return () => {
+      alive = false
+    }
+  }, [pathname, adminTokenAttempt])
+
+  useEffect(() => {
+    if (adminTokenPhase !== 'ready') return
     let alive = true
     getAdminSchoolAccess()
       .then((access) => {
@@ -52,7 +84,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
     return () => {
       alive = false
     }
-  }, [])
+  }, [adminTokenPhase])
 
   // パス変更でモバイルのドロワーを閉じる。開いたまま遷移すると
   // 遷移先の内容が隠れたままになる。
@@ -183,7 +215,21 @@ export function AdminShell({ children }: { children: ReactNode }) {
         </AppBar>
 
         <Box component="main" id={MAIN_ID} sx={{ flex: 1, minWidth: 0 }}>
-          {children}
+          {adminTokenPhase === 'pending' && (
+            <Typography role="status" sx={{ p: 3 }}>
+              管理者セッションを確認しています
+            </Typography>
+          )}
+          {adminTokenPhase === 'error' && (
+            <Alert severity="error" sx={{ m: 3 }} action={
+              <Button color="inherit" onClick={() => setAdminTokenAttempt((n) => n + 1)}>
+                もう一度試す
+              </Button>
+            }>
+              管理者セッションを更新できませんでした。このままでは管理画面の操作が拒否されます。通信を確認して、もう一度試してください。
+            </Alert>
+          )}
+          {adminTokenPhase === 'ready' && children}
         </Box>
         <Divider />
       </Box>
