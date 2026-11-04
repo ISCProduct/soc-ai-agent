@@ -190,13 +190,24 @@ func NewBacklogClientFromEnv() *BacklogClient {
 }
 
 func (c *BacklogClient) Users(ctx context.Context) ([]BacklogUser, error) {
-	// apiKey はクエリ文字列で渡す（Backlog の仕様）。url.Error にURLごと入るので、
-	// エラーに丸ごと包むとログにキーが残る。理由だけを取り出す。
-	endpoint := fmt.Sprintf("%s/api/v2/projects/%s/users?apiKey=%s",
-		c.baseURL, url.PathEscape(c.projectKey), url.QueryEscape(c.apiKey))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	var users []BacklogUser
+	if err := c.get(ctx, "/projects/"+url.PathEscape(c.projectKey)+"/users", nil, &users); err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+// get は Backlog API を GET して out に読み込む。
+// apiKey はクエリ文字列で渡す（Backlog の仕様）。url.Error にURLごと入るので、
+// エラーに丸ごと包むとログにキーが残る。理由だけを取り出す。
+func (c *BacklogClient) get(ctx context.Context, path string, q url.Values, out any) error {
+	if q == nil {
+		q = url.Values{}
+	}
+	q.Set("apiKey", c.apiKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v2"+path+"?"+q.Encode(), nil)
 	if err != nil {
-		return nil, errors.New("Backlog API のリクエスト作成に失敗しました")
+		return errors.New("Backlog API のリクエスト作成に失敗しました")
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -204,17 +215,16 @@ func (c *BacklogClient) Users(ctx context.Context) ([]BacklogUser, error) {
 		if errors.As(err, &ue) {
 			err = ue.Err
 		}
-		return nil, fmt.Errorf("Backlog API の呼び出しに失敗しました: %w", err)
+		return fmt.Errorf("Backlog API の呼び出しに失敗しました: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Backlog API が %d を返しました", resp.StatusCode)
+		return fmt.Errorf("Backlog API が %d を返しました", resp.StatusCode)
 	}
-	var users []BacklogUser
-	if err := json.NewDecoder(resp.Body).Decode(&users); err != nil {
-		return nil, fmt.Errorf("Backlog API の応答を読めませんでした: %w", err)
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("Backlog API の応答を読めませんでした: %w", err)
 	}
-	return users, nil
+	return nil
 }
 
 // ResolveBacklogUser は名前の完全一致で1人に絞る。

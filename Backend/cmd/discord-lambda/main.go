@@ -57,17 +57,19 @@ func main() {
 		os.Getenv("DISCORD_ALLOWED_ROLE_ID"),
 	)
 
-	// /link 系。BACKLOG_API_KEY が無ければ付けない(コマンドは「利用できません」を返す)。
+	// /link 系と期限リマインド。BACKLOG_API_KEY が無ければ付けない(コマンドは「利用できません」を返す)。
 	// 他のコマンドを巻き込んで起動失敗にはしない。
+	var reminder *discord.ReminderService
 	if backlog := discord.NewBacklogClientFromEnv(); backlog != nil {
 		links, err := discord.NewLinkServiceFromEnv(ctx)
 		if err != nil {
 			log.Fatalf("LinkService の初期化に失敗しました: %v", err)
 		}
 		handler.WithLinks(links, backlog)
+		reminder = discord.NewReminderServiceFromEnv(backlog, links)
 	}
 
-	lambda.Start(newLambdaHandler(handler, discord.NewWorkflowDispatcherFromEnv()))
+	lambda.Start(newLambdaHandler(handler, discord.NewWorkflowDispatcherFromEnv(), reminder))
 }
 
 // schedulerEvent は EventBridge Scheduler から渡す固定ペイロード（#1388）。
@@ -83,24 +85,34 @@ func main() {
 type schedulerEvent struct {
 	Source   string `json:"source"`
 	Workflow string `json:"workflow"`
+	// DryRun は期限リマインドで、投稿せず本文だけ返す(手動の確認用)。
+	DryRun bool `json:"dry_run"`
 }
 
 // schedulerSource は EventBridge からの呼び出しであることを示す値。
 // Discord の Interaction ペイロードと取り違えないよう、固定文字列で判定する。
 const schedulerSource = "prod-uptime-scheduler"
 
+// reminderSource は Backlog の期限リマインドを起動する EventBridge からの目印。
+const reminderSource = "backlog-deadline-reminder"
+
 // newLambdaHandler は ALB からの Discord Interaction と、
 // EventBridge Scheduler からの起動要求の両方を受ける。
 //
 // 入口を分けずに1つの Lambda で受けるのは、本番を起動する口を増やさないため。
 // ALB 経由の受け口は staging が停止していても生きている（既存の構成）。
-func newLambdaHandler(h *discord.Handler, dispatcher *discord.WorkflowDispatcher) func(context.Context, json.RawMessage) (any, error) {
+func newLambdaHandler(h *discord.Handler, dispatcher *discord.WorkflowDispatcher, reminder *discord.ReminderService) func(context.Context, json.RawMessage) (any, error) {
 	return func(ctx context.Context, raw json.RawMessage) (any, error) {
 		// EventBridge Scheduler からの呼び出しかを先に判定する。
 		// ALB のリクエストには source フィールドが無いので取り違えない。
 		var ev schedulerEvent
-		if err := json.Unmarshal(raw, &ev); err == nil && ev.Source == schedulerSource {
-			return handleScheduled(ctx, dispatcher, ev)
+		if err := json.Unmarshal(raw, &ev); err == nil {
+			switch ev.Source {
+			case schedulerSource:
+				return handleScheduled(ctx, dispatcher, ev)
+			case reminderSource:
+				return handleReminder(ctx, reminder, ev)
+			}
 		}
 
 		var req events.ALBTargetGroupRequest
@@ -132,6 +144,26 @@ func handleScheduled(ctx context.Context, dispatcher *discord.WorkflowDispatcher
 }
 
 var errDispatcherNotConfigured = errors.New("workflow dispatcher is not configured")
+
+var errReminderNotConfigured = errors.New("backlog deadline reminder is not configured")
+
+// handleReminder は期限が近い・切れた課題を Discord へ投稿する。
+//
+// 失敗は Lambda のエラーにして CloudWatch に残す。再試行はしない(スケジュール側で
+// 0 回)。投稿が成功したあとの失敗で再実行すると、同じ通知が二重に飛ぶため。
+func handleReminder(ctx context.Context, reminder *discord.ReminderService, ev schedulerEvent) (any, error) {
+	if reminder == nil {
+		log.Printf("[Reminder] skipped: not configured")
+		return nil, errReminderNotConfigured
+	}
+	res, err := reminder.Run(ctx, ev.DryRun)
+	if err != nil {
+		log.Printf("[Reminder] failed: %v", err)
+		return nil, err
+	}
+	log.Printf("[Reminder] issues=%d messages=%d posted=%v dry_run=%v", res.Issues, len(res.Messages), res.Posted, ev.DryRun)
+	return res, nil
+}
 
 func handleALB(ctx context.Context, h *discord.Handler, req events.ALBTargetGroupRequest) (events.ALBTargetGroupResponse, error) {
 	body, err := decodeBody(req)

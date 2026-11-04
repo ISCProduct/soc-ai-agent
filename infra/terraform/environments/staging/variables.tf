@@ -276,6 +276,13 @@ variable "backlog_api_key" {
   default     = ""
 }
 
+variable "discord_reminder_webhook_url" {
+  type        = string
+  sensitive   = true
+  description = "Backlog の期限リマインドを投稿する Discord Webhook URL。未設定なら期限リマインドは動かない(他のコマンドには影響しない)"
+  default     = ""
+}
+
 variable "github_dispatch_repo" {
   type        = string
   description = "workflow_dispatch の対象リポジトリ(owner/repo)"

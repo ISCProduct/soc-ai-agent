@@ -81,3 +81,15 @@ Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確
 - 4KB の上限があり、40人強まで。超える場合は DynamoDB へ移す。
 - 有効にするには Lambda に `BACKLOG_API_KEY`（terraform の `backlog_api_key`）が要る。未設定なら `/link` 系は「利用できません」を返す。
 - コマンドの追加後に `automation/discord/register-commands.sh` を再実行する。
+
+## Backlog の期限リマインド
+
+平日 9:30 JST に、期限が2日以内・期限切れの課題を担当者ごとにまとめて投稿する（EventBridge Scheduler → discord Lambda）。
+
+- 対象ステータス: 未対応・処理中・PR確認待ち。保留・処理済み・ステージング反映以降は対象外。
+- 担当者は `/link` で紐づけた人にメンションする。未登録の人は名前だけで、「Discord未登録」と出る。
+- 対象が無い日は何も投稿しない。
+- 投稿先は Webhook（terraform の `discord_reminder_webhook_url`）。未設定なら動かない。
+- 手動確認（投稿しない）: Lambda を `{"source":"backlog-deadline-reminder","dry_run":true}` で invoke すると、投稿予定の本文が返る。
+- 再試行はしない（成功後の失敗で二重投稿になるため）。失敗は CloudWatch Logs `/aws/lambda/<project>-discord` の `[Reminder]` に残る。
+
