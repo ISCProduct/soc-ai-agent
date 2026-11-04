@@ -197,6 +197,16 @@ func TestEvaluateResumeResponse_書き換え案(t *testing.T) {
 			c:    lowFirst,
 			res:  body(second + `,"rewrite":"研究室でGoのCLIを3ヶ月で公開しました","severity":"info"}`),
 		},
+		{
+			name: "複数行の引用が低信頼行の一部を含む",
+			c: Case{ID: "r-span", Label: LabelGood, Target: TargetResume, Input: Input{
+				ResumeText:        "学生時代はサークルの新人勧誘を担当し、\n50名の入会に貢獣しました。",
+				OCRLineConfidence: []float64{0.95, 0.3},
+				CandidateType:     "new_grad",
+			}},
+			res:            body(`{"quote":"学生時代はサークルの新人勧誘を担当し、50名の入会に貢","message":"指摘","suggestion":"改善案","rewrite":"学生時代はサークルの新人勧誘を担当し、50名の入会につなげました","severity":"info"}`),
+			wantViolations: []string{"rewrite_on_low_confidence"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

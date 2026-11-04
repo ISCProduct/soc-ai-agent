@@ -204,6 +204,8 @@ func evaluateResumeResponse(o Observation, c Case, res CallResult) Observation {
 // スコアが無い・範囲外の行は不明なので当たらない（本番が書き換えを禁止しないのと同じ）。
 // 行が引用を含む、または6文字以上の行が引用に含まれるとき当たったとみなす。
 // 短い行の包含は表の見出しが長い引用に偶然入るのを避けるため見ない。
+// 引用が複数行にまたがり、低信頼行の一部だけを含む場合も当たったとみなす。
+// 行全体の包含だけだと、隣の誤読を少しだけ取り込んだ引用を見逃す。
 func quoteOnLowConfidenceLine(quote, resumeText string, confidence []float64) bool {
 	if len(confidence) == 0 {
 		return false
@@ -212,6 +214,11 @@ func quoteOnLowConfidenceLine(quote, resumeText string, confidence []float64) bo
 	if normQuote == "" {
 		return false
 	}
+	type row struct {
+		norm string
+		low  bool
+	}
+	var rows []row
 	i := 0
 	for _, line := range strings.Split(resumeText, "\n") {
 		if strings.TrimSpace(line) == "" {
@@ -224,17 +231,62 @@ func quoteOnLowConfidenceLine(quote, resumeText string, confidence []float64) bo
 			known = score >= 0 && score <= 1
 		}
 		i++
-		if !known || score >= resume.OCRRewriteMinConfidence {
-			continue
-		}
 		normLine := normalizeForQuote(line)
-		if normLine == "" {
+		low := known && score < resume.OCRRewriteMinConfidence
+		rows = append(rows, row{norm: normLine, low: low})
+		if !low || normLine == "" {
 			continue
 		}
 		if strings.Contains(normLine, normQuote) {
 			return true
 		}
 		if len([]rune(normLine)) >= 6 && strings.Contains(normQuote, normLine) {
+			return true
+		}
+	}
+	// 本番の照合窓と同じく、連続する最大4行を見る。
+	for size := 2; size <= 4; size++ {
+		for start := 0; start+size <= len(rows); start++ {
+			var b strings.Builder
+			low := false
+			for _, row := range rows[start : start+size] {
+				b.WriteString(row.norm)
+				if row.low {
+					low = true
+				}
+			}
+			if !low {
+				continue
+			}
+			joined := b.String()
+			if joined == "" || (!strings.Contains(joined, normQuote) && !strings.Contains(normQuote, joined)) {
+				continue
+			}
+			for _, row := range rows[start : start+size] {
+				if row.low && lineTouchesQuote(normQuote, row.norm) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// lineTouchesQuote は、低信頼行の6文字以上が引用に入っているかを返す。
+// 行全体が引用に含まれない折り返しでも、誤読部分を拾う。
+func lineTouchesQuote(normQuote, normLine string) bool {
+	if normLine == "" {
+		return false
+	}
+	if strings.Contains(normQuote, normLine) || strings.Contains(normLine, normQuote) {
+		return true
+	}
+	runes := []rune(normLine)
+	if len(runes) < 6 {
+		return false
+	}
+	for i := 0; i+6 <= len(runes); i++ {
+		if strings.Contains(normQuote, string(runes[i:i+6])) {
 			return true
 		}
 	}

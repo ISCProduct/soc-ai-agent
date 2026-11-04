@@ -46,6 +46,79 @@ func TestOCRRewriteMinConfidenceBoundary(t *testing.T) {
 	}
 }
 
+func TestMapReviewItems_複数行の引用に誤読行があれば書き換えを出さない(t *testing.T) {
+	lines := []string{"学生時代はサークルの新人勧誘を担当し、", "50名の入会に貢獣しました。"}
+	blocks := makeBlocks(lines...)
+	high, low := 0.95, 0.3
+	blocks[0].Confidence = &high
+	blocks[1].Confidence = &low
+	item := aiReviewItem{
+		Quote:      strings.Join(lines, ""),
+		Message:    "誤読をそのまま書かない",
+		Suggestion: "入会人数の記述を原本で確認する",
+		Rewrite:    "学生時代はサークルの新人勧誘を担当し、50名の入会につなげました。",
+		Severity:   "warning",
+	}
+	got := mapReviewItems(blocks, []aiReviewItem{item})
+	if len(got) != 1 {
+		t.Fatalf("紐づけ件数 = %d, want 1", len(got))
+	}
+	if got[0].Rewrite != "" || got[0].RewriteWithheld != rewriteWithheldLowOCR {
+		t.Fatalf("窓内の誤読行を見逃した: rewrite=%q withheld=%q", got[0].Rewrite, got[0].RewriteWithheld)
+	}
+
+	blocks[1].Confidence = &high
+	kept := mapReviewItems(blocks, []aiReviewItem{item})
+	if len(kept) != 1 || kept[0].Rewrite != item.Rewrite || kept[0].RewriteWithheld != "" {
+		t.Fatalf("両行とも信頼できるのに書き換えを捨てた: %+v", kept)
+	}
+}
+
+func TestMapReviewItems_低信頼の印は原文に残さない(t *testing.T) {
+	text := "に貢獣しました。店舗の売上を前年比で伸ばしています。"
+	blocks := makeBlocks(text)
+	low := 0.3
+	blocks[0].Confidence = &low
+	item := aiReviewItem{
+		Quote:      lowConfidenceMark + " " + text,
+		Message:    "誤読のまま書き換えない",
+		Suggestion: "原本の文を確認する",
+		Rewrite:    "店舗売上を前年比10%伸ばしました。",
+		Severity:   "warning",
+	}
+	got := mapReviewItems(blocks, []aiReviewItem{item})
+	if len(got) != 1 {
+		t.Fatalf("紐づけ件数 = %d, want 1", len(got))
+	}
+	if strings.Contains(got[0].Quote, lowConfidenceMark) || got[0].Quote != text {
+		t.Fatalf("原文 = %q, want %q", got[0].Quote, text)
+	}
+	if got[0].Rewrite != "" || got[0].RewriteWithheld != rewriteWithheldLowOCR {
+		t.Fatalf("低信頼行の書き換えを残した: rewrite=%q withheld=%q", got[0].Rewrite, got[0].RewriteWithheld)
+	}
+}
+
+func TestMapReviewItems_原文と同じ書き換えは残さない(t *testing.T) {
+	blocks := makeBlocks("アルバイトでは接客を通じて売上向上に貢献しました。")
+	item := aiReviewItem{
+		Quote:      blocks[0].Text,
+		Message:    "具体性を足してください",
+		Suggestion: "人数と期間を書く",
+		Rewrite:    "アルバイトでは接客を通じて\n売上向上に貢献しました。",
+		Severity:   "info",
+	}
+	got := mapReviewItems(blocks, []aiReviewItem{item})
+	if len(got) != 1 {
+		t.Fatalf("紐づけ件数 = %d, want 1", len(got))
+	}
+	if got[0].Rewrite != "" || got[0].RewriteWithheld != "" {
+		t.Fatalf("原文の写しを残した: rewrite=%q withheld=%q", got[0].Rewrite, got[0].RewriteWithheld)
+	}
+	if got[0].Suggestion != item.Suggestion {
+		t.Fatalf("説明まで消した: %q", got[0].Suggestion)
+	}
+}
+
 func TestNormalizeOCRScore_範囲外は不明(t *testing.T) {
 	zero := normalizeOCRScore(0)
 	if zero == nil || *zero != 0 {

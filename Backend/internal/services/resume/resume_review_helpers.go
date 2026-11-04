@@ -58,7 +58,7 @@ const (
 	OCRRewriteMinConfidence = 0.6
 
 	// lowConfidenceMark はプロンプト上で「この行を書き換えない」と示す印。
-	// 本文の一部ではない。モデルが quote に写しても、照合は印を除いた本文で行う。
+	// 本文の一部ではない。モデルが quote に写しても、照合と保存の前に除く。
 	lowConfidenceMark = "[低信頼]"
 
 	// rewriteWithheldLowOCR は書き換えを空にした理由。画面と注釈PDFが同じ値を見る。
@@ -78,6 +78,43 @@ const (
 // スコアが無い行は不明なので false（書き換えを禁止しない）。
 func blockConfidenceTooLow(confidence *float64) bool {
 	return confidence != nil && *confidence < OCRRewriteMinConfidence
+}
+
+// spanConfidenceTooLow は、照合に使った窓のどれか1行でも下限未満なら true。
+// 代表の1行だけを見ると、隣の誤読行を含む引用に書き換えが残る。
+func spanConfidenceTooLow(blocks []models.ResumeTextBlock, start, size int) bool {
+	if size <= 0 || start < 0 || start+size > len(blocks) {
+		return false
+	}
+	for i := start; i < start+size; i++ {
+		if blockConfidenceTooLow(blocks[i].Confidence) {
+			return true
+		}
+	}
+	return false
+}
+
+// stripLowConfidenceMark はプロンプト用の印を引用から除く。
+// 画面と注釈PDFの「原文」に印が出ないように、保存する文字列へは残さない。
+func stripLowConfidenceMark(s string) string {
+	return strings.TrimSpace(strings.ReplaceAll(s, lowConfidenceMark, ""))
+}
+
+// sameRewriteAsQuote は、空白の差を除いて書き換えが原文の写しかを返す。
+func sameRewriteAsQuote(rewrite, quote string) bool {
+	return stripSpaces(rewrite) != "" && stripSpaces(rewrite) == stripSpaces(quote)
+}
+
+func stripSpaces(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case ' ', '\t', '\n', '\r', '　':
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // normalizeOCRScore は 0〜1 の認識スコアだけを残す。範囲外は不明（nil）にする。
@@ -179,12 +216,14 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 	for _, item := range aiItems {
 		// 長さは正規化後で判定する。生の文字数で見ると約物だけの引用が通ってしまう。
 		// page_hint 経路も同じゲートを通すため、ここで1回だけ判定する。
-		quoteText := textsim.New(item.Quote)
+		rawQuote := stripLowConfidenceMark(item.Quote)
+		quoteText := textsim.New(rawQuote)
 		if quoteText.Len() < quoteMinRunes {
 			continue
 		}
 
 		var block *models.ResumeTextBlock
+		spanStart, spanSize := 0, 0
 		// page_hint / block_index はLLM生成で幻覚するので、指しているブロックが
 		// 実際に引用と一致するかを裏取りし、外れていたら通常の探索に落とす。
 		// block_index は ocr_extract.py が 0 始まりで振るため 0 も受ける。
@@ -197,11 +236,12 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 			if i := findBlockByIndex(blocks, item.PageHint, item.BlockIndex); i >= 0 &&
 				blockTexts[i].MatchScore(quoteText) >= quoteMatchThreshold {
 				block = &blocks[i]
+				spanStart, spanSize = i, 1
 			}
 		}
 		// findBestBlock が quoteMatchThreshold を保証して返すため、追加の照合はしない。
 		if block == nil {
-			block = findBestBlock(blocks, blockTexts, windows, quoteText)
+			block, spanStart, spanSize = findBestBlock(blocks, blockTexts, windows, quoteText)
 		}
 		if block == nil {
 			continue
@@ -210,7 +250,7 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 		if severity == "" {
 			severity = "info"
 		}
-		quote := strings.TrimSpace(item.Quote)
+		quote := rawQuote
 		if quote == "" {
 			quote = strings.TrimSpace(block.Text)
 		}
@@ -218,9 +258,12 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 		withheld := ""
 		// モデルが誤認識行へ書き換えを出しても、ここで捨てる。
 		// プロンプトの印は守られないことがあるため、保存前に必ず見る。
-		if blockConfidenceTooLow(block.Confidence) {
+		// 窓の代表行だけを見ると、隣の誤読行を含む引用に書き換えが残る。
+		if spanConfidenceTooLow(blocks, spanStart, spanSize) {
 			rewrite = ""
 			withheld = rewriteWithheldLowOCR
+		} else if sameRewriteAsQuote(rewrite, quote) {
+			rewrite = ""
 		}
 		result = append(result, models.ResumeReviewItem{
 			PageNumber:      block.PageNumber,
@@ -277,9 +320,10 @@ func (w blockWindow) overlaps(other blockWindow) bool {
 	return w.start < other.start+other.size && other.start < w.start+w.size
 }
 
-// findBestBlock は引用に最も近い本文ブロックを返す。
+// findBestBlock は引用に最も近い本文ブロックと、照合に使った窓の範囲を返す。
 // blockTexts は blocks と同じ並びの正規化済みテキスト、windows は buildBlockWindows の結果。
-// しきい値未満、または次点と差が小さく曖昧な場合は nil を返す。
+// しきい値未満、または次点と差が小さく曖昧な場合は nil と空の範囲を返す。
+// 範囲は書き換えを出してよいかを窓全体で見るために使う。代表の1行だけでは誤読行を見逃す。
 //
 // 候補は1行だけでなく連続行を連結した窓も見る（#1559）。OCRブロックは行単位、
 // 引用は一文なので、一文が複数行に折り返していると1行との Dice 係数が原理的に
@@ -287,7 +331,7 @@ func (w blockWindow) overlaps(other blockWindow) bool {
 //
 // page_hint での絞り込みはしない。page_hint はLLM生成で幻覚するため、
 // 絞り込むと他ページの完全一致を見ずに同ページの弱い候補を採ってしまう。
-func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Bigrams, windows []blockWindow, quoteText textsim.Bigrams) *models.ResumeTextBlock {
+func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Bigrams, windows []blockWindow, quoteText textsim.Bigrams) (*models.ResumeTextBlock, int, int) {
 	scores := make([]float64, len(windows))
 	best := -1
 	bestScore := 0.0
@@ -300,7 +344,7 @@ func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Bigrams
 		}
 	}
 	if best < 0 || bestScore < quoteMatchThreshold {
-		return nil
+		return nil, 0, 0
 	}
 	// 次点は「最良の窓と1行も重ならない窓」から採る。重なる窓は本文の同じ箇所を
 	// 指しており、競合ではなく同じ紐づけ先の言い換えにすぎない。
@@ -317,14 +361,16 @@ func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Bigrams
 	// 満点はほぼ「本文が引用を含む」ケースだが、bigram集合が一致しても1.0になり得る
 	// （"あいあ"と"いあい"）ため、包含とは言わず満点として扱う。
 	if bestScore == 1 && second < 1 {
-		return pickRepresentative(blocks, blockTexts, windows[best], quoteText)
+		w := windows[best]
+		return pickRepresentative(blocks, blockTexts, w, quoteText), w.start, w.size
 	}
 	// 次点と差が小さいときは、本文のどちらの箇所とも言える状態。
 	// 誤ったブロックに紐づけるより欠落させる（同じ言い回しが2箇所にある場合など）。
 	if bestScore-second < quoteMatchMargin {
-		return nil
+		return nil, 0, 0
 	}
-	return pickRepresentative(blocks, blockTexts, windows[best], quoteText)
+	w := windows[best]
+	return pickRepresentative(blocks, blockTexts, w, quoteText), w.start, w.size
 }
 
 // pickRepresentative は窓の中で引用と最も長く重なる行を返す（同点なら上の行）。
