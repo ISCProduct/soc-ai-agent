@@ -267,7 +267,12 @@ export default function PageContent() {
               {/* Report */}
               {selectedDetail.report ? (
                 <>
-                  <InterviewSummary report={selectedDetail.report} userId={user?.user_id} theme="light" />
+                  <InterviewSummary
+                    report={selectedDetail.report}
+                    utterances={selectedDetail.utterances}
+                    userId={user?.user_id}
+                    theme="light"
+                  />
 
                   {/* 教員用レポートパネル。開示判定はサーバー側（実ロールで teacher_report_json
                       自体を除去する）。ここで保存済み利用者情報を見て再判定すると、昇格直後など

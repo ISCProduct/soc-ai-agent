@@ -222,6 +222,79 @@ type EvidenceCheck struct {
 // Matched は照合できた項目数を返す。
 func (c EvidenceCheck) Matched() int { return c.Checked - len(c.Unmatched) }
 
+// EvidenceReferenceCheck は引用文と発話IDを照合した結果。
+type EvidenceReferenceCheck struct {
+	EvidenceCheck
+	UtteranceIDs map[string]uint
+}
+
+// ValidateEvidenceReferences は引用が指定IDの受験者発話に含まれることを検証する。
+func ValidateEvidenceReferences(
+	evidence map[string]string,
+	utteranceIDs map[string]*uint,
+	utterances []models.InterviewUtterance,
+) EvidenceReferenceCheck {
+	byID := make(map[uint]models.InterviewUtterance, len(utterances))
+	for _, utterance := range utterances {
+		if utterance.Role == "user" {
+			byID[utterance.ID] = utterance
+		}
+	}
+
+	result := EvidenceReferenceCheck{UtteranceIDs: make(map[string]uint)}
+	for _, key := range RubricKeys() {
+		quote := strings.TrimSpace(evidence[key])
+		id := utteranceIDs[key]
+		if quote == "" {
+			if id != nil {
+				result.Checked++
+				result.Unmatched = append(result.Unmatched, key)
+			}
+			continue
+		}
+		result.Checked++
+		if id == nil || *id == 0 {
+			result.Unmatched = append(result.Unmatched, key)
+			continue
+		}
+		utterance, ok := byID[*id]
+		if !ok || !strings.Contains(utterance.Text, quote) {
+			result.Unmatched = append(result.Unmatched, key)
+			continue
+		}
+		result.UtteranceIDs[key] = *id
+	}
+	sort.Strings(result.Unmatched)
+	return result
+}
+
+func evidenceIDsAsPointers(ids map[string]uint) map[string]*uint {
+	out := make(map[string]*uint, len(ids))
+	for key, id := range ids {
+		value := id
+		out[key] = &value
+	}
+	return out
+}
+
+func evidenceIDsFromPointers(ids map[string]*uint) map[string]uint {
+	out := make(map[string]uint, len(ids))
+	for key, id := range ids {
+		if id != nil && *id > 0 {
+			out[key] = *id
+		}
+	}
+	return out
+}
+
+func blankUnmatchedEvidenceIDs(ids map[string]*uint, unmatched []string) {
+	for _, key := range unmatched {
+		if !strings.HasPrefix(key, "teacher.") {
+			delete(ids, key)
+		}
+	}
+}
+
 // SpokenContent は受験者(role=user)の発話を内容語だけに落として返す（#1527 / #1566）。
 //
 // 面接官(role=ai)の発話を混ぜると、質問文をそのまま根拠として引用しても

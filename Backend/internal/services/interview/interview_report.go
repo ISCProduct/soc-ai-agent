@@ -115,8 +115,12 @@ func BuildTranscript(utterances []models.InterviewUtterance) string {
 		role := "User"
 		if u.Role == "ai" {
 			role = "Interviewer"
+			b.WriteString(role)
+		} else if u.ID > 0 {
+			b.WriteString(fmt.Sprintf("%s [utterance_id=%d]", role, u.ID))
+		} else {
+			b.WriteString(role)
 		}
-		b.WriteString(role)
 		b.WriteString(": ")
 		b.WriteString(strings.TrimSpace(u.Text))
 		b.WriteString("\n")
@@ -165,6 +169,13 @@ func BuildReportPrompts(lang, transcript string) (systemPrompt, userPrompt strin
     "communication": "コミュニケーション力の根拠となった発言",
     "enthusiasm": "積極性・熱意の根拠となった発言（きっかけや継続の姿勢を含めてよい）"
   },
+  "evidence_utterance_ids": {
+    "logic": 123,
+    "specificity": 123,
+    "ownership": 123,
+    "communication": null,
+    "enthusiasm": 123
+  },
   "strengths": ["強み1", "強み2", "強み3"],
   "improvements": ["改善点1", "改善点2", "改善点3"],
   "teacher": {
@@ -177,8 +188,9 @@ func BuildReportPrompts(lang, transcript string) (systemPrompt, userPrompt strin
 }
 
 ※ scoresは実際の会話内容に基づいて正直に採点してください（全て同じ値は避ける）。
-※ evidence と teacher.detailed_evidence は、受験者（User）が実際に話した発言をそのまま引用して始めてください。言い換えや推測で書かず、根拠が見つからない項目は空文字にしてください。
-※ 上記2つは実発話と自動照合され、一致しない項目は破棄されます（teacher.detailed_evidence の指導ポイントは引用の後に続けてください）。
+※ evidence は受験者（User）の発言を一字一句そのまま引用し、引用元の [utterance_id=...] を evidence_utterance_ids に設定してください。引用とIDの両方が一致しない項目は破棄されます。
+※ 根拠が見つからない項目は evidence を空文字、evidence_utterance_ids を null にしてください。
+※ teacher.detailed_evidence は、実際の発言を引用して始めてください。言い換えや推測で書かず、根拠が見つからない項目は空文字にしてください（指導ポイントは引用の後に続けてください）。
 ※ strengths/improvementsは各2〜4件のリスト形式で具体的に記述してください。
 ※ teacher以下は教員専用の詳細情報として出力してください。
 
@@ -234,7 +246,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	var lastErr error
 	for attempt := range reportGenerationAttempts {
 		ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport)
-		raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt+retryNote, 0.4, 2000, model)
+		raw, err := s.openaiClient.ChatCompletionWithSchema(ctx, systemPrompt, userPrompt+retryNote, 0.4, 2000, interviewReportResponseSchema, model)
 		if err != nil {
 			return err
 		}
@@ -256,10 +268,10 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		// 根拠が実際の発話に基づくかを照合する（#1527）。LLM は呼ばない。
 		// 教員向けの detailed_evidence も同じ経路で照合する。教員向けだけ無検証だと、
 		// 指導の前提になるレポートに捏造が残る（Issue #1527 の動機そのもの）。
-		ev := ValidateEvidence(candidate.Evidence, spoken)
+		ev := ValidateEvidenceReferences(candidate.Evidence, candidate.EvidenceUtteranceIDs, utterances)
 		te := ValidateEvidence(teacherDetailedEvidence(candidate), spoken)
-		unmatched := append(slices.Clone(ev.Unmatched), prefixKeys("teacher.", te.Unmatched)...)
-		matched, checked := ev.Matched()+te.Matched(), ev.Checked+te.Checked
+		unmatched := append(slices.Clone(ev.EvidenceCheck.Unmatched), prefixKeys("teacher.", te.Unmatched)...)
+		matched, checked := ev.EvidenceCheck.Matched()+te.Matched(), ev.EvidenceCheck.Checked+te.Checked
 		if checked == 0 {
 			// 根拠を1件も返さなかった。照合すべきものが無いので 0/0 になる。
 			// 「完璧に照合できた」と区別できるようにしておく。
@@ -280,7 +292,8 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		// evidence 起因の失敗では lastErr を汚さない
 		// （汚すと finalizeReportPayload がスコアまで捨てる）。
 		if !haveBest || matched > bestMatched {
-			best, bestEvidence, bestTeacher = candidate, ev, te
+			best, bestEvidence, bestTeacher = candidate, ev.EvidenceCheck, te
+			best.EvidenceUtteranceIDs = evidenceIDsAsPointers(ev.UtteranceIDs)
 			bestUnmatched, bestMatched, haveBest = unmatched, matched, true
 		}
 		if len(unmatched) == 0 {
@@ -299,6 +312,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 			// スコアと講評は残す（誤りを載せるより欠落させる。docs/wiki/scoring.md §2-3）。
 			blankUnmatchedEvidence(payload.Evidence, bestEvidence.Unmatched)
 			blankUnmatchedEvidence(teacherDetailedEvidence(payload), bestTeacher.Unmatched)
+			blankUnmatchedEvidenceIDs(payload.EvidenceUtteranceIDs, bestEvidence.Unmatched)
 			log.Printf("[Interview] report saved with blanked evidence (session %d): %s",
 				sessionID, strings.Join(bestUnmatched, ", "))
 		}
@@ -315,6 +329,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	// 乗らず、スコア反映へ進んでしまう。
 	scoresJSON := marshalOrEmpty(payload.Scores)
 	evidenceJSON := marshalOrEmpty(payload.Evidence)
+	evidenceUtteranceIDsJSON := marshalOrEmpty(evidenceIDsFromPointers(payload.EvidenceUtteranceIDs))
 	strengthsJSON, _ := json.Marshal(payload.Strengths)
 	improvementsJSON, _ := json.Marshal(payload.Improvements)
 	teacherJSON := []byte("{}")
@@ -331,13 +346,14 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	}
 
 	report := &models.InterviewReport{
-		SessionID:         sessionID,
-		SummaryText:       payload.Summary,
-		ScoresJSON:        scoresJSON,
-		EvidenceJSON:      evidenceJSON,
-		StrengthsJSON:     string(strengthsJSON),
-		ImprovementsJSON:  string(improvementsJSON),
-		TeacherReportJSON: string(teacherJSON),
+		SessionID:                sessionID,
+		SummaryText:              payload.Summary,
+		ScoresJSON:               scoresJSON,
+		EvidenceJSON:             evidenceJSON,
+		EvidenceUtteranceIDsJSON: evidenceUtteranceIDsJSON,
+		StrengthsJSON:            string(strengthsJSON),
+		ImprovementsJSON:         string(improvementsJSON),
+		TeacherReportJSON:        string(teacherJSON),
 	}
 	if err := s.reportRepo.Upsert(report); err != nil {
 		return err
@@ -544,12 +560,13 @@ func prefixKeys(prefix string, keys []string) []string {
 
 // reportPayload は LLM に出力させるレポート JSON。
 type reportPayload struct {
-	Summary      string            `json:"summary"`
-	Scores       map[string]int    `json:"scores"`
-	Evidence     map[string]string `json:"evidence"`
-	Strengths    []string          `json:"strengths"`
-	Improvements []string          `json:"improvements"`
-	Teacher      *teacherReport    `json:"teacher"`
+	Summary              string            `json:"summary"`
+	Scores               map[string]int    `json:"scores"`
+	Evidence             map[string]string `json:"evidence"`
+	EvidenceUtteranceIDs map[string]*uint  `json:"evidence_utterance_ids"`
+	Strengths            []string          `json:"strengths"`
+	Improvements         []string          `json:"improvements"`
+	Teacher              *teacherReport    `json:"teacher"`
 }
 
 // parseReportJSON は LLM 出力を reportPayload として読む。
@@ -606,6 +623,7 @@ func finalizeReportPayload(p reportPayload, haveBody bool, scoreErr error) (repo
 func dropInvalidScores(p reportPayload) reportPayload {
 	p.Scores = nil
 	p.Evidence = nil
+	p.EvidenceUtteranceIDs = nil
 	return p
 }
 
@@ -614,7 +632,7 @@ func dropInvalidScores(p reportPayload) reportPayload {
 // "null" や "{}" を保存すると、スコア反映の早期リターン（ScoresJSON == ""）に
 // 乗らず、画面側も空オブジェクトを truthy と見て平均が NaN になる。
 // 「無い」ことは空文字で表す。
-func marshalOrEmpty[T ~map[string]int | ~map[string]string](m T) string {
+func marshalOrEmpty[T ~map[string]int | ~map[string]string | ~map[string]uint](m T) string {
 	if len(m) == 0 {
 		return ""
 	}
