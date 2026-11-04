@@ -41,6 +41,7 @@ import (
 	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
 	"Backend/internal/services/email"
+	"Backend/internal/services/esreview"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/gbizinfo"
 	"Backend/internal/services/github"
@@ -324,7 +325,7 @@ func main() {
 	// 全トラフィックが従量課金へ移る。日次/月次のUSD上限と分間レートで打ち切る(#1293)
 	aiClient.SetFallbackGuard(costs.NewOpenAIFallbackGuard(apiCallLogRepo))
 	schoolRepo := repositories.NewSchoolRepository(db)
-	schoolService := school.NewSchoolService(schoolRepo)
+	schoolService := school.NewSchoolService(schoolRepo, userRepo)
 	authService := auth.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	authService.SetDB(db)
 	authService.SetSchoolRepo(schoolRepo)
@@ -538,6 +539,9 @@ func main() {
 	googleCalendarController := schedulecontrollers.NewGoogleCalendarController(calendarSyncService)
 	scheduleController := schedulecontrollers.NewScheduleController(scheduleService)
 	esReviewController := escontrollers.NewESReviewController(aiClient)
+	// ES添削の結果を履歴として残し、前回との差分とスコア連携を行う(#1531)。
+	esReviewRepo := repositories.NewESReviewRepository(db)
+	esReviewController.SetReviewService(esreview.NewService(esReviewRepo, crossFeatureService))
 	appService := application.NewApplicationService(appStatusRepo, matchRepo, db)
 	appController := applicationcontrollers.NewApplicationController(appService)
 	appController.SetSchoolAccess(schoolService)
@@ -651,8 +655,9 @@ func main() {
 	guidanceRepo := repositories.NewTeacherStudentGuidanceRepository(db)
 	guidanceService := teacher.NewGuidanceService(guidanceRepo, userRepo)
 	teacherGuidanceController := insightcontrollers.NewTeacherGuidanceController(guidanceService, schoolService)
+	teacherESReviewController := insightcontrollers.NewTeacherESReviewController(esReviewRepo)
 	studentGuidanceController := usercontrollers.NewStudentGuidanceController(guidanceService)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, teacherGuidanceController, userRepo, schoolService, cfg.AdminSecret)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, teacherGuidanceController, teacherESReviewController, userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
 	// 適性検査 第1段（#1678）。結果は source=assessment で user_weight_scores へ入り、マッチングへ合流する
 	assessmentRepo := repositories.NewAssessmentRepository(db)
@@ -669,7 +674,7 @@ func main() {
 	routes.SetupAbilityRoutes(api, abilitycontrollers.NewController(abilitysvc.NewService(abilityRepo)), cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)
-	routes.SetupESRoutes(api, esRewriteController, esReviewController)
+	routes.SetupESRoutes(api, esRewriteController, esReviewController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)
