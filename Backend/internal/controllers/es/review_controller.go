@@ -70,6 +70,8 @@ func (c *ESReviewController) Review(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
+	// 形式チェックの位置は、利用者が送った原文（trim 前）を基準にする（#1530）
+	rawText := req.ESText
 	req.ESText = strings.TrimSpace(req.ESText)
 	if req.ESText == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "es_text is required")
@@ -95,9 +97,11 @@ func (c *ESReviewController) Review(ctx echo.Context) error {
 		return ctx.JSONBlob(status, respBody)
 	}
 	// RAG の応答（usage は取り除き済み）に、原文の形式チェック結果を足して返す（#1530）
-	body, err := withFormatFindings(respBody, formatFindings(req.ESText, req.CharLimit, req.CharLimitMode))
+	body, err := withFormatFindings(respBody, formatFindings(rawText, req.CharLimit, req.CharLimitMode))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to parse RAG response")
+		// 形式チェックは付加機能なので、RAG の応答が想定外の形でも添削結果はそのまま返す
+		log.Printf("es_review: format_findings を付けられないため RAG の応答を素通しする: %v", err)
+		return ctx.JSONBlob(status, respBody)
 	}
 	return ctx.JSONBlob(status, body)
 }

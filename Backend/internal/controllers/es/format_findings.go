@@ -14,19 +14,15 @@ type formatFinding = textcheck.Finding
 //
 // 検査は入力テキストだけで決まり、RAG の応答（改善文）には依存しない。そのため
 // postESReview の中ではなく、添削・リライトの両ハンドラで原文に対して走らせる。
-// 字数の指定が無いときは char_limit を見ない。指摘が無いときも null ではなく [] を返す。
+// 位置は渡した text（利用者が送った trim 前の原文）を基準にした UTF-16 単位。
+// ルールの組み合わせは textcheck.DefaultRules に任せ、ここでは並べない。
+// 指摘が無いときも null ではなく [] を返す。
 func formatFindings(text string, charLimit *int, mode string) []formatFinding {
-	rules := []textcheck.Rule{
-		textcheck.MixedWidth{},
-		textcheck.MixedNumeral{},
-		textcheck.MixedEra{},
-		textcheck.MixedStyle{},
-		textcheck.DateOrder{},
-	}
+	limit := 0
 	if charLimit != nil {
-		rules = append(rules, textcheck.CharLimit{Limit: *charLimit, Mode: mode})
+		limit = *charLimit
 	}
-	if fs := textcheck.Run(text, rules...); fs != nil {
+	if fs := textcheck.Run(text, textcheck.DefaultRules(limit, mode)...); fs != nil {
 		return fs
 	}
 	return []formatFinding{}
@@ -34,7 +30,7 @@ func formatFindings(text string, charLimit *int, mode string) []formatFinding {
 
 // withFormatFindings は RAG の応答 JSON に format_findings を足す。
 // 添削は RAG の応答を素通しで返しているため、型で受けると型に無い項目が落ちる。
-// キーを保ったまま1項目だけ足す。
+// キーを保ったまま1項目だけ足す（キーの並びはアルファベット順になるが、JSON として等価）。
 func withFormatFindings(body []byte, findings []formatFinding) ([]byte, error) {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(body, &m); err != nil {

@@ -58,6 +58,8 @@ func (c *ESRewriteController) Rewrite(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
+	// 形式チェックの位置は、利用者が送った原文（trim 前）を基準にする（#1530）
+	rawText := req.OriginalText
 	req.OriginalText = strings.TrimSpace(req.OriginalText)
 	if req.OriginalText == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "original_text is required")
@@ -94,6 +96,6 @@ func (c *ESRewriteController) Rewrite(ctx echo.Context) error {
 		Star:               rag.Star,
 		ImprovedTextLength: rag.ImprovedTextLength,
 		CharLimitSatisfied: rag.CharLimitSatisfied,
-		FormatFindings:     formatFindings(req.OriginalText, req.CharLimit, req.CharLimitMode),
+		FormatFindings:     formatFindings(rawText, req.CharLimit, req.CharLimitMode),
 	})
 }
