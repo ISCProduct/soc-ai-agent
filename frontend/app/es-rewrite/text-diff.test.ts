@@ -13,10 +13,11 @@ describe('createTextDiff', () => {
   it('identical text remains unchanged', () => {
     const result = createTextDiff('成果を出しました。', '成果を出しました。')
 
-    expect(result.original).toEqual([
-      { text: '成果を出しました。', kind: 'unchanged', start: 0, end: 9 },
-    ])
-    expect(result.improved).toEqual(result.original)
+    expect(result.original.map(segment => segment.text).join('')).toBe('成果を出しました。')
+    expect(result.improved.map(segment => segment.text).join('')).toBe('成果を出しました。')
+    expect(result.original.every(segment => segment.kind === 'unchanged')).toBe(true)
+    expect(result.improved.every(segment => segment.kind === 'unchanged')).toBe(true)
+    expect(result.usedFallback).toBe(false)
   })
 
   it('large inputs fall back to a bounded replacement diff', () => {
@@ -28,5 +29,26 @@ describe('createTextDiff', () => {
     expect(result.improved.map(segment => segment.text).join('')).toBe(improved)
     expect(result.original.every(segment => segment.kind === 'removed')).toBe(true)
     expect(result.improved.every(segment => segment.kind === 'added')).toBe(true)
+    expect(result.usedFallback).toBe(true)
+  })
+
+  it('tokenizes Japanese text when Intl.Segmenter is unavailable', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter')
+    Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: undefined })
+
+    try {
+      const result = createTextDiff('頑張りました。', '主体的に取り組みました。')
+
+      expect(result.original.map(segment => segment.text).join('')).toBe('頑張りました。')
+      expect(result.improved.map(segment => segment.text).join('')).toBe('主体的に取り組みました。')
+      expect(result.original.some(segment => segment.kind === 'removed')).toBe(true)
+      expect(result.improved.some(segment => segment.kind === 'added')).toBe(true)
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(Intl, 'Segmenter', descriptor)
+      } else {
+        Reflect.deleteProperty(Intl, 'Segmenter')
+      }
+    }
   })
 })

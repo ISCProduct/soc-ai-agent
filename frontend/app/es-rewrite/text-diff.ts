@@ -10,6 +10,7 @@ export type DiffSegment = {
 export type TextDiff = {
   original: DiffSegment[]
   improved: DiffSegment[]
+  usedFallback: boolean
 }
 
 type Token = {
@@ -56,6 +57,7 @@ export function createTextDiff(originalText: string, improvedText: string): Text
   const improved = tokenize(improvedText)
   const originalSegments: DiffSegment[] = []
   const improvedSegments: DiffSegment[] = []
+  let usedFallback = false
 
   let prefix = 0
   while (
@@ -85,6 +87,7 @@ export function createTextDiff(originalText: string, improvedText: string): Text
   const columns = improvedMiddle.length + 1
 
   if (rows * columns > MAX_DIFF_CELLS) {
+    usedFallback = true
     for (const token of originalMiddle) appendSegment(originalSegments, token, 'removed')
     for (const token of improvedMiddle) appendSegment(improvedSegments, token, 'added')
   } else {
@@ -134,5 +137,5 @@ export function createTextDiff(originalText: string, improvedText: string): Text
     appendSegment(improvedSegments, improvedToken, 'unchanged')
   }
 
-  return { original: originalSegments, improved: improvedSegments }
+  return { original: originalSegments, improved: improvedSegments, usedFallback }
 }

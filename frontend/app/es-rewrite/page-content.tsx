@@ -210,7 +210,8 @@ function HighlightedDiffText({
                 sx={{
                   bgcolor: '#dcfce7',
                   color: '#166534',
-                  textDecoration: 'none',
+                  textDecoration: 'underline',
+                  textUnderlineOffset: '2px',
                   borderRadius: 0.5,
                   ...anchorStyle,
                 }}
@@ -803,6 +804,11 @@ function ESRewriteContent() {
                     <Chip size="small" label="追加" sx={{ bgcolor: '#dcfce7', color: '#166534' }} />
                     <Chip size="small" label="削除" sx={{ bgcolor: '#fee2e2', color: '#991b1b' }} />
                   </Stack>
+                  {reviewDiff?.usedFallback && (
+                    <Alert severity="warning" role="status" sx={{ mb: 1.5 }}>
+                      文章が長いため差分を簡易表示しています。変更箇所を正確に示していない場合があります。
+                    </Alert>
+                  )}
                   {reviewDiff &&
                     !reviewDiff.original.some(segment => segment.kind === 'removed') &&
                     !reviewDiff.improved.some(segment => segment.kind === 'added') && (

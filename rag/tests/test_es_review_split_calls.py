@@ -20,6 +20,7 @@ from services.es_review import (
     _REVIEW_TRUNCATED_MESSAGE,
     _TOO_LONG_MESSAGE,
     _estimate_max_tokens,
+    _parse_feedback_items,
     _run_es_review,
 )
 
@@ -100,6 +101,124 @@ def _run(client, **kwargs):
     params.update(kwargs)
     with patch("main.OpenAI", return_value=client):
         return _run_es_review(**params)
+
+
+def test_feedback_items_are_deduplicated_and_trimmed():
+    items = _parse_feedback_items(
+        [
+            {
+                "score_key": "specificity_score",
+                "source_excerpt": "  原文の一部  ",
+                "issue": "  指摘  ",
+                "suggestion": "  改善案  ",
+            },
+            {
+                "score_key": "specificity_score",
+                "source_excerpt": "別の原文",
+                "issue": "重複した指摘",
+                "suggestion": "別の改善案",
+            },
+        ],
+        source_text="原文の一部",
+        include_company_fit=True,
+    )
+
+    assert len(items) == 1
+    assert items[0].source_excerpt == "原文の一部"
+    assert items[0].issue == "指摘"
+    assert items[0].suggestion == "改善案"
+
+
+@pytest.mark.parametrize(
+        ("field", "length", "max_length"),
+        [
+            ("source_excerpt", 70, 70),
+            ("issue", 80, 80),
+            ("suggestion", 80, 80),
+        ],
+)
+def test_feedback_items_accept_fields_at_length_limit(field, length, max_length):
+    candidate = {
+        "score_key": "specificity_score",
+        "source_excerpt": "原文",
+        "issue": "指摘",
+        "suggestion": "改善案",
+    }
+    candidate[field] = "x" * length
+    source_text = candidate["source_excerpt"]
+
+    items = _parse_feedback_items(
+        [candidate],
+        source_text=source_text,
+        include_company_fit=True,
+    )
+    assert len(items) == 1
+    assert len(getattr(items[0], field)) == max_length
+
+
+@pytest.mark.parametrize(
+        ("field", "length"),
+        [
+            ("source_excerpt", 71),
+            ("issue", 81),
+            ("suggestion", 81),
+        ],
+)
+def test_feedback_items_reject_fields_over_length_limit(field, length):
+    candidate = {
+        "score_key": "specificity_score",
+        "source_excerpt": "原文",
+        "issue": "指摘",
+        "suggestion": "改善案",
+    }
+    candidate[field] = "x" * length
+
+    assert _parse_feedback_items(
+        [candidate],
+        source_text=candidate["source_excerpt"],
+        include_company_fit=True,
+    ) == []
+
+
+def test_feedback_items_ignore_unmatched_source_excerpts():
+    assert _parse_feedback_items(
+        [
+            {
+                "score_key": "specificity_score",
+                "source_excerpt": "原文にない引用",
+                "issue": "指摘",
+                "suggestion": "改善案",
+            }
+        ],
+        source_text="別の原文",
+        include_company_fit=True,
+    ) == []
+
+
+def test_feedback_items_consider_at_most_four_model_candidates():
+    candidates = [
+        {
+            "score_key": "unknown_score",
+            "source_excerpt": "原文",
+            "issue": "指摘",
+            "suggestion": "改善案",
+        }
+        for _ in range(4)
+    ]
+    candidates.append(
+        {
+            "score_key": "specificity_score",
+            "source_excerpt": "原文",
+            "issue": "指摘",
+            "suggestion": "改善案",
+        }
+    )
+
+    assert _parse_feedback_items(
+        candidates,
+        source_text="原文",
+        include_company_fit=True,
+    ) == []
 
 
 def test_review_is_split_into_two_calls(monkeypatch):
