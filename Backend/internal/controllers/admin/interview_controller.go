@@ -115,11 +115,12 @@ func (c *AdminInterviewController) CreateCompanyQuestion(ctx echo.Context) error
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
 	}
 	var req struct {
-		Position     string `json:"position"`
-		Category     string `json:"category"`
-		QuestionText string `json:"question_text"`
-		Priority     int    `json:"priority"`
-		IsRequired   bool   `json:"is_required"`
+		Position         string `json:"position"`
+		Category         string `json:"category"`
+		QuestionText     string `json:"question_text"`
+		Priority         int    `json:"priority"`
+		IsRequired       bool   `json:"is_required"`
+		EvaluationIntent string `json:"evaluation_intent"`
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
@@ -130,13 +131,18 @@ func (c *AdminInterviewController) CreateCompanyQuestion(ctx echo.Context) error
 	if req.Category == "" || req.QuestionText == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "category and question_text are required")
 	}
+	intent, err := normalizeEvaluationIntent(req.EvaluationIntent)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 	q := &models.InterviewCompanyQuestion{
-		CompanyID:    companyID,
-		Position:     req.Position,
-		Category:     req.Category,
-		QuestionText: req.QuestionText,
-		Priority:     req.Priority,
-		IsRequired:   req.IsRequired,
+		CompanyID:        companyID,
+		Position:         req.Position,
+		Category:         req.Category,
+		QuestionText:     req.QuestionText,
+		Priority:         req.Priority,
+		IsRequired:       req.IsRequired,
+		EvaluationIntent: intent,
 	}
 	if err := c.companyQuestionRepo.Create(q); err != nil {
 		return httpapi.InternalError(err)
@@ -162,11 +168,12 @@ func (c *AdminInterviewController) UpdateCompanyQuestion(ctx echo.Context) error
 		return echo.NewHTTPError(http.StatusNotFound, "Question not found")
 	}
 	var req struct {
-		Position     *string `json:"position"`
-		Category     *string `json:"category"`
-		QuestionText *string `json:"question_text"`
-		Priority     *int    `json:"priority"`
-		IsRequired   *bool   `json:"is_required"`
+		Position         *string `json:"position"`
+		Category         *string `json:"category"`
+		QuestionText     *string `json:"question_text"`
+		Priority         *int    `json:"priority"`
+		IsRequired       *bool   `json:"is_required"`
+		EvaluationIntent *string `json:"evaluation_intent"`
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
@@ -193,6 +200,13 @@ func (c *AdminInterviewController) UpdateCompanyQuestion(ctx echo.Context) error
 	}
 	if req.IsRequired != nil {
 		q.IsRequired = *req.IsRequired
+	}
+	if req.EvaluationIntent != nil {
+		intent, err := normalizeEvaluationIntent(*req.EvaluationIntent)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		q.EvaluationIntent = intent
 	}
 	if err := c.companyQuestionRepo.Update(q); err != nil {
 		return httpapi.InternalError(err)
@@ -258,11 +272,12 @@ func (c *AdminInterviewController) GenerateCompanyQuestions(ctx echo.Context) er
 
 // GeneratedQuestion はAI生成の質問候補（IDなし）。
 type GeneratedQuestion struct {
-	Category     string `json:"category"`
-	Position     string `json:"position"`
-	QuestionText string `json:"question_text"`
-	Priority     int    `json:"priority"`
-	IsRequired   bool   `json:"is_required"`
+	Category         string `json:"category"`
+	Position         string `json:"position"`
+	QuestionText     string `json:"question_text"`
+	Priority         int    `json:"priority"`
+	IsRequired       bool   `json:"is_required"`
+	EvaluationIntent string `json:"evaluation_intent"`
 }
 
 // generateQuestionsWithAI は企業情報をもとにAIで面接質問を生成する。
@@ -302,7 +317,8 @@ JSON配列形式のみで回答（説明文不要）:
     "position": "対象職種（全職種共通なら空文字）",
     "question_text": "質問文",
     "priority": 優先度（0〜9の整数、小さいほど重要）,
-    "is_required": true or false
+    "is_required": true or false,
+    "evaluation_intent": "この質問で評価したい観点（100字以内。例: 困難に直面したときの粘り強さ）"
   }
 ]`, companyFacts)
 
@@ -319,11 +335,12 @@ JSON配列形式のみで回答（説明文不要）:
 	}
 
 	var raw []struct {
-		Category     string `json:"category"`
-		Position     string `json:"position"`
-		QuestionText string `json:"question_text"`
-		Priority     int    `json:"priority"`
-		IsRequired   bool   `json:"is_required"`
+		Category         string `json:"category"`
+		Position         string `json:"position"`
+		QuestionText     string `json:"question_text"`
+		Priority         int    `json:"priority"`
+		IsRequired       bool   `json:"is_required"`
+		EvaluationIntent string `json:"evaluation_intent"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr[start:end+1]), &raw); err != nil {
 		return nil, fmt.Errorf("JSONパース失敗: %w", err)
@@ -345,11 +362,12 @@ JSON配列形式のみで回答（説明文不要）:
 			continue
 		}
 		result = append(result, &GeneratedQuestion{
-			Category:     cat,
-			Position:     strings.TrimSpace(r.Position),
-			QuestionText: qt,
-			Priority:     r.Priority,
-			IsRequired:   r.IsRequired,
+			Category:         cat,
+			Position:         strings.TrimSpace(r.Position),
+			QuestionText:     qt,
+			Priority:         r.Priority,
+			IsRequired:       r.IsRequired,
+			EvaluationIntent: clipEvaluationIntent(r.EvaluationIntent),
 		})
 	}
 	return result, nil

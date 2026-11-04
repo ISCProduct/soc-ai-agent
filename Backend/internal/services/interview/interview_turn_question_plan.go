@@ -68,10 +68,11 @@ func (s *InterviewService) advanceQuestionPlan(
 					return nil, err
 				}
 				return &questionDirective{
-					Text:        followUpText,
-					Source:      questionSourceFollowUp,
-					Category:    asked.Category,
-					IsDeepening: true,
+					Text:              followUpText,
+					Source:            questionSourceFollowUp,
+					Category:          asked.Category,
+					CompanyQuestionID: asked.CompanyQuestionID,
+					IsDeepening:       true,
 				}, nil
 			}
 		}
@@ -90,9 +91,10 @@ func (s *InterviewService) advanceQuestionPlan(
 		return nil, err
 	}
 	return &questionDirective{
-		Text:     next.QuestionText,
-		Source:   next.Source,
-		Category: next.Category,
+		Text:              next.QuestionText,
+		Source:            next.Source,
+		Category:          next.Category,
+		CompanyQuestionID: next.CompanyQuestionID,
 	}, nil
 }
 

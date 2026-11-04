@@ -398,6 +398,22 @@ components:
         char_limit: { type: integer, nullable: true, description: "設問の文字数上限（#1523）" }
         char_limit_mode: { type: string }
 
+    InterviewCompanyQuestionInput:
+      type: object
+      description: 企業別面接カスタム質問の作成・更新。作成では category と question_text が必須。更新は指定した項目だけを変える
+      properties:
+        position: { type: string, description: 対象職種。空文字は全職種共通 }
+        category: { type: string }
+        question_text: { type: string }
+        priority: { type: integer, description: 小さいほど先に聞く }
+        is_required: { type: boolean }
+        evaluation_intent:
+          type: string
+          maxLength: 300
+          description: |
+            この質問で評価したい観点（#1092）。AI 面接官の system プロンプトへ、質問と同じ非信頼テキストの囲みの中で渡し、応募者には伝えないよう指示する。
+            前後の空白は落とし、空文字は未設定（null）として保存する。更新で空文字を送ると消える。300字を超えると 400
+
     ESRewriteResponse:
       type: object
       properties:
@@ -2029,6 +2045,11 @@ paths:
       tags: [admin-companies]
       summary: 企業の面接質問を作る
       security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InterviewCompanyQuestionInput" }
       parameters:
         - in: path
           name: id
@@ -2063,6 +2084,11 @@ paths:
       tags: [admin-companies]
       summary: 企業の面接質問を更新
       security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InterviewCompanyQuestionInput" }
       parameters:
         - in: path
           name: id
