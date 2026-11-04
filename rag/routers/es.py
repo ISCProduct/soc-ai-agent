@@ -81,4 +81,5 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
         tech_stack=request.tech_stack,
         char_limit=request.char_limit,
         char_limit_mode=request.char_limit_mode,
+        include_feedback_items=request.include_feedback_items,
     )

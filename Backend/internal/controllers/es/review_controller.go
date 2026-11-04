@@ -39,12 +39,13 @@ type esReviewRequest struct {
 // esReviewRAGRequest は RAG の /es/review へ送る本文。
 // ES添削・ESリライトの両タブが同じ経路・同じプロンプトを使う(#1533)。
 type esReviewRAGRequest struct {
-	ESText        string `json:"es_text"`
-	QuestionType  string `json:"question_type"`
-	CompanyName   string `json:"company_name,omitempty"`
-	TechStack     string `json:"tech_stack,omitempty"`
-	CharLimit     *int   `json:"char_limit,omitempty"`
-	CharLimitMode string `json:"char_limit_mode,omitempty"`
+	ESText               string `json:"es_text"`
+	QuestionType         string `json:"question_type"`
+	CompanyName          string `json:"company_name,omitempty"`
+	TechStack            string `json:"tech_stack,omitempty"`
+	CharLimit            *int   `json:"char_limit,omitempty"`
+	CharLimitMode        string `json:"char_limit_mode,omitempty"`
+	IncludeFeedbackItems bool   `json:"include_feedback_items"`
 }
 
 // esReviewRAGUsage は RAG が返すトークン使用量（公開APIへは出さない / #1533）。
@@ -82,11 +83,12 @@ func (c *ESReviewController) Review(ctx echo.Context) error {
 
 	log.Printf("es_review: rag request question_type=%q company=%q char_limit=%v", req.QuestionType, req.CompanyName, req.CharLimit)
 	status, respBody, err := postESReview(ctx, esReviewRAGRequest{
-		ESText:        req.ESText,
-		QuestionType:  req.QuestionType,
-		CompanyName:   req.CompanyName,
-		CharLimit:     req.CharLimit,
-		CharLimitMode: req.CharLimitMode,
+		ESText:               req.ESText,
+		QuestionType:         req.QuestionType,
+		CompanyName:          req.CompanyName,
+		CharLimit:            req.CharLimit,
+		CharLimitMode:        req.CharLimitMode,
+		IncludeFeedbackItems: true,
 	}, c.openaiClient, usagectx.FeatureESReview)
 	if err != nil {
 		return err

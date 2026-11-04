@@ -71,12 +71,13 @@ func (c *ESRewriteController) Rewrite(ctx echo.Context) error {
 	// 未ログイン利用が仕様の経路なので主体は載らないことがある。機能名だけ付けて
 	// 費用を機能別に割る（#1294）。es_rewrite と es_review の内訳はここで分かれる。
 	status, body, err := postESReview(ctx, esReviewRAGRequest{
-		ESText:        req.OriginalText,
-		QuestionType:  req.QuestionType,
-		CompanyName:   req.CompanyName,
-		TechStack:     req.TechStack,
-		CharLimit:     req.CharLimit,
-		CharLimitMode: req.CharLimitMode,
+		ESText:               req.OriginalText,
+		QuestionType:         req.QuestionType,
+		CompanyName:          req.CompanyName,
+		TechStack:            req.TechStack,
+		CharLimit:            req.CharLimit,
+		CharLimitMode:        req.CharLimitMode,
+		IncludeFeedbackItems: false,
 	}, c.openaiClient, usagectx.FeatureESRewrite)
 	if err != nil {
 		return err
