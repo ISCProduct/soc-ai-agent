@@ -132,7 +132,7 @@ def test_feedback_items_are_deduplicated_and_trimmed():
 @pytest.mark.parametrize(
         ("field", "length", "max_length"),
         [
-            ("source_excerpt", 70, 70),
+            ("source_excerpt", 120, 120),
             ("issue", 80, 80),
             ("suggestion", 80, 80),
         ],
@@ -159,7 +159,7 @@ def test_feedback_items_accept_fields_at_length_limit(field, length, max_length)
 @pytest.mark.parametrize(
         ("field", "length"),
         [
-            ("source_excerpt", 71),
+            ("source_excerpt", 121),
             ("issue", 81),
             ("suggestion", 81),
         ],
@@ -193,6 +193,51 @@ def test_feedback_items_ignore_unmatched_source_excerpts():
         source_text="別の原文",
         include_company_fit=True,
     ) == []
+
+
+def test_feedback_items_match_width_whitespace_and_combining_variants():
+    source = "ＡＢＣ\r\nカ\u3099クチカ"
+    items = _parse_feedback_items(
+        [
+            {
+                "score_key": "specificity_score",
+                "source_excerpt": "ABC ガクチカ",
+                "issue": "引用形式の揺れを許容する",
+                "suggestion": "原文の記述を具体化する",
+            }
+        ],
+        source_text=source,
+        include_company_fit=True,
+    )
+
+    assert len(items) == 1
+    assert items[0].source_excerpt == source
+
+
+def test_feedback_items_drop_ambiguous_quotes_and_strip_controls():
+    items = _parse_feedback_items(
+        [
+            {
+                "score_key": "specificity_score",
+                "source_excerpt": "同じ引用",
+                "issue": "不明瞭\u202eな指摘\x01",
+                "suggestion": "具体化する\u2066",
+            },
+            {
+                "score_key": "star_score",
+                "source_excerpt": "一意な引用",
+                "issue": "不明瞭\u202eな指摘\x01",
+                "suggestion": "具体化する\u2066",
+            },
+        ],
+        source_text="同じ引用、同じ引用。一意な引用",
+        include_company_fit=True,
+    )
+
+    assert len(items) == 1
+    assert items[0].source_excerpt == "一意な引用"
+    assert items[0].issue == "不明瞭な指摘"
+    assert items[0].suggestion == "具体化する"
 
 
 def test_feedback_items_consider_at_most_four_model_candidates():
@@ -235,7 +280,20 @@ def test_review_is_split_into_two_calls(monkeypatch):
     assert result.improved_text == "改善後の文章"
     first_prompt = client.chat.completions.create.call_args_list[0].kwargs["messages"][1]["content"]
     assert '"feedback_items"' in first_prompt
-    assert "一字一句そのまま" in first_prompt
+    assert "連続して引用した" in first_prompt
+
+
+def test_rewrite_skips_unused_feedback_item_generation(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    client = _mock_client()
+
+    result = _run(client, include_feedback_items=False)
+
+    first_call = client.chat.completions.create.call_args_list[0]
+    review_prompt = first_call.kwargs["messages"][1]["content"]
+    assert "source_excerpt" not in review_prompt
+    assert first_call.kwargs["max_tokens"] == _estimate_max_tokens(900)
+    assert result.feedback_items == []
 
 
 def test_retry_once_on_length_finish_reason(monkeypatch):
@@ -295,7 +353,7 @@ def test_second_length_on_improved_stage_advises_shortening(chars, monkeypatch):
     [
         (0, 400),  # 下限
         (100, 400),  # 下限
-        (_REVIEW_TEXT_CHARS, 1650),  # 本番で唯一この関数を使う経路（評価の段）
+        (_REVIEW_TEXT_CHARS, 1905),  # 本番で唯一この関数を使う経路（評価の段）
         (1000, 970),
         (20000, _MAX_OUTPUT_TOKENS),  # 天井で打ち止め
     ],

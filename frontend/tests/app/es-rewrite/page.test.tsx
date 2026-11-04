@@ -404,10 +404,14 @@ describe('ESRewritePage 差分と指摘アンカー (#1532)', () => {
 
     const sourceLink = screen.getByRole('link', { name: '原文の該当箇所を見る' })
     expect(sourceLink).toHaveAttribute('href', '#es-original-anchor-0')
-    expect(document.getElementById('es-original-anchor-0')).toHaveTextContent('頑張り')
+    const anchor = document.getElementById('es-original-anchor-0')
+    expect(anchor).toHaveTextContent('頑張り')
 
     fireEvent.change(originalField, { target: { value: '別の文章に変更しました。' } })
-    expect(document.getElementById('es-original-anchor-0')).toHaveTextContent('頑張り')
+    expect(anchor).toHaveTextContent('頑張り')
+
+    fireEvent.click(sourceLink)
+    expect(document.activeElement).toBe(anchor)
   })
 
   it('差分が簡易表示になる場合はその旨を通知する', async () => {

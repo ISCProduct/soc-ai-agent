@@ -97,6 +97,8 @@ class ESReviewRequest(BaseModel):
     )
     # within: 超過不可（「400字以内」）/ around: +10%まで許容（「400字程度」）
     char_limit_mode: Literal["within", "around"] = "within"
+    # ESリライトは評価根拠を表示しないため、不要な生成を省く（Backend内部から指定）。
+    include_feedback_items: bool = True
 
     @field_validator("company_context")
     @classmethod
@@ -135,9 +137,9 @@ class ESReviewFeedbackItem(BaseModel):
         "company_fit_score",
         "length_balance_score",
     ]
-    source_excerpt: str
-    issue: str
-    suggestion: str
+    source_excerpt: str = Field(max_length=120)
+    issue: str = Field(max_length=80)
+    suggestion: str = Field(max_length=80)
 
 
 class ESReviewResponse(BaseModel):

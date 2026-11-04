@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useMemo, useState } from 'react'
+import { memo, Suspense, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Alert,
@@ -26,7 +26,7 @@ import RateReviewIcon from '@mui/icons-material/RateReview'
 import { PageLoading } from '@/components/common/PageLoading'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import { CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
-import { createTextDiff, type DiffSegment } from './text-diff'
+import { createTextDiff, findUniqueTextRange, type DiffSegment } from './text-diff'
 
 const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
 
@@ -127,9 +127,11 @@ const FEEDBACK_SCORE_LABELS: Record<ReviewFeedbackItem['score_key'], string> = {
   length_balance_score: '文字数バランス',
 }
 
-function HighlightedDiffText({
+const NO_ANCHORED_FEEDBACK: AnchoredFeedbackItem[] = []
+
+const HighlightedDiffText = memo(function HighlightedDiffText({
   segments,
-  anchors = [],
+  anchors = NO_ANCHORED_FEEDBACK,
   ariaLabel,
 }: {
   segments: DiffSegment[]
@@ -167,7 +169,7 @@ function HighlightedDiffText({
           for (const anchor of activeAnchors) renderedAnchors.add(anchor.anchorId)
           const anchorId = newAnchorIds[0]
           const anchorProps = anchorId
-            ? { id: anchorId, 'data-es-feedback-anchor': 'true' }
+            ? { id: anchorId, 'data-es-feedback-anchor': 'true', tabIndex: -1 }
             : {}
           const anchorMarkers = newAnchorIds.slice(1).map(anchorId => (
             <Box
@@ -175,6 +177,7 @@ function HighlightedDiffText({
               component="span"
               id={anchorId}
               data-es-feedback-anchor="true"
+              tabIndex={-1}
               sx={{ display: 'inline-block', width: 0, height: '1em', overflow: 'hidden', scrollMarginTop: '96px' }}
             />
           ))
@@ -236,7 +239,7 @@ function HighlightedDiffText({
       })}
     </Box>
   )
-}
+})
 
 // マーカーは S / T / A / R の頭文字を使う。
 // 📍🎯⚡📊 を当てていたが、絵文字と項目の対応に意味が無く、
@@ -390,13 +393,12 @@ function ESRewriteContent() {
   const anchoredFeedback = useMemo(() => {
     if (!reviewResult) return []
     return (reviewResult.feedback_items ?? []).flatMap((item, index) => {
-      const start = item.source_excerpt ? reviewedOriginalText.indexOf(item.source_excerpt) : -1
-      if (start < 0) return []
+      const range = findUniqueTextRange(reviewedOriginalText, item.source_excerpt)
+      if (!range) return []
       return [{
         ...item,
         index,
-        start,
-        end: start + item.source_excerpt.length,
+        ...range,
         anchorId: `es-original-anchor-${index}`,
       }]
     })
@@ -763,6 +765,7 @@ function ESRewriteContent() {
                             component="a"
                             href={`#${item.anchorId}`}
                             size="small"
+                            onClick={() => document.getElementById(item.anchorId)?.focus({ preventScroll: true })}
                             sx={{ mt: 0.5, px: 0, minWidth: 0, textTransform: 'none' }}
                           >
                             原文の該当箇所を見る

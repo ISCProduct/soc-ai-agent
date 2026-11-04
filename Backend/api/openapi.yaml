@@ -425,6 +425,7 @@ components:
         star: { $ref: "#/components/schemas/StarBreakdown" }
         feedback_items:
           type: array
+          maxItems: 4
           description: 原文の該当箇所と評価根拠に結びついた指摘
           items:
             type: object
@@ -433,9 +434,9 @@ components:
               score_key:
                 type: string
                 enum: [specificity_score, star_score, company_fit_score, length_balance_score]
-              source_excerpt: { type: string, description: 原文からの連続した引用 }
-              issue: { type: string }
-              suggestion: { type: string }
+              source_excerpt: { type: string, maxLength: 120, description: 原文からの連続した引用 }
+              issue: { type: string, maxLength: 80 }
+              suggestion: { type: string, maxLength: 80 }
 
     ResumeStatus:
       type: object

@@ -13,6 +13,11 @@ export type TextDiff = {
   usedFallback: boolean
 }
 
+export type TextRange = {
+  start: number
+  end: number
+}
+
 type Token = {
   text: string
   start: number
@@ -22,6 +27,68 @@ type Token = {
 const TOKEN_PATTERN =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]|[A-Za-z0-9]+|\s+|[^\s]/gu
 const MAX_DIFF_CELLS = 4_000_000
+const UNSAFE_TEXT_CHARACTERS =
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/u
+const COMBINING_MARK = /\p{M}/u
+
+function normalizeWithOffsets(text: string): { value: string; starts: number[]; ends: number[] } {
+  const chars: string[] = []
+  const starts: number[] = []
+  const ends: number[] = []
+  let offset = 0
+
+  while (offset < text.length) {
+    const start = offset
+    const firstPoint = text.codePointAt(offset)
+    if (firstPoint === undefined) break
+    let cluster = String.fromCodePoint(firstPoint)
+    offset += cluster.length
+    while (offset < text.length) {
+      const nextPoint = text.codePointAt(offset)
+      if (nextPoint === undefined) break
+      const next = String.fromCodePoint(nextPoint)
+      if (!COMBINING_MARK.test(next) && next !== '\uff9e' && next !== '\uff9f') break
+      cluster += next
+      offset += next.length
+    }
+
+    for (const char of cluster.normalize('NFKC')) {
+      if (UNSAFE_TEXT_CHARACTERS.test(char)) continue
+      const normalized = /\s/u.test(char) ? ' ' : char
+      if (normalized === ' ' && chars[chars.length - 1] === ' ') {
+        ends[ends.length - 1] = offset
+        continue
+      }
+      chars.push(normalized)
+      for (let index = 0; index < normalized.length; index += 1) {
+        starts.push(start)
+        ends.push(offset)
+      }
+    }
+  }
+
+  const value = chars.join('')
+  const left = value.length - value.trimStart().length
+  const right = value.trimEnd().length
+  return {
+    value: value.slice(left, right),
+    starts: starts.slice(left, right),
+    ends: ends.slice(left, right),
+  }
+}
+
+export function findUniqueTextRange(text: string, excerpt: string): TextRange | null {
+  const source = normalizeWithOffsets(text)
+  const needle = normalizeWithOffsets(excerpt).value
+  if (!needle) return null
+
+  const start = source.value.indexOf(needle)
+  if (start < 0 || source.value.indexOf(needle, start + 1) >= 0) return null
+  return {
+    start: source.starts[start],
+    end: source.ends[start + needle.length - 1],
+  }
+}
 
 function tokenize(text: string): Token[] {
   if (typeof Intl.Segmenter === 'function') {

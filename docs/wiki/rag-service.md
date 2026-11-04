@@ -143,14 +143,15 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 ```
 
 - `company_context_source`: 企業コンテキストの取得元（`company_brief` / `cache` / `web_search` / `none`）
-- `feedback_items`: 評価項目ごとの指摘（最大4件）。`source_excerpt` は原文に完全一致する引用のみ返し、引用箇所を特定できない指摘は除外する（#1532）
+- `feedback_items`: 評価項目ごとの指摘（最大4件）。`source_excerpt` は幅・結合文字・空白を正規化して原文位置を確認し、曖昧な重複引用や該当箇所を特定できない指摘は除外する。LLM由来の指摘文から制御・双方向制御文字を除く（#1532）
 - **企業コンテキストが0件（`none`）のときは企業名もプロンプトへ入れず、`company_fit_score` と `company_strategy` は必ず `null`** になる（モデルの内部知識による根拠の無い企業評価を防ぐ / #1524）
 - 生成は2回の呼び出しに分割している（#1521）
   - 第1: スコア4軸 + `feedback` + `company_strategy`（企業情報の生データはこちらだけに渡す）
   - 第2: `improved_text` のみ（第1の `feedback` を「改善の観点」として渡す。企業情報は再投入しない＝入力トークンの二重計上を避ける）
   - ES本文・質問種別・フィードバックは呼び出しごとに `_wrap_untrusted_text` で囲み直す。第1の区切りを feedback に引用させて第2のブロックを閉じる経路を塞ぐため、区切りを使い回さない（#1565）
 - `max_tokens` の決め方は段で違う（詳細は後述「出力上限の決め方」/ #1564）
-  - 評価の段: 総評400字 + 企業対策400字 + 指摘最大4件（合計880字）と余裕を含む**約1,800字**に、日本語 **0.85トークン/文字**を掛け、JSONオーバーヘッド120を加算 = 1,650（`_estimate_max_tokens`）
+  - 評価の段（ES添削）: 総評400字 + 企業対策400字 + 指摘最大4件（最大1120字）と余裕を含む**約2,100字**に、日本語 **0.85トークン/文字**を掛け、JSONオーバーヘッド120を加算 = 1,905（`_estimate_max_tokens`）
+  - 評価の段（ESリライト）: 指摘は生成しないため**約900字**に同じ見積もりを適用 = 885。画面に出さない指摘の生成費用を避ける（#1532）
   - 改善文の段: **`max_tokens` を渡さない**（入力長から見積もらず、モデル自身の出力上限に任せる）
 - `finish_reason == "length"`（出力上限到達）を検知したら上限を2倍にして**1回だけ**再試行する。既に天井なら引き上げ余地が無いので再試行しない（改善文の段は `max_tokens` を渡さない＝引き上げ余地が無いので再試行せず、上限到達時は2呼び出しで 422 を返す）
 - 再試行しても上限に達した場合は 422 を返す。案内文は段ごとに変える（評価の出力量はESの長さに依存しないため、そちらで「文字数を減らして」と案内しても直らない）
@@ -182,6 +183,7 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 - ESの評価・書き換えの実装は `services/es_review.py` のみ。Backend の `/api/es/review`（ES添削タブ）と `/api/es/rewrite`（ESリライトタブ）はどちらも RAG の `/es/review` を呼ぶ
 - 旧実装では `/api/es/rewrite` が Backend 内の独自プロンプト（gpt-4o-mini・**インジェクション対策なし**・字数指示120〜150%）で生成していたため、同じESでも添削タブと違う書き換え案が返っていた。統合でプロンプト・出力スキーマ・インジェクション対策が1箇所になった
 - `/api/es/rewrite` のレスポンスは従来互換（`rewritten_text` / `star`）。`improved_text` を `rewritten_text` に詰め替えて返し、`improved_text_length` / `char_limit_satisfied` を追加している
+- ESリライトは評価根拠を表示しないため、内部フラグで `feedback_items` の生成を省略し、評価段の出力予算も縮める（#1532）
 - STAR分解（`star`）は改善文と同じ第2呼び出しで生成する。ES添削タブは `star_score`、ESリライトタブは `star` の内訳を同じレスポンスから表示する
 - **デプロイ順は rag-review を backend より先**にする（`.github/workflows/deployment.yml`）。Backend の ES 経路は生成を RAG へ委譲しており、旧 RAG は Pydantic の `extra=ignore` で `char_limit` / `tech_stack` を**黙って捨てる**ため、逆順だとロール中の数分だけ「字数上限を指定しても無視され、画面に手がかりも出ない」窓ができる
 - コストの機能別内訳（`es_review` / `es_rewrite`）は、RAG が返す `usage` を Backend が `openai.Client.ReportProxyUsage` で `api_call_logs` へ記録して残す。RAG 自身は記録先を持たないため、この経路が唯一の記録手段（統合前は RAG 経由の添削ぶんが記録されていなかった）。`usage` は内部情報なので Backend が転送前に本文から取り除く

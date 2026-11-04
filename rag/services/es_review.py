@@ -10,7 +10,9 @@ import json
 import logging
 import math
 import os
+import re
 import time
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
@@ -24,7 +26,8 @@ logger = logging.getLogger("main")
 #   v2 で「評価＋対策」と「改善文」の2呼び出しに分割した(#1521)
 #   v3 で文字数上限の指示(#1523)とSTAR分解(#1533)を第2呼び出しへ統合した
 #   v4 で評価ごとの原文引用と改善ヒントを追加した(#1532)
-_PROMPT_VERSION = "es_review_v4"
+#   v5 でリライト経路では表示しない指摘出力を省いた(#1532)
+_PROMPT_VERSION = "es_review_v5"
 
 # 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測レートは素材で大きく散る
 # （英数混在 0.20 / 日本語＋英数 0.53 / 漢字かな混在 0.78〜0.81 / ひらがな主体 0.91 /
@@ -44,8 +47,9 @@ _JP_TOKENS_PER_CHAR = 0.85
 _IMPROVED_TEXT_RATIO = 1.3
 # JSONのキー・括弧・エスケープ分の固定オーバーヘッド
 _JSON_OVERHEAD_TOKENS = 120
-# feedback(400字) + company_strategy(400字) + feedback_items(880字) + 余裕
-_REVIEW_TEXT_CHARS = 1800
+# feedback(400字) + company_strategy(400字) + feedback_items(最大1120字) + 余裕
+_REVIEW_TEXT_CHARS = 2100
+_REVIEW_WITHOUT_FEEDBACK_ITEMS_CHARS = 900
 # STAR分解4項目（各100字以内）の説明文ぶん。第2呼び出しの予算に上乗せする(#1533)
 _STAR_TEXT_CHARS = 400
 # 1回の出力に許す上限（再試行時の引き上げもここで打ち止め）。
@@ -242,6 +246,49 @@ _FEEDBACK_SCORE_KEYS = {
     "company_fit_score",
     "length_balance_score",
 }
+_UNSAFE_FEEDBACK_CHARACTERS = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u061c\u200e\u200f"
+    r"\u202a-\u202e\u2066-\u2069\ufeff]"
+)
+
+
+def _normalize_excerpt_with_offsets(text: str) -> Tuple[str, List[int], List[int]]:
+    """幅・結合文字・空白を正規化し、正規化後の文字列から元の範囲を引ける形にする。"""
+    normalized_chars: List[str] = []
+    starts: List[int] = []
+    ends: List[int] = []
+    index = 0
+    while index < len(text):
+        start = index
+        cluster = text[index]
+        index += 1
+        while index < len(text) and (
+            unicodedata.combining(text[index]) > 0 or text[index] in "\uff9e\uff9f"
+        ):
+            cluster += text[index]
+            index += 1
+
+        for char in unicodedata.normalize("NFKC", cluster):
+            if _UNSAFE_FEEDBACK_CHARACTERS.fullmatch(char):
+                continue
+            if char.isspace():
+                if normalized_chars and normalized_chars[-1] == " ":
+                    ends[-1] = index
+                    continue
+                char = " "
+            normalized_chars.append(char)
+            starts.append(start)
+            ends.append(index)
+
+    normalized = "".join(normalized_chars)
+    left = len(normalized) - len(normalized.lstrip())
+    right = len(normalized.rstrip())
+    return normalized[left:right], starts[left:right], ends[left:right]
+
+
+def _safe_feedback_text(value: str) -> str:
+    """LLM の指摘から制御文字と双方向制御文字を除く。"""
+    return _UNSAFE_FEEDBACK_CHARACTERS.sub("", value).strip()
 
 
 def _parse_feedback_items(
@@ -253,6 +300,7 @@ def _parse_feedback_items(
     if not isinstance(value, list):
         return []
 
+    normalized_source, source_starts, source_ends = _normalize_excerpt_with_offsets(source_text)
     items: List[ESReviewFeedbackItem] = []
     seen_score_keys: set[str] = set()
     for candidate in value[:4]:
@@ -273,18 +321,30 @@ def _parse_feedback_items(
         ):
             continue
 
-        source_excerpt = source_excerpt.strip()
-        issue = issue.strip()
-        suggestion = suggestion.strip()
+        source_excerpt = _safe_feedback_text(source_excerpt)
+        issue = _safe_feedback_text(issue)
+        suggestion = _safe_feedback_text(suggestion)
         if (
             not source_excerpt
-            or len(source_excerpt) > 70
+            or len(source_excerpt) > 120
             or not issue
             or len(issue) > 80
             or not suggestion
             or len(suggestion) > 80
-            or source_excerpt not in source_text
         ):
+            continue
+
+        normalized_excerpt, _, _ = _normalize_excerpt_with_offsets(source_excerpt)
+        if not normalized_excerpt or len(normalized_excerpt) > 120:
+            continue
+        start = normalized_source.find(normalized_excerpt)
+        if start < 0 or normalized_source.find(normalized_excerpt, start + 1) >= 0:
+            # 曖昧な引用を誤った箇所へリンクしない。モデルがより具体的な引用を返せる。
+            continue
+        source_start = source_starts[start]
+        source_end = source_ends[start + len(normalized_excerpt) - 1]
+        source_excerpt = _UNSAFE_FEEDBACK_CHARACTERS.sub("", source_text[source_start:source_end]).strip()
+        if not source_excerpt or len(source_excerpt) > 120:
             continue
 
         items.append(
@@ -329,6 +389,7 @@ def _run_es_review(
         tech_stack: str = "",
         char_limit: Optional[int] = None,
         char_limit_mode: str = "within",
+        include_feedback_items: bool = True,
 ) -> ESReviewResponse:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -432,6 +493,25 @@ def _run_es_review(
     # ノンスを混ぜるため / #1565）。第1呼び出しのLLMはES本文の区切りを見ているので、
     # それを feedback に引用させて第2呼び出しのブロックを閉じる余地がある。区切りを
     # 使い回さず囲み直せば第2呼び出しの区切りは第1と別物になり、その経路が塞がる。
+    feedback_items_field = (
+        '''  "feedback_items": [
+    {
+      "score_key": "<specificity_score | star_score | company_fit_score | length_balance_score>",
+      "source_excerpt": "<ES文章から連続して引用した120字以内の箇所>",
+      "issue": "<その箇所に対する具体的な指摘。80字以内>",
+      "suggestion": "<改善すると評価が上がる書き方。80字以内>"
+    }
+  ],'''
+        if include_feedback_items
+        else '  "feedback_items": [],'
+    )
+    feedback_items_instruction = (
+        """feedback_items は評価項目ごとに最大1件、合計最大4件にしてください。
+source_excerpt は【ES文章】内の連続した文章を正確に引用してください。言い換えや推測した文章を引用してはいけません。
+該当箇所を特定できない場合は、その項目を出力しないでください。"""
+        if include_feedback_items
+        else "feedback_items は空配列にしてください。"
+    )
     review_user_prompt = (
             f"【質問種別】{_wrap_untrusted_text(question_type, '質問種別')}"
             + char_limit_block
@@ -446,20 +526,12 @@ def _run_es_review(
   {company_fit_key},
   "length_balance_score": <{length_balance_hint}>,
   "feedback": "<{feedback_hint}>",
-  "feedback_items": [
-    {{
-      "score_key": "<specificity_score | star_score | company_fit_score | length_balance_score>",
-      "source_excerpt": "<ES文章から一字一句そのまま抜き出した70字以内の箇所>",
-      "issue": "<その箇所に対する具体的な指摘。80字以内>",
-      "suggestion": "<改善すると評価が上がる書き方。80字以内>"
-    }}
-  ],
+{feedback_items_field}
   {company_strategy_key}
 }}
 
-feedback_items は評価した項目ごとに最大1件、合計最大4件にしてください。企業情報がなく企業適合性を採点しない場合、その項目は含めないでください。
-source_excerpt は【ES文章】内の連続した文章を正確に引用してください。言い換えや推測した文章を引用してはいけません。
-該当箇所を特定できない場合は、その項目を出力しないでください。"""
+{feedback_items_instruction}
+企業情報がなく企業適合性を採点しない場合、その項目は含めないでください。"""
     )
 
     # --- 第2呼び出し: improved_text + STAR分解（第1のfeedbackを改善の観点として渡す） ---
@@ -526,7 +598,11 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
             model,
             review_system_prompt,
             review_user_prompt,
-            _estimate_max_tokens(_REVIEW_TEXT_CHARS),
+            _estimate_max_tokens(
+                _REVIEW_TEXT_CHARS
+                if include_feedback_items
+                else _REVIEW_WITHOUT_FEEDBACK_ITEMS_CHARS
+            ),
             label="review",
             tally=tally,
         )
@@ -604,10 +680,14 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
             company_fit_score=_clamp_company_fit(company_fit),
             length_balance_score=_clamp_score(review_data.get("length_balance_score", 5)),
             feedback=feedback,
-            feedback_items=_parse_feedback_items(
-                review_data.get("feedback_items"),
-                es_text,
-                include_company_fit=has_company_context,
+            feedback_items=(
+                _parse_feedback_items(
+                    review_data.get("feedback_items"),
+                    es_text,
+                    include_company_fit=has_company_context,
+                )
+                if include_feedback_items
+                else []
             ),
             improved_text=improved_text,
             company_strategy=str(company_strategy) if company_strategy is not None else None,

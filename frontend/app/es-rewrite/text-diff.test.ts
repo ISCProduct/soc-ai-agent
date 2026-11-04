@@ -1,4 +1,4 @@
-import { createTextDiff } from './text-diff'
+import { createTextDiff, findUniqueTextRange } from './text-diff'
 
 describe('createTextDiff', () => {
   it('Japanese additions and deletions are represented on the corresponding side', () => {
@@ -8,6 +8,19 @@ describe('createTextDiff', () => {
     expect(result.improved.map(segment => segment.text).join('')).toBe('チームで主体的に取り組みました。')
     expect(result.original.some(segment => segment.kind === 'removed' && segment.text.includes('頑張'))).toBe(true)
     expect(result.improved.some(segment => segment.kind === 'added' && segment.text.includes('主体的'))).toBe(true)
+  })
+
+  describe('findUniqueTextRange', () => {
+    it('finds excerpts across width, whitespace, combining, and invisible-control differences', () => {
+      expect(findUniqueTextRange('前ＡＢＣ\r\nカ\u3099クチカ\u202e後', 'ABC ガクチカ')).toEqual({
+        start: 1,
+        end: 11,
+      })
+    })
+
+    it('does not anchor an ambiguous repeated excerpt', () => {
+      expect(findUniqueTextRange('重複した引用と重複した引用', '重複した引用')).toBeNull()
+    })
   })
 
   it('identical text remains unchanged', () => {
