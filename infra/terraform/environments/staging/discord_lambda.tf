@@ -121,6 +121,8 @@ resource "aws_lambda_function" "discord" {
       GITHUB_DISPATCH_TOKEN   = var.github_dispatch_token
       GITHUB_DISPATCH_REPO    = var.github_dispatch_repo
       BACKLOG_API_KEY         = var.backlog_api_key
+
+      DISCORD_REMINDER_WEBHOOK_URL = var.discord_reminder_webhook_url
     }
   }
 
