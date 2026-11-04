@@ -176,6 +176,17 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 - **デプロイ順は rag-review を backend より先**にする（`.github/workflows/deployment.yml`）。Backend の ES 経路は生成を RAG へ委譲しており、旧 RAG は Pydantic の `extra=ignore` で `char_limit` / `tech_stack` を**黙って捨てる**ため、逆順だとロール中の数分だけ「字数上限を指定しても無視され、画面に手がかりも出ない」窓ができる
 - コストの機能別内訳（`es_review` / `es_rewrite`）は、RAG が返す `usage` を Backend が `openai.Client.ReportProxyUsage` で `api_call_logs` へ記録して残す。RAG 自身は記録先を持たないため、この経路が唯一の記録手段（統合前は RAG 経由の添削ぶんが記録されていなかった）。`usage` は内部情報なので Backend が転送前に本文から取り除く
 
+### 形式チェック `format_findings`（#1530）
+
+- Backend の `/api/es/review` と `/api/es/rewrite` は、RAG の応答に `format_findings` を足して返す。RAG の `/es/review` 自体は返さない
+- 検査は `Backend/internal/services/shared/textcheck` のルールだけで行い、LLM は呼ばない。学生の原文の純関数で RAG の応答に依存しないため、`postESReview` の中ではなく両ハンドラで原文に対して走らせる
+- ルールは `textcheck.DefaultRules`（`mixed_width` / `mixed_numeral` / `mixed_era` / `mixed_style` / `date_order` / `char_limit`）。`char_limit` は `char_limit` を指定したときだけ指摘する
+- 字数の数え方と許容範囲は、上記の `count_es_chars` / `_CHAR_LIMIT_RANGE` に揃える（Go 側は `textcheck.CountChars`）。`char_limit_satisfied` は**改善文**について、`format_findings` の `char_limit` は**原文**についての判定
+- 位置（`start` / `end`）は、**リクエストで送った原文（trim 前）**を UTF-16 のコード単位で数えた位置。FE の文字列の添字と同じ単位
+- 並びは重要度順（`critical` → `warning` → `info`、同じなら位置順）。指摘が無いときは `[]`
+- RAG の応答が200でも JSON オブジェクトでないときは、添削は `format_findings` を付けずに RAG の応答をそのまま返す（付加機能のために添削結果まで失わせない）
+- 誤字脱字の検出は辞書が要るため初期範囲外。`format_findings` の永続化は #1531 の担当
+
 ### 入力上限の決め方（#1564）
 
 - `es_text` の上限 6,000字は「改善文（入力の最大130%）＋STAR分解(400字)を `_MAX_OUTPUT_TOKENS` 内で生成できる長さ」から決めている: `(6000 * 1.3 + 400) * 0.85 + 120 = 7,090` トークン < 8,192
