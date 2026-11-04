@@ -317,7 +317,7 @@ func BuildReminder(issues []BacklogIssue, links map[string]Link, today, issueBas
 	}
 
 	header := "📅 **Backlog 期限リマインド** (" + md(today) + ")\n"
-	footer := "\n着手していない・間に合わない場合は、このチャンネルで相談してください。"
+	footer := "\n間に合わない場合は `/deadline` で、新しい期限と理由を入力してください（Backlog に反映されます）。"
 	var msgs []string
 	cur := header
 	for _, sec := range sections {

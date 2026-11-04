@@ -66,6 +66,7 @@ func main() {
 			log.Fatalf("LinkService の初期化に失敗しました: %v", err)
 		}
 		handler.WithLinks(links, backlog)
+		handler.WithDeadline(backlog, backlog.ProjectKey(), backlog.BaseURL())
 		reminder = discord.NewReminderServiceFromEnv(backlog, links)
 	}
 
