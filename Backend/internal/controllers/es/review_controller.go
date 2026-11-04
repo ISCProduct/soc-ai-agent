@@ -5,7 +5,9 @@ import (
 	"Backend/internal/ragclient"
 	"Backend/internal/usagectx"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -137,7 +139,7 @@ func postESReview(ctx echo.Context, payload esReviewRAGRequest, cli *openai.Clie
 	started := time.Now()
 	resp, err := client.Do(ragReq)
 	if err != nil {
-		return 0, nil, echo.NewHTTPError(http.StatusBadGateway, "RAG service unavailable: "+err.Error())
+		return 0, nil, esReviewRequestError(err)
 	}
 	defer resp.Body.Close()
 
@@ -149,6 +151,13 @@ func postESReview(ctx echo.Context, payload esReviewRAGRequest, cli *openai.Clie
 		respBody = consumeRAGUsage(ctx, cli, feature, respBody, time.Since(started))
 	}
 	return resp.StatusCode, respBody, nil
+}
+
+func esReviewRequestError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return echo.NewHTTPError(http.StatusGatewayTimeout, "ES添削に時間がかかっています。時間をおいて再度お試しください。")
+	}
+	return echo.NewHTTPError(http.StatusBadGateway, "RAG service unavailable: "+err.Error())
 }
 
 // consumeRAGUsage は RAG レスポンスの usage を api_call_logs へ記録し、本文から取り除く。

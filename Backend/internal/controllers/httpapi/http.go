@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -30,6 +31,7 @@ const (
 	ErrCodeServiceUnavail  = "SERVICE_UNAVAILABLE"
 	ErrCodeConflict        = "CONFLICT"
 	ErrCodeTooManyRequests = "TOO_MANY_REQUESTS"
+	ErrCodeGatewayTimeout  = "GATEWAY_TIMEOUT"
 )
 
 // ── ヘルパー関数 ──────────────────────────────────────────────────────────────
@@ -63,6 +65,10 @@ const InternalServerErrorMessage = "内部エラーが発生しました"
 // InternalError はエラーをログ出力しつつ echo.HTTPError を返す。
 func InternalError(err error) error {
 	LogError(err)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return NewAPIError(http.StatusGatewayTimeout, ErrCodeGatewayTimeout,
+			"処理に時間がかかっています。時間をおいて再度お試しください。")
+	}
 	// AI プロバイダ未設定・ローカル推論先の障害は設定/運用の問題で、リトライすれば
 	// 回復しうる。500 + 「内部エラー」だと API 利用者が原因を切り分けられないため
 	// 503 + 明示メッセージにする(#1293)。InternalError を通る全経路に一様に効かせる。

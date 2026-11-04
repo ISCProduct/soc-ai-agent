@@ -15,9 +15,12 @@ import (
 	"log"
 	"slices"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
+
+const interviewReportLLMCallTimeout = 60 * time.Second
 
 // ErrNoUtterances は発話が1件も保存されていないセッションのレポート生成エラー（#1476）。
 //
@@ -233,8 +236,9 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	var haveBody bool
 	var lastErr error
 	for attempt := range reportGenerationAttempts {
-		ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport)
-		raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt+retryNote, 0.4, 2000, model)
+		llmCtx, cancel := context.WithTimeout(usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport), interviewReportLLMCallTimeout)
+		raw, err := s.openaiClient.ChatCompletionJSON(llmCtx, systemPrompt, userPrompt+retryNote, 0.4, 2000, model)
+		cancel()
 		if err != nil {
 			return err
 		}

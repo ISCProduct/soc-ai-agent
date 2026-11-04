@@ -17,6 +17,29 @@ import (
 // Responses API の web_search + 安価モデル。Chat Completions の search-preview / search-api は使わない。
 const defaultWebSearchModel = "gpt-4o-mini"
 
+const (
+	chatCompletionCallTimeout = 2 * time.Minute
+	webSearchCallTimeout      = 90 * time.Second
+	chatCompletionAttemptCap  = 60 * time.Second
+	webSearchAttemptCap       = 45 * time.Second
+)
+
+func callAttemptTimeout(ctx context.Context, cap time.Duration) (time.Duration, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return 0, context.DeadlineExceeded
+		}
+		if remaining < cap {
+			return remaining, nil
+		}
+	}
+	return cap, nil
+}
+
 func isChatCompletionsSearchModel(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
 	return strings.Contains(m, "search-preview") || strings.Contains(m, "search-api")
@@ -63,6 +86,8 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 	if err := cli.ensureText(); err != nil {
 		return "", err
 	}
+	callCtx, cancelCall := context.WithTimeout(ctx, chatCompletionCallTimeout)
+	defer cancelCall()
 
 	model := cli.DefaultModel
 	if len(modelOverride) > 0 && modelOverride[0] != "" {
@@ -74,7 +99,11 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 
 	var lastErr error
 	for attempt := 1; attempt <= 5; attempt++ {
-		ctxReq, cancel := context.WithTimeout(withFallbackFlag(ctx), 60*time.Second)
+		attemptTimeout, err := callAttemptTimeout(callCtx, chatCompletionAttemptCap)
+		if err != nil {
+			return "", err
+		}
+		ctxReq, cancel := context.WithTimeout(withFallbackFlag(callCtx), attemptTimeout)
 		req := openai.ChatCompletionRequest{
 			Model: model,
 			Messages: []openai.ChatCompletionMessage{
@@ -160,9 +189,19 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 			lastErr = err
 		}
 
+		if err := callCtx.Err(); err != nil {
+			return "", err
+		}
+		if attempt == 5 {
+			break
+		}
 		backoff := time.Duration(1<<attempt) * time.Second
 		jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
-		time.Sleep(backoff + jitter)
+		select {
+		case <-callCtx.Done():
+			return "", callCtx.Err()
+		case <-time.After(backoff + jitter):
+		}
 	}
 
 	if lastErr == nil {
@@ -211,6 +250,8 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 	if err := cli.ensureText(); err != nil {
 		return "", err
 	}
+	callCtx, cancelCall := context.WithTimeout(ctx, webSearchCallTimeout)
+	defer cancelCall()
 	if maxTokens < 600 {
 		maxTokens = 600
 	}
@@ -227,7 +268,11 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		started := time.Now()
-		ctxReq, cancel := context.WithTimeout(ctx, 45*time.Second)
+		attemptTimeout, err := callAttemptTimeout(callCtx, webSearchAttemptCap)
+		if err != nil {
+			return "", err
+		}
+		ctxReq, cancel := context.WithTimeout(callCtx, attemptTimeout)
 		text, err := cli.doResponses(ctxReq, responsesRequest{
 			Model:           model,
 			Input:           userPrompt,
@@ -240,13 +285,17 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 		})
 		elapsedMs := time.Since(started).Milliseconds()
 		cancel()
+		if err := callCtx.Err(); err != nil {
+			return "", err
+		}
 		if err == nil && strings.TrimSpace(text) != "" {
 			log.Printf("[openai] web_search model=%s elapsed_ms=%d attempt=%d", model, elapsedMs, attempt)
 			return strings.TrimSpace(text), nil
 		}
 		if err != nil {
 			lastErr = err
-			if !isRetryableAPIErr(err) && !strings.Contains(strings.ToLower(err.Error()), "empty response") {
+			attemptTimedOut := errors.Is(err, context.DeadlineExceeded)
+			if !isRetryableAPIErr(err) && !attemptTimedOut && !strings.Contains(strings.ToLower(err.Error()), "empty response") {
 				return "", err
 			}
 		} else {
@@ -258,8 +307,8 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 		backoff := time.Duration(1<<attempt) * time.Second
 		jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
 		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
+		case <-callCtx.Done():
+			return "", callCtx.Err()
 		case <-time.After(backoff + jitter):
 		}
 	}

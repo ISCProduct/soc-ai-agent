@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // clearAIEnv は AI 関連の環境変数をテスト間で確実に初期化する。
@@ -590,6 +591,67 @@ func TestNilClientReturnsErrAIUnavailable(t *testing.T) {
 	}
 	if !cli.Degraded() {
 		t.Error("nil クライアントは Degraded() = true であるべき")
+	}
+}
+
+func TestLLMCallTimeoutStopsRetriesAndBackoff(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(*Client, context.Context) error
+	}{
+		{
+			name: "ChatCompletionJSON",
+			call: func(cli *Client, ctx context.Context) error {
+				_, err := cli.ChatCompletionJSON(ctx, "sys", "user", 0, 16)
+				return err
+			},
+		},
+		{
+			name: "WebSearchJSON",
+			call: func(cli *Client, ctx context.Context) error {
+				_, err := cli.WebSearchJSON(ctx, "user", 600)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAIEnv(t)
+			var requests atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				select {
+				case <-r.Context().Done():
+				case <-time.After(200 * time.Millisecond):
+				}
+			}))
+			defer srv.Close()
+
+			t.Setenv("AI_TEXT_PROVIDER", "local")
+			t.Setenv("AI_TEXT_BASE_URL", srv.URL)
+			t.Setenv("AI_TEXT_MODEL", "test-model")
+			cli, err := NewFromEnv("")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			started := time.Now()
+			err = tt.call(cli, ctx)
+			elapsed := time.Since(started)
+
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("error = %v, want context deadline exceeded", err)
+			}
+			if elapsed > time.Second {
+				t.Fatalf("call took %s after its deadline", elapsed)
+			}
+			if got := requests.Load(); got != 1 {
+				t.Fatalf("request count = %d, want 1 (no retry after caller deadline)", got)
+			}
+		})
 	}
 }
 
