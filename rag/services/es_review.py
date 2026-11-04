@@ -23,7 +23,8 @@ logger = logging.getLogger("main")
 # プロンプト版:
 #   v2 で「評価＋対策」と「改善文」の2呼び出しに分割した(#1521)
 #   v3 で文字数上限の指示(#1523)とSTAR分解(#1533)を第2呼び出しへ統合した
-_PROMPT_VERSION = "es_review_v3"
+#   v4 で改善文の目標字数を数値で明示し、元より短いときは1回作り直す(#1606)
+_PROMPT_VERSION = "es_review_v4"
 
 # 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測レートは素材で大きく散る
 # （英数混在 0.20 / 日本語＋英数 0.53 / 漢字かな混在 0.78〜0.81 / ひらがな主体 0.91 /
@@ -40,7 +41,17 @@ _PROMPT_VERSION = "es_review_v3"
 _JP_TOKENS_PER_CHAR = 0.85
 # プロンプトが改善文へ指示している目標倍率（元の文字数の110〜130%）。
 # 出力予算の見積もりには使わない（#1564。改善文の段は max_tokens を渡さない）。
+_IMPROVED_TEXT_TARGET_LOW_RATIO = 1.1
 _IMPROVED_TEXT_RATIO = 1.3
+# これを下回る改善文は要約になっている（#1606。10,000字が約360字＝4%まで縮んだ実測）。
+# 下限はハーネスの improved_text_ratio と同じ100%。110%まで上げると、
+# すでに十分な短いESまで作り直し、品質と比較の前提が変わる。
+_IMPROVED_TEXT_MIN_RATIO = 1.0
+# 短すぎる改善文の作り直しは1回だけ。
+# 45秒は「次の呼び出しを始めるか」の判断で、始まった呼び出しの長さは縛らない。
+# 1回は最大60秒（SDKの再試行でさらに伸びる）なので、評価＋改善文のあとでは
+# Backend の85秒（#1556）を超えることがある。超えない保証ではない。
+_MAX_SHORT_TEXT_RETRIES = 1
 # JSONのキー・括弧・エスケープ分の固定オーバーヘッド
 _JSON_OVERHEAD_TOKENS = 120
 # feedback(400字) + company_strategy(400字) + 余裕
@@ -77,10 +88,19 @@ _TRUNCATED_MESSAGES = {
 # そのため「文字数を減らして」と案内しても利用者は何も直せない(#1523)。
 _CHAR_LIMIT_TOO_TIGHT_MESSAGE = "指定字数に収められませんでした。文字数上限を緩めるか、もう一度お試しください。"
 
-# 字数超過の再生成を打ち切る経過時間。手前のALB / CloudFront が60秒で切るため(#1556)、
-# その前に「収まらなかった」と明示して返し、生成済みの結果を利用者へ届ける。
-# 打ち切っても結果は返る（char_limit_satisfied=false）ので、失敗にはしない。
+# 次の作り直しを始めるかどうかの経過時間。
+# #1556 で CloudFront / ALB は90秒、Backend は85秒。45は、境界が60秒だった頃の
+# 余裕をそのまま使っている。この秒数を過ぎたら新しい呼び出しを始めない、という意味で、
+# すでに走っている呼び出しを85秒以内に終わらせるものではない。
 _CHAR_LIMIT_RETRY_DEADLINE_SEC = 45.0
+
+
+def _brief_error(exc: BaseException) -> str:
+    """ログに出す例外文。応答本文にES全文が載ることがあるので短く切る。"""
+    text = " ".join(str(exc).split())
+    if len(text) <= 300:
+        return text
+    return text[:300] + "…"
 
 
 def count_es_chars(text: str) -> int:
@@ -182,6 +202,7 @@ def _call_json_with_retry(
         label: str,
         tally: Optional[_UsageTally] = None,
         truncated_message: Optional[str] = None,
+        keep_truncated: bool = False,
 ) -> Dict[str, Any]:
     """出力上限に到達した場合のみ、上限を引き上げて1回だけ再試行する。
 
@@ -189,7 +210,10 @@ def _call_json_with_retry(
     2回目も上限到達なら、段(label)に応じた案内文と共に 422 を返す。
     max_tokens が None（＝上限を渡さずモデル自身の上限に任せる段）は引き上げ余地が
     無いため再試行しない（#1564）。
+    keep_truncated のときは 422 にせず、読めたJSONか空の改善文を返す。
+    出力上限4,096のモデルで長文指示が天井に当たっても、画面の警告を残すため（#1606）。
     """
+    content = ""
     for attempt in (1, 2):
         content, finish_reason = _chat_json(
             client, model, system_prompt, user_prompt, max_tokens, tally
@@ -204,6 +228,15 @@ def _call_json_with_retry(
             # 引き上げ余地が無いため再試行しても同じ結果になる（無駄な呼び出しを避ける）
             break
         max_tokens = min(max_tokens * 2, _MAX_OUTPUT_TOKENS)
+    if keep_truncated:
+        try:
+            parsed = json.loads(content or "{}")
+        except json.JSONDecodeError:
+            logger.warning("es review truncated output was not json label=%s", label)
+            return {"improved_text": ""}
+        if isinstance(parsed, dict):
+            return parsed
+        return {"improved_text": ""}
     raise HTTPException(
         status_code=422,
         detail=truncated_message or _TRUNCATED_MESSAGES.get(label, _TOO_LONG_MESSAGE),
@@ -244,10 +277,46 @@ def _parse_star(value: Any) -> ESStarBreakdown:
     )
 
 
-def _length_instruction(char_limit: Optional[int], mode: str) -> str:
-    """改善文の字数指示。char_limit 未指定時は従来どおり元の文章基準にする。"""
+def _ceil_ratio(source_chars: int, numerator: int, denominator: int) -> int:
+    """source * numerator / denominator を切り上げる。浮動小数の誤差で1字ずれない。"""
+    if source_chars <= 0:
+        return 0
+    return (source_chars * numerator + denominator - 1) // denominator
+
+
+def _improved_length_bounds(source_chars: int) -> Tuple[int, int]:
+    """元の文章から改善文の目標レンジ（下限, 上限）を返す。
+
+    倍率は _IMPROVED_TEXT_TARGET_LOW_RATIO / _IMPROVED_TEXT_RATIO（1.1 / 1.3）。
+    float のまま掛けると 6000 * 1.1 が 6600 をわずかに超え、切り上げが1字ずれる。
+    """
+    if (_IMPROVED_TEXT_TARGET_LOW_RATIO, _IMPROVED_TEXT_RATIO) != (1.1, 1.3):
+        raise RuntimeError("改善文の目標倍率と整数の切り上げがずれている")
+    return _ceil_ratio(source_chars, 11, 10), _ceil_ratio(source_chars, 13, 10)
+
+
+def _improved_length_floor(source_chars: int) -> int:
+    """これより短い改善文は作り直す。0字の入力では検査しない。"""
+    if source_chars <= 0:
+        return 0
+    return math.ceil(source_chars * _IMPROVED_TEXT_MIN_RATIO)
+
+
+def _length_instruction(char_limit: Optional[int], mode: str, source_chars: int) -> str:
+    """改善文の字数指示。char_limit 未指定時は元の文章の実測字数を書く。
+
+    「110〜130%を目安」だけだと長文で gpt-4o が220〜400字しか書かない（#1606）。
+    目標を字数で渡す。守らなくても生成後の検査で作り直す。
+    """
     if char_limit is None:
-        return "元の文字数の110〜130%を目安"
+        if source_chars <= 0:
+            return "元の文字数の110〜130%を目安"
+        low, high = _improved_length_bounds(source_chars)
+        return (
+            f"元の文章は{source_chars}字です。改善後は{low}〜{high}字"
+            "（元の110〜130%。改行と前後の空白は数えず、それ以外は全角・半角ともに1文字）"
+            "にしてください。要約して短くしないでください"
+        )
     low, high = _char_limit_bounds(char_limit, mode)
     suffix = "以内" if mode == "within" else "程度"
     return (
@@ -316,7 +385,8 @@ def _run_es_review(
         if has_company_context
         else ""
     )
-    length_instruction = _length_instruction(char_limit, char_limit_mode)
+    source_chars = count_es_chars(es_text)
+    length_instruction = _length_instruction(char_limit, char_limit_mode, source_chars)
     char_limit_block = (
         f"\n【設問の文字数上限】{length_instruction}" if char_limit is not None else ""
     )
@@ -399,6 +469,13 @@ def _run_es_review(
     )
 
     def _improved_user_prompt(feedback: str, retry_note: str = "") -> str:
+        # char_limit なしの指示はすでに文なので、「文字数は〜にする」に入れると
+        # 「文字数は元の文章はN字です。……してくださいにする」になる。
+        length_bullet = (
+            f"- {length_instruction}"
+            if char_limit is None
+            else f"- 文字数は{length_instruction}にする"
+        )
         return (
                 f"【質問種別】{_wrap_untrusted_text(question_type, '質問種別')}"
                 + char_limit_block
@@ -414,7 +491,7 @@ def _run_es_review(
 - 「頑張りました」「工夫しました」等の抽象表現を、具体的な行動・数値・成果に置き換える
 - Situation（状況）/ Task（課題）/ Action（施策）/ Result（成果）の順序で流れが分かるようにする
 - 元の内容を大きく変えず、言語化を強化する方向で書き換える{tech_rule}
-- 文字数は{length_instruction}にする
+{length_bullet}
 
 以下のJSONのみを返してください:
 {{
@@ -470,6 +547,8 @@ def _run_es_review(
             label="improved_text",
             tally=tally,
             truncated_message=improved_truncated_message,
+            # 上限なしの長文はモデル自身の出力上限で切れる。422にすると警告も本文も届かない。
+            keep_truncated=char_limit is None,
         )
         improved_text = str(improved_data.get("improved_text", ""))
         improved_length = count_es_chars(improved_text)
@@ -483,7 +562,7 @@ def _run_es_review(
                 elapsed = time.monotonic() - started_at
                 if elapsed >= _CHAR_LIMIT_RETRY_DEADLINE_SEC:
                     # 作り直すより、いま手元にある結果を届けるほうが利用者の利益が大きい。
-                    # 60秒で切られると 422 の案内文も生成済みの本文も届かない(#1556)。
+                    # 次の呼び出しを始めなければ、生成済みの本文は届く(#1556)。
                     logger.warning(
                         "es review char limit retry skipped by deadline elapsed=%.1fs length=%d limit=%d",
                         elapsed, improved_length, allowed_max,
@@ -497,23 +576,106 @@ def _run_es_review(
                     f"\n\n【前回の生成結果】{improved_length}字で、目標の{allowed_max}字を超えました。"
                     f"内容を削って{target_low}〜{allowed_max}字に収めてください。"
                 )
-                improved_data = _call_json_with_retry(
-                    client,
-                    model,
-                    improved_system_prompt,
-                    _improved_user_prompt(feedback, retry_note),
-                    improved_budget,
-                    label="improved_text",
-                    tally=tally,
-                    truncated_message=improved_truncated_message,
-                )
-                improved_text = str(improved_data.get("improved_text", ""))
-                improved_length = count_es_chars(improved_text)
+                try:
+                    retry_data = _call_json_with_retry(
+                        client,
+                        model,
+                        improved_system_prompt,
+                        _improved_user_prompt(feedback, retry_note),
+                        improved_budget,
+                        label="improved_text",
+                        tally=tally,
+                        truncated_message=improved_truncated_message,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "es review char limit retry failed; keeping previous text error=%s length=%d",
+                        _brief_error(exc), improved_length,
+                    )
+                    break
+                candidate = str(retry_data.get("improved_text", ""))
+                candidate_len = count_es_chars(candidate)
+                # 空、または前回より長い結果は採用しない。上限内か、超過でも短くなったときだけ替える。
+                if candidate_len > 0 and (candidate_len <= allowed_max or candidate_len < improved_length):
+                    improved_data = retry_data
+                    improved_text = candidate
+                    improved_length = candidate_len
+                else:
+                    logger.warning(
+                        "es review char limit retry not adopted length=%d prev=%d limit=%d",
+                        candidate_len, improved_length, allowed_max,
+                    )
+                    break
             if improved_length > allowed_max:
                 # 黙って切り詰めない。収まらなかったことを画面へ伝える(#1523)
                 logger.warning(
                     "es review char limit not satisfied length=%d limit=%d mode=%s",
                     improved_length, allowed_max, char_limit_mode,
+                )
+
+        # char_limit が無いとき、元より短い改善文は要約になっている（#1606）。
+        # 目標字数を数値で渡してもモデルが守るとは限らないので、実測して1回だけ作り直す。
+        # max_tokens は渡さない（入力長に比例させると #1564 の飽和が戻る）。
+        length_floor = _improved_length_floor(source_chars) if char_limit is None else 0
+        improved_length_satisfied: Optional[bool] = None
+        if length_floor > 0:
+            for attempt in range(1, _MAX_SHORT_TEXT_RETRIES + 1):
+                if improved_length >= length_floor:
+                    break
+                elapsed = time.monotonic() - started_at
+                if elapsed >= _CHAR_LIMIT_RETRY_DEADLINE_SEC:
+                    logger.warning(
+                        "es review short text retry skipped by deadline elapsed=%.1fs length=%d floor=%d",
+                        elapsed, improved_length, length_floor,
+                    )
+                    break
+                target_low_chars, target_high_chars = _improved_length_bounds(source_chars)
+                logger.info(
+                    "es review improved text too short length=%d source=%d floor=%d attempt=%d",
+                    improved_length, source_chars, length_floor, attempt,
+                )
+                retry_note = (
+                    f"\n\n【前回の生成結果】{improved_length}字で、元の文章（{source_chars}字）より短いです。"
+                    f"要約せず、{target_low_chars}〜{target_high_chars}字で書き直してください。"
+                )
+                # 作り直しは品質のための任意の1回。上限到達・タイムアウト・不正JSONで
+                # 失敗しても、最初の改善文は有効なので捨てない。ここで例外を外へ出すと
+                # 422/500 になり、本文も improved_length_satisfied: false の警告も届かない。
+                try:
+                    retry_data = _call_json_with_retry(
+                        client,
+                        model,
+                        improved_system_prompt,
+                        _improved_user_prompt(feedback, retry_note),
+                        None,
+                        label="improved_text",
+                        tally=tally,
+                        truncated_message=improved_truncated_message,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "es review short text retry failed; keeping previous text error=%s length=%d",
+                        _brief_error(exc), improved_length,
+                    )
+                    break
+                candidate = str(retry_data.get("improved_text", ""))
+                candidate_len = count_es_chars(candidate)
+                # 長くなったときだけ替える。空や短い結果で1回目の本文と STAR を潰さない。
+                if candidate_len > improved_length:
+                    improved_data = retry_data
+                    improved_text = candidate
+                    improved_length = candidate_len
+                else:
+                    logger.warning(
+                        "es review short text retry not adopted length=%d prev=%d",
+                        candidate_len, improved_length,
+                    )
+                    break
+            improved_length_satisfied = improved_length >= length_floor
+            if not improved_length_satisfied:
+                logger.warning(
+                    "es review improved text still short length=%d source=%d floor=%d",
+                    improved_length, source_chars, length_floor,
                 )
 
         company_fit = review_data.get("company_fit_score")
@@ -536,6 +698,7 @@ def _run_es_review(
             char_limit_satisfied=(
                 None if allowed_max is None else improved_length <= allowed_max
             ),
+            improved_length_satisfied=improved_length_satisfied,
             usage=tally.to_model(),
         )
     except HTTPException:

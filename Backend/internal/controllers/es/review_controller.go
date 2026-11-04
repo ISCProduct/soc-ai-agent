@@ -57,11 +57,12 @@ type esReviewRAGUsage struct {
 
 // esReviewRAGResponse は RAG の /es/review レスポンスのうち Go が読む項目。
 type esReviewRAGResponse struct {
-	ImprovedText       string            `json:"improved_text"`
-	ImprovedTextLength int               `json:"improved_text_length"`
-	CharLimitSatisfied *bool             `json:"char_limit_satisfied"`
-	Star               starBreakdown     `json:"star"`
-	Usage              *esReviewRAGUsage `json:"usage"`
+	ImprovedText            string            `json:"improved_text"`
+	ImprovedTextLength      int               `json:"improved_text_length"`
+	CharLimitSatisfied      *bool             `json:"char_limit_satisfied"`
+	ImprovedLengthSatisfied *bool             `json:"improved_length_satisfied"`
+	Star                    starBreakdown     `json:"star"`
+	Usage                   *esReviewRAGUsage `json:"usage"`
 }
 
 // Review POST /api/es/review

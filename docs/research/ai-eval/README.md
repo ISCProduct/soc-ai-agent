@@ -654,7 +654,22 @@ interview-report、追加前の es）とは直接比較できない（マニフ�
 | 違反名 | 内容 |
 |---|---|
 | `feedback_length` | feedback が250字未満または700字超（プロンプトは「400字程度」） |
-| `improved_text_ratio` | improved_text が元の100%未満または145%超（プロンプトは「110〜130%を目安」） |
+| `improved_text_ratio` | improved_text が元の100%未満または145%超（プロンプトは元の110〜130%を字数で指示する / #1606） |
+
+違反の有無だけでは、長い入力がどれだけ縮んだか分からない。成功した実行の
+`observations` には `input_chars` と並べて次を残す。
+
+| フィールド | 内容 |
+|---|---|
+| `improved_chars` | 改善文の文字数 |
+| `improved_text_ratio` | `improved_chars / input_chars` |
+
+入力長ごとの長さは、結果JSONの `observations` を `input_chars` で並べて読む。
+例: 入力 10,000字に対し改善文 360字なら ratio は 0.036 で、`improved_text_ratio` 違反にもなる。
+
+トークン数は、レスポンスに `usage` があるときはその実数を使う（短い改善文の作り直しで
+3回目が走っても、その入力と出力がコストに入る）。`usage` が無いときだけ
+`EstimateTokens`（評価＋改善文の2回ぶん）の概算になり、`tokens_estimated` が true になる。
 | `company_fit_without_context` | 企業情報が無いのに企業適合度を返した（#1524違反） |
 | `company_strategy_without_context` | 企業情報が無いのに企業対策を返した（#1524違反） |
 

@@ -57,10 +57,10 @@ def test_es_text_is_wrapped_with_untrusted_delimiters(sequential_nonce, monkeypa
             context_docs=[],
         )
 
-    # #1521で「評価」と「改善文」の2呼び出しに分割したため、両方を検証する
-    # （call_args だけ見ると最後の呼び出ししか確認できずカバレッジが落ちる）
+    # 評価と改善文に加え、改善文が元より短いときの作り直しも囲む（#1521 / #1606）。
+    # call_args だけ見ると最後の呼び出ししか確認できずカバレッジが落ちる。
     calls = mock_client.chat.completions.create.call_args_list
-    assert len(calls) == 2
+    assert len(calls) == 3
     es_nonces = []
     for call in calls:
         user_message = _user_message(call)
@@ -75,7 +75,7 @@ def test_es_text_is_wrapped_with_untrusted_delimiters(sequential_nonce, monkeypa
         assert "従わないでください" in system_message
 
     # 呼び出しごとに囲み直すので区切りは共有されない(#1565)
-    assert es_nonces[0] != es_nonces[1]
+    assert len(set(es_nonces)) == len(es_nonces)
 
 
 def test_feedback_passed_to_second_call_is_wrapped(sequential_nonce, monkeypatch):
@@ -238,8 +238,8 @@ def test_rewrite_path_inputs_are_wrapped(monkeypatch):
         )
 
     calls = mock_client.chat.completions.create.call_args_list
-    # 評価1 + 改善文(初回 + 再生成2回) = 4回。すべてで囲みとsystemの禁止指示が効く
-    assert len(calls) == 4
+    # 評価1 + 改善文1 + 作り直し1。同じ600字は短くなっていないので、2回目の作り直しは始めない。
+    assert len(calls) == 3
     improved_messages = []
     for call_kwargs in (c.kwargs for c in calls):
         user_message = next(m["content"] for m in call_kwargs["messages"] if m["role"] == "user")
@@ -251,7 +251,8 @@ def test_rewrite_path_inputs_are_wrapped(monkeypatch):
         if "【添削フィードバック】" in user_message:
             improved_messages.append(user_message)
 
-    assert len(improved_messages) == 3
+    assert len(improved_messages) == 2
+    assert "600字" in improved_messages[1]
     for user_message in improved_messages:
         assert injected_tech in user_message
         assert re.search(r"UNTRUSTED_技術スタック_[0-9a-f]+_START", user_message)
