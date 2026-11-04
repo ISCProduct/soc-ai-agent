@@ -82,8 +82,12 @@ describe('面接官ステージのレイアウト', () => {
     expect(stageTop).not.toMatch(/right:\s*\d+px/)
   })
 
-  it('--pip-width は stageCard に1箇所だけ定義する', () => {
-    expect(block('.stageCard')).toMatch(/--pip-width:\s*clamp\(/)
+  it('--pip-width は PiP とステージの共通の親(.leftStage)に1箇所だけ定義する', () => {
+    // ステージ側に置くと、ステージの兄弟である PiP が継承できず width が auto に落ち、
+    // 枠だけ(4px)に潰れる。使う側が2つ（.stageTop はステージの子、.pipCard は兄弟）
+    // なので、定義はその両方の親に置く。
+    expect(block('.leftStage')).toMatch(/--pip-width:\s*clamp\(/)
+    expect(block('.stageCard')).not.toMatch(/--pip-width:/)
     const defs = css.match(/--pip-width:/g) ?? []
     expect(defs).toHaveLength(1)
   })

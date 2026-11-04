@@ -324,6 +324,10 @@
      ステージは最初の子で幅100%なので、ここを基準にしても見た目はステージ基準と同じ。
      狭い画面では重ねるのをやめ、この列に普通に並べる。 */
   position: relative;
+  /* PiP の幅。ステージ上段ラベル(.stageTop、ステージの子)と PiP(ステージの兄弟)の
+     両方が使うので、両方の親であるここに置く。ステージ側に置くと PiP が継承できず、
+     width が auto に落ちて枠だけ(4px)に潰れる。 */
+  --pip-width: clamp(120px, 28%, 224px);
 }
 @media (min-width: 1200px) {
   .leftStage { flex: 0 0 58%; }
@@ -331,8 +335,6 @@
 
 /* 面接官ステージ(主役、16:9)。アバターは全面、自分のカメラは右上のPiP */
 .stageCard {
-  /* PiP の幅。stageTop の右インセットと共有し、狭い画面で面接官ラベルの幅を無駄に削らない。 */
-  --pip-width: clamp(120px, 28%, 224px);
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
