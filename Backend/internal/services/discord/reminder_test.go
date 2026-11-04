@@ -7,9 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 )
 
 func issue(key, summary, due string, status int, assigneeID int, assignee string) BacklogIssue {
@@ -83,11 +85,7 @@ func TestBuildReminder_長いときは担当者の区切りで分割する(t *te
 	if len(msgs) < 2 {
 		t.Fatalf("分割されない: %d通", len(msgs))
 	}
-	for _, m := range msgs {
-		if len(m) > 2000 {
-			t.Errorf("2000文字を超える通: %d", len(m))
-		}
-	}
+	assertWithinDiscordLimit(t, msgs) // Discord の上限は文字数。len はバイト数で比べられない
 }
 
 type issuesStub struct {
@@ -259,7 +257,7 @@ func TestBuildReminder_レビュアー本人の課題は依頼の対象にしな
 
 func TestBuildReminder_レビュアー未登録なら黙って落とさずリンク登録を促す(t *testing.T) {
 	out := strings.Join(BuildReminder([]BacklogIssue{issue("P-1", "x", "2026-11-04", statusPRReview, 2, "山田太郎")}, map[string]Link{"222": {BacklogID: 2, Name: "山田太郎"}}, "2026-11-04", base, []int{1}), "")
-	if !strings.Contains(out, "レビュアー** (Discord未登録") {
+	if !strings.Contains(out, "レビュアー(Backlog ID 1)** (Discord未登録") {
 		t.Errorf("未登録の通知が無い:\n%s", out)
 	}
 }
@@ -288,5 +286,85 @@ func TestParseIDs(t *testing.T) {
 	}
 	if parseIDs("") != nil {
 		t.Errorf("空は nil")
+	}
+}
+
+// 本番の実データで1通目が2101文字になり、Discord に拒否される欠陥があった。
+// 1人の担当者に課題が多いと、担当者単位の分割では1ブロックが上限を超える。
+func manyIssues(n int, assigneeID int, assignee string, status int) []BacklogIssue {
+	var out []BacklogIssue
+	for i := 0; i < n; i++ {
+		key := "SOCAIAGENT-" + strconv.Itoa(400+i)
+		out = append(out, issue(key, strings.Repeat("長い件名", 15), "2026-10-20", status, assigneeID, assignee))
+	}
+	return out
+}
+
+func assertWithinDiscordLimit(t *testing.T, msgs []string) {
+	t.Helper()
+	for i, m := range msgs {
+		if n := utf8.RuneCountInString(m); n > 2000 {
+			t.Errorf("%d通目が %d文字で Discord の上限(2000)を超える", i+1, n)
+		}
+	}
+}
+
+func TestBuildReminder_1人の課題が多くても1通を上限内に収める(t *testing.T) {
+	issues := manyIssues(20, 1, "大橋和幸", 2)
+	msgs := BuildReminder(issues, remindLinks, "2026-11-04", base, nil)
+	if len(msgs) < 2 {
+		t.Fatalf("分割されない: %d通", len(msgs))
+	}
+	assertWithinDiscordLimit(t, msgs)
+	all := strings.Join(msgs, "\n")
+	for _, i := range issues {
+		if !strings.Contains(all, i.IssueKey+">") {
+			t.Errorf("%s が本文から落ちた", i.IssueKey)
+		}
+	}
+	// 続きの通にも担当者の見出し(メンション)が付く。誰の課題か分からなくならない。
+	for i, m := range msgs {
+		if !strings.Contains(m, "<@111>") {
+			t.Errorf("%d通目に担当者の見出しが無い", i+1)
+		}
+	}
+}
+
+func TestBuildReminder_レビュー依頼が多くても上限内に収める(t *testing.T) {
+	issues := manyIssues(25, 2, "山田太郎", statusPRReview)
+	msgs := BuildReminder(issues, reviewerLinks, "2026-11-04", base, []int{1})
+	assertWithinDiscordLimit(t, msgs)
+	review := 0
+	for _, m := range msgs {
+		if strings.Contains(m, "👀 **レビュー依頼** <@111>") {
+			review++
+		}
+	}
+	if review < 2 {
+		t.Errorf("レビュー依頼が分割され、続きにも見出しが付くはず: 見出し%d回", review)
+	}
+	if got := strings.Count(strings.Join(msgs, ""), "担当: 山田太郎"); got != 25 {
+		t.Errorf("レビュー依頼の行が %d/25 件しか残っていない", got)
+	}
+}
+
+func TestBuildReminder_複数レビュアーの未登録を1人ずつ促す(t *testing.T) {
+	// 大橋(ID 1)は登録済み、ID 9 は未登録。
+	out := strings.Join(BuildReminder([]BacklogIssue{issue("P-1", "x", "2026-11-04", statusPRReview, 2, "山田太郎")}, reviewerLinks, "2026-11-04", base, []int{1, 9}), "")
+	if !strings.Contains(out, "<@111>") || !strings.Contains(out, "レビュアー(Backlog ID 9)** (Discord未登録") {
+		t.Errorf("登録済みへのメンションと、未登録の案内が両方出ていない:\n%s", out)
+	}
+}
+
+func TestReminder_Run_取得上限に達したら注意書きを出す(t *testing.T) {
+	st := &issuesStub{issues: manyIssues(issueFetchLimit, 1, "大橋和幸", 2)}
+	res, err := newReminder("http://unused.invalid", st).Run(context.Background(), true)
+	if err != nil || !strings.Contains(res.Messages[len(res.Messages)-1], "取得上限") {
+		t.Errorf("上限に達したのに注意書きが無い: err=%v", err)
+	}
+	st = &issuesStub{issues: manyIssues(3, 1, "大橋和幸", 2)}
+	res, _ = newReminder("http://unused.invalid", st).Run(context.Background(), true)
+	if strings.Contains(strings.Join(res.Messages, ""), "取得上限") {
+		t.Errorf("上限に達していないのに注意書きが出た")
 	}
 }
