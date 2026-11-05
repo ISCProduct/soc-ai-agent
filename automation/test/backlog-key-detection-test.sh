@@ -79,6 +79,11 @@ key_cases = [
     ("feat(scout): 氏名を出さない (SOCAIAGENT-474)", "", "SOCAIAGENT-474"),
     ("feat(scout): 氏名を出さない SOCAIAGENT-474", "", "SOCAIAGENT-474"),
     ("docs(wiki): 方針を整理する (SOCAIAGENT-328 / #1817)", "", "SOCAIAGENT-328"),
+    # 日本語が直後に続く裸書き。\b では末尾が境界にならず拾えなかった
+    ("SOCAIAGENT-474の氏名表示を直す", "", "SOCAIAGENT-474"),
+    ("対応: SOCAIAGENT-474、氏名を出さない", "", "SOCAIAGENT-474"),
+    # 番号の途中で切らない
+    ("feat: SOCAIAGENT-4741 を直す", "", "SOCAIAGENT-4741"),
     # タイトルに無ければ本文のマーカー・記述を見る
     ("feat: 何か", "<!-- backlog-key:SOCAIAGENT-12 -->", "SOCAIAGENT-12"),
     ("feat: 何か", "Backlog: SOCAIAGENT-34", "SOCAIAGENT-34"),

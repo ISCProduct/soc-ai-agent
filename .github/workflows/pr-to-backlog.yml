@@ -145,7 +145,10 @@ jobs:
               #    囲みの種類は見ない。[SOCAIAGENT-474] も (SOCAIAGENT-474) も裸書きも拾う。
               #    角括弧だけを見ていたため、丸括弧で書かれた #1974 が
               #    「キーが見つかりません」で同期されず、課題が「処理中」で止まっていた。
-              m = re.search(rf'\b({re.escape(PROJ_KEY)}-\d+)\b', title or '')
+              #    \b は使わない。Python の \w は日本語も単語文字なので
+              #    「SOCAIAGENT-474の氏名表示」では末尾が境界にならず拾えない。
+              #    \d+ は貪欲なので SOCAIAGENT-4741 を 474 と読む誤りも起きない。
+              m = re.search(rf'({re.escape(PROJ_KEY)}-\d+)', title or '')
               if m:
                   return m.group(1)
               # 2. 本文の <!-- backlog-key:PROJ-N --> マーカー
