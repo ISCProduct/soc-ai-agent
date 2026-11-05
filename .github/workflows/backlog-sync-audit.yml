@@ -1,0 +1,81 @@
+name: Backlog と GitHub のズレ検知
+
+# pr-to-backlog.yml は課題キーが解決できないと `::warning::` を残して success で
+# 終わる。Actions の警告は誰も読まないので、沈黙と同じになる。実際に 2026-11-05 の
+# 時点で、直近92回の同期実行のうち35回が「キーが見つかりません」で何もしておらず、
+# SOCAIAGENT-474 は PR が開いているのに「処理中」で止まっていた。
+# 手で突き合わせないと気づけない状態だったので、突き合わせを機械にやらせる。
+#
+# ズレが無い日は何も投稿しない。ズレが残っている間は毎営業日出る（直るまで出す）。
+#
+# 再試行や送信済みの印は持たない。これは「その時点の状態」の報告なので、
+# Actions の schedule が1日落としても翌営業日の報告に同じズレが出る。
+# 進捗リマインダー(週1回のイベント)と違い、落ちた回を取り戻す必要がない。
+
+on:
+  schedule:
+    # 10:10 JST（01:10 UTC）平日。期限リマインド(9:30 JST)の後に出す。
+    - cron: '10 1 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '投稿せず結果だけ見る'
+        type: boolean
+        default: true
+  pull_request:
+    branches: [develop, release, main]
+    paths:
+      - '.github/workflows/backlog-sync-audit.yml'
+      - '.github/scripts/backlog_sync_audit.py'
+      - 'automation/test/backlog-sync-audit-test.sh'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: backlog-sync-audit-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Dependabot の実行には secrets が渡らず、BACKLOG_API_KEY が空で必ず失敗する
+    # （automation/test/dependabot-workflow-test.sh で規約化）。
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: ズレ判定のテスト
+        run: ./automation/test/backlog-sync-audit-test.sh
+
+      # PR では突き合わせ本体を動かさない（secrets を使わずテストだけで確かめる）。
+      - name: 突き合わせ
+        if: github.event_name != 'pull_request'
+        env:
+          BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
+          BACKLOG_SPACE_ID: ${{ secrets.BACKLOG_SPACE_ID }}
+          BACKLOG_PROJECT_KEY: ${{ secrets.BACKLOG_PROJECT_KEY }}
+          BACKLOG_DOMAIN: ${{ secrets.BACKLOG_DOMAIN }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/backlog_sync_audit.py "$RUNNER_TEMP/backlog-sync-audit.txt"
+
+      # ズレが無ければ本文は空。そのときは投稿しない。
+      - name: Discord へ通知
+        if: >-
+          github.event_name == 'schedule'
+          || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        env:
+          DISCORD_OPS_WEBHOOK_URL: ${{ secrets.DISCORD_OPS_WEBHOOK_URL }}
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          file="$RUNNER_TEMP/backlog-sync-audit.txt"
+          if [ ! -s "$file" ]; then
+            echo "ズレはありません。通知しません。"
+            exit 0
+          fi
+          ./automation/ops/notify-discord.sh "$(cat "$file")"
