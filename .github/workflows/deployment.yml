@@ -143,12 +143,20 @@ jobs:
           # 同じシークレットから渡すと、staging を有効化した瞬間に次の本番デプロイでも
           # 有効になってしまい、環境ごとに段階導入できない。シークレットを分ける。
           if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then
+            # Live2Dの Core とモデルはライセンス上このリポジトリに置けないので、
+            # 非公開バケットからビルドコンテキストへ展開する。揃っていなければここで
+            # 落ちる（資産が無いまま NEXT_PUBLIC_LIVE2D_ENABLED=true のイメージを作らせない）。
+            # バックグラウンドのビルドより前に、同期的に終わらせる。
+            # 詳細は docs/wiki/live2d-assets.md。
+            LIVE2D_ASSETS_BUCKET="${{ vars.LIVE2D_ASSETS_BUCKET || 'soc-build-assets-508897596159' }}" \
+              ./automation/ops/fetch-live2d-assets.sh
             (cd frontend && docker buildx build --platform linux/amd64 --provenance=false \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }} \
               --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND_STAGING }} \
               --build-arg NEXT_PUBLIC_APP_ENV=staging \
               --build-arg NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }} \
+              --build-arg NEXT_PUBLIC_LIVE2D_ENABLED=true \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging \
               --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging,mode=max \
               -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
@@ -667,12 +675,20 @@ jobs:
           pids=()
 
           if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then
+            # Live2Dの Core とモデルはライセンス上このリポジトリに置けないので、
+            # 非公開バケットからビルドコンテキストへ展開する。揃っていなければここで
+            # 落ちる（資産が無いまま NEXT_PUBLIC_LIVE2D_ENABLED=true のイメージを作らせない）。
+            # バックグラウンドのビルドより前に、同期的に終わらせる。
+            # 詳細は docs/wiki/live2d-assets.md。
+            LIVE2D_ASSETS_BUCKET="${{ vars.LIVE2D_ASSETS_BUCKET || 'soc-build-assets-508897596159' }}" \
+              ./automation/ops/fetch-live2d-assets.sh
             (cd frontend && docker buildx build --platform linux/amd64 --provenance=false \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }} \
               --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND_PROD }} \
               --build-arg NEXT_PUBLIC_APP_ENV=production \
               --build-arg NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }} \
+              --build-arg NEXT_PUBLIC_LIVE2D_ENABLED=true \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production \
               --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production,mode=max \
               -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &

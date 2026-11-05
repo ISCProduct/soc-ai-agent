@@ -15,11 +15,13 @@
 import { act, render } from '@testing-library/react'
 
 import Live2DAvatar from '@/app/interview/components/Live2DAvatar'
+import { FEMALE_OVERLAY_MESH_IDS, OVERLAY_MESH_IDS } from '@/lib/interview/live2d-overlay'
 
 jest.mock('@/lib/interview/live2d-loader', () => ({
   // Core は読めた（＝既存の try/catch は通らない）状況を作る。
   ensureCubismCore: jest.fn().mockResolvedValue(undefined),
-  DEFAULT_MODEL_URL: '/live2d/interviewers/male/male.model3.json',
+  modelUrlForGender: (gender: 'male' | 'female') =>
+    `/live2d/interviewers/${gender}/${gender}-interviewer.model3.json`,
   DEFAULT_SHADER_PATH: '/live2d/shaders/',
 }))
 
@@ -29,6 +31,8 @@ const USABLE_PARAM_IDS = ['ParamMouthOpenY', 'ParamAngleY', 'ParamEyeLOpen', 'Pa
 /** テストごとに「初期化で投げる」「描画で投げる」を切り替える。 */
 let failInit = false
 let throwOnFrame = false
+/** Live2DFrameworkModel.load に渡された引数。性別ごとの読み込み先の確認に使う。 */
+let loadArgs: unknown[] = []
 
 jest.mock('@/lib/interview/live2d-framework-model', () => ({
   __esModule: true,
@@ -36,7 +40,7 @@ jest.mock('@/lib/interview/live2d-framework-model', () => ({
     if (failInit) throw new Error('Live2DCubismCore is not defined')
   },
   Live2DFrameworkModel: {
-    load: () => ({
+    load: (...args: unknown[]) => ((loadArgs = args), {
       getCapabilitiesInfo: () => ({ parameterIds: USABLE_PARAM_IDS }),
       resize: jest.fn(),
       release: jest.fn(),
@@ -64,6 +68,7 @@ describe('Live2DAvatar の非同期な失敗', () => {
   beforeEach(() => {
     failInit = false
     throwOnFrame = false
+    loadArgs = []
     jest.spyOn(console, 'warn').mockImplementation(() => {})
     rafCallbacks = []
     global.ResizeObserver = class {
@@ -84,11 +89,11 @@ describe('Live2DAvatar の非同期な失敗', () => {
     jest.restoreAllMocks()
   })
 
-  async function renderAvatar() {
+  async function renderAvatar(gender: 'male' | 'female' = 'male') {
     const onUnavailable = jest.fn()
     await act(async () => {
       render(
-        <Live2DAvatar gender="male" level={0} speaking={false} active onUnavailable={onUnavailable} />,
+        <Live2DAvatar gender={gender} level={0} speaking={false} active onUnavailable={onUnavailable} />,
       )
     })
     return onUnavailable
@@ -112,5 +117,17 @@ describe('Live2DAvatar の非同期な失敗', () => {
     expect(onUnavailable).toHaveBeenCalled()
     // 例外のあとも回し続けると、同じ例外を毎フレーム出し続ける
     expect(rafCallbacks).toHaveLength(1)
+  })
+
+  // 書き出し済みモデルは男女で別ファイルかつ差分ArtMeshのIDも逆。取り違えると
+  // 画面には「相手の性別の面接官」や「何も描画されないcanvas」が出る。
+  it.each([
+    ['male', '/live2d/interviewers/male/', 'male-interviewer.model3.json', OVERLAY_MESH_IDS],
+    ['female', '/live2d/interviewers/female/', 'female-interviewer.model3.json', FEMALE_OVERLAY_MESH_IDS],
+  ] as const)('%s は自分のモデルと差分メッシュIDで読み込む', async (gender, dir, fileName, meshIds) => {
+    await renderAvatar(gender)
+    expect(loadArgs[1]).toBe(dir)
+    expect(loadArgs[2]).toBe(fileName)
+    expect(loadArgs[6]).toEqual(meshIds)
   })
 })
