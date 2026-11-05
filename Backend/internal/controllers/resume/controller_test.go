@@ -119,7 +119,7 @@ func TestResumeController_Review_Success(t *testing.T) {
 	review := &models.ResumeReview{Score: &score}
 	items := []models.ResumeReviewItem{{Severity: "info", Message: "構成良好"}}
 	svc.On("EnsureDocumentOwner", uint(1), uint(1)).Return(nil)
-	svc.On("ReviewDocument", uint(1), uint(1), "", "", "").Return(review, items, nil)
+	svc.On("ReviewDocument", uint(1), uint(1), "", "", "").Return(review, items, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review?document_id=1", nil)
 	req = testsupport.WithUserID(req, 1)
