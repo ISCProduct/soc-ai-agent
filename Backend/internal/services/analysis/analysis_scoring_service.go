@@ -63,6 +63,22 @@ type LLMStructuredSummary struct {
 	RecommendedWorkingStyle string   `json:"recommended_working_style"`
 }
 
+func analysisSummaryResponseSchema() *openai.ResponseSchema {
+	return &openai.ResponseSchema{
+		Name: "analysis_summary",
+		Schema: json.RawMessage(`{
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["strengths", "concerns", "recommended_working_style"],
+			"properties": {
+				"strengths": {"type": "array", "items": {"type": "string"}},
+				"concerns": {"type": "array", "items": {"type": "string"}},
+				"recommended_working_style": {"type": "string"}
+			}
+		}`),
+	}
+}
+
 type AnalysisSummary struct {
 	Scores                AnalysisScores          `json:"scores"`
 	Progress              AnalysisProgress        `json:"progress"`
@@ -232,7 +248,7 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 			// 切断したら LLM 呼び出しも止める。その場合 LLM 要約なしで返り、保存もしないので、
 			// 次回のリクエストで生成し直される。
 			aiCtx, cancel := context.WithTimeout(usagectx.WithFeature(ctx, usagectx.FeatureAnalysisScoring), analysisSummaryLLMTimeout)
-			raw, err := s.aiClient.ChatCompletionJSON(aiCtx, systemPrompt, userPrompt, 0.2, 400)
+			raw, err := s.aiClient.ChatCompletionWithSchema(aiCtx, systemPrompt, userPrompt, 0.2, 400, analysisSummaryResponseSchema())
 			cancel()
 			if err == nil && strings.TrimSpace(raw) != "" {
 				// パースを試みる

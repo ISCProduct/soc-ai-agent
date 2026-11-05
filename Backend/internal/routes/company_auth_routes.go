@@ -86,6 +86,7 @@ func SetupCompanyAuthRoutes(
 	api *echo.Group,
 	authController *companycontrollers.CompanyAuthController,
 	portalController *companycontrollers.CompanyPortalController,
+	interviewQuestionController *companycontrollers.CompanyPortalInterviewQuestionController,
 	studentController *companycontrollers.CompanyStudentController,
 	applicationController *companycontrollers.CompanyPortalApplicationController,
 	jobController *companycontrollers.CompanyPortalJobController,
@@ -111,6 +112,12 @@ func SetupCompanyAuthRoutes(
 
 	portal := api.Group("/company-portal", EchoCompanyAuth(companySecret, users))
 	portal.GET("/companies/:id", portalController.GetCompany)
+	if interviewQuestionController != nil {
+		portal.GET("/interview-questions", interviewQuestionController.List)
+		portal.POST("/interview-questions", interviewQuestionController.Create)
+		portal.PATCH("/interview-questions/:id", interviewQuestionController.Update)
+		portal.DELETE("/interview-questions/:id", interviewQuestionController.Delete)
+	}
 
 	// 学生検索・分析とスカウトは審査完了まで開けない。
 	// 求人や自社プロフィールは審査前でも編集できる。

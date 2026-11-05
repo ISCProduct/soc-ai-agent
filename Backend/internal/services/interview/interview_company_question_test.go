@@ -31,6 +31,10 @@ func (r *interviewCompanyQuestionRepoStub) FindByID(uint) (*models.InterviewComp
 	return nil, nil
 }
 
+func (r *interviewCompanyQuestionRepoStub) FindByIDForCompany(uint, uint) (*models.InterviewCompanyQuestion, error) {
+	return nil, nil
+}
+
 func (r *interviewCompanyQuestionRepoStub) Create(*models.InterviewCompanyQuestion) error {
 	return nil
 }
@@ -72,11 +76,19 @@ func TestInterviewServiceFetchCustomQuestions(t *testing.T) {
 			wantCalls:     1,
 		},
 		{
-			name:      "リポジトリエラー時は面接を継続できるよう空にする",
+			name:      "リポジトリエラーは空として続行する",
 			companyID: 42,
 			position:  "バックエンドエンジニア",
 			repo:      &interviewCompanyQuestionRepoStub{err: errors.New("database unavailable")},
 			wantCalls: 1,
+		},
+		{
+			name:          "上限を超える質問は切り詰める",
+			companyID:     42,
+			position:      "バックエンドエンジニア",
+			repo:          &interviewCompanyQuestionRepoStub{questions: make([]models.InterviewCompanyQuestion, maxInterviewCustomQuestions+1)},
+			wantQuestions: maxInterviewCustomQuestions,
+			wantCalls:     1,
 		},
 	}
 
@@ -86,7 +98,6 @@ func TestInterviewServiceFetchCustomQuestions(t *testing.T) {
 			svc.SetCompanyQuestionRepo(tt.repo)
 
 			got := svc.fetchCustomQuestions(tt.companyID, tt.position)
-
 			if len(got) != tt.wantQuestions {
 				t.Fatalf("question count = %d, want %d", len(got), tt.wantQuestions)
 			}
@@ -109,10 +120,12 @@ func TestBuildInterviewSystemPromptCustomQuestions(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		questions   []models.InterviewCompanyQuestion
-		wantContain []string
-		wantAbsent  []string
+		name             string
+		questions        []models.InterviewCompanyQuestion
+		remainingSeconds int
+		directive        *questionDirective
+		wantContain      []string
+		wantAbsent       []string
 	}{
 		{
 			name:      "必須質問と推奨質問を別セクションへ注入する",
@@ -125,6 +138,15 @@ func TestBuildInterviewSystemPromptCustomQuestions(t *testing.T) {
 			},
 		},
 		{
+			name:             "企業独自カテゴリでも残トピック数を正しく案内する",
+			remainingSeconds: 60,
+			directive:        &questionDirective{Category: "企業独自", Source: questionSourceCustom},
+			wantContain: []string{
+				"現在のトピック: 企業別（企業別カテゴリ）",
+				"残り5トピックあります",
+			},
+		},
+		{
 			name:       "カスタム質問がなければ質問セクションを追加しない",
 			wantAbsent: []string{"【必須質問", "【推奨質問"},
 		},
@@ -134,7 +156,7 @@ func TestBuildInterviewSystemPromptCustomQuestions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			prompt := buildInterviewSystemPrompt(
 				"テスト株式会社", "", "バックエンドエンジニア", "", "general",
-				tt.questions, nil, 0, 0, 1, 5, 0, 180, nil,
+				tt.questions, nil, 0, tt.remainingSeconds, 1, 5, 0, 180, tt.directive,
 			)
 
 			for _, want := range tt.wantContain {

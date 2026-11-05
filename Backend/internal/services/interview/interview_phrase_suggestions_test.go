@@ -128,34 +128,34 @@ func TestBuildTranscript_Empty(t *testing.T) {
 
 func TestBuildTranscript_UserOnly(t *testing.T) {
 	utterances := []models.InterviewUtterance{
-		{Role: "user", Text: "チームでの開発経験があります。"},
-		{Role: "user", Text: "リーダーを担当しました。"},
+		{ID: 21, Role: "user", Text: "チームでの開発経験があります。"},
+		{ID: 22, Role: "user", Text: "リーダーを担当しました。"},
 	}
 	result := interview.BuildTranscript(utterances)
-	assert.Contains(t, result, "User: チームでの開発経験があります。")
-	assert.Contains(t, result, "User: リーダーを担当しました。")
+	assert.Contains(t, result, "User [utterance_id=21]: チームでの開発経験があります。")
+	assert.Contains(t, result, "User [utterance_id=22]: リーダーを担当しました。")
 }
 
 func TestBuildTranscript_MixedRoles(t *testing.T) {
 	utterances := []models.InterviewUtterance{
 		{Role: "ai", Text: "自己紹介をお願いします。"},
-		{Role: "user", Text: "田中と申します。"},
+		{ID: 21, Role: "user", Text: "田中と申します。"},
 		{Role: "ai", Text: "志望動機を聞かせてください。"},
-		{Role: "user", Text: "御社に興味があります。"},
+		{ID: 22, Role: "user", Text: "御社に興味があります。"},
 	}
 	result := interview.BuildTranscript(utterances)
 	assert.Contains(t, result, "Interviewer: 自己紹介をお願いします。")
-	assert.Contains(t, result, "User: 田中と申します。")
+	assert.Contains(t, result, "User [utterance_id=21]: 田中と申します。")
 	assert.Contains(t, result, "Interviewer: 志望動機を聞かせてください。")
-	assert.Contains(t, result, "User: 御社に興味があります。")
+	assert.Contains(t, result, "User [utterance_id=22]: 御社に興味があります。")
 }
 
 func TestBuildTranscript_TrimsWhitespace(t *testing.T) {
 	utterances := []models.InterviewUtterance{
-		{Role: "user", Text: "  スペースあり  "},
+		{ID: 21, Role: "user", Text: "  スペースあり  "},
 	}
 	result := interview.BuildTranscript(utterances)
-	assert.Contains(t, result, "User: スペースあり")
+	assert.Contains(t, result, "User [utterance_id=21]: スペースあり")
 }
 
 // ─── ExtractJSONObject ────────────────────────────────────────────────────────

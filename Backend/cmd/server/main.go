@@ -687,6 +687,9 @@ func main() {
 	companyPortalJobController := companycontrollers.NewCompanyPortalJobController(
 		companyportal.NewJobService(companyRepo),
 	)
+	companyPortalInterviewQuestionController := companycontrollers.NewCompanyPortalInterviewQuestionController(
+		companyportal.NewInterviewQuestionService(interviewCompanyQuestionRepo),
+	)
 	// 自社プロフィール編集と担当者管理 (#1322)。
 	// 担当者管理は既存の CompanyUserService をそのまま使う。
 	companyPortalProfileController := companycontrollers.NewCompanyPortalProfileController(
@@ -703,7 +706,7 @@ func main() {
 	scoutService := companyportal.NewScoutService(scoutRepo, studentSearchRepo, userRepo, companyRepo, emailService, config.AppURL())
 	companyPortalScoutController := companycontrollers.NewCompanyPortalScoutController(scoutService)
 	studentScoutController := usercontrollers.NewStudentScoutController(scoutService)
-	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, companyPortalSchoolApplicationController, companyPortalScoutController, cfg.CompanyUserSecret, companyUserRepo, companyRepo)
+	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyPortalInterviewQuestionController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, companyPortalSchoolApplicationController, companyPortalScoutController, cfg.CompanyUserSecret, companyUserRepo, companyRepo)
 	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, studentGuidanceController, studentScoutController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())

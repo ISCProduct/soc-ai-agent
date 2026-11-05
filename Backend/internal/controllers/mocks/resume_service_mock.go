@@ -26,7 +26,7 @@ func (m *ResumeServiceMock) EnsureDocumentOwner(documentID uint, requestingUserI
 	return m.Called(documentID, requestingUserID).Error(0)
 }
 
-func (m *ResumeServiceMock) ReviewDocument(ctx context.Context, documentID uint, requestingUserID uint, companyName, jobTitle, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (m *ResumeServiceMock) ReviewDocument(ctx context.Context, documentID uint, requestingUserID uint, companyName, jobTitle, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, []resume.FormatFinding, error) {
 	args := m.Called(documentID, requestingUserID, companyName, jobTitle, candidateType)
 	var review *models.ResumeReview
 	var items []models.ResumeReviewItem
@@ -36,7 +36,11 @@ func (m *ResumeServiceMock) ReviewDocument(ctx context.Context, documentID uint,
 	if args.Get(1) != nil {
 		items = args.Get(1).([]models.ResumeReviewItem)
 	}
-	return review, items, args.Error(2)
+	var findings []resume.FormatFinding
+	if args.Get(2) != nil {
+		findings = args.Get(2).([]resume.FormatFinding)
+	}
+	return review, items, findings, args.Error(3)
 }
 
 func (m *ResumeServiceMock) ReviewDocumentStream(ctx context.Context, documentID uint, requestingUserID uint, companyName, jobTitle, candidateType string, w http.ResponseWriter) error {
