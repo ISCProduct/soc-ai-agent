@@ -19,6 +19,7 @@ import {
 import { resolveFinishOutcomeMessage } from '../finishOutcome'
 import { applyCompanyReadingResponse } from '../companyReadingContext'
 import { saveUtteranceWithRetry, newClientUtteranceId, flushThenFinish } from '../utteranceSave'
+import { nextQuestionIndex } from '../questionEvents'
 import { fetchAndReadWithTimeout } from '@/lib/fetch-timeout'
 import type { Utterance, InterviewCompany, Position, InterviewStatus } from '../types'
 
@@ -45,6 +46,7 @@ const TURN_FETCH_TIMEOUT_MS = 90_000
 type UseInterviewSessionArgs = {
   user: User | null
   interviewCompany: InterviewCompany | null
+  companyQuestionHints: string[]
   selectedPosition: Position
   media: InterviewMedia
   status: InterviewStatus
@@ -58,6 +60,7 @@ type UseInterviewSessionArgs = {
 export function useInterviewSession({
   user,
   interviewCompany,
+  companyQuestionHints,
   selectedPosition,
   media,
   status,
@@ -70,6 +73,7 @@ export function useInterviewSession({
   const [remainingSeconds, setRemainingSeconds] = useState(interviewLimits.maxMinutes * 60)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(1)
+  const [totalQuestionCount, setTotalQuestionCount] = useState(Math.max(1, selectedPosition.questions))
   const [questionElapsedSeconds, setQuestionElapsedSeconds] = useState(0)
   const [isDeepeningQuestion, setIsDeepeningQuestion] = useState(false)
   const [questionCategory, setQuestionCategory] = useState<string | null>(null)
@@ -146,6 +150,7 @@ export function useInterviewSession({
   /** playAudioBlob の世代。cleanupConnection で increment し、古い再生を破棄する */
   const audioGenerationRef = useRef(0)
   const sessionStartRef = useRef<number | null>(null)
+  const questionStartedAtRef = useRef<number | null>(null)
   const transcriptEndRef = useRef<HTMLDivElement | null>(null)
   const isRecordingRef = useRef(false)
   const turnPendingRef = useRef(false)
@@ -191,6 +196,7 @@ export function useInterviewSession({
     audioGenerationRef.current++
     if (invalidateCompanyContext) companyContextGenerationRef.current++
     ;[timerRef, pollRef].forEach(r => { if (r.current) { clearInterval(r.current); r.current = null } })
+    questionStartedAtRef.current = null
     if (mediaRecorderRef.current) {
       // 録音中に終了した場合、stop() の onstop で新しいターンを送ると
       // 終了API(=レポート生成のキュー投入)より後に発話が積まれる(#1476)。
@@ -213,26 +219,21 @@ export function useInterviewSession({
     setIsRecording(false); setTurnPending(false); setAiSpeaking(false)
   }
 
-  const startTimer = (totalQuestions: number) => {
+  const startTimer = () => {
     sessionStartRef.current = Date.now()
+    questionStartedAtRef.current = Date.now()
     timerRef.current = setInterval(() => {
       if (!sessionStartRef.current) return
       const elapsed = Math.floor((Date.now() - sessionStartRef.current) / 1000)
       const remaining = Math.max(0, interviewLimits.maxMinutes * 60 - elapsed)
       const safeQuestionDuration = Math.max(60, interviewLimits.questionDurationSeconds || 180)
-      const safeTotalQuestions = Math.max(1, totalQuestions)
-      const nextQuestionIndex = Math.min(
-        safeTotalQuestions,
-        Math.floor(elapsed / safeQuestionDuration) + 1,
-      )
       const questionElapsed = Math.min(
         safeQuestionDuration,
-        Math.max(0, elapsed - (nextQuestionIndex - 1) * safeQuestionDuration),
+        Math.max(0, Math.floor((Date.now() - (questionStartedAtRef.current ?? Date.now())) / 1000)),
       )
 
       setElapsedSeconds(elapsed)
       setRemainingSeconds(remaining)
-      setCurrentQuestionIndex(nextQuestionIndex)
       setQuestionElapsedSeconds(questionElapsed)
       if (remaining <= 120 && !sessionWarningShown) setSessionWarningShown(true)
       if (remaining <= 0) handleStop(true)
@@ -404,9 +405,10 @@ export function useInterviewSession({
           company_id: interviewCompany?.id || 0,
           company_type: selectedPosition?.category || 'general',
           question_index: 1,
-          total_questions: Math.max(1, selectedPosition?.questions || 1),
+          total_questions: totalQuestionCount,
           question_elapsed_seconds: 0,
           question_duration_seconds: Math.max(60, interviewLimits.questionDurationSeconds || 180),
+          question_hints: companyQuestionHints.slice(0, 5).map((question) => question.slice(0, 300)),
         }),
       }, TURN_FETCH_TIMEOUT_MS, async res => {
         if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
@@ -420,6 +422,15 @@ export function useInterviewSession({
         companyContextGenerationRef.current,
       )
       const aiText: string = meta.ai_text || ''
+      const responseQuestionTotal = Number(meta.total_questions)
+      if (Number.isSafeInteger(responseQuestionTotal) && responseQuestionTotal > 0) {
+        setTotalQuestionCount(responseQuestionTotal)
+      }
+      if (typeof meta.question_source === 'string' && meta.question_source.trim() !== '') {
+        setCurrentQuestionIndex(1)
+        questionStartedAtRef.current = Date.now()
+        setQuestionElapsedSeconds(0)
+      }
       setIsDeepeningQuestion(Boolean(meta.is_deepening))
       setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
       if (aiText) {
@@ -450,6 +461,7 @@ export function useInterviewSession({
     setRemainingSeconds(interviewLimits.maxMinutes * 60)
     setElapsedSeconds(0)
     setCurrentQuestionIndex(1)
+    setTotalQuestionCount(Math.max(1, selectedPosition.questions))
     setQuestionElapsedSeconds(0)
     setSessionWarningShown(false)
     setUtteranceSaveFailed(false)
@@ -482,7 +494,7 @@ export function useInterviewSession({
         media.startVideoRecording(stream)
       }
 
-      startTimer(selectedPosition.questions)
+      startTimer()
       await doStartTurn(created.id, user.user_id)
     } catch (error: any) {
       setStatus('error')
@@ -759,7 +771,7 @@ export function useInterviewSession({
     formData.append('turn_count', String(Math.floor(historyRef.current.length / 2) + 1))
     formData.append('remaining_seconds', String(remainingSeconds))
     formData.append('question_index', String(currentQuestionIndex))
-    formData.append('total_questions', String(Math.max(1, selectedPosition.questions)))
+    formData.append('total_questions', String(totalQuestionCount))
     formData.append('question_elapsed_seconds', String(questionElapsedSeconds))
     formData.append('question_duration_seconds', String(Math.max(60, interviewLimits.questionDurationSeconds || 180)))
     formData.append('company_name', interviewCompany?.name || '')
@@ -771,6 +783,10 @@ export function useInterviewSession({
     formData.append('company_info', buildCompanyInfo(interviewCompany))
     formData.append('company_type', selectedPosition?.category || 'general')
     formData.append('company_id', String(interviewCompany?.id || 0))
+    formData.append(
+      'question_hints',
+      JSON.stringify(companyQuestionHints.slice(0, 5).map((question) => question.slice(0, 300))),
+    )
     const companyContextGeneration = companyContextGenerationRef.current
     const receive = async (): Promise<Blob> => {
       // Backend は保存済みの発話から履歴を組み直す（#1636）。前ターンの保存が終わる前に送ると
@@ -794,6 +810,16 @@ export function useInterviewSession({
       )
       const userText: string = meta.user_text || ''
       const aiText: string = meta.ai_text || ''
+      const responseQuestionTotal = Number(meta.total_questions)
+      if (Number.isSafeInteger(responseQuestionTotal) && responseQuestionTotal > 0) {
+        setTotalQuestionCount(responseQuestionTotal)
+      }
+      const questionEvent = typeof meta.question_source === 'string' && meta.question_source.trim() !== ''
+      if (questionEvent) {
+        setCurrentQuestionIndex((index) => nextQuestionIndex(index, meta.question_source))
+        questionStartedAtRef.current = Date.now()
+        setQuestionElapsedSeconds(0)
+      }
       setIsDeepeningQuestion(Boolean(meta.is_deepening))
       setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
       if (userText) {
@@ -844,6 +870,7 @@ export function useInterviewSession({
     remainingSeconds,
     elapsedSeconds,
     currentQuestionIndex,
+    totalQuestionCount,
     questionElapsedSeconds,
     isDeepeningQuestion,
     questionCategory,

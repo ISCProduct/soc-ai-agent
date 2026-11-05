@@ -31,9 +31,11 @@ func (s *InterviewService) advanceQuestionPlan(
 	if err != nil {
 		return nil, err
 	}
+	totalQuestions := int(count)
 	if count == 0 {
 		customQuestions := s.fetchCustomQuestions(companyID, position)
-		queue := BuildQuestionQueue(session.ID, customQuestions)
+		queue := BuildQuestionQueue(session.ID, customQuestions, companyQuestionHintsFromContext(ctx)...)
+		totalQuestions = len(queue)
 		if err := s.questionStateRepo.CreateBatch(queue); err != nil {
 			return nil, err
 		}
@@ -74,6 +76,7 @@ func (s *InterviewService) advanceQuestionPlan(
 					Category:          asked.Category,
 					CompanyQuestionID: asked.CompanyQuestionID,
 					IsDeepening:       true,
+					TotalQuestions:    totalQuestions + 1,
 				}, nil
 			}
 		}
@@ -83,6 +86,7 @@ func (s *InterviewService) advanceQuestionPlan(
 	if err != nil {
 		return nil, err
 	}
+	totalQuestions = len(states)
 	next := selectNextPending(states)
 	if next == nil {
 		return nil, nil
@@ -96,6 +100,7 @@ func (s *InterviewService) advanceQuestionPlan(
 		Source:            next.Source,
 		Category:          next.Category,
 		CompanyQuestionID: next.CompanyQuestionID,
+		TotalQuestions:    totalQuestions,
 	}, nil
 }
 

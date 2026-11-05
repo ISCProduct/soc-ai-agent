@@ -151,6 +151,11 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    ValidationError:
+      description: 入力値が不正
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     TooManyRequests:
       description: レート制限
       content:
@@ -199,6 +204,25 @@ components:
             - UNAUTHORIZED
             - VALIDATION_ERROR
         detail: { type: string, description: 補足。無い場合は省略される }
+
+    CompanyInterviewQuestionInput:
+      type: object
+      required: [category, question_text]
+      properties:
+        position: { type: string, maxLength: 100, description: 空欄は全職種共通 }
+        category: { type: string, minLength: 1, maxLength: 100 }
+        question_text: { type: string, minLength: 1, maxLength: 2000 }
+        priority: { type: integer, minimum: 0, maximum: 999 }
+        is_required: { type: boolean }
+
+    CompanyInterviewQuestion:
+      allOf:
+        - $ref: "#/components/schemas/CompanyInterviewQuestionInput"
+        - type: object
+          required: [id, company_id]
+          properties:
+            id: { type: integer }
+            company_id: { type: integer }
 
     AuthResponse:
       type: object
@@ -4762,6 +4786,92 @@ paths:
       responses:
         "200":
           description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/CompanyOwnerOnly" }
+
+  /api/company-portal/interview-questions:
+    get:
+      tags: [company-portal]
+      summary: 自社の面接質問一覧
+      description: 企業IDは認証情報から解決する。企業ユーザーは閲覧できる。
+      security: [{ companyCookie: [] }]
+      responses:
+        "200":
+          description: 質問一覧
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  questions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CompanyInterviewQuestion"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [company-portal]
+      summary: 自社の面接質問を作成
+      description: owner のみ実行可能。企業IDは認証情報から解決する。
+      security: [{ companyCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyInterviewQuestionInput"
+      responses:
+        "201":
+          description: 作成した質問
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyInterviewQuestion"
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/CompanyOwnerOnly" }
+
+  /api/company-portal/interview-questions/{id}:
+    patch:
+      tags: [company-portal]
+      summary: 自社の面接質問を更新
+      description: owner のみ実行可能。他社の質問IDは操作できない。
+      security: [{ companyCookie: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyInterviewQuestionInput"
+      responses:
+        "200":
+          description: 更新した質問
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyInterviewQuestion"
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/CompanyOwnerOnly" }
+    delete:
+      tags: [company-portal]
+      summary: 自社の面接質問を削除
+      description: owner のみ実行可能。他社の質問IDは操作できない。
+      security: [{ companyCookie: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: 削除した
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CompanyOwnerOnly" }
 

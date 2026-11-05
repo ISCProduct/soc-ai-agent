@@ -11,17 +11,23 @@ import (
 	"time"
 )
 
+// maxInterviewCustomQuestions は1回の面接で使う企業別質問の上限。
+// 登録時の上限より前に作られた行があっても、質問キューとプロンプトが際限なく伸びないようにする。
+const maxInterviewCustomQuestions = 50
+
 // fetchCustomQuestions は企業別カスタム質問を取得する。未登録時は空スライスを返す。
+//
+// 取得に失敗しても空として続行する。STT の課金後に面接を止めないため（標準トピックで進められる）。
 func (s *InterviewService) fetchCustomQuestions(companyID uint, position string) []models.InterviewCompanyQuestion {
 	if s.companyQuestionRepo == nil || companyID == 0 {
 		return nil
 	}
-	qs, err := s.companyQuestionRepo.FindByCompanyAndPosition(companyID, position)
+	questions, err := s.companyQuestionRepo.FindByCompanyAndPosition(companyID, position)
 	if err != nil {
 		log.Printf("[Interview] fetchCustomQuestions error: %v", err)
 		return nil
 	}
-	return qs
+	return questions[:min(len(questions), maxInterviewCustomQuestions)]
 }
 
 // fetchSkillScores はユーザーのGitHubスキルスコアを取得する。未登録時は空スライスを返す。

@@ -212,6 +212,7 @@ func TestUnverifiedCompanyCannotReachStudentOrScoutAPIs(t *testing.T) {
 		api,
 		&companycontrollers.CompanyAuthController{},
 		&companycontrollers.CompanyPortalController{},
+		nil,
 		&companycontrollers.CompanyStudentController{},
 		nil, nil, nil, nil,
 		&companycontrollers.CompanyPortalScoutController{},
