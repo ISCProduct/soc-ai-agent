@@ -350,17 +350,30 @@ jobs:
               return result
 
           def append_pr_url(bl_key, pr_url_section):
-              """説明欄への PR URL 追記。失敗してもステータス更新は守る。"""
+              """説明欄の `## GitHub PR` に PR URL を積む。失敗してもステータス更新は守る。
+
+              URL を1本だけ保持して上書きしていたため、同じ課題に追いPRを出すと
+              前のPRのURLが消えていた。突き合わせ(backlog_sync_audit.py)はこのURLを
+              逆引き索引に使うので、消えると「どの課題にも紐づいていないPR」として
+              誤検知される（#1972 が実際にそうなっていた）。
+              """
               try:
                   issue = bl_request('GET', f"/issues/{bl_key}")
                   if not issue:
                       return
                   current_desc = issue.get('description') or ''
-                  pr_pattern = r'\n*## GitHub PR\n[^\n]*'
-                  if re.search(pr_pattern, current_desc):
-                      new_desc = re.sub(pr_pattern, pr_url_section, current_desc)
+                  # 見出しに続く URL の行だけを節として扱う。`(?:\n[^\n]*)*` のように
+                  # 貪欲にすると、節の後ろに人が書いた本文まで飲み込んでしまう。
+                  pr_pattern = r'\n*## GitHub PR\n(?:https://\S+[ \t]*\n?)*'
+                  found = re.search(pr_pattern, current_desc)
+                  existing = re.findall(r'https://\S+', found.group(0)) if found else []
+                  urls = existing + [u for u in re.findall(r'https://\S+', pr_url_section)
+                                     if u not in existing]
+                  section = '\n\n## GitHub PR\n' + '\n'.join(urls)
+                  if found:
+                      new_desc = re.sub(pr_pattern, section, current_desc, count=1)
                   else:
-                      new_desc = current_desc.rstrip() + pr_url_section
+                      new_desc = current_desc.rstrip() + section
                   # 変化が無いなら PATCH しない(無変更更新は Backlog に拒否されうる)
                   if new_desc.strip() and new_desc != current_desc:
                       if bl_request('PATCH', f"/issues/{bl_key}", {'description': new_desc}) is None:
