@@ -10,6 +10,12 @@ export type ReviewItem = {
   severity: string
   message: string
   suggestion?: string
+  /** 指摘が指している原文 */
+  quote?: string
+  /** quote をそのまま置き換えられる一文。AIの提案であり、確定した本文ではない */
+  rewrite?: string
+  /** low_ocr_confidence のとき、読み取りが不確かなので書き換え案を出していない */
+  rewrite_withheld?: string
 }
 
 export type ReviewResult = {

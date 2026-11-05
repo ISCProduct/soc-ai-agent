@@ -69,6 +69,10 @@ type Input struct {
 	ResumeText    string `json:"resume_text,omitempty"`
 	JobTitle      string `json:"job_title,omitempty"`
 	CandidateType string `json:"candidate_type,omitempty"`
+	// OCRLineConfidence は ResumeText の非空行と同じ順の認識スコア（0〜1）。
+	// 省略した行は信頼度不明。resume.OCRRewriteMinConfidence 未満の行へ
+	// rewrite を出すと rewrite_on_low_confidence になる（#1942）。
+	OCRLineConfidence []float64 `json:"ocr_line_confidence,omitempty"`
 	// 面接レポート
 	Transcript string `json:"transcript,omitempty"`
 	Lang       string `json:"lang,omitempty"`
