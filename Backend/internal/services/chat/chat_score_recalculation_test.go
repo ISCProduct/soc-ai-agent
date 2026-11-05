@@ -71,3 +71,27 @@ func TestRecalculateChatSession_IgnoresSkipAndMissingQuestion(t *testing.T) {
 		t.Fatalf("recalculated scores = %v, want no scored categories", got)
 	}
 }
+
+func TestRecalculateChatSession_IgnoresAnswersFollowedByValidationFeedback(t *testing.T) {
+	question := "チームで協力した経験を教えてください"
+	validAnswer := "チームで協力して開発し、課題を解決しました。"
+	messages := []models.ChatMessage{
+		{Role: "assistant", Content: question, WeightCategory: "チームワーク志向"},
+		{Role: "user", Content: "今日はいい天気ですね"},
+		{Role: "assistant", Content: validationRetryMessage(1, 3)},
+		{Role: "user", Content: validAnswer},
+	}
+	service := NewChatService(nil, nil, recalculationChatMessageRepository{messages: messages},
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	want := service.answerEvaluator.EvaluateHumanScoringWithContext(
+		context.Background(), question, validAnswer, false, false, nil,
+	).Score
+
+	got, err := service.RecalculateChatSession(context.Background(), 7, "session-1")
+	if err != nil {
+		t.Fatalf("RecalculateChatSession returned error: %v", err)
+	}
+	if got["チームワーク志向"] != want {
+		t.Fatalf("recalculated score = %d, want valid answer score %d", got["チームワーク志向"], want)
+	}
+}

@@ -135,3 +135,28 @@ func TestAddScore_ClampsToZeroOneHundred(t *testing.T) {
 		t.Errorf("expectations not met: %v", err)
 	}
 }
+
+func TestRecalculationQueriesScopeCrossFeatureExclusionsToAppliedSession(t *testing.T) {
+	repo, mock := newScoreRepoTestDB(t)
+
+	mock.ExpectQuery(`(?s)SELECT COALESCE\(MAX\(uws\.id\).*uws\.session_id = \(.*prior\.updated_at <= er\.scored_at.*uws\.session_id = \(.*prior\.updated_at <= ir\.scores_applied_at.*WHERE uws\.calculation_version <> \?`).
+		WithArgs("v2").
+		WillReturnRows(sqlmock.NewRows([]string{"max_score_id", "eligible_sessions", "unsupported_sessions"}).
+			AddRow(100, 2, 1))
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\).*prior\.updated_at <= er\.scored_at.*prior\.updated_at <= ir\.scores_applied_at`).
+		WithArgs("v2").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(5))
+	mock.ExpectQuery(`(?s)SELECT MIN\(uws\.id\).*uws\.session_id = \(.*prior\.updated_at <= er\.scored_at.*uws\.session_id = \(.*prior\.updated_at <= ir\.scores_applied_at`).
+		WithArgs("v2", uint(100), uint(0), 10).
+		WillReturnRows(sqlmock.NewRows([]string{"score_id", "user_id", "session_id"}))
+
+	if _, err := repo.RecalculationStats("v2"); err != nil {
+		t.Fatalf("RecalculationStats returned error: %v", err)
+	}
+	if _, err := repo.FindNextRecalculationTargets("v2", 100, 0, 10); err != nil {
+		t.Fatalf("FindNextRecalculationTargets returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}

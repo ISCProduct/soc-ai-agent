@@ -222,6 +222,10 @@ func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, s
 		if message.Role != "user" {
 			continue
 		}
+		if i+1 < len(messages) && messages[i+1].Role == "assistant" &&
+			isValidationFeedbackMessage(messages[i+1].Content) {
+			continue
+		}
 		question, category := lastQuestionForScoring(messages[:i+1])
 		if strings.TrimSpace(question) == "" || (category == "" && s.isJobSelectionQuestion(question)) {
 			continue

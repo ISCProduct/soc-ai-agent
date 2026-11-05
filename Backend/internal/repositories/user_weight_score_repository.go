@@ -6,6 +6,7 @@ import (
 	"Backend/domain/valueobject"
 	"Backend/internal/models"
 	"errors"
+	"fmt"
 
 	"gorm.io/gorm"
 )
@@ -141,62 +142,73 @@ type UserScoreRecalculationStats struct {
 // reconstructed from chat messages alone.
 func (r *UserWeightScoreRepository) RecalculationStats(version string) (UserScoreRecalculationStats, error) {
 	var stats UserScoreRecalculationStats
-	err := r.db.Raw(`
+	err := r.db.Raw(fmt.Sprintf(`
 SELECT
-  COALESCE(MAX(id), 0) AS max_score_id,
-  COUNT(DISTINCT CASE WHEN source = 'chat'
-    AND session_id NOT LIKE 'interview-%'
+  COALESCE(MAX(uws.id), 0) AS max_score_id,
+  COUNT(DISTINCT CASE WHEN uws.source = 'chat'
+    AND LEFT(uws.session_id, 10) <> 'interview-'
     AND EXISTS (
       SELECT 1 FROM chat_messages cm
-      WHERE cm.user_id = user_weight_scores.user_id
-        AND cm.session_id = user_weight_scores.session_id
+      WHERE cm.user_id = uws.user_id
+        AND cm.session_id = uws.session_id
     )
     AND NOT EXISTS (
       SELECT 1 FROM resume_documents rd
       JOIN resume_reviews rr ON rr.document_id = rd.id
-      WHERE rd.user_id = user_weight_scores.user_id
-        AND rd.session_id = user_weight_scores.session_id
+      WHERE rd.user_id = uws.user_id
+        AND rd.session_id = uws.session_id
+        AND rr.score IS NOT NULL
     )
     AND NOT EXISTS (
       SELECT 1 FROM es_reviews er
-      WHERE er.user_id = user_weight_scores.user_id AND er.scored_at IS NOT NULL
+      WHERE er.user_id = uws.user_id AND er.scored_at IS NOT NULL
+        AND %s
     )
     AND NOT EXISTS (
       SELECT 1 FROM interview_sessions ins
       JOIN interview_reports ir ON ir.session_id = ins.id
-      WHERE ins.user_id = user_weight_scores.user_id
+      WHERE ins.user_id = uws.user_id AND ir.scores_applied_at IS NOT NULL
+        AND %s
     )
-    THEN CONCAT(user_weight_scores.user_id, ':', user_weight_scores.session_id) END) AS eligible_sessions,
-  COUNT(DISTINCT CONCAT(user_weight_scores.user_id, ':', user_weight_scores.session_id)) -
-  COUNT(DISTINCT CASE WHEN source = 'chat'
-    AND session_id NOT LIKE 'interview-%'
+    THEN CONCAT(uws.user_id, ':', uws.session_id) END) AS eligible_sessions,
+  COUNT(DISTINCT CONCAT(uws.user_id, ':', uws.session_id)) -
+  COUNT(DISTINCT CASE WHEN uws.source = 'chat'
+    AND LEFT(uws.session_id, 10) <> 'interview-'
     AND EXISTS (
       SELECT 1 FROM chat_messages cm
-      WHERE cm.user_id = user_weight_scores.user_id
-        AND cm.session_id = user_weight_scores.session_id
+      WHERE cm.user_id = uws.user_id
+        AND cm.session_id = uws.session_id
     )
     AND NOT EXISTS (
       SELECT 1 FROM resume_documents rd
       JOIN resume_reviews rr ON rr.document_id = rd.id
-      WHERE rd.user_id = user_weight_scores.user_id
-        AND rd.session_id = user_weight_scores.session_id
+      WHERE rd.user_id = uws.user_id
+        AND rd.session_id = uws.session_id
+        AND rr.score IS NOT NULL
     )
     AND NOT EXISTS (
       SELECT 1 FROM es_reviews er
-      WHERE er.user_id = user_weight_scores.user_id AND er.scored_at IS NOT NULL
+      WHERE er.user_id = uws.user_id AND er.scored_at IS NOT NULL
+        AND %s
     )
     AND NOT EXISTS (
       SELECT 1 FROM interview_sessions ins
       JOIN interview_reports ir ON ir.session_id = ins.id
-      WHERE ins.user_id = user_weight_scores.user_id
+      WHERE ins.user_id = uws.user_id AND ir.scores_applied_at IS NOT NULL
+        AND %s
     )
-    THEN CONCAT(user_weight_scores.user_id, ':', user_weight_scores.session_id) END) AS unsupported_sessions
-FROM user_weight_scores
-WHERE calculation_version <> ?`, version).Scan(&stats).Error
+    THEN CONCAT(uws.user_id, ':', uws.session_id) END) AS unsupported_sessions
+FROM user_weight_scores uws
+WHERE uws.calculation_version <> ?`,
+		scoreSessionAtTime("uws", "er.scored_at"),
+		scoreSessionAtTime("uws", "ir.scores_applied_at"),
+		scoreSessionAtTime("uws", "er.scored_at"),
+		scoreSessionAtTime("uws", "ir.scores_applied_at"),
+	), version).Scan(&stats).Error
 	if err != nil {
 		return stats, err
 	}
-	err = r.db.Raw(`
+	err = r.db.Raw(fmt.Sprintf(`
 SELECT COUNT(*)
 FROM chat_messages cm
 WHERE cm.role = 'user'
@@ -204,19 +216,28 @@ WHERE cm.role = 'user'
     SELECT 1 FROM user_weight_scores uws
     WHERE uws.user_id = cm.user_id AND uws.session_id = cm.session_id
       AND uws.calculation_version <> ? AND uws.source = 'chat'
-      AND uws.session_id NOT LIKE 'interview-%'
+      AND LEFT(uws.session_id, 10) <> 'interview-'
       AND NOT EXISTS (
         SELECT 1 FROM resume_documents rd
         JOIN resume_reviews rr ON rr.document_id = rd.id
         WHERE rd.user_id = uws.user_id AND rd.session_id = uws.session_id
+          AND rr.score IS NOT NULL
       )
-      AND NOT EXISTS (SELECT 1 FROM es_reviews er WHERE er.user_id = uws.user_id AND er.scored_at IS NOT NULL)
+      AND NOT EXISTS (
+        SELECT 1 FROM es_reviews er
+        WHERE er.user_id = uws.user_id AND er.scored_at IS NOT NULL
+          AND %s
+      )
       AND NOT EXISTS (
         SELECT 1 FROM interview_sessions ins
         JOIN interview_reports ir ON ir.session_id = ins.id
-        WHERE ins.user_id = uws.user_id
+        WHERE ins.user_id = uws.user_id AND ir.scores_applied_at IS NOT NULL
+          AND %s
       )
-  )`, version).Scan(&stats.EligibleAnswers).Error
+  )`,
+		scoreSessionAtTime("uws", "er.scored_at"),
+		scoreSessionAtTime("uws", "ir.scores_applied_at"),
+	), version).Scan(&stats.EligibleAnswers).Error
 	return stats, err
 }
 
@@ -225,12 +246,12 @@ func (r *UserWeightScoreRepository) FindNextRecalculationTargets(version string,
 	if limit <= 0 {
 		return targets, nil
 	}
-	err := r.db.Raw(`
+	err := r.db.Raw(fmt.Sprintf(`
 SELECT MIN(uws.id) AS score_id, uws.user_id, uws.session_id
 FROM user_weight_scores uws
 WHERE uws.calculation_version <> ?
   AND uws.source = 'chat'
-  AND uws.session_id NOT LIKE 'interview-%'
+  AND LEFT(uws.session_id, 10) <> 'interview-'
   AND uws.id <= ?
   AND EXISTS (
     SELECT 1 FROM chat_messages cm
@@ -240,21 +261,40 @@ WHERE uws.calculation_version <> ?
     SELECT 1 FROM resume_documents rd
     JOIN resume_reviews rr ON rr.document_id = rd.id
     WHERE rd.user_id = uws.user_id AND rd.session_id = uws.session_id
+      AND rr.score IS NOT NULL
   )
   AND NOT EXISTS (
     SELECT 1 FROM es_reviews er
     WHERE er.user_id = uws.user_id AND er.scored_at IS NOT NULL
+      AND %s
   )
   AND NOT EXISTS (
     SELECT 1 FROM interview_sessions ins
     JOIN interview_reports ir ON ir.session_id = ins.id
-    WHERE ins.user_id = uws.user_id
+    WHERE ins.user_id = uws.user_id AND ir.scores_applied_at IS NOT NULL
+      AND %s
   )
 GROUP BY uws.user_id, uws.session_id
 HAVING MIN(uws.id) > ?
 ORDER BY MIN(uws.id)
-LIMIT ?`, version, maxScoreID, cursor, limit).Scan(&targets).Error
+LIMIT ?`,
+		scoreSessionAtTime("uws", "er.scored_at"),
+		scoreSessionAtTime("uws", "ir.scores_applied_at"),
+	), version, maxScoreID, cursor, limit).Scan(&targets).Error
 	return targets, err
+}
+
+func scoreSessionAtTime(scoreAlias, appliedAt string) string {
+	return fmt.Sprintf(`%s.session_id = (
+  SELECT prior.session_id
+  FROM user_weight_scores prior
+  WHERE prior.user_id = %s.user_id
+    AND prior.source <> 'assessment'
+    AND LEFT(prior.session_id, 10) <> 'interview-'
+    AND prior.updated_at <= %s
+  ORDER BY prior.updated_at DESC, prior.id DESC
+  LIMIT 1
+)`, scoreAlias, scoreAlias, appliedAt)
 }
 
 // ReplaceChatSessionScores atomically replaces a replayed chat session's scores.
