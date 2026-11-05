@@ -23,46 +23,46 @@ import (
 )
 
 // ctx はリクエストIDを RAG まで伝播させるために受け取る(#1188)
-func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, requestingUserID uint, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, requestingUserID uint, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, []FormatFinding, error) {
 	// クエリを user_id でスコープする。所有者以外には見つからない（#1156）
 	doc, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil, shared.ErrForbidden
+			return nil, nil, nil, shared.ErrForbidden
 		}
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
-		return nil, nil, &shared.ValidationError{Message: "応募企業名または応募職種を入力してください"}
+		return nil, nil, nil, &shared.ValidationError{Message: "応募企業名または応募職種を入力してください"}
 	}
 	canonicalName, err := s.ensureRealCompany(ctx, companyName)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	companyName = canonicalName
 
 	workDir, err := s.ensureWorkingDir(doc.ID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer os.RemoveAll(workDir)
 
 	pdfPath, normalizedStored, err := s.normalizeToPDF(doc, workDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	doc.NormalizedPath = normalizedStored
 	doc.Status = "normalized"
 	if err := s.repo.UpdateDocument(doc); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if err := validatePathInDir(pdfPath, workDir); err != nil {
-		return nil, nil, fmt.Errorf("invalid pdf path: %w", err)
+		return nil, nil, nil, fmt.Errorf("invalid pdf path: %w", err)
 	}
 	blocks, err := s.extractTextBlocks(doc, pdfPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	hasText := false
 	for _, block := range blocks {
@@ -72,25 +72,26 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 		}
 	}
 	if !hasText {
-		return nil, nil, &shared.ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
+		return nil, nil, nil, &shared.ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
 	}
 	if err := s.repo.ReplaceTextBlocks(doc.ID, blocks); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
+	findings := formatFindingsFor(blocks)
 	review, items, err := s.buildResumeReviewWithAI(ctx, blocks, companyName, jobTitle, candidateType)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := s.persistReview(doc, review, items); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if _, err := s.finalizeDocument(doc, pdfPath, review, items); err != nil {
-		return review, items, err
+		return review, items, findings, err
 	}
 
-	return review, items, nil
+	return review, items, findings, nil
 }
 
 // 評価ハーネス（cmd/aibench）が本番と同じ指示・同じ呼び出し条件で測れるように、
@@ -439,6 +440,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		return errors.New(msg)
 	}
 	_ = s.repo.ReplaceTextBlocks(doc.ID, blocks)
+	findings := formatFindingsFor(blocks)
 
 	text := buildResumeText(blocks, reviewTextLimit)
 
@@ -497,6 +499,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		"review":              review,
 		"items":               items,
 		"annotated_available": annotatedAvailable,
+		"format_findings":     findings,
 	})
 	return nil
 }

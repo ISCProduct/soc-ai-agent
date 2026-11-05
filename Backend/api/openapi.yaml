@@ -414,6 +414,20 @@ components:
             この質問で評価したい観点（#1092）。AI 面接官の system プロンプトへ、質問と同じ非信頼テキストの囲みの中で渡し、応募者には伝えないよう指示する。
             前後の空白は落とし、空文字は未設定（null）として保存する。更新で空文字を送ると消える。300字を超えると 400
 
+    ResumeFormatFinding:
+      description: |
+        履歴書の形式チェックの指摘（#1530）。FormatFinding と同じ形で、page_hint と block_index を必ず含む（block_index は 0 から）。
+        start/end は、そのブロックの text の中の位置（UTF-16）。
+        画面はブロックの本文を持たないので、該当箇所の文字列を excerpt で返す。
+      allOf:
+        - $ref: "#/components/schemas/FormatFinding"
+        - type: object
+          required: [page_hint, block_index, excerpt]
+          properties:
+            excerpt:
+              type: string
+              description: 該当箇所の文字列（ブロックの text[start:end]、空白は1つにまとめる）。長いときは先頭を切り出して「…」を付ける
+
     FormatFinding:
       type: object
       description: |
@@ -424,7 +438,8 @@ components:
       properties:
         rule:
           type: string
-          enum: [mixed_width, mixed_numeral, mixed_era, mixed_style, date_order, char_limit]
+          enum: [mixed_width, mixed_numeral, mixed_era, mixed_style, date_order, char_limit, spoken_language, blank_field]
+          description: spoken_language は ES と履歴書、blank_field は履歴書だけで出る
         severity:
           type: string
           enum: [critical, warning, info]
@@ -1612,14 +1627,26 @@ paths:
       summary: 添削する
       security: [{ userToken: [] }]
       responses:
-        "200": { description: 添削結果 }
+        "200":
+          description: 添削結果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  review: { type: object }
+                  items: { type: array, items: { type: object } }
+                  format_findings:
+                    type: array
+                    description: 形式チェックの指摘（#1530）。保存はしない（#1531）。
+                    items: { $ref: "#/components/schemas/ResumeFormatFinding" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/resume/review/stream:
     post:
       tags: [resume]
       summary: 添削する（ストリーミング）
-      description: Server-Sent Events で逐次返す。
+      description: Server-Sent Events で逐次返す。最後の `complete` イベントに review・items・annotated_available と、format_findings（ResumeFormatFinding の配列）を含む。
       security: [{ userToken: [] }]
       responses:
         "200":
