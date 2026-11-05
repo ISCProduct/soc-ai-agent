@@ -628,4 +628,4 @@ cpr "123"
 | [スコアリング・マッチング](./docs/wiki/scoring.md) | 開発者 | 10カテゴリスコア・マッチングアルゴリズム |
 | [運用手順書](./docs/wiki/operations.md) | 運用担当 | デプロイ・監視・バッチ・障害対応 |
 | [データプライバシー設計](./docs/wiki/data-privacy.md) | 開発者・法務 | 匿名化・同意管理の設計 |
-| [スコアキャリブレーション](./docs/wiki/score-calibration.md) | 運用担当 | スコア精度検証・改善手順 |
+| [スコアキャリブレーション](./docs/wiki/score-calibration.md) | 運用担当 | データ要件・現状判定（現状は較正不可） |
