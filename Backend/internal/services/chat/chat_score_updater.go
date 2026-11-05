@@ -209,6 +209,60 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 	return nil
 }
 
+// RecalculateChatSession は保存済みの質問・回答だけからチャットスコアを再構築する。
+// 書き込みは呼び出し側が同一トランザクションで置き換える。
+func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, sessionID string) (map[string]int, error) {
+	messages, err := s.chatMessageRepo.FindBySessionIDForUser(sessionID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load chat session for recalculation: %w", err)
+	}
+
+	scores := make(map[string]int)
+	for i, message := range messages {
+		if message.Role != "user" {
+			continue
+		}
+		question, category := lastQuestionForScoring(messages[:i+1])
+		if strings.TrimSpace(question) == "" || (category == "" && s.isJobSelectionQuestion(question)) {
+			continue
+		}
+		if category == "" {
+			category = s.inferCategoryFromQuestion(question)
+		}
+
+		resolved := ResolveChoiceAnswer(question, message.Content)
+		var result HumanScoreResult
+		scoreInput := message.Content
+		if resolved.IsChoice && s.isChoiceAnswer(resolved.Letter) {
+			result = s.answerEvaluator.EvaluateHumanScoring(question, resolved.Letter, true, false, nil)
+			if result.Action != PrecheckScore {
+				continue
+			}
+			result.Score, _ = AdjustChoiceAxisScore(result.Score, resolved.Reason)
+			scoreInput = resolved.Letter
+		} else {
+			if resolved.IsFreeText {
+				scoreInput = resolved.Text
+			}
+			result = s.answerEvaluator.EvaluateHumanScoringWithContext(ctx, question, scoreInput, false, false, nil)
+			if result.Action == PrecheckSkip || result.Action == PrecheckIgnore {
+				continue
+			}
+			result = floorEngagedShortScore(scoreInput, result)
+		}
+		if result.Score <= 0 {
+			continue
+		}
+
+		if current, exists := scores[category]; exists {
+			scores[category] = int(math.Round(float64(current)*0.7 + float64(result.Score)*0.3))
+		} else {
+			scores[category] = result.Score
+		}
+	}
+	return scores, nil
+}
+
 // isChoiceAnswer 選択肢回答かどうかを判定
 func (s *ChatService) isChoiceAnswer(answer string) bool {
 	answer = strings.ToUpper(strings.TrimSpace(answer))

@@ -65,7 +65,8 @@ func TestAddScore_UpdatesExistingRecord(t *testing.T) {
 			AddRow(10, 1, "session-1", "技術志向", 70))
 
 	mock.ExpectBegin()
-	mock.ExpectExec("UPDATE `user_weight_scores`").
+	mock.ExpectExec("UPDATE `user_weight_scores` SET `score`=GREATEST\\(0, LEAST\\(100, score \\+ \\?\\)\\),`updated_at`=\\? WHERE `id` = \\?").
+		WithArgs(5, sqlmock.AnyArg(), 10).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 

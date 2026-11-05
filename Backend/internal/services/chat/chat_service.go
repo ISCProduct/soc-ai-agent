@@ -65,6 +65,15 @@ func NewChatService(
 	}
 }
 
+// RecalculationModel はチャットスコア再計算の概算に使うモデルと課金有無を返す。
+func (s *ChatService) RecalculationModel() (string, bool) {
+	if s.aiClient == nil {
+		return "", false
+	}
+	provider, _, _ := s.aiClient.Providers()
+	return s.aiClient.DefaultModel, provider == "openai"
+}
+
 // ChatRequest チャットリクエスト
 type ChatRequest struct {
 	UserID        uint   `json:"user_id"`

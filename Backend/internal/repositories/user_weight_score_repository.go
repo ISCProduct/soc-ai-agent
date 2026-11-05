@@ -5,6 +5,7 @@ import (
 	"Backend/domain/mapper"
 	"Backend/domain/valueobject"
 	"Backend/internal/models"
+	"errors"
 
 	"gorm.io/gorm"
 )
@@ -43,11 +44,12 @@ func (r *UserWeightScoreRepository) SetScoreWithSource(userID uint, sessionID, c
 		absoluteScore = 100
 	}
 	score := models.UserWeightScore{
-		UserID:         userID,
-		SessionID:      sessionID,
-		WeightCategory: category,
-		Score:          absoluteScore,
-		Source:         source,
+		UserID:             userID,
+		SessionID:          sessionID,
+		WeightCategory:     category,
+		Score:              absoluteScore,
+		Source:             source,
+		CalculationVersion: models.CurrentUserScoreCalculationVersion,
 	}
 	if err := fillOrganizationID(r.db, userID, &score.OrganizationID); err != nil {
 		return err
@@ -70,6 +72,7 @@ func (r *UserWeightScoreRepository) AddScore(userID uint, sessionID, category st
 		userID, sessionID, category).First(&score).Error; err != nil {
 		return err
 	}
+	// 既存スコアを混ぜる加算では、過去版の値が残るため計算版を更新しない。
 	return r.db.Model(&score).Update(
 		"score",
 		gorm.Expr("GREATEST(0, LEAST(100, score + ?))", delta),
@@ -118,6 +121,176 @@ func (r *UserWeightScoreRepository) CountByUserAndSession(userID uint, sessionID
 		Where("user_id = ? AND session_id = ?", userID, sessionID).
 		Count(&count).Error
 	return count, err
+}
+
+type UserScoreRecalculationTarget struct {
+	ScoreID   uint
+	UserID    uint
+	SessionID string
+}
+
+type UserScoreRecalculationStats struct {
+	EligibleSessions    uint
+	UnsupportedSessions uint
+	MaxScoreID          uint
+	EligibleAnswers     uint
+}
+
+// RecalculationStats returns chat sessions whose scores are out of date. Sessions
+// with cross-feature contributions are excluded because their aggregate cannot be
+// reconstructed from chat messages alone.
+func (r *UserWeightScoreRepository) RecalculationStats(version string) (UserScoreRecalculationStats, error) {
+	var stats UserScoreRecalculationStats
+	err := r.db.Raw(`
+SELECT
+  COALESCE(MAX(id), 0) AS max_score_id,
+  COUNT(DISTINCT CASE WHEN source = 'chat'
+    AND session_id NOT LIKE 'interview-%'
+    AND EXISTS (
+      SELECT 1 FROM chat_messages cm
+      WHERE cm.user_id = user_weight_scores.user_id
+        AND cm.session_id = user_weight_scores.session_id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM resume_documents rd
+      JOIN resume_reviews rr ON rr.document_id = rd.id
+      WHERE rd.user_id = user_weight_scores.user_id
+        AND rd.session_id = user_weight_scores.session_id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM es_reviews er
+      WHERE er.user_id = user_weight_scores.user_id AND er.scored_at IS NOT NULL
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM interview_sessions ins
+      JOIN interview_reports ir ON ir.session_id = ins.id
+      WHERE ins.user_id = user_weight_scores.user_id
+    )
+    THEN CONCAT(user_weight_scores.user_id, ':', user_weight_scores.session_id) END) AS eligible_sessions,
+  COUNT(DISTINCT CONCAT(user_weight_scores.user_id, ':', user_weight_scores.session_id)) -
+  COUNT(DISTINCT CASE WHEN source = 'chat'
+    AND session_id NOT LIKE 'interview-%'
+    AND EXISTS (
+      SELECT 1 FROM chat_messages cm
+      WHERE cm.user_id = user_weight_scores.user_id
+        AND cm.session_id = user_weight_scores.session_id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM resume_documents rd
+      JOIN resume_reviews rr ON rr.document_id = rd.id
+      WHERE rd.user_id = user_weight_scores.user_id
+        AND rd.session_id = user_weight_scores.session_id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM es_reviews er
+      WHERE er.user_id = user_weight_scores.user_id AND er.scored_at IS NOT NULL
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM interview_sessions ins
+      JOIN interview_reports ir ON ir.session_id = ins.id
+      WHERE ins.user_id = user_weight_scores.user_id
+    )
+    THEN CONCAT(user_weight_scores.user_id, ':', user_weight_scores.session_id) END) AS unsupported_sessions
+FROM user_weight_scores
+WHERE calculation_version <> ?`, version).Scan(&stats).Error
+	if err != nil {
+		return stats, err
+	}
+	err = r.db.Raw(`
+SELECT COUNT(*)
+FROM chat_messages cm
+WHERE cm.role = 'user'
+  AND EXISTS (
+    SELECT 1 FROM user_weight_scores uws
+    WHERE uws.user_id = cm.user_id AND uws.session_id = cm.session_id
+      AND uws.calculation_version <> ? AND uws.source = 'chat'
+      AND uws.session_id NOT LIKE 'interview-%'
+      AND NOT EXISTS (
+        SELECT 1 FROM resume_documents rd
+        JOIN resume_reviews rr ON rr.document_id = rd.id
+        WHERE rd.user_id = uws.user_id AND rd.session_id = uws.session_id
+      )
+      AND NOT EXISTS (SELECT 1 FROM es_reviews er WHERE er.user_id = uws.user_id AND er.scored_at IS NOT NULL)
+      AND NOT EXISTS (
+        SELECT 1 FROM interview_sessions ins
+        JOIN interview_reports ir ON ir.session_id = ins.id
+        WHERE ins.user_id = uws.user_id
+      )
+  )`, version).Scan(&stats.EligibleAnswers).Error
+	return stats, err
+}
+
+func (r *UserWeightScoreRepository) FindNextRecalculationTargets(version string, maxScoreID, cursor uint, limit int) ([]UserScoreRecalculationTarget, error) {
+	var targets []UserScoreRecalculationTarget
+	if limit <= 0 {
+		return targets, nil
+	}
+	err := r.db.Raw(`
+SELECT MIN(uws.id) AS score_id, uws.user_id, uws.session_id
+FROM user_weight_scores uws
+WHERE uws.calculation_version <> ?
+  AND uws.source = 'chat'
+  AND uws.session_id NOT LIKE 'interview-%'
+  AND uws.id <= ?
+  AND EXISTS (
+    SELECT 1 FROM chat_messages cm
+    WHERE cm.user_id = uws.user_id AND cm.session_id = uws.session_id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM resume_documents rd
+    JOIN resume_reviews rr ON rr.document_id = rd.id
+    WHERE rd.user_id = uws.user_id AND rd.session_id = uws.session_id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM es_reviews er
+    WHERE er.user_id = uws.user_id AND er.scored_at IS NOT NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM interview_sessions ins
+    JOIN interview_reports ir ON ir.session_id = ins.id
+    WHERE ins.user_id = uws.user_id
+  )
+GROUP BY uws.user_id, uws.session_id
+HAVING MIN(uws.id) > ?
+ORDER BY MIN(uws.id)
+LIMIT ?`, version, maxScoreID, cursor, limit).Scan(&targets).Error
+	return targets, err
+}
+
+// ReplaceChatSessionScores atomically replaces a replayed chat session's scores.
+func (r *UserWeightScoreRepository) ReplaceChatSessionScores(userID uint, sessionID string, scores map[string]int, version string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var existing models.UserWeightScore
+		err := tx.Where("user_id = ? AND session_id = ? AND source = ?", userID, sessionID, models.ScoreSourceChat).
+			First(&existing).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err := tx.Where("user_id = ? AND session_id = ? AND source = ?", userID, sessionID, models.ScoreSourceChat).
+			Delete(&models.UserWeightScore{}).Error; err != nil {
+			return err
+		}
+		for category, score := range scores {
+			normalized, err := valueobject.ParseWeightCategory(category)
+			if err != nil {
+				return err
+			}
+			row := models.UserWeightScore{
+				UserID: userID, SessionID: sessionID, Source: models.ScoreSourceChat,
+				WeightCategory: string(normalized), Score: max(0, min(100, score)),
+				CalculationVersion: version,
+			}
+			if existing.ID != 0 {
+				row.OrganizationID = existing.OrganizationID
+			} else if err := fillOrganizationID(tx, userID, &row.OrganizationID); err != nil {
+				return err
+			}
+			if err := tx.Create(&row).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // FindLatestByUser ユーザーの最新セッションのスコアを取得する。
