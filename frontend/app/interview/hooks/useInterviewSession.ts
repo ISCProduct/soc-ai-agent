@@ -9,7 +9,8 @@ import { WeightScore } from '@/components/ScoreUpdateBanner'
 import type { InterviewMedia } from './useInterviewMedia'
 import { useHandsFreeVad } from './useHandsFreeVad'
 import { pickRecorderFormat, extFromMimeType, type RecorderFormat } from '../lib/recorderFormat'
-import { buildCompanyInfo, getNextAvatarGender } from '../utils'
+import { buildCompanyInfo } from '../utils'
+import { measureLevel, setAiAudioMeter } from '@/lib/interview/ai-audio-meter'
 import {
   evaluateReportPollTick,
   REPORT_POLL_INTERVAL_MS,
@@ -90,7 +91,8 @@ export function useInterviewSession({
   const [aiSpeaking, _setAiSpeaking] = useState(false)
   /** 学生の発話に区切りが来るたびに増える。面接官アバターの相槌の合図（#1646）。 */
   const [studentPauseCount, setStudentPauseCount] = useState(0)
-  const [avatarGender, setAvatarGender] = useState<'male' | 'female'>('male')
+  // 面接官は男性のみ。声(バックエンドの interviewer_gender)と見た目(Live2D)を揃える。
+  const avatarGender = 'male' as const
   const [captionsVisible, setCaptionsVisible] = useState(true)
   const [handsFreeMode, setHandsFreeMode] = useState(false)
   const [consentDialogOpen, setConsentDialogOpen] = useState(false)
@@ -272,6 +274,7 @@ export function useInterviewSession({
         }
         setAiLevel(0)
         setAiSpeaking(false)
+        setAiAudioMeter(null)
         aiAudioRef.current = null
       }
       URL.revokeObjectURL(url)
@@ -297,16 +300,16 @@ export function useInterviewSession({
 
       const timeData = new Uint8Array(analyser.fftSize)
       const trackLevel = () => {
-        analyser.getByteTimeDomainData(timeData)
-        let sum = 0
-        for (const v of timeData) {
-          const n = (v - 128) / 128
-          sum += n * n
-        }
-        const rms = Math.sqrt(sum / timeData.length)
-        setAiLevel(Math.min(1, rms * 6))
+        setAiLevel(measureLevel(analyser, timeData))
         rafId = requestAnimationFrame(trackLevel)
       }
+      // Live2D は状態(再描画)を経由せずここから直接読む。出力遅延ぶん音より先に測れてしまうので、
+      // 遅れの秒数も渡して、描画側で口を遅らせる。
+      const meterBuf = new Uint8Array(analyser.fftSize)
+      setAiAudioMeter({
+        read: () => measureLevel(analyser, meterBuf),
+        latencySec: (ctx.outputLatency || 0) + (ctx.baseLatency || 0),
+      })
       rafId = requestAnimationFrame(trackLevel)
       aiLevelRafRef.current = rafId
     } catch (err) {
@@ -471,9 +474,6 @@ export function useInterviewSession({
 
     try {
       setStatus('connecting')
-      const nextGender = getNextAvatarGender()
-      setAvatarGender(nextGender)
-
       // ユーザー操作中に AudioContext を事前作成・resume（autoplay policy 対策）
       try {
         if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
@@ -484,7 +484,7 @@ export function useInterviewSession({
 
       const stream = await media.ensureStream()
 
-      const created = await interviewApi.createSession(user.user_id, 'ja', nextGender)
+      const created = await interviewApi.createSession(user.user_id, 'ja', avatarGender)
       sessionRef.current = created
       setSession(created)
       await interviewApi.startSession(created.id, user.user_id)

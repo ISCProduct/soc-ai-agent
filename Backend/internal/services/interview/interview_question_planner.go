@@ -47,6 +47,8 @@ type questionDirective struct {
 	Category       string
 	IsDeepening    bool
 	TotalQuestions int
+	// CompanyQuestionID は元の企業別カスタム質問（評価したい観点の引き先）。標準トピックでは nil
+	CompanyQuestionID *uint
 }
 
 type companyQuestionHintsContextKey struct{}

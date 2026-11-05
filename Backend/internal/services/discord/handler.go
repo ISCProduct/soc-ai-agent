@@ -25,6 +25,28 @@ type Handler struct {
 	dispatcher    *WorkflowDispatcher
 	publicKey     string
 	allowedRoleID string
+
+	// links / backlog は Discord ↔ Backlog の対応づけ(/link)用。未設定なら /link 系は
+	// 「利用できません」を返す。NewHandler の引数を増やすとテストが全部壊れるため setter で足す。
+	links   *LinkService
+	backlog BacklogUserLister
+
+	// /deadline 用。未設定なら「利用できません」を返す。
+	deadlines       DeadlineBacklog
+	deadlineProject string // 変更を許す Backlog プロジェクトキー（他プロジェクトの課題は触らせない）
+	deadlineBase    string // 公開メッセージに載せる課題リンクの基点
+}
+
+// WithDeadline は /deadline の依存を設定する。
+func (h *Handler) WithDeadline(d DeadlineBacklog, projectKey, baseURL string) *Handler {
+	h.deadlines, h.deadlineProject, h.deadlineBase = d, projectKey, baseURL
+	return h
+}
+
+// WithLinks は /link 系コマンドの依存を設定する。
+func (h *Handler) WithLinks(l *LinkService, b BacklogUserLister) *Handler {
+	h.links, h.backlog = l, b
+	return h
 }
 
 // StagingStateSetter はステージングの起動状態の書き込み面（#1249）。
@@ -77,6 +99,8 @@ func (h *Handler) Handle(ctx context.Context, body []byte, signature, timestamp 
 		return http.StatusOK, &InteractionResponse{Type: ResponseTypePong}
 	case InteractionTypeApplicationCommand:
 		return http.StatusOK, h.handleCommand(ctx, &interaction)
+	case InteractionTypeAutocomplete:
+		return http.StatusOK, h.handleAutocomplete(ctx, &interaction)
 	case InteractionTypeModalSubmit:
 		return http.StatusOK, h.handleModalSubmit(ctx, &interaction)
 	default:
@@ -96,6 +120,14 @@ func (h *Handler) handleCommand(ctx context.Context, interaction *Interaction) *
 		return h.setProdOverride(ctx, interaction)
 	case CommandNameStaging:
 		return h.setStagingState(ctx, interaction)
+	case CommandNameLink:
+		return h.link(ctx, interaction)
+	case CommandNameLinkList:
+		return h.linkList(ctx, interaction)
+	case CommandNameUnlink:
+		return h.unlink(ctx, interaction)
+	case CommandNameDeadline:
+		return h.deadline(ctx, interaction)
 	case CommandNameProdUptime:
 		if !h.hasAllowedRole(interaction) {
 			return ephemeral("このコマンドを実行する権限がありません。")

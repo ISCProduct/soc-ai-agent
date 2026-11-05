@@ -190,6 +190,72 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromResumeReview(
 	return nil
 }
 
+// ── ES添削 → UserWeightScore ───────────────────────────────────────────────
+
+// UpdateScoresFromESReview は ES添削の評価を UserWeightScore へ反映する（#1531）。
+//
+// 書き込み先は「本人の最新のチャット診断セッション」で、専用のセッションは作らない。
+// FindLatestByUser は最新1行のセッションを選んでそのセッションのスコアを全件返すため、
+// ES専用セッションを作ると「最新セッション＝ESの2カテゴリだけ」になり、
+// 残り8カテゴリが欠落して中立50で埋められる。マッチングが静かに歪むので、
+// 履歴書と同じく既存の診断セッションへ移動平均で合流させる。
+//
+// 診断セッションがまだ無い（チャット診断を一度もしていない）利用者には何も書かない。
+// 欠けたカテゴリだけのセッションを作る方が害が大きい。
+// 戻り値の bool は「実際に反映したか」。呼び出し元はこれを見て反映済みの記録を残す。
+// 反映していないのに記録すると、その本文が以後永久にスコアへ乗らない。
+func (s *CrossFeatureIntegrationService) UpdateScoresFromESReview(userID uint, review *models.ESReview) (bool, error) {
+	if review == nil {
+		return false, nil
+	}
+	sessionID, ok, err := s.esTargetSession(userID)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		log.Printf("[CrossFeature] ES添削(es_review_id=%d): 診断セッションが無いため user_weight_scores へ反映しない\n", review.ID)
+		return false, nil
+	}
+
+	// 対応表と式は esScoreMapping / mapESScore（score_mapping.go）に集約している。
+	applied, failed := 0, 0
+	for _, mapped := range mapESScore(
+		int(review.SpecificityScore), int(review.StarScore), int(review.LengthBalanceScore),
+	) {
+		if err := s.applyMovingAverage(userID, sessionID, mapped.category, mapped.score); err != nil {
+			failed++
+			log.Printf("[CrossFeature] es→score update failed (cat=%s): %v\n", mapped.category, err)
+			continue
+		}
+		applied++
+	}
+	// 1カテゴリも書けていないのに「反映済み」と記録すると、その本文が以後乗らない。
+	if applied == 0 && failed > 0 {
+		return false, fmt.Errorf("ES添削のスコア反映が全件失敗 (es_review_id=%d)", review.ID)
+	}
+	return true, nil
+}
+
+// esTargetSession は ES添削の反映先セッションを返す。見つからなければ ok=false。
+//
+// 専用セッションを作らないことがこの関数の責務。作ってしまうと FindLatestByUser が
+// 「最新セッション＝ESの2カテゴリだけ」を返し、残り8カテゴリが中立50で埋められる。
+// 切り出してあるのは、この判断をテストから直接確かめられるようにするため
+// （反映側はエラーをログに流すので、書き込みの有無だけでは検証が効かない）。
+func (s *CrossFeatureIntegrationService) esTargetSession(userID uint) (string, bool, error) {
+	sessionID, err := s.weightScoreRepo.FindLatestDiagnosisSessionID(userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("診断セッションの取得エラー: %w", err)
+	}
+	if sessionID == "" {
+		return "", false, nil
+	}
+	return sessionID, true, nil
+}
+
 // ── チャット分析スコア → 面接コンテキスト ────────────────────────────────
 
 // BuildInterviewContextFromScores チャット分析スコアを面接システムプロンプト用テキストに変換する

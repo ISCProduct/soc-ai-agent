@@ -227,15 +227,22 @@ func buildInterviewSystemPrompt(
 		if directive.Category != "" {
 			question += fmt.Sprintf("\n（カテゴリ: %s）", directive.Category)
 		}
+		intent := evaluationIntentFor(customQuestions, directive.CompanyQuestionID)
+		if intent != "" {
+			question += fmt.Sprintf("\n（評価したい観点: %s）", intent)
+		}
 		base += fmt.Sprintf("\n次の質問文をそのまま面接官として投げかけてください（1問のみ）:\n%s",
 			shared.WrapUntrustedText(question, "質問文"))
+		if intent != "" {
+			base += "\n" + evaluationIntentNote
+		}
 	} else if len(customQuestions) > 0 {
 		var required, recommended []string
 		for _, q := range customQuestions {
 			if q.IsRequired {
-				required = append(required, fmt.Sprintf("- [%s] %s", q.Category, q.QuestionText))
+				required = append(required, customQuestionLine(q))
 			} else {
-				recommended = append(recommended, fmt.Sprintf("- [%s] %s", q.Category, q.QuestionText))
+				recommended = append(recommended, customQuestionLine(q))
 			}
 		}
 		// 企業別カスタム質問は企業ポータル・管理画面の入力か、企業情報をもとに
@@ -249,6 +256,9 @@ func buildInterviewSystemPrompt(
 		if len(recommended) > 0 {
 			base += "\n\n【推奨質問（会話の流れに応じて取り入れてください）】\n" +
 				shared.WrapUntrustedText(strings.Join(recommended, "\n"), "推奨質問")
+		}
+		if anyEvaluationIntent(customQuestions) {
+			base += "\n\n" + evaluationIntentNote
 		}
 	}
 

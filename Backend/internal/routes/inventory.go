@@ -60,11 +60,11 @@ func Inventory() []Route {
 	SetupCompanyRoutes(api, nil)
 	SetupAdminRoutes(api,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "")
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "")
 	SetupResumeRoutes(api, nil, "", nil, nil)
 	SetupInterviewRoutes(api, nil, nil, "", nil, nil)
 	SetupGitHubRoutes(api, nil, "", nil, nil)
-	SetupESRoutes(api, nil, nil)
+	SetupESRoutes(api, nil, nil, "", nil, nil)
 	SetupScheduleRoutes(api, nil, "", nil, nil)
 	SetupGoogleCalendarRoutes(api, nil, "", nil, nil)
 	SetupApplicationRoutes(api, nil, nil, "", nil, nil)
