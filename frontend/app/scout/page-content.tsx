@@ -86,6 +86,15 @@ export default function PageContent() {
     }
   }
 
+  const accept = async (id: number) => {
+    try {
+      const res = await studentScoutService.accept(id)
+      setItems((prev) => prev.map((x) => (x.id === id ? { ...x, status: res.status } : x)))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '承諾に失敗しました')
+    }
+  }
+
   const decline = async (id: number) => {
     try {
       const res = await studentScoutService.decline(id)
@@ -125,7 +134,7 @@ export default function PageContent() {
         </Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2, pl: 6 }}>
-        企業からのオファーを確認できます。辞退やブロックもここから行えます。
+        企業からのオファーを確認できます。承諾すると、その企業に氏名・学校・写真が見えるようになります。
       </Typography>
 
       {error && (
@@ -184,6 +193,11 @@ export default function PageContent() {
                 <Button variant="contained" size="small" onClick={() => void openScout(s)}>
                   内容を確認
                 </Button>
+                {(s.status === 'sent' || s.status === 'viewed') && (
+                  <Button size="small" onClick={() => void accept(s.id)}>
+                    このスカウトを承諾
+                  </Button>
+                )}
                 {s.status !== 'declined' && (
                   <Button size="small" onClick={() => void decline(s.id)}>
                     このスカウトを辞退

@@ -104,12 +104,7 @@ func (r *StudentSearchRepository) Search(companyID uint, f StudentSearchFilters)
 	offset := max(f.Offset, 0)
 
 	rows := []StudentSearchRow{}
-	err := r.visibleStudents(companyID, f).
-		Select(`u.id AS user_id, u.name, u.school_name, u.target_level, u.avatar_url,
-			u.certifications_acquired, u.certifications_in_progress,
-			COALESCE(up.desired_location, '') AS desired_location,
-			up.desired_industry_id,
-			COALESCE(i.name, '') AS desired_industry_name`).
+	err := r.identityRedactedSelect(companyID, f).
 		Order("u.id DESC").
 		Limit(limit).Offset(offset).
 		Scan(&rows).Error
@@ -117,6 +112,30 @@ func (r *StudentSearchRepository) Search(companyID uint, f StudentSearchFilters)
 		return nil, 0, err
 	}
 	return rows, total, nil
+}
+
+// identityRedactedSelect は一覧のSELECT。
+// 氏名・学校・写真は、その学生が自社スカウトを承諾した後だけ返す（SOCAIAGENT-474）。
+// 承諾前は空文字。応募者一覧の氏名は VisibleStudentNames のまま。
+func (r *StudentSearchRepository) identityRedactedSelect(companyID uint, f StudentSearchFilters) *gorm.DB {
+	revealed := `EXISTS (
+		SELECT 1 FROM scouts AS sc
+		WHERE sc.company_id = ? AND sc.user_id = u.id AND sc.status = ?
+	)`
+	return r.visibleStudents(companyID, f).
+		Select(`u.id AS user_id,
+			CASE WHEN `+revealed+` THEN u.name ELSE '' END AS name,
+			CASE WHEN `+revealed+` THEN u.school_name ELSE '' END AS school_name,
+			u.target_level,
+			CASE WHEN `+revealed+` THEN u.avatar_url ELSE '' END AS avatar_url,
+			u.certifications_acquired, u.certifications_in_progress,
+			COALESCE(up.desired_location, '') AS desired_location,
+			up.desired_industry_id,
+			COALESCE(i.name, '') AS desired_industry_name`,
+			companyID, models.ScoutStatusAccepted,
+			companyID, models.ScoutStatusAccepted,
+			companyID, models.ScoutStatusAccepted,
+		)
 }
 
 // IsVisible は対象学生が企業に公開されているかを返す（詳細画面の認可に使う）。
@@ -127,6 +146,16 @@ func (r *StudentSearchRepository) IsVisible(userID uint) (bool, error) {
 			userID, true, "student", false).
 		Count(&count).Error
 	return count > 0, err
+}
+
+// IdentityRevealed は、その学生が自社スカウトを承諾済みか。
+// 詳細APIの氏名を出すかどうかの判定に使う。
+func (r *StudentSearchRepository) IdentityRevealed(companyID, userID uint) (bool, error) {
+	var n int64
+	err := r.db.Model(&models.Scout{}).
+		Where("company_id = ? AND user_id = ? AND status = ?", companyID, userID, models.ScoutStatusAccepted).
+		Count(&n).Error
+	return n > 0, err
 }
 
 // escapeLike は LIKE のワイルドカードをエスケープし、利用者入力で全件一致するのを防ぐ。

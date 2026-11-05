@@ -36,6 +36,7 @@ type companyStudentSearchStub struct {
 	lastFilters  repositories.StudentSearchFilters
 	lastTagOwner uint
 	lastQuery    string
+	revealed     bool
 }
 
 func (s *companyStudentSearchStub) Search(companyID uint, f repositories.StudentSearchFilters) (*hrsvc.StudentSearchResult, error) {
@@ -70,6 +71,11 @@ func (s *companyStudentSearchStub) ListTagNames(companyID uint) ([]string, error
 func (s *companyStudentSearchStub) ListTagsForUser(companyID, _ uint) ([]hrsvc.StudentTagView, error) {
 	s.lastCompany = companyID
 	return s.tags, nil
+}
+
+func (s *companyStudentSearchStub) IdentityRevealed(companyID, _ uint) (bool, error) {
+	s.lastCompany = companyID
+	return s.revealed, nil
 }
 
 type companyStudentAnalysisStub struct {
@@ -242,7 +248,10 @@ func TestCompanyStudentController_Detail(t *testing.T) {
 }
 
 func TestCompanyStudentController_Detail_ReturnsOwnCompanyTags(t *testing.T) {
-	search := &companyStudentSearchStub{tags: []hrsvc.StudentTagView{{ID: 1, TagName: "即戦力"}}}
+	search := &companyStudentSearchStub{
+		tags:     []hrsvc.StudentTagView{{ID: 1, TagName: "即戦力"}},
+		revealed: true,
+	}
 	analysis := &companyStudentAnalysisStub{resp: &hrsvc.StudentAnalysisResponse{UserID: 5, Name: "山田太郎"}}
 	req := httptest.NewRequest(http.MethodGet, "/api/company-portal/students/5", nil)
 	req = withCompanyContext(req, 42, 7)
@@ -262,6 +271,25 @@ func TestCompanyStudentController_Detail_ReturnsOwnCompanyTags(t *testing.T) {
 	require.Len(t, body.Tags, 1)
 	assert.Equal(t, "即戦力", body.Tags[0].TagName)
 	assert.Equal(t, uint(7), search.lastCompany, "タグは自社IDでのみ取得される")
+}
+
+func TestCompanyStudentController_Detail_承諾前は氏名を返さない(t *testing.T) {
+	search := &companyStudentSearchStub{revealed: false}
+	analysis := &companyStudentAnalysisStub{resp: &hrsvc.StudentAnalysisResponse{UserID: 5, Name: "山田太郎"}}
+	req := httptest.NewRequest(http.MethodGet, "/api/company-portal/students/5", nil)
+	req = withCompanyContext(req, 42, 7)
+	rec := httptest.NewRecorder()
+
+	testsupport.AssertStatus(t, newCompanyStudentController(search, analysis).Detail,
+		companyStudentCtx(req, rec, []string{"userID"}, []string{"5"}), http.StatusOK)
+
+	var body struct {
+		Analysis struct {
+			Name string `json:"name"`
+		} `json:"analysis"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Empty(t, body.Analysis.Name)
 }
 
 // ── タグ ───────────────────────────────────────────────────────────

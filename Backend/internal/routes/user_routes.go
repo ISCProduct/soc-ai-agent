@@ -23,6 +23,7 @@ func SetupUserRoutes(api *echo.Group, profileController *usercontrollers.Integra
 	if scoutController != nil {
 		user.GET("/scouts", scoutController.List)
 		user.POST("/scouts/:id/view", scoutController.View)
+		user.POST("/scouts/:id/accept", scoutController.Accept)
 		user.POST("/scouts/:id/decline", scoutController.Decline)
 		user.POST("/scout-blocks", scoutController.BlockCompany)
 	}

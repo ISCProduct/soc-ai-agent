@@ -23,6 +23,7 @@ type studentSearchService interface {
 	RemoveTag(companyID, tagID uint) error
 	ListTagNames(companyID uint) ([]string, error)
 	ListTagsForUser(companyID, userID uint) ([]hrsvc.StudentTagView, error)
+	IdentityRevealed(companyID, userID uint) (bool, error)
 }
 
 type industryLister interface {
@@ -127,6 +128,13 @@ func (c *CompanyStudentController) Detail(ctx echo.Context) error {
 	analysis, err := c.analysis.GetAnalysisForVisibleStudent(userID)
 	if err != nil {
 		return mapStudentSearchError(err)
+	}
+	revealed, err := c.search.IdentityRevealed(companyID, userID)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	if analysis != nil && !revealed {
+		analysis.Name = ""
 	}
 	tags, err := c.search.ListTagsForUser(companyID, userID)
 	if err != nil {

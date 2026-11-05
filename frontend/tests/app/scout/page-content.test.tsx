@@ -21,6 +21,7 @@ jest.mock('@/lib/scout/api', () => ({
   studentScoutService: {
     list: jest.fn(),
     view: jest.fn(),
+    accept: jest.fn(),
     decline: jest.fn(),
     blockCompany: jest.fn(),
   },
@@ -28,6 +29,7 @@ jest.mock('@/lib/scout/api', () => ({
 
 const list = studentScoutService.list as jest.Mock
 const view = studentScoutService.view as jest.Mock
+const accept = studentScoutService.accept as jest.Mock
 const decline = studentScoutService.decline as jest.Mock
 const blockCompany = studentScoutService.blockCompany as jest.Mock
 
@@ -46,6 +48,7 @@ describe('学生のスカウト受信箱', () => {
   beforeEach(() => {
     list.mockReset()
     view.mockReset()
+    accept.mockReset()
     decline.mockReset()
     blockCompany.mockReset()
     list.mockImplementation(async (params?: { offset?: number }) => ({
@@ -54,6 +57,7 @@ describe('学生のスカウト受信箱', () => {
       blocked_company_ids: [],
     }))
     view.mockResolvedValue({ id: 1, company_id: 8, status: 'viewed', message: '本文' })
+    accept.mockResolvedValue({ id: 1, status: 'accepted' })
     decline.mockResolvedValue({ id: 1, status: 'declined' })
     blockCompany.mockResolvedValue(undefined)
   })
@@ -76,6 +80,9 @@ describe('学生のスカウト受信箱', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '内容を確認' }))
     expect(view).toHaveBeenCalledWith(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'このスカウトを承諾' }))
+    expect(accept).toHaveBeenCalledWith(1)
 
     fireEvent.click(screen.getByRole('button', { name: 'このスカウトを辞退' }))
     expect(decline).toHaveBeenCalledWith(1)
