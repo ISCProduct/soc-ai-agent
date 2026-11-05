@@ -215,3 +215,51 @@ func TestRewrite_PassesCharLimitModeToFormatCheck(t *testing.T) {
 		})
 	}
 }
+
+// リライトでも、位置は利用者が送った原文（trim 前）を基準にする。先頭の改行・空白（3単位）の分だけずれない。
+func TestRewrite_PositionsAreBasedOnUntrimmedText(t *testing.T) {
+	srv := ragStub(t, http.StatusOK, ragOKBody, nil)
+	defer srv.Close()
+	t.Setenv("RAG_REVIEW_URL", srv.URL)
+
+	ctx, rec := newCtx(http.MethodPost, "/api/es/rewrite", `{"original_text": "\n  ITとＩＴ"}`)
+	if err := (&ESRewriteController{openaiClient: noopClient()}).Rewrite(ctx); err != nil {
+		t.Fatalf("Rewrite: %v", err)
+	}
+	arr, _ := decodeBody(t, rec.Body.Bytes())["format_findings"].([]any)
+	if len(arr) != 1 {
+		t.Fatalf("format_findings = %v, want 1件", arr)
+	}
+	f := arr[0].(map[string]any)
+	if f["start"] != float64(6) || f["end"] != float64(8) {
+		t.Errorf("位置 = %v〜%v, want 6〜8（trim 前の原文で「ＩＴ」の位置）", f["start"], f["end"])
+	}
+}
+
+// 添削でも、字数指定の mode がハンドラから形式チェックまで渡ること（11字・10字指定は within なら超過、around なら範囲内）。
+func TestReview_PassesCharLimitModeToFormatCheck(t *testing.T) {
+	text := strings.Repeat("あ", 11)
+	for _, tc := range []struct {
+		mode string
+		want []string
+	}{
+		{"within", []string{"char_limit"}},
+		{"around", []string{}},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			srv := ragStub(t, http.StatusOK, ragOKBody, nil)
+			defer srv.Close()
+			t.Setenv("RAG_REVIEW_URL", srv.URL)
+
+			ctx, rec := newCtx(http.MethodPost, "/api/es/review",
+				`{"es_text": "`+text+`", "char_limit": 10, "char_limit_mode": "`+tc.mode+`"}`)
+			if err := (&ESReviewController{openaiClient: noopClient()}).Review(ctx); err != nil {
+				t.Fatalf("Review: %v", err)
+			}
+			got := findingRules(t, decodeBody(t, rec.Body.Bytes())["format_findings"])
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("format_findings の rule = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -187,6 +187,7 @@ func (r MixedEra) Check(text string) []Finding {
 //
 // 「。」「！」「？」で終わる文だけを、文末で分類する。体言止め・疑問文など
 // どちらとも言えない文は数えない。改行だけで終わる行（箇条書き・見出し）は文とみなさない。
+// 引用（「」『』）の中の「。」も文の区切りとみなさない。「できます。」と答えた。は、常体の1文として数える。
 type MixedStyle struct{}
 
 func (MixedStyle) Name() string { return "mixed_style" }
@@ -223,8 +224,17 @@ func (r MixedStyle) Check(text string) []Finding {
 	p := newPositions(text)
 	var polite, plain []span
 	start := 0
+	depth := 0 // 「」『』の入れ子の深さ。引用の中の文末は、引用を含む文の一部として扱う
 	for i, c := range rs {
-		if !isSentenceEnd(c) {
+		switch c {
+		case '「', '『':
+			depth++
+		case '」', '』':
+			if depth > 0 {
+				depth--
+			}
+		}
+		if depth > 0 || !isSentenceEnd(c) {
 			continue
 		}
 		s := start
