@@ -277,6 +277,25 @@ def _parse_star(value: Any) -> ESStarBreakdown:
     )
 
 
+def _text_field(data: Dict[str, Any], key: str) -> str:
+    """JSONの文字列欄を取り出す。null や配列を str() すると "None" が本文になる。"""
+    value = data.get(key, "")
+    return value if isinstance(value, str) else ""
+
+
+def _with_kept_star(previous: Dict[str, Any], retry: Dict[str, Any]) -> Dict[str, Any]:
+    """作り直しを採用するとき、star が object でなければ1回目の STAR を残す。
+
+    長くなった本文だけを替え、分解が欠けると添削タブの STAR が空になる。
+    """
+    if isinstance(retry.get("star"), dict):
+        return retry
+    kept = dict(retry)
+    previous_star = previous.get("star")
+    kept["star"] = previous_star if isinstance(previous_star, dict) else {}
+    return kept
+
+
 def _ceil_ratio(source_chars: int, numerator: int, denominator: int) -> int:
     """source * numerator / denominator を切り上げる。浮動小数の誤差で1字ずれない。"""
     if source_chars <= 0:
@@ -550,7 +569,7 @@ def _run_es_review(
             # 上限なしの長文はモデル自身の出力上限で切れる。422にすると警告も本文も届かない。
             keep_truncated=char_limit is None,
         )
-        improved_text = str(improved_data.get("improved_text", ""))
+        improved_text = _text_field(improved_data, "improved_text")
         improved_length = count_es_chars(improved_text)
 
         # 生成後にサーバ側で字数を検査する。モデルの自己申告は当てにならないため、
@@ -593,11 +612,11 @@ def _run_es_review(
                         _brief_error(exc), improved_length,
                     )
                     break
-                candidate = str(retry_data.get("improved_text", ""))
+                candidate = _text_field(retry_data, "improved_text")
                 candidate_len = count_es_chars(candidate)
                 # 空、または前回より長い結果は採用しない。上限内か、超過でも短くなったときだけ替える。
                 if candidate_len > 0 and (candidate_len <= allowed_max or candidate_len < improved_length):
-                    improved_data = retry_data
+                    improved_data = _with_kept_star(improved_data, retry_data)
                     improved_text = candidate
                     improved_length = candidate_len
                 else:
@@ -658,11 +677,12 @@ def _run_es_review(
                         _brief_error(exc), improved_length,
                     )
                     break
-                candidate = str(retry_data.get("improved_text", ""))
+                candidate = _text_field(retry_data, "improved_text")
                 candidate_len = count_es_chars(candidate)
                 # 長くなったときだけ替える。空や短い結果で1回目の本文と STAR を潰さない。
+                # star が無い採用は本文だけ替え、1回目の分解を残す。
                 if candidate_len > improved_length:
-                    improved_data = retry_data
+                    improved_data = _with_kept_star(improved_data, retry_data)
                     improved_text = candidate
                     improved_length = candidate_len
                 else:

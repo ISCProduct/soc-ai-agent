@@ -18,6 +18,7 @@ from services.es_review import (
     _MAX_SHORT_TEXT_RETRIES,
     _MAX_CHAR_LIMIT_RETRIES,
     _STAR_TEXT_CHARS,
+    _brief_error,
     _char_limit_bounds,
     _improved_length_bounds,
     _improved_length_floor,
@@ -248,8 +249,10 @@ def test_no_char_limit_leaves_satisfied_null(monkeypatch):
     # 「学生時代に力を入れたことは、」は14字。目標は切り上げた110〜130%
     assert "元の文章は14字です。改善後は16〜19字" in prompts[0]
     assert "要約して短くしないでください" in prompts[0]
-    # 「文字数は〜にする」に文を入れると「してくださいにする」になる
-    assert "してくださいにする" not in prompts[0]
+    # 文の指示を「文字数は〜にする」へ戻すと、この行がプロンプトに現れる。
+    # 「してくださいにする」は間に別の文が入るため、旧文言へ戻しても一致しない。
+    assert "- 元の文章は14字です。" in prompts[0]
+    assert "- 文字数は元の文章は14字です。" not in prompts[0]
     assert "【設問の文字数上限】" not in prompts[0]
 
 
@@ -380,6 +383,69 @@ def test_shorter_or_empty_retry_keeps_the_first_text_and_star(monkeypatch):
         assert result.improved_text_length == 360
         assert result.improved_length_satisfied is False
         assert result.star.situation == "最初の状況"
+
+
+def test_adopted_retry_without_star_keeps_the_first_star(monkeypatch):
+    """長くなった作り直しに star が無い、または object でないときは1回目の STAR を残す。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    first_star = {"situation": "最初の状況", "task": "課題", "action": "行動", "result": "成果"}
+    long_text = "あ" * 7000
+    cases = [
+        {"improved_text": long_text},
+        {"improved_text": long_text, "star": None},
+        {"improved_text": long_text, "star": "状況だけ"},
+    ]
+    for second in cases:
+        client = _review_then_improved([
+            {"improved_text": "あ" * 360, "star": first_star},
+            second,
+        ])
+        result = _run(client, es_text="あ" * 6000)
+        assert result.improved_text == long_text
+        assert result.improved_length_satisfied is True
+        assert result.star.situation == "最初の状況"
+        assert result.star.task == "課題"
+
+
+def test_null_improved_text_is_not_the_word_none(monkeypatch):
+    """null の improved_text を "None" として採用しない。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    first_star = {"situation": "最初の状況", "task": "課題", "action": "行動", "result": "成果"}
+    client = _review_then_improved([
+        {"improved_text": "", "star": first_star},
+        {"improved_text": None},
+    ])
+
+    result = _run(client, es_text="あ" * 6000)
+
+    assert result.improved_text == ""
+    assert result.star.situation == "最初の状況"
+
+
+def test_char_limit_retry_without_star_keeps_the_first_star(monkeypatch):
+    """字数の作り直しを採用しても、star が無ければ1回目の STAR を残す。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    first_star = {"situation": "最初の状況", "task": "課題", "action": "行動", "result": "成果"}
+    client = _review_then_improved([
+        {"improved_text": "あ" * 500, "star": first_star},
+        {"improved_text": "あ" * 380},
+    ])
+
+    result = _run(client, es_text="あ" * 6000, char_limit=400)
+
+    assert result.improved_text_length == 380
+    assert result.char_limit_satisfied is True
+    assert result.star.situation == "最初の状況"
+
+
+def test_brief_error_truncates_long_exception_text():
+    """応答本文にES全文が載っても、ログは300字で切る。"""
+    short = _brief_error(RuntimeError("timeout"))
+    assert short == "timeout"
+    long = _brief_error(RuntimeError("あ" * 500))
+    assert len(long) == 301
+    assert long.endswith("…")
+    assert "\n" not in _brief_error(RuntimeError("1行目\n2行目"))
 
 
 def test_length_equal_to_floor_is_not_regenerated(monkeypatch):
