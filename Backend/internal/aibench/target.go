@@ -33,6 +33,8 @@ func NewTarget(name, modelOverride string) (Target, error) {
 		return newResumeTarget(modelOverride), nil
 	case TargetInterviewReport:
 		return newInterviewTarget(modelOverride), nil
+	case TargetChatAnswer:
+		return newChatAnswerTarget(modelOverride), nil
 	default:
 		return nil, fmt.Errorf("未知の target: %q（対応: %s）", name, strings.Join(ValidTargets(), ", "))
 	}

@@ -29,7 +29,7 @@ import { formatSeconds } from '@/lib/interview/utils'
 import type { Utterance } from '../types'
 import styles from './interview.module.css'
 import { setInterviewSessionActive } from '../sessionChrome'
-import Avatar2D from './Avatar2D'
+import InterviewerAvatar from './InterviewerAvatar'
 
 /** 回答に迷ったときの思考の補助線。チケット固有の採点基準ではなく、どの質問にも共通する一般的な枠組み。 */
 const STAR_GUIDE = [
@@ -257,40 +257,32 @@ export default function SessionScreen({
             </Box>
           )}
 
-          {/* ── Main: 左58% 自分のカメラ+面接官 / 右42% 質問パネル ── */}
+          {/* ── Main: 左58% 面接官ステージ / 右42% 質問パネル ── */}
           <Box className={styles.mainGrid}>
 
-            {/* ── 左: 自分のカメラ(主役) + 面接官(2Dアバター、小) ── */}
-            {/* 自分の映像を中心に据える構成に変更(#2D化)。以前は面接官アバターが
-                全面で自分のカメラは左下の小さいオーバーレイだったが、面接練習で
-                本人が自分の映り・姿勢を確認しやすいよう主従を入れ替えた。 */}
+            {/* ── 左: 面接官(主役、16:9) + 自分のカメラ ── */}
+            {/* 面接官と向き合う没入感を優先し、面接官を大きくした。自分の映像は
+                広い画面では右上の小窓、狭い画面ではステージの下にフル幅で出す。 */}
             <Box className={styles.leftStage}>
-
-              {/* 自分のカメラ(大、16:9) */}
-              <Box className={styles.cameraCard}>
-                <video
-                  ref={sessionVideoCallbackRef}
-                  muted
-                  playsInline
-                  className={`${styles.cameraVideo} ${styles.cameraVideoFill} ${cameraEnabled ? '' : styles.cameraVideoHidden}`}
-                />
-                {!cameraEnabled && (
-                  <Box className={styles.cameraOffIcon}>
-                    <VideocamOffIcon sx={{ fontSize: 40 }} />
-                  </Box>
-                )}
-
-                <Box className={styles.cameraScrim} />
-                <Box className={styles.liveFeedBadge}>
-                  <Box className={styles.liveFeedDot} />
-                  <Typography component="span" className={styles.liveFeedLabel}>LIVE FEED</Typography>
+              <Box className={styles.stageCard}>
+                <Box className={styles.stageAvatar}>
+                  <InterviewerAvatar
+                    gender={avatarGender}
+                    level={aiLevel}
+                    speaking={aiSpeaking}
+                    active={isConnected}
+                    pending={turnPending}
+                    acknowledgeSignal={studentPauseCount}
+                  />
                 </Box>
+                <Box className={styles.stageScrim} />
 
-                <Box className={styles.candidateLabelWrap}>
-                  <Box className={styles.candidateLabel}>
-                    <Typography component="div" className={styles.candidateLabelEyebrow}>CANDIDATE</Typography>
-                    <Typography component="div" className={styles.candidateLabelName}>
-                      あなた{userName ? `（${userName}）` : ''}
+                {/* 上部: 面接官バッジ */}
+                <Box className={styles.stageTop}>
+                  <Box className={styles.avatarBadgeRow}>
+                    <Box className={styles.avatarBadgeDot} data-speaking={aiSpeaking} />
+                    <Typography noWrap component="span" className={styles.avatarBadgeLabel}>
+                      {(companyName || 'AI面接練習') + ' 面接官'}
                     </Typography>
                   </Box>
                 </Box>
@@ -314,44 +306,44 @@ export default function SessionScreen({
                 )}
               </Box>
 
-              {/* 面接官(2Dアバター、小) + 発話中の字幕 */}
-              <Box className={styles.avatarCard}>
-                <Box className={styles.avatarPanel}>
-                  <Avatar2D
-                    gender={avatarGender}
-                    level={aiLevel}
-                    speaking={aiSpeaking}
-                    active={isConnected}
-                    pending={turnPending}
-                    acknowledgeSignal={studentPauseCount}
-                  />
-                  <Box className={styles.avatarBadgeRow}>
-                    <Box className={styles.avatarBadgeDot} data-speaking={aiSpeaking} />
-                    <Typography noWrap component="span" className={styles.avatarBadgeLabel}>
-                      {(companyName || 'AI面接練習') + ' 面接官'}
-                    </Typography>
+              {/* 自分のカメラ。広い画面ではステージ右上の小窓に重ね、狭い画面では
+                  姿勢を確認できる大きさを残すためステージの下へフル幅で並べる(CSS側で切替)。 */}
+              <Box className={styles.pipCard}>
+                <video
+                  ref={sessionVideoCallbackRef}
+                  muted
+                  playsInline
+                  className={`${styles.cameraVideo} ${styles.cameraVideoFill} ${cameraEnabled ? '' : styles.cameraVideoHidden}`}
+                />
+                {!cameraEnabled && (
+                  <Box className={styles.cameraOffIcon}>
+                    <VideocamOffIcon sx={{ fontSize: 28 }} />
                   </Box>
-                </Box>
-
-                {/* 発話中の字幕(リアルタイムTTSテキスト)。「字幕」トグルで表示/非表示。
-                    右パネルの「現在の質問」カードと内容が重複するため、実際に
-                    読み上げている間だけ出す（クローズドキャプションと同じ考え方）。 */}
-                {captionsVisible && aiSpeaking ? (
-                  <Box className={styles.captionBox}>
-                    <Box className={styles.captionEyebrowRow}>
-                      <VolumeUpIcon sx={{ color: 'var(--primary-container)', fontSize: 14 }} />
-                      <Typography component="span" className={styles.captionEyebrow}>
-                        AI面接官 音声読み上げ中
-                      </Typography>
-                    </Box>
-                    <Typography component="div" className={styles.captionText}>
-                      {partialAi || currentQuestionText}
-                    </Typography>
-                  </Box>
-                ) : (
-                  <Box sx={{ flex: 1 }} />
                 )}
+                <Box className={styles.pipLabel}>
+                  <Box className={styles.liveFeedDot} />
+                  <Typography noWrap component="span" className={styles.pipLabelText}>
+                    あなた{userName ? `（${userName}）` : ''}
+                  </Typography>
+                </Box>
               </Box>
+
+              {/* 発話中の字幕(リアルタイムTTSテキスト)。「字幕」トグルで表示/非表示。
+                  右パネルの「現在の質問」と内容が重複するため、実際に読み上げている間だけ出す。
+                  広い画面ではステージ下部に重ね、狭い画面では口を隠さないようステージの外に出す。 */}
+              {captionsVisible && aiSpeaking && (
+                <Box className={styles.captionBox}>
+                  <Box className={styles.captionEyebrowRow}>
+                    <VolumeUpIcon sx={{ color: 'var(--primary-container)', fontSize: 14 }} />
+                    <Typography component="span" className={styles.captionEyebrow}>
+                      面接官 音声読み上げ中
+                    </Typography>
+                  </Box>
+                  <Typography component="div" className={styles.captionText}>
+                    {partialAi || currentQuestionText}
+                  </Typography>
+                </Box>
+              )}
             </Box>
 
             {/* ── 右: 質問パネル ── */}

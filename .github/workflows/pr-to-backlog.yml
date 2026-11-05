@@ -30,10 +30,10 @@ name: PR → Backlog 同期
 #       完全一致必須）。未作成の場合はジョブがエラーで停止し、作成を促すログを出す。
 #
 # 課題キーの検出場所（優先順）:
-#   1. PR タイトルの [PROJ-N] プレフィックス
+#   1. PR タイトルに書かれた PROJ-N（[ ] / ( ) / 裸書きのいずれでも可）
 #   2. PR 本文の <!-- backlog-key:PROJ-N --> マーカー
 #   3. PR 本文の「Backlog: PROJ-N」記述
-#   4. PR タイトル・本文の Closes/Fixes/Resolves/Refs/Related/See #N が指す GitHub Issue
+#   4. PR タイトル・本文の Closes/Fixes/Resolves/Refs/Related/See/Issue #N が指す GitHub Issue
 #   5. ブランチ名に埋め込まれた番号（fix/1374-... / feature/619-... / feature/issue-521）
 #
 #   6. 上の 1〜5 で決まらないとき: PR タイトル・参照する GitHub Issue のタイトルを、
@@ -141,8 +141,14 @@ jobs:
                   return json.loads(r.read())
 
           def extract_bl_key(title, body):
-              # 1. タイトルの [PROJ-N] プレフィックス
-              m = re.search(rf'\[({re.escape(PROJ_KEY)}-\d+)\]', title or '')
+              # 1. タイトルに書かれたキー。
+              #    囲みの種類は見ない。[SOCAIAGENT-474] も (SOCAIAGENT-474) も裸書きも拾う。
+              #    角括弧だけを見ていたため、丸括弧で書かれた #1974 が
+              #    「キーが見つかりません」で同期されず、課題が「処理中」で止まっていた。
+              #    \b は使わない。Python の \w は日本語も単語文字なので
+              #    「SOCAIAGENT-474の氏名表示」では末尾が境界にならず拾えない。
+              #    \d+ は貪欲なので SOCAIAGENT-4741 を 474 と読む誤りも起きない。
+              m = re.search(rf'({re.escape(PROJ_KEY)}-\d+)', title or '')
               if m:
                   return m.group(1)
               # 2. 本文の <!-- backlog-key:PROJ-N --> マーカー
@@ -167,7 +173,7 @@ jobs:
           # このリポジトリでは「Refs #1158」「Refs #1332」という書き方が実際に使われており、
           # キーワードを絞っていたせいで同期が漏れていた。
           ISSUE_REF_RE = re.compile(
-              r'(?:closes?|fixes?|resolves?|refs?|related(?:\s+to)?|see)\s*[:：]?\s*#(\d+)',
+              r'(?:closes?|fixes?|resolves?|refs?|related(?:\s+to)?|see|issues?)\s*[:：]?\s*#(\d+)',
               re.IGNORECASE,
           )
 
@@ -332,7 +338,7 @@ jobs:
                   return 4, name
               return False, name
 
-          def update_merge_status(bl_key, status_id, status_name, *, pr_url_section=None):
+          def update_merge_status(bl_key, status_id, status_name, *, pr_url=None):
               """マージ時のステータス更新。既に先へ進んでいる課題は後退させない。
 
               マージ同期は resolve_bl_keys_from_commits でコミット範囲から
@@ -345,22 +351,39 @@ jobs:
               """
               result = advance_issue_status(BL_BASE, API_KEY, bl_key, status_id, status_name,
                                             request=bl_request)
-              if result == "updated" and pr_url_section:
-                  append_pr_url(bl_key, pr_url_section)
+              if result == "updated" and pr_url:
+                  append_pr_url(bl_key, pr_url)
               return result
 
-          def append_pr_url(bl_key, pr_url_section):
-              """説明欄への PR URL 追記。失敗してもステータス更新は守る。"""
+          def append_pr_url(bl_key, pr_url):
+              """説明欄の `## GitHub PR` に PR URL を積む。失敗してもステータス更新は守る。
+
+              URL を1本だけ保持して上書きしていたため、同じ課題に追いPRを出すと
+              前のPRのURLが消えていた。突き合わせ(backlog_sync_audit.py)はこのURLを
+              逆引き索引に使うので、消えると「どの課題にも紐づいていないPR」として
+              誤検知される（#1972 が実際にそうなっていた）。
+              """
               try:
                   issue = bl_request('GET', f"/issues/{bl_key}")
                   if not issue:
                       return
                   current_desc = issue.get('description') or ''
-                  pr_pattern = r'\n*## GitHub PR\n[^\n]*'
-                  if re.search(pr_pattern, current_desc):
-                      new_desc = re.sub(pr_pattern, pr_url_section, current_desc)
+                  # 見出しに続く URL の行だけを節として扱う。`(?:\n[^\n]*)*` のように
+                  # 貪欲にすると、節の後ろに人が書いた本文まで飲み込んでしまう。
+                  pr_pattern = r'\n*## GitHub PR\n(?:https://\S+[ \t]*\n?)*'
+                  found = re.search(pr_pattern, current_desc)
+                  existing = re.findall(r'https://\S+', found.group(0)) if found else []
+                  urls = existing + ([pr_url] if pr_url not in existing else [])
+                  section = '\n\n## GitHub PR\n' + '\n'.join(urls)
+                  if found:
+                      # 節の末尾の改行は残す。消すと後ろに書かれた本文が
+                      # URL の行末に連結して `/pull/1追記メモ` になり、
+                      # 次回からはそのメモまで既存URLとして扱われる。
+                      tail = '\n' if found.group(0).endswith('\n') else ''
+                      new_desc = (current_desc[:found.start()] + section + tail
+                                  + current_desc[found.end():])
                   else:
-                      new_desc = current_desc.rstrip() + pr_url_section
+                      new_desc = current_desc.rstrip() + section
                   # 変化が無いなら PATCH しない(無変更更新は Backlog に拒否されうる)
                   if new_desc.strip() and new_desc != current_desc:
                       if bl_request('PATCH', f"/issues/{bl_key}", {'description': new_desc}) is None:
@@ -370,7 +393,7 @@ jobs:
                   print(f"警告: {bl_key} の説明欄更新で例外: {e}"
                         "(ステータス更新は成功しています)", file=sys.stderr)
 
-          def update_backlog_status(bl_key, status_id, *, pr_url_section=None):
+          def update_backlog_status(bl_key, status_id, *, pr_url=None):
               """PRオープン時の「処理中」、非マージクローズ時の「未対応」への更新。
 
               どちらもそのPRの課題1件に対する明示的な操作なので、後退も意図どおりとして許す
@@ -392,8 +415,8 @@ jobs:
                   return False
               # skipped でも PR URL の追記は行う。ステータスが既に正しいことと、
               # 説明欄に PR URL が載っていることは別の話。
-              if pr_url_section:
-                  append_pr_url(bl_key, pr_url_section)
+              if pr_url:
+                  append_pr_url(bl_key, pr_url)
               return True
 
           # ---- ブランチ作成時: 処理中 ----
@@ -461,7 +484,7 @@ jobs:
                   elif advance_issue_status(BL_BASE, API_KEY, own_key, target_id, target_name) == 'failed':
                       print(f"警告: {own_key} のステータス更新に失敗しました。", file=sys.stderr)
               # 説明欄の PR URL は、ステータスが動かなくても常に最新にする
-              append_pr_url(own_key, f'\n\n## GitHub PR\n{PR_URL}')
+              append_pr_url(own_key, PR_URL)
               print(f"Backlog 課題を反映しました: {own_key} (ステータス: {target_name or '変更なし'}、PR URL を追記)")
               sys.exit(0)
 
@@ -499,10 +522,9 @@ jobs:
               sys.exit(0)
 
           print(f"検出した Backlog 課題キー: {', '.join(sorted(keys))}")
-          pr_section = f'\n\n## GitHub PR\n{PR_URL}'
           for key in sorted(keys):
               result = update_merge_status(key, status_id, status_name,
-                                           pr_url_section=pr_section if key == own_key else None)
+                                           pr_url=PR_URL if key == own_key else None)
               if result == "updated":
                   print(f"Backlog 課題を更新しました: {key} (ステータス: {status_name})")
           PYEOF

@@ -55,8 +55,9 @@ func (s *InterviewService) CreateSession(userID uint, language string, interview
 	// 対応言語のホワイトリスト。以前は空文字しか弾いておらず、未知の値が
 	// 採点プロンプトへ生で入った（normalizeLanguage のコメント参照、#1600）。
 	language = normalizeLanguage(language)
+	// 面接官は男性のみ。未指定・不正値は male（声も male 側になる）。
 	if interviewerGender != "male" && interviewerGender != "female" {
-		interviewerGender = "female"
+		interviewerGender = "male"
 	}
 	session := &models.InterviewSession{
 		UserID:            userID,
