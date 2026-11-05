@@ -324,9 +324,10 @@ func techResultFromCompany(company *models.Company) *TechStackResult {
 }
 
 // buildTechScrapeParseUser は採用ページ本文からの抽出指示を組み立てる。本文は外部サイト由来なので囲む（#1636）。
+// 企業名も企業行（自動収集・ゲスト投稿）由来なので同じく囲む。文中の「企業「%s」」に埋めると囲みの外に出る。
 func buildTechScrapeParseUser(companyName, domainLabel, schema, pageText string) string {
 	return fmt.Sprintf(
-		"企業「%s」の公開ページ本文です。本文に明示された%sのみ次のJSON形式で抽出してください。推測禁止。\n%s\n\n---\n本文:\n%s",
-		companyName, domainLabel, schema, shared.WrapUntrustedText(pageText, "ページ本文"),
+		"次の企業の公開ページ本文です。本文に明示された%sのみ次のJSON形式で抽出してください。推測禁止。\n企業名:\n%s\n%s\n\n---\n本文:\n%s",
+		domainLabel, shared.WrapUntrustedText(companyName, "企業名"), schema, shared.WrapUntrustedText(pageText, "ページ本文"),
 	)
 }
