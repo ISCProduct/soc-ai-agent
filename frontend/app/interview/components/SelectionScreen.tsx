@@ -603,7 +603,8 @@ export default function SelectionScreen({
                 variant="contained"
                 fullWidth
                 endIcon={<ArrowForwardIcon />}
-                disabled={!interviewCompany || hintsLoading}
+                // ヒントは付加情報なので、取得を待たずに開始できる（取得できていなければ標準の質問で進む）
+                disabled={!interviewCompany}
                 onClick={() => { void handleStartInterview() }}
                 sx={{
                   bgcolor: UI.mark, '&:hover': { bgcolor: `color-mix(in srgb, ${UI.mark} 88%, transparent)` },
@@ -613,7 +614,7 @@ export default function SelectionScreen({
                   '&:disabled': { bgcolor: UI.ruleSoft, color: UI.inkFaint, boxShadow: 'none' },
                 }}
               >
-                {hintsLoading ? '企業の面接傾向を取得中...' : '面接を開始する'}
+                面接を開始する
               </Button>
               <Typography sx={{ fontSize: 12, textAlign: 'center', color: UI.inkFaint }}>
                 開始すると利用規約に同意したことになります

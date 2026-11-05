@@ -77,13 +77,14 @@ describe('SelectionScreen', () => {
     expect(retry).toHaveBeenCalledTimes(1)
   })
 
-  it('企業面接ヒント取得中は質問キューを作らないよう開始を待つ', () => {
+  it('企業面接ヒントの取得中でも面接を開始できる', () => {
     renderScreen({
       interviewCompany: { id: 1, name: 'テスト株式会社' },
       hintsLoading: true,
     })
 
-    expect(screen.getByRole('button', { name: '企業の面接傾向を取得中...' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '面接を開始する' })).toBeEnabled()
+    expect(screen.getByText('企業情報を読み込み中...')).toBeInTheDocument()
   })
 
   it('職種カードをキーボード（Enter）で選択できる', () => {

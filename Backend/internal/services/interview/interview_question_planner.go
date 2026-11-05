@@ -143,49 +143,13 @@ func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompan
 	return states
 }
 
-type InterviewAnswerEvaluation struct {
-	Score           int
-	DeepeningPoints []string
-}
-
-// EvaluateInterviewAnswer はキーワードと回答の長さだけを使って軽量評価する。
-// 音声ターンごとの追加LLM呼び出しを避けるため、評価自体は決定的に行う。
-func EvaluateInterviewAnswer(answer string) InterviewAnswerEvaluation {
-	trimmed := strings.TrimSpace(answer)
-	evaluation := InterviewAnswerEvaluation{DeepeningPoints: make([]string, 0, 2)}
-	if trimmed == "" || trimmed == "（聞き取れませんでした）" {
-		evaluation.DeepeningPoints = append(evaluation.DeepeningPoints, "回答の具体例")
-		return evaluation
-	}
-
-	if utf8.RuneCountInString(trimmed) >= minDeepeningRunes {
-		evaluation.Score += 40
-	} else {
-		evaluation.DeepeningPoints = append(evaluation.DeepeningPoints, "回答の具体例")
-	}
-	if strongSignalPattern.MatchString(trimmed) || numberedCountPattern.MatchString(trimmed) {
-		evaluation.Score += 40
-	} else if len(weakSignalPattern.FindAllString(trimmed, -1)) >= 2 {
-		evaluation.Score += 40
-	} else {
-		evaluation.DeepeningPoints = append(evaluation.DeepeningPoints, "具体的な行動や成果")
-	}
-	if evaluation.Score > 100 {
-		evaluation.Score = 100
-	}
-	return evaluation
-}
-
 // NeedsDeepening は回答が抽象的すぎて追質問が必要かを判定する。
+// 十分な長さがあり具体性シグナルを含む回答は深掘りせず、次の質問へ進む。
 func NeedsDeepening(answer string, depth int) bool {
 	if depth >= maxFollowUpDepth {
 		return false
 	}
 	trimmed := strings.TrimSpace(answer)
-	evaluation := EvaluateInterviewAnswer(trimmed)
-	if evaluation.Score >= 80 && len(evaluation.DeepeningPoints) == 0 {
-		return false
-	}
 	if trimmed == "" || trimmed == "（聞き取れませんでした）" {
 		return true
 	}

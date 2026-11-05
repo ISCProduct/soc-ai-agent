@@ -5,10 +5,12 @@ import (
 	"testing"
 
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
 )
 
 type interviewQuestionRepoStub struct {
 	question      *models.InterviewCompanyQuestion
+	existing      []models.InterviewCompanyQuestion
 	findCompanyID uint
 	findID        uint
 	created       *models.InterviewCompanyQuestion
@@ -18,7 +20,7 @@ type interviewQuestionRepoStub struct {
 }
 
 func (r *interviewQuestionRepoStub) FindByCompanyID(uint) ([]models.InterviewCompanyQuestion, error) {
-	return nil, nil
+	return r.existing, nil
 }
 
 func (r *interviewQuestionRepoStub) FindByIDForCompany(id, companyID uint) (*models.InterviewCompanyQuestion, error) {
@@ -62,6 +64,34 @@ func TestInterviewQuestionServiceCreateTrimsInputAndScopesCompany(t *testing.T) 
 	}
 	if repo.created != created {
 		t.Fatal("repository did not receive created question")
+	}
+}
+
+func TestInterviewQuestionServiceCreateEnforcesCompanyLimit(t *testing.T) {
+	input := InterviewQuestionInput{Category: "技術", QuestionText: "質問"}
+
+	tests := []struct {
+		name     string
+		existing int
+		wantErr  bool
+	}{
+		{name: "上限の1件手前は登録できる", existing: maxInterviewQuestionsPerCompany - 1},
+		{name: "上限に達したら登録できない", existing: maxInterviewQuestionsPerCompany, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &interviewQuestionRepoStub{existing: make([]models.InterviewCompanyQuestion, tt.existing)}
+
+			_, err := NewInterviewQuestionService(repo).Create(42, input)
+
+			var validationErr *shared.ValidationError
+			if got := errors.As(err, &validationErr); got != tt.wantErr {
+				t.Fatalf("Create() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if (repo.created == nil) != tt.wantErr {
+				t.Fatalf("created = %+v, wantErr %v", repo.created, tt.wantErr)
+			}
+		})
 	}
 }
 

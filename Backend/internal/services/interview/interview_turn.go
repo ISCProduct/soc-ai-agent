@@ -171,10 +171,7 @@ func (s *InterviewService) Turn(
 	companyReadingResolved = companyContext.readingResolved
 
 	// 企業別カスタム質問とGitHubスキルスコアを取得
-	customQuestions, err := s.fetchCustomQuestions(companyID, position)
-	if err != nil {
-		return nil, err
-	}
+	customQuestions := s.fetchCustomQuestions(companyID, position)
 	skillScores := s.fetchSkillScores(userID)
 	directive, err := s.advanceQuestionPlan(ctx, session, companyID, position, companyName, userText, false)
 	if err != nil {
@@ -301,10 +298,7 @@ func (s *InterviewService) StartTurn(
 	companyInfo = s.resolveCompanyInfo(companyID, companyName, companyInfo)
 
 	// 企業別カスタム質問とGitHubスキルスコアを取得
-	customQuestions, err := s.fetchCustomQuestions(companyID, position)
-	if err != nil {
-		return nil, err
-	}
+	customQuestions := s.fetchCustomQuestions(companyID, position)
 	skillScores := s.fetchSkillScores(userID)
 	directive, err := s.advanceQuestionPlan(ctx, session, companyID, position, companyName, "", true)
 	if err != nil {

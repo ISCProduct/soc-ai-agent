@@ -2,6 +2,7 @@ package companyportal
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"Backend/internal/models"
@@ -13,6 +14,8 @@ var ErrInterviewQuestionForbidden = errors.New("interview question is not owned 
 const (
 	maxInterviewQuestionTextRunes = 2000
 	maxInterviewQuestionPriority  = 999
+	// maxInterviewQuestionsPerCompany は1社あたりの登録上限。ポータルと管理者の両方に適用する。
+	maxInterviewQuestionsPerCompany = 50
 )
 
 type interviewQuestionRepository interface {
@@ -51,6 +54,13 @@ func (s *InterviewQuestionService) Create(companyID uint, input InterviewQuestio
 		return nil, ErrInterviewQuestionForbidden
 	}
 	if err := input.Validate(); err != nil {
+		return nil, err
+	}
+	existing, err := s.repo.FindByCompanyID(companyID)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateInterviewQuestionCount(len(existing)); err != nil {
 		return nil, err
 	}
 	question := &models.InterviewCompanyQuestion{CompanyID: companyID}
@@ -102,6 +112,14 @@ func (in InterviewQuestionInput) Validate() error {
 	}
 	if in.Priority < 0 || in.Priority > maxInterviewQuestionPriority {
 		return &shared.ValidationError{Message: "優先度は0〜999で入力してください"}
+	}
+	return nil
+}
+
+// ValidateInterviewQuestionCount は登録済みの件数からもう1件追加できるかを検証する。
+func ValidateInterviewQuestionCount(existing int) error {
+	if existing >= maxInterviewQuestionsPerCompany {
+		return &shared.ValidationError{Message: fmt.Sprintf("面接質問は1社あたり%d件まで登録できます", maxInterviewQuestionsPerCompany)}
 	}
 	return nil
 }

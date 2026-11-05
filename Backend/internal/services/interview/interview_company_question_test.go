@@ -60,7 +60,6 @@ func TestInterviewServiceFetchCustomQuestions(t *testing.T) {
 		repo          *interviewCompanyQuestionRepoStub
 		wantQuestions int
 		wantCalls     int
-		wantErr       bool
 	}{
 		{
 			name:      "company_idが0ならデフォルト動作へフォールバックする",
@@ -77,12 +76,19 @@ func TestInterviewServiceFetchCustomQuestions(t *testing.T) {
 			wantCalls:     1,
 		},
 		{
-			name:      "リポジトリエラーを呼び出し元へ返す",
+			name:      "リポジトリエラーは空として続行する",
 			companyID: 42,
 			position:  "バックエンドエンジニア",
 			repo:      &interviewCompanyQuestionRepoStub{err: errors.New("database unavailable")},
 			wantCalls: 1,
-			wantErr:   true,
+		},
+		{
+			name:          "上限を超える質問は切り詰める",
+			companyID:     42,
+			position:      "バックエンドエンジニア",
+			repo:          &interviewCompanyQuestionRepoStub{questions: make([]models.InterviewCompanyQuestion, maxInterviewCustomQuestions+1)},
+			wantQuestions: maxInterviewCustomQuestions,
+			wantCalls:     1,
 		},
 	}
 
@@ -91,11 +97,7 @@ func TestInterviewServiceFetchCustomQuestions(t *testing.T) {
 			svc := NewInterviewService(nil, nil, nil, nil, nil, nil, nil)
 			svc.SetCompanyQuestionRepo(tt.repo)
 
-			got, err := svc.fetchCustomQuestions(tt.companyID, tt.position)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("fetchCustomQuestions() error = %v, wantErr %v", err, tt.wantErr)
-			}
-
+			got := svc.fetchCustomQuestions(tt.companyID, tt.position)
 			if len(got) != tt.wantQuestions {
 				t.Fatalf("question count = %d, want %d", len(got), tt.wantQuestions)
 			}

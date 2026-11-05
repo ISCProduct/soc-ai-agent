@@ -33,10 +33,7 @@ func (s *InterviewService) advanceQuestionPlan(
 	}
 	totalQuestions := int(count)
 	if count == 0 {
-		customQuestions, err := s.fetchCustomQuestions(companyID, position)
-		if err != nil {
-			return nil, err
-		}
+		customQuestions := s.fetchCustomQuestions(companyID, position)
 		queue := BuildQuestionQueue(session.ID, customQuestions, companyQuestionHintsFromContext(ctx)...)
 		totalQuestions = len(queue)
 		if err := s.questionStateRepo.CreateBatch(queue); err != nil {

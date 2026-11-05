@@ -3,6 +3,7 @@ package interview
 import (
 	"Backend/internal/models"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -94,6 +95,26 @@ func TestAdvanceQuestionPlanReportsActualQueueSize(t *testing.T) {
 	}
 }
 
+// 企業別質問の取得に失敗しても、標準トピックで面接を続ける。
+func TestAdvanceQuestionPlanContinuesWhenCustomQuestionsFail(t *testing.T) {
+	service := NewInterviewService(nil, nil, nil, nil, nil, nil, nil)
+	service.SetQuestionStateRepo(&questionPlanStateRepoStub{})
+	service.SetCompanyQuestionRepo(&interviewCompanyQuestionRepoStub{err: errors.New("database unavailable")})
+
+	directive, err := service.advanceQuestionPlan(
+		context.Background(),
+		&models.InterviewSession{ID: 5, CompanyID: 42},
+		42, "", "", "", true,
+	)
+
+	if err != nil {
+		t.Fatalf("advanceQuestionPlan() error = %v", err)
+	}
+	if directive == nil || directive.Source != questionSourceTopic {
+		t.Fatalf("directive = %+v, want a standard topic", directive)
+	}
+}
+
 func TestNeedsDeepening(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -126,16 +147,6 @@ func TestNeedsDeepening(t *testing.T) {
 				t.Fatalf("NeedsDeepening() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestEvaluateInterviewAnswerMarksConcreteAnswerAsHighQuality(t *testing.T) {
-	evaluation := EvaluateInterviewAnswer("3名チームでAPIを2週間以内にリリースし、レスポンスを40%改善しました。自分は設計とレビューを担当しました。")
-	if evaluation.Score != 80 {
-		t.Fatalf("score = %d, want 80", evaluation.Score)
-	}
-	if len(evaluation.DeepeningPoints) != 0 {
-		t.Fatalf("deepening points = %v, want none", evaluation.DeepeningPoints)
 	}
 }
 
