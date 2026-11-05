@@ -353,6 +353,36 @@ GitHub Issue を作ります（タイトルは `[SOCAIAGENT-N] ...`）。
 それをそのまま入れます。
 
 
+### PR と Backlog 課題の紐づけ
+
+`pr-to-backlog.yml` が PR のイベントごとに Backlog のステータスを進めます。
+**キーが解決できないと何も起きません**（ジョブは success のまま警告だけ残る）ので、
+次のどれかで必ずキーを載せてください。
+
+| 書き方 | 例 |
+|---|---|
+| PR タイトルにキー（囲みは何でもよい） | `feat(scout): 氏名を出さない (SOCAIAGENT-474)` |
+| PR 本文のマーカー | `<!-- backlog-key:SOCAIAGENT-474 -->` |
+| PR 本文の記述 | `Backlog: SOCAIAGENT-474` |
+| `Closes/Fixes/Refs/Related/See/Issue #N` で、キーを持つ GitHub Issue を指す | `Refs #1636` |
+| ブランチ名の番号（GitHub Issue 番号、またはキーそのもの） | `fix/1374-...` / `feature/SOCAIAGENT-474-...` |
+
+ステータスの進み方。**前へ進めるだけ**で、戻しません（追いPRを出しても本番反映済みの
+課題は巻き戻らない）。
+
+| きっかけ | ステータス |
+|---|---|
+| ブランチの最初の push | 処理中 |
+| PR オープン・再オープン・ドラフト解除 | PR確認待ち（ドラフト中は 処理中 のまま） |
+| PR へ追加 push | 変えない（PR URL だけ更新） |
+| PR クローズ（非マージ） | 未対応 |
+| develop / release / main へマージ | ステージング環境反映 / リリース待ち / 完了 |
+
+ブランチ名に入れる番号は **GitHub Issue 番号**として解決されます。Backlog の課題番号を
+裸の数字で入れると（`feature/474-...`）別の Issue を指してしまうので、
+キーを入れるなら `SOCAIAGENT-474` の形で書いてください。
+
+
 ## 6. 新しく追加する
 
 1. `.claude/commands/<名前>.md` を作る。ファイル名がコマンド名になるので、**短くて打ちやすい名前**にする
