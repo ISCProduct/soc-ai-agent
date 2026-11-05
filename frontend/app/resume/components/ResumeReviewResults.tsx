@@ -16,6 +16,7 @@ import {
 import ScoreUpdateBanner, { type WeightScore } from '@/components/ScoreUpdateBanner'
 import type { ReviewResult } from '../types'
 import { getSeverityConfig, parseItemScores, RUBRIC_SCORE_MAX } from '../utils'
+import FormatFindingsSection from '@/components/FormatFindingsSection'
 
 type ResumeReviewResultsProps = {
   review: ReviewResult | null
@@ -101,6 +102,16 @@ export function ResumeReviewResults({
           </Box>
         )}
         <Divider sx={{ mb: 3 }} />
+        {review.format_findings && (
+          <>
+            <Box sx={{ mb: 3 }}>
+              <FormatFindingsSection findings={review.format_findings} showPage />
+            </Box>
+            <Typography variant="h6" fontWeight="bold" gutterBottom>
+              改善案
+            </Typography>
+          </>
+        )}
         <Stack spacing={2}>
           {(review.items ?? []).map((item) => {
             const config = getSeverityConfig(item.severity)

@@ -1,3 +1,5 @@
+import type { FormatFinding } from '@/components/FormatFindingsSection'
+
 /**
  * 履歴書レビューページ向けの共有型。
  */
@@ -21,6 +23,8 @@ export type ReviewResult = {
   }
   items: ReviewItem[]
   annotated_available: boolean
+  /** ルールによる形式チェックの指摘(#1530)。古い応答には無い */
+  format_findings?: FormatFinding[]
 }
 
 export type CompanyCandidate = {

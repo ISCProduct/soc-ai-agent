@@ -302,6 +302,7 @@ export function useResumePage() {
             review?: ReviewResult['review']
             items?: ReviewResult['items']
             annotated_available?: boolean
+            format_findings?: ReviewResult['format_findings']
             message?: string
           }
           try {
@@ -321,6 +322,7 @@ export function useResumePage() {
               review: data.review as ReviewResult['review'],
               items: data.items ?? [],
               annotated_available: annotatedAvailable,
+              format_findings: data.format_findings,
             })
             if (userId && sessionId) {
               try {
