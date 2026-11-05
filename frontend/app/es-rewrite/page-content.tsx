@@ -1,6 +1,7 @@
 'use client'
 
 import { memo, Suspense, useMemo, useState } from 'react'
+import FormatFindingsSection, { type FormatFinding } from '@/components/FormatFindingsSection'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Alert,
@@ -106,6 +107,8 @@ type ReviewResult = CharLimitResult & {
   company_context_source?: 'company_brief' | 'cache' | 'web_search' | 'none'
   // 同一設問の前回の添削(#1531)。初回・未ログイン・設問未入力のときは付かない。
   previous?: PreviousReview | null
+  // ルールによる形式チェックの指摘(#1530)。「必ず直す」として AI の指摘とは分けて表示する
+  format_findings?: FormatFinding[]
 }
 
 type PreviousReview = {
@@ -785,6 +788,12 @@ function ESRewriteContent() {
               </Paper>
 
               {/* Feedback */}
+              {reviewResult.format_findings && (
+                <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
+                  <FormatFindingsSection findings={reviewResult.format_findings} text={reviewedOriginalText} />
+                </Paper>
+              )}
+
               <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
                 <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 1.5 }}>フィードバック</Typography>
                 <Typography variant="body2" sx={{ color: UI.inkSoft, lineHeight: 1.8 }}>

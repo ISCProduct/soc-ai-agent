@@ -1,19 +1,10 @@
 /**
  * 履歴書レビューページ向けの純粋ヘルパー（React state 非依存）。
  */
-import type { CompanyCandidate, SeverityConfig } from './types'
+import type { CompanyCandidate } from './types'
 
-/** 指摘事項の重要度表示設定 */
-export const severityConfig: Record<string, Omit<SeverityConfig, 'color'> & { color: 'error' | 'warning' | 'info' }> = {
-  critical: { color: 'error', label: '重大', borderColor: '#d32f2f' },
-  warning: { color: 'warning', label: '注意', borderColor: '#ed6c02' },
-  info: { color: 'info', label: '情報', borderColor: '#0288d1' },
-}
-
-/** 未知の severity にはデフォルト表示を返す */
-export function getSeverityConfig(severity: string): SeverityConfig {
-  return severityConfig[severity] ?? { color: 'default', label: severity, borderColor: '#9e9e9e' }
-}
+// 重要度の表示は形式チェック（#1530）と共通なので lib/severity.ts に置き、ここからも使えるようにする
+export { getSeverityConfig, severityConfig } from '@/lib/severity'
 
 /**
  * ルーブリックの評価項目（#1529）。順序・キーはバックエンドの

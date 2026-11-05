@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { ResumeReviewResults } from '@/app/resume/components/ResumeReviewResults'
 import type { WeightScore } from '@/components/ScoreUpdateBanner'
 import type { ReviewResult } from '@/app/resume/types'
@@ -88,5 +88,40 @@ describe('ResumeReviewResults', () => {
       />,
     )
     expect(screen.queryByText('評価の内訳')).not.toBeInTheDocument()
+  })
+})
+
+describe('ResumeReviewResults の形式チェック（#1530）', () => {
+  const props = { scoresBefore: null, scoresAfter: null, annotateError: '', onDownload: () => {} }
+
+  it('format_findings があれば「必ず直す」と「改善案」に分けて表示する', () => {
+    const review: ReviewResult = {
+      ...buildReview({}),
+      format_findings: [
+        { rule: 'blank_field', severity: 'info', start: 0, end: 4, message: '「志望動機」の欄が空欄のようです。', fix: '', page_hint: 1, block_index: 0 },
+      ],
+    }
+    render(<ResumeReviewResults review={review} {...props} />)
+    expect(screen.getByText('必ず直す')).toBeInTheDocument()
+    expect(screen.getByText('改善案')).toBeInTheDocument()
+    expect(screen.getByText('「志望動機」の欄が空欄のようです。')).toBeInTheDocument()
+    expect(within(screen.getByTestId('format-findings')).getByText('ページ 1')).toBeInTheDocument()
+  })
+
+  it('format_findings が無い古い応答では「必ず直す」を出さず、「改善案」の見出しは出す', () => {
+    render(<ResumeReviewResults review={buildReview({})} {...props} />)
+    expect(screen.queryByText('必ず直す')).toBeNull()
+    expect(screen.getByText('改善案')).toBeInTheDocument()
+  })
+
+  it('バックエンドが切り出した excerpt で該当箇所を表示する', () => {
+    const review: ReviewResult = {
+      ...buildReview({}),
+      format_findings: [
+        { rule: 'mixed_style', severity: 'warning', start: 0, end: 7, message: 'です・ます調とである調が混在しています。', fix: '', page_hint: 1, block_index: 3, excerpt: '成果を上げた。' },
+      ],
+    }
+    render(<ResumeReviewResults review={review} {...props} />)
+    expect(within(screen.getByTestId('format-findings')).getByText('「成果を上げた。」')).toBeInTheDocument()
   })
 })
