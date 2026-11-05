@@ -108,9 +108,20 @@ describe('ResumeReviewResults の形式チェック（#1530）', () => {
     expect(within(screen.getByTestId('format-findings')).getByText('ページ 1')).toBeInTheDocument()
   })
 
-  it('format_findings が無い古い応答では、どちらの見出しも出さない', () => {
+  it('format_findings が無い古い応答では「必ず直す」を出さず、「改善案」の見出しは出す', () => {
     render(<ResumeReviewResults review={buildReview({})} {...props} />)
     expect(screen.queryByText('必ず直す')).toBeNull()
-    expect(screen.queryByText('改善案')).toBeNull()
+    expect(screen.getByText('改善案')).toBeInTheDocument()
+  })
+
+  it('バックエンドが切り出した excerpt で該当箇所を表示する', () => {
+    const review: ReviewResult = {
+      ...buildReview({}),
+      format_findings: [
+        { rule: 'mixed_style', severity: 'warning', start: 0, end: 7, message: 'です・ます調とである調が混在しています。', fix: '', page_hint: 1, block_index: 3, excerpt: '成果を上げた。' },
+      ],
+    }
+    render(<ResumeReviewResults review={review} {...props} />)
+    expect(within(screen.getByTestId('format-findings')).getByText('「成果を上げた。」')).toBeInTheDocument()
   })
 })

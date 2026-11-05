@@ -64,6 +64,27 @@ describe('FormatFindingsSection', () => {
     expect(screen.queryByText(/「/)).toBeNull()
   })
 
+  it('本文を渡さないときは excerpt を表示し、本文を渡したときは本文から抜き出す', () => {
+    const { rerender } = render(<FormatFindingsSection findings={[f({ excerpt: '成果を上げた。' })]} />)
+    expect(screen.getByText('「成果を上げた。」')).toBeInTheDocument()
+    rerender(<FormatFindingsSection findings={[f({ start: 0, end: 2, excerpt: '使わない' })]} text="本文です" />)
+    expect(screen.getByText('「本文」')).toBeInTheDocument()
+    expect(screen.queryByText('「使わない」')).toBeNull()
+  })
+
+  it('見出しの id は固定せず、2つ並べても重ならない', () => {
+    render(
+      <>
+        <FormatFindingsSection findings={[]} />
+        <FormatFindingsSection findings={[]} />
+      </>,
+    )
+    const ids = screen.getAllByTestId('format-findings').map((el) => el.getAttribute('aria-labelledby'))
+    expect(ids[0]).toBeTruthy()
+    expect(ids[0]).not.toBe(ids[1])
+    expect(document.getElementById(ids[0] as string)).toHaveTextContent('必ず直す')
+  })
+
   it('履歴書ではページ番号と直し方を表示する', () => {
     render(
       <FormatFindingsSection findings={[f({ page_hint: 2, block_index: 0, fix: 'アルバイト' })]} showPage />,

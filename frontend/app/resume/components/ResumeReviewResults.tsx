@@ -103,15 +103,14 @@ export function ResumeReviewResults({
         )}
         <Divider sx={{ mb: 3 }} />
         {review.format_findings && (
-          <>
-            <Box sx={{ mb: 3 }}>
-              <FormatFindingsSection findings={review.format_findings} showPage />
-            </Box>
-            <Typography variant="h6" fontWeight="bold" gutterBottom>
-              改善案
-            </Typography>
-          </>
+          <Box sx={{ mb: 3 }}>
+            <FormatFindingsSection findings={review.format_findings} showPage />
+          </Box>
         )}
+        {/* 見出しは format_findings の有無によらず出す。古い応答でも画面の構造を変えない */}
+        <Typography variant="h6" fontWeight="bold" gutterBottom>
+          改善案
+        </Typography>
         <Stack spacing={2}>
           {(review.items ?? []).map((item) => {
             const config = getSeverityConfig(item.severity)

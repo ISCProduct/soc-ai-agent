@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { Alert, Box, Button, Card, CardContent, Chip, Stack, Typography } from '@mui/material'
-import { getSeverityConfig } from '@/app/resume/utils'
+import { getSeverityConfig } from '@/lib/severity'
 
 /**
  * 形式チェックの指摘（#1530）。ES 添削の format_findings と、履歴書レビューの ResumeFormatFinding。
@@ -17,6 +17,8 @@ export type FormatFinding = {
   fix: string
   page_hint?: number
   block_index?: number
+  /** 該当箇所の文字列。履歴書だけ（画面がブロックの本文を持たないので、バックエンドが切り出す） */
+  excerpt?: string
 }
 
 /** 最初に表示する件数。残りは折りたたむ */
@@ -36,6 +38,8 @@ export function sortFormatFindings(findings: FormatFinding[]): FormatFinding[] {
 }
 
 function excerptOf(text: string | undefined, f: FormatFinding): string | null {
+  // 本文が無い（履歴書）ときは、バックエンドが切り出した excerpt を使う
+  if (text === undefined) return f.excerpt?.trim() || null
   if (!text || f.start < 0 || f.end <= f.start || f.end > text.length) return null
   const s = text.slice(f.start, f.end).replace(/\s+/g, ' ').trim()
   if (!s) return null
@@ -45,7 +49,7 @@ function excerptOf(text: string | undefined, f: FormatFinding): string | null {
 type FormatFindingsSectionProps = {
   /** 応答に format_findings が無い（古いバックエンド）ときは何も表示しない */
   findings: FormatFinding[] | null | undefined
-  /** 検査した本文。渡すと、指摘された箇所を抜き出して表示する（ES） */
+  /** 検査した本文。渡すと、指摘された箇所を抜き出して表示する（ES）。渡さないときは excerpt を表示する（履歴書） */
   text?: string
   /** ページ番号を表示する（履歴書） */
   showPage?: boolean
@@ -54,6 +58,8 @@ type FormatFindingsSectionProps = {
 /** ルールで見つけた形式の指摘を「必ず直す」として、AI の改善案とは分けて表示する */
 export default function FormatFindingsSection({ findings, text, showPage = false }: FormatFindingsSectionProps) {
   const [expanded, setExpanded] = useState(false)
+  // 1画面に複数置いても aria-labelledby が重ならないよう、見出しの id は固定にしない
+  const headingId = useId()
   if (!findings) return null
 
   const sorted = sortFormatFindings(findings)
@@ -61,8 +67,8 @@ export default function FormatFindingsSection({ findings, text, showPage = false
   const visible = expanded ? sorted : sorted.slice(0, FORMAT_FINDINGS_VISIBLE)
 
   return (
-    <Box component="section" aria-labelledby="format-findings-heading" data-testid="format-findings">
-      <Typography id="format-findings-heading" variant="h6" fontWeight="bold" gutterBottom>
+    <Box component="section" aria-labelledby={headingId} data-testid="format-findings">
+      <Typography id={headingId} variant="h6" fontWeight="bold" gutterBottom>
         必ず直す
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
