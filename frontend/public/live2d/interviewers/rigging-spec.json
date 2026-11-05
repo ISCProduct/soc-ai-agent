@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "models": [
+    {
+      "id": "interviewer-male",
+      "sourceCanvas": {
+        "width": 1312,
+        "height": 1199
+      },
+      "sourceDirectory": "source/male"
+    },
+    {
+      "id": "interviewer-female",
+      "sourceCanvas": {
+        "width": 1289,
+        "height": 1220
+      },
+      "sourceDirectory": "source/female"
+    }
+  ],
+  "requiredParameters": [
+    {
+      "id": "ParamMouthOpenY",
+      "min": 0,
+      "default": 0,
+      "max": 1,
+      "group": "LipSync"
+    },
+    {
+      "id": "ParamAngleY",
+      "min": -30,
+      "default": 0,
+      "max": 30
+    },
+    {
+      "id": "ParamEyeLOpen",
+      "min": 0,
+      "default": 1,
+      "max": 1,
+      "group": "EyeBlink"
+    },
+    {
+      "id": "ParamEyeROpen",
+      "min": 0,
+      "default": 1,
+      "max": 1,
+      "group": "EyeBlink"
+    }
+  ],
+  "recommendedParameters": [
+    {
+      "id": "ParamAngleX",
+      "min": -30,
+      "default": 0,
+      "max": 30
+    },
+    {
+      "id": "ParamBreath",
+      "min": 0,
+      "default": 0,
+      "max": 1
+    }
+  ],
+  "export": {
+    "cubism": "4/5",
+    "textureAtlas": {
+      "size": 2048,
+      "count": 1
+    },
+    "includeCdi3": true,
+    "includePhysics3": false,
+    "includeMotions": false,
+    "includeExpressions": false
+  },
+  "runtimeViewport": {
+    "stage": {
+      "aspectRatio": "16:9",
+      "fit": "full-bleed",
+      "note": "面接画面(/interview)のアバターはステージ全面。96〜120px枠は小さい方の下限確認でしかない"
+    },
+    "smallestPreview": {
+      "minPixels": 96,
+      "maxPixels": 120
+    },
+    "overlays": [
+      "stageTop: 面接官ラベル(左上)",
+      "pipCard: 自分のカメラ(右上、幅 clamp(120px,28%,224px))",
+      "captionBox: 字幕(下部、最大3行)",
+      "stageScrim: 上下のグラデーション",
+      "statusOverlay: 接続中・エラー表示(全面)"
+    ]
+  },
+  "acceptance": [
+    "npm run check:live2d -- <directory> が成功する(終了コード0)。3 は未確認で、合格ではない",
+    "96〜120px枠で閉眼・開口・うなずきが判別できる",
+    "/interview の16:9ステージ(全面表示)で、顔がステージ内に収まっていて切れていない",
+    "同ステージで、右上のPiPと下部の字幕(3行時)が口と目を覆っていない",
+    "接続中・エラーのオーバーレイが出た状態でも、上の2点が崩れない",
+    "ステージ幅375px・768px・1440pxの3段で上の2点を確認する"
+  ]
+}

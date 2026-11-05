@@ -38,11 +38,12 @@ const (
 	TargetES              = "es"
 	TargetResume          = "resume"
 	TargetInterviewReport = "interview-report"
+	TargetChatAnswer      = "chat-answer"
 )
 
 // ValidTargets は対応している評価対象。
 func ValidTargets() []string {
-	return []string{TargetES, TargetResume, TargetInterviewReport}
+	return []string{TargetES, TargetResume, TargetInterviewReport, TargetChatAnswer}
 }
 
 // Case はマニフェスト（jsonl）1行。
@@ -75,6 +76,9 @@ type Input struct {
 	// 面接レポート
 	Transcript string `json:"transcript,omitempty"`
 	Lang       string `json:"lang,omitempty"`
+	// チャット診断の回答評価
+	Question string `json:"question,omitempty"`
+	Answer   string `json:"answer,omitempty"`
 }
 
 // LoadManifest は jsonl を読む。
@@ -145,6 +149,10 @@ func validateCase(c Case) error {
 		if strings.TrimSpace(c.Input.Transcript) == "" {
 			return fmt.Errorf("input.transcript は必須")
 		}
+	case TargetChatAnswer:
+		if strings.TrimSpace(c.Input.Question) == "" || strings.TrimSpace(c.Input.Answer) == "" {
+			return fmt.Errorf("input.question と input.answer は必須")
+		}
 	}
 	return nil
 }
@@ -201,6 +209,9 @@ func (c Case) InputText() string {
 		return c.Input.ResumeText
 	case TargetInterviewReport:
 		return c.Input.Transcript
+	case TargetChatAnswer:
+		// 質問は全ラベルで共通にできるので、長さの交絡は回答側だけを見る。
+		return c.Input.Answer
 	}
 	return ""
 }
