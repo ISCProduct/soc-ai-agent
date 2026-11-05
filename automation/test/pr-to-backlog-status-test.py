@@ -14,14 +14,15 @@ script = textwrap.dedent(body)
 
 FAILED = []
 
-def run(name, env, issue_status, pr=None, expect_patch=None, hits=(), expect_warn=False):
+def run(name, env, issue_status, pr=None, expect_patch=None, hits=(), expect_warn=False,
+        desc='本文', expect_desc=None):
     d = tempfile.mkdtemp()
     os.makedirs(f'{d}/.github/scripts')
     src = open(f'{REPO}/.github/scripts/backlog_client.py', encoding='utf-8').read()
     # 偽の Backlog: 課題1件をメモリ上に持ち、PATCH を記録する
     src += f'''
 _STATUSES = [{{"id":1,"name":"未対応"}},{{"id":2,"name":"処理中"}},{{"id":5,"name":"PR確認待ち"}},{{"id":3,"name":"処理済み"}},{{"id":6,"name":"ステージング環境反映"}},{{"id":4,"name":"完了"}}]
-_ISSUE = {{"status": {{"id": {issue_status[0]}, "name": "{issue_status[1]}"}}, "description": "本文"}}
+_ISSUE = {{"status": {{"id": {issue_status[0]}, "name": "{issue_status[1]}"}}, "description": {json.dumps(desc)}}}
 _LOG = []
 def load_backlog_env(): return ("k","s","SOCAIAGENT","backlog.jp")
 def resolve_bl_base(*a, **k): return ("http://fake","backlog.jp")
@@ -54,7 +55,13 @@ urllib.request.urlopen = _fake
     status_patches = [p for p in (patches or []) if 'statusId' in (p[1] or {})]
     ok = out.returncode == 0 and (expect_patch is None and not status_patches) or (expect_patch is not None and [p[1]['statusId'] for p in status_patches] == [expect_patch])
     ok = ok and (('::warning' in out.stdout) == expect_warn)
+    # 説明欄の PR URL 節。1本上書きだと追いPRでURLが消え、改行を消すと後続本文が連結する。
+    desc_patches = [p[1]['description'] for p in (patches or []) if 'description' in (p[1] or {})]
+    if expect_desc is not None:
+        ok = ok and desc_patches[-1:] == [expect_desc]
     print(('OK  ' if ok else 'FAIL'), name, '| statusPatches=', [p[1] for p in status_patches], '| rc=', out.returncode)
+    if not ok and expect_desc is not None:
+        print('  desc=', desc_patches)
     if not ok:
         FAILED.append(name)
         print(out.stdout[-600:], out.stderr[-600:])
@@ -85,6 +92,22 @@ run('N 日本語の分類名は落とさない(別課題に誤爆しない)', di
     hits=[{'issueKey': 'SOCAIAGENT-8', 'summary': '検索: エラーを表示する'}], expect_warn=True)
 run('O 日本語の分類名が同じ課題には一致する', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=JA,
     hits=[{'issueKey': 'SOCAIAGENT-8', 'summary': 'ログイン: エラーを表示する'}], expect_patch=5)
+# --- 説明欄の PR URL 節 ---
+U = 'https://github.com/o/r/pull/9'
+PRU = dict(PRBASE, html_url=U)
+run('P 説明欄に PR URL 節を作る', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=PRU,
+    expect_patch=5, expect_desc=f'本文\n\n## GitHub PR\n{U}')
+run('P2 追いPRのURLを積む(前のPRを消さない)', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=PRU,
+    desc='本文\n\n## GitHub PR\nhttps://github.com/o/r/pull/8',
+    expect_patch=5,
+    expect_desc=f'本文\n\n## GitHub PR\nhttps://github.com/o/r/pull/8\n{U}')
+run('P3 節の後ろの本文を URL 行に連結しない', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=PRU,
+    desc='本文\n\n## GitHub PR\nhttps://github.com/o/r/pull/8\n追記メモ',
+    expect_patch=5,
+    expect_desc=f'本文\n\n## GitHub PR\nhttps://github.com/o/r/pull/8\n{U}\n追記メモ')
+run('P4 同じURLを二重に積まない(PATCHしない)', dict(ACTION='synchronize', PR_NUMBER='9'), (5, 'PR確認待ち'), pr=PRU,
+    desc=f'本文\n\n## GitHub PR\n{U}')
+
 if FAILED:
     print('FAIL:', ', '.join(FAILED))
     sys.exit(1)

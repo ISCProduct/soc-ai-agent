@@ -34,6 +34,7 @@ func SetupAdminRoutes(
 	appController *applicationcontrollers.ApplicationController,
 	teacherInsightController *insightcontrollers.TeacherStudentInsightController,
 	teacherGuidanceController *insightcontrollers.TeacherGuidanceController,
+	teacherESReviewController *insightcontrollers.TeacherESReviewController,
 	userRepo *repositories.UserRepository,
 	schoolService *school.SchoolService,
 	adminSecret string,
@@ -55,6 +56,8 @@ func SetupAdminRoutes(
 	// 単一生徒ルートは school_id クエリを持たないため schoolScope を掛けず、
 	// コントローラで対象生徒の学校に対して EnsureAdminSchoolAccess を行う。
 	admin.POST("/teacher/students/:id/guidances", teacherGuidanceController.Create)
+	// ES添削の履歴（#1531）。担当校スコープを通し、学園一致はクエリ側で担保する。
+	admin.GET("/teacher/students/:id/es-reviews", teacherESReviewController.List, schoolScope)
 
 	admin.GET("/interviews", adminInterviewController.ListSessions, schoolScope)
 	admin.GET("/interviews/:id/videos", adminInterviewController.ListVideos)

@@ -42,6 +42,13 @@ func PrintSummary(w io.Writer, s *Summary) {
 		formatUnstable(s.UnstableCaseIDs))
 	fmt.Fprintf(w, "%-16s %+.3f（1.000が完全一致）%s\n", "弁別力(順位相関)",
 		s.LabelRankCorrelation, formatByLabel(s.MeanScoreByLabel))
+	if s.PairwiseComparable == 0 {
+		// 0.0% と出すと「当てずっぽう(50%)より悪い」に見える。比べる組が無いだけ。
+		fmt.Fprintf(w, "%-16s 算出不可（ラベルが異なる組が無い）\n", "ペア一致率")
+	} else {
+		fmt.Fprintf(w, "%-16s %.1f%%（異なるラベルの%d組のうち、点の大小がラベルと同じだった割合。50%%は当てずっぽう）\n",
+			"ペア一致率", s.PairwiseAgreement*100, s.PairwiseComparable)
+	}
 	// 交絡は弁別力の直下に必ず3行で出す。弁別力だけを見ると、長さを測っている
 	// だけの測定を「内容の質を測れている」と読んでしまう（#1593）。
 	//
@@ -205,6 +212,11 @@ func Diff(prev, cur *Summary) (regs []Regression, warnings []string) {
 	add("破損率", prev.BrokenRate, cur.BrokenRate, brokenRateWorseBy, true)
 	add("指示遵守率", prev.ComplianceRate, cur.ComplianceRate, complianceWorseBy, false)
 	add("弁別力(順位相関)", prev.LabelRankCorrelation, cur.LabelRankCorrelation, correlationWorseBy, false)
+	// ペア一致率は両方で比べる組があるときだけ。旧 JSON はこの項目が無く 0 でデコードされるので、
+	// 組数が0の側があれば比べない（0 から上がって「改善」に見えるのを防ぐ）。
+	if prev.PairwiseComparable > 0 && cur.PairwiseComparable > 0 {
+		add("ペア一致率", prev.PairwiseAgreement, cur.PairwiseAgreement, correlationWorseBy, false)
+	}
 	// 交絡も劣化ゲートに入れる。弁別力だけをゲートにすると、ゲートが
 	// 「どんな手段でも弁別力を上げろ」を報酬にしてしまい、長さへの依存を
 	// 強めた変更が緑で通る（#1593 が止めたかったことそのもの）。
@@ -295,6 +307,9 @@ func PrintDiff(w io.Writer, prev, cur *Summary) bool {
 	row("破損率", prev.BrokenRate, cur.BrokenRate, true)
 	row("指示遵守率", prev.ComplianceRate, cur.ComplianceRate, true)
 	row("弁別力(順位相関)", prev.LabelRankCorrelation, cur.LabelRankCorrelation, false)
+	if prev.PairwiseComparable > 0 && cur.PairwiseComparable > 0 {
+		row("ペア一致率", prev.PairwiseAgreement, cur.PairwiseAgreement, true)
+	}
 	// 未計測の側があるときは行自体を出さない。0.000 と並べると「交絡が無かった
 	// のに増えた」と読める表になる。
 	if lengthComparable(prev, cur) {
