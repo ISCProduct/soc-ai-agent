@@ -91,3 +91,47 @@ describe('POST /api/es/review', () => {
     expect(data).toEqual({ specificity_score: 80 })
   })
 })
+
+// ES添削の履歴を残すには実行者が要る。プロキシが X-User-Token を落とすと、
+// Backend は常に未ログイン扱いになり保存が静かに止まる（#1531）。
+describe('POST /api/es/review のトークン転送', () => {
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  it('X-User-Token を Backend へ転送する', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ improved_text: '改善後' }), { status: 200 }),
+    )
+
+    const request = new NextRequest('http://localhost:3000/api/es/review', {
+      method: 'POST',
+      headers: { 'X-User-Token': 'token-abc' },
+      body: JSON.stringify({ es_text: '原文', question: '設問' }),
+    })
+    await reviewPOST(request)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/es\/review$/),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'X-User-Token': 'token-abc' }),
+      }),
+    )
+  })
+
+  it('トークンが無くてもリクエストは通る（未ログイン利用は仕様）', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ improved_text: '改善後' }), { status: 200 }),
+    )
+
+    const request = new NextRequest('http://localhost:3000/api/es/review', {
+      method: 'POST',
+      body: JSON.stringify({ es_text: '原文' }),
+    })
+    const response = await reviewPOST(request)
+
+    expect(response.status).toBe(200)
+    const headers = fetchMock.mock.calls[0][1]?.headers as Record<string, string>
+    expect(headers['X-User-Token']).toBeUndefined()
+  })
+})

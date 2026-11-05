@@ -89,6 +89,70 @@ func EchoUserAuth(userSecret string, access auth.UserAccessGuard, orgs ...Organi
 	}
 }
 
+// EchoOptionalUserAuth は X-User-Token があれば実行者を載せ、無ければ素通りする（#1531）。
+//
+// ES添削は未ログインでも使える経路として開いている（認証を必須にすると、
+// ログイン前に試してもらう導線が壊れる）。一方で結果を履歴として残すには
+// 実行者が要る。そこで「あれば使う、無ければ従来どおり」にする。
+//
+// 壊れたトークン・退会済みユーザーは 401 ではなく「未ログイン」として扱う。
+// ここで弾くと、トークンの期限が切れただけで添削そのものが使えなくなる。
+// 本人として保存されないだけで、機能は従来どおり動く方を選ぶ。
+//
+// 必須認証が要る経路には使わないこと。EchoUserAuth と違って素通りする。
+func EchoOptionalUserAuth(userSecret string, access auth.UserAccessGuard, orgs ...OrganizationIDResolver) echo.MiddlewareFunc {
+	var resolver OrganizationIDResolver
+	if len(orgs) > 0 {
+		resolver = orgs[0]
+	}
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			token := c.Request().Header.Get("X-User-Token")
+			if userSecret == "" || token == "" {
+				return next(c)
+			}
+			userID, _, err := middleware.ParseJWT(token, userSecret)
+			// userID == 0 も弾く。ParseJWT は失敗時に 0 を返す約束だが、
+			// その内部規約に依存せずここで閉じる（依存すると、約束が変わったときに
+			// 誰のものか分からない実行者が載る）。
+			if err != nil || userID == 0 {
+				return next(c)
+			}
+			if access != nil {
+				if err := access.EnsureActiveUser(userID); err != nil {
+					return next(c)
+				}
+			}
+			var orgID uint
+			if resolver != nil {
+				resolved, err := resolver.ResolveOrganizationID(userID)
+				if err != nil || resolved == 0 {
+					// 組織が確定しない実行者は載せない。載せると、呼び出し側が
+					// 「本人は分かったが所属は分からない」状態で保存先を決めることになり、
+					// 既定組織へ倒すなどして別学園の行として永続化されうる（#1531）。
+					// 無効化された組織・一時的な DB 障害もここに入る。
+					return next(c)
+				}
+				orgID = resolved
+			}
+			ctx := context.WithValue(c.Request().Context(), middleware.UserIDContextKey, userID)
+			if orgID > 0 {
+				ctx = context.WithValue(ctx, middleware.OrganizationIDContextKey, orgID)
+				// テナントを跨いだアクセスは本人の所属として扱わない。
+				// 他学園のサブドメインから送られた添削が本人の学園の履歴に混ざると、
+				// 帰属が追えなくなる（EchoUserAuth は同じ状況を 403 にしている）。
+				if tenantOrgID, ok := middleware.TenantOrganizationIDFromContext(ctx); ok && tenantOrgID != orgID {
+					return next(c)
+				}
+			}
+			// AI利用量の配賦先も載せる（#1294）。未ログインのときは従来どおり NULL のまま。
+			ctx = usagectx.WithActor(ctx, userID, orgID)
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	}
+}
+
 // EchoTenantResolver は X-Tenant-Slug ヘッダー(学園サブドメインラベル)から組織を解決し、
 // リクエストコンテキストへ載せるEcho nativeミドルウェア。
 // ヘッダー未指定の場合は何もしない（テナント概念のないアクセスとの後方互換のため）。
