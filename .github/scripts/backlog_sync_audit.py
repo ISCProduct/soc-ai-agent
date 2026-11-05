@@ -20,10 +20,12 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backlog_client import bl_request, load_backlog_env, resolve_bl_base  # noqa: E402
+from resolve_deployed_issues import extract_pr_numbers  # noqa: E402
 
 # ステータスの前後。pr-to-backlog.yml の MERGE_STATUS_ORDER と同じ並びにする。
 STATUS_ORDER = (
@@ -50,10 +52,21 @@ MERGED_MIN_STATUS = {
 # ステータスの前後比較で弾かれるので、含めても完了の課題が指摘に出ることはない。
 AUDIT_STATUS_IDS = (1, 2, 416375, 416451, 3, 437943, 437944, 4)
 
-PR_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/(\d+)")
+def pr_url_re(repo: str) -> re.Pattern[str]:
+    """`https://github.com/<repo>/pull/N` だけを拾う正規表現。
+
+    owner/repo を捨てて番号だけ見ると、別リポジトリの参考リンクが索引に入り、
+    同じ番号のローカルPRが「紐づいている」ことになって検知漏れになる。
+    github-issue-to-backlog.yml は Issue 本文をそのまま説明欄へ写すので、
+    参考リンクは実際に説明欄へ入ってくる。
+    """
+    return re.compile(r"https://github\.com/" + re.escape(repo) + r"/pull/(\d+)")
 
 # Discord の 1 通は 2000 文字。余裕を見て切る。
 MESSAGE_CHARS = 1700
+
+# PR 一覧の1ページの件数。100 だと1ページ 2MB を超え、読み落としが起きやすい。
+PR_PAGE_SIZE = 50
 
 
 def rank(status_name: str) -> int:
@@ -64,26 +77,27 @@ def rank(status_name: str) -> int:
         return -1
 
 
-def linked_pr_numbers(description: str) -> list[int]:
-    """説明欄に書かれた PR 番号。重複は除き、書かれた順に返す。"""
+def linked_pr_numbers(description: str, repo: str) -> list[int]:
+    """説明欄に書かれた、このリポジトリの PR 番号。重複は除き、書かれた順に返す。"""
     nums: list[int] = []
-    for m in PR_URL_RE.finditer(description or ""):
+    for m in pr_url_re(repo).finditer(description or ""):
         n = int(m.group(1))
         if n not in nums:
             nums.append(n)
     return nums
 
 
-def find_mismatches(issues: list[dict], prs: list[dict]) -> list[str]:
+def find_mismatches(issues: list[dict], prs: list[dict], repo: str) -> list[str]:
     """ズレの一覧を人が読む1行ずつにして返す。ズレが無ければ空。
 
     issues: Backlog の課題（issueKey / status.name / description）
-    prs:    GitHub の PR（number / draft / state / base / mergedAt / title）
+    prs:    GitHub の PR（number / draft / state / base / mergedAt / title /
+            プロモーションPRなら commitSubjects）
     どちらも API の形をそのまま受ける。テストから素の dict を渡せるようにしている。
     """
     by_pr: dict[int, list[dict]] = {}
     for issue in issues:
-        for n in linked_pr_numbers(issue.get("description") or ""):
+        for n in linked_pr_numbers(issue.get("description") or "", repo):
             by_pr.setdefault(n, []).append(issue)
 
     pr_by_number = {int(p["number"]): p for p in prs}
@@ -97,10 +111,10 @@ def find_mismatches(issues: list[dict], prs: list[dict]) -> list[str]:
 
         # 1. キーが解決できず、どの課題にも紐づいていない PR。
         #    ドラフトは作業中なので、まだ書いていなくてもおかしくない。
-        if not linked:
-            if is_open and not pr.get("draft"):
-                lines.append(f"- #{num} どの課題にも紐づいていません（{title[:50]}）")
-            continue
+        #    ここで continue しない。課題に直接紐づかないプロモーションPRを
+        #    検知3へ通す必要がある。
+        if not linked and is_open and not pr.get("draft"):
+            lines.append(f"- #{num} どの課題にも紐づいていません（{title[:50]}）")
 
         for issue in linked:
             key = issue["issueKey"]
@@ -113,10 +127,23 @@ def find_mismatches(issues: list[dict], prs: list[dict]) -> list[str]:
             if is_open and not pr.get("draft") and cur < rank("PR確認待ち"):
                 lines.append(f"- {key} は「{name}」ですが #{num} はレビュー待ちです")
 
-            # 3. マージ済みなのに課題が進んでいない。
-            if pr.get("mergedAt"):
-                want = MERGED_MIN_STATUS.get(pr.get("base") or "")
-                if want and cur < rank(want):
+        # 3. マージ済みなのに課題が進んでいない。
+        #    develop→release→main のプロモーションPR自身はどの課題にも紐づかない
+        #    （pr-to-backlog.yml が URL を追記するのは own_key の課題だけ）。
+        #    squash マージのコミット題名に残る元PR番号 "(#1234)" から元PRへ展開し、
+        #    その課題を見る。これが無いと release・main 昇格の同期漏れを拾えない。
+        if pr.get("mergedAt"):
+            want = MERGED_MIN_STATUS.get(pr.get("base") or "")
+            related = list(linked)
+            for origin in extract_pr_numbers(pr.get("commitSubjects") or []):
+                for issue in by_pr.get(origin, []):
+                    if issue not in related:
+                        related.append(issue)
+            for issue in related:
+                key = issue["issueKey"]
+                name = (issue.get("status") or {}).get("name", "")
+                cur = rank(name)
+                if want and 0 <= cur < rank(want):
                     lines.append(
                         f"- {key} は「{name}」ですが #{num} は {pr['base']} にマージ済みです"
                         f"（「{want}」以降のはず）"
@@ -128,7 +155,7 @@ def find_mismatches(issues: list[dict], prs: list[dict]) -> list[str]:
         if name != "PR確認待ち":
             continue
         key = issue["issueKey"]
-        nums = linked_pr_numbers(issue.get("description") or "")
+        nums = linked_pr_numbers(issue.get("description") or "", repo)
         open_prs = [n for n in nums if (pr_by_number.get(n) or {}).get("state") == "open"]
         if open_prs:
             continue
@@ -189,6 +216,28 @@ def fetch_issues(base: str, api_key: str, project_key: str) -> list[dict]:
         offset += 100
 
 
+def gh_get(url: str, token: str, attempts: int = 3):
+    """GitHub API を叩いて JSON を返す。読み込み失敗は読み直す。
+
+    PR 一覧は1ページ 1MB 超になり、`IncompleteRead` で途中で切れることが実際にあった。
+    1回の読み落としで突き合わせ全体が落ちると、ズレの報告がその日だけ出なくなる。
+    """
+    last: Exception | None = None
+    for i in range(attempts):
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Accept", "application/vnd.github+json")
+        req.add_header("X-GitHub-Api-Version", "2022-11-28")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return json.loads(resp.read())
+        except Exception as e:  # noqa: BLE001  読み落とし・切断は読み直す
+            last = e
+            print(f"GitHub API の取得に失敗（{i + 1}/{attempts}）: {e}", file=sys.stderr)
+            time.sleep(2 * (i + 1))
+    raise last if last else RuntimeError("GitHub API の取得に失敗しました")
+
+
 def gh_prs(repo: str, token: str, merged_days: int) -> list[dict]:
     """オープンな PR と、直近 merged_days 日にマージされた PR。
 
@@ -203,26 +252,27 @@ def gh_prs(repo: str, token: str, merged_days: int) -> list[dict]:
     for state in ("open", "closed"):
         page = 1
         while True:
-            url = (
+            # per_page は 50。100 だと1ページ 2MB を超えて読み落としが起きやすい。
+            prs = gh_get(
                 f"https://api.github.com/repos/{repo}/pulls"
-                f"?state={state}&per_page=100&page={page}&sort=updated&direction=desc"
+                f"?state={state}&per_page={PR_PAGE_SIZE}&page={page}"
+                f"&sort=updated&direction=desc",
+                token,
             )
-            req = urllib.request.Request(url)
-            req.add_header("Authorization", f"Bearer {token}")
-            req.add_header("Accept", "application/vnd.github+json")
-            req.add_header("X-GitHub-Api-Version", "2022-11-28")
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                prs = json.load(resp)
             if not prs:
                 break
+            # sort=updated&direction=desc なので、更新が since より古いページに
+            # 入ったらそれ以降は対象外。merged_at で打ち切ると、古いマージ済みPRに
+            # コメントが付いて前へ並んだときに対象期間のPRを取り落とす
+            # （merged_at <= updated_at なので、更新日時で見れば取りこぼさない）。
             stop = False
             for p in prs:
                 merged_at = p.get("merged_at")
                 if state == "closed":
-                    if not merged_at:
-                        continue
-                    if merged_at < since:
+                    if (p.get("updated_at") or "") < since:
                         stop = True
+                        continue
+                    if not merged_at or merged_at < since:
                         continue
                 out.append(
                     {
@@ -234,10 +284,22 @@ def gh_prs(repo: str, token: str, merged_days: int) -> list[dict]:
                         "mergedAt": merged_at,
                     }
                 )
-            if stop or len(prs) < 100:
+            if stop or len(prs) < PR_PAGE_SIZE:
                 break
             page += 1
     return out
+
+
+def gh_commit_subjects(repo: str, token: str, number: int) -> list[str]:
+    """PR のコミット題名。取れなければ空（展開できないだけで、他の検知は続ける）。"""
+    try:
+        commits = gh_get(
+            f"https://api.github.com/repos/{repo}/pulls/{number}/commits?per_page=250", token
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"#{number} のコミット取得に失敗: {e}", file=sys.stderr)
+        return []
+    return [(c.get("commit", {}).get("message") or "").split("\n", 1)[0] for c in commits]
 
 
 def main(argv: list[str]) -> int:
@@ -255,7 +317,11 @@ def main(argv: list[str]) -> int:
 
     issues = fetch_issues(base, api_key, project_key)
     prs = gh_prs(repo, token, merged_days)
-    lines = find_mismatches(issues, prs)
+    # プロモーションPR(release/main 宛)だけコミット題名を取る。元PRへの展開に使う。
+    for pr in prs:
+        if pr.get("mergedAt") and pr.get("base") in ("release", "main"):
+            pr["commitSubjects"] = gh_commit_subjects(repo, token, pr["number"])
+    lines = find_mismatches(issues, prs, repo)
     print(f"課題 {len(issues)} 件 / PR {len(prs)} 件を突き合わせ: ズレ {len(lines)} 件")
     for line in lines:
         print(line)

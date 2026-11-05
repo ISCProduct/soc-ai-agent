@@ -338,7 +338,7 @@ jobs:
                   return 4, name
               return False, name
 
-          def update_merge_status(bl_key, status_id, status_name, *, pr_url_section=None):
+          def update_merge_status(bl_key, status_id, status_name, *, pr_url=None):
               """マージ時のステータス更新。既に先へ進んでいる課題は後退させない。
 
               マージ同期は resolve_bl_keys_from_commits でコミット範囲から
@@ -351,11 +351,11 @@ jobs:
               """
               result = advance_issue_status(BL_BASE, API_KEY, bl_key, status_id, status_name,
                                             request=bl_request)
-              if result == "updated" and pr_url_section:
-                  append_pr_url(bl_key, pr_url_section)
+              if result == "updated" and pr_url:
+                  append_pr_url(bl_key, pr_url)
               return result
 
-          def append_pr_url(bl_key, pr_url_section):
+          def append_pr_url(bl_key, pr_url):
               """説明欄の `## GitHub PR` に PR URL を積む。失敗してもステータス更新は守る。
 
               URL を1本だけ保持して上書きしていたため、同じ課題に追いPRを出すと
@@ -373,11 +373,15 @@ jobs:
                   pr_pattern = r'\n*## GitHub PR\n(?:https://\S+[ \t]*\n?)*'
                   found = re.search(pr_pattern, current_desc)
                   existing = re.findall(r'https://\S+', found.group(0)) if found else []
-                  urls = existing + [u for u in re.findall(r'https://\S+', pr_url_section)
-                                     if u not in existing]
+                  urls = existing + ([pr_url] if pr_url not in existing else [])
                   section = '\n\n## GitHub PR\n' + '\n'.join(urls)
                   if found:
-                      new_desc = re.sub(pr_pattern, section, current_desc, count=1)
+                      # 節の末尾の改行は残す。消すと後ろに書かれた本文が
+                      # URL の行末に連結して `/pull/1追記メモ` になり、
+                      # 次回からはそのメモまで既存URLとして扱われる。
+                      tail = '\n' if found.group(0).endswith('\n') else ''
+                      new_desc = (current_desc[:found.start()] + section + tail
+                                  + current_desc[found.end():])
                   else:
                       new_desc = current_desc.rstrip() + section
                   # 変化が無いなら PATCH しない(無変更更新は Backlog に拒否されうる)
@@ -389,7 +393,7 @@ jobs:
                   print(f"警告: {bl_key} の説明欄更新で例外: {e}"
                         "(ステータス更新は成功しています)", file=sys.stderr)
 
-          def update_backlog_status(bl_key, status_id, *, pr_url_section=None):
+          def update_backlog_status(bl_key, status_id, *, pr_url=None):
               """PRオープン時の「処理中」、非マージクローズ時の「未対応」への更新。
 
               どちらもそのPRの課題1件に対する明示的な操作なので、後退も意図どおりとして許す
@@ -411,8 +415,8 @@ jobs:
                   return False
               # skipped でも PR URL の追記は行う。ステータスが既に正しいことと、
               # 説明欄に PR URL が載っていることは別の話。
-              if pr_url_section:
-                  append_pr_url(bl_key, pr_url_section)
+              if pr_url:
+                  append_pr_url(bl_key, pr_url)
               return True
 
           # ---- ブランチ作成時: 処理中 ----
@@ -480,7 +484,7 @@ jobs:
                   elif advance_issue_status(BL_BASE, API_KEY, own_key, target_id, target_name) == 'failed':
                       print(f"警告: {own_key} のステータス更新に失敗しました。", file=sys.stderr)
               # 説明欄の PR URL は、ステータスが動かなくても常に最新にする
-              append_pr_url(own_key, f'\n\n## GitHub PR\n{PR_URL}')
+              append_pr_url(own_key, PR_URL)
               print(f"Backlog 課題を反映しました: {own_key} (ステータス: {target_name or '変更なし'}、PR URL を追記)")
               sys.exit(0)
 
@@ -518,10 +522,9 @@ jobs:
               sys.exit(0)
 
           print(f"検出した Backlog 課題キー: {', '.join(sorted(keys))}")
-          pr_section = f'\n\n## GitHub PR\n{PR_URL}'
           for key in sorted(keys):
               result = update_merge_status(key, status_id, status_name,
-                                           pr_url_section=pr_section if key == own_key else None)
+                                           pr_url=PR_URL if key == own_key else None)
               if result == "updated":
                   print(f"Backlog 課題を更新しました: {key} (ステータス: {status_name})")
           PYEOF

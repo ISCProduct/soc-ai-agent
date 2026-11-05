@@ -17,7 +17,14 @@ import sys
 sys.path.insert(0, ".github/scripts")
 from backlog_sync_audit import build_message, find_mismatches, linked_pr_numbers, rank
 
-PR = "https://github.com/ISCProduct/soc-ai-agent/pull/"
+REPO = "ISCProduct/soc-ai-agent"
+
+
+def find_mismatches_(issues, prs):
+    """リポジトリ名を毎回書かないための薄い包み。"""
+    return find_mismatches(issues, prs, REPO)
+
+PR = f"https://github.com/{REPO}/pull/"
 
 
 def issue(key, status, *prs):
@@ -27,9 +34,10 @@ def issue(key, status, *prs):
     return {"issueKey": key, "status": {"name": status}, "description": desc}
 
 
-def pr(number, *, state="open", draft=False, base="develop", merged=None, title="feat: 何か"):
+def pr(number, *, state="open", draft=False, base="develop", merged=None,
+       title="feat: 何か", subjects=None):
     return {"number": number, "state": state, "draft": draft, "base": base,
-            "mergedAt": merged, "title": title}
+            "mergedAt": merged, "title": title, "commitSubjects": subjects or []}
 
 
 failures = 0
@@ -49,21 +57,21 @@ def check(name, got, want):
 # SOCAIAGENT-474 の実例。PR は開いているのに課題が「処理中」で止まっていた。
 check(
     "オープンPRがあるのに課題がPR確認待ちより手前",
-    find_mismatches([issue("SOCAIAGENT-474", "処理中", 1974)], [pr(1974)]),
+    find_mismatches_([issue("SOCAIAGENT-474", "処理中", 1974)], [pr(1974)]),
     ["- SOCAIAGENT-474 は「処理中」ですが #1974 はレビュー待ちです"],
 )
 
 # キーがどこにも書かれておらず同期が効かなかったPR。
 check(
     "どの課題にも紐づいていないオープンPR",
-    find_mismatches([], [pr(1970, title="fix(company): 企業名を囲む")]),
+    find_mismatches_([], [pr(1970, title="fix(company): 企業名を囲む")]),
     ["- #1970 どの課題にも紐づいていません（fix(company): 企業名を囲む）"],
 )
 
 # マージ済みなのに進んでいない（SOCAIAGENT-450 / 473 の実例）。
 check(
     "developへマージ済みなのに未対応",
-    find_mismatches(
+    find_mismatches_(
         [issue("SOCAIAGENT-450", "未対応", 1954)],
         [pr(1954, state="closed", merged="2026-11-04T05:43:00Z")],
     ),
@@ -72,7 +80,7 @@ check(
 )
 check(
     "mainへマージ済みなのにリリース待ち",
-    find_mismatches(
+    find_mismatches_(
         [issue("SOCAIAGENT-9", "リリース待ち", 10)],
         [pr(10, state="closed", base="main", merged="2026-11-04T00:00:00Z")],
     ),
@@ -82,12 +90,12 @@ check(
 # PR確認待ちなのに見るものが無い（424 / 445 / 453 / 379 の実例）。
 check(
     "PR確認待ちだがPRが紐づいていない",
-    find_mismatches([issue("SOCAIAGENT-424", "PR確認待ち")], []),
+    find_mismatches_([issue("SOCAIAGENT-424", "PR確認待ち")], []),
     ["- SOCAIAGENT-424 は「PR確認待ち」ですが PR が紐づいていません"],
 )
 check(
     "PR確認待ちだが紐づくPRが閉じている",
-    find_mismatches(
+    find_mismatches_(
         [issue("SOCAIAGENT-5", "PR確認待ち", 11)],
         [pr(11, state="closed")],
     ),
@@ -98,33 +106,33 @@ check(
 
 check(
     "正常（PR確認待ち × オープンPR）",
-    find_mismatches([issue("SOCAIAGENT-1", "PR確認待ち", 100)], [pr(100)]),
+    find_mismatches_([issue("SOCAIAGENT-1", "PR確認待ち", 100)], [pr(100)]),
     [],
 )
 check(
     "ドラフトPRは課題が処理中でも正常",
-    find_mismatches([issue("SOCAIAGENT-2", "処理中", 101)], [pr(101, draft=True)]),
+    find_mismatches_([issue("SOCAIAGENT-2", "処理中", 101)], [pr(101, draft=True)]),
     [],
 )
 check(
     "ドラフトPRはキーが無くても指摘しない",
-    find_mismatches([], [pr(1912, draft=True)]),
+    find_mismatches_([], [pr(1912, draft=True)]),
     [],
 )
 check(
     "完了済みの課題に追いPRが出ているのは正常",
-    find_mismatches([issue("SOCAIAGENT-347", "完了", 1821)], [pr(1821)]),
+    find_mismatches_([issue("SOCAIAGENT-347", "完了", 1821)], [pr(1821)]),
     [],
 )
 check(
     "ステージング反映済みの課題に追いPRが出ているのは正常",
-    find_mismatches([issue("SOCAIAGENT-384", "ステージング環境反映", 1972, 1973)],
+    find_mismatches_([issue("SOCAIAGENT-384", "ステージング環境反映", 1972, 1973)],
                     [pr(1972), pr(1973)]),
     [],
 )
 check(
     "feature宛のマージはステータスを問わない",
-    find_mismatches(
+    find_mismatches_(
         [issue("SOCAIAGENT-3", "処理中", 12)],
         [pr(12, state="closed", base="feature/other", merged="2026-11-04T00:00:00Z")],
     ),
@@ -135,8 +143,48 @@ check(
 
 check(
     "説明欄から複数のPR番号を順に拾う",
-    linked_pr_numbers(f"## GitHub PR\n{PR}1972\n{PR}1973\n{PR}1972"),
+    linked_pr_numbers(f"## GitHub PR\n{PR}1972\n{PR}1973\n{PR}1972", REPO),
     [1972, 1973],
+)
+# 別リポジトリの参考リンクを拾うと、同番号のローカルPRが「紐づき済み」になって
+# 検知漏れになる。
+check(
+    "別リポジトリのPR URLは索引に入れない",
+    linked_pr_numbers("参考: https://github.com/upstream/library/pull/1970", REPO),
+    [],
+)
+check(
+    "別リポジトリのリンクだけの課題では未リンクPRを見逃さない",
+    find_mismatches_(
+        [issue("SOCAIAGENT-7", "完了")
+         | {"description": "参考: https://github.com/upstream/library/pull/1970"}],
+        [pr(1970, title="fix: 何か")],
+    ),
+    ["- #1970 どの課題にも紐づいていません（fix: 何か）"],
+)
+
+# プロモーションPR(develop→release→main)は課題に直接紐づかない。
+# squash コミット題名の "(#1234)" から元PRへ展開しないと昇格の同期漏れを拾えない。
+check(
+    "プロモーションPRを元PRへ展開して検知する",
+    find_mismatches_(
+        [issue("SOCAIAGENT-8", "ステージング環境反映", 1900)],
+        [pr(1900, state="closed", merged="2026-11-01T00:00:00Z"),
+         pr(1949, state="closed", base="main", merged="2026-11-04T00:00:00Z",
+            title="chore: release を main へ",
+            subjects=["feat: 何か (#1900)", "Merge pull request #1948 from ISCProduct/release"])],
+    ),
+    ["- SOCAIAGENT-8 は「ステージング環境反映」ですが #1949 は main にマージ済みです"
+     "（「完了」以降のはず）"],
+)
+check(
+    "プロモーションPRの元PRが完了済みなら指摘しない",
+    find_mismatches_(
+        [issue("SOCAIAGENT-9", "完了", 1900)],
+        [pr(1949, state="closed", base="main", merged="2026-11-04T00:00:00Z",
+            subjects=["feat: 何か (#1900)"])],
+    ),
+    [],
 )
 check("知らないステータスは比較しない", rank("なにか"), -1)
 check("ステータスの前後", rank("処理中") < rank("PR確認待ち"), True)
@@ -150,5 +198,5 @@ check("切り捨てた件数を残す", "ほか" in msg, True)
 if failures:
     print(f"FAIL: {failures} 件")
     sys.exit(1)
-print("PASS (ズレ判定 17 ケース)")
+print("PASS (ズレ判定 21 ケース)")
 PY
