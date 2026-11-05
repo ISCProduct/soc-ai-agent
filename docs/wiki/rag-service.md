@@ -203,6 +203,8 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 
 - `POST /api/resume/review` の応答と、`/api/resume/review/stream` の `complete` イベントに `format_findings` を載せる。保存はしない（#1531）。
 - ブロックを改行でつないだ全文にルールをかけ（文体の混在は履歴書全体で見る）、指摘をブロックに戻す。`start`/`end` はそのブロックの `text` の中の位置（UTF-16）。`page_hint` と `block_index`（0 から）は必ず含む。
+  - 指摘は、終わりの文字（文体の混在なら文末）があるブロックに割り当てる。句点の無い見出しブロックの直後の文が、見出しを指さないようにするため。
+  - 画面はブロックの本文を持たないので、該当箇所の文字列を `excerpt` で返す（空白は1つにまとめ、30字を超えたら「…」で切る）。
 - 使うルール: `mixed_style`・`date_order`・`spoken_language`・`blank_field`。`mixed_width`・`mixed_numeral`・`mixed_era` は、欄ごとに書き方が決まる履歴書では自然に混ざるので使わない。`char_limit` は ES だけ。
 - `spoken_language`（ES でも使う）: すごく・すごい・やっぱり・やっぱ・ちゃんと・いっぱい、略語の バイト（アルバイト・メガバイトなどカタカナに続くものは除く）・就活、文頭（本文の先頭・改行の後・文末の後。行頭の空白と箇条書きの記号は飛ばす）の なので、・でも、・だから、は warning。させていただ の2回目以降は info。「」『』の中は見ない。
 - `blank_field`: 氏名・生年月日・住所・志望動機・自己PR の見出しと完全に一致するブロック（空白と全角はそろえて比べる）の次が、無いか見出しなら info。見出しが見つからなければ何も出さない。

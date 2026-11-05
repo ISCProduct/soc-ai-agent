@@ -33,19 +33,23 @@ func CheckResume(blocks []Block) []Finding {
 
 	var out []Finding
 	for _, f := range Run(b.String(), ResumeRules()...) {
-		k := sort.Search(len(starts), func(j int) bool { return starts[j] > f.Start }) - 1
+		if f.End <= f.Start {
+			continue
+		}
+		// 指摘は、終わりの文字（文体の混在なら文末の「。」）があるブロックに割り当てる。
+		// 句点の無い見出しブロック（「自己PR」など）の直後の文は、文体の混在の span が見出しから始まる。
+		// 始まりで選ぶと、本文ではなく見出しを指してしまう（#1972 のレビュー）。
+		k := sort.Search(len(starts), func(j int) bool { return starts[j] > f.End-1 }) - 1
 		if k < 0 {
 			continue
 		}
-		// つなぎの改行から始まる指摘は、次のブロックの先頭からにする。
-		if f.Start >= starts[k]+lens[k] && k+1 < len(starts) {
-			k++
-			f.Start = starts[k]
+		if f.Start < starts[k] {
+			f.Start = starts[k] // 前のブロックから続く部分は切り、このブロックの先頭からにする
 		}
 		f.Start -= starts[k]
 		f.End -= starts[k]
 		if f.End > lens[k] {
-			f.End = lens[k] // ブロックをまたぐ指摘は、始まったブロックの中で切る
+			f.End = lens[k] // つなぎの改行で終わる指摘は、ブロックの末尾までにする
 		}
 		if f.Start >= f.End {
 			continue

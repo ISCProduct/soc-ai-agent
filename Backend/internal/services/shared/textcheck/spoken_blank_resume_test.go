@@ -146,3 +146,27 @@ func TestDefaultRules_IncludesSpokenLanguage(t *testing.T) {
 	}
 	t.Fatal("ES のルールに spoken_language が無い")
 }
+
+// 句点の無い見出しブロックの直後の文は、文体の混在の span が見出しから始まる。
+// 指摘は見出しではなく、文末のある本文のブロックに割り当てる（#1972 のレビュー）。
+func TestCheckResume_MixedStyleAfterHeadingPointsToBody(t *testing.T) {
+	blocks := []Block{
+		{Text: "私は学生です。", PageNumber: 1, BlockIndex: 0},
+		{Text: "毎日勉強しています。", PageNumber: 1, BlockIndex: 1},
+		{Text: "自己PR", PageNumber: 1, BlockIndex: 2},
+		{Text: "成果を上げた。", PageNumber: 1, BlockIndex: 3},
+	}
+	for _, f := range CheckResume(blocks) {
+		if f.Rule != "mixed_style" {
+			continue
+		}
+		if f.BlockIndex != 3 {
+			t.Fatalf("mixed_style が本文ではなくブロック %d を指した: %+v", f.BlockIndex, f)
+		}
+		if hit := slHits(blocks[3].Text, []Finding{f})[0]; hit != "成果を上げた。" {
+			t.Errorf("範囲 = %q", hit)
+		}
+		return
+	}
+	t.Fatal("mixed_style が出なかった")
+}
