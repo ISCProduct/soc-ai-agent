@@ -80,6 +80,38 @@ func SpearmanCorrelation(xs, ys []float64) float64 {
 	return pearson(averageRanks(xs), averageRanks(ys))
 }
 
+// PairwiseAgreement はラベルが異なるケースの組のうち、スコアの大小がラベルの大小と
+// 一致した割合を返す（スコアが同じ組は 0.5 と数える）。comparable は比べた組の数。
+//
+// 順位相関と違って閾値を要らない。「良の回答は悪の回答より高い点が付くか」という
+// 人が直接読める形で、1.0 が完全一致、0.5 が当てずっぽうと同じ。
+// 同じラベルの組は比べない（人も順序を付けていない）。
+func PairwiseAgreement(labels, scores []float64) (agreement float64, comparable int) {
+	if len(labels) != len(scores) {
+		return 0, 0
+	}
+	var sum float64
+	for i := range labels {
+		for j := i + 1; j < len(labels); j++ {
+			if labels[i] == labels[j] {
+				continue
+			}
+			comparable++
+			ds, dl := scores[i]-scores[j], labels[i]-labels[j]
+			switch {
+			case ds == 0:
+				sum += 0.5
+			case (ds > 0) == (dl > 0):
+				sum++
+			}
+		}
+	}
+	if comparable == 0 {
+		return 0, 0
+	}
+	return sum / float64(comparable), comparable
+}
+
 // averageRanks は値を順位へ変換する。同じ値には平均順位を与える。
 func averageRanks(xs []float64) []float64 {
 	type pair struct {

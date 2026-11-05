@@ -18,7 +18,13 @@ export async function POST(request: NextRequest) {
     })
     const text = await response.text()
     if (!response.ok) {
-      return NextResponse.json({ error: text || 'Failed to apply' }, { status: response.status })
+      // Backend のエラーは {"error": "..."} 形式。そのまま包むと文字列が二重の JSON になり、画面に生の JSON が出る
+      let message = text || 'Failed to apply'
+      try {
+        const parsed: { error?: unknown } = JSON.parse(text)
+        if (typeof parsed.error === 'string' && parsed.error !== '') message = parsed.error
+      } catch { /* JSON でなければそのまま使う */ }
+      return NextResponse.json({ error: message }, { status: response.status })
     }
     return NextResponse.json(JSON.parse(text), { status: 201 })
   } catch (error) {

@@ -378,6 +378,9 @@ func hardDeleteUserData(tx *gorm.DB, userID uint) error {
 		// 適性検査（#1678）。回答は assessment_sessions の FK CASCADE で消える
 		&models.AssessmentResult{},
 		&models.AssessmentSession{},
+		// ES添削（#1531）。ES本文・改善文を持つので明示的に消す。
+		// users への FK CASCADE でも落ちるが、依存を暗黙にしない。
+		&models.ESReview{},
 	}
 	for _, m := range deletes {
 		if err := tx.Where("user_id = ?", userID).Delete(m).Error; err != nil {
