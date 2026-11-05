@@ -60,6 +60,7 @@ const ragOKBody = `{
   "company_fit_score": null,
   "length_balance_score": 5,
   "feedback": "フィードバック",
+  "feedback_items": [{"score_key": "specificity_score", "source_excerpt": "元の文章", "issue": "具体性を追加", "suggestion": "数値を示す"}],
   "improved_text": "改善後の文章",
   "company_strategy": null,
   "company_context_source": "none",
@@ -100,6 +101,9 @@ func TestRewrite_UsesRAGReviewAndKeepsResponseShape(t *testing.T) {
 	}
 	if ragReq["char_limit"] != float64(400) || ragReq["char_limit_mode"] != "around" {
 		t.Errorf("char_limit = %v / %v", ragReq["char_limit"], ragReq["char_limit_mode"])
+	}
+	if ragReq["include_feedback_items"] != false {
+		t.Errorf("リライトで指摘項目の生成を有効にしている: %+v", ragReq)
 	}
 
 	var got esRewriteResponse
@@ -158,6 +162,9 @@ func TestReview_ForwardsCharLimitAndStripsUsage(t *testing.T) {
 	if ragReq["char_limit_mode"] != "around" {
 		t.Errorf("char_limit_mode = %v, want around", ragReq["char_limit_mode"])
 	}
+	if ragReq["include_feedback_items"] != true {
+		t.Errorf("添削の指摘項目生成が有効でない: %+v", ragReq)
+	}
 
 	var got map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
@@ -166,7 +173,7 @@ func TestReview_ForwardsCharLimitAndStripsUsage(t *testing.T) {
 	if _, ok := got["usage"]; ok {
 		t.Errorf("usage がレスポンスに漏れている: %s", rec.Body.String())
 	}
-	for _, key := range []string{"feedback", "improved_text", "star", "improved_text_length", "char_limit_satisfied", "company_context_source"} {
+	for _, key := range []string{"feedback", "feedback_items", "improved_text", "star", "improved_text_length", "char_limit_satisfied", "company_context_source"} {
 		if _, ok := got[key]; !ok {
 			t.Errorf("%s が転送されていない: %s", key, rec.Body.String())
 		}

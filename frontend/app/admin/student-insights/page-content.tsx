@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useCallback, useEffect, useState } from 'react'
+import NextLink from 'next/link'
 import {
   Alert,
   Button,
@@ -16,6 +17,7 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  Link as MuiLink,
   TextField,
   Typography,
 } from '@mui/material'
@@ -291,7 +293,15 @@ export default function PageContent() {
                 <Fragment key={s.user_id}>
                   <TableRow hover>
                     <TableCell>
-                      <Typography fontWeight={500}>{s.name || '—'}</Typography>
+                      {/* 個別画面へ。担当校は URL で引き継ぐ（個別画面では選び直させない / #1531） */}
+                      <MuiLink
+                        component={NextLink}
+                        href={`/admin/student-insights/${s.user_id}${schoolId !== undefined ? `?school_id=${schoolId}` : ''}`}
+                        fontWeight={500}
+                        underline="hover"
+                      >
+                        {s.name || '—'}
+                      </MuiLink>
                       <Typography variant="body2" color="text.secondary">{s.email}</Typography>
                     </TableCell>
                     <TableCell>

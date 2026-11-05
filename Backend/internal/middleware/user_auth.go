@@ -17,6 +17,14 @@ const AdminUserIDContextKey contextKey = "adminUserID"
 const AdminIsPlatformContextKey contextKey = "adminIsPlatform"
 const AdminSchoolFilterContextKey contextKey = "adminSchoolFilter"
 
+// UserIDFromContext はコンテキストから認証済みユーザーのIDを取り出す。
+// 任意認証の経路（EchoOptionalUserAuth）では未ログインのとき ok=false になる。
+func UserIDFromContext(ctx context.Context) (uint, bool) {
+	v := ctx.Value(UserIDContextKey)
+	id, ok := v.(uint)
+	return id, ok && id > 0
+}
+
 // OrganizationIDFromContext はコンテキストから組織IDを取り出す。
 func OrganizationIDFromContext(ctx context.Context) (uint, bool) {
 	v := ctx.Value(OrganizationIDContextKey)
