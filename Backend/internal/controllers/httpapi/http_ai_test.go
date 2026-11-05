@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"testing"
 
+	"Backend/internal/middleware"
 	"Backend/internal/openai"
 
 	"github.com/labstack/echo/v4"
@@ -18,15 +20,29 @@ import (
 // バグなのか切り分けられない。
 func TestEchoInternalError_AIUnavailable(t *testing.T) {
 	tests := []struct {
-		name       string
-		err        error
-		wantStatus int
+		name        string
+		err         error
+		wantStatus  int
+		wantCode    string
+		wantMessage string
 	}{
 		{name: "AI未設定は503", err: openai.ErrAIUnavailable, wantStatus: http.StatusServiceUnavailable},
 		{
 			name:       "ラップされていても503",
 			err:        fmt.Errorf("generate failed: %w", openai.ErrAIUnavailable),
 			wantStatus: http.StatusServiceUnavailable,
+		},
+		{
+			name:        "LLMの打ち切りは504で再試行可能な文面",
+			err:         fmt.Errorf("generate failed: %w", openai.ErrAICallTimeout),
+			wantStatus:  http.StatusGatewayTimeout,
+			wantCode:    ErrCodeGatewayTimeout,
+			wantMessage: "処理に時間がかかっています。時間をおいて再度お試しください。",
+		},
+		{
+			name:       "LLM以外のdeadlineは従来どおり500",
+			err:        fmt.Errorf("db query failed: %w", context.DeadlineExceeded),
+			wantStatus: http.StatusInternalServerError,
 		},
 		{name: "その他のエラーは従来どおり500", err: errors.New("db error"), wantStatus: http.StatusInternalServerError},
 	}
@@ -39,6 +55,18 @@ func TestEchoInternalError_AIUnavailable(t *testing.T) {
 			}
 			if he.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", he.Code, tt.wantStatus)
+			}
+			if tt.wantCode != "" {
+				resp, ok := he.Message.(middleware.APIError)
+				if !ok {
+					t.Fatalf("message type = %T, want API error", he.Message)
+				}
+				if got := resp.Code; got != tt.wantCode {
+					t.Errorf("error code = %q, want %q", got, tt.wantCode)
+				}
+				if got := resp.Msg; got != tt.wantMessage {
+					t.Errorf("error message = %q, want %q", got, tt.wantMessage)
+				}
 			}
 		})
 	}

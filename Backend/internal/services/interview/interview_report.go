@@ -15,9 +15,17 @@ import (
 	"log"
 	"slices"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
+
+// interviewReportLLMCallTimeout はレポート生成の LLM 呼び出し1回の締切。
+//
+// 試行上限(60秒)と同じ値だと、1試行目が長引いたときに再試行の余地がなくなる。
+// レポートは非同期ジョブ（上限10分）で生成され、利用者を画面で待たせない。maxTokens=2000 で
+// INTERVIEW_REPORT_MODEL により重いモデルにもなるため、論理コールの上限と同じ長さにする。
+const interviewReportLLMCallTimeout = 2 * time.Minute
 
 // ErrNoUtterances は発話が1件も保存されていないセッションのレポート生成エラー（#1476）。
 //
@@ -244,8 +252,9 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	var haveBody bool
 	var lastErr error
 	for attempt := range reportGenerationAttempts {
-		ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport)
-		raw, err := s.openaiClient.ChatCompletionWithSchema(ctx, systemPrompt, userPrompt+retryNote, 0.4, 2000, interviewReportResponseSchema, model)
+		llmCtx, cancel := context.WithTimeout(usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport), interviewReportLLMCallTimeout)
+		raw, err := s.openaiClient.ChatCompletionWithSchema(llmCtx, systemPrompt, userPrompt+retryNote, 0.4, 2000, interviewReportResponseSchema, model)
+		cancel()
 		if err != nil {
 			return err
 		}
