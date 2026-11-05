@@ -34,6 +34,7 @@ import {
   getGuestApplicationsButtonProps,
   getGuestEmailButtonProps,
 } from '@/lib/guest-limits'
+import { APPLY_CLOSED_LABEL, getApplyClosedButtonProps } from '@/lib/apply-availability'
 import { CONTENT_MAX_WIDTH, UI, leadSentences, scaleBand } from '@/lib/design/tokens'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
@@ -56,6 +57,8 @@ export interface ResultsListViewProps {
   applyingId: number | null
   snackbar: SnackbarState
   isGuestUser: boolean
+  /** 応募を受け付けているか。閉じている間は応募ボタンを「準備中」で無効にする */
+  applyEnabled: boolean
   onCloseSnackbar: () => void
   onBack: () => void
   onReset: () => void
@@ -87,6 +90,7 @@ export default function ResultsListView({
   applyingId,
   snackbar,
   isGuestUser,
+  applyEnabled,
   onCloseSnackbar,
   onBack,
   onReset,
@@ -98,6 +102,7 @@ export default function ResultsListView({
 }: ResultsListViewProps) {
   const guestEmailProps = getGuestEmailButtonProps(isGuestUser)
   const guestApplicationsProps = getGuestApplicationsButtonProps(isGuestUser)
+  const applyClosedProps = getApplyClosedButtonProps(applyEnabled)
   // 一覧全体の幅。各社の位置はこの中で示す
   const band = scaleBand(companies.map((c) => c.matchScore))
   // 一覧の中で最も多い根拠軸数。これを下回る行だけ印を出す
@@ -444,16 +449,30 @@ export default function ResultsListView({
                     >
                       ES添削・リライト
                     </Button>
-                    <Tooltip title={guestApplicationsProps.title} disableHoverListener={!guestApplicationsProps.disabled}>
+                    <Tooltip
+                      title={guestApplicationsProps.title || (company.isApplied ? '' : applyClosedProps.title)}
+                      disableHoverListener={!guestApplicationsProps.disabled && (company.isApplied || !applyClosedProps.disabled)}
+                    >
                       <span>
                         <Button
                           variant={company.isApplied ? 'contained' : 'outlined'}
                           size="small"
                           color="primary"
-                          disabled={company.isApplied || applyingId === company.matchId || guestApplicationsProps.disabled}
+                          disabled={
+                            company.isApplied ||
+                            applyingId === company.matchId ||
+                            guestApplicationsProps.disabled ||
+                            applyClosedProps.disabled
+                          }
                           onClick={(e) => onApply(e, company)}
                         >
-                          {company.isApplied ? '応募済み' : applyingId === company.matchId ? '応募中...' : '応募する'}
+                          {company.isApplied
+                            ? '応募済み'
+                            : applyClosedProps.disabled
+                              ? APPLY_CLOSED_LABEL
+                              : applyingId === company.matchId
+                                ? '応募中...'
+                                : '応募する'}
                         </Button>
                       </span>
                     </Tooltip>
