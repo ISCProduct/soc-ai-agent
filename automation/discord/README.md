@@ -64,3 +64,49 @@ rm ~/Library/LaunchAgents/jp.soc-ai-agent.progress-reminder.plist
 仕様参照:
 - https://docs.discord.com/developers/resources/webhook
 - https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule
+
+## Discord ↔ Backlog の紐づけ（/link）
+
+Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確認をするための対応表。
+管理者ロール（`DISCORD_ALLOWED_ROLE_ID`）だけが操作できる。
+
+| コマンド | 内容 |
+|---|---|
+| `/link member:@誰か backlog:名前` | 紐づける。`backlog` は入力すると Backlog のメンバーが候補に出る。名前は完全一致 |
+| `/unlink member:@誰か` | 解除する |
+| `/link-list` | 一覧を本人にだけ表示する |
+
+- 表は SSM Parameter `/soc-app/discord-backlog-links` に JSON で持つ。突き合わせは Backlog のユーザーID。
+- 同じ Backlog ユーザーを別の Discord ユーザーに紐づけることはできない（先に `/unlink`）。
+- 4KB の上限があり、40人強まで。超える場合は DynamoDB へ移す。
+- 有効にするには Lambda に `BACKLOG_API_KEY`（terraform の `backlog_api_key`）が要る。未設定なら `/link` 系は「利用できません」を返す。
+- コマンドの追加後に `automation/discord/register-commands.sh` を再実行する。
+
+## Backlog の期限リマインド
+
+平日 9:30 JST に、期限が2日以内・期限切れの課題を担当者ごとにまとめて投稿する（EventBridge Scheduler → discord Lambda）。
+
+- 対象ステータス: 未対応・処理中・PR確認待ち。保留・処理済み・ステージング反映以降は対象外。
+- 担当者は `/link` で紐づけた人にメンションする。未登録の人は名前だけで、「Discord未登録」と出る。
+- 「PR確認待ち」の課題があるときは、レビュアー（terraform の `backlog_reviewer_ids`、既定は大橋和幸）にもメンションして、レビューを促す。レビュアー本人が担当の課題は対象にしない。
+- 対象が無い日は何も投稿しない。
+- 投稿先は Webhook（terraform の `discord_reminder_webhook_url`）。未設定なら動かない。
+- 手動確認（投稿しない）: Lambda を `{"source":"backlog-deadline-reminder","dry_run":true}` で invoke すると、投稿予定の本文が返る。
+- 再試行はしない（成功後の失敗で二重投稿になるため）。失敗は CloudWatch Logs `/aws/lambda/<project>-discord` の `[Reminder]` に残る。
+
+## 期限の変更（/deadline）
+
+間に合わないときに、担当者本人が Discord から期限を変更する。Backlog の期限日を更新し、変更履歴をコメントに残す。
+
+```
+/deadline issue:SOCAIAGENT-403 date:11/12 reason:レビュー待ちのため
+```
+
+- `issue` は、入力すると自分が担当の課題が候補に出る。`date` は `2026-11-12` または `11/12`。
+- **本人確認**: Discord のユーザーIDを `/link` の対応表で Backlog ユーザーに引き当て、その人が課題の担当者のときだけ反映する。他人の課題・担当者なしの課題は変更できない。
+- 変更できるステータスは、未対応・処理中・PR確認待ち・保留。処理済み以降は変更できない。
+- 過去の日付と、今日から180日より先の日付は受け付けない。年を省いた日付が過ぎていたときも拒否する（来年は `2027-01-05` のように年から入力）。
+- 結果はチャンネルに公開で返る（理由の `@` は無効化し、メンションの通知は飛ばさない）。失敗は本人にだけ表示する。
+- Backlog への更新は、`BACKLOG_API_KEY` の持ち主の名前で記録される。変更者はコメント本文に残る。
+- コマンドの追加後に `register-commands.sh` を再実行する。
+

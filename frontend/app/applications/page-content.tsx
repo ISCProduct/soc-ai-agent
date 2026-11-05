@@ -157,7 +157,7 @@ function ApplicationsContent() {
         <Paper>
           <EmptyState
             title="まだ応募した企業はありません"
-            description="マッチング結果から気になる企業を選び、応募すると選考の進み具合をここで管理できます。"
+            description="応募した企業の選考の進み具合を、ここで管理できます。"
             action={
               <Button variant="contained" onClick={() => router.push(getResultsPathOrChat())}>
                 おすすめ企業を見る

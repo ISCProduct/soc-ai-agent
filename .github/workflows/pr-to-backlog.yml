@@ -30,10 +30,10 @@ name: PR → Backlog 同期
 #       完全一致必須）。未作成の場合はジョブがエラーで停止し、作成を促すログを出す。
 #
 # 課題キーの検出場所（優先順）:
-#   1. PR タイトルの [PROJ-N] プレフィックス
+#   1. PR タイトルに書かれた PROJ-N（[ ] / ( ) / 裸書きのいずれでも可）
 #   2. PR 本文の <!-- backlog-key:PROJ-N --> マーカー
 #   3. PR 本文の「Backlog: PROJ-N」記述
-#   4. PR タイトル・本文の Closes/Fixes/Resolves/Refs/Related/See #N が指す GitHub Issue
+#   4. PR タイトル・本文の Closes/Fixes/Resolves/Refs/Related/See/Issue #N が指す GitHub Issue
 #   5. ブランチ名に埋め込まれた番号（fix/1374-... / feature/619-... / feature/issue-521）
 #
 #   6. 上の 1〜5 で決まらないとき: PR タイトル・参照する GitHub Issue のタイトルを、
@@ -141,8 +141,14 @@ jobs:
                   return json.loads(r.read())
 
           def extract_bl_key(title, body):
-              # 1. タイトルの [PROJ-N] プレフィックス
-              m = re.search(rf'\[({re.escape(PROJ_KEY)}-\d+)\]', title or '')
+              # 1. タイトルに書かれたキー。
+              #    囲みの種類は見ない。[SOCAIAGENT-474] も (SOCAIAGENT-474) も裸書きも拾う。
+              #    角括弧だけを見ていたため、丸括弧で書かれた #1974 が
+              #    「キーが見つかりません」で同期されず、課題が「処理中」で止まっていた。
+              #    \b は使わない。Python の \w は日本語も単語文字なので
+              #    「SOCAIAGENT-474の氏名表示」では末尾が境界にならず拾えない。
+              #    \d+ は貪欲なので SOCAIAGENT-4741 を 474 と読む誤りも起きない。
+              m = re.search(rf'({re.escape(PROJ_KEY)}-\d+)', title or '')
               if m:
                   return m.group(1)
               # 2. 本文の <!-- backlog-key:PROJ-N --> マーカー
@@ -167,7 +173,7 @@ jobs:
           # このリポジトリでは「Refs #1158」「Refs #1332」という書き方が実際に使われており、
           # キーワードを絞っていたせいで同期が漏れていた。
           ISSUE_REF_RE = re.compile(
-              r'(?:closes?|fixes?|resolves?|refs?|related(?:\s+to)?|see)\s*[:：]?\s*#(\d+)',
+              r'(?:closes?|fixes?|resolves?|refs?|related(?:\s+to)?|see|issues?)\s*[:：]?\s*#(\d+)',
               re.IGNORECASE,
           )
 
