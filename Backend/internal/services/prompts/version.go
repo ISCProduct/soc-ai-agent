@@ -22,12 +22,6 @@ const (
 	StageCompanyExtraction  Stage = "company_extraction"
 )
 
-// VersionAssignment は工程に割り当てられた版ラベルと実験群を表す。
-type VersionAssignment struct {
-	Version string
-	Variant string
-}
-
 const defaultPromptVersion = "v2"
 
 var (
@@ -38,18 +32,14 @@ var (
 // ResolvePromptVersion は工程別設定、共通設定、既定値の順に版ラベルを解決する。
 //
 // ラベルはデプロイされた本文の識別子であり、本文自体はコードで管理する。
-// 異なる候補本文がない間はA/B群を作らず、常にcontrolを返す。
-func ResolvePromptVersion(stage Stage, _ uint) VersionAssignment {
-	if strings.TrimSpace(os.Getenv("PROMPT_AB_"+strings.ToUpper(string(stage)))) != "" {
-		warnPromptVersionOnce(stage, "A/B assignment requires a candidate prompt")
-	}
-	return VersionAssignment{Version: promptVersionForStage(stage), Variant: "control"}
+func ResolvePromptVersion(stage Stage) string {
+	return promptVersionForStage(stage)
 }
 
-// WithPromptVersion は選択した版を利用量記録用 context に載せる。
-func WithPromptVersion(ctx context.Context, stage Stage, subjectID uint) (context.Context, VersionAssignment) {
-	assignment := ResolvePromptVersion(stage, subjectID)
-	return usagectx.WithPromptVersion(ctx, string(stage), assignment.Version, assignment.Variant), assignment
+// WithPromptVersion は解決した版を利用量記録用 context に載せる。
+func WithPromptVersion(ctx context.Context, stage Stage) (context.Context, string) {
+	version := ResolvePromptVersion(stage)
+	return usagectx.WithPromptVersion(ctx, string(stage), version), version
 }
 
 func promptVersionForStage(stage Stage) string {
@@ -60,14 +50,14 @@ func promptVersionForStage(stage Stage) string {
 
 	stageVersion := strings.TrimSpace(os.Getenv("PROMPT_VERSION_" + strings.ToUpper(string(stage))))
 	if stageVersion != "" {
-		if validPromptVersion(stageVersion) {
+		if ValidPromptVersion(stageVersion) {
 			return stageVersion
 		}
 		warnPromptVersionOnce(stage, "invalid stage version")
 	}
 	globalVersion := strings.TrimSpace(os.Getenv("PROMPT_VERSION"))
 	if globalVersion != "" {
-		if validPromptVersion(globalVersion) {
+		if ValidPromptVersion(globalVersion) {
 			return globalVersion
 		}
 		warnPromptVersionOnce(stage, "invalid global version")
@@ -75,7 +65,8 @@ func promptVersionForStage(stage Stage) string {
 	return defaultPromptVersion
 }
 
-func validPromptVersion(version string) bool {
+// ValidPromptVersion は版ラベルとして保存できる形式かを返す。
+func ValidPromptVersion(version string) bool {
 	return promptVersionPattern.MatchString(version)
 }
 

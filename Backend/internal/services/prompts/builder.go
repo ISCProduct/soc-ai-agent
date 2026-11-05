@@ -87,7 +87,7 @@ func GetJobTypeConfig(jobCategoryName string) JobTypeConfig {
 	}
 	slog.Info("プロンプト設定取得",
 		"job_type", string(jt),
-		"prompt_version", ResolvePromptVersion(StageQuestionGeneration, 0).Version,
+		"prompt_version", ResolvePromptVersion(StageQuestionGeneration),
 	)
 	return cfg
 }
@@ -103,6 +103,6 @@ func BuildJobTypeToneGuidance(jobCategoryName string) string {
 func LogPromptVersion(context string) {
 	slog.Info("プロンプトバージョン使用",
 		"context", context,
-		"version", ResolvePromptVersion(StageQuestionGeneration, 0).Version,
+		"version", ResolvePromptVersion(StageQuestionGeneration),
 	)
 }

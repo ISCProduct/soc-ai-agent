@@ -18,6 +18,7 @@ export type CompanyInfoSetters = {
   setSourceUrl: (v: string) => void
   setLastModelUsed: (v: string) => void
   setLastFetchConfidence: (v: string) => void
+  setPromptVersion?: (v: string) => void
 }
 
 /**
@@ -50,4 +51,6 @@ export function applyInfoPayload(
   s('source_url', setters.setSourceUrl)
   s('model_used', setters.setLastModelUsed)
   s('confidence', setters.setLastFetchConfidence)
+  // AIを使わないプレビューには版が無い。前回のAIプレビューの版を確定保存へ持ち越さないよう、空でも上書きする。
+  setters.setPromptVersion?.(typeof data.prompt_version === 'string' ? data.prompt_version : '')
 }

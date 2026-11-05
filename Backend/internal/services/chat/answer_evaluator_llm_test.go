@@ -168,6 +168,9 @@ func TestLLM_HybridNilClientEqualsEvaluate(t *testing.T) {
 }
 
 func TestHumanScoring_RecordsPromptVersionOnlyAfterSuccessfulLLM(t *testing.T) {
+	t.Setenv("PROMPT_VERSION", "")
+	t.Setenv("PROMPT_VERSION_SCORE_EVALUATION", "score-t1")
+
 	srv := newMockLLMServer(t, 72, "medium", "評価結果")
 	defer srv.Close()
 
@@ -175,7 +178,7 @@ func TestHumanScoring_RecordsPromptVersionOnlyAfterSuccessfulLLM(t *testing.T) {
 	result := evaluator.EvaluateHumanScoringWithContext(
 		context.Background(), "志望理由を教えてください", "成長できる環境で挑戦したいです", false, false, nil,
 	)
-	assert.Equal(t, "v2", result.PromptVersion)
+	assert.Equal(t, "score-t1", result.PromptVersion)
 
 	failedServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

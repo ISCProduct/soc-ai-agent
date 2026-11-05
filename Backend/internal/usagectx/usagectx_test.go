@@ -34,14 +34,23 @@ func TestFeature(t *testing.T) {
 }
 
 func TestPromptVersionFromContext(t *testing.T) {
-	ctx := WithPromptVersion(context.Background(), "matching_reason", "v3", "candidate")
-	if got := PromptVersionFromContext(ctx); got != (PromptVersion{
-		Stage: "matching_reason", Version: "v3", Variant: "candidate",
-	}) {
-		t.Fatalf("PromptVersionFromContext()=%+v", got)
+	tests := []struct {
+		name    string
+		stage   string
+		version string
+		want    PromptVersion
+	}{
+		{name: "工程と版を載せる", stage: "matching_reason", version: "v3", want: PromptVersion{Stage: "matching_reason", Version: "v3"}},
+		{name: "工程が空なら載せない", version: "v3"},
+		{name: "版が空なら載せない", stage: "matching_reason"},
 	}
-	if got := PromptVersionFromContext(context.Background()); got != (PromptVersion{}) {
-		t.Fatalf("未設定の版=%+v", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := WithPromptVersion(context.Background(), tt.stage, tt.version)
+			if got := PromptVersionFromContext(ctx); got != tt.want {
+				t.Fatalf("PromptVersionFromContext()=%+v, want %+v", got, tt.want)
+			}
+		})
 	}
 }
 

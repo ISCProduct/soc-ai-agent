@@ -58,7 +58,7 @@ curl http://localhost:8080/healthz
 
 バージョン管理型マイグレーション（`Backend/migrations/`、`cmd/migrate`）を使用（GORMの `AutoMigrate` は禁止）。CI/CD（`.github/workflows/deployment.yml`）で以下の通り自動適用される（#618）。
 
-- **staging**: `docker compose up -d` 後、backendコンテナ内で `docker compose exec -T backend /bin/migrate up` を実行。失敗するとデプロイジョブが失敗する。
+- **staging**: `docker compose up -d` の前に `docker compose run --rm --no-deps -T backend /bin/migrate up` を実行。失敗するとサービスを起動せず、デプロイジョブが失敗する。
 - **production**: 新イメージのタスク定義を登録し、backendサービスと同じネットワーク設定でワンオフECSタスクとして `/bin/migrate up` を実行。マイグレーションが失敗した場合はサービスの更新（新イメージへの切り替え）自体を行わない。
 
 手動実行する場合:
@@ -318,20 +318,23 @@ curl -X POST http://localhost:8080/api/admin/score-validation/calibration/run \
 `PROMPT_VERSION_<STAGE>` も更新する。工程別値は `PROMPT_VERSION` より優先され、未設定時は `v2`。
 設定例と Terraform 変数は `.env.example` と `infra/terraform/environments/` を参照する。
 
+staging の Terraform 変数 `prompt_version` / `prompt_versions` は新規インスタンスの user_data にしか
+届かない。稼働中のインスタンスへ反映するときは、`/opt/app/.env` も手で更新する。
+
 デプロイ後、利用ログの工程別件数と版ラベルを確認する:
 
 ```sql
-SELECT prompt_stage, prompt_version, prompt_variant, COUNT(*) AS calls
+SELECT prompt_stage, prompt_version, COUNT(*) AS calls
 FROM api_call_logs
 WHERE called_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY
-GROUP BY prompt_stage, prompt_version, prompt_variant
-ORDER BY prompt_stage, prompt_version, prompt_variant;
+GROUP BY prompt_stage, prompt_version
+ORDER BY prompt_stage, prompt_version;
 ```
 
 質問・評価・企業情報・マッチング理由の生成結果に記録されたラベルは、それぞれ
 `ai_generated_questions.prompt_version`、`user_weight_scores.prompt_version`、
 `companies.info_prompt_version`、`user_company_matches.match_reason_prompt_version` で確認する。
-現在は異なる候補本文がないためA/B振り分けは未対応で、`prompt_variant` は `control` のみとなる。
+A/B振り分けは未対応である。
 `prompt_stage='unknown'` は工程メタデータが付与されていない呼び出しを表す。
 
 詳細は [プロンプト版の記録](./prompt-versioning.md) を参照。

@@ -70,7 +70,6 @@ func TestCalculateMatching_AIReasonOnlyForTopN(t *testing.T) {
 	t.Setenv("MATCHING_REASON_AI_TOP_N", "5")
 	t.Setenv("PROMPT_VERSION", "v2")
 	t.Setenv("PROMPT_VERSION_MATCHING_REASON", "")
-	t.Setenv("PROMPT_AB_MATCHING_REASON", "")
 
 	var calls atomic.Int32
 	srv := newCountingLLMServer(t, &calls)
@@ -135,7 +134,6 @@ func TestCalculateMatching_NoAICallsWhenFlagOff(t *testing.T) {
 	t.Setenv("MATCHING_REASON_USE_AI", "")
 	t.Setenv("PROMPT_VERSION", "v2")
 	t.Setenv("PROMPT_VERSION_MATCHING_REASON", "")
-	t.Setenv("PROMPT_AB_MATCHING_REASON", "")
 
 	var calls atomic.Int32
 	srv := newCountingLLMServer(t, &calls)

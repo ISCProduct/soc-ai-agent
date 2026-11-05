@@ -34,16 +34,11 @@ var upsertAssignments = clause.AssignmentColumns([]string{
 	"communication_match",
 	"matched_axis_count",
 	"match_reason",
+	// 理由と一緒に更新する。AI理由を作らない再計算では空になり、
+	// 存在しないAI理由を古い版が生成したことにならない。
+	"match_reason_prompt_version",
 	"updated_at",
 })
-
-var upsertAssignmentsWithPromptVersion = append(
-	append([]clause.Assignment(nil), upsertAssignments...),
-	clause.Assignment{
-		Column: clause.Column{Name: "match_reason_prompt_version"},
-		Value:  gorm.Expr("IF(VALUES(match_reason_prompt_version) <> '', VALUES(match_reason_prompt_version), match_reason_prompt_version)"),
-	},
-)
 
 // CreateOrUpdate マッチング結果を作成または更新
 func (r *UserCompanyMatchRepository) CreateOrUpdate(match *entity.UserCompanyMatch) error {
@@ -80,7 +75,7 @@ func (r *UserCompanyMatchRepository) CreateOrUpdateBatch(matches []*entity.UserC
 	// MySQL ドライバは OnConflict.Columns を無視して ON DUPLICATE KEY UPDATE を書くだけなので
 	// 衝突検出は一意キー uniq_user_session_company（migration 000023）に依存する。
 	// 将来この表に別の一意キーを足すと、そちらでも衝突して同じ列が更新される点に注意。
-	err := r.db.Clauses(clause.OnConflict{DoUpdates: upsertAssignmentsWithPromptVersion}).
+	err := r.db.Clauses(clause.OnConflict{DoUpdates: upsertAssignments}).
 		CreateInBatches(rows, 100).Error
 	if err != nil {
 		return 0, err

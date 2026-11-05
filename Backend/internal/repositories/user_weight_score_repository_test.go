@@ -4,6 +4,8 @@ package repositories_test
 // 実行: cd Backend && go test ./internal/repositories/... -run TestUserWeightScore -v
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -34,6 +36,46 @@ func newScoreRepoTestDB(t *testing.T) (*repositories.UserWeightScoreRepository, 
 	return repositories.NewUserWeightScoreRepository(db), mock
 }
 
+// newScoreRepoCapturingStatements は発行した SQL とバインド値を記録するリポジトリを返す。
+// sqlmock の前方一致だけでは、版を保存しない実装でもテストが通ってしまう。
+func newScoreRepoCapturingStatements(t *testing.T) (*repositories.UserWeightScoreRepository, sqlmock.Sqlmock, *[]string, *[]any) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock作成失敗: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("gorm open失敗: %v", err)
+	}
+	var statements []string
+	var vars []any
+	capture := func(tx *gorm.DB) {
+		statements = append(statements, tx.Statement.SQL.String())
+		vars = append(vars, tx.Statement.Vars...)
+	}
+	if err := db.Callback().Create().After("gorm:create").Register("test:capture_create", capture); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Callback().Update().After("gorm:update").Register("test:capture_update", capture); err != nil {
+		t.Fatal(err)
+	}
+	return repositories.NewUserWeightScoreRepository(db), mock, &statements, &vars
+}
+
+func assertPromptVersionWritten(t *testing.T, statements []string, vars []any, version string) {
+	t.Helper()
+	if !slices.ContainsFunc(statements, func(sql string) bool { return strings.Contains(sql, "prompt_version") }) {
+		t.Errorf("prompt_version を書き込んでいない: %v", statements)
+	}
+	if !slices.Contains(vars, any(version)) {
+		t.Errorf("バインド値に版 %q が無い: %v", version, vars)
+	}
+}
+
 // TestSetScore_CreatesNewRecord は SetScore が新規レコードを絶対値で作成することを検証する（#315修正）
 func TestSetScore_CreatesNewRecord(t *testing.T) {
 	repo, mock := newScoreRepoTestDB(t)
@@ -56,7 +98,7 @@ func TestSetScore_CreatesNewRecord(t *testing.T) {
 }
 
 func TestSetScoreWithPromptVersion_SavesPromptVersion(t *testing.T) {
-	repo, mock := newScoreRepoTestDB(t)
+	repo, mock, statements, vars := newScoreRepoCapturingStatements(t)
 
 	mock.ExpectQuery("SELECT `organization_id` FROM `users` WHERE id = \\?").
 		WithArgs(uint(1)).
@@ -66,12 +108,13 @@ func TestSetScoreWithPromptVersion_SavesPromptVersion(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	if err := repo.SetScoreWithPromptVersion(1, "session-1", "技術志向", 80, "v2"); err != nil {
+	if err := repo.SetScoreWithPromptVersion(1, "session-1", "技術志向", 80, "score-t1"); err != nil {
 		t.Fatalf("SetScoreWithPromptVersion returned error: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
 	}
+	assertPromptVersionWritten(t, *statements, *vars, "score-t1")
 }
 
 // TestAddScore_UpdatesExistingRecord は AddScore が既存レコードに差分加算することを検証する（#315修正）
@@ -98,7 +141,7 @@ func TestAddScore_UpdatesExistingRecord(t *testing.T) {
 }
 
 func TestAddScoreWithPromptVersion_UpdatesPromptVersion(t *testing.T) {
-	repo, mock := newScoreRepoTestDB(t)
+	repo, mock, statements, vars := newScoreRepoCapturingStatements(t)
 
 	mock.ExpectQuery("SELECT \\* FROM `user_weight_scores` WHERE").
 		WithArgs(uint(1), "session-1", "技術志向", 1).
@@ -109,12 +152,13 @@ func TestAddScoreWithPromptVersion_UpdatesPromptVersion(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	if err := repo.AddScoreWithPromptVersion(1, "session-1", "技術志向", 0, "v2"); err != nil {
+	if err := repo.AddScoreWithPromptVersion(1, "session-1", "技術志向", 0, "score-t1"); err != nil {
 		t.Fatalf("AddScoreWithPromptVersion returned error: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
 	}
+	assertPromptVersionWritten(t, *statements, *vars, "score-t1")
 }
 
 // TestAddScore_RecordNotFound はレコードが存在しない場合にエラーを返すことを検証する

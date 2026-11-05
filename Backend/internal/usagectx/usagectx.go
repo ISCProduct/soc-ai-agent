@@ -47,11 +47,10 @@ type featureKey struct{}
 type promptVersionKey struct{}
 type actorKey struct{}
 
-// PromptVersion は工程、版、実験群を表す利用量記録用メタデータ。
+// PromptVersion は工程と版を表す利用量記録用メタデータ。
 type PromptVersion struct {
 	Stage   string
 	Version string
-	Variant string
 }
 
 // actor は実行主体と配賦先。どちらも解決できないことがあるためポインタで持つ。
@@ -82,13 +81,11 @@ func Feature(ctx context.Context) string {
 }
 
 // WithPromptVersion はAI呼び出しの工程別プロンプト版を記録用contextに載せる。
-func WithPromptVersion(ctx context.Context, stage, version, variant string) context.Context {
+func WithPromptVersion(ctx context.Context, stage, version string) context.Context {
 	if ctx == nil || stage == "" || version == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, promptVersionKey{}, PromptVersion{
-		Stage: stage, Version: version, Variant: variant,
-	})
+	return context.WithValue(ctx, promptVersionKey{}, PromptVersion{Stage: stage, Version: version})
 }
 
 // PromptVersionFromContext は工程別プロンプト版を取り出す。未設定ならゼロ値を返す。

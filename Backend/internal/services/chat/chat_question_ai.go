@@ -10,7 +10,7 @@ import (
 )
 
 func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, industryID, jobCategoryID uint) (string, uint, error) {
-	ctx, assignment := prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration, userID)
+	ctx, promptVersion := prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration)
 
 	// 会話履歴を構築
 	historyText := ""
@@ -113,7 +113,7 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 		QuestionText:  questionText,
 		Weight:        5, // デフォルト重み
 		IsAnswered:    false,
-		PromptVersion: assignment.Version,
+		PromptVersion: promptVersion,
 	}
 
 	if err := s.aiGeneratedQuestionRepo.Create(aiGenQuestion); err != nil {
@@ -123,8 +123,8 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 	return questionText, aiGenQuestion.ID, nil
 }
 
-func (s *ChatService) simplifyQuestionWithAI(ctx context.Context, userID uint, question string) (string, error) {
-	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration, userID)
+func (s *ChatService) simplifyQuestionWithAI(ctx context.Context, question string) (string, error) {
+	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration)
 	prompt := prompts.BuildSimplifyQuestionPrompt(question)
 	return s.aiCallWithRetries(ctx, prompt)
 }

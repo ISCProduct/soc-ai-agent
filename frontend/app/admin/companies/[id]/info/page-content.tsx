@@ -67,6 +67,7 @@ export default function PageContent() {
   const [techFetchedAt, setTechFetchedAt] = useState<string | null>(null)
   const [relationsFetchedAt, setRelationsFetchedAt] = useState<string | null>(null)
   const [lastModelUsed, setLastModelUsed] = useState('')
+  const [promptVersion, setPromptVersion] = useState('')
   const [lastFetchConfidence, setLastFetchConfidence] = useState('')
 
   const loadCompany = () => {
@@ -110,7 +111,7 @@ export default function PageContent() {
     setDescription, setIndustry, setLocation, setWebsiteUrl,
     setFoundedYear, setEmployeeCount, setMainBusiness, setCulture,
     setWorkStyle, setTechStack, setWelfareDetails, setSourceType,
-    setSourceUrl, setLastModelUsed, setLastFetchConfidence,
+    setSourceUrl, setLastModelUsed, setLastFetchConfidence, setPromptVersion,
   }
 
   const handleAiFetch = async () => {
@@ -205,6 +206,7 @@ export default function PageContent() {
           source_url: sourceUrl,
           model_used: lastModelUsed,
           confidence: lastFetchConfidence,
+          prompt_version: promptVersion,
         }),
       })
       const data = (await res.json().catch(() => ({}))) as Record<string, unknown>

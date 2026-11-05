@@ -58,7 +58,6 @@ type Usage struct {
 	Feature        string
 	PromptStage    string
 	PromptVersion  string
-	PromptVariant  string
 	UserID         *uint // 実行主体。バッチ経路は nil
 	OrganizationID *uint // 配賦先の学校/企業。解決できなければ nil
 	AudioSeconds   float64
@@ -99,7 +98,6 @@ func (cli *Client) ReportAudioUsage(ctx context.Context, u AudioUsage) {
 		Feature:        usagectx.Feature(ctx),
 		PromptStage:    promptVersion.Stage,
 		PromptVersion:  promptVersion.Version,
-		PromptVariant:  promptVersion.Variant,
 		UserID:         userID,
 		OrganizationID: orgID,
 		AudioSeconds:   u.AudioSeconds,
@@ -136,7 +134,6 @@ func (cli *Client) ReportProxyUsage(ctx context.Context, u ProxyUsage) {
 		Feature:          usagectx.Feature(ctx),
 		PromptStage:      promptVersion.Stage,
 		PromptVersion:    promptVersion.Version,
-		PromptVariant:    promptVersion.Variant,
 		UserID:           userID,
 		OrganizationID:   orgID,
 		PromptTokens:     u.PromptTokens,
@@ -223,7 +220,6 @@ func (cli *Client) reportUsage(ctx context.Context, r usageReport) {
 		Feature:          usagectx.Feature(ctx),
 		PromptStage:      promptVersion.Stage,
 		PromptVersion:    promptVersion.Version,
-		PromptVariant:    promptVersion.Variant,
 		UserID:           userID,
 		OrganizationID:   orgID,
 		AudioSeconds:     r.audioSeconds,

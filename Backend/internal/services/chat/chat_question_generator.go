@@ -78,7 +78,7 @@ var phaseCategories = map[string][]string{
 }
 
 func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, targetLevel string, currentPhase *entity.UserAnalysisProgress) (string, uint, string, error) {
-	ctx, assignment := prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration, userID)
+	ctx, resolvedVersion := prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration)
 
 	// 狙った軸は呼び出し元に返す。ここはフェーズで絞った allowedCategories から
 	// 選ぶので、呼び出し元が allCategories から決めた軸とは一致しないことがある。
@@ -266,7 +266,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	questionText = strings.TrimSpace(questionText)
 	questionText = strings.Trim(questionText, `"「」`)
 
-	promptVersion := assignment.Version
+	promptVersion := resolvedVersion
 	// フォールバック: AIが空を返した場合は簡易質問を使用する
 	if questionText == "" {
 		fallbackQuestion := s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)

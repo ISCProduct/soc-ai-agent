@@ -49,12 +49,7 @@ func (e *AnswerEvaluator) llmEvaluateWithPromptVersion(ctx context.Context, ques
 	if e.llmClient == nil {
 		return nil, ""
 	}
-	userID, _ := usagectx.Actor(ctx)
-	subjectID := uint(0)
-	if userID != nil {
-		subjectID = *userID
-	}
-	ctx, assignment := prompts.WithPromptVersion(ctx, prompts.StageScoreEvaluation, subjectID)
+	ctx, promptVersion := prompts.WithPromptVersion(ctx, prompts.StageScoreEvaluation)
 	userPrompt := prompts.BuildAnswerQualityUserPrompt(question, answer)
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureChatAnswerEval)
 	raw, err := e.llmClient.ChatCompletionJSON(ctx, prompts.AnswerQualitySystemPrompt, userPrompt, 0.2, 256)
@@ -78,7 +73,7 @@ func (e *AnswerEvaluator) llmEvaluateWithPromptVersion(ctx context.Context, ques
 	}
 	log.Printf("[AnswerEvaluator] LLM評価完了: score=%d confidence=%s specificity=%d authenticity=%d consistency=%d",
 		eval.Score, eval.Confidence, eval.Specificity, eval.Authenticity, eval.Consistency)
-	return &eval, assignment.Version
+	return &eval, promptVersion
 }
 
 // EvaluateWithLLMFallback はルールベース評価を行い、信頼度が "low" の場合のみLLMで再評価する（Phase 1）。

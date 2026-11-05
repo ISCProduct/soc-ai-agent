@@ -177,11 +177,18 @@ func (f *CompanyInfoFetcher) FetchAndSaveDetails(ctx context.Context, companyID 
 	return err
 }
 
+// ErrInvalidPromptVersion は確定保存で受け取った版ラベルの形式が不正なことを表す。
+var ErrInvalidPromptVersion = errors.New("invalid prompt_version")
+
 // ConfirmAndSave はプレビュー済みの構造化結果を LLM 再実行なしで DB に確定保存する。
 // info_fetched_at / last_model_used / last_fetch_confidence も同時更新する。
 func (f *CompanyInfoFetcher) ConfirmAndSave(companyID uint, result *CompanyInfoResult) (*CompanyInfoResult, error) {
 	if result == nil {
 		return nil, fmt.Errorf("result is required")
+	}
+	// 版はクライアントから届く値なので信頼しない。varchar(64) を超えると保存全体が失敗する。
+	if result.PromptVersion != "" && !prompts.ValidPromptVersion(result.PromptVersion) {
+		return nil, ErrInvalidPromptVersion
 	}
 	company, err := f.repo.FindByID(companyID)
 	if err != nil {
@@ -388,12 +395,7 @@ func (f *CompanyInfoFetcher) acquireForCompany(ctx context.Context, company *mod
 }
 
 func (f *CompanyInfoFetcher) withCompanyExtractionVersion(ctx context.Context) context.Context {
-	userID, _ := usagectx.Actor(ctx)
-	subjectID := uint(0)
-	if userID != nil {
-		subjectID = *userID
-	}
-	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageCompanyExtraction, subjectID)
+	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageCompanyExtraction)
 	return ctx
 }
 

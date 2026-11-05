@@ -6,7 +6,7 @@ const MatchingReasonPromptVersion = "matching_reason_v2"
 
 // GetMatchingReasonPromptVersion はマッチング理由工程の版を返す。
 func GetMatchingReasonPromptVersion() string {
-	version := ResolvePromptVersion(StageMatchingReason, 0).Version
+	version := ResolvePromptVersion(StageMatchingReason)
 	return FormatMatchingReasonPromptVersion(version)
 }
 

@@ -402,9 +402,9 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 		return BuildMatchReason(match, userScores), nil
 	}
 
-	ctx, assignment := prompts.WithPromptVersion(ctx, prompts.StageMatchingReason, match.UserID)
+	ctx, promptVersion := prompts.WithPromptVersion(ctx, prompts.StageMatchingReason)
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureMatchingReason)
-	userPrompt := buildMatchingReasonUserPromptWithVersion(match, userScores, assignment.Version)
+	userPrompt := buildMatchingReasonUserPromptWithVersion(match, userScores, promptVersion)
 	reason, err := s.aiClient.ResponsesWithTemperature(
 		ctx,
 		prompts.MatchingReasonSystemPrompt,
@@ -420,7 +420,7 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 	if reason == "" {
 		return BuildMatchReason(match, userScores), nil
 	}
-	match.MatchReasonPromptVersion = assignment.Version
+	match.MatchReasonPromptVersion = promptVersion
 	return reason, nil
 }
 
@@ -431,7 +431,7 @@ func matchingReasonUseAI() bool {
 
 func buildMatchingReasonUserPrompt(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) string {
 	return buildMatchingReasonUserPromptWithVersion(
-		match, userScores, prompts.ResolvePromptVersion(prompts.StageMatchingReason, 0).Version,
+		match, userScores, prompts.ResolvePromptVersion(prompts.StageMatchingReason),
 	)
 }
 
