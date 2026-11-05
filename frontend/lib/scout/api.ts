@@ -55,6 +55,10 @@ export const studentScoutService = {
     return request(`/scouts/${id}/view`, { method: 'POST' })
   },
 
+  accept(id: number): Promise<{ id: number; status: ScoutStatus }> {
+    return request(`/scouts/${id}/accept`, { method: 'POST' })
+  },
+
   decline(id: number): Promise<{ id: number; status: ScoutStatus }> {
     return request(`/scouts/${id}/decline`, { method: 'POST' })
   },

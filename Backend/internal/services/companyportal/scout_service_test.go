@@ -190,6 +190,22 @@ func (f fakeVisible) VisibleStudentNames(uint, []uint) (map[uint]string, error) 
 	return map[uint]string{}, nil
 }
 
+type namedVisible struct {
+	names map[uint]string
+}
+
+func (n namedVisible) IsVisible(uint) (bool, error) { return true, nil }
+
+func (n namedVisible) VisibleStudentNames(_ uint, ids []uint) (map[uint]string, error) {
+	out := map[uint]string{}
+	for _, id := range ids {
+		if name, ok := n.names[id]; ok {
+			out[id] = name
+		}
+	}
+	return out, nil
+}
+
 type fakeUserReader struct{ user *entity.User }
 
 func (f fakeUserReader) GetUserByID(uint) (*entity.User, error) { return f.user, nil }
@@ -231,8 +247,8 @@ func TestScoutService_Send_クールダウンとブロック(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	if first.Scout.Message != "山田 さん / デモ株式会社" {
-		t.Fatalf("差し込み失敗: %q", first.Scout.Message)
+	if first.Scout.Message != "学生 さん / デモ株式会社" {
+		t.Fatalf("承諾前の文面に実名を残している: %q", first.Scout.Message)
 	}
 	if mailer.sent != 1 {
 		t.Fatalf("mail sent=%d", mailer.sent)
@@ -308,6 +324,62 @@ func TestScoutService_Send_並行送信は1件だけ保存してメールも1通
 func TestScoutService_CreateTemplate_バリデーション(t *testing.T) {
 	svc := NewScoutService(newFakeScoutStore(), fakeVisible{ok: true}, nil, nil, nil, "")
 	_, err := svc.CreateTemplate(1, 2, ScoutTemplateInput{Title: "", Body: "x"})
+	var ve *shared.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("validation expected, got %v", err)
+	}
+}
+
+func TestScoutService_ListCompanyScouts_承諾前は氏名を返さない(t *testing.T) {
+	store := newFakeScoutStore()
+	store.scouts = []models.Scout{
+		{ID: 1, CompanyID: 1, UserID: 10, Status: models.ScoutStatusSent, Message: "未承諾"},
+		{ID: 2, CompanyID: 1, UserID: 11, Status: models.ScoutStatusAccepted, Message: "承諾済"},
+	}
+	svc := NewScoutService(store, namedVisible{names: map[uint]string{10: "山田", 11: "佐藤"}}, nil, nil, nil, "")
+
+	views, total, err := svc.ListCompanyScouts(1, 30, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 || len(views) != 2 {
+		t.Fatalf("total=%d len=%d", total, len(views))
+	}
+	byUser := map[uint]string{}
+	for _, v := range views {
+		byUser[v.UserID] = v.StudentName
+	}
+	if byUser[10] != "" {
+		t.Fatalf("承諾前の氏名が漏れている: %q", byUser[10])
+	}
+	if byUser[11] != "佐藤" {
+		t.Fatalf("承諾後の氏名: %q", byUser[11])
+	}
+}
+
+func TestScoutService_Accept_未読と既読を承諾でき辞退はできない(t *testing.T) {
+	store := newFakeScoutStore()
+	store.scouts = []models.Scout{
+		{ID: 1, CompanyID: 1, UserID: 10, Status: models.ScoutStatusSent},
+		{ID: 2, CompanyID: 1, UserID: 10, Status: models.ScoutStatusDeclined},
+	}
+	svc := NewScoutService(store, fakeVisible{ok: true}, nil, nil, nil, "")
+
+	got, err := svc.Accept(10, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != models.ScoutStatusAccepted {
+		t.Fatalf("status=%s", got.Status)
+	}
+	again, err := svc.Accept(10, 1)
+	if err != nil || again.Status != models.ScoutStatusAccepted {
+		t.Fatalf("再承諾: %+v %v", again, err)
+	}
+	_, err = svc.Accept(10, 2)
+	if err == nil {
+		t.Fatal("辞退済みを承諾できてしまっている")
+	}
 	var ve *shared.ValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("validation expected, got %v", err)

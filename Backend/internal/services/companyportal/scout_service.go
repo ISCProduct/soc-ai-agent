@@ -255,7 +255,9 @@ func (s *ScoutService) Send(companyID, companyUserID uint, in SendScoutInput) (*
 		id := tpl.ID
 		templateID = &id
 		if message == "" {
-			message = InterpolateScoutBody(tpl.Body, student.Name, company.Name)
+			// 企業に残る文面へ実名を入れない。承諾前は氏名非公開（SOCAIAGENT-474）。
+			// 学生本人へのメールは下で実名を使う。
+			message = InterpolateScoutBody(tpl.Body, "学生", company.Name)
 		}
 	}
 	if message == "" {
@@ -315,7 +317,9 @@ func (s *ScoutService) ListCompanyScouts(companyID uint, limit, offset int) ([]C
 	}
 	ids := make([]uint, 0, len(rows))
 	for i := range rows {
-		ids = append(ids, rows[i].UserID)
+		if rows[i].Status == models.ScoutStatusAccepted {
+			ids = append(ids, rows[i].UserID)
+		}
 	}
 	names := map[uint]string{}
 	if s.visible != nil && len(ids) > 0 {
@@ -326,9 +330,13 @@ func (s *ScoutService) ListCompanyScouts(companyID uint, limit, offset int) ([]C
 	}
 	out := make([]CompanyScoutView, 0, len(rows))
 	for i := range rows {
+		name := ""
+		if rows[i].Status == models.ScoutStatusAccepted {
+			name = names[rows[i].UserID]
+		}
 		out = append(out, CompanyScoutView{
 			Scout:       rows[i],
-			StudentName: names[rows[i].UserID],
+			StudentName: name,
 		})
 	}
 	return out, total, nil
@@ -382,6 +390,35 @@ func (s *ScoutService) MarkViewed(userID, scoutID uint) (*models.Scout, error) {
 		}
 	}
 	return scout, nil
+}
+
+// Accept は学生がスカウトを承諾する。承諾した企業にだけ氏名を公開する。
+// 辞退済みは戻せない。既に承諾済みならそのまま返す。
+func (s *ScoutService) Accept(userID, scoutID uint) (*models.Scout, error) {
+	scout, err := s.store.FindByIDForUser(userID, scoutID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrScoutNotFound
+		}
+		return nil, err
+	}
+	if scout.Status == models.ScoutStatusDeclined {
+		return nil, &shared.ValidationError{Message: "辞退したスカウトは承諾できません"}
+	}
+	if scout.Status == models.ScoutStatusAccepted {
+		return scout, nil
+	}
+	if err := s.store.UpdateStatusForUser(
+		userID, scoutID,
+		[]string{models.ScoutStatusSent, models.ScoutStatusViewed},
+		models.ScoutStatusAccepted,
+	); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrScoutNotFound
+		}
+		return nil, err
+	}
+	return s.store.FindByIDForUser(userID, scoutID)
 }
 
 func (s *ScoutService) Decline(userID, scoutID uint) (*models.Scout, error) {
