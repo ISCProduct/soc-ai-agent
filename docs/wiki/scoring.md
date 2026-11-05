@@ -862,6 +862,27 @@ summary / strengths / improvements はスコアと独立して有用なので届
 
 **照合はローカル計算だけで行う。LLM を再度呼ばない**（追加コスト0、レイテンシ数十ms）。
 
+#### 根拠と発話の紐づけ（#1775）
+
+学生向けの `evidence` は、項目ごとに引用元の発話IDも検証して保存する。
+
+| 項目 | 内容 |
+| --- | --- |
+| LLM の出力 | `evidence_utterance_ids`（評価項目 → 発話ID または `null`） |
+| 検証 | `ValidateEvidenceReferences`。指定IDの `role=user` の発話1件に絞って `ValidateEvidence` と同じ照合を行う |
+| 保存先 | `interview_reports.evidence_utterance_ids_json` |
+| API | レポートの `evidence_utterance_ids_json`（評価項目 → 発話ID の JSON 文字列 または `null`） |
+
+- 範囲外のID、面接官のID、照合できない引用は、その項目の根拠とIDを捨てる
+- 引用が空なのにIDがある項目も未照合として扱う
+- 教員向けの `teacher.detailed_evidence` は発話IDを持たず、従来どおり受験者の全発話と照合する
+- 照合できたIDが1件も無いときは `NULL` を保存する。MySQL の JSON カラムは strict モードで空文字を保存できない
+- 新カラムが `NULL` の旧レポートには「発言を見る」を出さず、従来の表示にする
+
+**照合の精度は下の表と同じで、一字一句の一致は保証しない。** 言い換えも通るので、
+画面の引用が発話の文字列と完全に同じとは限らない。内容語が重なる別の発話IDも、
+未発話の数値を含まなければ通ることがある。正確な引用はプロンプトで要求している。
+
 #### なぜ内容語だけで照合するか（#1566）
 
 #1527 の初版は**全文**の文字bigramで照合していたが、日本語では述語末尾が一致するだけで
