@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -17,11 +18,21 @@ import (
 // Responses API の web_search + 安価モデル。Chat Completions の search-preview / search-api は使わない。
 const defaultWebSearchModel = "gpt-4o-mini"
 
-const (
+// ErrAICallTimeout は LLM の論理コールが締切で打ち切られたことを表す（#1779）。
+//
+// context.DeadlineExceeded は DB・S3・RAG などでも発生する。HTTP 応答で LLM の打ち切りだけを
+// 504 にできるよう専用のエラーで包む。errors.Is(err, context.DeadlineExceeded) も引き続き成立する。
+var ErrAICallTimeout = errors.New("ai call timed out")
+
+// テストで短縮できるよう変数にしている。
+var (
 	chatCompletionCallTimeout = 2 * time.Minute
 	webSearchCallTimeout      = 90 * time.Second
 	chatCompletionAttemptCap  = 60 * time.Second
 	webSearchAttemptCap       = 45 * time.Second
+	// llmMinAttemptRemaining 未満の残り時間では、失敗が確実なので試行しない。
+	// 試行すると OpenAIFallbackGuard の分間カウントだけを消費してしまう。
+	llmMinAttemptRemaining = 3 * time.Second
 )
 
 func callAttemptTimeout(ctx context.Context, cap time.Duration) (time.Duration, error) {
@@ -30,7 +41,7 @@ func callAttemptTimeout(ctx context.Context, cap time.Duration) (time.Duration, 
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
-		if remaining <= 0 {
+		if remaining <= 0 || remaining < llmMinAttemptRemaining {
 			return 0, context.DeadlineExceeded
 		}
 		if remaining < cap {
@@ -38,6 +49,15 @@ func callAttemptTimeout(ctx context.Context, cap time.Duration) (time.Duration, 
 		}
 	}
 	return cap, nil
+}
+
+// wrapCallTimeout は締切超過のエラーだけを ErrAICallTimeout で包む。
+// クライアント切断などの context.Canceled は打ち切りではないので包まない。
+func wrapCallTimeout(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %w", ErrAICallTimeout, err)
+	}
+	return err
 }
 
 func isChatCompletionsSearchModel(model string) bool {
@@ -101,7 +121,7 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 	for attempt := 1; attempt <= 5; attempt++ {
 		attemptTimeout, err := callAttemptTimeout(callCtx, chatCompletionAttemptCap)
 		if err != nil {
-			return "", err
+			return "", wrapCallTimeout(err)
 		}
 		ctxReq, cancel := context.WithTimeout(withFallbackFlag(callCtx), attemptTimeout)
 		req := openai.ChatCompletionRequest{
@@ -190,7 +210,7 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 		}
 
 		if err := callCtx.Err(); err != nil {
-			return "", err
+			return "", wrapCallTimeout(err)
 		}
 		if attempt == 5 {
 			break
@@ -199,7 +219,7 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 		jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
 		select {
 		case <-callCtx.Done():
-			return "", callCtx.Err()
+			return "", wrapCallTimeout(callCtx.Err())
 		case <-time.After(backoff + jitter):
 		}
 	}
@@ -207,7 +227,7 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 	if lastErr == nil {
 		lastErr = errors.New("no response from model")
 	}
-	return "", lastErr
+	return "", wrapCallTimeout(lastErr)
 }
 
 // isRetryableAPIErr は 429 / 5xx など再試行すれば成功しうるエラーか判定する。
@@ -270,7 +290,7 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 		started := time.Now()
 		attemptTimeout, err := callAttemptTimeout(callCtx, webSearchAttemptCap)
 		if err != nil {
-			return "", err
+			return "", wrapCallTimeout(err)
 		}
 		ctxReq, cancel := context.WithTimeout(callCtx, attemptTimeout)
 		text, err := cli.doResponses(ctxReq, responsesRequest{
@@ -285,18 +305,19 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 		})
 		elapsedMs := time.Since(started).Milliseconds()
 		cancel()
-		if err := callCtx.Err(); err != nil {
-			return "", err
-		}
+		// 成功直後に締切を過ぎても、課金済みの結果を捨てないよう成功判定を先に行う。
 		if err == nil && strings.TrimSpace(text) != "" {
 			log.Printf("[openai] web_search model=%s elapsed_ms=%d attempt=%d", model, elapsedMs, attempt)
 			return strings.TrimSpace(text), nil
 		}
+		if err := callCtx.Err(); err != nil {
+			return "", wrapCallTimeout(err)
+		}
 		if err != nil {
 			lastErr = err
-			attemptTimedOut := errors.Is(err, context.DeadlineExceeded)
-			if !isRetryableAPIErr(err) && !attemptTimedOut && !strings.Contains(strings.ToLower(err.Error()), "empty response") {
-				return "", err
+			// web_search は検索ごとに課金されるので、試行タイムアウトは再試行しない。
+			if !isRetryableAPIErr(err) && !strings.Contains(strings.ToLower(err.Error()), "empty response") {
+				return "", wrapCallTimeout(err)
 			}
 		} else {
 			lastErr = errors.New("empty response from web search")
@@ -308,14 +329,14 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 		jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
 		select {
 		case <-callCtx.Done():
-			return "", callCtx.Err()
+			return "", wrapCallTimeout(callCtx.Err())
 		case <-time.After(backoff + jitter):
 		}
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no response from web search")
 	}
-	return "", lastErr
+	return "", wrapCallTimeout(lastErr)
 }
 
 // responseFormatFor はスキーマの有無に応じた response_format を返す。

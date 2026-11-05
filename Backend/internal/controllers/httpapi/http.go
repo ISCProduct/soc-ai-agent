@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -66,7 +65,8 @@ const InternalServerErrorMessage = "内部エラーが発生しました"
 // InternalError はエラーをログ出力しつつ echo.HTTPError を返す。
 func InternalError(err error) error {
 	LogError(err)
-	if errors.Is(err, context.DeadlineExceeded) {
+	// 504 にするのは LLM の打ち切りだけ。DB・S3・RAG などの deadline は従来どおり 500 にする(#1779)。
+	if errors.Is(err, openai.ErrAICallTimeout) {
 		return NewAPIError(http.StatusGatewayTimeout, ErrCodeGatewayTimeout,
 			"処理に時間がかかっています。時間をおいて再度お試しください。")
 	}

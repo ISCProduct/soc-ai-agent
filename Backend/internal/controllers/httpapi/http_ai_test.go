@@ -33,11 +33,16 @@ func TestEchoInternalError_AIUnavailable(t *testing.T) {
 			wantStatus: http.StatusServiceUnavailable,
 		},
 		{
-			name:        "LLM deadline exceeded は504で再試行可能な文面",
-			err:         fmt.Errorf("generate failed: %w", context.DeadlineExceeded),
+			name:        "LLMの打ち切りは504で再試行可能な文面",
+			err:         fmt.Errorf("generate failed: %w", openai.ErrAICallTimeout),
 			wantStatus:  http.StatusGatewayTimeout,
 			wantCode:    ErrCodeGatewayTimeout,
 			wantMessage: "処理に時間がかかっています。時間をおいて再度お試しください。",
+		},
+		{
+			name:       "LLM以外のdeadlineは従来どおり500",
+			err:        fmt.Errorf("db query failed: %w", context.DeadlineExceeded),
+			wantStatus: http.StatusInternalServerError,
 		},
 		{name: "その他のエラーは従来どおり500", err: errors.New("db error"), wantStatus: http.StatusInternalServerError},
 	}

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"Backend/internal/controllers/httpapi"
+	"Backend/internal/middleware"
 	"Backend/internal/openai"
 	"Backend/internal/usagectx"
 
@@ -24,8 +26,15 @@ func TestESReviewRequestError_Deadline(t *testing.T) {
 	if httpErr.Code != http.StatusGatewayTimeout {
 		t.Fatalf("status = %d, want %d", httpErr.Code, http.StatusGatewayTimeout)
 	}
-	if got, want := httpErr.Message, "ES添削に時間がかかっています。時間をおいて再度お試しください。"; got != want {
-		t.Fatalf("message = %v, want %q", got, want)
+	resp, ok := httpErr.Message.(middleware.APIError)
+	if !ok {
+		t.Fatalf("message type = %T, want middleware.APIError", httpErr.Message)
+	}
+	if resp.Code != httpapi.ErrCodeGatewayTimeout {
+		t.Fatalf("code = %q, want %q", resp.Code, httpapi.ErrCodeGatewayTimeout)
+	}
+	if got, want := resp.Msg, "ES添削に時間がかかっています。時間をおいて再度お試しください。"; got != want {
+		t.Fatalf("message = %q, want %q", got, want)
 	}
 }
 

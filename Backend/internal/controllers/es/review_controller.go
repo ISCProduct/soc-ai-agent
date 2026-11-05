@@ -1,6 +1,7 @@
 package es
 
 import (
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -302,7 +303,7 @@ func postESReview(ctx echo.Context, payload esReviewRAGRequest, cli *openai.Clie
 
 func esReviewRequestError(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
-		return echo.NewHTTPError(http.StatusGatewayTimeout, "ES添削に時間がかかっています。時間をおいて再度お試しください。")
+		return httpapi.NewAPIError(http.StatusGatewayTimeout, httpapi.ErrCodeGatewayTimeout, "ES添削に時間がかかっています。時間をおいて再度お試しください。")
 	}
 	return echo.NewHTTPError(http.StatusBadGateway, "RAG service unavailable: "+err.Error())
 }

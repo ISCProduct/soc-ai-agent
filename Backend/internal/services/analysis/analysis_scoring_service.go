@@ -168,7 +168,6 @@ func NewAnalysisScoringService(
 }
 
 func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userID uint, sessionID string) (*AnalysisSummary, error) {
-	_ = ctx
 	jobScore, err := s.calculateJobScore(userID, sessionID)
 	if err != nil {
 		return nil, err
@@ -229,6 +228,9 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 日本語で簡潔に記述してください。`
 			userPrompt := "解析メタ情報: " + string(contextBytes) + "\n\n直近のユーザーメッセージ:\n" + userContext
 
+			// リクエストの ctx を引き継ぐ。誰も受け取らない要約に課金しないよう、クライアントが
+			// 切断したら LLM 呼び出しも止める。その場合 LLM 要約なしで返り、保存もしないので、
+			// 次回のリクエストで生成し直される。
 			aiCtx, cancel := context.WithTimeout(usagectx.WithFeature(ctx, usagectx.FeatureAnalysisScoring), analysisSummaryLLMTimeout)
 			raw, err := s.aiClient.ChatCompletionJSON(aiCtx, systemPrompt, userPrompt, 0.2, 400)
 			cancel()
