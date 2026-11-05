@@ -6,27 +6,39 @@ const isDev = process.env.NODE_ENV === 'development'
 // ビルド時焼き込み不要、コンテナのランタイム環境変数をそのまま読める)
 const backendOrigin = process.env.NEXT_PUBLIC_BACKEND_URL || process.env.BACKEND_URL || ''
 
+/**
+ * Content-Security-Policy を組み立てる。
+ *
+ * `wasm` を true にすると `script-src` に `'wasm-unsafe-eval'` を足す。Live2D の
+ * Cubism Core は `WebAssembly.instantiateStreaming` を呼ぶので、この許可が無いと
+ * CSPにWebAssemblyのコンパイルを拒否され、面接官の初期化が失敗する（資産を正しく
+ * 配送していても Avatar2D に落ちる）。開発モードは既存の `'unsafe-eval'` で動いて
+ * しまうため、本番だけで踏む。`'wasm-unsafe-eval'` が許すのはWebAssemblyの
+ * コンパイルだけで、JavaScriptの eval() は許可しない。
+ */
+function cspValue({ wasm }: { wasm: boolean }): string {
+  // 開発モードのバンドラ（Turbopack）が eval() を使うため 'unsafe-eval' が必要
+  const scriptSrc = isDev
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://va.vercel-scripts.com"
+    : `script-src 'self' 'unsafe-inline'${wasm ? " 'wasm-unsafe-eval'" : ''} https://va.vercel-scripts.com`
+  return [
+    "default-src 'self'",
+    scriptSrc,
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data: https:",
+    // blob: URL の音声/動画再生を許可（AI面接の TTS は blob: 経由で再生。connect-src の blob: では不足）
+    "media-src 'self' blob:",
+    // 開発モードの HMR の WebSocket 接続を許可
+    isDev
+      ? "connect-src 'self' blob: http://localhost:* https://api.openai.com https://*.sentry.io ws://localhost:* wss://localhost:*"
+      : `connect-src 'self' blob: https://api.openai.com https://*.sentry.io${backendOrigin ? ` ${backendOrigin}` : ''}`,
+    "frame-ancestors 'none'",
+  ].join('; ')
+}
+
 const securityHeaders = [
-  {
-    key: 'Content-Security-Policy',
-    value: [
-      "default-src 'self'",
-      // 開発モードのバンドラ（Turbopack）が eval() を使うため 'unsafe-eval' が必要
-      isDev
-        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://va.vercel-scripts.com"
-        : "script-src 'self' 'unsafe-inline' https://va.vercel-scripts.com",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "font-src 'self' https://fonts.gstatic.com",
-      "img-src 'self' data: https:",
-      // blob: URL の音声/動画再生を許可（AI面接の TTS は blob: 経由で再生。connect-src の blob: では不足）
-      "media-src 'self' blob:",
-      // 開発モードの HMR の WebSocket 接続を許可
-      isDev
-        ? "connect-src 'self' blob: http://localhost:* https://api.openai.com https://*.sentry.io ws://localhost:* wss://localhost:*"
-        : `connect-src 'self' blob: https://api.openai.com https://*.sentry.io${backendOrigin ? ` ${backendOrigin}` : ''}`,
-      "frame-ancestors 'none'",
-    ].join('; '),
-  },
+  { key: 'Content-Security-Policy', value: cspValue({ wasm: false }) },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
@@ -37,6 +49,12 @@ const securityHeaders = [
 const interviewPermissionsHeader = {
   key: 'Permissions-Policy',
   value: 'camera=(self), microphone=(self), geolocation=()',
+}
+
+// Live2D(Cubism Core)のWebAssemblyを使うのは面接ページだけなので、許可もここに限る
+const interviewCspHeader = {
+  key: 'Content-Security-Policy',
+  value: cspValue({ wasm: true }),
 }
 
 const nextConfig: NextConfig = {
@@ -60,8 +78,11 @@ const nextConfig: NextConfig = {
         // 面接ページのみカメラ・マイクを許可（他ページは securityHeaders で引き続き禁止）
         source: '/interview(.*)',
         headers: [
-          ...securityHeaders.filter((h) => h.key !== 'Permissions-Policy'),
+          ...securityHeaders.filter(
+            (h) => h.key !== 'Permissions-Policy' && h.key !== 'Content-Security-Policy',
+          ),
           interviewPermissionsHeader,
+          interviewCspHeader,
         ],
       },
     ]

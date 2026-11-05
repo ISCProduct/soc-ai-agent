@@ -16,6 +16,12 @@
  *
  * 頂点が1つも無ければ幅・高さ 0 を返す（呼び出し側はこれを描画しない条件に使う）。
  * 末尾の y が欠けた奇数長は、その x を無視する。
+ *
+ * ponytail: 非表示の drawable の頂点も含める。現行の男女モデルでは差分が通常絵と
+ * ほぼ同じ外接矩形なので実害が無く、除外しようとすると「どのフレームの可視状態で
+ * 測るか」を決める必要が出る（目・口の差分の可視は毎フレーム変わり、ここは初回の
+ * 結果を使い回す）。差し替えたモデルで絵が小さく描かれるようなら、可視状態に
+ * 依存しない測り方へ変える。
  */
 export function verticesExtent(vertexArrays: ArrayLike<number>[]): { width: number; height: number } {
   let minX = Number.POSITIVE_INFINITY

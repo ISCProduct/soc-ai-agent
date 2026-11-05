@@ -77,12 +77,25 @@ IDが変わると口もまばたきも動かなくなります。残っている
 
 1. [live2d.com](https://www.live2d.com/) から Cubism SDK for Web を取得して同意し、
    `Core/live2dcubismcore.min.js` を `frontend/public/live2d/core/` に置く
-2. モデル一式を S3 から取る
+2. 資産を S3 から取る（`core/` も含めて同期するので、手順1を済ませていれば上書きされるだけ）
    ```bash
    LIVE2D_ASSETS_BUCKET=soc-build-assets-508897596159 ./automation/ops/fetch-live2d-assets.sh
    ```
+   バケットへの読み取り権限が無い場合はここで失敗します。その場合はモデルを
+   別途受け取って `frontend/public/live2d/interviewers/{male,female}/` に置いてください。
 3. `frontend/.env.local` に `NEXT_PUBLIC_LIVE2D_ENABLED=true` を書く
-4. `npm run check:live2d` でモデルが面接官の要件を満たすか検査する
-   （パラメータ構成と LipSync / EyeBlink 登録を見るだけで、動作は保証しません）
+4. モデルが面接官の要件を満たすか検査する（`frontend` で実行する。
+   スクリプトは `frontend/package.json` にしかない）
+   ```bash
+   cd frontend
+   npm run check:live2d -- public/live2d/interviewers/male
+   npm run check:live2d -- public/live2d/interviewers/female
+   ```
+   パラメータ構成と LipSync / EyeBlink 登録を見るだけで、動作は保証しません。
+   面接官として使うには `ParamAngleY` か `ParamAngleX` のどちらかが必要です
+   （`live2d-params.ts` の `isUsableAsInterviewer`。両方無いモデルは不適格と
+   判定され Avatar2D に切り替わります）。
 
 単一モデルで試すときは `NEXT_PUBLIC_LIVE2D_MODEL_URL` を指定すると性別によらずそれを使います。
+ただし**差分ArtMeshの対応は `gender` で選ばれたまま**なので、男性モデルを女性として表示すると
+口開き差分が出たままになります。試すモデルに合う性別を選んでください。

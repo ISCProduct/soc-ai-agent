@@ -1,4 +1,9 @@
-import { FEMALE_OVERLAY_MESH_IDS, OVERLAY_MESH_IDS, overlayOpacities } from '@/lib/interview/live2d-overlay'
+import {
+  applyOverlayToDrawables,
+  FEMALE_OVERLAY_MESH_IDS,
+  OVERLAY_MESH_IDS,
+  overlayOpacities,
+} from '@/lib/interview/live2d-overlay'
 import { verticesExtent } from '@/lib/interview/live2d-extent'
 
 describe('overlayOpacities', () => {
@@ -54,5 +59,66 @@ describe('verticesExtent', () => {
 
   it('末尾に y が欠けた奇数長でも落ちない', () => {
     expect(verticesExtent([new Float32Array([0, 0, 4, 3, 9])])).toEqual({ width: 4, height: 3 })
+  })
+})
+
+/**
+ * `applyOverlayToDrawables` は本番コード（`Live2DFrameworkModel.applyOverlayOpacities`）が
+ * そのまま呼ぶ関数。Coreが「不透明度0・不可視」で書き出したモデルを実際に直せるかを、
+ * Coreが返すのと同じ型の配列（TypedArray）で確かめる。
+ */
+describe('applyOverlayToDrawables', () => {
+  /** 女性モデルの書き出し相当: 通常絵も差分も不透明度0・不可視。 */
+  function invisibleDrawables(count = 3) {
+    return {
+      opacities: new Float32Array(count), // すべて 0
+      dynamicFlags: new Uint8Array(count), // IsVisible が立っていない
+    }
+  }
+  const targets = { base: 0, eyesClosed: 1, mouthOpen: 2 }
+
+  it('不可視で書き出された通常絵を、不透明度1かつ可視へ直す', () => {
+    const { opacities, dynamicFlags } = invisibleDrawables()
+    applyOverlayToDrawables(opacities, dynamicFlags, targets, 1, 0)
+    expect(opacities[0]).toBe(1)
+    expect(dynamicFlags[0] & 1).toBe(1)
+  })
+
+  it('発話中は口開き差分を可視にする', () => {
+    const { opacities, dynamicFlags } = invisibleDrawables()
+    applyOverlayToDrawables(opacities, dynamicFlags, targets, 1, 1)
+    expect(opacities[2]).toBeGreaterThan(0)
+    expect(dynamicFlags[2] & 1).toBe(1)
+  })
+
+  it('口を閉じたら口開き差分は不可視へ戻す（残ると開いたままに見える）', () => {
+    const { opacities, dynamicFlags } = invisibleDrawables()
+    applyOverlayToDrawables(opacities, dynamicFlags, targets, 1, 1)
+    applyOverlayToDrawables(opacities, dynamicFlags, targets, 1, 0)
+    expect(opacities[2]).toBe(0)
+    expect(dynamicFlags[2] & 1).toBe(0)
+  })
+
+  it('まばたき中は目閉じ差分を可視にする', () => {
+    const { opacities, dynamicFlags } = invisibleDrawables()
+    applyOverlayToDrawables(opacities, dynamicFlags, targets, 0, 0)
+    expect(opacities[1]).toBe(1)
+    expect(dynamicFlags[1] & 1).toBe(1)
+  })
+
+  it('IsVisible 以外のビットは壊さない', () => {
+    const opacities = new Float32Array(3)
+    const dynamicFlags = new Uint8Array([0b1010, 0b1010, 0b1010])
+    applyOverlayToDrawables(opacities, dynamicFlags, targets, 1, 0)
+    // 口は閉じなので IsVisible を落とすが、上位ビットは残る
+    expect(dynamicFlags[2]).toBe(0b1010)
+    expect(dynamicFlags[0]).toBe(0b1011)
+  })
+
+  it('差分メッシュが見つからないモデルでも通常絵の補正はする', () => {
+    const { opacities, dynamicFlags } = invisibleDrawables(1)
+    applyOverlayToDrawables(opacities, dynamicFlags, { base: 0, eyesClosed: null, mouthOpen: null }, 1, 1)
+    expect(opacities[0]).toBe(1)
+    expect(dynamicFlags[0] & 1).toBe(1)
   })
 })

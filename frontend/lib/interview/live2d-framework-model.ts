@@ -13,7 +13,7 @@ import type { ICubismModelSetting } from '@/vendor/live2d-framework/src/icubismm
 import { CubismUserModel } from '@/vendor/live2d-framework/src/model/cubismusermodel'
 import { CubismMatrix44 } from '@/vendor/live2d-framework/src/math/cubismmatrix44'
 import { buildCapabilitiesInfo, type Live2DFrameworkCapabilitiesInfo } from './live2d-capabilities-info'
-import { OVERLAY_MESH_IDS, overlayOpacities, type OverlayMeshIds } from './live2d-overlay'
+import { OVERLAY_MESH_IDS, applyOverlayToDrawables, type OverlayMeshIds } from './live2d-overlay'
 import { verticesExtent } from './live2d-extent'
 
 export type { Live2DFrameworkCapabilitiesInfo }
@@ -62,7 +62,8 @@ export class Live2DFrameworkModel extends CubismUserModel {
   private modelSetting: ICubismModelSetting | null = null
   private readonly viewMatrix = new CubismMatrix44()
   private overlay = { eyeOpen: 1, mouthOpen: 0 }
-  private overlayIndices: { base: number | null; eyesClosed: number; mouthOpen: number } | null = null
+  private overlayIndices: { eyesClosed: number; mouthOpen: number } | null = null
+  private baseIndex: number | null = null
   private measuredExtent: { width: number; height: number } | null = null
 
   static async load(
@@ -93,9 +94,10 @@ export class Live2DFrameworkModel extends CubismUserModel {
       const eyesClosed = drawableIds.indexOf(overlayMeshIds.eyesClosed)
       const mouthOpen = drawableIds.indexOf(overlayMeshIds.mouthOpen)
       const base = drawableIds.indexOf(overlayMeshIds.base)
-      if (eyesClosed >= 0 && mouthOpen >= 0) {
-        model.overlayIndices = { base: base >= 0 ? base : null, eyesClosed, mouthOpen }
-      }
+      // base は差分2枚とは独立に持つ。まとめて1つにすると、差分が欠けたモデルでは
+      // 通常絵の不透明度・可視フラグの補正も効かなくなり、何も描画されない。
+      model.baseIndex = base >= 0 ? base : null
+      if (eyesClosed >= 0 && mouthOpen >= 0) model.overlayIndices = { eyesClosed, mouthOpen }
 
       const physicsFileName = setting.getPhysicsFileName()
       if (physicsFileName) {
@@ -171,32 +173,19 @@ export class Live2DFrameworkModel extends CubismUserModel {
   }
 
   private applyOverlayOpacities(): void {
-    const indices = this.overlayIndices
-    if (!indices) return
-    const { eyesClosed, mouthOpen } = overlayOpacities(this.overlay.eyeOpen, this.overlay.mouthOpen)
-    // Core の drawables.opacities は描画側(renderer)が読むのと同じ配列。update() のたびに
-    // Core が計算し直すので、毎フレームこの直後に上書きする。
-    const opacities = this.getModel().getModel().drawables.opacities
-    opacities[indices.eyesClosed] = eyesClosed
-    opacities[indices.mouthOpen] = mouthOpen
-    // 不透明度とは別に、Coreが計算する「IsVisible」動的フラグ(bit 0)が false だと
-    // レンダラーは不透明度を見ずにその drawable の描画自体をスキップする
-    // (`cubismrenderer_webgl.ts:973` が `getDrawableDynamicFlagIsVisible` で弾く。
-    //  判定は Core の `hasIsVisibleBit` で bit 0)。
-    // 不透明度を上書きするなら、このフラグも揃えないと効かない。
-    const dynamicFlags = this.getModel().getModel().drawables.dynamicFlags
-    dynamicFlags[indices.eyesClosed] =
-      eyesClosed > 0 ? dynamicFlags[indices.eyesClosed] | 1 : dynamicFlags[indices.eyesClosed] & ~1
-    dynamicFlags[indices.mouthOpen] =
-      mouthOpen > 0 ? dynamicFlags[indices.mouthOpen] | 1 : dynamicFlags[indices.mouthOpen] & ~1
-    // 書き出しによっては通常絵(base)のCore側の既定値が不透明度0・不可視になっている
-    // （女性モデルで確認。これが原因で画面に何も出なかった）。差分2枚以外の常時表示
-    // レイヤーは、Coreの計算値に関わらず毎フレーム見える状態に固定する
-    // （男性モデルでは既にそうなっているので上書きしても無害）。
-    if (indices.base !== null) {
-      opacities[indices.base] = 1
-      dynamicFlags[indices.base] |= 1
-    }
+    if (this.overlayIndices === null && this.baseIndex === null) return
+    const drawables = this.getModel().getModel().drawables
+    applyOverlayToDrawables(
+      drawables.opacities,
+      drawables.dynamicFlags,
+      {
+        base: this.baseIndex,
+        eyesClosed: this.overlayIndices?.eyesClosed ?? null,
+        mouthOpen: this.overlayIndices?.mouthOpen ?? null,
+      },
+      this.overlay.eyeOpen,
+      this.overlay.mouthOpen,
+    )
   }
 
   /**
@@ -226,6 +215,12 @@ export class Live2DFrameworkModel extends CubismUserModel {
    *
    * `zoom` > 1 で拡大し、`focusY`（モデル画像の上端を0・下端を1とした位置）が
    * canvasの縦中央に来るようにずらす。全身絵の余白を切って顔を大きく見せるのに使う。
+   *
+   * ponytail: 平行移動は unit 原点基準のまま（外接矩形の中心基準にしていない）。
+   * 現行の男女モデルは絵が原点中心に収まっており、`FACE_ZOOM` / `FACE_FOCUS_Y`
+   * （`Live2DAvatar.tsx`）もその前提で実画面を見て決めてある。原点から外接矩形の
+   * 中心がずれたモデルに差し替えると絵が寄るので、そのときは外接矩形の中心へ
+   * 合わせる平行移動に変え、合わせて `FACE_FOCUS_Y` を見直す。
    */
   draw(gl: WebGLRenderingContext, canvasWidthPx: number, canvasHeightPx: number, margin = 0.98, zoom = 1, focusY = 0.5): void {
     const { width: canvasWidthUnit, height: canvasHeightUnit } = this.measureExtent()

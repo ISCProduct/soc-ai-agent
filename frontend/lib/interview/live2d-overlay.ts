@@ -62,3 +62,55 @@ export function overlayOpacities(eyeOpen: number, mouthOpen: number): OverlayOpa
     mouthOpen: mouthCrossfade(mouthOpen) * (1 - eyesClosed),
   }
 }
+
+/** 書き込める数値配列（Core の `drawables.opacities` / `dynamicFlags` は TypedArray）。 */
+type MutableNumbers = { readonly length: number; [index: number]: number }
+
+/** 差分ArtMeshの位置。見つからなかったものは null。 */
+export interface OverlayTargets {
+  base: number | null
+  eyesClosed: number | null
+  mouthOpen: number | null
+}
+
+/** Core が計算する「IsVisible」動的フラグのビット（Core の `hasIsVisibleBit` と同じ bit 0）。 */
+const IS_VISIBLE_BIT = 1
+
+/**
+ * Core の drawable 配列を書き換えて、差分ArtMesh方式のモデルの目・口を動かす。
+ *
+ * `opacities` / `dynamicFlags` は描画側(renderer)が読むのと同じ配列。`update()` のたびに
+ * Core が計算し直すので、毎フレームその直後に呼ぶ。
+ *
+ * 不透明度だけでは足りない。Core が計算する IsVisible 動的フラグが false だと、
+ * レンダラーは不透明度を見ずにその drawable の描画自体をスキップする
+ * （`cubismrenderer_webgl.ts` が `getDrawableDynamicFlagIsVisible` で弾き、判定は
+ * Core の `hasIsVisibleBit`）。そのため不透明度とフラグを必ず揃える。
+ *
+ * `base`（常時表示の通常絵）は、書き出しによって Core 側の既定値が不透明度0・不可視に
+ * なっている（女性モデルで確認。これが原因で画面に何も出なかった）。差分の有無とは
+ * 無関係に常に見える状態へ固定する（男性モデルでは既にそうなので上書きしても無害）。
+ */
+export function applyOverlayToDrawables(
+  opacities: MutableNumbers,
+  dynamicFlags: MutableNumbers,
+  targets: OverlayTargets,
+  eyeOpen: number,
+  mouthOpen: number,
+): void {
+  const opacity = overlayOpacities(eyeOpen, mouthOpen)
+  for (const [key, value] of [
+    ['eyesClosed', opacity.eyesClosed],
+    ['mouthOpen', opacity.mouthOpen],
+  ] as const) {
+    const index = targets[key]
+    if (index === null) continue
+    opacities[index] = value
+    dynamicFlags[index] =
+      value > 0 ? dynamicFlags[index] | IS_VISIBLE_BIT : dynamicFlags[index] & ~IS_VISIBLE_BIT
+  }
+  if (targets.base !== null) {
+    opacities[targets.base] = 1
+    dynamicFlags[targets.base] |= IS_VISIBLE_BIT
+  }
+}

@@ -62,6 +62,13 @@ targets = list(refs.get('Textures') or [])
 for key in ('Moc', 'DisplayInfo'):
     if refs.get(key):
         targets.append(refs[key])
+# Moc が無いとランタイムはモデルを読み込めない。Textures が空だと、テクスチャを
+# 一枚も設定しないまま描画して真っ白になる。どちらも「参照が無い」ので、
+# 下の存在チェックだけでは素通りしてしまう。
+if not refs.get('Moc'):
+    sys.exit(f"エラー: {model} に Moc の参照が無い")
+if not refs.get('Textures'):
+    sys.exit(f"エラー: {model} に Textures の参照が無い")
 for rel in targets:
     path = os.path.join(base, rel)
     if not os.path.isfile(path) or os.path.getsize(path) == 0:
