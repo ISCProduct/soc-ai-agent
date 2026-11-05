@@ -17,7 +17,7 @@ import { InterviewReport, InterviewSession } from '@/lib/interview'
 import InterviewSummary from './InterviewSummary'
 import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
-import { PRIMARY, BG_DARK } from '../constants'
+
 import { UTTERANCE_SAVE_FAILED_MESSAGE } from '../utteranceSave'
 import type { ReportStatus } from '../hooks/useInterviewSession'
 import {
@@ -25,6 +25,7 @@ import {
   GUEST_REGISTER_CTA_LABEL,
   getGuestEmailButtonProps,
 } from '@/lib/guest-limits'
+import { UI } from '@/lib/design/tokens'
 
 export interface ReportScreenProps {
   onBack: () => void
@@ -89,19 +90,19 @@ export default function ReportScreen({
   videoSizeWarning,
 }: ReportScreenProps) {
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: BG_DARK, color: '#e8eaed', overflowY: 'auto', p: { xs: 2, md: 4 } }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: UI.nightBg, color: UI.nightInk, overflowY: 'auto', p: { xs: 2, md: 4 } }}>
       <Box sx={{ maxWidth: 720, mx: 'auto' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 4 }}>
-          <IconButton sx={{ color: '#bdc1c6' }} onClick={onBack} aria-label="前の画面へ戻る">
+          <IconButton sx={{ color: UI.nightSoft }} onClick={onBack} aria-label="前の画面へ戻る">
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h5" sx={{ fontWeight: 700, color: '#e8eaed', flex: 1 }}>面接レポート</Typography>
+          <Typography variant="h5" sx={{ fontWeight: 700, color: UI.nightInk, flex: 1 }}>面接レポート</Typography>
           <Button
             component={Link}
             href="/interview/history"
             size="small"
             startIcon={<HistoryIcon />}
-            sx={{ color: '#bdc1c6', textTransform: 'none' }}
+            sx={{ color: UI.nightSoft, textTransform: 'none' }}
           >
             面接履歴を見る
           </Button>
@@ -114,7 +115,7 @@ export default function ReportScreen({
               <Button
                 variant="contained"
                 onClick={onRetryFinish}
-                sx={{ bgcolor: PRIMARY, '&:hover': { bgcolor: '#d14f10' } }}
+                sx={{ bgcolor: UI.mark, '&:hover': { bgcolor: '#d14f10' } }}
               >
                 再試行
               </Button>
@@ -130,8 +131,8 @@ export default function ReportScreen({
         )}
 
         {reportStatus === 'pending' && (
-          <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(255,255,255,0.08)', p: 3, borderRadius: 2 }}>
-            <Typography sx={{ color: '#e8eaed', mb: 1.5 }}>レポートを生成中です...</Typography>
+          <Paper sx={{ bgcolor: UI.nightPanel, border: '1px solid rgba(255,255,255,0.08)', p: 3, borderRadius: 2 }}>
+            <Typography sx={{ color: UI.nightInk, mb: 1.5 }}>レポートを生成中です...</Typography>
             <LinearProgress sx={{ bgcolor: '#3c4043', '& .MuiLinearProgress-bar': { bgcolor: '#4285f4' } }} />
           </Paper>
         )}
@@ -155,7 +156,7 @@ export default function ReportScreen({
                         fullWidth
                         disabled={emailSending || emailSent || guestEmailProps.disabled}
                         onClick={onSendEmail}
-                        sx={{ color: emailSent ? '#34a853' : PRIMARY, borderColor: emailSent ? '#34a853' : PRIMARY, '&:hover': { borderColor: PRIMARY, bgcolor: 'rgba(236,91,19,0.08)' } }}
+                        sx={{ color: emailSent ? '#34a853' : UI.mark, borderColor: emailSent ? '#34a853' : UI.mark, '&:hover': { borderColor: UI.mark, bgcolor: 'rgba(236,91,19,0.08)' } }}
                       >
                         {emailSent ? '✓ メールを送信しました' : emailSending ? '送信中...' : 'レポートをメールで受け取る'}
                       </Button>
@@ -163,12 +164,12 @@ export default function ReportScreen({
                   </Tooltip>
                   <ErrorAlert error={emailError} sx={{ mb: 0 }} />
                   {isGuest && (
-                    <Typography variant="caption" sx={{ color: '#9aa0a6', textAlign: 'center' }}>
+                    <Typography variant="caption" sx={{ color: UI.nightMuted, textAlign: 'center' }}>
                       {GUEST_EMAIL_DISABLED_REASON}{' '}
                       <Button
                         size="small"
                         onClick={onRegisterClick}
-                        sx={{ color: PRIMARY, textTransform: 'none', p: 0, minWidth: 0, verticalAlign: 'baseline' }}
+                        sx={{ color: UI.mark, textTransform: 'none', p: 0, minWidth: 0, verticalAlign: 'baseline' }}
                       >
                         {GUEST_REGISTER_CTA_LABEL}
                       </Button>
@@ -181,7 +182,7 @@ export default function ReportScreen({
         )}
 
         {(reportStatus === 'error' || reportStatus === 'timeout') && (
-          <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(234,67,53,0.3)', p: 3, borderRadius: 2 }}>
+          <Paper sx={{ bgcolor: UI.nightPanel, border: '1px solid rgba(234,67,53,0.3)', p: 3, borderRadius: 2 }}>
             <Typography variant="body2" sx={{ color: '#f28b82', mb: onRetryReport ? 2 : 0 }}>
               {reportStatus === 'timeout'
                 ? 'レポート生成がタイムアウトしました。時間をおいて再試行してください。'
@@ -191,7 +192,7 @@ export default function ReportScreen({
               <Button
                 variant="contained"
                 onClick={onRetryReport}
-                sx={{ bgcolor: PRIMARY, '&:hover': { bgcolor: '#d14f10' } }}
+                sx={{ bgcolor: UI.mark, '&:hover': { bgcolor: '#d14f10' } }}
               >
                 再試行
               </Button>
@@ -203,13 +204,13 @@ export default function ReportScreen({
 
         {/* Video upload status */}
         {videoUploadStatus !== 'idle' && (
-          <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(255,255,255,0.1)', p: 2, borderRadius: 2 }}>
+          <Paper sx={{ bgcolor: UI.nightPanel, border: '1px solid rgba(255,255,255,0.1)', p: 2, borderRadius: 2 }}>
             {videoSizeWarning && (
               <Typography variant="caption" sx={{ color: '#fdd663', display: 'block', mb: 1 }}>
                 ⚠ {videoSizeWarning}
               </Typography>
             )}
-            <Typography variant="body2" sx={{ color: videoUploadStatus === 'done' ? '#34a853' : videoUploadStatus === 'error' ? '#f28b82' : '#9aa0a6', mb: videoUploadStatus === 'uploading' ? 1 : 0 }}>
+            <Typography variant="body2" sx={{ color: videoUploadStatus === 'done' ? '#34a853' : videoUploadStatus === 'error' ? '#f28b82' : UI.nightMuted, mb: videoUploadStatus === 'uploading' ? 1 : 0 }}>
               {videoUploadStatus === 'uploading' && `動画をアップロード中... ${videoUploadProgress}%`}
               {videoUploadStatus === 'done' && '✓ 動画のアップロードが完了しました'}
               {videoUploadStatus === 'error' && '動画のアップロードに失敗しました。ネットワーク接続を確認してください'}
@@ -218,7 +219,7 @@ export default function ReportScreen({
               <LinearProgress
                 variant="determinate"
                 value={videoUploadProgress}
-                sx={{ height: 6, borderRadius: 3, bgcolor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { bgcolor: PRIMARY } }}
+                sx={{ height: 6, borderRadius: 3, bgcolor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { bgcolor: UI.mark } }}
               />
             )}
           </Paper>

@@ -28,8 +28,8 @@ AI面接の音声基盤について、**Realtime API 実装を有効化するか
 
 | レイヤ | 実装 | モデル |
 | --- | --- | --- |
-| 音声認識 | `openai/transcribe_hints.go` `TranscribeWithHints` | `gpt-4o-mini-transcribe` |
-| 音声認識(再送) | `openai/transcribe_hints.go` `TranscribeWithModel` | `gpt-4o-transcribe`（問題発話のみ） |
+| 音声認識 | `openai/transcribe_hints.go` `TranscribeWithHints` | `gpt-transcribe`（補助語は `keywords`） |
+| 音声認識(再送) | `openai/transcribe_hints.go` `TranscribeWithModel` | 既定モデルのままなら再送しない。mini に戻したときだけ `gpt-transcribe` へ再送 |
 | 質問生成 | `openai/client_chat.go` `ChatInterview` | `gpt-4o-mini` |
 | 音声合成 | `openai/tts.go` `TTS` | `tts-1` |
 
@@ -187,7 +187,7 @@ AI面接の音声基盤について、**Realtime API 実装を有効化するか
 | --- | --- | --- |
 | 案の選択 | A / B のいずれか | プロダクト判断 |
 | B 採用時のモデル | `gpt-realtime-mini` か `gpt-realtime`（約3倍） | 実際に聞いて判断 |
-| STT モデル | `gpt-4o-mini-transcribe` を既定値として採用 | 単価は半額。**合成音声で検証済み**（`docs/research/interview-audio-eval/RESULTS_stt_hints.md`）で、CER・固有名詞正解率に差は出なかった。ただし **mini は「御社」を8/8で「本社」と誤認する**ため、この語を検知して高精度モデルへ再送するフォールバックを併用する。実発話の精度と再送率は未測定で、問題が出たら `OPENAI_WHISPER_MODEL=gpt-4o-transcribe` に戻す。戻すときは `terraform.tfvars` の `openai_whisper_model` を変更して apply する |
+| STT モデル | **2026-10-11 に `gpt-transcribe` へ変更。** 実際の面接音声13発話（動画の音声トラック、正解は復元）で誤り率は mini 23% / `gpt-transcribe` 18%。再送先だった `gpt-4o-transcribe` は語の羅列の prompt をそのまま返し誤り率 83% だったため再送先から外した。以下は変更前の判断記録。`gpt-4o-mini-transcribe` を既定値として採用 | 単価は半額。**合成音声で検証済み**（`docs/research/interview-audio-eval/RESULTS_stt_hints.md`）で、CER・固有名詞正解率に差は出なかった。ただし **mini は「御社」を8/8で「本社」と誤認する**ため、この語を検知して高精度モデルへ再送するフォールバックを併用する。実発話の精度と再送率は未測定で、問題が出たら `OPENAI_WHISPER_MODEL=gpt-4o-transcribe` に戻す。戻すときは `terraform.tfvars` の `openai_whisper_model` を変更して apply する |
 | 既存 Realtime 実装の扱い | A 採用時、削除するか凍結して残すか | 本書は削除を推奨 |
 
 ## 10. 参照

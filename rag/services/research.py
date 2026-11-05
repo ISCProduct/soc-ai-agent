@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -85,7 +86,7 @@ def run_deep_research(company_name: str, job_title: str) -> str:
         "企業名: {company}\n"
         "職種: {role}\n"
         "出力は日本語で、箇条書きを含む短いレポート形式にしてください。"
-    ).format(company=safe_company, role=role)
+    ).format(company=_wrap_untrusted_text(safe_company, "企業名"), role=_wrap_untrusted_text(role, "職種"))
     def request_response(use_tools: bool, model_name: str):
         kwargs = {
             "model": model_name,
@@ -302,7 +303,12 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
                 "軸3: 最近の事業展開（直近のニュース・IR情報・新規事業）\n\n"
                 "検索エンジンのヒット率を最大化するため、具体的なキーワードを組み合わせてください。\n"
                 "出力はJSONのみ: {{\"queries\": [\"クエリ1\", \"クエリ2\", ...]}}"
-            ).format(company=safe_company, role=role_text)
+            ).format(
+                # サニタイズは記号しか削らず日本語の指示文は残るため囲む（#1643）。
+                # キャッシュキーは囲む前の値のまま（ノンスを焼き付けない）。
+                company=_wrap_untrusted_text(safe_company, "企業名"),
+                role=_wrap_untrusted_text(role_text, "職種"),
+            )
             resp = client.chat.completions.create(
                 model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
                 messages=[{"role": "user", "content": prompt}],
@@ -373,7 +379,10 @@ def _summarize_for_hiring(company_name: str, job_title: str, raw_texts: List[str
     prompt = (
                  "企業名: {company}\n"
                  "職種: {role}\n\n"
-             ).format(company=safe_company, role=role_text) + (
+             ).format(
+                 company=_wrap_untrusted_text(safe_company, "企業名"),
+                 role=_wrap_untrusted_text(role_text, "職種"),
+             ) + (
                  "以下の検索結果をもとに、採用観点での企業分析サマリーを日本語で作成してください。\n\n"
                  "【優先情報ソース（重要度順）】\n"
                  "1. 企業公式サイト（採用ページ・企業理念・代表メッセージ）\n"
@@ -425,19 +434,25 @@ def _save_search_log(
         raw_results: List[str],
         summary: str,
 ) -> None:
-    """検索結果をJSONL形式でログ保存する（ファインチューニング用データセット）。"""
+    """検索メタデータと本文・要約のダイジェストを保存し、外部文章を複製しない。"""
     import main as m
 
     try:
         os.makedirs(m.SEARCH_LOG_DIR, exist_ok=True)
         log_path = os.path.join(m.SEARCH_LOG_DIR, "search_log.jsonl")
+        raw_results_digest = hashlib.sha256(
+            json.dumps(raw_results, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        summary_digest = hashlib.sha256(summary.encode("utf-8")).hexdigest()
         record = {
             "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
             "company_name": company_name,
             "job_title": job_title,
             "queries": queries,
-            "raw_results": raw_results,
-            "summary": summary,
+            "raw_result_count": len(raw_results),
+            "raw_results_sha256": raw_results_digest,
+            "summary_sha256": summary_digest,
+            "summary_chars": len(summary),
         }
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")

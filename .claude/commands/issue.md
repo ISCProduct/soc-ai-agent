@@ -31,7 +31,11 @@ argument-hint: <実装したい機能やバグの概要>
 
 1. **規模の決定**（Lite / Standard / Full。不明なら Standard）
 2. **不足情報の確認**（ロール・成功指標・スコープ外）
-3. **確認** … 要約とメタ（タイトル・ラベル・カテゴリ・種別）を提示し、**承認後**に Notion/Issue 作成へ進む
+3. **確認** … 要約とメタ（タイトル・`カテゴリ`・`種別`）を提示し、**承認後**に Backlog / Notion 作成へ進む
+
+   GitHub のラベルは承認項目に入れない。`backlog-to-github-issue.yml` が作る Issue は
+   title / body だけでラベルを付けないため、承認しても反映先が無い。
+   トリアージは Backlog の `種別` と Notion の `カテゴリ` で持つ。
 4. **Backlog 課題を作成**（番号採番のため先に作る。`SOCAIAGENT-N` は即座に得られる）
 
    起票先は **Backlog**。GitHub Issue は `backlog-to-github-issue.yml` が
@@ -39,8 +43,32 @@ argument-hint: <実装したい機能やバグの概要>
    `gh issue create` で直接作らない。両方から作ると二重に課題ができる。
 
    認証情報は `.env` の `BACKLOG_SPACE_ID` / `BACKLOG_PROJECT_KEY` /
-   `BACKLOG_API_KEY`。API 呼び出しは `.github/scripts/backlog_client.py` の
-   `load_backlog_env` / `resolve_bl_base` / `bl_request` を使う。
+   `BACKLOG_API_KEY`。`load_backlog_env` が未設定時に `.env` から読むので
+   export は不要。
+
+   `bl_request` は汎用の HTTP ヘルパーで、課題作成の payload は補わない。
+   Backlog の課題追加 API は `projectId` / `summary` / `issueTypeId` /
+   `priorityId` が必須なので、次の順に解決する。
+
+   ```python
+   import sys; sys.path.insert(0, ".github/scripts")
+   from backlog_client import load_backlog_env, resolve_bl_base, bl_request
+
+   api_key, space_id, proj_key, domain = load_backlog_env()
+   base, host = resolve_bl_base(space_id, api_key, domain)   # base に /api/v2 を含む
+   proj  = bl_request(base, api_key, "GET", f"/projects/{proj_key}")
+   types = bl_request(base, api_key, "GET", f"/projects/{proj_key}/issueTypes")
+   # 優先度は /priorities（高=2 / 中=3 / 低=4）。不明なら 中。
+   res = bl_request(base, api_key, "POST", "/issues", {
+       "projectId": proj["id"], "summary": "...", "description": "...",
+       "issueTypeId": next(t["id"] for t in types if t["name"] == "開発要望"),
+       "priorityId": 3,
+   })
+   # res["issueKey"] が SOCAIAGENT-N。親子にする場合は parentIssueId を渡す。
+   ```
+
+   **パスに `/api/v2` を付けない。** `resolve_bl_base` が返す `base` に含まれており、
+   二重になると `Undefined resource` で 400 になる。
 5. **Notion Markdown** … `notion://docs/enhanced-markdown-spec` を確認してから本文を書く
 6. **PRD を PRD一覧へ作成**（テンプレート見出しに従う）
 7. **DesignDoc を DesignDoc一覧へ作成**し、PRD と Relation 相互リンク
@@ -71,7 +99,9 @@ argument-hint: <実装したい機能やバグの概要>
 
     - **`Backlogキー`**: 手順4で得た `SOCAIAGENT-N` をそのまま入れる。
     - **`ステータス` は `承認済み`**。`レビュー中` にしない。起票まで進んだ時点で内容は合意済みであり、`レビュー中` のまま誰も動かさないため、実際に全件が止まっていた。
-    - 実装が main へマージされたら `完了` に更新する（`/pr` のマージ後、または後追いで）。
+    - `完了` にするのは **main へ昇格した後**。`/pr` は `develop` 宛てなので、
+      develop へ入っただけでは release / main のレビューと本番反映が残っている。
+      develop マージ時点では Backlog 側が `ステージング環境反映` になるのに合わせる。
 
 **禁止・注意:**
 - Notion 作成を飛ばして Issue に全文を載せない

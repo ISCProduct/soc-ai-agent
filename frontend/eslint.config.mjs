@@ -4,7 +4,9 @@ import reactHooksPlugin from 'eslint-plugin-react-hooks'
 
 export default [
   {
-    ignores: ['.next/**', 'node_modules/**'],
+    // vendor/live2d-framework は Live2D公式 Cubism Web Framework の無改変ベンダリング。
+    // 自分たちのコードではないのでlintしない（strict向けでない上流コードなので警告まみれになる）。
+    ignores: ['.next/**', 'node_modules/**', 'vendor/live2d-framework/**'],
   },
   {
     files: ['**/*.{ts,tsx}'],

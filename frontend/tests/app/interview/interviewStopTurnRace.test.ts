@@ -159,6 +159,9 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
   let hangTurnBody: boolean
   /** true の間は /api/auth/session が応答せず固まる（middleware のトークン更新が半開き） */
   let hangAuthSession: boolean
+  /** true の間は発話保存（/utterances）の応答を保留する */
+  let holdUtterances: boolean
+  let releaseUtterances: (() => void)[]
 
   beforeEach(() => {
     calls = []
@@ -167,6 +170,8 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     releaseStartTurn = null
     hangTurnBody = false
     hangAuthSession = false
+    holdUtterances = false
+    releaseUtterances = []
     // 面接中は有効なトークンが入っている状態から始める
     storeUserToken(tokenExpiringIn(3600))
     pendingRecorderStops.length = 0
@@ -188,6 +193,9 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
       if (url.includes('/api/auth/session')) {
         if (hangAuthSession) return neverResolves<FakeResponse>(init?.signal)
         return jsonResponse({ user_token: tokenExpiringIn(3600) })
+      }
+      if (url.includes('/utterances') && holdUtterances) {
+        return new Promise<FakeResponse>(resolve => { releaseUtterances.push(() => resolve(jsonResponse({}))) })
       }
       if (url.includes('/start-turn')) {
         if (!holdStartTurn) return turnResponse({ ai_text: '自己紹介をお願いします' })
@@ -220,6 +228,48 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
       status: 'connected',
       setStatus: jest.fn(),
     }))
+
+  /**
+   * Backend は保存済みの発話から履歴を組み直す（#1636）。前ターンの保存が終わる前に次の /turn を
+   * 送ると、直前のやり取りが履歴から抜け、面接官が同じ質問を繰り返す。
+   */
+  it('前ターンの発話保存が終わるまで、次の /turn を送らない', async () => {
+    const media = fakeMedia()
+    const { result, unmount } = renderSession(media)
+    const turnCalls = () => calls.filter(u => u.includes('/turn') && !u.includes('/start-turn')).length
+
+    await act(async () => { await result.current.handleJoin() })
+    act(() => { result.current.startRecording() })
+    act(() => { result.current.stopRecording() })
+    act(() => { deliverRecorderStops() })
+    await flush()
+
+    // 1ターン目の応答は返るが、その発話保存はまだ終わらない
+    holdUtterances = true
+    await act(async () => {
+      releaseTurn?.(turnResponse({ user_text: '1つ目の回答', ai_text: '次の質問です' }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    expect(turnCalls()).toBe(1)
+
+    // 2ターン目を録音して送る。保存待ちの間は /turn を出さない
+    act(() => { result.current.startRecording() })
+    act(() => { result.current.stopRecording() })
+    act(() => { deliverRecorderStops() })
+    await flush()
+    expect(turnCalls()).toBe(1)
+
+    // 保存が終わったら送る
+    await act(async () => {
+      holdUtterances = false
+      releaseUtterances.splice(0).forEach(r => r())
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    await flush()
+    expect(turnCalls()).toBe(2)
+
+    unmount()
+  })
 
   it('handleStop の後に届いたターンの発話も、finishSession より先に保存する', async () => {
     const media = fakeMedia()

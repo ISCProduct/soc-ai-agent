@@ -16,6 +16,7 @@ const (
 	BrokenTruncated   = "output_truncated"  // 出力上限に到達して途中で切れた
 	BrokenCallFailed  = "call_failed"       // 応答は得たが使える出力ではなかった
 	BrokenSchema      = "schema_incomplete" // JSONは読めたが必須キーが無くスコアが取れない
+	BrokenValidation  = "input_validation"  // 入力がRAGのバリデーションで拒否された
 
 	// BrokenNetwork は通信・レート制限・サーバ側エラー。品質ではないので
 	// 破損率とレイテンシの両方から除外し、「計測できなかった回数」として別に出す。
@@ -134,6 +135,8 @@ type Summary struct {
 	// UnmeasuredRuns は通信エラー等で計測できなかった回数（破損率の分母から除外）。
 	// これが多い実行は数字自体が信用できない。
 	UnmeasuredRuns int `json:"unmeasured_runs"`
+	// MeasuredRuns は実際にスコアを取れた実行回数。0 のとき指標は無意味になる。
+	MeasuredRuns int `json:"measured_runs"`
 
 	// 再現性: ケースごとのスコア標準偏差の平均と最大（小さいほど安定）
 	MeanScoreStdDev float64 `json:"mean_score_stddev"`
@@ -142,8 +145,12 @@ type Summary struct {
 	UnstableCaseIDs []string `json:"unstable_case_ids,omitempty"`
 
 	// 弁別力: ゴールドラベル（良/中/悪）とスコアの順位相関（1.0が完全一致）。
-	LabelRankCorrelation float64            `json:"label_rank_correlation"`
-	MeanScoreByLabel     map[string]float64 `json:"mean_score_by_label"`
+	LabelRankCorrelation float64 `json:"label_rank_correlation"`
+	// PairwiseAgreement はラベルが異なるケースの組のうち、スコアの大小がラベルの大小と
+	// 一致した割合（1.0 が完全一致、0.5 が当てずっぽう）。PairwiseComparable は比べた組の数。
+	PairwiseAgreement  float64            `json:"pairwise_agreement"`
+	PairwiseComparable int                `json:"pairwise_comparable"`
+	MeanScoreByLabel   map[string]float64 `json:"mean_score_by_label"`
 
 	// 交絡: 入力の文字数とスコアの順位相関。**弁別力と必ず並べて読む。**
 	// ラベルとの相関が高くてもこれが同じくらい高ければ、その測定は
@@ -258,6 +265,7 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 
 	s.Cases = len(byCase)
 	s.Runs = len(obs) / max(1, len(byCase))
+	s.MeasuredRuns = measured
 	if measured > 0 {
 		s.BrokenRate = float64(broken) / float64(measured)
 	}
@@ -314,6 +322,7 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	}
 	sort.Strings(s.UnstableCaseIDs)
 	s.LabelRankCorrelation = SpearmanCorrelation(labelSeries, scoreSeries)
+	s.PairwiseAgreement, s.PairwiseComparable = PairwiseAgreement(labelSeries, scoreSeries)
 	s.LengthRankCorrelation = SpearmanCorrelation(charSeries, scoreSeries)
 	s.LabelLengthRankCorrelation = SpearmanCorrelation(labelSeries, charSeries)
 	s.LengthMetricsMeasured = true

@@ -1,6 +1,7 @@
 package interview
 
 import (
+	"Backend/internal/openai"
 	"regexp"
 	"strings"
 	"time"
@@ -93,7 +94,10 @@ func ShouldUseFallbackResult(retried string, retryErr error) bool {
 // FallbackModel は再送に使う高精度モデル名。
 // 既定モデルが既に高精度なら再送しても意味が無いので、
 // 呼び出し側は SameAsPrimary で判断する。
-const FallbackModel = "gpt-4o-transcribe"
+//
+// gpt-4o-transcribe は使わない。実音声で補助語をそのまま返す・後半を落とす結果になり、
+// 再送すると元より悪化した（誤り率 83%）。
+const FallbackModel = openai.GPTTranscribeModel
 
 // sttFallbackTimeout は再送の打ち切り時間。
 //

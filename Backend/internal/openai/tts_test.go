@@ -15,7 +15,7 @@ func TestTranscribe_Model(t *testing.T) {
 		envModel  string
 		wantModel string
 	}{
-		{name: "default is gpt-4o-mini-transcribe", envModel: "", wantModel: "gpt-4o-mini-transcribe"},
+		{name: "default is gpt-transcribe", envModel: "", wantModel: "gpt-transcribe"},
 		{name: "respects env override", envModel: "whisper-1", wantModel: "whisper-1"},
 	}
 

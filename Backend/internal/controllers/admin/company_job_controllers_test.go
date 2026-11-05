@@ -153,6 +153,9 @@ func TestAdminCompanyController_Publish_Success(t *testing.T) {
 	ctx.SetParamValues("1")
 	testsupport.AssertStatus(t, newAdminCompanyController(repo, audit).Publish, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
+	if !company.IsVerified {
+		t.Fatal("公開しても is_verified が false のままだと、企業ポータルの学生検索は403のまま")
+	}
 }
 
 func TestAdminCompanyController_Publish_RequiresWeightProfile(t *testing.T) {
@@ -168,6 +171,38 @@ func TestAdminCompanyController_Publish_RequiresWeightProfile(t *testing.T) {
 	ctx.SetParamValues("1")
 	testsupport.AssertStatus(t, newAdminCompanyController(repo, nil).Publish, ctx, http.StatusBadRequest)
 	repo.AssertExpectations(t)
+}
+
+func TestAdminCompanyController_Verify_審査を完了できる(t *testing.T) {
+	repo := &mocks.CompanyRepositoryMock{}
+	audit := &mocks.AuditLogServiceMock{}
+	company := &models.Company{Name: "自己登録株式会社", IsVerified: false}
+	repo.On("FindByID", uint(1)).Return(company, nil)
+	repo.On("Update", mock.MatchedBy(func(c *models.Company) bool {
+		return c.IsVerified && c.DataStatus != "published"
+	})).Return(nil)
+	audit.On("Record", mock.Anything, "company.verify", "company", mock.Anything, mock.Anything).Return()
+
+	body, _ := json.Marshal(map[string]bool{"verified": true})
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/companies/1/verify", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	ctx := testsupport.NewCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("1")
+	testsupport.AssertStatus(t, newAdminCompanyController(repo, audit).Verify, ctx, http.StatusOK)
+	repo.AssertExpectations(t)
+}
+
+func TestAdminCompanyController_Verify_フラグ未指定は400(t *testing.T) {
+	body, _ := json.Marshal(map[string]string{"name": "無視される"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/companies/1/verify", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	ctx := testsupport.NewCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("1")
+	testsupport.AssertStatus(t, admincontrollers.NewAdminCompanyController(nil, nil, nil).Verify, ctx, http.StatusBadRequest)
 }
 
 func TestAdminCompanyController_Publish_NotFound(t *testing.T) {

@@ -1,13 +1,109 @@
 package interview
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"Backend/internal/models"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestCompanyReadingCacheExpiresAndCapsEntries(t *testing.T) {
+	cache := companyReadingCache{entries: map[string]companyReadingCacheEntry{
+		"expired": {value: "old", expiresAt: time.Now().Add(-time.Second)},
+	}}
+	cache.store("first", "first reading")
+	assert.Len(t, cache.entries, 1, "expired entries are removed before storing")
+
+	for i := range companyReadingCacheMaxEntries {
+		cache.store(fmt.Sprintf("company-%d", i), "reading")
+	}
+	assert.Len(t, cache.entries, companyReadingCacheMaxEntries)
+	if _, ok := cache.load("first"); ok {
+		t.Fatal("oldest entry should have been evicted at the cache limit")
+	}
+
+	// 空の読みも記憶する。捨てると毎ターン最大15秒のLLM呼び出しが走り続ける。
+	cache.store("blank", "  ")
+	got, ok := cache.load("blank")
+	if !ok {
+		t.Fatal("空の読みも「引いた」事実として記憶する必要がある")
+	}
+	assert.Equal(t, "", got, "空白は空文字に正規化して保持する")
+}
+
+// 読みを返せない企業でも、LLM 呼び出しは1回で済む（#521 レビュー指摘）。
+func TestCachedCompanyReadingCachesEmptyResult(t *testing.T) {
+	svc := NewInterviewService(nil, nil, nil, nil, nil, nil, nil)
+	var calls atomic.Int32
+	lookup := func(context.Context, string) (string, error) {
+		calls.Add(1)
+		return "", nil // 読みが分からなかった
+	}
+
+	for i := range 3 {
+		got := svc.cachedCompanyReading(context.Background(), "読み不明企業", "読み不明企業", lookup)
+		assert.Equal(t, "", got, "%d回目", i+1)
+	}
+
+	assert.Equal(t, int32(1), calls.Load(), "空でもキャッシュするので呼び出しは1回")
+}
+
+func TestCachedCompanyReadingSharesLookupAndRetriesCancelledLeader(t *testing.T) {
+	svc := NewInterviewService(nil, nil, nil, nil, nil, nil, nil)
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	defer cancelLeader()
+
+	var calls atomic.Int32
+	lookupStarted := make(chan struct{})
+	lookup := func(ctx context.Context, _ string) (string, error) {
+		if calls.Add(1) == 1 {
+			close(lookupStarted)
+			<-ctx.Done()
+			return "", ctx.Err()
+		}
+		return "えーしーみー", nil
+	}
+
+	leaderResult := make(chan string, 1)
+	go func() {
+		leaderResult <- svc.cachedCompanyReading(leaderCtx, "Acme", "Acme", lookup)
+	}()
+	<-lookupStarted
+
+	const waiters = 8
+	var ready sync.WaitGroup
+	var done sync.WaitGroup
+	ready.Add(waiters)
+	done.Add(waiters)
+	results := make(chan string, waiters)
+	for range waiters {
+		go func() {
+			defer done.Done()
+			ready.Done()
+			results <- svc.cachedCompanyReading(context.Background(), "Acme", "Acme", lookup)
+		}()
+	}
+	ready.Wait()
+	time.Sleep(20 * time.Millisecond)
+	cancelLeader()
+
+	if got := <-leaderResult; got != "" {
+		t.Fatalf("cancelled leader result = %q, want empty", got)
+	}
+	done.Wait()
+	close(results)
+	for got := range results {
+		assert.Equal(t, "えーしーみー", got)
+	}
+	assert.EqualValues(t, 2, calls.Load(), "the lookup is retried once and shared among waiters")
+}
 
 type briefRepoStub struct {
 	byID map[uint]*models.Company

@@ -27,15 +27,21 @@ info:
     |---|---|---|
     | `userToken` | `X-User-Token` | 学生・教員。ログインで発行される短TTLのJWT |
     | `adminAuth` | `X-Admin-Email` + `X-Admin-Token` | 管理画面。管理者本人の認証 |
-    | `serviceSecret` | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない |
+    | `serviceSecret` | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない。値は `SERVICE_SECRET`（`ADMIN_SECRET` とは別値） |
     | `companyCookie` | Cookie | 企業ポータル。httpOnly Cookie 3本 |
 
     テナントの切り替えが必要な場合は `X-Tenant-Slug` を併せて送る。
 
     ## エラー
 
-    Echo の `HTTPError` をそのまま返すため、本文は `{"message": "..."}` 形式。
-    一部の古いエンドポイントは `{"error": "..."}` を返す。統一は未完。
+    グローバルハンドラ（`internal/middleware/error_handler.go`）が全エラーを
+    次の形に揃えて返す。`message` は返らない。
+
+    ```json
+    { "error": "...", "code": "...", "detail": "..." }
+    ```
+
+    `detail` は省略されることがある（`omitempty`）。
 
 servers:
   - url: http://localhost:8080
@@ -57,6 +63,8 @@ tags:
     description: 面接のリアルタイム音声セッション
   - name: resume
     description: 職務経歴書のアップロードと添削
+  - name: assessments
+    description: 適性検査の受検と結果（#1678）
   - name: es
     description: エントリーシートの添削とリライト（未ログインでも使える）
   - name: schedule
@@ -118,6 +126,11 @@ components:
       type: apiKey
       in: header
       name: X-Admin-Secret
+      description: |
+        ヘッダ名は歴史的に `X-Admin-Secret` だが、照合する値は `SERVICE_SECRET` であり
+        管理者トークンのHMAC鍵 `ADMIN_SECRET` とは別値（#1158）。未設定なら 503 で拒否し、
+        本文に `"code": "SERVICE_SECRET_NOT_CONFIGURED"` を入れる（ALB が healthy target
+        ゼロで返す 503 と区別するため。CI がこのコードを見ている）。
     companyCookie:
       type: apiKey
       in: cookie
@@ -144,7 +157,8 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
           example:
-            message: "Too Many Requests: お試し回数の上限に達しました。しばらく待ってから再試行してください。"
+            error: "Too Many Requests: お試し回数の上限に達しました。しばらく待ってから再試行してください。"
+            code: "TOO_MANY_REQUESTS"
 
     PlatformAdminOnly:
       description: |
@@ -163,15 +177,35 @@ components:
   schemas:
     Error:
       type: object
+      description: |
+        `internal/middleware/error_handler.go` の `APIErrorResponse`。
+        全エラーがこの形で返る。
+      required: [error, code]
       properties:
-        message:
+        error: { type: string, description: 表示用のメッセージ }
+        code:
           type: string
+          description: |
+            `defaultCodeByStatus` が HTTP ステータスから決める。
+            コントローラが明示したコードがあればそれが入る。
+          enum:
+            - BAD_GATEWAY
+            - CONFLICT
+            - FORBIDDEN
+            - INTERNAL_ERROR
+            - NOT_FOUND
+            - SERVICE_UNAVAILABLE
+            - TOO_MANY_REQUESTS
+            - UNAUTHORIZED
+            - VALIDATION_ERROR
+        detail: { type: string, description: 補足。無い場合は省略される }
 
     AuthResponse:
       type: object
       description: |
         ログイン・登録・リフレッシュの共通レスポンス。
-        `token` は管理者のみ、`user_token` と `refresh_token` は全ユーザーに入る。
+        `token`（管理者トークン）は管理者と職員（is_staff）に入る。
+        `user_token` と `refresh_token` は全ユーザーに入る。
       required: [user_id, email, name, is_guest, target_level, is_admin, email_verified]
       properties:
         user_id: { type: integer }
@@ -181,11 +215,12 @@ components:
         target_level: { type: string, description: "新卒 / 中途" }
         school_name: { type: string }
         is_admin: { type: boolean }
+        is_staff: { type: boolean, description: "学校職員（教員・キャリア担当）。ログイン後に /admin へ送る判定に使う" }
         certifications_acquired: { type: string }
         certifications_in_progress: { type: string }
         avatar_url: { type: string }
         oauth_provider: { type: string, description: "google / github" }
-        token: { type: string, description: 管理者トークン。管理者のみ }
+        token: { type: string, description: 管理者トークン。管理者と職員(is_staff)に発行 }
         user_token: { type: string, description: ユーザー認証トークン（短TTL） }
         refresh_token: { type: string, description: "リフレッシュトークン（#616）" }
         email_verified: { type: boolean }
@@ -228,12 +263,20 @@ components:
 
     UserWeightScore:
       type: object
-      description: 10カテゴリの重みスコア。
+      description: |
+        10カテゴリの重みスコア。
+
+        **キーが Go のフィールド名のままになっている。**
+        `domain/entity.UserWeightScore` を直接 JSON 化しており、同型に json タグが
+        無いため `id` や `user_id` ではなく `ID` / `UserID` が返る。
+        snake_case を前提に生成したクライアントは値を取得できない。
       properties:
-        id: { type: integer }
-        user_id: { type: integer }
-        session_id: { type: string }
-        category:
+        ID: { type: integer }
+        UserID: { type: integer }
+        SessionID: { type: string }
+        CreatedAt: { type: string, format: date-time }
+        UpdatedAt: { type: string, format: date-time }
+        WeightCategory:
           type: string
           enum:
             - technical_orientation
@@ -246,18 +289,23 @@ components:
             - challenge_seeking
             - detail_orientation
             - communication_skill
-        score: { type: integer, minimum: 0, maximum: 100 }
+        Score: { type: integer, minimum: 0, maximum: 100 }
 
     PhaseProgress:
       type: object
-      description: 診断4フェーズの進捗。
+      description: 診断4フェーズの進捗（`services/chat.PhaseProgress`）。
       properties:
+        phase_id: { type: integer }
         phase_name:
           type: string
           enum: [job_analysis, interest_analysis, aptitude_analysis, future_analysis]
-        answered_questions: { type: integer }
+        display_name: { type: string }
+        questions_asked: { type: integer }
+        valid_answers: { type: integer, description: 有効と判定された回答数 }
+        completion_score: { type: number, format: double }
+        is_completed: { type: boolean }
         min_questions: { type: integer }
-        is_complete: { type: boolean }
+        max_questions: { type: integer, description: 0 なら上限なし }
 
     ChatRequest:
       type: object
@@ -350,6 +398,44 @@ components:
         char_limit: { type: integer, nullable: true, description: "設問の文字数上限（#1523）" }
         char_limit_mode: { type: string }
 
+    InterviewCompanyQuestionInput:
+      type: object
+      description: 企業別面接カスタム質問の作成・更新。作成では category と question_text が必須。更新は指定した項目だけを変える
+      properties:
+        position: { type: string, description: 対象職種。空文字は全職種共通 }
+        category: { type: string }
+        question_text: { type: string }
+        priority: { type: integer, description: 小さいほど先に聞く }
+        is_required: { type: boolean }
+        evaluation_intent:
+          type: string
+          maxLength: 300
+          description: |
+            この質問で評価したい観点（#1092）。AI 面接官の system プロンプトへ、質問と同じ非信頼テキストの囲みの中で渡し、応募者には伝えないよう指示する。
+            前後の空白は落とし、空文字は未設定（null）として保存する。更新で空文字を送ると消える。300字を超えると 400
+
+    FormatFinding:
+      type: object
+      description: |
+        形式チェック（#1530）の指摘1件。LLM を使わずルールだけで判定する。
+        位置 `start` / `end` は、リクエストで送った原文（trim 前）を UTF-16 のコード単位で数えた位置（`end` は含まない）。
+        JavaScript の文字列の添字と同じ単位。
+      required: [rule, severity, start, end, message, fix]
+      properties:
+        rule:
+          type: string
+          enum: [mixed_width, mixed_numeral, mixed_era, mixed_style, date_order, char_limit]
+        severity:
+          type: string
+          enum: [critical, warning, info]
+          description: 履歴書の AI 指摘と同じ3値（重大 / 注意 / 情報）
+        start: { type: integer }
+        end: { type: integer }
+        message: { type: string, description: 何が問題か }
+        fix: { type: string, description: どう直すか }
+        page_hint: { type: integer, description: 履歴書のみ。ES では省略される }
+        block_index: { type: integer, description: 履歴書のみ。ES では省略される }
+
     ESRewriteResponse:
       type: object
       properties:
@@ -357,12 +443,20 @@ components:
         star: { $ref: "#/components/schemas/StarBreakdown" }
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
+        format_findings:
+          type: array
+          description: 原文の形式チェック（#1530）。重要度順（同じなら出現位置順）。指摘が無いときは空配列
+          items: { $ref: "#/components/schemas/FormatFinding" }
 
     ESReviewRequest:
       type: object
       required: [es_text, question_type]
       properties:
         es_text: { type: string }
+        question:
+          type: string
+          maxLength: 500
+          description: "設問文（任意 / #1531）。同一設問の前回結果と突き合わせるキー。種別だけだと「学チカ」と「ガクチカ」が別扱いになる"
         question_type: { type: string }
         company_name: { type: string }
         char_limit: { type: integer, nullable: true }
@@ -374,7 +468,42 @@ components:
         improved_text: { type: string }
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
+        format_findings:
+          type: array
+          description: 原文の形式チェック（#1530）。重要度順（同じなら出現位置順）。指摘が無いときは空配列。RAG の応答が想定外の形のときは付かず、RAG の応答をそのまま返す
+          items: { $ref: "#/components/schemas/FormatFinding" }
         star: { $ref: "#/components/schemas/StarBreakdown" }
+        feedback_items:
+          type: array
+          maxItems: 4
+          description: 原文の該当箇所と評価根拠に結びついた指摘
+          items:
+            type: object
+            required: [score_key, source_excerpt, issue, suggestion]
+            properties:
+              score_key:
+                type: string
+                enum: [specificity_score, star_score, company_fit_score, length_balance_score]
+              source_excerpt: { type: string, maxLength: 120, description: 原文からの連続した引用 }
+              issue: { type: string, maxLength: 80 }
+              suggestion: { type: string, maxLength: 80 }
+        previous:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/ESReviewPrevious" }]
+          description: "同一設問の前回の添削（#1531）。初回・未ログイン・設問未入力のときは付かない"
+
+    ESReviewPrevious:
+      type: object
+      description: "前回の添削のうち差分表示に使う項目だけ（#1531）。本文は含めない"
+      properties:
+        id: { type: integer }
+        created_at: { type: string, format: date-time }
+        question: { type: string }
+        question_type: { type: string }
+        specificity_score: { type: integer }
+        star_score: { type: integer }
+        length_balance_score: { type: integer }
+        company_fit_score: { type: integer, nullable: true }
 
     ResumeStatus:
       type: object
@@ -522,7 +651,7 @@ paths:
             schema: { $ref: "#/components/schemas/RegisterRequest" }
       security: []
       responses:
-        "200":
+        "201":
           description: 登録した
           content:
             application/json:
@@ -557,7 +686,7 @@ paths:
       description: 登録せずに診断を試すための経路。後から promote_guest で引き継げる。
       security: []
       responses:
-        "200":
+        "201":
           description: 作成した
           content:
             application/json:
@@ -643,6 +772,18 @@ paths:
     post:
       tags: [auth]
       summary: ログアウト（リフレッシュトークンを失効させる）
+      description: |
+        本文の `refresh_token` を失効させる。**本文を省略すると失効処理が
+        空文字に対する no-op になり、200 は返るが既存のトークンは使い続けられる。**
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
       security: []
       responses:
         "200": { description: ログアウトした }
@@ -792,6 +933,7 @@ paths:
       parameters:
         - in: query
           name: session_id
+          required: true
           schema: { type: string }
       responses:
         "200": { description: 履歴 }
@@ -805,6 +947,7 @@ paths:
       parameters:
         - in: query
           name: session_id
+          required: true
           schema: { type: string }
       responses:
         "200":
@@ -824,6 +967,7 @@ paths:
       parameters:
         - in: query
           name: session_id
+          required: true
           schema: { type: string }
       responses:
         "200": { description: 推薦企業 }
@@ -837,6 +981,7 @@ paths:
       parameters:
         - in: query
           name: session_id
+          required: true
           schema: { type: string }
       responses:
         "200": { description: サマリ }
@@ -871,7 +1016,8 @@ paths:
   /api/chat/favorite:
     post:
       tags: [chat]
-      summary: セッションのお気に入りを切り替える
+      summary: 企業マッチのお気に入りを切り替える
+      description: 対象は `match_id`（`UserCompanyMatch` のID）。`session_id` では切り替わらない。
       security: [{ userToken: [] }]
       requestBody:
         required: true
@@ -879,10 +1025,12 @@ paths:
           application/json:
             schema:
               type: object
+              required: [match_id]
               properties:
-                session_id: { type: string }
+                match_id: { type: integer }
       responses:
         "200": { description: 切り替えた }
+        "400": { description: match_id が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   # ── questions ──────────────────────────────────────
@@ -891,8 +1039,20 @@ paths:
       tags: [questions]
       summary: 質問を生成する
       security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category]
+              properties:
+                category:
+                  type: string
+                  description: 正典10カテゴリのいずれか
       responses:
         "200": { description: 生成した質問 }
+        "400": { description: category が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/questions/create:
@@ -900,8 +1060,21 @@ paths:
       tags: [questions]
       summary: 質問を登録する
       security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question, weight_category]
+              properties:
+                question: { type: string }
+                weight_category:
+                  type: string
+                  description: 正典10カテゴリのいずれか
       responses:
         "200": { description: 登録した }
+        "400": { description: question か weight_category が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/questions/list:
@@ -912,6 +1085,7 @@ paths:
       parameters:
         - in: query
           name: category
+          required: true
           schema: { type: string }
       responses:
         "200": { description: 質問一覧 }
@@ -983,10 +1157,10 @@ paths:
     get:
       tags: [interviews]
       summary: セッション詳細
+      description: report.teacher_report_json は職員・管理者にのみ含まれる（認証ユーザーの実ロールで決まる。#1814）。
       security: [{ userToken: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
-        - { in: query, name: role, schema: { type: string } }
       responses:
         "200": { description: 詳細 }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -1163,6 +1337,256 @@ paths:
         "200": { description: セッション情報 }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  # ── assessments ────────────────────────────────────
+  /api/assessments:
+    get:
+      tags: [assessments]
+      summary: 受けられる検査と自分の受検状況を一覧する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 検査一覧（未受検が先） }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/assessments/{templateId}/sessions:
+    post:
+      parameters: [{ in: path, name: templateId, required: true, schema: { type: integer } }]
+      tags: [assessments]
+      summary: 受検を始める（受検中があればそれを返す）
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 受検セッションと問題 }
+        "400": { description: 検査IDが不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 検査が無い }
+
+  /api/assessments/sessions/{sessionId}:
+    get:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 受検セッションと保存済みの回答を取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 受検セッション }
+        "400": { description: セッションIDが不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人のセッションが無い }
+
+  /api/assessments/sessions/{sessionId}/answers/{questionId}:
+    put:
+      parameters:
+        - { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: questionId, required: true, schema: { type: integer } }
+      tags: [assessments]
+      summary: 1問の回答を保存する（同じ問題は上書き）
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value: { type: integer, minimum: 1, maximum: 5 }
+      responses:
+        "204": { description: 保存した }
+        "400": { description: 回答が1〜5の範囲外、またはIDが不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: セッションか問題が無い }
+        "409": { description: 提出済み }
+
+  /api/assessments/sessions/{sessionId}/submit:
+    post:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 提出してスコアを確定する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 提出した }
+        "400": { description: 未回答の問題がある }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人のセッションが無い }
+        "409": { description: 提出済み }
+
+  /api/assessments/sessions/{sessionId}/result:
+    get:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 提出済みの結果を取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: カテゴリ別スコア }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 未提出または本人のセッションが無い }
+
+  # ── ability-assessments（能力検査 / 学生）─────────────────────
+  # 性格検査（/api/assessments）とパスを分ける。採点方式も結果の意味も違い、
+  # 能力検査の点数は user_weight_scores へ入れない（SOCAIAGENT-433）。
+  # 受検中のレスポンスに正解（correct_choice）は含めない。採点はサーバ側のみ。
+  /api/ability-assessments:
+    get:
+      tags: [assessments]
+      summary: 受けられる能力検査と自分の受検状況を一覧する
+      description: "受検中のまま制限時間を過ぎたものは `status: expired` で返す。"
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 能力検査の一覧（未受検が先） }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/ability-assessments/{templateId}/sessions:
+    post:
+      parameters: [{ in: path, name: templateId, required: true, schema: { type: integer } }]
+      tags: [assessments]
+      summary: 能力検査の受検を開始する（受検中があればそれを返す）
+      description: |
+        開始時に制限時間から締め切り（`deadline_at`）を凍結する。判定はサーバだけが行い、
+        クライアントのタイマーは表示用。制限時間を過ぎた受検中は再開できない（410）。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 問題（選択肢つき）・保存済みの回答・締め切り・残り秒 }
+        "400": { description: 検査の指定が正しくない }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 検査が無い }
+        "410": { description: 制限時間を過ぎている }
+
+  /api/ability-assessments/sessions/{sessionId}:
+    get:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 受検の現在の状態を取得する
+      description: 問題は `id` / `position` / `section` / `body` / `choices` だけを返す。正解は含めない。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 問題と保存済みの回答 }
+        "400": { description: 受検の指定が正しくない }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人の受検が無い }
+        "410": { description: 制限時間を過ぎている }
+
+  /api/ability-assessments/sessions/{sessionId}/answers/{questionId}:
+    put:
+      parameters:
+        - { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: questionId, required: true, schema: { type: integer } }
+      tags: [assessments]
+      summary: 1問の回答を保存する（自動保存・冪等）
+      description: |
+        `choice` は選択肢の 0 始まりの添字。0 を正当な値として受けるため、未指定とは区別する。
+        締め切りを過ぎた回答は受け付けない（410）。
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [choice]
+              properties:
+                choice: { type: integer, minimum: 0 }
+      responses:
+        "204": { description: 保存した }
+        "400": { description: 選択肢の範囲外、または検査に無い問題 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人の受検が無い }
+        "409": { description: すでに提出済み }
+        "410": { description: 制限時間を過ぎている }
+
+  /api/ability-assessments/sessions/{sessionId}/submit:
+    post:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 回答を採点して提出する
+      description: |
+        未回答は誤答扱いで、出題数には数える。締め切りを過ぎていても提出は受け付ける
+        （弾くと時間切れで結果が一切出ない）。締め切り後の新しい回答は保存されないので点数は増えない。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 提出した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人の受検が無い }
+        "409": { description: すでに提出済み }
+
+  /api/ability-assessments/sessions/{sessionId}/result:
+    get:
+      parameters: [{ in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }]
+      tags: [assessments]
+      summary: 提出済みの結果を取得する
+      description: section（verbal / numerical）別の正答数と出題数。偏差値・順位は返さない。
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: section 別の正答数と出題数 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 未提出または本人の受検が無い }
+
+  # ── assessments（学校側 / 先生） ─────────────────────
+  /api/admin/assessment-templates:
+    get:
+      tags: [assessments]
+      summary: 学校独自の検査テンプレートを一覧する
+      description: |
+        担当校スコープが掛かる（`school_id` 必須）。運営標準は含まない。学校独自の結果は「おすすめ企業の計算には使われない」。
+      security: [{ adminAuth: [] }]
+      parameters: [{ in: query, name: school_id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: テンプレート一覧 }
+        "400": { description: school_id が無い・不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [assessments]
+      summary: 学校独自の検査テンプレートを作る
+      description: |
+        カテゴリは正典10個から選ぶ。`is_standard` は常に false で、マッチングには合流しない。
+        担当校・作成者は認証情報から決め、リクエスト本文の値は使わない。
+      security: [{ adminAuth: [] }]
+      parameters: [{ in: query, name: school_id, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, questions]
+              properties:
+                title: { type: string, maxLength: 100 }
+                description: { type: string, maxLength: 500 }
+                due_at: { type: string, format: date-time, description: 受検期限。現在より後 }
+                questions:
+                  type: array
+                  minItems: 1
+                  maxItems: 60
+                  items:
+                    type: object
+                    required: [body, weight_category]
+                    properties:
+                      body: { type: string, maxLength: 200 }
+                      weight_category: { type: string }
+                      reverse_scored: { type: boolean }
+      responses:
+        "201": { description: 作成した }
+        "400": { description: 入力不正（メッセージは先生にそのまま見せられる） }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 学校が無い }
+
+  /api/admin/assessment-templates/{id}/students:
+    get:
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: school_id, required: true, schema: { type: integer } }
+      tags: [assessments]
+      summary: 学校独自テンプレートの受検状況（学生ごと）
+      description: |
+        期限超過 → 未受検 → 途中 → 完了の順。スコアの生値は返さず、上位カテゴリ名だけを返す。
+        他校のテンプレートは 404。
+      security: [{ adminAuth: [] }]
+      responses:
+        "200": { description: 学生ごとの受検状況 }
+        "400": { description: IDまたは school_id が不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: この学校のテンプレートが無い }
+
   # ── resume ─────────────────────────────────────────
   /api/resume/upload:
     post:
@@ -1254,7 +1678,11 @@ paths:
     post:
       tags: [es]
       summary: エントリーシートを添削する
-      description: "**未ログインでも使える。** 認証は付けず、レート制限のみ（#1154）。"
+      description: |
+        **未ログインでも使える。** 認証は必須にしない（必須にするとログイン前に試す導線が壊れる）。
+        ただし `X-User-Token` があれば実行者として扱い、添削結果を履歴に残す（#1531）。
+        壊れたトークン・退会済み・所属学園が確定しない場合も 401 にはせず、保存だけ行わない。
+        コスト濫用はレート制限で止める（#1154）。
       requestBody:
         required: true
         content:
@@ -1598,6 +2026,40 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 
+  /api/admin/companies/{id}/verify:
+    patch:
+      tags: [admin-companies]
+      summary: 学生検索の審査を完了する、または取り消す
+      description: |
+        `companies.is_verified` を更新する。公開（`data_status`）とは別で、重み付けプロファイルは不要。
+        true になるまで企業ポータルの学生検索とスカウト送信は 403。システム管理者専用。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verified]
+              properties:
+                verified:
+                  type: boolean
+      responses:
+        "200":
+          description: 成功
+        "400":
+          description: verified が無い、または真偽値でない
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "404":
+          description: 存在しない
+
   /api/admin/companies/{id}/reject:
     patch:
       tags: [admin-companies]
@@ -1652,6 +2114,11 @@ paths:
       tags: [admin-companies]
       summary: 企業の面接質問を作る
       security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InterviewCompanyQuestionInput" }
       parameters:
         - in: path
           name: id
@@ -1686,6 +2153,11 @@ paths:
       tags: [admin-companies]
       summary: 企業の面接質問を更新
       security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InterviewCompanyQuestionInput" }
       parameters:
         - in: path
           name: id
@@ -2693,6 +3165,9 @@ paths:
     put:
       tags: [admin-users]
       summary: 利用者を更新
+      description: |
+        `is_admin`（管理者権限）と `is_staff`（職員ロール= users.role を staff にする）は
+        権限の付与/剥奪にあたるため、無制限管理者のみ変更可能（担当校を持つ制限adminは403）。
       security: [{ adminAuth: [] }]
       parameters:
         - in: path
@@ -2700,6 +3175,17 @@ paths:
           required: true
           schema:
             type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                is_admin: { type: boolean, description: 管理者権限（無制限管理者のみ変更可） }
+                is_staff: { type: boolean, description: 職員ロール（無制限管理者のみ変更可）。true で users.role=staff }
+                name: { type: string }
+                target_level: { type: string, enum: ["新卒", "中途", ""] }
+                school_name: { type: string }
       responses:
         "200":
           description: 成功
@@ -2821,6 +3307,35 @@ paths:
       responses:
         "200":
           description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/teacher/students/{id}/es-reviews:
+    get:
+      tags: [admin-analytics]
+      summary: 学生のES添削履歴
+      description: |
+        担当校に在籍する学生の ES添削履歴を新しい順に返す（#1531）。
+
+        担当校スコープが掛かる。学校での絞り込みは学園一致つきで行うため、
+        プロフィールの学校名（自己申告）を他学園の校名に書き替えた学生の履歴は混ざらない（#1675）。
+        担当校外・他学園の学生は 404 ではなく空配列で返す（存在を明かさないため）。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: school_id
+          schema:
+            type: integer
+          description: 担当校。担当校ありの管理者・職員は必須
+      responses:
+        "200":
+          description: 成功
+        "400": { description: 学生IDまたは school_id が不正 }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -3348,7 +3863,7 @@ paths:
       tags: [admin-training]
       summary: 学習データの件数
       description: |
-        件数しか返さず個人情報を含まないため、`X-Admin-Secret` によるサービス間認証にしている。運用から機械的に叩けるようにするためで、管理者になりすます形を避けている。
+        件数しか返さず個人情報を含まないため、`X-Admin-Secret` によるサービス間認証にしている。運用から機械的に叩けるようにするためで、管理者になりすます形を避けている。照合する値は `SERVICE_SECRET`（`ADMIN_SECRET` とは別値、#1158）。
       security: [{ serviceSecret: [] }]
       responses:
         "200":
@@ -3360,7 +3875,7 @@ paths:
       tags: [release-notes]
       summary: リリースノートを取り込む
       description: |
-        CI（GitHub Actions）からのマシン間呼び出しのため、共有シークレットのみで認証する（#861）。
+        CI（GitHub Actions）からのマシン間呼び出しのため、共有シークレットのみで認証する（#861）。照合する値は `SERVICE_SECRET` で、管理者トークンのHMAC鍵 `ADMIN_SECRET` とは分けてある（#1158）。
       security: [{ serviceSecret: [] }]
       responses:
         "200":
@@ -3632,6 +4147,60 @@ paths:
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/user/scouts:
+    get:
+      tags: [user]
+      summary: 受け取ったスカウト一覧
+      description: |
+        `limit` と `offset` でページを送る。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/user/scouts/{id}/view:
+    post:
+      tags: [user]
+      summary: スカウトを既読にする
+      security: [{ userToken: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/user/scouts/{id}/decline:
+    post:
+      tags: [user]
+      summary: スカウトを辞退する
+      security: [{ userToken: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/user/scout-blocks:
+    post:
+      tags: [user]
+      summary: 企業からのスカウトを受け取らない
+      security: [{ userToken: [] }]
+      responses:
+        "204":
+          description: ブロックした
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /api/user/guidances/{id}/dismiss:
     post:
       tags: [user]
@@ -3664,11 +4233,15 @@ paths:
     post:
       tags: [applications]
       summary: 応募する
+      description: |
+        応募を閉じている間（`STUDENT_APPLY_ENABLED` が `true` でない既定の状態）は 403 を返す。
+        開いているかは `GET /api/applications/availability` で分かる。
       security: [{ userToken: [] }]
       responses:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
     get:
       tags: [applications]
       summary: 自分の応募一覧
@@ -3682,6 +4255,24 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Application"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/applications/availability:
+    get:
+      tags: [applications]
+      summary: 応募を受け付けているか
+      description: 画面の応募ボタンを有効にするかの判定に使う。環境変数 `STUDENT_APPLY_ENABLED` の値を返す。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: { type: boolean }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/applications/correlation:
@@ -3909,6 +4500,23 @@ paths:
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/company-auth/register:
+    post:
+      tags: [company-auth]
+      summary: 企業アカウントを自己登録する
+      description: |
+        審査前でもアカウントは作れる。学生検索とスカウトは `is_verified` が true になるまで使えない。
+        IP 単位でログインと同じレート制限がかかる。
+      security: []
+      responses:
+        "201":
+          description: 登録した
+        "400":
+          description: 入力が不正
+        "409":
+          description: 同じメールアドレスが既にある
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
   /api/company-auth/login:
     post:
       tags: [company-auth]
@@ -3935,7 +4543,7 @@ paths:
       description: |
         **初回はここから。** 招待トークンの有効期限は 24 時間で、DB にはハッシュだけ保存する。
 
-        企業側から自分でアカウントを作ることはできない。必ず学校側の管理者の招待から始まる。
+        追加の担当者は学校側の管理者、または既存の owner からの招待で入る。企業自身の初回登録は `/register`。
       security: []
       responses:
         "200":
@@ -4169,6 +4777,24 @@ paths:
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CompanyOwnerOnly" }
+    delete:
+      tags: [company-portal]
+      summary: 求人を削除する
+      description: |
+        論理削除。応募やマッチの参照は残し、一覧と学生向け公開から外す。
+        **owner のみ実行できる。** `member` は 403（コントローラ側で判定）。
+      security: [{ companyCookie: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: 削除した
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/CompanyOwnerOnly" }
 
   /api/company-portal/jobs/{id}/publish:
     post:
@@ -4177,7 +4803,7 @@ paths:
       description: |
         **owner のみ実行できる。** `member` は 403（コントローラ側で判定）。
 
-        **削除は提供していない。** 応募が紐づくため、非公開化で対応する（#1321）。
+        不要な求人は `DELETE /api/company-portal/jobs/{id}` で論理削除する。
       security: [{ companyCookie: [] }]
       parameters:
         - in: path
@@ -4190,6 +4816,104 @@ paths:
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CompanyOwnerOnly" }
+
+  /api/company-portal/scout-templates:
+    get:
+      tags: [company-portal]
+      summary: スカウト定型文の一覧
+      description: |
+        審査完了（`is_verified`）まで 403。
+      security: [{ companyCookie: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [company-portal]
+      summary: スカウト定型文を作る
+      description: |
+        審査完了（`is_verified`）まで 403。
+      security: [{ companyCookie: [] }]
+      responses:
+        "201":
+          description: 作成した
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/company-portal/scout-templates/{id}:
+    patch:
+      tags: [company-portal]
+      summary: スカウト定型文を更新する
+      description: |
+        審査完了（`is_verified`）まで 403。
+      security: [{ companyCookie: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    delete:
+      tags: [company-portal]
+      summary: スカウト定型文を削除する
+      description: |
+        審査完了（`is_verified`）まで 403。
+      security: [{ companyCookie: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: 削除した
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/company-portal/scouts:
+    get:
+      tags: [company-portal]
+      summary: スカウト送信履歴
+      description: |
+        審査完了（`is_verified`）まで 403。`limit` と `offset` でページを送る。
+      security: [{ companyCookie: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [company-portal]
+      summary: 学生へスカウトを送る
+      description: |
+        審査完了（`is_verified`）まで 403。同一学生へは 24 時間のクールダウンがある。
+      security: [{ companyCookie: [] }]
+      responses:
+        "201":
+          description: 送信した
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/company-portal/scouts/cooldown:
+    get:
+      tags: [company-portal]
+      summary: スカウト再送までの残り時間
+      description: |
+        審査完了（`is_verified`）まで 403。
+      security: [{ companyCookie: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/company-portal/students:
     get:

@@ -48,7 +48,7 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
 | 機能 | 概要 | 関連 Issue |
 |------|------|-----------|
 | AI チャット分析 | 4フェーズ・10カテゴリのスコアリング | — |
-| 音声面接練習 | OpenAI Realtime API + 3D アバター | — |
+| 音声面接練習 | OpenAI Realtime API + 2D イラストアバター | — |
 | 面接動画管理 | AWS S3 アップロード・Presigned URL | — |
 | 職務経歴書レビュー | RAG (ChromaDB + OpenAI Embeddings) | — |
 | 選考管理 | 応募〜内定の状態遷移管理 | #201 |
@@ -170,7 +170,7 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
 | ORM | GORM + MySQL ドライバー | — |
 | Frontend | Next.js / React / TypeScript | 16 / 19 / — |
 | UI ライブラリ | MUI | v7 |
-| 3D アバター | Three.js + wawa-lipsync | — |
+| 面接官アバター | SVGイラスト(自前実装、音声振幅駆動の口パク) | — |
 | RAG | Python / FastAPI / LangChain / ChromaDB | 3.10+ |
 | ベクトル DB | ChromaDB | — |
 | AI | OpenAI API（GPT-4o / Realtime） | — |

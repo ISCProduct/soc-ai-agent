@@ -40,7 +40,7 @@ function VerifyEmailContent() {
   }, [searchParams])
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f5f5f5' }}>
+    <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default' }}>
       <Paper sx={{ p: { xs: 2, sm: 4 }, maxWidth: 440, width: '100%', textAlign: 'center', borderRadius: 2 }}>
         {status === 'loading' && (
           <>
@@ -81,7 +81,7 @@ export default function PageContent() {
   return (
     <Suspense
       fallback={
-        <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f5f5f5' }}>
+        <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default' }}>
           <Paper sx={{ p: { xs: 2, sm: 4 }, maxWidth: 440, width: '100%', textAlign: 'center', borderRadius: 2 }}>
             <CircularProgress sx={{ mb: 2 }} />
             <Typography>認証中...</Typography>

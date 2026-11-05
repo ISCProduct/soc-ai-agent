@@ -178,6 +178,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 		TargetLevel:              user.TargetLevel,
 		SchoolName:               user.SchoolName,
 		IsAdmin:                  user.IsAdmin,
+		IsStaff:                  user.HasStaffRole(),
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
@@ -186,6 +187,14 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 	if userSecret := os.Getenv("USER_SECRET"); userSecret != "" {
 		authResp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
 		authResp.RefreshToken = s.issueRefreshToken(user.ID)
+	}
+	// 管理者・職員には管理者トークンを発行する（GitHub 側と揃える）。
+	// これが無いと Google ログインの管理者/職員は X-Admin-Token が空のまま
+	// 全管理APIが403になり、職員は /admin へ遷移しても何も操作できない。
+	if user.CanAccessAdminArea() {
+		if adminSecret := os.Getenv("ADMIN_SECRET"); adminSecret != "" {
+			authResp.Token = middleware.GenerateAdminToken(user.ID, user.Email, adminSecret)
+		}
 	}
 	return authResp, nil
 }
@@ -308,6 +317,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, te
 		TargetLevel:              user.TargetLevel,
 		SchoolName:               user.SchoolName,
 		IsAdmin:                  user.IsAdmin,
+		IsStaff:                  user.HasStaffRole(),
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
@@ -317,7 +327,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, te
 		authResp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
 		authResp.RefreshToken = s.issueRefreshToken(user.ID)
 	}
-	if user.IsAdmin {
+	if user.CanAccessAdminArea() {
 		if adminSecret := os.Getenv("ADMIN_SECRET"); adminSecret != "" {
 			authResp.Token = middleware.GenerateAdminToken(user.ID, user.Email, adminSecret)
 		}

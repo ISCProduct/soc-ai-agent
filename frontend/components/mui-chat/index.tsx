@@ -46,6 +46,7 @@ export function MuiChat() {
         <ChatMessageList
           messages={chat.messages}
           isLoading={chat.isLoading}
+          historyLoading={chat.historyLoading}
           historyLoadError={chat.historyLoadError}
           historyRetrying={chat.historyRetrying}
           messagesEndRef={chat.messagesEndRef}

@@ -152,13 +152,50 @@ func TestMainGoDirectRoutesAreListed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s が読めない: %v", mainGoPath, err)
 	}
-	re := regexp.MustCompile(`(?m)^\s*[a-zA-Z][a-zA-Z0-9]*\.(GET|POST|PUT|PATCH|DELETE|Any)\(`)
-	found := len(re.FindAllString(string(raw), -1))
+	// 変数名・メソッド・パスを取る。変数名はグループの prefix 解決に使う。
+	re := regexp.MustCompile(`(?m)^\s*([a-zA-Z][a-zA-Z0-9]*)\.(GET|POST|PUT|PATCH|DELETE|Any)\("([^"]*)"`)
+	matches := re.FindAllStringSubmatch(string(raw), -1)
 
-	if found != len(mainGoRoutes) {
-		t.Errorf("main.go の直接登録が %d 本、mainGoRoutes は %d 件。"+
-			"main.go に追加したら inventory.go の mainGoRoutes にも追記する",
-			found, len(mainGoRoutes))
+	// main.go のグループ変数と prefix。`api := e.Group("/api")` 等を直接読むのは
+	// 過剰なので、使われている変数だけを対応表に持つ。増えたら下の default で落ちる。
+	prefix := map[string]string{
+		"e":          "",     // ルート直下（/health, /metrics）
+		"api":        "/api", // api := e.Group("/api")
+		"adminEntry": "/api/admin",
+	}
+
+	var found []Route
+	for _, m := range matches {
+		varName, method, path := m[1], m[2], m[3]
+		p, ok := prefix[varName]
+		if !ok {
+			t.Errorf("main.go に未知のグループ変数 %q がある（%s %q）。"+
+				"prefix の対応表に追加すること", varName, method, path)
+			continue
+		}
+		found = append(found, Route{Method: method, Path: p + path})
+	}
+
+	// 件数だけでなく (メソッド, パス) の組で照合する。件数比較だと、改名や
+	// GET→POST の変更で本数が変わらない場合に mainGoRoutes と routes.txt が
+	// 古い経路を持ち続けてしまう。
+	want := map[Route]bool{}
+	for _, r := range mainGoRoutes {
+		want[r] = true
+	}
+	got := map[Route]bool{}
+	for _, r := range found {
+		got[r] = true
+	}
+	for r := range got {
+		if !want[r] {
+			t.Errorf("main.go にあるが mainGoRoutes に無い: %s %s", r.Method, r.Path)
+		}
+	}
+	for r := range want {
+		if !got[r] {
+			t.Errorf("mainGoRoutes にあるが main.go に無い: %s %s", r.Method, r.Path)
+		}
 	}
 }
 

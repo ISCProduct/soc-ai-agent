@@ -6,6 +6,7 @@ import { ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter'
 import { createAdminMuiTheme } from '@/lib/admin-theme'
+import { createCompanyMuiTheme } from '@/lib/company-theme'
 import {
   createStudentMuiTheme,
   readStudentThemeMode,
@@ -17,6 +18,7 @@ import {
 // 以前は primary だけ指定した MUI 既定のままで、型階層・余白・角丸・
 // コンポーネント指定が全て未定義だった。
 const ADMIN_THEME = createAdminMuiTheme()
+const COMPANY_THEME = createCompanyMuiTheme()
 
 type StudentThemeContextValue = {
   mode: StudentThemeMode
@@ -44,6 +46,7 @@ function storage(): Storage | null {
 export function MuiProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname() || ''
   const isAdmin = pathname.startsWith('/admin')
+  const isCompanyPortal = pathname.startsWith('/company-portal')
   const [mode, setModeState] = useState<StudentThemeMode>('comfortable')
 
   useEffect(() => {
@@ -55,10 +58,11 @@ export function MuiProvider({ children }: { children: ReactNode }) {
     writeStudentThemeMode(next, storage())
   }, [])
 
-  const theme = useMemo(
-    () => (isAdmin ? ADMIN_THEME : createStudentMuiTheme(mode)),
-    [isAdmin, mode],
-  )
+  const theme = useMemo(() => {
+    if (isAdmin) return ADMIN_THEME
+    if (isCompanyPortal) return COMPANY_THEME
+    return createStudentMuiTheme(mode)
+  }, [isAdmin, isCompanyPortal, mode])
 
   return (
     <AppRouterCacheProvider>

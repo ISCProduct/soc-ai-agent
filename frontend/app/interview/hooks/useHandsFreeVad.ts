@@ -24,6 +24,8 @@ type UseHandsFreeVadArgs = {
   stopRecording: () => void
   /** 発話が確定しなかった録音を送らずに捨てる。 */
   discardRecording: () => void
+  /** 発話中の区切り（息継ぎ）。面接官の相槌に使う。 */
+  onPause?: () => void
 }
 
 /**
@@ -43,6 +45,7 @@ export function useHandsFreeVad({
   startRecording,
   stopRecording,
   discardRecording,
+  onPause,
 }: UseHandsFreeVadArgs) {
   useEffect(() => {
     if (!enabled || status !== 'connected' || !streamRef.current) return
@@ -75,6 +78,9 @@ export function useHandsFreeVad({
         case 'discard':
           discardRecording()
           break
+        case 'pause':
+          onPause?.()
+          break
       }
     }
 
@@ -84,6 +90,5 @@ export function useHandsFreeVad({
       source.disconnect()
       audioCtx.close().catch(() => {})
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, status])
 }

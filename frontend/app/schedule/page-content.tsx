@@ -30,6 +30,8 @@ import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import { authService } from '@/lib/auth'
 import { datetimeLocalToISO, formatLocalDateKey, isoToDatetimeLocal } from '@/lib/datetime-local'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
+import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 
 const STAGE_OPTIONS = [
   { value: '書類選考', label: '書類選考', color: '#9c27b0' },
@@ -99,6 +101,7 @@ export default function PageContent() {
   const [userId, setUserId] = useState<number | null>(null)
   const [events, setEvents] = useState<ScheduleEvent[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
   const [viewYear, setViewYear] = useState(new Date().getFullYear())
   const [viewMonth, setViewMonth] = useState(new Date().getMonth())
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -122,8 +125,10 @@ export default function PageContent() {
       if (!res.ok) throw new Error('スケジュールの取得に失敗しました')
       const data = await res.json()
       setEvents(Array.isArray(data) ? data : [])
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'スケジュールの取得に失敗しました')
+    } finally {
+      setLoaded(true)
     }
   }, [userId])
 
@@ -223,7 +228,7 @@ export default function PageContent() {
   const today = new Date()
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f5f5', p: { xs: 1.5, sm: 3 } }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', p: { xs: 1.5, sm: 3 } }}>
       <Box sx={{ maxWidth: 900, mx: 'auto' }}>
         {/* Header */}
         <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 3 }}>
@@ -414,13 +419,17 @@ export default function PageContent() {
             </Paper>
           ))}
 
-        {events.filter(ev => {
+        {!loaded ? (
+          <ListSkeleton rows={2} label="予定を読み込み中" />
+        ) : !error && events.filter(ev => {
           const d = new Date(ev.scheduled_at)
           return d.getFullYear() === viewYear && d.getMonth() === viewMonth
         }).length === 0 && (
-          <Typography color="text.secondary" textAlign="center" py={3}>
-            この月のイベントはありません
-          </Typography>
+          <EmptyState
+            title="この月の予定はまだありません"
+            description="面接や締切を登録すると、日付ごとに確認できます。"
+            action={<Button variant="outlined" onClick={() => openCreateDialog()}>予定を追加</Button>}
+          />
         )}
       </Box>
 

@@ -49,6 +49,10 @@ func (s *stubMatchingService) GetDiagnostics(uint, string) (*matching.MatchingDi
 	return nil, nil
 }
 
+func (s *stubMatchingService) ReasonScores(_ uint, scores []entity.UserWeightScore) []entity.UserWeightScore {
+	return scores
+}
+
 // TestRunBackgroundMatching_SkipsWhileRunning は実行中の同一セッションが
 // 多重に計算されないことを検証する（#1167 の核心）。
 func TestRunBackgroundMatching_SkipsWhileRunning(t *testing.T) {

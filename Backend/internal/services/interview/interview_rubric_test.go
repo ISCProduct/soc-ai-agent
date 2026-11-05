@@ -328,7 +328,7 @@ func TestEvidenceMatchThreshold_Boundary(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := textsim.ContentBestMatch(tt.evidence, spoken)
+			got := textsim.ContentBestMatch(tt.evidence, spoken.Content)
 			if got < tt.wantScore-0.005 || got > tt.wantScore+0.005 {
 				t.Fatalf("一致度 = %.4f, want %.3f 前後（照合方法が変わった。実測表を引き直すこと）", got, tt.wantScore)
 			}
@@ -349,6 +349,10 @@ func TestEvidenceMatchThreshold_Boundary(t *testing.T) {
 // これを「たまたま通っている」ではなくテストで明示しておく。
 // 弾けるようになったらここが落ちるので、
 // interview_rubric.go と docs/wiki/scoring.md §2-4 の表も一緒に更新すること。
+//
+// #1596 で「発話に無い数値を含む捏造」は数値の完全一致照合で弾けるようになった
+// （TestValidateEvidence_UnspokenNumber）。残るのは数値を含まない捏造と、
+// 発話に出た数値を別の事柄へ付け替えた捏造である。
 func TestValidateEvidence_KnownLimitation(t *testing.T) {
 	t.Parallel()
 
@@ -360,14 +364,12 @@ func TestValidateEvidence_KnownLimitation(t *testing.T) {
 		why      string
 	}{
 		{
-			name: "実引用に事実を継ぎ足した捏造",
+			name: "発話に出た数値を別の事柄へ付け替えた捏造",
 			evidence: map[string]string{
-				// 前半は実発話、後半は捏造（部長・3年間・50人はどこにも出てこない）
-				"logic": "入学した当初は部員が8人しかいなくて、私が部長として3年間で部員数を50人まで増やしました",
-				// 発話の語彙を転記しつつ事実を入れ替えた捏造
-				"specificity": "部員が8人から100人に増えて、部費を3倍にすることができました",
+				// 「3倍」は部員数について言った。部費は3倍になっていない
+				"specificity": "部費を3倍にすることができました",
 			},
-			why: "内容語での実測 0.36 / 0.35。正当な要約（0.29〜1.00）と同じ帯に入る",
+			why: "数値は発話に存在するため完全一致では弾けない。何に掛かる数値かは見ていない",
 		},
 		{
 			name: "発話の内容語を流用して別の事実をでっち上げた捏造",
@@ -390,6 +392,47 @@ func TestValidateEvidence_KnownLimitation(t *testing.T) {
 					got.Unmatched, tt.why)
 			}
 		})
+	}
+}
+
+// 学生が言っていない数値を含む evidence は、内容語の一致度に関わらず未照合にする（#1596）。
+func TestValidateEvidence_UnspokenNumber(t *testing.T) {
+	t.Parallel()
+
+	spoken := SpokenContent(testUtterances())
+	tests := []struct {
+		name      string
+		evidence  string
+		wantMatch bool
+	}{
+		// 旧 KnownLimitation の2件。内容語では 0.36 / 0.35 で正当な要約と同じ帯だった
+		{name: "実引用に事実を継ぎ足した捏造（50人・3年間は未発話）",
+			evidence: "入学した当初は部員が8人しかいなくて、私が部長として3年間で部員数を50人まで増やしました"},
+		{name: "数値を入れ替えた捏造（100人は未発話）",
+			evidence: "部員が8人から100人に増えて、部費を3倍にすることができました"},
+		{name: "全角数字でも未発話なら弾く", evidence: "新入部員は４０人まで増えました"},
+		// 正当な引用は落とさない
+		{name: "発話どおりの数値は照合する", evidence: "部員数を3倍にすることができました", wantMatch: true},
+		{name: "全角で書かれても同じ数値なら照合する", evidence: "新入部員は２３人まで増えました", wantMatch: true},
+		{name: "数値を含まない要約は従来どおり", evidence: "新歓ライブの企画を提案した", wantMatch: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := ValidateEvidence(map[string]string{"logic": tt.evidence}, spoken)
+			if gotMatch := len(got.Unmatched) == 0; gotMatch != tt.wantMatch {
+				t.Errorf("照合 = %v, want %v", gotMatch, tt.wantMatch)
+			}
+		})
+	}
+}
+
+func TestExtractNumbers(t *testing.T) {
+	t.Parallel()
+	got := extractNumbers("毎日3,000円、１２３人、1.5倍、２．５時間")
+	want := []string{"3000", "123", "1.5", "2.5"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("extractNumbers = %v, want %v", got, want)
 	}
 }
 

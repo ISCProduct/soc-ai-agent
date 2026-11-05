@@ -1,6 +1,10 @@
 package prompts
 
-import "fmt"
+import (
+	"fmt"
+
+	"Backend/internal/services/shared"
+)
 
 // ──────────────────────────────────────────────
 // 回答妥当性チェックプロンプト（validateAnswerRelevance 用）
@@ -41,5 +45,14 @@ func BuildAnswerValidationUserPrompt(question, answer string) string {
 - かつ 10文字未満（挨拶・短い感嘆詞のみ）、または完全に無関係な話題
 
 ## 判定
-{"valid": true} または {"valid": false}`, question, answer)
+{"valid": true} または {"valid": false}`, question, wrapAnswer(answer))
+}
+
+// wrapAnswer は学生の回答を非信頼データとして囲む（#1636）。
+// 回答は妥当性判定・品質スコアの入力そのもので、指示文を書けば判定を書き換えられる。
+func wrapAnswer(answer string) string {
+	if wrapped := shared.WrapUntrustedText(answer, "ユーザーの回答"); wrapped != "" {
+		return wrapped
+	}
+	return "（回答なし）"
 }

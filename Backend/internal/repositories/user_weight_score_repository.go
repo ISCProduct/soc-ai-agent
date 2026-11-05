@@ -21,6 +21,11 @@ func NewUserWeightScoreRepository(db *gorm.DB) *UserWeightScoreRepository {
 // 呼び出し前に対象レコードが存在しないことを確認すること。
 // スコアは 0〜100 に丸める。
 func (r *UserWeightScoreRepository) SetScore(userID uint, sessionID, category string, absoluteScore int) error {
+	return r.SetScoreWithSource(userID, sessionID, category, absoluteScore, models.ScoreSourceChat)
+}
+
+// SetScoreWithSource は由来（chat / assessment）を指定して SetScore する（#1678）。
+func (r *UserWeightScoreRepository) SetScoreWithSource(userID uint, sessionID, category string, absoluteScore int, source string) error {
 	// 正典外のカテゴリ名を書かせない（#929）。
 	// マッチングは正典キーで scoreMap を引くため、揺れた名前で保存されると
 	// その行は永久に引かれず、代わりに中立50が使われて静かにスコアが希釈される。
@@ -42,6 +47,7 @@ func (r *UserWeightScoreRepository) SetScore(userID uint, sessionID, category st
 		SessionID:      sessionID,
 		WeightCategory: category,
 		Score:          absoluteScore,
+		Source:         source,
 	}
 	if err := fillOrganizationID(r.db, userID, &score.OrganizationID); err != nil {
 		return err
@@ -116,9 +122,10 @@ func (r *UserWeightScoreRepository) CountByUserAndSession(userID uint, sessionID
 
 // FindLatestByUser ユーザーの最新セッションのスコアを取得する。
 // 面接スナップショット(interview-*)よりチャット診断セッションを優先する。
+// 適性検査の行は「最新セッション」の候補にしない（#1678。合流はマッチング側で行う）。
 func (r *UserWeightScoreRepository) FindLatestByUser(userID uint) ([]entity.UserWeightScore, error) {
 	var latest models.UserWeightScore
-	err := r.db.Where("user_id = ?", userID).
+	err := r.db.Where("user_id = ? AND source <> ?", userID, models.ScoreSourceAssessment).
 		Order("CASE WHEN session_id LIKE 'interview-%' THEN 1 ELSE 0 END ASC, updated_at DESC, id DESC").
 		First(&latest).Error
 	if err != nil {
@@ -131,7 +138,7 @@ func (r *UserWeightScoreRepository) FindLatestByUser(userID uint) ([]entity.User
 // 面接スナップショットは除外。無い場合は gorm.ErrRecordNotFound。
 func (r *UserWeightScoreRepository) FindLatestDiagnosisSessionID(userID uint) (string, error) {
 	var latest models.UserWeightScore
-	err := r.db.Where("user_id = ? AND session_id NOT LIKE ?", userID, "interview-%").
+	err := r.db.Where("user_id = ? AND session_id NOT LIKE ? AND source <> ?", userID, "interview-%", models.ScoreSourceAssessment).
 		Order("updated_at DESC, id DESC").
 		First(&latest).Error
 	if err != nil {
@@ -172,7 +179,7 @@ WITH latest AS (
              id DESC
          ) AS rn
   FROM user_weight_scores
-  WHERE user_id IN (?)
+  WHERE user_id IN (?) AND source <> 'assessment'
 )
 SELECT s.user_id, s.weight_category, s.score
 FROM user_weight_scores s

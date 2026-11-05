@@ -12,6 +12,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // jobChBufferSize はフォールバック用レポート生成キューのバッファ長。
@@ -36,11 +38,13 @@ type InterviewService struct {
 	jobCh                chan uint
 	// inFlightJobs はフォールバック channel 経路の重複排除（Redis 経路の TaskID 相当、#1476）。
 	// 投入時に登録し、worker が処理し終えるまで保持する。
-	inFlightJobs map[uint]struct{}
-	inFlightMu   sync.Mutex
-	workerOnce   sync.Once
-	jobs         shared.JobEnqueuer
-	ownsCompany  func(userID, companyID uint) (bool, error)
+	inFlightJobs         map[uint]struct{}
+	inFlightMu           sync.Mutex
+	workerOnce           sync.Once
+	jobs                 shared.JobEnqueuer
+	ownsCompany          func(userID, companyID uint) (bool, error)
+	companyReadingCache  companyReadingCache
+	companyReadingFlight singleflight.Group
 }
 
 // SkillScoreReader はGitHubスキルスコア取得の最小インターフェース。
@@ -227,6 +231,8 @@ type TurnResult struct {
 	UserText               string
 	AIText                 string
 	Audio                  []byte
+	CompanyReading         string
+	CompanyReadingResolved bool
 	QuestionSource         string
 	QuestionCategory       string
 	IsDeepening            bool
@@ -255,6 +261,24 @@ func (s *InterviewService) isAllowed(actorID uint, ownerID uint) bool {
 		return false
 	}
 	return user.IsAdmin
+}
+
+// redactTeacherReport は教員用レポートを見てよい実ロール（職員・管理者）以外には
+// TeacherReportJSON を空にしたコピーを返す。ユーザーを引けない場合も除去する(fail-close)。
+func (s *InterviewService) redactTeacherReport(actorID uint, report *models.InterviewReport) *models.InterviewReport {
+	if report == nil {
+		return nil
+	}
+	user, err := s.userRepo.GetUserByID(actorID)
+	if err != nil {
+		// 除去側に倒すが、DB 障害で職員のレポートが空になる原因を追えるよう残す
+		log.Printf("[Interview] WARN: 教員用レポートの開示判定でユーザーを取得できず除去しました user=%d: %v", actorID, err)
+	} else if user != nil && (user.IsAdmin || user.HasStaffRole()) {
+		return report
+	}
+	sanitized := *report
+	sanitized.TeacherReportJSON = ""
+	return &sanitized
 }
 
 func toSessionResponse(session *models.InterviewSession) *InterviewSessionResponse {

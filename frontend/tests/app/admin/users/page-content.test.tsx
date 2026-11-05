@@ -160,4 +160,26 @@ describe('管理ユーザー画面 担当校スコープの取得失敗 (#1448)'
 
     expect(await screen.findByRole('button', { name: '管理者にする' })).toBeInTheDocument()
   })
+
+  // 職員ロール付与UI(#1681 フォロー)。無制限管理者のみボタンが出て、
+  // クリックで is_staff を PUT する。
+  it('職員にするボタンを押すと is_staff:true を PUT する', async () => {
+    const fetchMock = jest.fn().mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {
+      const method = (init?.method || 'GET').toUpperCase()
+      if (method === 'GET') {
+        return Promise.resolve({ ok: true, status: 200, text: async () => JSON.stringify({ users: [USER], total: 1 }) })
+      }
+      return Promise.resolve({ ok: true, status: 200, text: async () => JSON.stringify({ ...USER, is_staff: true }) })
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+    render(<PageContent />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '職員にする' }))
+
+    await waitFor(() => {
+      const putCall = fetchMock.mock.calls.find((c) => (c[1]?.method || '').toUpperCase() === 'PUT')
+      expect(putCall).toBeTruthy()
+      expect(JSON.parse(putCall![1].body)).toEqual({ is_staff: true })
+    })
+  })
 })

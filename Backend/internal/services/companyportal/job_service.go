@@ -46,6 +46,7 @@ type jobRepository interface {
 	ListJobPositions(companyID, schoolID *uint, limit int) ([]models.CompanyJobPosition, error)
 	CreateJobPosition(position *models.CompanyJobPosition) error
 	UpdateJobPosition(position *models.CompanyJobPosition) error
+	DeleteJobPosition(id uint) error
 }
 
 type JobService struct {
@@ -145,9 +146,16 @@ func (s *JobService) Update(jobID, companyID uint, in JobInput) (*models.Company
 	return job, nil
 }
 
+// Delete は自社の求人を論理削除する。他社の求人IDは存在しないIDと同じ403にする。
+func (s *JobService) Delete(jobID, companyID uint) error {
+	job, err := s.ownedJob(jobID, companyID)
+	if err != nil {
+		return err
+	}
+	return s.repo.DeleteJobPosition(job.ID)
+}
+
 // SetPublished は求人の公開・非公開を切り替える。
-//
-// 削除は提供しない。応募が紐づくため、非公開化で対応する(#1321)。
 //
 // 公開できるのは企業本体が published のときだけ。求人だけ公開しても
 // 学生側の企業詳細に出ないので、成功したように見せてはいけない。

@@ -170,6 +170,37 @@ func TestBuildInterviewSystemPromptKeepsTTSResponsesShort(t *testing.T) {
 	}
 }
 
+// TestBuildInterviewSystemPromptForbidsRepeatingThemes は、言い回しを変えた
+// 重複質問（例:「力を入れたこと」の焼き直し）を避ける指示が入っていることを確認する。
+func TestBuildInterviewSystemPromptForbidsRepeatingThemes(t *testing.T) {
+	prompt := buildInterviewSystemPrompt(
+		"テスト株式会社", "", "エンジニア", "", "general",
+		nil, nil, 0, 0, 1, 5, 0, 180, nil,
+	)
+	if !strings.Contains(prompt, "繰り返さない") {
+		t.Fatalf("prompt missing instruction against repeating question themes: %s", prompt)
+	}
+}
+
+// TestBuildStudentNameContext は、聞き間違いに左右されない氏名の正を
+// システムプロンプトへ渡すブロックの中身を確認する（#name mismatch bug）。
+func TestBuildStudentNameContext(t *testing.T) {
+	ctx := buildStudentNameContext("田中優希")
+	if !strings.Contains(ctx, "田中優希") {
+		t.Fatalf("name context missing student name: %s", ctx)
+	}
+	if !strings.Contains(ctx, "音声認識の誤り") {
+		t.Fatalf("name context missing rationale for overriding heard name: %s", ctx)
+	}
+
+	if got := buildStudentNameContext(""); got != "" {
+		t.Fatalf("expected empty context for blank name, got: %q", got)
+	}
+	if got := buildStudentNameContext("   "); got != "" {
+		t.Fatalf("expected empty context for whitespace-only name, got: %q", got)
+	}
+}
+
 func TestIsEngineerPosition(t *testing.T) {
 	tests := []struct {
 		name     string

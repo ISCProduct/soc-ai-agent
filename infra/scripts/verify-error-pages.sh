@@ -13,7 +13,9 @@ check() {
     fail=1
     return
   fi
-  if ! grep -q "$want_title" "$file"; then
+  # og:title の content の中だけを見る。ファイル全体を grep すると、本文に
+  # 同じ語が混ざっているだけで通ってしまい、文言を変えても検知できない。
+  if ! grep 'property="og:title"' "$file" | grep -q "content=\"[^\"]*${want_title}"; then
     echo "FAIL: expected og title fragment '$want_title' in $file"
     fail=1
     return
@@ -26,7 +28,7 @@ check() {
   echo "OK: $file"
 }
 
-check "$ROOT/static/service-unavailable.html" "接続できません"
+check "$ROOT/static/service-unavailable.html" "メンテナンス中"
 check "$ROOT/static/service-starting.html" "起動中"
 
 exit "$fail"

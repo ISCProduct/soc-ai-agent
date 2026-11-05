@@ -36,7 +36,12 @@ ${service_starting_html}
 HTMLEOF
 
 mkdir -p /opt/app
-cat > /opt/app/.env <<EOF
+# 区切り文字を引用する。引用しないと bash が値の $ / `...` / \ を展開してから書き込むため、
+# シークレットに $(...) が含まれると cloud-init の root 権限でそれが実行され、
+# 未定義の $name が含まれると set -u でここで落ちて docker compose まで到達しない。
+# terraform の templatefile による変数の差し込みは引用の有無に関係なく先に済むので、
+# 引用しても値はそのまま入る。
+cat > /opt/app/.env <<'EOF'
 SERVER_PORT=8080
 DB_HOST=${db_host}
 DB_PORT=${db_port}
@@ -55,9 +60,8 @@ OPENAI_MODEL=${openai_model}
 OPENAI_WEB_SEARCH_MODEL=gpt-4o-mini
 OPENAI_COMPANY_SEARCH_MODEL=gpt-4o-mini
 OPENAI_HINTS_MODEL=gpt-4o-mini
-# AI面接のSTT。miniは「御社」を「本社」と誤認しやすく、問題発話だけ
-# gpt-4o-transcribe へ自動で再送する(stt_fallback.go)。
-# 精度に問題が出たら gpt-4o-transcribe にすると再送なしで高精度モデルだけを使う。
+# AI面接のSTT。既定は gpt-transcribe。mini にすると問題発話だけ
+# gpt-transcribe へ自動で再送する(stt_fallback.go)。
 OPENAI_WHISPER_MODEL=${openai_whisper_model}
 RESEND_API_KEY=${resend_api_key}
 EMAIL_PROVIDER=resend
@@ -68,6 +72,8 @@ GITHUB_CLIENT_ID=${github_client_id}
 GITHUB_CLIENT_SECRET=${github_client_secret}
 USER_SECRET=${user_secret}
 ADMIN_SECRET=${admin_secret}
+# CIからのサービス間呼び出し(X-Admin-Secret)用。ADMIN_SECRETとは別値(#1158)
+SERVICE_SECRET=${service_secret}
 DISCORD_PUBLIC_KEY=${discord_public_key}
 DISCORD_ALLOWED_ROLE_ID=${discord_allowed_role_id}
 GITHUB_DISPATCH_TOKEN=${github_dispatch_token}

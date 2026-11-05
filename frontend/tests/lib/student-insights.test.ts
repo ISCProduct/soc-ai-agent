@@ -5,6 +5,8 @@ import {
   displayIndustries,
   displayTypeLabel,
   formatScore,
+  isInactive,
+  lastActivityLabel,
   NO_DATA_LABEL,
   type StudentTendency,
 } from '@/lib/student-insights'
@@ -141,5 +143,23 @@ describe('resumeAttentionLabel', () => {
       ...withData,
       resume_status: { needs_attention: true, has_document: true },
     })).toBe('要対応')
+  })
+})
+
+// #1573: 最終活動の表示と、バックエンドの inactive_days と同じ境界判定。
+describe('最終活動', () => {
+  const now = new Date('2026-10-11T09:00:00Z')
+  const at = (iso: string | null) => ({ ...withData, last_activity_at: iso })
+
+  it('日数で表示し、記録なしはその旨を出す', () => {
+    expect(lastActivityLabel(at('2026-10-11T01:00:00Z'), now)).toBe('今日')
+    expect(lastActivityLabel(at('2026-10-08T09:00:00Z'), now)).toBe('3日前')
+    expect(lastActivityLabel(at(null), now)).toBe('活動の記録なし')
+  })
+
+  it('14日ちょうどと記録なしは未活動、13日は活動あり', () => {
+    expect(isInactive(at('2026-09-27T09:00:00Z'), now)).toBe(true)
+    expect(isInactive(at('2026-09-28T09:00:00Z'), now)).toBe(false)
+    expect(isInactive(at(null), now)).toBe(true)
   })
 })

@@ -99,7 +99,7 @@ export function ChatModals({
       >
         <DialogTitle sx={{ textAlign: 'center', pb: 1 }}>
           <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: 'warning.main' }}>
-            ⚠️ チャットを終了しますか？
+            チャットを終了しますか？
           </Typography>
         </DialogTitle>
         <DialogContent sx={{ pt: 2, pb: 2 }}>
@@ -155,13 +155,18 @@ export function ChatModals({
             variant="body1"
             sx={{ textAlign: 'center', mb: 2, color: 'error.main', fontWeight: 'bold' }}
           >
-            質問と関係のない内容が3回続いたため、チャットを終了しました。
+            うまく受け取れない回答が続いたため、このチャットを終了しました。
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mb: 1 }}>
-            新しいセッションで最初からやり直してください。
+            新しく始めれば、最初からやり直せます。
           </Typography>
+          {/*
+            「現在の回答内容は保存されていません」と出していたが誤り。
+            TerminateSession は is_terminated を立てるだけで、chat_messages も
+            スコアも消していない。続きができないだけ。失われたと伝えると再開をためらう。
+          */}
           <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
-            現在の回答内容は保存されていません。
+            ここまでの回答は残っています。答えにくい質問が続くときは、先生にも相談してみてください。
           </Typography>
         </DialogContent>
         <DialogActions sx={{ justifyContent: 'center', pb: 2 }}>

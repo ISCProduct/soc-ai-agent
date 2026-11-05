@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ElementType, ReactNode } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 
 type EmptyStateProps = {
@@ -8,6 +8,20 @@ type EmptyStateProps = {
   description?: string
   /** 次の操作。具体的な操作名のボタンを渡す（「OK」「実行」は使わない）。 */
   action?: ReactNode
+  /**
+   * title を見出し要素として描画する際のタグ（例: "h2"）。
+   * 省略時は見出しにしない（既存呼び出し元の見た目・DOM構造を変えないため）。
+   * ページの見出し階層に合わせて呼び出し元が指定する。
+   */
+  titleComponent?: ElementType
+  /**
+   * 余白を詰める。
+   *
+   * 既定の余白はページ全体が空のときを想定している。チャットのログのように
+   * 既に余白を持つ領域の中へ置くと、本文（挨拶や直前の質問）を画面外へ
+   * 押し出してしまう。省略時は従来どおり。
+   */
+  dense?: boolean
 }
 
 /**
@@ -23,11 +37,17 @@ type EmptyStateProps = {
  * 装飾目的のイラストやアイコンは置かない（§27）。読む順序は
  * 「何が無いか」→「どうすればよいか」→「操作」に固定する。
  */
-export function EmptyState({ title, description, action }: EmptyStateProps) {
+export function EmptyState({
+  title,
+  description,
+  action,
+  titleComponent,
+  dense = false,
+}: EmptyStateProps) {
   return (
     <Box
       sx={{
-        py: { xs: 5, sm: 7 },
+        py: dense ? { xs: 2, sm: 2.5 } : { xs: 5, sm: 7 },
         px: 2,
         textAlign: 'center',
         // 読み幅を抑える。中央寄せの文は長いと視線の戻りが大きくなる。
@@ -36,7 +56,12 @@ export function EmptyState({ title, description, action }: EmptyStateProps) {
       }}
     >
       <Stack spacing={1.5} alignItems="center">
-        <Typography variant="body1" fontWeight={700} color="text.primary">
+        <Typography
+          variant="body1"
+          fontWeight={700}
+          color="text.primary"
+          {...(titleComponent ? { component: titleComponent } : {})}
+        >
           {title}
         </Typography>
         {description ? (

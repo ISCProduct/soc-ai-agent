@@ -5,6 +5,7 @@ import (
 	"Backend/internal/middleware"
 	"Backend/internal/services/school"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -73,6 +74,9 @@ func (c *AdminSchoolController) Create(ctx echo.Context) error {
 func (c *AdminSchoolController) Get(ctx echo.Context) error {
 	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
+		return err
+	}
+	if err := c.ensureSchoolAccess(ctx, id); err != nil {
 		return err
 	}
 	found, err := c.schools.Get(id)
@@ -184,6 +188,9 @@ func (c *AdminSchoolController) ListCompanyApprovals(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := c.ensureSchoolAccess(ctx, id); err != nil {
+		return err
+	}
 	ids, err := c.schools.ListApprovedCompanyIDs(id)
 	if err != nil {
 		return httpapi.InternalError(err)
@@ -238,7 +245,8 @@ func (c *AdminSchoolController) ensureSchoolAccess(ctx echo.Context, schoolID ui
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	restricted, allowedSchoolIDs, err := c.schools.ResolveAdminAccess(adminUserID)
+	isPlatform := middleware.AdminIsPlatformFromContext(ctx.Request().Context())
+	restricted, allowedSchoolIDs, err := c.schools.ResolveAccess(isPlatform, adminUserID)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -260,7 +268,8 @@ func (c *AdminSchoolController) MySchoolAccess(ctx echo.Context) error {
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	restricted, schools, err := c.schools.ListAccessibleSchools(adminUserID)
+	isPlatform := middleware.AdminIsPlatformFromContext(ctx.Request().Context())
+	restricted, schools, err := c.schools.ListAccessibleSchools(isPlatform, adminUserID)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -278,6 +287,12 @@ func mapSchoolError(err error) error {
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	case errors.Is(err, school.ErrSchoolNameRequired), errors.Is(err, school.ErrSchoolOrgRequired):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	case errors.Is(err, school.ErrMemberNotFound), errors.Is(err, school.ErrMemberOrganizationMismatch):
+		// 「存在しない」と「他学園に存在する」を同じ応答にする。打ち分けると、担当校を持つ
+		// 管理者が任意の user_id を投げて他学園のユーザーの存在を判定できてしまう（#1675）。
+		// 運用で切り分けたいときのために、理由はログへ残す。
+		log.Printf("[Admin] school member assignment rejected: %v", err)
+		return echo.NewHTTPError(http.StatusBadRequest, "指定されたユーザーをこの学校の担当にできません")
 	default:
 		return httpapi.InternalError(err)
 	}

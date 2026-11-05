@@ -8,6 +8,7 @@ type InteractionType int
 const (
 	InteractionTypePing               InteractionType = 1
 	InteractionTypeApplicationCommand InteractionType = 2
+	InteractionTypeAutocomplete       InteractionType = 4
 	InteractionTypeModalSubmit        InteractionType = 5
 )
 
@@ -17,6 +18,7 @@ const (
 	ResponseTypePong                             ResponseType = 1
 	ResponseTypeChannelMessageWithSource         ResponseType = 4
 	ResponseTypeDeferredChannelMessageWithSource ResponseType = 5
+	ResponseTypeAutocompleteResult               ResponseType = 8
 	ResponseTypeModal                            ResponseType = 9
 )
 
@@ -80,6 +82,8 @@ type InteractionData struct {
 type CommandOption struct {
 	Name  string `json:"name"`
 	Value any    `json:"value"`
+	// Focused はオートコンプリートで、いま入力中の引数に付く。
+	Focused bool `json:"focused,omitempty"`
 }
 
 type Component struct {
@@ -105,6 +109,22 @@ type InteractionResponseData struct {
 	CustomID   string      `json:"custom_id,omitempty"`
 	Title      string      `json:"title,omitempty"`
 	Components []Component `json:"components,omitempty"`
+	// Choices はオートコンプリートの候補。
+	Choices []Choice `json:"choices,omitempty"`
+	// AllowedMentions を指定すると、本文中のメンションで通知が飛ぶ範囲を絞れる。
+	AllowedMentions *AllowedMentions `json:"allowed_mentions,omitempty"`
+}
+
+// AllowedMentions の Parse を空にすると、本文に <@id> や @everyone があっても通知しない。
+// 利用者の入力（理由など）を含む公開メッセージで、意図しないメンションを防ぐ。
+type AllowedMentions struct {
+	Parse []string `json:"parse"` // omitempty にしない。空配列を送ることに意味がある
+}
+
+// Choice はオートコンプリートの1候補。
+type Choice struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // EphemeralFlag は本人にしか見えないメッセージを表すフラグ値。
@@ -116,6 +136,15 @@ const (
 	CommandNameProdUptimeList = "prod-uptime-list"
 	CommandNameProd           = "prod"
 	CommandNameStaging        = "staging"
+	CommandNameLink           = "link"
+	CommandNameLinkList       = "link-list"
+	CommandNameUnlink         = "unlink"
+	CommandNameDeadline       = "deadline"
+	OptionNameIssue           = "issue"
+	OptionNameDate            = "date"
+	OptionNameReason          = "reason"
+	OptionNameMember          = "member"
+	OptionNameBacklog         = "backlog"
 	OptionNameState           = "state"
 	// OptionNameUntil は /prod の復帰日。state と結合して on:YYYY-MM-DD の形にする。
 	// state は選択肢(choices)固定で日付を入力できないため、別オプションで受ける。

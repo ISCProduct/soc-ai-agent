@@ -120,7 +120,7 @@ export default function PageContent() {
 
   if (loadStatus === 'loading') {
     return (
-      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f5f7fa' }}>
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default' }}>
         <Typography color="text.secondary">読み込み中...</Typography>
       </Box>
     )
@@ -162,7 +162,7 @@ export default function PageContent() {
   const cicd = parseJsonArray(company.cicd_tools)
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f7fa' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       <Box sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
         <Box sx={{ maxWidth: 1000, mx: 'auto', px: 2, py: 1.5 }}>
           <Button startIcon={<ArrowBackIcon />} onClick={() => router.back()}>

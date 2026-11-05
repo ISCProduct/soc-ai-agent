@@ -2,6 +2,7 @@ package interview
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
 	"context"
 	"errors"
 	"fmt"
@@ -54,23 +55,25 @@ func (s *InterviewService) advanceQuestionPlan(
 				}
 				parentID := asked.ID
 				followUp := &models.InterviewQuestionState{
-					SessionID:     session.ID,
-					Source:        questionSourceFollowUp,
-					Category:      asked.Category,
-					QuestionText:  followUpText,
-					Status:        questionStatusAsked,
-					ParentStateID: &parentID,
-					Depth:         asked.Depth + 1,
-					SortOrder:     asked.SortOrder,
+					SessionID:         session.ID,
+					Source:            questionSourceFollowUp,
+					Category:          asked.Category,
+					CompanyQuestionID: asked.CompanyQuestionID,
+					QuestionText:      followUpText,
+					Status:            questionStatusAsked,
+					ParentStateID:     &parentID,
+					Depth:             asked.Depth + 1,
+					SortOrder:         asked.SortOrder,
 				}
 				if err := s.questionStateRepo.Create(followUp); err != nil {
 					return nil, err
 				}
 				return &questionDirective{
-					Text:        followUpText,
-					Source:      questionSourceFollowUp,
-					Category:    asked.Category,
-					IsDeepening: true,
+					Text:              followUpText,
+					Source:            questionSourceFollowUp,
+					Category:          asked.Category,
+					CompanyQuestionID: asked.CompanyQuestionID,
+					IsDeepening:       true,
 				}, nil
 			}
 		}
@@ -89,9 +92,10 @@ func (s *InterviewService) advanceQuestionPlan(
 		return nil, err
 	}
 	return &questionDirective{
-		Text:     next.QuestionText,
-		Source:   next.Source,
-		Category: next.Category,
+		Text:              next.QuestionText,
+		Source:            next.Source,
+		Category:          next.Category,
+		CompanyQuestionID: next.CompanyQuestionID,
 	}, nil
 }
 
@@ -134,7 +138,7 @@ func (s *InterviewService) generateFollowUpQuestion(ctx context.Context, origina
 // STAR で欠けている要素を明示して、追質問の狙いを固定する（#794）。
 // 指定しないと、成果が語られていない回答にも「きっかけ」を聞き返すことがある。
 func buildFollowUpUserPrompt(originalQuestion, userAnswer string) string {
-	prompt := fmt.Sprintf("元の質問: %s\n応募者回答: %s", originalQuestion, userAnswer)
+	prompt := fmt.Sprintf("元の質問: %s\n応募者回答:\n%s", originalQuestion, shared.WrapUntrustedText(userAnswer, "応募者回答"))
 	if _, missing := STARFollowUpQuestion(userAnswer); missing != "" {
 		label := STARLabel(missing)
 		prompt += fmt.Sprintf("\n\nこの回答には「%s」が含まれていません。「%s」を引き出す質問にしてください。", label, label)

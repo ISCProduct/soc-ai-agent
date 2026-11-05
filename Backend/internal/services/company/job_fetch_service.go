@@ -8,6 +8,7 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/ragclient"
 	"Backend/internal/scraper"
+	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"bytes"
 	"context"
@@ -373,28 +374,7 @@ func (s *JobFetchService) analyzePersonaProfile(ctx context.Context, companyName
 - 80以上を付けてよいのは最大3項目まで
 - 少なくとも2項目は40以下にする
 - 10項目すべてを似た値にしない（最大値と最小値の差を40以上にする）`
-	userPrompt := fmt.Sprintf(`「%s」が求める人物像を以下の10カテゴリでスコア化してください（0〜100）。
-平均的な日本企業を50とした相対評価です。この企業を他社と見分けられる形にしてください。
-JSON形式のみで回答してください（説明文は不要）。
-
-{
-  "technical_orientation": 技術志向の重視度（0-100）,
-  "teamwork_orientation": チームワーク志向の重視度（0-100）,
-  "leadership_orientation": リーダーシップ志向の重視度（0-100）,
-  "creativity_orientation": 創造性志向の重視度（0-100）,
-  "stability_orientation": 安定志向の重視度（0-100）,
-  "growth_orientation": 成長志向の重視度（0-100）,
-  "work_life_balance": ワークライフバランスの重視度（0-100）,
-  "challenge_seeking": チャレンジ精神の重視度（0-100）,
-  "detail_orientation": 細部への注意力の重視度（0-100）,
-  "communication_skill": コミュニケーション力の重視度（0-100）
-}
-
-企業情報:
-%s
-
-求人情報:
-%s`, companyName, companyInfo, positionText)
+	userPrompt := buildPersonaUserPrompt(companyName, companyInfo, positionText)
 
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureCompanyJobFetch)
 	jsonStr, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.3, 500)
@@ -476,4 +456,45 @@ func buildPositionSummary(positions []models.CompanyJobPosition) string {
 		fmt.Fprintf(&sb, "職種: %s / 雇用形態: %s / 必須: %s\n", p.Title, p.EmploymentType, p.RequiredSkills)
 	}
 	return sb.String()
+}
+
+// buildPersonaUserPrompt は人物像分析のユーザープロンプトを組み立てる。
+//
+// 企業名・企業情報・求人情報はいずれも非信頼データとして囲む（#1636）。
+// 企業行は自動収集（Web由来）やゲスト投稿で埋まりうる。ここの出力は
+// CompanyWeightProfile＝マッチングの重みそのものになり、同じ企業情報が
+// RAG 経由で履歴書・ESレビューの企業コンテキストとしても配られる。
+func buildPersonaUserPrompt(companyName, companyInfo, positionText string) string {
+	return fmt.Sprintf(`「%s」が求める人物像を以下の10カテゴリでスコア化してください（0〜100）。
+平均的な日本企業を50とした相対評価です。この企業を他社と見分けられる形にしてください。
+JSON形式のみで回答してください（説明文は不要）。
+
+{
+  "technical_orientation": 技術志向の重視度（0-100）,
+  "teamwork_orientation": チームワーク志向の重視度（0-100）,
+  "leadership_orientation": リーダーシップ志向の重視度（0-100）,
+  "creativity_orientation": 創造性志向の重視度（0-100）,
+  "stability_orientation": 安定志向の重視度（0-100）,
+  "growth_orientation": 成長志向の重視度（0-100）,
+  "work_life_balance": ワークライフバランスの重視度（0-100）,
+  "challenge_seeking": チャレンジ精神の重視度（0-100）,
+  "detail_orientation": 細部への注意力の重視度（0-100）,
+  "communication_skill": コミュニケーション力の重視度（0-100）
+}
+
+企業情報:
+%s
+
+求人情報:
+%s`,
+		shared.WrapUntrustedText(companyName, "企業名"),
+		orNone(shared.WrapUntrustedText(companyInfo, "企業情報")),
+		orNone(shared.WrapUntrustedText(positionText, "求人情報")))
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "（なし）"
+	}
+	return s
 }

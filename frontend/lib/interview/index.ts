@@ -181,9 +181,10 @@ export const interviewApi = {
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
   },
 
-  async getDetail(sessionId: number, userId: number, role?: string): Promise<InterviewDetail> {
-    const roleParam = role ? `&role=${role}` : ''
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}${roleParam}`, undefined, LIST_FETCH_TIMEOUT_MS)
+  async getDetail(sessionId: number, userId: number): Promise<InterviewDetail> {
+    // 教員用レポートを返すかはサーバーが認証済みユーザーの実ロールで決める(#1814)。
+    // クライアントから role は送らない。
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },

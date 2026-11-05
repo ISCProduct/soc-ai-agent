@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 )
@@ -16,6 +17,18 @@ var ErrInterviewBudgetExceeded = errors.New("interview monthly budget exceeded")
 
 // maxClientUtteranceIDLen は client_utterance_id の上限。DBの VARCHAR(64) と揃える。
 const maxClientUtteranceIDLen = 64
+
+// 発話の上限（#1636）。STT の1発話は長くても数百字。30分の面接で往復は20前後。
+// ponytail: 件数判定は保存済み発話を全件読む。上限が小さいので Count クエリは足さない。
+const (
+	maxUtteranceRunes       = 2000
+	maxUtterancesPerSession = 200
+)
+
+var (
+	ErrUtteranceTooLong  = errors.New("utterance too long")
+	ErrTooManyUtterances = errors.New("too many utterances in session")
+)
 
 // interviewBudgetGuard は月次上限の判定面。未設定なら常に許可する。
 type interviewBudgetGuard interface {
@@ -42,8 +55,9 @@ func (s *InterviewService) CreateSession(userID uint, language string, interview
 	// 対応言語のホワイトリスト。以前は空文字しか弾いておらず、未知の値が
 	// 採点プロンプトへ生で入った（normalizeLanguage のコメント参照、#1600）。
 	language = normalizeLanguage(language)
+	// 面接官は男性のみ。未指定・不正値は male（声も male 側になる）。
 	if interviewerGender != "male" && interviewerGender != "female" {
-		interviewerGender = "female"
+		interviewerGender = "male"
 	}
 	session := &models.InterviewSession{
 		UserID:            userID,
@@ -148,6 +162,18 @@ func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role strin
 	if text == "" {
 		return errors.New("empty text")
 	}
+	// 発話はスコアとレポートの入力で、面接官の履歴にもなる（#1636）。
+	// 長さと件数に上限が無いと、1リクエストで文脈を埋め尽くせる。
+	if utf8.RuneCountInString(text) > maxUtteranceRunes {
+		return ErrUtteranceTooLong
+	}
+	existing, err := s.utterRepo.FindBySessionID(sessionID)
+	if err != nil {
+		return err
+	}
+	if len(existing) >= maxUtterancesPerSession {
+		return ErrTooManyUtterances
+	}
 	utter := &models.InterviewUtterance{
 		SessionID: sessionID,
 		Role:      role,
@@ -219,11 +245,9 @@ func (s *InterviewService) ListSessions(userID uint, all bool, limit int, offset
 	return toSessionResponses(sessions), total, nil
 }
 
+// GetSessionDetail は面接詳細を返す。教員用レポートを含めるかは呼び出し元の実ロールで
+// サーバー側が決める（クライアント送信の値は使わない。#1814）。
 func (s *InterviewService) GetSessionDetail(userID uint, sessionID uint) (*InterviewDetailResponse, error) {
-	return s.GetSessionDetailWithRole(userID, sessionID, "student")
-}
-
-func (s *InterviewService) GetSessionDetailWithRole(userID uint, sessionID uint, role string) (*InterviewDetailResponse, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -243,12 +267,7 @@ func (s *InterviewService) GetSessionDetailWithRole(userID uint, sessionID uint,
 		}
 		report = nil
 	}
-	// 教員以外には教員用レポートを返さない
-	if report != nil && role != "teacher" {
-		sanitized := *report
-		sanitized.TeacherReportJSON = ""
-		report = &sanitized
-	}
+	report = s.redactTeacherReport(userID, report)
 	return &InterviewDetailResponse{
 		Session:    *toSessionResponse(session),
 		Utterances: utterances,

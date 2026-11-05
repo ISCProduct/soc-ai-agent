@@ -133,7 +133,7 @@ func TestUpdateScoresFromInterviewReport_SavedValues(t *testing.T) {
 					WillReturnRows(sqlmock.NewRows([]string{"organization_id"}).AddRow(testOrgID))
 				mock.ExpectBegin()
 				mock.ExpectExec("INSERT INTO `user_weight_scores`").
-					WithArgs(testOrgID, testUserID, testSessionID, category, score,
+					WithArgs(testOrgID, testUserID, testSessionID, models.ScoreSourceChat, category, score,
 						sqlmock.AnyArg(), sqlmock.AnyArg()).
 					WillReturnResult(sqlmock.NewResult(1, 1))
 				mock.ExpectCommit()
@@ -254,7 +254,7 @@ func TestUpdateScoresFromResumeReview_SavedValues(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{"organization_id"}).AddRow(testOrgID))
 		mock.ExpectBegin()
 		mock.ExpectExec("INSERT INTO `user_weight_scores`").
-			WithArgs(testOrgID, testUserID, testSessionID, category, score,
+			WithArgs(testOrgID, testUserID, testSessionID, models.ScoreSourceChat, category, score,
 				sqlmock.AnyArg(), sqlmock.AnyArg()).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectCommit()

@@ -20,6 +20,8 @@ import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
+import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 
 type InterviewSession = {
   id: number
@@ -48,35 +50,47 @@ export default function PageContent() {
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
 
   useEffect(() => {
     const user = authService.getStoredUser()
-    if (!user?.is_admin) {
+    if (!user?.is_admin && !user?.is_staff) {
       window.location.href = '/'
     }
   }, [])
 
   useEffect(() => {
+    // ページ・学校を素早く切り替えたとき、後着の古い応答で一覧を上書きしない
+    let stale = false
     const fetchSessions = async () => {
       setError('')
+      setLoading(true)
       const params = new URLSearchParams({
         page: String(page + 1),
         limit: String(rowsPerPage),
       })
       if (schoolId !== undefined) params.set('school_id', String(schoolId))
-      const response = await fetch(`/api/admin/interviews?${params}`, {
-        headers: authService.getAdminFetchHeaders(),
-      })
-      const data = await response.json()
-      if (!response.ok) {
-        setError(data?.error || '面接セッション一覧の取得に失敗しました')
-        return
+      try {
+        const response = await fetch(`/api/admin/interviews?${params}`, {
+          headers: authService.getAdminFetchHeaders(),
+        })
+        const data = await response.json()
+        if (stale) return
+        if (!response.ok) {
+          setError(data?.error || '面接セッション一覧の取得に失敗しました')
+          return
+        }
+        setSessions(data?.sessions || [])
+        setTotal(data?.total ?? 0)
+      } catch {
+        if (!stale) setError('面接セッション一覧の取得に失敗しました。通信状況を確認して再読み込みしてください')
+      } finally {
+        if (!stale) setLoading(false)
       }
-      setSessions(data?.sessions || [])
-      setTotal(data?.total ?? 0)
     }
     fetchSessions()
+    return () => { stale = true }
   }, [page, rowsPerPage, schoolId])
 
   const handleChangePage = (_: unknown, newPage: number) => setPage(newPage)
@@ -100,10 +114,15 @@ export default function PageContent() {
           <Stack sx={{ mb: 2 }}>
             <SchoolFilterSelect value={schoolId} onChange={(id) => { setSchoolId(id); setPage(0) }} />
           </Stack>
-          {sessions.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              面接セッションがありません。
-            </Typography>
+          {loading ? (
+            <ListSkeleton rows={3} label="面接セッションを読み込み中" />
+          ) : sessions.length === 0 ? (
+            error ? null : (
+              <EmptyState
+                title="まだ面接セッションはありません"
+                description="学生がAI面接を受けると、ここに一覧で表示されます。学校を絞り込んでいる場合は、ほかの学校も確認してください。"
+              />
+            )
           ) : (
             <>
               <AdminTableWrapper>

@@ -15,9 +15,13 @@ import {
   readStoredJobCategoryId,
   writeStoredJobCategoryId,
   computeProgressTotals,
-  shouldAutoScrollToBottom,
+  historyToMessages,
+  isHistoryCompletionMessage,
   findLastAssistantQuestionMessage,
+  isValidationFeedbackMessage,
+  isValidationTerminationMessage,
 } from '../utils'
+import { useChatAutoScroll } from './useChatAutoScroll'
 import type { Message, PhaseProgress, ProgressTotals, ChoiceOption } from '../types'
 
 /**
@@ -44,10 +48,17 @@ export function useMuiChat() {
   const [phaseProgresses, setPhaseProgresses] = useState<PhaseProgress[] | null>(null)
   const [historyLoadError, setHistoryLoadError] = useState<string | null>(null)
   const [historyRetrying, setHistoryRetrying] = useState(false)
+  /**
+   * 履歴の初回読み込み中。
+   *
+   * 履歴が0件でも挨拶メッセージを入れるので、messages が空なのはこの取得中だけ。
+   * フラグが無かったため、その間は画面が空白のまま待たされていた。
+   */
+  const [historyLoading, setHistoryLoading] = useState(true)
   const [jobCategoryId, setJobCategoryId] = useState(0)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const messagesAreaRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  // 一覧の ref とスクロール（動きを減らす設定への対応を含む）は専用フックへ。
+  const { messagesEndRef, messagesAreaRef } = useChatAutoScroll(messages, isLoading)
 
   const progressTotals: ProgressTotals = computeProgressTotals({
     phases: phaseProgresses,
@@ -64,34 +75,12 @@ export function useMuiChat() {
   const isSessionExpiredError = (error: unknown): boolean =>
     error instanceof UserFacingApiError && (error.status === 401 || error.status === 403)
 
-  const scrollToBottomIfNeeded = () => {
-    const area = messagesAreaRef.current
-    if (area) {
-      const allow = shouldAutoScrollToBottom({
-        scrollHeight: area.scrollHeight,
-        scrollTop: area.scrollTop,
-        clientHeight: area.clientHeight,
-      })
-      if (!allow) return
-    }
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
-
-  useEffect(() => {
-    scrollToBottomIfNeeded()
-  }, [messages, isLoading])
-
   const applyHistoryOrGreeting = useCallback((history: Awaited<ReturnType<typeof getChatHistory>>) => {
     setHistoryLoadError(null)
-    if (history && history.length > 0) {
-      const restoredMessages: Message[] = history.map((msg) => ({
-        id: String(msg.id),
-        role: msg.role,
-        content: msg.content,
-        timestamp: new Date(msg.created_at),
-      }))
+    const restoredMessages = historyToMessages(history)
+    if (restoredMessages.length > 0) {
       setMessages(restoredMessages)
-      const userQuestionCount = history.filter((msg) => msg.role === 'user').length
+      const userQuestionCount = restoredMessages.filter((msg) => msg.role === 'user').length
       setQuestionCount(userQuestionCount)
 
       const savedTotalQuestions = sessionStorage.getItem('totalQuestions')
@@ -118,13 +107,8 @@ export function useMuiChat() {
         )
       }, 100)
 
-      const lastMessage = history[history.length - 1]
-      const isCompletionMessage =
-        lastMessage?.content?.includes('分析が完了しました') ||
-        lastMessage?.content?.includes('全てのフェーズが完了') ||
-        lastMessage?.content?.includes('最適な企業をマッチング')
-
-      if (isCompletionMessage) {
+      const lastMessage = restoredMessages[restoredMessages.length - 1]
+      if (isHistoryCompletionMessage(lastMessage?.content)) {
         setAnalysisComplete(true)
         setAllPhasesCompleted(true)
       }
@@ -144,8 +128,14 @@ export function useMuiChat() {
 
   const loadChatHistory = useCallback(
     async (targetSessionId: string) => {
-      const history = await getChatHistory(targetSessionId)
-      applyHistoryOrGreeting(history)
+      setHistoryLoading(true)
+      try {
+        const history = await getChatHistory(targetSessionId)
+        applyHistoryOrGreeting(history)
+      } finally {
+        // 失敗時も下ろす。下ろさないと、エラー表示の裏で Skeleton が残り続ける。
+        setHistoryLoading(false)
+      }
     },
     [applyHistoryOrGreeting],
   )
@@ -221,7 +211,6 @@ export function useMuiChat() {
 
     void initializeChat()
     // マウント時のみ初期化（loadChatHistory / router は安定参照）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleSend = async (overrideMessage?: string) => {
@@ -284,16 +273,14 @@ export function useMuiChat() {
         timestamp: new Date(),
       }
 
-      // バリデーションエラーかどうかをチェック
-      const isValidationError =
-        response.response?.includes('書かれた内容にはお答えできません') ||
-        response.response?.includes('質問に回答してください') ||
-        response.response?.includes('質問と関係のない内容が3回続いた')
+      // 判定は構造化フィールドを先に見る。本文の文字列一致は、
+      // 旧いバックエンドが is_terminated を返さない場合の保険として残す。
+      // 目印は utils 側（VALIDATION_*_MARKERS）に寄せてある。
+      const isValidationError = isValidationFeedbackMessage(response.response ?? '')
 
-      // セッション終了チェック
       const isTerminated =
         response.is_terminated === true ||
-        response.response?.includes('チャットを終了させていただきます')
+        isValidationTerminationMessage(response.response ?? '')
 
       setMessages((prev) => {
         const newMessages = [...prev, assistantMessage]
@@ -546,6 +533,7 @@ export function useMuiChat() {
     selectedChoiceValue,
     historyLoadError,
     historyRetrying,
+    historyLoading,
     messagesEndRef,
     messagesAreaRef,
     inputRef,

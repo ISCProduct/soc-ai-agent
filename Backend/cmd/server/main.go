@@ -2,8 +2,10 @@ package main
 
 import (
 	"Backend/internal/config"
+	abilitycontrollers "Backend/internal/controllers/ability"
 	admincontrollers "Backend/internal/controllers/admin"
 	applicationcontrollers "Backend/internal/controllers/application"
+	assessmentcontrollers "Backend/internal/controllers/assessment"
 	authcontrollers "Backend/internal/controllers/auth"
 	chatcontrollers "Backend/internal/controllers/chat"
 	companycontrollers "Backend/internal/controllers/company"
@@ -26,9 +28,11 @@ import (
 	"Backend/internal/routes"
 	"Backend/internal/safego"
 	"Backend/internal/scraper"
+	abilitysvc "Backend/internal/services/ability"
 	"Backend/internal/services/admin"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/application"
+	assessmentsvc "Backend/internal/services/assessment"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/chat"
 	"Backend/internal/services/company"
@@ -37,6 +41,7 @@ import (
 	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
 	"Backend/internal/services/email"
+	"Backend/internal/services/esreview"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/gbizinfo"
 	"Backend/internal/services/github"
@@ -320,7 +325,7 @@ func main() {
 	// 全トラフィックが従量課金へ移る。日次/月次のUSD上限と分間レートで打ち切る(#1293)
 	aiClient.SetFallbackGuard(costs.NewOpenAIFallbackGuard(apiCallLogRepo))
 	schoolRepo := repositories.NewSchoolRepository(db)
-	schoolService := school.NewSchoolService(schoolRepo)
+	schoolService := school.NewSchoolService(schoolRepo, userRepo)
 	authService := auth.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	authService.SetDB(db)
 	authService.SetSchoolRepo(schoolRepo)
@@ -534,6 +539,9 @@ func main() {
 	googleCalendarController := schedulecontrollers.NewGoogleCalendarController(calendarSyncService)
 	scheduleController := schedulecontrollers.NewScheduleController(scheduleService)
 	esReviewController := escontrollers.NewESReviewController(aiClient)
+	// ES添削の結果を履歴として残し、前回との差分とスコア連携を行う(#1531)。
+	esReviewRepo := repositories.NewESReviewRepository(db)
+	esReviewController.SetReviewService(esreview.NewService(esReviewRepo, crossFeatureService))
 	appService := application.NewApplicationService(appStatusRepo, matchRepo, db)
 	appController := applicationcontrollers.NewApplicationController(appService)
 	appController.SetSchoolAccess(schoolService)
@@ -641,16 +649,32 @@ func main() {
 	teacherInsightService.SetLowMatchReader(appStatusRepo)
 	// 履歴書要対応を教員一覧に出す（#1030）
 	teacherInsightService.SetResumeFactReader(resumeRepo)
+	// 最終活動日と未活動の絞り込みを教員一覧に出す（#1573）
+	teacherInsightService.SetLastActivityReader(userRepo)
 	teacherInsightController := insightcontrollers.NewTeacherStudentInsightController(teacherInsightService)
 	guidanceRepo := repositories.NewTeacherStudentGuidanceRepository(db)
 	guidanceService := teacher.NewGuidanceService(guidanceRepo, userRepo)
 	teacherGuidanceController := insightcontrollers.NewTeacherGuidanceController(guidanceService, schoolService)
+	teacherESReviewController := insightcontrollers.NewTeacherESReviewController(esReviewRepo)
 	studentGuidanceController := usercontrollers.NewStudentGuidanceController(guidanceService)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, teacherGuidanceController, userRepo, schoolService, cfg.AdminSecret)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, teacherGuidanceController, teacherESReviewController, userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
+	// 適性検査 第1段（#1678）。結果は source=assessment で user_weight_scores へ入り、マッチングへ合流する
+	assessmentRepo := repositories.NewAssessmentRepository(db)
+	matchingService.SetAssessmentScoreReader(assessmentRepo)
+	assessmentService := assessmentsvc.NewService(assessmentRepo, matchingService, userWeightScoreRepo)
+	routes.SetupAssessmentRoutes(api, assessmentcontrollers.NewController(assessmentService), cfg.UserSecret, userDeletionService, organizationService)
+	// 適性検査 第2段（#1675）。学校独自テンプレートはマッチングに合流させない
+	routes.SetupAssessmentSchoolRoutes(api, assessmentcontrollers.NewSchoolController(assessmentsvc.NewSchoolService(assessmentRepo)), userRepo, schoolService, cfg.AdminSecret)
+
+	// 適性検査 第3段: 能力検査（SOCAIAGENT-433）。言語・非言語の正答数を独立スコアとして持つ。
+	// user_weight_scores へは書かない（10カテゴリへ変換する方法が無い）ので、
+	// matchingService へは繋がない。性格検査とはテーブル・型・パスを分けている。
+	abilityRepo := repositories.NewAbilityRepository(db)
+	routes.SetupAbilityRoutes(api, abilitycontrollers.NewController(abilitysvc.NewService(abilityRepo)), cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)
-	routes.SetupESRoutes(api, esRewriteController, esReviewController)
+	routes.SetupESRoutes(api, esRewriteController, esReviewController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)
@@ -672,12 +696,22 @@ func main() {
 	companyPortalSchoolApplicationController := companycontrollers.NewCompanyPortalSchoolApplicationController(
 		companyportal.NewSchoolApplicationService(repositories.NewSchoolCompanyApplicationRepository(db)),
 	)
-	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, companyPortalSchoolApplicationController, cfg.CompanyUserSecret, companyUserRepo)
-	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, studentGuidanceController, cfg.UserSecret, userDeletionService, organizationService)
+	// スカウト送信・テンプレート (#1095)
+	scoutRepo := repositories.NewScoutRepository(db)
+	// 通知メールのリンクはデプロイが設定する APP_URL を使う。
+	// FRONTEND_URL は staging / production に無く、未設定だと localhost になる。
+	scoutService := companyportal.NewScoutService(scoutRepo, studentSearchRepo, userRepo, companyRepo, emailService, config.AppURL())
+	companyPortalScoutController := companycontrollers.NewCompanyPortalScoutController(scoutService)
+	studentScoutController := usercontrollers.NewStudentScoutController(scoutService)
+	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, companyPortalSchoolApplicationController, companyPortalScoutController, cfg.CompanyUserSecret, companyUserRepo, companyRepo)
+	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, studentGuidanceController, studentScoutController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
 	api.GET("/whats-new", releaseNoteController.List, routes.EchoUserAuth(cfg.UserSecret, userDeletionService))
-	adminEntry := api.Group("/admin", routes.EchoAdminAuth(userRepo, cfg.AdminSecret))
+	// これらは企業ユーザー招待・学習データのエクスポート等、担当校に閉じない
+	// 横断操作なので is_admin 必須にする（職員=staff は不可）。SetupAdminRoutes の外で
+	// 作られているため EchoRequireAdmin をグループに明示的に掛ける(#職員ロール)。
+	adminEntry := api.Group("/admin", routes.EchoAdminAuth(userRepo, cfg.AdminSecret), routes.EchoRequireAdmin())
 	adminEntry.POST("/company-entry-submissions/:id/resend-email", companyEntryController.ResendEmail)
 	adminEntry.POST("/companies/:id/company-users", adminCompanyUserController.Invite)
 	adminEntry.GET("/companies/:id/company-users", adminCompanyUserController.List)
@@ -686,12 +720,12 @@ func main() {
 	adminTrainingController := admincontrollers.NewAdminTrainingController(training.NewService(db))
 	// stats は件数しか返さない(個人情報を含まない)。運用から機械的に叩けるよう、
 	// whats-new/ingest と同じサービス間認証にする。管理者になりすます形を避ける。
-	api.GET("/admin/training/stats", adminTrainingController.Stats, routes.EchoStaticSecretAuth(cfg.AdminSecret))
+	api.GET("/admin/training/stats", adminTrainingController.Stats, routes.EchoStaticSecretAuth(cfg.ServiceSecret))
 	// export は候補者の発話と選考結果を返すので、管理者本人の認証を要求する。
 	adminEntry.GET("/training/export", adminTrainingController.Export)
 	// CI(GitHub Actions)からのマシン間呼び出しのため、ログインユーザー前提のEchoAdminAuthではなく
 	// 共有シークレットのみで認証する(#861)
-	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.AdminSecret))
+	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.ServiceSecret))
 
 	// 以下の定期実行は safego 経由で起動する。素の go だと 1 回の panic で
 	// Backend プロセスが丸ごと落ち、全ユーザーが 502 になる(#1405, #1446)。

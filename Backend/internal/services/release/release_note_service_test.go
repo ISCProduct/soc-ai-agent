@@ -441,3 +441,26 @@ func TestReleaseNoteService_List_TeacherSeesAllAndTeacherAudience(t *testing.T) 
 		t.Errorf("unmet expectations: %v", err)
 	}
 }
+
+// #職員ロール: role=staff は教員向け面（all/teacher）を見る。
+func TestReleaseNoteService_List_StaffSeesTeacherAudience(t *testing.T) {
+	db, mock := newReleaseNoteTestDB(t)
+	svc := release.NewReleaseNoteService(db, nil)
+
+	rows := sqlmock.NewRows([]string{"id", "pr_number", "title", "summary", "audience", "merged_at", "created_at"}).
+		AddRow(1, 100, "教員向け機能", "説明", "teacher", time.Now(), time.Now())
+	mock.ExpectQuery("SELECT \\* FROM `release_notes` WHERE audience IN \\(\\?,\\?\\) ORDER BY merged_at DESC LIMIT \\?").
+		WithArgs("all", "teacher", 20).
+		WillReturnRows(rows)
+
+	notes, err := svc.List(context.Background(), 0, "staff", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(notes) != 1 || notes[0].Audience != "teacher" {
+		t.Fatalf("unexpected result: %+v", notes)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}

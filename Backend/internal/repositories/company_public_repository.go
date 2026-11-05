@@ -19,6 +19,7 @@ import (
 // 企業ブリーフはこちらを経由する。
 //
 // 埋め込みにより GetWeightProfile など残りの参照系はそのまま引き継ぐ。
+// 企業行・職種行を返す参照を基底に足したら、ここでもガード付きで上書きすること（#1636）。
 type CompanyPublicRepository struct {
 	*CompanyRepository
 }
@@ -65,4 +66,42 @@ func (r *CompanyPublicRepository) FindAllActiveNames(q string) ([]models.Company
 	}
 	err := query.Order("name asc").Find(&names).Error
 	return names, err
+}
+
+// FindByIDs 複数IDで企業を取得（審査前のゲスト投稿は返さない）
+func (r *CompanyPublicRepository) FindByIDs(ids []uint) ([]models.Company, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var companies []models.Company
+	err := r.db.
+		Where("id IN ?", ids).
+		Where(guestEntryVisibilityGuard("companies.id")).
+		Find(&companies).Error
+	return companies, err
+}
+
+// FindByCorporateNumber 法人番号で取得（審査前のゲスト投稿は返さない）
+func (r *CompanyPublicRepository) FindByCorporateNumber(corporateNumber string) (*models.Company, error) {
+	var company models.Company
+	err := r.db.
+		Where("corporate_number = ?", corporateNumber).
+		Where(guestEntryVisibilityGuard("companies.id")).
+		First(&company).Error
+	if err != nil {
+		return nil, err
+	}
+	return &company, nil
+}
+
+// FindJobPositionByID 職種をIDで取得（審査前のゲスト投稿企業の職種は返さない）
+func (r *CompanyPublicRepository) FindJobPositionByID(id uint) (*models.CompanyJobPosition, error) {
+	var position models.CompanyJobPosition
+	err := r.db.
+		Where(guestEntryVisibilityGuard("company_job_positions.company_id")).
+		First(&position, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &position, nil
 }

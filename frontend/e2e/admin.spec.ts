@@ -51,6 +51,15 @@ test.describe('管理者ダッシュボードフロー', () => {
         body: JSON.stringify({ restricted: false, schools: [] }),
       })
     })
+
+    // ダッシュボード先頭の「気にかけたい学生」が呼ぶ（#1573）。同じ理由でモックする
+    await page.route('**/api/admin/teacher/students/tendency-analysis*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ students: [], total: 0 }),
+      })
+    })
   })
 
   test('管理者ダッシュボードが表示される', async ({ page }) => {

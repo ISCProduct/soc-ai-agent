@@ -1,10 +1,12 @@
 package routes
 
 import (
-	companycontrollers "Backend/internal/controllers/company"
 	"cmp"
 	"slices"
 	"strings"
+
+	companycontrollers "Backend/internal/controllers/company"
+	usercontrollers "Backend/internal/controllers/user"
 
 	"github.com/labstack/echo/v4"
 )
@@ -58,16 +60,16 @@ func Inventory() []Route {
 	SetupCompanyRoutes(api, nil)
 	SetupAdminRoutes(api,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "")
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "")
 	SetupResumeRoutes(api, nil, "", nil, nil)
 	SetupInterviewRoutes(api, nil, nil, "", nil, nil)
 	SetupGitHubRoutes(api, nil, "", nil, nil)
-	SetupESRoutes(api, nil, nil)
+	SetupESRoutes(api, nil, nil, "", nil, nil)
 	SetupScheduleRoutes(api, nil, "", nil, nil)
 	SetupGoogleCalendarRoutes(api, nil, "", nil, nil)
 	SetupApplicationRoutes(api, nil, nil, "", nil, nil)
-	// company_auth_routes.go は 4 つのコントローラを `!= nil` で囲んでいる。
-	// nil を渡すとそのブロックの 16 本が登録されず、カタログから静かに漏れる。
+	// company_auth_routes.go と user_routes.go は一部のコントローラを `!= nil` で囲んでいる。
+	// nil を渡すとそのブロックが登録されず、カタログから静かに漏れる。
 	// ゼロ値のポインタは非 nil なのでブロックを通り、ハンドラは値として
 	// 受け取るだけなので中身は呼ばれない。
 	SetupCompanyAuthRoutes(api, nil, nil, nil,
@@ -75,9 +77,15 @@ func Inventory() []Route {
 		&companycontrollers.CompanyPortalJobController{},
 		&companycontrollers.CompanyPortalProfileController{},
 		&companycontrollers.CompanyPortalSchoolApplicationController{},
-		"", nil)
-	SetupUserRoutes(api, nil, nil, nil, nil, "", nil, nil)
+		&companycontrollers.CompanyPortalScoutController{},
+		"", nil, nil)
+	SetupUserRoutes(api, nil, nil, nil, nil,
+		&usercontrollers.StudentScoutController{},
+		"", nil, nil)
 	SetupCollectiveInsightRoutes(api, nil, "", nil, nil)
+	SetupAssessmentRoutes(api, nil, "", nil, nil)
+	SetupAssessmentSchoolRoutes(api, nil, nil, nil, "")
+	SetupAbilityRoutes(api, nil, "", nil, nil)
 
 	out := make([]Route, 0, len(e.Routes())+len(mainGoRoutes))
 	for _, r := range e.Routes() {

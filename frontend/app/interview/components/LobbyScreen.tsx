@@ -1,6 +1,7 @@
 'use client'
 
 import type { ReactNode, RefObject } from 'react'
+import Link from 'next/link'
 import {
   Box,
   Button,
@@ -18,9 +19,10 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import PsychologyIcon from '@mui/icons-material/Psychology'
 import { interviewLimits } from '@/lib/interview'
-import { PRIMARY, BG_LIGHT } from '../constants'
+
 import type { InterviewCompany } from '../types'
 import styles from './interview.module.css'
+import { UI } from '@/lib/design/tokens'
 
 export interface LobbyScreenProps {
   userName: string
@@ -64,11 +66,11 @@ export default function LobbyScreen({
   consentDialog,
 }: LobbyScreenProps) {
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: BG_LIGHT, display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: UI.paper, display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
       <Box component="header" sx={{ px: 3, py: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: PRIMARY, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: UI.mark, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <PsychologyIcon sx={{ color: '#fff', fontSize: 24 }} />
           </Box>
           <Box>
@@ -98,12 +100,12 @@ export default function LobbyScreen({
                 <Box sx={{ textAlign: 'center', p: 3, position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                   <Typography sx={{ color: '#f28b82', mb: 1.5, fontSize: 14 }}>{lobbyPermissionError}</Typography>
                   <Box sx={{ mb: 2, textAlign: 'left', bgcolor: 'rgba(0,0,0,0.4)', borderRadius: 1, p: 1.5, width: '100%', maxWidth: 360 }}>
-                    <Typography sx={{ color: '#e8eaed', fontSize: 12, mb: 0.5 }}>【ブラウザの許可】</Typography>
-                    <Typography sx={{ color: '#9aa0a6', fontSize: 12, lineHeight: 1.8, mb: 1 }}>
+                    <Typography sx={{ color: UI.nightInk, fontSize: 12, mb: 0.5 }}>【ブラウザの許可】</Typography>
+                    <Typography sx={{ color: UI.nightMuted, fontSize: 12, lineHeight: 1.8, mb: 1 }}>
                       アドレスバー左端の 🔒 → カメラ・マイクを「許可」
                     </Typography>
-                    <Typography sx={{ color: '#e8eaed', fontSize: 12, mb: 0.5 }}>【Mac のシステム設定】</Typography>
-                    <Typography sx={{ color: '#9aa0a6', fontSize: 12, lineHeight: 1.8 }}>
+                    <Typography sx={{ color: UI.nightInk, fontSize: 12, mb: 0.5 }}>【Mac のシステム設定】</Typography>
+                    <Typography sx={{ color: UI.nightMuted, fontSize: 12, lineHeight: 1.8 }}>
                       システム設定 → プライバシーとセキュリティ<br />
                       → カメラ / マイク → 使用中のブラウザをオン
                     </Typography>
@@ -115,7 +117,7 @@ export default function LobbyScreen({
               ) : null}
               {!lobbyPermissionError && !cameraEnabled && (
                 <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <VideocamOffIcon sx={{ color: '#9aa0a6', fontSize: 48 }} />
+                  <VideocamOffIcon sx={{ color: UI.nightMuted, fontSize: 48 }} />
                 </Box>
               )}
 
@@ -161,7 +163,7 @@ export default function LobbyScreen({
                 </Typography>
               </Box>
             )}
-            <Typography variant="h4" sx={{ fontWeight: 400, color: '#202124', mb: 1 }}>
+            <Typography variant="h4" sx={{ fontWeight: 400, color: UI.ink, mb: 1 }}>
               準備はできましたか？
             </Typography>
             <Typography sx={{ color: 'text.secondary', mb: 1, fontSize: 15 }}>
@@ -239,12 +241,21 @@ export default function LobbyScreen({
       </Box>
 
       {/* Footer */}
+      {/*
+        リンク風の見た目だけで href も onClick も無い項目を置いていた（#1058）。
+        押しても何も起きず、Typography なので Tab フォーカスも当たらない。
+        LandingFooter と同じ方針で、実在するページだけを本物のリンクで出す。
+        利用規約・ヘルプはページが無いので載せない。作ったら足すこと。
+      */}
       <Box component="footer" sx={{ py: 2.5, display: 'flex', justifyContent: 'center', gap: 4 }}>
-        {['プライバシー', '利用規約', 'ヘルプ'].map(label => (
-          <Typography key={label} variant="body2" sx={{ color: 'text.secondary', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}>
-            {label}
-          </Typography>
-        ))}
+        <Typography
+          component={Link}
+          href="/privacy"
+          variant="body2"
+          sx={{ color: 'text.secondary', '&:hover': { textDecoration: 'underline' } }}
+        >
+          プライバシーポリシー
+        </Typography>
       </Box>
 
       {consentDialog}

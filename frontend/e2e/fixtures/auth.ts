@@ -5,9 +5,27 @@ export type MockUser = {
   email: string
   name: string
   is_guest: boolean
+  role?: 'student' | 'teacher' | 'staff'
+  // 画面の教員判定はサーバーの実ロール（is_staff / is_admin）で行う（#1908）。
+  // role だけを渡しても教員扱いにはならない。
+  is_staff?: boolean
   is_admin?: boolean
   token: string
   user_token: string
+}
+
+/**
+ * テスト用の JWT を組み立てる。
+ *
+ * Backend の GenerateJWT は必ず exp 付きで発行する。ここを不透明な文字列にすると
+ * middleware が「読めない＝期限切れ」と判定して Cookie を落とすため(#1535)、
+ * ログイン済みのはずの全テストが未ログイン扱いになる。署名は検証しないので
+ * 中身だけ実物と揃える。
+ */
+export function testJwt(userId: number, expiresInSeconds = 60 * 60): string {
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  const exp = Math.floor(Date.now() / 1000) + expiresInSeconds
+  return `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: String(userId), exp })}.test-signature`
 }
 
 export const TEST_USER: MockUser = {
@@ -17,7 +35,7 @@ export const TEST_USER: MockUser = {
   is_guest: false,
   is_admin: false,
   token: 'test-token-abc123',
-  user_token: 'test-user-token-xyz789',
+  user_token: testJwt(1),
 }
 
 export const TEST_ADMIN: MockUser = {
@@ -26,8 +44,10 @@ export const TEST_ADMIN: MockUser = {
   name: '管理者',
   is_guest: false,
   is_admin: true,
-  token: 'admin-token-abc123',
-  user_token: 'admin-user-token-xyz789',
+  // 管理画面は "<発行時刻>.<署名>" 以外を期限切れとみなして本文を出さない（SOCAIAGENT-476）。
+  // 署名は見ない。発行時刻だけ今にして、取り直しの通信を走らせない。
+  token: `${Math.floor(Date.now() / 1000)}.e2e-admin`,
+  user_token: testJwt(99),
 }
 
 export async function setupAuth(page: Page, user: MockUser = TEST_USER) {
@@ -57,6 +77,8 @@ export async function setupAuth(page: Page, user: MockUser = TEST_USER) {
         email: u.email,
         name: u.name,
         is_guest: u.is_guest,
+        role: u.role,
+        is_staff: u.is_staff,
         is_admin: u.is_admin,
       }
       sessionStorage.setItem('user', JSON.stringify(userData))

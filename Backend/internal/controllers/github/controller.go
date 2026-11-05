@@ -159,6 +159,10 @@ func (c *GitHubController) SummarizeRepo(ctx echo.Context) error {
 
 	summary, err := c.githubService.SummarizeRepo(ctx.Request().Context(), userID, body.FullName, body.ForceRefresh, body.TargetRole)
 	if err != nil {
+		var reauthErr *github.GitHubReauthRequiredError
+		if errors.As(err, &reauthErr) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
 		return httpapi.InternalError(err)
 	}
 

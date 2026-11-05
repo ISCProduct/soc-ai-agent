@@ -2,6 +2,7 @@ package interview
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -26,7 +27,26 @@ type RubricCriterion struct {
 	Label string
 	// Description は採点基準。プロンプトへそのまま入る。
 	Description string
+	// Levels は 0〜RubricScoreMax のレベル定義（アンカー）。添字がスコアそのもの。
+	// プロンプトへそのまま入る（#1594）。
+	Levels RubricLevels
 }
+
+// RubricLevels は1項目のレベル定義。添字 0〜RubricScoreMax がスコア。
+//
+// 配列だがコンパイラは書き忘れを止めない（短いコンポジットリテラルはゼロ値で
+// 埋まる）。空のレベルを止めているのは TestRubricLevelsDefined。
+//
+// 書き方の制約は履歴書側（resume_rubric.go）と揃える。プロンプトが
+// 「満たしている最も高いレベルを選ぶ」と指示しているので、どれが破れても
+// 採点が意図と逆へ動く。
+//
+//  1. 隣り合うレベルの差が発言を見れば判定できること
+//     （例: specificity の3点と4点の差は「具体が1種類か2種類以上か」）
+//  2. 主観語だけで段を分けないこと（「優れている」「普通」では 3 と 4 の
+//     区別をモデルに伝えられない）
+//  3. 0〜2 は欠落の段・3 は基準を満たす段・4〜5 は積み増しという構えにすること
+type RubricLevels [RubricScoreMax + 1]string
 
 // RubricScoreMin / RubricScoreMax はスコアの値域。
 // この範囲外は LLM の出力ミスとして弾く（#795）。
@@ -42,11 +62,46 @@ const reportGenerationAttempts = 2
 
 // rubricCriteria は面接の評価項目。順序はプロンプトの記載順。
 var rubricCriteria = []RubricCriterion{
-	{"logic", "論理性", "回答が筋道立っているか、主張に一貫性があるか"},
-	{"specificity", "具体性", "具体的なエピソードや数値が含まれているか"},
-	{"ownership", "主体性", "「私が〜した」という自分起点の表現があるか"},
-	{"communication", "コミュニケーション力", "簡潔・明確に伝えられているか、聞き返しが少ないか"},
-	{"enthusiasm", "積極性・熱意", "志望動機や意欲が伝わっているか。取り組みのきっかけや継続の姿勢も評価材料に含めてよい"},
+	{"logic", "論理性", "回答が筋道立っているか、主張に一貫性があるか", RubricLevels{
+		"質問に対応する答えが無い。話題が質問から外れたまま戻らない",
+		"結論に当たる文は有るが、理由がまったく述べられていない",
+		"結論と理由はあるが、理由が結論を支えていない。または前後で主張が食い違う",
+		"結論と、それを支える理由が1つ述べられており、話の前後で主張が一貫している",
+		"結論を支える理由が2つ以上あり、順序立てて述べられている。質問の条件（期間・立場など）にも答えている",
+		"上記に加えて、反対の見方や制約に触れたうえで結論を選んだ理由が述べられている",
+	}},
+	{"specificity", "具体性", "具体的なエピソードや数値が含まれているか", RubricLevels{
+		"具体が一切無く、「頑張りました」「成長できました」のような形容だけ",
+		"活動名や所属だけがあり、自分が何をしたかの行動が述べられていない",
+		"自分の行動は述べられているが、いつ・どこで・何を の具体がいずれも無い",
+		"自分の行動に加えて、時期・場面・対象のいずれか1種類が述べられている",
+		"自分の行動に加えて、時期・場面・対象・数量のうち2種類以上が述べられ、取組の規模と自分の役割が分かる",
+		"上記に加えて、着手前→実施→結果の順で、聞き手が同じ状況を思い描ける粒度で述べられている",
+	}},
+	{"ownership", "主体性", "「私が〜した」という自分起点の表現があるか", RubricLevels{
+		"主語が全て他者・組織・環境で、自分が何をしたかが現れない",
+		"「参加した」「手伝った」のように、与えられた役割をこなしたことだけが述べられている",
+		"自分の行動はあるが、すべて指示されたことの実行で、自分で決めた箇所が無い",
+		"自分で判断して動いた箇所が1つ述べられている",
+		"自分で課題を見つけ、やり方を決めて動いた経過が述べられている",
+		"上記に加えて、うまくいかなかった案や断られた案を含めて、選び直した理由まで述べられている",
+	}},
+	{"communication", "コミュニケーション力", "簡潔・明確に伝えられているか、聞き返しが少ないか", RubricLevels{
+		"何を言おうとしているか聞き取れない。文が途中で途切れたまま次へ移る",
+		"話は続くが、主語や対象が省かれていて誰の何の話か分からない箇所が多い",
+		"内容は分かるが、同じ説明の繰り返しや脱線が多く、要点に辿り着くまでが長い",
+		"要点が先に述べられ、補足がその後に続く。聞き返さずに意味が取れる",
+		"要点が先にあり、相手が知らない語には説明が添えられている。長さも質問の粒度に合っている",
+		"上記に加えて、話の区切りで相手の理解を確かめる、または補足の要否を尋ねる姿勢が見える",
+	}},
+	{"enthusiasm", "積極性・熱意", "志望動機や意欲が伝わっているか。取り組みのきっかけや継続の姿勢も評価材料に含めてよい", RubricLevels{
+		"志望や関心に触れた発言が無い",
+		"「興味があります」「成長したいです」のように、気持ちの表明だけで対象が述べられていない",
+		"関心の対象は述べられているが、なぜそう思ったかのきっかけが無い",
+		"関心の対象と、そう思ったきっかけが述べられている",
+		"きっかけに加えて、自分で調べた・試した・続けている事実が述べられている",
+		"上記に加えて、その関心を応募先で何に使うかが、相手の事業や職種と結びつけて述べられている",
+	}},
 }
 
 // RubricCriteria は評価項目の一覧を返す。
@@ -69,8 +124,12 @@ func RubricKeys() []string {
 func BuildRubricPromptSection() string {
 	lines := make([]string, 0, len(rubricCriteria)+1)
 	lines = append(lines, fmt.Sprintf("## 評価基準（各スコアは%d〜%dの整数）", RubricScoreMin, RubricScoreMax))
+	lines = append(lines, "各項目について、**満たしている最も高いレベルの点数**を選ぶこと。")
 	for _, c := range rubricCriteria {
-		lines = append(lines, fmt.Sprintf("- %s（%s）: %s", c.Key, c.Label, c.Description))
+		lines = append(lines, fmt.Sprintf("\n### %s（%s）\n%s", c.Key, c.Label, c.Description))
+		for score, level := range c.Levels {
+			lines = append(lines, fmt.Sprintf("- %d点: %s", score, level))
+		}
 	}
 	return strings.Join(lines, "\n")
 }
@@ -147,6 +206,7 @@ func ValidateRubricScores(scores map[string]int) error {
 // **通った根拠が実発話に基づくとは限らない。** 内容語を発話から流用して事実だけ
 // 入れ替えた捏造（「部費を3倍にすることができました」）は正当な要約と同じ帯に入り、
 // しきい値では分離できない（`TestValidateEvidence_KnownLimitation`、Issue #1566）。
+// 発話に無い数値を含むものだけは hasUnspokenNumber で別に弾く（#1596）。
 //
 // 評価項目やプロンプトを変えたときは textsim で実測してこの表を引き直すこと。
 const EvidenceMatchThreshold = 0.25
@@ -172,7 +232,7 @@ func (c EvidenceCheck) Matched() int { return c.Checked - len(c.Unmatched) }
 // 助詞を含む生の needle と突き合わせても意味のある値にはならない。
 //
 // evidence の件数ぶん作り直さないよう、呼び出し側で1度だけ作って使い回す。
-func SpokenContent(utterances []models.InterviewUtterance) textsim.Bigrams {
+func SpokenContent(utterances []models.InterviewUtterance) SpokenEvidence {
 	var b strings.Builder
 	for _, u := range utterances {
 		if u.Role != "user" {
@@ -181,7 +241,60 @@ func SpokenContent(utterances []models.InterviewUtterance) textsim.Bigrams {
 		b.WriteString(u.Text)
 		b.WriteString("\n")
 	}
-	return textsim.NewContent(b.String())
+	numbers := map[string]bool{}
+	for _, n := range extractNumbers(b.String()) {
+		numbers[n] = true
+	}
+	return SpokenEvidence{Content: textsim.NewContent(b.String()), numbers: numbers}
+}
+
+// SpokenEvidence は受験者発話の照合用の表現。
+type SpokenEvidence struct {
+	// Content は内容語だけの文字bigram（textsim.ContentBestMatch 用）。
+	Content textsim.Bigrams
+	// numbers は発話に出た数値（正規化済み）。
+	numbers map[string]bool
+}
+
+var numberPattern = regexp.MustCompile(`[0-9０-９]+(?:[,，.．][0-9０-９]+)*`)
+
+// extractNumbers は算用数字の数値を正規化して返す（全角→半角、桁区切りのカンマを除去）。
+//
+// ponytail: 漢数字（三倍・五十人）は拾わない。発話側が漢数字で evidence 側が算用数字だと
+// 正当な引用も未照合になるが、誤った値より欠損を選ぶ（docs/wiki/scoring.md §2-3）。
+// 取りこぼしが目立つようなら漢数字の数値化を足す。
+func extractNumbers(s string) []string {
+	var out []string
+	for _, m := range numberPattern.FindAllString(s, -1) {
+		var b strings.Builder
+		for _, r := range m {
+			switch {
+			case r >= '０' && r <= '９':
+				b.WriteRune('0' + (r - '０'))
+			case r == ',' || r == '，':
+			case r == '．':
+				b.WriteRune('.')
+			default:
+				b.WriteRune(r)
+			}
+		}
+		out = append(out, b.String())
+	}
+	return out
+}
+
+// hasUnspokenNumber は evidence に、受験者が発話していない数値があるかを返す（#1596）。
+//
+// 内容語を発話から流用して数値だけ入れ替えた捏造（「部費を3倍にした」）は、
+// 局所類似度では正当な要約と同じ帯に入り、しきい値で分離できない。
+// 数値は完全一致で別に照合する。学生が言っていない数値は最も信じられやすい捏造になる。
+func hasUnspokenNumber(text string, spoken SpokenEvidence) bool {
+	for _, n := range extractNumbers(text) {
+		if !spoken.numbers[n] {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateEvidence は evidence の各項目が実際の受験者発話に基づくかを照合する（#1527）。
@@ -200,7 +313,7 @@ func SpokenContent(utterances []models.InterviewUtterance) textsim.Bigrams {
 // 内容語が残らないため未照合になる（そのまま表示させない）。
 //
 // spoken は SpokenContent で作ること（内容語だけの Bigrams）。
-func ValidateEvidence(evidence map[string]string, spoken textsim.Bigrams) EvidenceCheck {
+func ValidateEvidence(evidence map[string]string, spoken SpokenEvidence) EvidenceCheck {
 	var out EvidenceCheck
 	// キーは評価項目側から回す。evidence は LLM 出力の JSON をそのまま
 	// unmarshal したものなので、キー自体もモデルが自由に書ける。
@@ -213,7 +326,7 @@ func ValidateEvidence(evidence map[string]string, spoken textsim.Bigrams) Eviden
 			continue
 		}
 		out.Checked++
-		if textsim.ContentBestMatch(text, spoken) < EvidenceMatchThreshold {
+		if textsim.ContentBestMatch(text, spoken.Content) < EvidenceMatchThreshold || hasUnspokenNumber(text, spoken) {
 			out.Unmatched = append(out.Unmatched, key)
 		}
 	}

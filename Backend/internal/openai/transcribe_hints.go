@@ -39,13 +39,7 @@ func (cli *Client) TranscribeWithModel(ctx context.Context, audio []byte, filena
 
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
-	_ = w.WriteField("model", model)
-	_ = w.WriteField("language", "ja")
-	if strings.TrimSpace(hints) != "" {
-		// 補助語は「認識してほしい語の一覧」であって文章ではない。
-		// 文章を渡すと続きの文脈として扱われ、認識が引きずられる。
-		_ = w.WriteField("prompt", hints)
-	}
+	WriteTranscribeContext(w, model, hints)
 	part, err := w.CreateFormFile("file", filename)
 	if err != nil {
 		return "", err
@@ -88,9 +82,40 @@ func (cli *Client) TranscribeWithModel(ctx context.Context, audio []byte, filena
 	return out.Text, nil
 }
 
+// WriteTranscribeContext は model / 言語 / 補助語のフォーム値を書く。
+//
+// gpt-transcribe は言語を `languages`、語を `keywords` で受ける（`language` と併送不可）。
+// 旧モデルは語の羅列を prompt で受けるが、gpt-4o-transcribe は実音声で
+// その羅列をそのまま認識結果として返すことがあった（13発話中9件）。
+// keywords の1語に <, >, 改行が含まれるとリクエスト全体が拒否されるため、その語は落とす。
+func WriteTranscribeContext(w *multipart.Writer, model, hints string) {
+	_ = w.WriteField("model", model)
+	if model != GPTTranscribeModel {
+		_ = w.WriteField("language", "ja")
+		if strings.TrimSpace(hints) != "" {
+			_ = w.WriteField("prompt", hints)
+		}
+		return
+	}
+	_ = w.WriteField("languages[]", "ja")
+	for _, k := range strings.Split(hints, ",") {
+		k = strings.TrimSpace(k)
+		if k == "" || strings.ContainsAny(k, "<>\r\n") {
+			continue
+		}
+		_ = w.WriteField("keywords[]", k)
+	}
+}
+
+// GPTTranscribeModel は録音音声向けの推奨モデル。
+const GPTTranscribeModel = "gpt-transcribe"
+
 // DefaultTranscribeModel は STT の既定モデル。
 // ずれると補助語ありと無しで別モデルが使われ、比較が成立しない。
-const DefaultTranscribeModel = "gpt-4o-mini-transcribe"
+//
+// 実際の面接音声（2026-10-11, 13発話）の文字誤り率は
+// gpt-4o-mini-transcribe 23% に対し gpt-transcribe 18%。単価は $0.003 → $0.0045/分。
+const DefaultTranscribeModel = GPTTranscribeModel
 
 // resolveTranscribeModel は環境変数を見て使用するSTTモデルを決める。
 //

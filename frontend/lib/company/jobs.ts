@@ -3,7 +3,7 @@ import { companyAuthService } from '@/lib/company/auth'
 // 企業ポータルの求人管理（#1321）。
 //
 // company_id はサーバー側がJWTから解決する。ボディに入れても無視される。
-// 削除は提供されない（応募が紐づくため非公開化で対応）。
+// 削除は論理削除。一覧と学生向け公開から外れる。
 
 export interface CompanyJob {
   id: number
@@ -92,6 +92,10 @@ export const companyJobService = {
 
   async update(id: number, input: JobInput): Promise<CompanyJob> {
     return request<CompanyJob>(`/jobs/${id}`, { method: 'PATCH', body: JSON.stringify(input) })
+  },
+
+  async remove(id: number): Promise<void> {
+    await request<void>(`/jobs/${id}`, { method: 'DELETE' })
   },
 
   async setPublished(id: number, published: boolean): Promise<{ job: CompanyJob; companyPublished: boolean }> {

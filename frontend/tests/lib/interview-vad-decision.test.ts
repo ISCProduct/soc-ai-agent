@@ -10,6 +10,7 @@ import {
   CONFIRM_MS,
   SILENCE_MS,
   MIN_RECORDING_MS,
+  PAUSE_MS,
   type VadState,
 } from '@/app/interview/lib/vadDecision'
 
@@ -178,5 +179,48 @@ describe('録音の停止', () => {
     const before = state.noiseFloor
     const after = stepVad(state, { rms: 0.9, now: t0 + 100, canStart: true }).state
     expect(after.noiseFloor).toBe(before)
+  })
+})
+
+// #1646: 発話中の息継ぎで面接官が相槌を打つための合図。
+describe('発話の区切り', () => {
+  function speakingState() {
+    let state = settleNoiseFloor(0.001)
+    const t0 = 10_000
+    state = stepVad(state, { rms: 0.5, now: t0, canStart: true }).state
+    return { state, t0 }
+  }
+
+  it('無音が PAUSE_MS 続くと録音を続けたまま1回だけ pause を出す', () => {
+    let { state, t0 } = speakingState()
+    let now = t0 + MIN_RECORDING_MS
+    state = stepVad(state, { rms: 0, now, canStart: true }).state
+
+    expect(stepVad(state, { rms: 0, now: now + PAUSE_MS - 1, canStart: true }).action).toBe('none')
+    const r = stepVad(state, { rms: 0, now: now + PAUSE_MS, canStart: true })
+    expect(r.action).toBe('pause')
+    expect(r.state.recording).toBe(true)
+
+    now += PAUSE_MS + 16
+    expect(stepVad(r.state, { rms: 0, now, canStart: true }).action).toBe('none')
+  })
+
+  it('話し直すと次の区切りでまた pause を出し、長い無音では従来どおり stop する', () => {
+    let { state, t0 } = speakingState()
+    let now = t0 + MIN_RECORDING_MS
+    state = stepVad(state, { rms: 0, now, canStart: true }).state
+    state = stepVad(state, { rms: 0, now: now + PAUSE_MS, canStart: true }).state
+
+    now += 1000
+    state = stepVad(state, { rms: 0.5, now, canStart: true }).state
+    now += 16
+    state = stepVad(state, { rms: 0, now, canStart: true }).state
+    expect(stepVad(state, { rms: 0, now: now + PAUSE_MS, canStart: true }).action).toBe('pause')
+    expect(stepVad(state, { rms: 0, now: now + SILENCE_MS, canStart: true }).action).toBe('stop')
+  })
+
+  it('最短録音時間の前の無音では pause を出さない', () => {
+    const { state, t0 } = speakingState()
+    expect(stepVad(state, { rms: 0, now: t0 + PAUSE_MS, canStart: true }).action).toBe('none')
   })
 })

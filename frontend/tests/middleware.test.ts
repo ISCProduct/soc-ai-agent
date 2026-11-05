@@ -23,18 +23,24 @@ describe('middleware', () => {
   })
 
   it('有効なセッションcookieがある場合はcookie由来の値で上書きする', async () => {
+    // Backend の GenerateJWT は必ず exp 付きで発行する。ダミー文字列だと
+    // 読めないトークン＝期限切れ扱いになり(#1535)、実態と違う検査になる。
+    const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+    const exp = Math.floor(Date.now() / 1000) + 3600
+    const realToken = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: '1', exp })}.sig`
+
     const request = new NextRequest('http://localhost:3000/api/schedule', {
       headers: {
         'X-User-ID': '999',
         'X-User-Token': 'forged-token',
-        cookie: 'user_id=1; user_token=real-token',
+        cookie: `user_id=1; user_token=${realToken}`,
       },
     })
 
     const response = await middleware(request)
 
     expect(response.headers.get('x-middleware-request-x-user-id')).toBe('1')
-    expect(response.headers.get('x-middleware-request-x-user-token')).toBe('real-token')
+    expect(response.headers.get('x-middleware-request-x-user-token')).toBe(realToken)
   })
 
   // 企業相関図の旧URL。next.config の redirects() は source の照合が大文字小文字を
@@ -84,6 +90,8 @@ describe('middleware: リフレッシュ失敗時のセッション破棄 (#1519
   }
 
   const expiredJwt = () => jwt(-3600)
+  // Backend が実際に発行する形。exp は十分先にあるので marginSeconds=0 の判定を通る。
+  const freshToken = jwt(3600)
 
   /** 後段(Route Handler / Server Component)が受け取るCookieヘッダー */
   function forwardedCookie(response: Response): string | null {
@@ -189,7 +197,7 @@ describe('middleware: リフレッシュ失敗時のセッション破棄 (#1519
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ user_id: 1, user_token: 'fresh-token', refresh_token: 'fresh-refresh' }),
+      json: async () => ({ user_id: 1, user_token: freshToken, refresh_token: 'fresh-refresh' }),
     })
 
     const request = new NextRequest('http://localhost:3000/api/schedule', {
@@ -198,8 +206,44 @@ describe('middleware: リフレッシュ失敗時のセッション破棄 (#1519
 
     const response = await middleware(request)
 
-    expect(response.headers.get('x-middleware-request-x-user-token')).toBe('fresh-token')
+    expect(response.headers.get('x-middleware-request-x-user-token')).toBe(freshToken)
     expect(response.headers.get('set-cookie') ?? '').toContain('fresh-refresh')
+  })
+
+  // refreshSession は応答の user_token が空でないことしか見ない。200 でも中身が
+  // 使えないことがあり、素通しすると Backend の ParseJWT が弾いて 401 → 再リフレッシュ
+  // の往復に戻る。#1535 で止めたいのはこのループなので、リフレッシュ直後も判定する。
+  it('リフレッシュが200でも読めないトークンならCookieを落として後段へ渡さない', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ user_id: 1, user_token: 'not-a-jwt', refresh_token: 'fresh-refresh' }),
+    })
+
+    const request = new NextRequest('http://localhost:3000/api/schedule', {
+      headers: { cookie: `user_id=1; user_token=${expiredJwt()}; refresh_token=ok` },
+    })
+
+    const response = await middleware(request)
+
+    expect(response.headers.get('x-middleware-request-x-user-token')).toBeNull()
+    expect(forwardedCookie(response) ?? '').not.toContain('user_token=')
+  })
+
+  it('リフレッシュが200でも期限切れのトークンならCookieを落とす', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ user_id: 1, user_token: expiredJwt(), refresh_token: 'fresh-refresh' }),
+    })
+
+    const request = new NextRequest('http://localhost:3000/api/schedule', {
+      headers: { cookie: `user_id=1; user_token=${expiredJwt()}; refresh_token=ok` },
+    })
+
+    const response = await middleware(request)
+
+    expect(response.headers.get('x-middleware-request-x-user-token')).toBeNull()
   })
 
   it('企業ポータル側も401ならCookieを消し、失効値を後段へ渡さない', async () => {
@@ -236,5 +280,229 @@ describe('middleware: リフレッシュ失敗時のセッション破棄 (#1519
     expect(response.headers.get('set-cookie')).toBeNull()
     expect(response.headers.get('x-middleware-request-x-company-user-token')).toBeNull()
     expect(forwardedCookie(response) ?? '').not.toContain('company_user_token=')
+  })
+})
+
+// exp が読めない user_token でも #1519 のループ止めが働くこと（#1535）。
+//
+// 以前の tokenExpiresSoon は payload が無い・base64デコード失敗・exp が数値でない、
+// のいずれでも false（期限に余裕あり）を返していた。そのため
+//   1. リフレッシュがそもそも試みられない → Cookie も消えない
+//   2. tokenExpiresSoon(token, 0) も false なので後段へ注入される
+//   3. Backend が 401 → ログイン画面へ → Cookie は残っているので 1 へ戻る
+// という輪から出られなかった。
+//
+// user_token は Backend の GenerateJWT が必ず exp 付きで出す（失敗時は空文字）。
+// exp が読めないものは壊れているので、期限切れとして扱うのが正しい。
+describe('middleware: expが読めないトークンでもループを止める (#1535)', () => {
+  const originalFetch = global.fetch
+
+  const DELETED_COOKIE = /Max-Age=0|Expires=Thu, 01 Jan 1970/
+
+  afterEach(() => {
+    global.fetch = originalFetch
+    jest.restoreAllMocks()
+  })
+
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+
+  const broken: Array<[string, string]> = [
+    ['payload が無い', 'not-a-jwt'],
+    ['base64 として壊れている', `${b64({ alg: 'HS256' })}.@@@@.sig`],
+    ['exp が無い', `${b64({ alg: 'HS256' })}.${b64({ sub: '1' })}.sig`],
+    ['exp が数値でない', `${b64({ alg: 'HS256' })}.${b64({ sub: '1', exp: 'soon' })}.sig`],
+  ]
+
+  it.each(broken)('%s トークンはリフレッシュへ送られ、失敗すればCookieが消える', async (_name, token) => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) })
+
+    const request = new NextRequest('http://localhost:3000/api/schedule', {
+      headers: { cookie: `user_id=1; user_token=${token}; refresh_token=stale` },
+    })
+
+    const response = await middleware(request)
+
+    // 読めないトークンを後段へ流すと Backend が 401 を返し続ける
+    expect(response.headers.get('x-middleware-request-x-user-token')).toBeNull()
+
+    // Cookie を消さないと次のリクエストでも同じ輪に入る
+    const setCookie = response.headers.get('set-cookie') ?? ''
+    expect(setCookie).toMatch(DELETED_COOKIE)
+  })
+
+  // 空文字は `if (userId && userToken)` のガードで弾かれ、リフレッシュ経路に
+  // 入らない。Cookie は残るが、トークンが後段へ渡らないのでループにはならない。
+  // 別の仕組みで守られていることを記録しておく。
+  it('空文字トークン（GenerateUserToken の失敗時）は後段へ渡らない', async () => {
+    const fetchSpy = jest.fn()
+    global.fetch = fetchSpy
+
+    const request = new NextRequest('http://localhost:3000/api/schedule', {
+      headers: { cookie: 'user_id=1; user_token=; refresh_token=stale' },
+    })
+
+    const response = await middleware(request)
+
+    expect(response.headers.get('x-middleware-request-x-user-token')).toBeNull()
+    expect(response.headers.get('x-middleware-request-x-user-id')).toBeNull()
+  })
+
+  it('読めるトークンで期限に余裕があれば従来どおり注入する（過剰なリフレッシュを起こさない）', async () => {
+    const fetchSpy = jest.fn()
+    global.fetch = fetchSpy
+
+    const exp = Math.floor(Date.now() / 1000) + 3600
+    const valid = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: '1', exp })}.sig`
+
+    const request = new NextRequest('http://localhost:3000/api/schedule', {
+      headers: { cookie: `user_id=1; user_token=${valid}; refresh_token=fresh` },
+    })
+
+    const response = await middleware(request)
+
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(response.headers.get('x-middleware-request-x-user-token')).toBe(valid)
+  })
+})
+
+describe('middleware: 管理者トークンをログイン更新で残す (SOCAIAGENT-476)', () => {
+  const originalFetch = global.fetch
+
+  function jwt(expiresInSeconds: number): string {
+    const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+    const exp = Math.floor(Date.now() / 1000) + expiresInSeconds
+    return `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: '1', exp })}.sig`
+  }
+
+  const freshAdminToken = `${Math.floor(Date.now() / 1000)}.signature`
+  const staleAdminToken = `${Math.floor(Date.now() / 1000) - 8 * 24 * 60 * 60}.signature`
+
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  it('ログイン更新の応答に含まれる管理者トークンをCookieと後段へ残す', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        user_id: 1,
+        user_token: jwt(3600),
+        refresh_token: 'fresh-refresh',
+        token: freshAdminToken,
+      }),
+    })
+
+    const request = new NextRequest('http://localhost:3000/admin', {
+      headers: { cookie: `user_id=1; user_token=${jwt(-10)}; refresh_token=ok` },
+    })
+    const response = await middleware(request)
+
+    expect(response.headers.get('set-cookie') ?? '').toContain(`admin_token=${freshAdminToken}`)
+    expect(response.headers.get('x-middleware-request-x-refreshed-admin-token')).toBe(freshAdminToken)
+  })
+
+  it('ユーザーJWTが有効でも、管理画面が期限切れの管理者トークンの更新を頼んだら取り直す', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        user_id: 1,
+        user_token: jwt(3600),
+        refresh_token: 'fresh-refresh',
+        token: freshAdminToken,
+      }),
+    })
+    global.fetch = fetchMock
+
+    const request = new NextRequest('http://localhost:3000/api/auth/session', {
+      headers: {
+        cookie: `user_id=1; user_token=${jwt(3600)}; refresh_token=ok; admin_token=${staleAdminToken}`,
+        'X-Refresh-Admin-Token': '1',
+        'X-Refreshed-Admin-Token': 'forged',
+      },
+    })
+    const response = await middleware(request)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(response.headers.get('x-middleware-request-x-refreshed-admin-token')).toBe(freshAdminToken)
+    expect(response.headers.get('x-middleware-request-x-refresh-admin-token')).toBeNull()
+  })
+
+  it('管理者トークンの更新ヘッダーが無ければ、ユーザーJWTが有効な間は更新しない', async () => {
+    const fetchMock = jest.fn()
+    global.fetch = fetchMock
+
+    const request = new NextRequest('http://localhost:3000/admin', {
+      headers: {
+        cookie: `user_id=1; user_token=${jwt(3600)}; refresh_token=ok; admin_token=${staleAdminToken}`,
+      },
+    })
+    await middleware(request)
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('管理者トークンがまだ新しければ、更新ヘッダーが付いても取り直さない', async () => {
+    const fetchMock = jest.fn()
+    global.fetch = fetchMock
+
+    const request = new NextRequest('http://localhost:3000/api/auth/session', {
+      headers: {
+        cookie: `user_id=1; user_token=${jwt(3600)}; refresh_token=ok; admin_token=${freshAdminToken}`,
+        'X-Refresh-Admin-Token': '1',
+      },
+    })
+    await middleware(request)
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+  it('更新が走らないとき、クライアントが付けた偽の X-Refreshed-Admin-Token は後段へ渡さない', async () => {
+    const fetchMock = jest.fn()
+    global.fetch = fetchMock
+
+    const request = new NextRequest('http://localhost:3000/api/auth/session', {
+      headers: {
+        cookie: `user_id=1; user_token=${jwt(3600)}; refresh_token=ok; admin_token=${freshAdminToken}`,
+        'X-Refreshed-Admin-Token': 'forged',
+      },
+    })
+    const response = await middleware(request)
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(response.headers.get('x-middleware-request-x-refreshed-admin-token')).toBeNull()
+  })
+
+  it('更新が500のとき、偽の X-Refreshed-Admin-Token は後段へ渡さない', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
+
+    const request = new NextRequest('http://localhost:3000/api/auth/session', {
+      headers: {
+        cookie: `user_id=1; user_token=${jwt(3600)}; refresh_token=ok; admin_token=${staleAdminToken}`,
+        'X-Refresh-Admin-Token': '1',
+        'X-Refreshed-Admin-Token': 'forged',
+      },
+    })
+    const response = await middleware(request)
+
+    expect(response.headers.get('x-middleware-request-x-refreshed-admin-token')).toBeNull()
+  })
+
+  it('学生の更新応答（token 無し）では、残っていた admin_token Cookie を消して後段へも渡さない', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ user_id: 2, user_token: jwt(3600), refresh_token: 'fresh-refresh' }),
+    })
+
+    const request = new NextRequest('http://localhost:3000/admin', {
+      headers: {
+        cookie: `user_id=2; user_token=${jwt(-10)}; refresh_token=ok; admin_token=${freshAdminToken}`,
+      },
+    })
+    const response = await middleware(request)
+
+    expect(response.headers.get('set-cookie') ?? '').toMatch(/admin_token=;/)
+    expect(response.headers.get('x-middleware-request-cookie') ?? '').not.toContain('admin_token')
   })
 })

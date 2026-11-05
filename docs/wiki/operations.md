@@ -4,6 +4,7 @@
 
 1. [デプロイ手順](#1-デプロイ手順)
    - [停止日の本番デプロイ](#11-停止日の本番デプロイ-1518)
+   - [staging の自動停止とデプロイの競合](#12-staging-の自動停止とデプロイの競合-1693)
 2. [定期バッチ作業](#2-定期バッチ作業)
 3. [監視項目](#3-監視項目)
    - [リクエストIDでサービス横断追跡](#31-リクエストidでサービス横断追跡-1188)
@@ -238,6 +239,44 @@ index+attestation の分だけ減らしている（provenance は誰も参照し
 
 ---
 
+## 1.2 staging の自動停止とデプロイの競合 (#1693)
+
+staging はコスト削減のため、デプロイから1時間で自動停止する（`deployment.yml` の
+`staging-auto-stop` ジョブが `sleep 3600` の後に ASG を desired=0、RDS を停止する）。
+1時間以内に次のデプロイが来れば、同じ concurrency group `staging-auto-stop` で
+前回分がキャンセルされ、実質タイマーがリセットされる。
+
+**キャンセルはデプロイの開始時点で行う。** auto-stop は `deploy-staging` の後続なので、
+デプロイ成功後にしかキャンセルが掛からないようにすると、デプロイ中（や失敗時）に
+前回の auto-stop が発火して起動中の staging を落とす。これを避けるため、
+`deploy-staging` と並んで走る空ジョブ `cancel-staging-auto-stop` が
+同じ group を先に押さえる。
+
+それでもキャンセルの取り合いには数秒〜数十秒の隙があるため、
+`Wait for staging infra ready` は待機ループの中で ASG の `DesiredCapacity` を
+毎回読み、0 に戻っていたら 1 へ上げ直す（自己修復）。
+**desired が 0 の周回では EC2 の state を見ない。** desired=0 の直後でも
+終了処理が始まるまでインスタンスは `running` のままで、そこで待機を抜けると
+これから落とされる台へデプロイしてしまう。
+
+### 失敗したときの読み方
+
+末尾の `desired:` を先に見る。
+
+- `desired: 0` — 5分間 0 のままだった。上げ直しが効いていないので、前回の auto-stop が
+  まだ生きているか、ASG の min/max や権限を疑う。desired が 0 の周回では state を
+  読まないため `state: unread` と出る（インスタンスの有無は分からない）。
+- `desired: 1` かつ `state: None` — desired は戻っているがインスタンスが現れない
+  （`None` = 該当インスタンスなし）。AZ の容量不足や launch template の不備を疑う。
+- `desired: unknown` — ASG を読めていない。権限か API 障害。
+
+いずれも再実行で復帰することが多いが、`desired: 0` が続くなら
+auto-stop のキャンセルが効いていない。
+
+判定ロジックは `automation/test/staging-infra-wait-test.sh` が固定している。
+
+---
+
 ## 2. 定期バッチ作業
 
 ### 週次推奨作業
@@ -454,6 +493,12 @@ EventBridge Scheduler へ移すまで（#1388）は、以下を手順として�
    Discord で `/prod state:on`
 
    これでオーバーライドが `on` になり、日付リストに関係なく起動する。
+
+   `/prod state:on expiry:<YYYY-MM-DD>` の形にすると、その日に自動で `auto` へ戻る。
+   復帰日なしの `on` は戻し忘れると課金が続くため、展示会が終わったら
+   **`/prod state:auto` に戻す**。復帰日を過ぎた `on:<過去日>` は失効扱いになり、
+   スケジューラもデプロイ後の停止処理も `auto` と同じに読む
+   （`automation/test/prod-deploy-scale-down-test.sh` で固定）。
 
    **Discord の返信が「反映を開始しました」であることを確認する。**
    即時実行は `GITHUB_DISPATCH_TOKEN` / `GITHUB_DISPATCH_REPO` が揃っているときだけで、
@@ -792,6 +837,13 @@ SSM パラメータの中身は `random_password.bff_internal_token` と同じ�
 `.env` は変更しない（user_data が書いた正しい値を消さないため）。
 `deployment.yml` は **running のインスタンス全台**へ SSH するので、ASG が複数台へ
 増えていても配り漏れは出ない。
+
+同じ経路を `SERVICE_SECRET`（CI・運用からのサービス間呼び出し用。#1158）にも使う。
+出どころは `var.service_secret_plain` で、新規インスタンスは user_data、稼働中インスタンスは
+SSM `/<project>/service-secret` から受け取る。届いていないと staging への更新情報の
+取り込みが 503 のまま回復しない（`X-Admin-Secret` が照合するのは `ADMIN_SECRET` ではなく
+`SERVICE_SECRET`）。SSM 経由で配るシークレットを増やしたときの継ぎ足しの足し忘れは
+`automation/test/staging-env-topup-test.sh` が検出する。
 
 デプロイを待たずに確認するなら。**トークンの値そのものは表示しない**
 （端末のスクロールバック・セッション録画・貼り付けたログに残り、拾った者は
@@ -1170,6 +1222,6 @@ GET /api/admin/audit-logs
 
 frontend は CloudFront 経由で、ALB が 500/502/503/504 を返すと
 `s3://soc-app-errors-production/service-unavailable.html` へフェイルオーバーする
-（`enable_error_fallback`、既定 `true`）。学生には「接続できません」の案内が出る。
+（`enable_error_fallback`、既定 `true`）。学生には「ただいまメンテナンス中です」の案内が出る。
 
 API (`api.shukatsu-ai.jp`) は JSON を返す前提のため対象外で、素の503になる。

@@ -2,6 +2,7 @@ package companyfetch
 
 import (
 	"Backend/internal/openai"
+	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
 	"fmt"
@@ -89,7 +90,7 @@ func (l *LLM) SearchLiteThenParseWithSchema(ctx context.Context, searchPrompt, p
 		return "", "", fmt.Errorf("web search returned empty")
 	}
 
-	parseUser := parseUserPrefix + "\n\n---\n検索結果:\n" + TrimText(searchText, 2000)
+	parseUser := buildParseUser(parseUserPrefix, searchText)
 	parsed, parseModel, err := l.ParseJSONWithSchema(ctx, parseSystem, parseUser, parseMaxTokens, schema)
 	if err != nil {
 		return "", searchModel, err
@@ -106,7 +107,7 @@ func (l *LLM) SearchLiteThenParse(ctx context.Context, searchPrompt, parseSystem
 		return "", "", fmt.Errorf("web search returned empty")
 	}
 
-	parseUser := parseUserPrefix + "\n\n---\n検索結果:\n" + TrimText(searchText, 2000)
+	parseUser := buildParseUser(parseUserPrefix, searchText)
 	parsed, parseModel, err := l.ParseJSON(ctx, parseSystem, parseUser, parseMaxTokens)
 	if err != nil {
 		return "", searchModel, err
@@ -154,4 +155,13 @@ func ExtractJSONObject(text string) (string, error) {
 		return "", fmt.Errorf("no valid JSON object found")
 	}
 	return text[start : end+1], nil
+}
+
+// buildParseUser はパース段のユーザープロンプトを組み立てる。
+//
+// 検索結果は外部サイトの文章そのものなので非信頼データとして囲む（#1636）。
+// SearchLiteThenParse* を通る全経路（企業情報・求人・技術スタック等）にここ1箇所で効く。
+// 切り詰めは囲む前に行う（囲んだ後に切ると閉じの区切りが落ちる）。
+func buildParseUser(parseUserPrefix, searchText string) string {
+	return parseUserPrefix + "\n\n---\n検索結果:\n" + shared.WrapUntrustedText(TrimText(searchText, 2000), "検索結果")
 }

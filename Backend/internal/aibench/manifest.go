@@ -38,11 +38,12 @@ const (
 	TargetES              = "es"
 	TargetResume          = "resume"
 	TargetInterviewReport = "interview-report"
+	TargetChatAnswer      = "chat-answer"
 )
 
 // ValidTargets は対応している評価対象。
 func ValidTargets() []string {
-	return []string{TargetES, TargetResume, TargetInterviewReport}
+	return []string{TargetES, TargetResume, TargetInterviewReport, TargetChatAnswer}
 }
 
 // Case はマニフェスト（jsonl）1行。
@@ -71,6 +72,9 @@ type Input struct {
 	// 面接レポート
 	Transcript string `json:"transcript,omitempty"`
 	Lang       string `json:"lang,omitempty"`
+	// チャット診断の回答評価
+	Question string `json:"question,omitempty"`
+	Answer   string `json:"answer,omitempty"`
 }
 
 // LoadManifest は jsonl を読む。
@@ -141,6 +145,10 @@ func validateCase(c Case) error {
 		if strings.TrimSpace(c.Input.Transcript) == "" {
 			return fmt.Errorf("input.transcript は必須")
 		}
+	case TargetChatAnswer:
+		if strings.TrimSpace(c.Input.Question) == "" || strings.TrimSpace(c.Input.Answer) == "" {
+			return fmt.Errorf("input.question と input.answer は必須")
+		}
 	}
 	return nil
 }
@@ -197,6 +205,9 @@ func (c Case) InputText() string {
 		return c.Input.ResumeText
 	case TargetInterviewReport:
 		return c.Input.Transcript
+	case TargetChatAnswer:
+		// 質問は全ラベルで共通にできるので、長さの交絡は回答側だけを見る。
+		return c.Input.Answer
 	}
 	return ""
 }
@@ -217,4 +228,19 @@ var numericTokenPattern = regexp.MustCompile(`[0-9０-９]+`)
 // 文字数と同じようにこの相関も上限を固定する（#1593 のレビュー指摘）。
 func (c Case) InputNumericTokens() int {
 	return len(numericTokenPattern.FindAllString(c.InputText(), -1))
+}
+
+// properNounPattern はゴールデンセットで使う固有名詞。合成データなので
+// 社名・学校名は「サンプル」「株式会社」で始まる形に統一してある。
+// 実在の固有名詞を一般に検出するものではない（そもそも実データは入れない）。
+var properNounPattern = regexp.MustCompile(`(?:株式会社|サンプル)[^\s、。]*`)
+
+// InputProperNouns は入力本文に現れる固有名詞の個数。
+//
+// 文字数・数値トークン数に続く3つ目の表層特徴として測る（#1637）。
+// specificity のレベル定義は「数値・固有名詞・期間」を並列に数えるので、
+// 数値の交絡を下げたぶんを固有名詞へ移しただけ、という逃げ方ができてしまう。
+// 同じ罠を3つ目で塞ぐために上限を固定する。
+func (c Case) InputProperNouns() int {
+	return len(properNounPattern.FindAllString(c.InputText(), -1))
 }

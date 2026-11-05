@@ -87,8 +87,42 @@ func TestTranscribeWithHints_OmitsEmptyPrompt(t *testing.T) {
 	if _, ok := got["prompt"]; ok {
 		t.Errorf("prompt を送っている: %q", got["prompt"])
 	}
-	if got["model"] != "gpt-4o-mini-transcribe" {
+	if got["model"] != "gpt-transcribe" {
 		t.Errorf("既定モデル = %q", got["model"])
+	}
+}
+
+// gpt-transcribe には languages / keywords で渡す。language と併送すると拒否され、
+// prompt に語の羅列を渡すと旧モデルではその羅列が認識結果として返った。
+// <, >, 改行を含む語はリクエスト全体を拒否させるので送らない。
+func TestTranscribeWithModel_GPTTranscribeUsesKeywords(t *testing.T) {
+	var form map[string][]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, params, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		f, err := multipart.NewReader(r.Body, params["boundary"]).ReadForm(10 << 20)
+		if err != nil {
+			t.Fatalf("read form: %v", err)
+		}
+		form = f.Value
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"御社を志望しました"}`))
+	}))
+	defer server.Close()
+
+	cli := NewWithBaseURL(server.URL, "gpt-4o-mini")
+	if _, err := cli.TranscribeWithModel(context.Background(), []byte("a"), "a.webm", "御社, 豊田自動織機, <x>", "gpt-transcribe"); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got := form["languages[]"]; len(got) != 1 || got[0] != "ja" {
+		t.Errorf("languages[] = %v", got)
+	}
+	if got := strings.Join(form["keywords[]"], "|"); got != "御社|豊田自動織機" {
+		t.Errorf("keywords[] = %q", got)
+	}
+	for _, k := range []string{"language", "prompt"} {
+		if _, ok := form[k]; ok {
+			t.Errorf("%s を送っている: %v", k, form[k])
+		}
 	}
 }
 

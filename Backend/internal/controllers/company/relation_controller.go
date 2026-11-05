@@ -257,11 +257,7 @@ func (ctrl *CompanyRelationController) ValidateCompany(ctx echo.Context) error {
 // searchCompaniesWithOpenAI はAIモデルの知識から企業候補を取得する（validator未設定時のフォールバック）
 func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) []map[string]string {
 	systemPrompt := `あなたは日本企業に詳しいアシスタントです。確実に知っている実在の企業のみを回答し、不明な場合は空配列にしてください。推測で企業を作らないでください。`
-	userPrompt := fmt.Sprintf(
-		`「%s」という検索キーワードに合致する日本の企業を最大5件挙げてください。キーワードと一致する企業が実在する場合は必ず最初に含めてください。以下のJSON形式のみで返してください。余分な説明は不要です。
-{"results":[{"name":"企業名","description":"事業内容の1行説明"}]}`,
-		query,
-	)
+	userPrompt := buildWebSearchUserPrompt(query)
 
 	ctxTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -288,4 +284,19 @@ func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Con
 		return []map[string]string{}
 	}
 	return parsed.Results
+}
+
+// buildWebSearchUserPrompt は企業のWEB検索のユーザープロンプトを組み立てる。
+//
+// /api/companies/web-search は未認証（レート制限のみ）なので、検索キーワードは
+// 誰でも書ける非信頼データとして囲む（#1636）。囲まないと「推測で企業を作らない」
+// という system 指示を上書きして架空の企業を出させられる。
+func buildWebSearchUserPrompt(query string) string {
+	return fmt.Sprintf(
+		`次の検索キーワードに合致する日本の企業を最大5件挙げてください。キーワードと一致する企業が実在する場合は必ず最初に含めてください。以下のJSON形式のみで返してください。余分な説明は不要です。
+{"results":[{"name":"企業名","description":"事業内容の1行説明"}]}
+
+%s`,
+		shared.WrapUntrustedText(query, "検索キーワード"),
+	)
 }

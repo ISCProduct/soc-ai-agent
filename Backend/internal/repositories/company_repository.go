@@ -268,6 +268,15 @@ func (r *CompanyRepository) UpdateJobPosition(position *models.CompanyJobPositio
 	return db.Save(position).Error
 }
 
+// DeleteJobPosition は募集職種を論理削除する。
+//
+// company_job_positions は deleted_at を持つ。物理削除すると
+// マッチや学校の個別停止が外部キーで失敗するため、deleted_at を立てて
+// 一覧と学生向け公開から外す。
+func (r *CompanyRepository) DeleteJobPosition(id uint) error {
+	return r.db.Delete(&models.CompanyJobPosition{}, id).Error
+}
+
 // FindJobPositionsByCompany 企業の公開済み募集職種を取得（公開ユーザー向け）
 func (r *CompanyRepository) FindJobPositionsByCompany(companyID uint) ([]models.CompanyJobPosition, error) {
 	var positions []models.CompanyJobPosition

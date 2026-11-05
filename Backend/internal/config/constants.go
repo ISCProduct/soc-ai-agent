@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -75,6 +76,23 @@ func ResumeCompletenessThreshold() int {
 
 // MissingBatchMaxConcurrency は企業間並列の上限。既定8は Fargate 0.25vCPU/512MB と OpenAI RPM の天井。
 func MissingBatchMaxConcurrency() int { return getIntOrDefault("MISSING_BATCH_MAX_CONCURRENCY", 8) }
+
+// AssessmentScoreMergeEnabled は適性検査スコアをマッチングへ合流させるか（#1678）。
+// 既定は有効。マッチングが劣化したら ASSESSMENT_SCORE_MERGE=false で合流だけ止める
+// （検査の受検・結果表示はそのまま使える）。
+func AssessmentScoreMergeEnabled() bool {
+	v, err := strconv.ParseBool(os.Getenv("ASSESSMENT_SCORE_MERGE"))
+	return err != nil || v
+}
+
+// StudentApplyEnabled は学生が企業へ応募登録できるか（SOCAIAGENT-403）。
+// 既定は閉じている。方針として応募機能を開く時点で STUDENT_APPLY_ENABLED=true にする。
+// 閉じている間は POST /api/applications が 403 を返し、画面は「準備中」で無効表示になる。
+// 登録済みの応募の閲覧・辞退・内定承諾は影響を受けない。
+func StudentApplyEnabled() bool {
+	v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("STUDENT_APPLY_ENABLED")))
+	return err == nil && v
+}
 
 func RelationGraphMaxDepth() int { return getIntOrDefault("RELATION_GRAPH_MAX_DEPTH", 4) }
 func RelationGraphMaxNodes() int { return getIntOrDefault("RELATION_GRAPH_MAX_NODES", 60) }

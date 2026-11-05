@@ -29,7 +29,7 @@ func (s *InterviewService) GetReport(userID uint, sessionID uint) (*models.Inter
 		}
 		return nil, err
 	}
-	return report, nil
+	return s.redactTeacherReport(userID, report), nil
 }
 
 // GetPhraseSuggestions はセッションのユーザー発話を分析し、言い換え提案を返す。

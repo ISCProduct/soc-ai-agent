@@ -36,6 +36,9 @@ import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 import { canUseFeature, fetchEntitlements, type Entitlements } from '@/lib/entitlements'
 import dynamic from 'next/dynamic'
 import type { InterviewTrendPoint } from '@/lib/interview'
+import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
+import { TableSkeletonRows } from '@/components/common/ListSkeleton'
 
 // 学生の履歴ページと同じ推移グラフ。教員が数値表だけを見て
 // 「伸びているのか停滞しているのか」を読み取れない状態を解消する(#1225)。
@@ -126,7 +129,7 @@ export default function PageContent() {
 
   useEffect(() => {
     const user = authService.getStoredUser()
-    if (!user?.is_admin) {
+    if (!user?.is_admin && !user?.is_staff) {
       window.location.href = '/'
       return
     }
@@ -288,15 +291,15 @@ export default function PageContent() {
             </TableHead>
             <TableBody>
               {loading ? (
-                <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
-                    <CircularProgress size={24} />
-                  </TableCell>
-                </TableRow>
+                <TableSkeletonRows columns={8} label="ユーザーを読み込み中" />
               ) : users.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                    ユーザーが見つかりません
+                  <TableCell colSpan={8}>
+                    {query ? (
+                      <EmptyState title="検索に一致するユーザーはいません" description="名前やメールアドレスの一部で検索し直すか、検索語を消して全員を表示してください。" />
+                    ) : (
+                      <EmptyState title="まだユーザーがいません" description="学生がアカウントを作ると、ここに表示されます。学校を絞り込んでいる場合は、ほかの学校も確認してください。" />
+                    )}
                   </TableCell>
                 </TableRow>
               ) : users.map(u => (
@@ -362,9 +365,9 @@ export default function PageContent() {
         </DialogTitle>
         <DialogContent>
           {detailLoading ? (
-            <Box textAlign="center" py={4}><CircularProgress /></Box>
+            <ListSkeleton rows={2} label="セッション履歴を読み込み中" />
           ) : detailSessions.length === 0 ? (
-            <Typography color="text.secondary" py={2}>セッションがありません</Typography>
+            <EmptyState title="この学生はまだAI面接を受けていません" description="面接を受けると、スコアの推移と各回の記録がここに表示されます。" />
           ) : (
             <>
               {detailSessions.length >= 2 && (

@@ -1,9 +1,12 @@
 """RAG API の Pydantic リクエスト/レスポンスモデル。"""
 from __future__ import annotations
 
+import logging
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 # 企業コンテキスト（Backend 共有 brief）の受け入れ上限。
 # プロンプト側でさらに短く切られる参考情報なので、422 でリクエストを落とさず
@@ -13,6 +16,19 @@ COMPANY_CONTEXT_MAX_LENGTH = 20000
 QUESTION_TYPE_MAX_LENGTH = 100
 # 職種名。FE の選択肢は最長でも数十字で、これを超える値は入力ミスか攻撃(#1591)
 POSITION_MAX_LENGTH = 100
+
+
+def _normalize_company_context(value: str, field_name: str) -> str:
+    normalized = (value or "").strip()
+    if len(normalized) > COMPANY_CONTEXT_MAX_LENGTH:
+        logger.info(
+            "company context truncated field=%s original_chars=%d max_chars=%d",
+            field_name,
+            len(normalized),
+            COMPANY_CONTEXT_MAX_LENGTH,
+        )
+        return normalized[:COMPANY_CONTEXT_MAX_LENGTH]
+    return normalized
 
 
 class ReviewRequest(BaseModel):
@@ -30,7 +46,7 @@ class ReviewRequest(BaseModel):
     @field_validator("company_context")
     @classmethod
     def normalize_company_context(cls, v: str) -> str:
-        return (v or "").strip()[:COMPANY_CONTEXT_MAX_LENGTH]
+        return _normalize_company_context(v, "review")
 
 
 class ReviewResponse(BaseModel):
@@ -46,7 +62,7 @@ class CompanyHintsRequest(BaseModel):
     @field_validator("company_context")
     @classmethod
     def normalize_hints_company_context(cls, v: str) -> str:
-        return (v or "").strip()[:COMPANY_CONTEXT_MAX_LENGTH]
+        return _normalize_company_context(v, "hints")
 
 
 class CompanyHintsResponse(BaseModel):
@@ -81,11 +97,13 @@ class ESReviewRequest(BaseModel):
     )
     # within: 超過不可（「400字以内」）/ around: +10%まで許容（「400字程度」）
     char_limit_mode: Literal["within", "around"] = "within"
+    # ESリライトは評価根拠を表示しないため、不要な生成を省く（Backend内部から指定）。
+    include_feedback_items: bool = True
 
     @field_validator("company_context")
     @classmethod
     def normalize_es_company_context(cls, v: str) -> str:
-        return (v or "").strip()[:COMPANY_CONTEXT_MAX_LENGTH]
+        return _normalize_company_context(v, "es_review")
 
 
 class ESStarBreakdown(BaseModel):
@@ -110,12 +128,27 @@ class ESReviewUsage(BaseModel):
     calls: int = 0
 
 
+class ESReviewFeedbackItem(BaseModel):
+    """原文の箇所に結びついた添削指摘(#1532)。"""
+
+    score_key: Literal[
+        "specificity_score",
+        "star_score",
+        "company_fit_score",
+        "length_balance_score",
+    ]
+    source_excerpt: str = Field(max_length=120)
+    issue: str = Field(max_length=80)
+    suggestion: str = Field(max_length=80)
+
+
 class ESReviewResponse(BaseModel):
     specificity_score: int  # 1-10: 具体性
     star_score: int  # 1-10: STAR法準拠
     company_fit_score: Optional[int]  # 1-10: 企業適合性（企業名なしは null）
     length_balance_score: int  # 1-10: 文字数バランス（char_limit 指定時は指定字数に対する評価 / #1523）
     feedback: str  # 全体フィードバック文
+    feedback_items: List[ESReviewFeedbackItem] = Field(default_factory=list)
     improved_text: str  # 改善後テキスト
     company_strategy: Optional[str] = None  # 企業特化の対策アドバイス（企業名なしは null）
     # 企業コンテキストの取得元(#1524)
@@ -132,7 +165,8 @@ class ESReviewResponse(BaseModel):
 class CompanyContextRequest(BaseModel):
     company_name: str = Field(min_length=1)
     context_type: str = Field(default="general")  # "jobs", "persona", "general"
-    content: str = Field(min_length=1)
+    # Backend が企業横断キャッシュへ保存する本文も他の企業コンテキストと同じ上限で拒否する。
+    content: str = Field(min_length=1, max_length=COMPANY_CONTEXT_MAX_LENGTH)
 
 
 class CompanyContextResponse(BaseModel):

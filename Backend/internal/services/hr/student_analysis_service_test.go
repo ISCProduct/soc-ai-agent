@@ -197,7 +197,7 @@ func TestStudentAnalysisService_GetAnalysisForVisibleStudent_AppliesFullGuard(t 
 		user    *entity.User
 		wantErr bool
 	}{
-		{name: "同意済みの学生は取得できる", user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "student"}},
+		{name: "同意済みの学生は取得できる", user: &entity.User{ID: 5, Name: "山田太郎", AllowScoutVisibility: true, Role: "student"}},
 		{name: "退会済みはID直指定でも取得できない", user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "student", WithdrawnAt: &withdrawn}, wantErr: true},
 		{name: "ゲストはID直指定でも取得できない", user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "student", IsGuest: true}, wantErr: true},
 		{name: "教員はID直指定でも取得できない", user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "teacher"}, wantErr: true},
@@ -219,6 +219,7 @@ func TestStudentAnalysisService_GetAnalysisForVisibleStudent_AppliesFullGuard(t 
 			}
 			require.NoError(t, err)
 			assert.Equal(t, uint(5), resp.UserID)
+			assert.Equal(t, "山田太郎", resp.Name, "企業の学生詳細で氏名を出せるようにする")
 		})
 	}
 }

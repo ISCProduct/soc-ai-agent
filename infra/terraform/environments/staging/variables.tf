@@ -192,18 +192,62 @@ variable "resend_api_key_plain" {
 
 variable "admin_secret_plain" {
   type        = string
-  description = "管理者認証シークレット(平文)。CI(sync-whats-newジョブ等)から既知の値で呼び出せるよう、random_passwordではなく固定値にする"
+  description = "管理者トークン(X-Admin-Token)のHMAC鍵(平文)。CIには渡さない(#1158: CIが叩く共有シークレットは service_secret_plain)"
   sensitive   = true
   default     = ""
 }
 
-# AI面接の音声認識モデル。既定はコード側と同じ mini。
-# 精度に問題が出たときに gpt-4o-transcribe へ戻せるよう、
-# 値を明示して切り替え口を用意しておく（既定と同値なので挙動は変わらない）。
-variable "openai_whisper_model" {
-  description = "AI面接のSTTモデル。品質に問題が出たら gpt-4o-transcribe に変更する"
+variable "service_secret_plain" {
   type        = string
-  default     = "gpt-4o-mini-transcribe"
+  description = "CIからのサービス間呼び出し(X-Admin-Secret)用の共有シークレット(平文)。GitHubのリポジトリシークレット SERVICE_SECRET と同じ値にする。admin_secret_plain とは必ず別値にする(#1158)"
+  sensitive   = true
+
+  # 既定値を持たせない。空のまま apply すると SERVICE_SECRET も aws_ssm_parameter も
+  # 空になり、CI の取り込みが 503 で拒否される（CI 側は警告で流すので気づきにくい）。
+  # plan の時点で止めて、tfvars への設定漏れをその場で分かるようにする。
+  #
+  # 条件は「禁止したい文字を1つずつ足す」形ではなく許可リスト1本にしている。
+  # この値は .env の1行として書かれ、Compose がそれを読むため、壊れ方が何通りもある:
+  #   - `$`      : Compose が引用なしの値を変数展開する（未定義名は空文字になる）
+  #   - `#`      : Compose が ` #` 以降をインラインコメントとして落とす
+  #   - 改行     : 2行目以降が別の環境変数として読まれる（引用では防げない）
+  #   - 空白/タブ: 値の途中で切れる・詰められる
+  #   - "None"   : AWS CLI が null を None と出すため、デプロイ側の
+  #                `[ "$X" != None ]` 判定が「未取得」と誤認し、稼働中インスタンスの
+  #                .env を更新しない。新規インスタンスは user_data 経由で None を
+  #                受け取るので、staging の値が新旧インスタンスで二つに分かれる
+  # 1つずつ禁止していくと、次に別の文字で同じ穴が開く。文字種と最小長で一度に閉じる。
+  #
+  # 文字種は本番の random_password(special = false → 英数字のみ)と、
+  # terraform.tfvars.example が案内している生成方法
+  # (`python3 -c "import secrets; print(secrets.token_urlsafe(36))"` → 英数字 + `_` `-`)
+  # の両方を通す範囲。最小長32は token_urlsafe(24) の長さで、本番の 48 より緩い下限。
+  # 上の壊れ方はすべてこの1本で落ちる（"None" は長さと文字種の両方で落ちる）。
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_-]{32,}$", var.service_secret_plain))
+    error_message = "service_secret_plain は英数字・アンダースコア・ハイフンのみ32文字以上にしてください。.env の1行として Compose が読むため、$ ・ # ・空白・改行を含む値は壊れます。生成例: python3 -c \"import secrets; print(secrets.token_urlsafe(36))\" (#1158)"
+  }
+
+  # 形式は正しいが公開されている値を弾く。上の許可リストとは目的が違うので別に持つ。
+  # terraform.tfvars.example をそのままコピーして apply すると、例示値が本物の
+  # SERVICE_SECRET として .env と SSM へ入り、リポジトリを読める第三者が
+  # /api/admin/whats-new/ingest と /api/admin/training/stats を叩けてしまう。
+  # 例示値は Backend/.env.example と同じ change-me-service-secret に揃えてあり
+  # (Backend/internal/config/config.go の serviceSecretPlaceholder と同値)、ここで弾く。
+  # 対応関係は automation/test/service-secret-placeholder-test.sh が固定している。
+  validation {
+    condition     = var.service_secret_plain != "change-me-service-secret"
+    error_message = "service_secret_plain がプレースホルダーのままです。terraform.tfvars.example の値をコピーしただけだと、リポジトリを読める第三者がサービス間エンドポイントを叩けます(#1158)。"
+  }
+}
+
+# AI面接の音声認識モデル。既定はコード側と同じ gpt-transcribe。
+# 実音声の誤り率は mini 23% / gpt-transcribe 18%。費用を優先するなら
+# gpt-4o-mini-transcribe に戻せる（問題発話だけ gpt-transcribe へ再送される）。
+variable "openai_whisper_model" {
+  description = "AI面接のSTTモデル。費用を下げるなら gpt-4o-mini-transcribe に変更する"
+  type        = string
+  default     = "gpt-transcribe"
 }
 
 variable "discord_public_key" {
@@ -223,6 +267,26 @@ variable "github_dispatch_token" {
   sensitive   = true
   description = "Discordの /prod から prod-uptime-scheduler.yml を即時起動するためのGitHubトークン(actions:write)。未設定でも機能は動くが、反映は次の毎時実行まで待つことになる"
   default     = ""
+}
+
+variable "backlog_api_key" {
+  type        = string
+  sensitive   = true
+  description = "Discordの /link で Backlog のメンバー一覧を引くためのAPIキー(読み取りのみ)。未設定なら /link 系は「利用できません」を返す"
+  default     = ""
+}
+
+variable "discord_reminder_webhook_url" {
+  type        = string
+  sensitive   = true
+  description = "Backlog の期限リマインドを投稿する Discord Webhook URL。未設定なら期限リマインドは動かない(他のコマンドには影響しない)"
+  default     = ""
+}
+
+variable "backlog_reviewer_ids" {
+  type        = string
+  description = "PR確認待ちの課題でレビューを促す Backlog ユーザーID(カンマ区切り)。空なら促さない"
+  default     = "2505302"
 }
 
 variable "github_dispatch_repo" {

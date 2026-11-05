@@ -245,7 +245,9 @@ func TestDiff(t *testing.T) {
 		{name: "σが増えたら劣化", mutate: func(s *Summary) { s.MeanScoreStdDev = 0.08 }, wantMetric: "再現性(平均σ)"},
 		{name: "p95が1.2倍なら劣化", mutate: func(s *Summary) { s.LatencyP95MS = 6000 }, wantMetric: "レイテンシ(p95)"},
 		{name: "p95が1.1倍なら劣化ではない", mutate: func(s *Summary) { s.LatencyP95MS = 5500 }},
-		{name: "コストが1.2倍なら劣化", mutate: func(s *Summary) { s.CostPerCallUSD = 0.0012 }, wantMetric: "コスト(1件)"},
+		// コストは月額換算の絶対増で見る（#1598）。比率が大きくても少額なら劣化ではない。
+		{name: "コストが1.2倍でも月+$2なら劣化ではない", mutate: func(s *Summary) { s.CostPerCallUSD = 0.0012 }},
+		{name: "コストが月+$10以上増えたら劣化", mutate: func(s *Summary) { s.CostPerCallUSD = 0.002 }, wantMetric: "コスト(1件)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -263,6 +265,42 @@ func TestDiff(t *testing.T) {
 			}
 			if len(regs) != 1 || regs[0].Metric != tt.wantMetric {
 				t.Errorf("劣化 = %+v, want %q 1件", regs, tt.wantMetric)
+			}
+		})
+	}
+}
+
+// #1598: 比率だけのゲートは判定を取り違える。受け入れ条件の2ケースを固定する。
+func TestDiffコストは絶対額で判定する(t *testing.T) {
+	tests := []struct {
+		name        string
+		prev, cur   float64
+		wantRegress bool
+	}{
+		{name: "#1584 の実測: 1.42倍だが +$0.00026/件", prev: 0.000622, cur: 0.000882, wantRegress: false},
+		{name: "高い工程: 1.19倍だが +$0.0095/件", prev: 0.05, cur: 0.0595, wantRegress: true},
+		{name: "コスト減は劣化ではない", prev: 0.05, cur: 0.01, wantRegress: false},
+		// 閾値ちょうどは劣化として扱う（他の指標と同じ）。この2件は
+		// 月額換算がちょうど $10.00 と $9.00 になる（eps そのものは踏んでいない）。
+		{name: "月額換算がちょうど閾値なら劣化", prev: 0.001, cur: 0.002, wantRegress: true},
+		{name: "月額換算が閾値を僅かに下回れば劣化ではない", prev: 0.001, cur: 0.0019, wantRegress: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prev := &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30, CostPerCallUSD: tt.prev}
+			cur := &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30, CostPerCallUSD: tt.cur}
+			regs, _ := Diff(prev, cur)
+			got := false
+			for _, r := range regs {
+				if r.Metric == "コスト(1件)" {
+					got = true
+					if !strings.Contains(r.Reason, "月") {
+						t.Errorf("理由に月額換算が出ていない: %s", r.Reason)
+					}
+				}
+			}
+			if got != tt.wantRegress {
+				t.Errorf("劣化判定 = %v, want %v (regs=%+v)", got, tt.wantRegress, regs)
 			}
 		})
 	}
@@ -476,4 +514,171 @@ func TestLengthStrata(t *testing.T) {
 			}
 		}
 	})
+}
+
+// #1598: 前回のコストが $0 でも絶対増は判定できる。
+//
+// ゲートを比率から絶対増に変えた時点で「前回 > 0」の前提は不要になったが、
+// 比率時代のガードが残っていた。ローカルモデルや無料経路の $0 と比べると
+// 月 +$500 の増加でも緑で通る。ゲートが見逃してはいけない増加そのものである。
+//
+// ただし1件も計測できていない実行（#1634）の $0 は「無料だった」ではなく
+// 「測れていない」なので、劣化にはせず比較不能の警告を出す。
+func TestDiff前回コストが0でも絶対増で判定する(t *testing.T) {
+	tests := []struct {
+		name            string
+		prevCost        float64
+		prevMeasured    int
+		curCost         float64
+		wantRegress     bool
+		wantReasonHas   string
+		wantReasonLacks string
+		wantWarning     bool
+	}{
+		{
+			name:     "前回が計測済みの$0（無料・ローカル経路）から$0.05なら劣化",
+			prevCost: 0, prevMeasured: 60, curCost: 0.05,
+			wantRegress: true, wantReasonHas: "月10000件で +500.00$",
+			// 前回が $0 だと比率は定義できない。+Inf倍と出すより落とす。
+			wantReasonLacks: "倍",
+		},
+		{
+			name:     "前回が未計測なら劣化にせず警告する",
+			prevCost: 0, prevMeasured: 0, curCost: 0.05,
+			wantWarning: true,
+		},
+		{
+			name:     "両方$0なら劣化でも警告でもない",
+			prevCost: 0, prevMeasured: 0, curCost: 0,
+		},
+		{
+			name:     "前回が計測済みの$0から閾値未満の増加なら劣化ではない",
+			prevCost: 0, prevMeasured: 60, curCost: 0.0005,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prev := &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30,
+				CostPerCallUSD: tt.prevCost, MeasuredRuns: tt.prevMeasured}
+			cur := &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30,
+				CostPerCallUSD: tt.curCost, MeasuredRuns: 60}
+			regs, warnings := Diff(prev, cur)
+
+			var got *Regression
+			for i, r := range regs {
+				if r.Metric == "コスト(1件)" {
+					got = &regs[i]
+				}
+			}
+			if (got != nil) != tt.wantRegress {
+				t.Fatalf("コストの劣化判定 = %v, want %v (regs=%+v)", got != nil, tt.wantRegress, regs)
+			}
+			if got != nil {
+				if tt.wantReasonHas != "" && !strings.Contains(got.Reason, tt.wantReasonHas) {
+					t.Errorf("理由に %q が無い: %s", tt.wantReasonHas, got.Reason)
+				}
+				if tt.wantReasonLacks != "" && strings.Contains(got.Reason, tt.wantReasonLacks) {
+					t.Errorf("理由に %q が出ている（前回$0では定義できない）: %s", tt.wantReasonLacks, got.Reason)
+				}
+			}
+			gotWarn := false
+			for _, m := range warnings {
+				if strings.Contains(m, "コスト") {
+					gotWarn = true
+				}
+			}
+			if gotWarn != tt.wantWarning {
+				t.Errorf("コストの比較不能警告 = %v, want %v (warnings=%v)", gotWarn, tt.wantWarning, warnings)
+			}
+		})
+	}
+}
+
+// #1598: 前回が未計測のときコストの行を出さない。交絡（#1593）と同じ理由で、
+// 「0.00 → 500.00 +500.00」と並べながら「劣化は検知されませんでした」と続く表は、
+// 警告を読み飛ばすと増加を見逃したようにも、無視したようにも読める。
+func TestPrintDiff前回が未計測ならコストの行を出さない(t *testing.T) {
+	var buf strings.Builder
+	prev := &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30, MeasuredRuns: 0}
+	cur := &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30,
+		CostPerCallUSD: 0.05, MeasuredRuns: 60}
+	if PrintDiff(&buf, prev, cur) {
+		t.Fatalf("未計測は劣化にしない:\n%s", buf.String())
+	}
+	out := buf.String()
+	if strings.Contains(out, "コスト/件($)") || strings.Contains(out, "件換算($)") {
+		t.Errorf("比較できないのにコストの行を出している:\n%s", out)
+	}
+	if !strings.Contains(out, "コストは比較できない") {
+		t.Errorf("比較不能の警告が出ていない:\n%s", out)
+	}
+}
+
+// #1598: 劣化行の数値が %.3f で丸められ、1件 $0.000622 → $0.000882 が
+// 「0.001 → 0.001」と出ていた。なぜ劣化と判定したかを読める出力にする。
+func TestPrintDiff劣化行がサブセントのコストを丸めない(t *testing.T) {
+	var buf strings.Builder
+	prev := &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30,
+		CostPerCallUSD: 0.002, MeasuredRuns: 60}
+	cur := &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30,
+		CostPerCallUSD: 0.0035, MeasuredRuns: 60}
+	if !PrintDiff(&buf, prev, cur) {
+		t.Fatalf("月 +$15 なので劣化を検知するはず:\n%s", buf.String())
+	}
+	out := buf.String()
+	if strings.Contains(out, "0.002 → 0.004") {
+		t.Errorf("劣化行でコストが丸められている:\n%s", out)
+	}
+	if !strings.Contains(out, "0.002 → 0.0035") {
+		t.Errorf("劣化行に丸めていないコストが無い:\n%s", out)
+	}
+}
+
+func TestAggregateペア一致率(t *testing.T) {
+	// 良2・中1・悪1。良の一方(g2)が悪より低く付く（人の判断と逆転する）。
+	obs := []Observation{
+		{CaseID: "g1", Label: LabelGood, Score: 0.9},
+		{CaseID: "g2", Label: LabelGood, Score: 0.1},
+		{CaseID: "m1", Label: LabelMid, Score: 0.5},
+		{CaseID: "b1", Label: LabelBad, Score: 0.2},
+	}
+	s := Aggregate(TargetChatAnswer, "m", "e", "t", obs)
+	// 異なるラベルの組: g1-m1 ○, g1-b1 ○, g2-m1 ×, g2-b1 ×, m1-b1 ○ → 3/5
+	if s.PairwiseComparable != 5 {
+		t.Errorf("PairwiseComparable = %d, want 5", s.PairwiseComparable)
+	}
+	if got := s.PairwiseAgreement; got < 0.599 || got > 0.601 {
+		t.Errorf("PairwiseAgreement = %v, want 0.6", got)
+	}
+}
+
+func TestDiffペア一致率(t *testing.T) {
+	has := func(regs []Regression) bool {
+		for _, r := range regs {
+			if r.Metric == "ペア一致率" {
+				return true
+			}
+		}
+		return false
+	}
+	base := Summary{Target: TargetChatAnswer, Model: "m", Cases: 30}
+	mk := func(a float64, n int) *Summary {
+		s := base
+		s.PairwiseAgreement, s.PairwiseComparable = a, n
+		return &s
+	}
+
+	if regs, _ := Diff(mk(0.90, 300), mk(0.70, 300)); !has(regs) {
+		t.Error("0.20 下がったら劣化として検知するべき")
+	}
+	if regs, _ := Diff(mk(0.90, 300), mk(0.85, 300)); has(regs) {
+		t.Error("0.05 の低下は劣化にしない")
+	}
+	// 旧 JSON（この項目が無い = 組数 0）とは比べない。0 → 0.9 が「改善」に見えるのも防ぐ。
+	if regs, _ := Diff(mk(0, 0), mk(0.50, 300)); has(regs) {
+		t.Error("前回が未計測なら比べない")
+	}
+	if regs, _ := Diff(mk(0.90, 300), mk(0, 0)); has(regs) {
+		t.Error("今回が未計測なら比べない")
+	}
 }

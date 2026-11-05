@@ -172,11 +172,48 @@ func TestListTendencies_ResumeFilterPagesAfterMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
-	if lister.gotLimit != filteredListScanLimit || lister.gotOffset != 0 {
-		t.Fatalf("フィルタ時は先読みすること: limit=%d offset=%d", lister.gotLimit, lister.gotOffset)
+	if lister.gotLimit != filteredScanChunk || lister.gotOffset != 0 {
+		t.Fatalf("フィルタ時は先頭から走査すること: limit=%d offset=%d", lister.gotLimit, lister.gotOffset)
 	}
 	if res.Total != 1 || len(res.Students) != 1 || res.Students[0].UserID != 26 {
 		t.Fatalf("26人目の要対応を返すこと: total=%d students=%+v", res.Total, res.Students)
+	}
+}
+
+// 1万人を超える対象でも、後ろの該当生徒へ到達できること（#1692）。
+// 旧実装は先頭10,000人だけを読み、total=0 を返していた。
+func TestListTendencies_ResumeFilterScansBeyondTenThousand(t *testing.T) {
+	t.Setenv("RESUME_COMPLETENESS_THRESHOLD", "60")
+
+	const n = 12500
+	targets := map[uint]bool{10001: true, 12345: true}
+	students := make([]entity.User, 0, n)
+	ok := 80
+	facts := map[uint]models.ResumeLatestFact{}
+	for i := 1; i <= n; i++ {
+		id := uint(i)
+		students = append(students, entity.User{ID: id, Name: "生徒", Email: "s@example.com"})
+		if !targets[id] {
+			facts[id] = models.ResumeLatestFact{HasDocument: true, LatestScore: &ok}
+		}
+	}
+	svc := NewStudentInsightService(
+		&pagingLister{students: students},
+		&stubScores{scores: map[uint]map[string]float64{}},
+		&stubIndustries{},
+		&stubProfiles{},
+	)
+	svc.SetResumeFactReader(&stubResumeFacts{byUser: facts})
+
+	res, err := svc.ListTendenciesWithFilters(1, 1, "", nil, false, true)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if res.Total != 2 {
+		t.Fatalf("total = %d, want 2", res.Total)
+	}
+	if len(res.Students) != 1 || res.Students[0].UserID != 12345 {
+		t.Fatalf("2件目(offset=1)は 12345 であること: %+v", res.Students)
 	}
 }
 

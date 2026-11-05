@@ -12,7 +12,7 @@ type InterviewService interface {
 	FinishSession(userID uint, sessionID uint) (*interview.InterviewSessionResponse, error)
 	ListSessions(userID uint, all bool, limit int, offset int) ([]interview.InterviewSessionResponse, int64, error)
 	ListSessionsForOwner(userID, companyID uint, limit int, offset int) ([]interview.InterviewSessionResponse, int64, error)
-	GetSessionDetailWithRole(userID uint, sessionID uint, role string) (*interview.InterviewDetailResponse, error)
+	GetSessionDetail(userID uint, sessionID uint) (*interview.InterviewDetailResponse, error)
 	GetReport(userID uint, sessionID uint) (*models.InterviewReport, error)
 	GetPhraseSuggestions(ctx context.Context, userID uint, sessionID uint) ([]interview.PhraseSuggestion, error)
 	GetTrend(userID uint, limit int) ([]interview.InterviewTrendPoint, error)
@@ -26,8 +26,9 @@ type InterviewService interface {
 		userID uint,
 		sessionID uint,
 		audioData []byte,
-		history []map[string]string,
-		companyName, companyReading, position, companyInfo, companyType string,
+		companyName, companyReading string,
+		companyReadingResolved bool,
+		position, companyInfo, companyType string,
 		companyID uint,
 		turnCount, remainingSeconds, questionIndex, totalQuestions, questionElapsedSeconds, questionDurationSeconds int,
 	) (*interview.TurnResult, error)

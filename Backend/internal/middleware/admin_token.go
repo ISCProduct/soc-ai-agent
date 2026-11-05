@@ -16,14 +16,13 @@ import (
 
 // defaultAdminTokenTTL は管理者トークンの既定の有効期間。
 //
-// 一般ユーザーのJWT(1時間, #616)より大幅に長い。管理者トークンには**リフレッシュ経路が無い**ため。
-// 再発行されるのはログイン時と GET /api/auth/user の応答(frontend/lib/auth.ts, #857)だけで、
-// 管理画面(app/admin/**)はどちらも呼ばないため、短いTTLにすると操作の途中で 403 になり
-// 再ログインしか復帰手段が無くなる。
+// 一般ユーザーのJWT(1時間, #616)より長い。ログインセッションのリフレッシュ
+// （POST /api/auth/refresh）は管理者・職員なら token を付けて返す。
+// フロントの middleware がそれを admin_token Cookie に残し、管理画面を開く前に
+// ストレージへ写す（SOCAIAGENT-476）。ここを短くすると、その更新が走る前に 403 になる。
 //
-// 無期限(修正前)より確実に良いが、漏洩時の有効期間を数時間に縮めるには
-// 管理者トークンのリフレッシュ経路を用意する必要がある(別Issue)。
-// それまでの間、運用で短縮したい場合は ADMIN_TOKEN_TTL_HOURS で上書きできる。
+// 運用で短縮したい場合は ADMIN_TOKEN_TTL_HOURS で上書きできる。
+// フロントの「期限が近いか」判定（frontend/lib/auth/admin-token.ts）は既定の7日を見ている。
 const defaultAdminTokenTTL = 7 * 24 * time.Hour
 
 // adminTokenClockSkew は発行時刻が未来にずれている場合に許容する幅。

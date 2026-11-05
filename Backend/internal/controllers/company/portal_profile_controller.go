@@ -92,6 +92,7 @@ func toCompanyProfileResponse(c *models.Company) companyProfileResponse {
 // すべてポインタにして「指定されなかった項目は変更しない」を表す。
 // 未指定とゼロ値を区別しないと、一部だけ更新したつもりで他が消える。
 type profileBody struct {
+	Name           *string `json:"name"`
 	Description    *string `json:"description"`
 	Industry       *string `json:"industry"`
 	Location       *string `json:"location"`
@@ -129,6 +130,7 @@ func (c *CompanyPortalProfileController) UpdateCompany(ctx echo.Context) error {
 		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
 	company, err := c.profiles.Update(companyID, companyportal.ProfileInput{
+		Name:           body.Name,
 		Description:    body.Description,
 		Industry:       body.Industry,
 		Location:       body.Location,

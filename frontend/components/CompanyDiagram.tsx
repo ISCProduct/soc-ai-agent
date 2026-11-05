@@ -12,7 +12,7 @@ import ReactFlow, {
     MarkerType,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Box, Typography, Chip } from '@mui/material';
+import { Box, Typography, Chip, useMediaQuery } from '@mui/material';
 import {
     fetchCompanyRelations,
     fetchCompanyMarketInfo,
@@ -26,6 +26,7 @@ import {
 import { formatRelationLabel } from '@/lib/relation-labels';
 import { layoutBusinessGraph, layoutCapitalGraphFromEdges } from '@/lib/relation-graph';
 import { edgeTypes } from '@/components/diagram/RelationEdge';
+import { RelationTextList, type RelationEdgeData } from '@/components/diagram/RelationTextList';
 
 type DiagramType = 'capital' | 'business';
 
@@ -39,6 +40,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
     const [marketInfo, setMarketInfo] = useState<CompanyMarketInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
+    const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
 
     useEffect(() => {
         async function loadData() {
@@ -114,6 +116,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
                 id: String(compId),
                 type: 'default',
                 position: { x: pos.x, y: pos.y },
+                ariaLabel: `${getCompanyName(compId)}（${marketLabels[marketType]}${isFocusCompany ? '・この企業' : ''}）`,
                 data: {
                     label: (
                         <Box sx={{ textAlign: 'center', p: 1 }}>
@@ -148,7 +151,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
         });
     }, [relations, getMarketType, getCompanyName]);
 
-    const createCapitalEdges = useCallback((focusCompanyId: number): Edge[] => {
+    const createCapitalEdges = useCallback((focusCompanyId: number): Edge<RelationEdgeData>[] => {
         const relatedIds = new Set([focusCompanyId]);
 
         relations.forEach(rel => {
@@ -178,6 +181,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
                 target: String(rel.child_id),
                 type: 'custom',
                 label: rel.ratio ? `${rel.ratio}%` : '',
+                data: { kind: rel.relation_type === 'capital_affiliate' ? '関連会社' : '子会社' },
                 animated: false,
                 style: {
                     stroke: '#555',
@@ -221,6 +225,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
                 id: String(compId),
                 type: 'default',
                 position: { x: pos.x, y: pos.y },
+                ariaLabel: `${getCompanyName(compId)}（${marketLabels[marketType]}${isFocusCompany ? '・この企業' : ''}）`,
                 data: {
                     label: (
                         <Box sx={{ textAlign: 'center', p: 1 }}>
@@ -255,8 +260,8 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
         });
     }, [relations, getMarketType, getCompanyName]);
 
-    const createBusinessEdges = useCallback((focusCompanyId: number): Edge[] => {
-        const edges: Edge[] = [];
+    const createBusinessEdges = useCallback((focusCompanyId: number): Edge<RelationEdgeData>[] => {
+        const edges: Edge<RelationEdgeData>[] = [];
         const relatedIds = new Set([focusCompanyId]);
 
         relations.forEach(rel => {
@@ -277,7 +282,9 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
                         target: String(rel.to_id),
                         type: 'custom',
                         label: formatRelationLabel(rel.description, rel.relation_type),
-                        animated: true,
+                        data: { kind: '取引' },
+                        // 動きを減らす設定では止める。向きは矢印で残る
+                        animated: !reduceMotion,
                         style: {
                             stroke: '#2196F3',
                             strokeWidth: 2,
@@ -300,6 +307,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
                         source: String(rel.parent_id),
                         target: String(rel.child_id),
                         type: 'custom',
+                        data: { kind: '親会社からの出資' },
                         animated: false,
                         style: {
                             stroke: '#999',
@@ -312,7 +320,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
         });
 
         return edges;
-    }, [relations]);
+    }, [relations, reduceMotion]);
 
     const { nodes, edges } = useMemo(() => {
         if (loading || relations.length === 0) {
@@ -365,21 +373,48 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
     }
 
     return (
-        <Box sx={{ width: '100%', height: '500px' }}>
-            <ReactFlow
-                nodes={flowNodes}
-                edges={flowEdges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                edgeTypes={edgeTypes}
-                fitView
-                minZoom={0.1}
-                maxZoom={2}
+        <Box>
+            <Box component="section" aria-label="凡例: 線と枠の意味" sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', fontSize: '12px', mb: 1 }}>
+                {diagramType === 'capital' ? (
+                    <>
+                        <span>実線: 子会社（矢印は親→子、数字は出資比率）</span>
+                        <span>破線: 関連会社</span>
+                    </>
+                ) : (
+                    <>
+                        <span>青線: 取引（矢印は取引の向き）</span>
+                        <span>灰色の点線: 親会社からの出資</span>
+                    </>
+                )}
+                <span>黄色の太枠: この企業</span>
+                <span>枠の色とラベル: 市場区分</span>
+            </Box>
+            <Box
+                role="group"
+                aria-label={`${getCompanyName(companyId)}の${diagramType === 'capital' ? '資本関連図' : 'ビジネス関連図'}。${flowNodes.length}社・${flowEdges.length}件の関係。図の下の一覧でも同じ内容を確認できます`}
+                sx={{ width: '100%', height: '500px' }}
             >
-                <Background />
-                <Controls />
-                <MiniMap />
-            </ReactFlow>
+                <ReactFlow
+                    nodes={flowNodes}
+                    edges={flowEdges}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    edgeTypes={edgeTypes}
+                    fitView
+                    minZoom={0.1}
+                    maxZoom={2}
+                >
+                    <Background />
+                    <Controls />
+                    <MiniMap />
+                </ReactFlow>
+            </Box>
+            <RelationTextList
+                edges={flowEdges}
+                companyCount={flowNodes.length}
+                getCompanyName={getCompanyName}
+                focusCompanyId={companyId}
+            />
         </Box>
     );
 }

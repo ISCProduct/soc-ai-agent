@@ -10,14 +10,16 @@ import {
 } from '@/app/results/components/ResultsStatusViews'
 
 describe('ResultsStatusViews', () => {
-  it('loading ビューに分析中メッセージを表示する', () => {
+  it('loading ビューは一覧の形の Skeleton と計算中であることを示す', () => {
     render(<ResultsLoadingView />)
-    expect(screen.getByText('AIが企業を分析中...')).toBeInTheDocument()
+    expect(screen.getByText('希望条件との一致度を計算しています')).toBeInTheDocument()
+    expect(screen.getByRole('status', { name: 'おすすめ企業を読み込み中' })).toBeInTheDocument()
   })
 
   it('empty ビューに更新・チャット導線を表示する', () => {
     render(<ResultsEmptyView onBackToChat={() => {}} />)
-    expect(screen.getByText(/データがありません/)).toBeInTheDocument()
+    expect(screen.getByText('まだおすすめ企業を計算できていません')).toBeInTheDocument()
+    expect(screen.getByText(/診断チャットを最後まで進めると/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'ページを更新' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'チャットに戻る' })).toBeInTheDocument()
   })

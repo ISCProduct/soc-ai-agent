@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { adminTokenNeedsRefresh } from '@/lib/auth/admin-token'
 import {
   SERVER_BACKEND_URL,
   setSessionCookies,
+  setAdminTokenCookie,
   setCompanySessionCookies,
   clearSessionCookies,
   clearCompanySessionCookies,
@@ -35,6 +37,8 @@ interface RefreshedSession {
   userId: string
   userToken: string
   refreshToken: string
+  // 管理者・職員のときだけ付く。学生の更新応答には無い。
+  adminToken?: string
 }
 
 interface RefreshedCompanySession {
@@ -65,17 +69,33 @@ function isAuthFailureStatus(status: number): boolean {
 // JWTのexpを検証なしでデコードし、残り有効期間がmarginSecondsを下回るか判定する
 // （署名検証はBackendが行う。ここでは自動リフレッシュの契機判定と、
 //   期限切れトークンを後段へ流さない判定のみ）
+/**
+ * トークンの期限が近いか。**読めないトークンは期限切れとして扱う**（#1535）。
+ *
+ * 以前は payload が無い・base64デコードに失敗する・exp が数値でない、の
+ * いずれでも false（＝期限に余裕あり）を返していた。そのため exp が読めない
+ * トークンは次の輪から出られなかった。
+ *
+ *   1. リフレッシュがそもそも試みられない → refreshSession を通らず Cookie も消えない
+ *   2. tokenExpiresSoon(token, 0) も false なので X-User-Token として後段へ注入される
+ *   3. Backend が 401 → ログイン画面へ → Cookie は残っているので 1 へ戻る
+ *
+ * user_token は Backend の GenerateJWT が必ず exp 付きで発行する
+ * （失敗時は空文字）。exp が読めないトークンは壊れているか別物なので、
+ * 期限切れとして扱ってリフレッシュへ送るのが正しい。リフレッシュも失敗すれば
+ * Cookie が消えて輪が切れる。
+ */
 function tokenExpiresSoon(token: string, marginSeconds = REFRESH_MARGIN_SECONDS): boolean {
   try {
     const payload = token.split('.')[1]
-    if (!payload) return false
+    if (!payload) return true
     const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
     const decoded: unknown = JSON.parse(atob(normalized))
     const exp = (decoded as { exp?: unknown }).exp
-    if (typeof exp !== 'number') return false
+    if (typeof exp !== 'number') return true
     return exp - Date.now() / 1000 < marginSeconds
   } catch {
-    return false
+    return true
   }
 }
 
@@ -111,17 +131,19 @@ async function refreshSession(refreshToken: string): Promise<RefreshOutcome<Refr
     if (!res.ok) {
       return { status: isAuthFailureStatus(res.status) ? 'expired' : 'unavailable' }
     }
-    const data: { user_id?: number; user_token?: string; refresh_token?: string } =
+    const data: { user_id?: number; user_token?: string; refresh_token?: string; token?: string } =
       await res.json()
     if (!data.user_id || !data.user_token || !data.refresh_token) {
       return { status: 'unavailable' }
     }
+    const adminToken = typeof data.token === 'string' && data.token !== '' ? data.token : undefined
     return {
       status: 'refreshed',
       session: {
         userId: String(data.user_id),
         userToken: data.user_token,
         refreshToken: data.refresh_token,
+        adminToken,
       },
     }
   } catch {
@@ -198,6 +220,10 @@ export async function middleware(request: NextRequest) {
   requestHeaders.delete('X-Company-User-ID')
   requestHeaders.delete('X-Company-User-Token')
   requestHeaders.delete('X-Tenant-Slug')
+  // クライアントが新しい管理者トークンを名乗れないようにする。
+  // 値を入れるのは、この下でリフレッシュに成功したときだけ。
+  requestHeaders.delete('X-Refreshed-Admin-Token')
+  requestHeaders.delete('X-Refresh-Admin-Token')
   let refreshed: RefreshedSession | null = null
   // リフレッシュが401/403で失敗した=失効が確定したセッション。Cookieを消して
   // 作り直させる(#1519)。一時障害(5xx・通信断)はここに含めない
@@ -216,8 +242,13 @@ export async function middleware(request: NextRequest) {
     let effectiveUserId = userId
     let effectiveToken = userToken
 
-    // アクセストークンの期限が近い場合は自動リフレッシュ（ユーザー操作を妨げない #616）
-    if (refreshToken && tokenExpiresSoon(userToken)) {
+    // アクセストークンの期限が近い場合は自動リフレッシュ（ユーザー操作を妨げない #616）。
+    // 管理画面が X-Refresh-Admin-Token を付け、admin_token が無い・期限が近いときも
+    // 同じ更新で管理者トークンを取りに行く（SOCAIAGENT-476）。学生の通常遷移では走らない。
+    const adminToken = request.cookies.get('admin_token')?.value
+    const refreshAdmin =
+      request.headers.get('X-Refresh-Admin-Token') === '1' && adminTokenNeedsRefresh(adminToken)
+    if (refreshToken && (tokenExpiresSoon(userToken) || refreshAdmin)) {
       const outcome = await refreshSession(refreshToken)
       if (outcome.status === 'refreshed') {
         refreshed = outcome.session
@@ -241,11 +272,21 @@ export async function middleware(request: NextRequest) {
       // 期限切れトークンは後段へ渡さないので、未ログイン扱いで描画されループしない。
     }
 
+    // リフレッシュ直後のトークンも同じ判定にかける（#1535）。
+    //
+    // 以前は !refreshed で除外していたが、refreshSession は応答JSONの user_token が
+    // 空でないことしか見ない。200 で期限切れ・壊れたトークンが返ると、検査を迂回して
+    // そのままヘッダーとCookieへ入る。Backend の ParseJWT はこれを拒むので、次の
+    // リクエストでも再リフレッシュと401が繰り返され、止めたかったループが残る。
+    //
+    // 正常に発行されたトークンは exp が十分先にあるため marginSeconds=0 の判定を
+    // 通る。ここで落ちるのは「リフレッシュは200だが中身が使えない」場合だけで、
+    // そのときは未ログイン扱いにしてログイン画面へ送るのが正しい。
     if (sessionExpired || tokenExpiresSoon(effectiveToken, 0)) {
       // 期限切れトークンを後段へ渡すとBackendが401を返し、ページがログイン画面へ
       // 飛び、そのログイン画面でも同じCookieで同じことを繰り返す(#1519)。
       // X-User-* を注入しないだけでなく、Cookie経由の抜け道も閉じる。
-      dropRequestCookies(requestHeaders, ['user_id', 'user_token'])
+      dropRequestCookies(requestHeaders, ['user_id', 'user_token', 'admin_token'])
     } else {
       // httpOnly CookieからX-User-*ヘッダーを注入（クライアント送信ヘッダーを上書き）
       requestHeaders.set('X-User-ID', effectiveUserId)
@@ -270,12 +311,21 @@ export async function middleware(request: NextRequest) {
       }
     }
 
+    // 学生側と同じ理由でリフレッシュ直後も判定にかける（#1535）。
     if (companySessionExpired || tokenExpiresSoon(effectiveCompanyToken, 0)) {
       dropRequestCookies(requestHeaders, ['company_user_id', 'company_user_token'])
     } else {
       requestHeaders.set('X-Company-User-ID', effectiveCompanyUserId)
       requestHeaders.set('X-Company-User-Token', effectiveCompanyToken)
     }
+  }
+
+  // NextResponse.next はここで渡したヘッダーを複製する。後から requestHeaders を
+  // 書き換えても後段の Route Handler には届かない。
+  if (refreshed?.adminToken) {
+    requestHeaders.set('X-Refreshed-Admin-Token', refreshed.adminToken)
+  } else if (refreshed) {
+    dropRequestCookies(requestHeaders, ['admin_token'])
   }
 
   let response: NextResponse
@@ -293,6 +343,12 @@ export async function middleware(request: NextRequest) {
   // ローテーションされた新しいトークンペアをCookieへ反映
   if (refreshed) {
     setSessionCookies(response, refreshed.userId, refreshed.userToken, refreshed.refreshToken)
+    if (refreshed.adminToken) {
+      setAdminTokenCookie(response, refreshed.adminToken)
+    } else {
+      // 学生の更新で古い管理者トークンを残さない
+      response.cookies.delete('admin_token')
+    }
   }
   // 企業ポータル側も同様に書き戻す。これが無いとリフレッシュトークンの
   // ローテーション後に古い値がCookieへ残り、企業ユーザーがログアウトされる (#1091の取りこぼし)

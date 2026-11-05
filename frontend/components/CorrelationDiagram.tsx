@@ -11,6 +11,7 @@ import ReactFlow, {
     useEdgesState,
     MarkerType,
     type NodeMouseHandler,
+    type OnSelectionChangeFunc,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import {
@@ -23,6 +24,7 @@ import {
     TextField,
     FormControl,
     Button,
+    useMediaQuery,
 } from '@mui/material';
 import {
     fetchCompanyRelations,
@@ -41,6 +43,7 @@ import CorrelationCompanyDetailPanel, {
 } from '@/components/CorrelationCompanyDetailPanel';
 import { edgeTypes } from '@/components/diagram/RelationEdge';
 import ClusterExplorer from '@/components/diagram/ClusterExplorer';
+import { RelationTextList, type RelationEdgeData } from '@/components/diagram/RelationTextList';
 import styles from './CorrelationDiagram.module.css';
 
 type DiagramType = 'capital' | 'business';
@@ -58,6 +61,8 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [reloadToken, setReloadToken] = useState(0);
+    // 取引の辺は流れるアニメーションで向きを示す。動きを減らす設定では止める（矢印で向きは残る）
+    const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
 
     useEffect(() => {
         async function loadData() {
@@ -149,6 +154,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                 id: String(compId),
                 type: 'default',
                 position: { x: pos.x, y: pos.y },
+                ariaLabel: `${getCompanyName(compId)}（${marketLabels[marketType]}${isFocusCompany ? '・起点の企業' : ''}）。Enterで企業の情報を表示`,
                 data: {
                     companyId: compId,
                     label: (
@@ -198,11 +204,11 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
         return nodes;
     }, [relations, getMarketType, getCompanyName]);
 
-    const createEdges = useCallback((focusCompanyId: number | null, type: DiagramType): Edge[] => {
+    const createEdges = useCallback((focusCompanyId: number | null, type: DiagramType): Edge<RelationEdgeData>[] => {
         if (!focusCompanyId) {
             return [];
         }
-        const edges: Edge[] = [];
+        const edges: Edge<RelationEdgeData>[] = [];
 
         relations.forEach((rel, idx) => {
             if (type === 'capital' && rel.relation_type.startsWith('capital') && rel.parent_id && rel.child_id) {
@@ -212,6 +218,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     target: String(rel.child_id),
                     type: 'custom',
                     label: rel.ratio ? `${rel.ratio.toFixed(0)}%` : '',
+                    data: { kind: rel.relation_type === 'capital_affiliate' ? '関連会社' : '子会社' },
                     style: {
                         stroke: '#555',
                         strokeWidth: 2,
@@ -229,7 +236,8 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     target: String(rel.to_id),
                     type: 'custom',
                     label: formatRelationLabel(rel.description, rel.relation_type),
-                    animated: true,
+                    data: { kind: '取引' },
+                    animated: !reduceMotion,
                     style: {
                         stroke: '#2196F3',
                         strokeWidth: 2,
@@ -243,7 +251,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
         });
 
         return edges;
-    }, [relations]);
+    }, [relations, reduceMotion]);
 
     const { nodes, edges } = useMemo(() => {
         if (loading || relations.length === 0) {
@@ -291,6 +299,12 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
         const companyId = getCompanyIdFromNode(node);
         if (companyId === null) return;
         setDetailCompanyId(companyId);
+    }, []);
+
+    // キーボードでノードへ移り Enter で選ぶと、クリックと同じく情報を開く（#1614）
+    const handleSelectionChange: OnSelectionChangeFunc = useCallback(({ nodes: selected }) => {
+        const companyId = selected[0] ? getCompanyIdFromNode(selected[0]) : null;
+        if (companyId !== null) setDetailCompanyId(companyId);
     }, []);
 
     const handleOpenSelectedCompanyDetail = useCallback(() => {
@@ -381,10 +395,10 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     </Button>
 
                     <Typography variant="caption" color="text.secondary" sx={{ flexBasis: { xs: '100%', md: 'auto' } }}>
-                        企業ノードをクリックすると右側に情報を表示します
+                        企業をクリック（またはTabで移動してEnter）すると右側に情報を表示します
                     </Typography>
 
-                    <Box sx={{ display: 'flex', gap: 1.5, ml: { md: 'auto' }, flexWrap: 'wrap' }}>
+                    <Box component="section" aria-label="凡例: 枠の色は市場区分" sx={{ display: 'flex', gap: 1.5, ml: { md: 'auto' }, flexWrap: 'wrap' }}>
                         {Object.entries(marketLabels).map(([key, label]) => (
                             <Box key={key} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                 <Box sx={{ width: 14, height: 14, bgcolor: marketColors[key as MarketType], borderRadius: '50%' }} />
@@ -394,18 +408,33 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     </Box>
                 </Box>
 
-                {diagramType === 'capital' && (
-                    <Box sx={{ mt: 1, display: 'flex', gap: 3, fontSize: '12px', flexWrap: 'wrap' }}>
+                <Box component="section" aria-label="凡例: 線と枠の意味" sx={{ mt: 1, display: 'flex', gap: 3, fontSize: '12px', flexWrap: 'wrap' }}>
+                    {diagramType === 'capital' ? (
+                        <>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <Box sx={{ width: 40, height: 2, bgcolor: '#555' }} />
+                                <span>子会社（実線・矢印は親→子、数字は出資比率）</span>
+                            </Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <Box sx={{ width: 40, height: 2, borderTop: '2px dashed #555' }} />
+                                <span>関連会社（破線）</span>
+                            </Box>
+                        </>
+                    ) : (
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <Box sx={{ width: 40, height: 2, bgcolor: '#555' }} />
-                            <span>子会社（実線）</span>
+                            <Box sx={{ width: 40, height: 2, bgcolor: '#2196F3' }} />
+                            <span>取引（青線・矢印は取引の向き、ラベルは取引内容）</span>
                         </Box>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <Box sx={{ width: 40, height: 2, borderTop: '2px dashed #555' }} />
-                            <span>関連会社（破線）</span>
-                        </Box>
+                    )}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Box sx={{ width: 16, height: 12, border: '3px solid #FFA726', bgcolor: '#FFF3CD', borderRadius: '3px' }} />
+                        <span>起点の企業（太枠・黄色地）</span>
                     </Box>
-                )}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Box sx={{ width: 16, height: 12, border: '3px solid #1976D2', bgcolor: '#E3F2FD', borderRadius: '3px' }} />
+                        <span>情報を表示中の企業（太枠・水色地）</span>
+                    </Box>
+                </Box>
             </Box>
 
             <Box
@@ -436,41 +465,57 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                             onSelectCompany={setSelectedCompanyId}
                         />
                     ) : (
-                        <ReactFlow
-                            nodes={flowNodes}
-                            edges={flowEdges}
-                            onNodesChange={onNodesChange}
-                            onEdgesChange={onEdgesChange}
-                            onNodeClick={handleNodeClick}
-                            edgeTypes={edgeTypes}
-                            fitView
-                            minZoom={0.05}
-                            maxZoom={3}
-                            defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
-                            attributionPosition="bottom-right"
-                            nodesDraggable={true}
-                            nodesConnectable={false}
-                            elementsSelectable={true}
-                            className={styles.canvas}
-                        >
-                            <Background color="#aaa" gap={16} />
-                            <Controls
-                                showZoom={true}
-                                showFitView={true}
-                                showInteractive={true}
-                                position="top-right"
+                        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                            <Box
+                                role="group"
+                                aria-label={`${getCompanyName(selectedCompanyId)}を起点とした${diagramType === 'capital' ? '資本関連図' : 'ビジネス関連図'}。${flowNodes.length}社・${flowEdges.length}件の関係。図の下の一覧でも同じ内容を確認できます`}
+                                sx={{ flex: 1, minHeight: 0 }}
+                            >
+                                <ReactFlow
+                                    nodes={flowNodes}
+                                    edges={flowEdges}
+                                    onNodesChange={onNodesChange}
+                                    onEdgesChange={onEdgesChange}
+                                    onNodeClick={handleNodeClick}
+                                    onSelectionChange={handleSelectionChange}
+                                    edgeTypes={edgeTypes}
+                                    fitView
+                                    minZoom={0.05}
+                                    maxZoom={3}
+                                    defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
+                                    attributionPosition="bottom-right"
+                                    nodesDraggable={true}
+                                    nodesConnectable={false}
+                                    elementsSelectable={true}
+                                    className={styles.canvas}
+                                >
+                                    <Background color="#aaa" gap={16} />
+                                    <Controls
+                                        showZoom={true}
+                                        showFitView={true}
+                                        showInteractive={true}
+                                        position="top-right"
+                                    />
+                                    <MiniMap
+                                        nodeColor={(node) => {
+                                            const border = node.style?.border as string;
+                                            if (border?.includes('#FFA726')) return '#FFA726';
+                                            if (border?.includes('#1976D2')) return '#1976D2';
+                                            return '#2196F3';
+                                        }}
+                                        maskColor="rgba(0, 0, 0, 0.1)"
+                                        position="bottom-left"
+                                    />
+                                </ReactFlow>
+                            </Box>
+                            <RelationTextList
+                                edges={flowEdges}
+                                companyCount={flowNodes.length}
+                                getCompanyName={getCompanyName}
+                                onSelectCompany={setDetailCompanyId}
+                                focusCompanyId={selectedCompanyId}
                             />
-                            <MiniMap
-                                nodeColor={(node) => {
-                                    const border = node.style?.border as string;
-                                    if (border?.includes('#FFA726')) return '#FFA726';
-                                    if (border?.includes('#1976D2')) return '#1976D2';
-                                    return '#2196F3';
-                                }}
-                                maskColor="rgba(0, 0, 0, 0.1)"
-                                position="bottom-left"
-                            />
-                        </ReactFlow>
+                        </Box>
                     )}
                 </Box>
 

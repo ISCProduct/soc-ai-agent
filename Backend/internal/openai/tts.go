@@ -20,12 +20,9 @@ func (cli *Client) Transcribe(ctx context.Context, audio []byte, filename string
 		return "", err
 	}
 
-	model := resolveTranscribeModel()
-
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
-	_ = w.WriteField("model", model)
-	_ = w.WriteField("language", "ja")
+	WriteTranscribeContext(w, resolveTranscribeModel(), "")
 	part, err := w.CreateFormFile("file", filename)
 	if err != nil {
 		return "", err

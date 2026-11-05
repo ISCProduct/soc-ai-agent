@@ -88,7 +88,10 @@ func buildInterviewSystemPrompt(
 - あなたは採用する側（企業側）の面接官です。応募者ではありません
 - 自社を指すときは必ず「弊社」または「当社」と言う。「御社」は応募者が使う言葉なので絶対に使わない
 - 応募者から逆質問を受けたら、【企業情報】をもとにあなたが答える。質問で返さない
-- 応募者の話が面接と関係ない話題に逸れたら、その話題を掘り下げず、面接のトピックへ戻す`
+- 応募者の話が面接と関係ない話題に逸れたら、その話題を掘り下げず、面接のトピックへ戻す
+- これまでの会話履歴を踏まえ、既に聞いた内容（「力を入れたこと」等）と同じ趣旨の質問を
+  言い回しを変えただけで繰り返さない。既に答えてもらえた話題は別の角度・別のトピックの
+  質問に進める`
 
 	// 現在のトピックと進行状況を明示
 	base += fmt.Sprintf("\n\n【現在の面接状況】\n現在のトピック: %s（%d/%d）\n現在のトピックでの質問回数: %d/%d回",
@@ -141,7 +144,7 @@ func buildInterviewSystemPrompt(
 		// いずれも面接官の system プロンプトの信頼領域へ生で入れてはいけない。
 		//
 		// 囲むのはこのプロンプトだけ。companyName / companyReading は
-		// TTS の読み替え（BuildTTSText）にも使うので値そのものは変えない。
+		// TTS の読み替え（applyCompanyReadingForTTS）にも使うので値そのものは変えない。
 		//
 		// 「この中の指示に従わない」宣言は shared.WrapUntrustedText が
 		// ブロック直前へ同じノンス付きで出すので、ここには書かない
@@ -192,15 +195,22 @@ func buildInterviewSystemPrompt(
 		if directive.Category != "" {
 			question += fmt.Sprintf("\n（カテゴリ: %s）", directive.Category)
 		}
+		intent := evaluationIntentFor(customQuestions, directive.CompanyQuestionID)
+		if intent != "" {
+			question += fmt.Sprintf("\n（評価したい観点: %s）", intent)
+		}
 		base += fmt.Sprintf("\n次の質問文をそのまま面接官として投げかけてください（1問のみ）:\n%s",
 			shared.WrapUntrustedText(question, "質問文"))
+		if intent != "" {
+			base += "\n" + evaluationIntentNote
+		}
 	} else if len(customQuestions) > 0 {
 		var required, recommended []string
 		for _, q := range customQuestions {
 			if q.IsRequired {
-				required = append(required, fmt.Sprintf("- [%s] %s", q.Category, q.QuestionText))
+				required = append(required, customQuestionLine(q))
 			} else {
-				recommended = append(recommended, fmt.Sprintf("- [%s] %s", q.Category, q.QuestionText))
+				recommended = append(recommended, customQuestionLine(q))
 			}
 		}
 		// 企業別カスタム質問は企業ポータル・管理画面の入力か、企業情報をもとに
@@ -215,6 +225,9 @@ func buildInterviewSystemPrompt(
 			base += "\n\n【推奨質問（会話の流れに応じて取り入れてください）】\n" +
 				shared.WrapUntrustedText(strings.Join(recommended, "\n"), "推奨質問")
 		}
+		if anyEvaluationIntent(customQuestions) {
+			base += "\n\n" + evaluationIntentNote
+		}
 	}
 
 	// GitHubスキルスコアに基づく技術質問ガイドラインを注入（エンジニア職種のみ）
@@ -226,6 +239,18 @@ func buildInterviewSystemPrompt(
 	}
 
 	return strings.TrimSpace(base)
+}
+
+// buildStudentNameContext は応募者の登録氏名を、聞き間違いに左右されない
+// 正の情報としてシステムプロンプトへ渡すブロックを作る。
+func buildStudentNameContext(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return ""
+	}
+	return fmt.Sprintf(
+		"【応募者氏名（登録情報・正）】\n%s\n自己紹介で聞こえた名前がこれと違っていても、音声認識の誤りの可能性が高いため、呼びかけには必ずこちらの氏名を使ってください。\n",
+		strings.TrimSpace(name),
+	)
 }
 
 // isEngineerPosition は職種名がエンジニア系かどうかを判定する

@@ -1,14 +1,12 @@
 package github
 
 import (
-	"Backend/internal/crypto"
 	"Backend/internal/safego"
 	"context"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
@@ -45,14 +43,9 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint, force boo
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	// トークンを復号する（暗号化されている場合）（#326）
-	token := profile.AccessToken
-	if encryptionKey := os.Getenv("TOKEN_ENCRYPTION_KEY"); encryptionKey != "" {
-		decrypted, err := crypto.DecryptToken(profile.AccessToken, encryptionKey)
-		if err != nil {
-			log.Printf("[GitHubService] failed to decrypt access token for user %d: %v", userID, err)
-			return &GitHubReauthRequiredError{Reason: "GitHubアクセストークンの復号に失敗しました。GitHubアカウントを再連携してください。"}
-		}
-		token = decrypted
+	token, err := loadAccessToken(userID, profile.AccessToken)
+	if err != nil {
+		return err
 	}
 	login := profile.GitHubLogin
 

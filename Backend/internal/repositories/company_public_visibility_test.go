@@ -136,6 +136,16 @@ func TestPublicCompanyEndpoints_ExcludeUnreviewedGuestEntries(t *testing.T) {
 		{name: "面接・履歴書の企業ブリーフ", want: []string{companyGuard}, call: func(db *gorm.DB) {
 			_, _ = repositories.NewCompanyPublicRepository(db).FindByID(1)
 		}},
+		// #1636-5: 埋め込みで継承するとガード無しになる参照系。
+		{name: "公開リポジトリの複数ID取得", want: []string{companyGuard}, call: func(db *gorm.DB) {
+			_, _ = repositories.NewCompanyPublicRepository(db).FindByIDs([]uint{1, 2})
+		}},
+		{name: "公開リポジトリの法人番号取得", want: []string{companyGuard}, call: func(db *gorm.DB) {
+			_, _ = repositories.NewCompanyPublicRepository(db).FindByCorporateNumber("1234567890123")
+		}},
+		{name: "公開リポジトリの職種取得", want: []string{guard("company_job_positions.company_id")}, call: func(db *gorm.DB) {
+			_, _ = repositories.NewCompanyPublicRepository(db).FindJobPositionByID(1)
+		}},
 	}
 
 	for _, tt := range tests {

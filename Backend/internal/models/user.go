@@ -2,6 +2,17 @@ package models
 
 import "time"
 
+// ユーザーロール。role 列（migrations/000001）に入る値。
+//
+// staff は学校職員（教員・キャリア担当）。is_admin とは独立で、is_admin でない
+// 純粋な職員も表現できる。職員は担当校（admin_school_memberships）でスコープされ、
+// 担当校を持たない職員は何も見えない（fail-close）。「無制限＝全校閲覧」は
+// is_admin のときだけ成立する（school.ResolveAccess）。
+const (
+	UserRoleStudent = "student"
+	UserRoleStaff   = "staff"
+)
+
 // User ユーザー情報
 type User struct {
 	ID             uint   `gorm:"primaryKey"`
@@ -10,7 +21,7 @@ type User struct {
 	Password       string `gorm:"size:255"` // ハッシュ化されたパスワード (OAuth時は空)
 	Name           string `gorm:"size:100"`
 	IsGuest        bool   `gorm:"default:false"`                                     // ゲストユーザーフラグ
-	Role           string `gorm:"size:20;default:'student'" json:"role"`             // ユーザーロール: student / teacher
+	Role           string `gorm:"size:20;default:'student'" json:"role"`             // ユーザーロール: student / staff
 	TargetLevel    string `gorm:"size:20;default:'新卒'"`                              // 新卒 or 中途
 	SchoolName     string `gorm:"size:255;column:school_name"`                       // 学校名(自由記述)
 	SchoolID       *uint  `gorm:"column:school_id;index" json:"school_id,omitempty"` // 個別校(構造化、既存データはNULLのまま)
@@ -33,6 +44,17 @@ type User struct {
 	WithdrawnAt              *time.Time `gorm:"index;column:withdrawn_at" json:"withdrawn_at,omitempty"` // 退会日時（論理削除）
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
+}
+
+// HasStaffRole は職員ロールを持つか。
+func (u *User) HasStaffRole() bool {
+	return u != nil && u.Role == UserRoleStaff
+}
+
+// CanAccessAdminArea は管理エリア（/admin 配下のAPI）へ入れる主体か。
+// 管理者、または職員。純粋な職員（is_admin=false）もここを通す。
+func (u *User) CanAccessAdminArea() bool {
+	return u != nil && (u.IsAdmin || u.HasStaffRole())
 }
 
 // IsWithdrawn は退会済み（猶予期間中含む）かどうか。

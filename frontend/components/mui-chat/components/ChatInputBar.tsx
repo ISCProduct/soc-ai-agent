@@ -4,16 +4,19 @@ import React from 'react'
 import {
   Box,
   Button,
+  Alert,
   IconButton,
   Paper,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material'
-import { Send } from '@mui/icons-material'
+import { Check, Mic, MicOff, Send } from '@mui/icons-material'
 import styles from '../MuiChat.module.css'
 import type { ChoiceOption } from '../types'
-import { CHAT_BRAND, CHAT_BRAND_HOVER, shouldSendChatOnKeyDown } from '../utils'
+import { CHAT_ACCENT, CHAT_ACCENT_HOVER, shouldSendChatOnKeyDown } from '../utils'
+import { useSpeechInput } from '../hooks/useSpeechInput'
 
 type ChatInputBarProps = {
   analysisComplete: boolean
@@ -33,7 +36,7 @@ type ChatInputBarProps = {
   onShowCompletionModal: () => void
 }
 
-/** 選択肢チップ・入力欄・分析完了ボタン */
+/** 選択肢リスト・入力欄・分析完了ボタン */
 export function ChatInputBar({
   analysisComplete,
   showChoiceButtons,
@@ -51,10 +54,18 @@ export function ChatInputBar({
   onOtherChoice,
   onShowCompletionModal,
 }: ChatInputBarProps) {
+  // 音声で入れた内容は自動送信しない。音声認識は誤りが珍しくないので、
+  // 送る前に直せるよう入力欄へ入れる。既に入力があれば後ろへ足す。
+  const speech = useSpeechInput((text) => {
+    onInputChange(input ? `${input}${input.endsWith('。') ? '' : ' '}${text}` : text)
+    inputRef.current?.focus()
+  })
+
   return (
     <Box
       sx={{
-        p: 2,
+        px: 2,
+        py: showChoiceButtons ? 1.25 : 2,
         borderTop: '1px solid #e0e0e0',
         backgroundColor: '#fff',
       }}
@@ -70,8 +81,8 @@ export function ChatInputBar({
               px: 4,
               fontSize: '1.1rem',
               fontWeight: 'bold',
-              bgcolor: CHAT_BRAND,
-              '&:hover': { bgcolor: CHAT_BRAND_HOVER },
+              bgcolor: CHAT_ACCENT,
+              '&:hover': { bgcolor: CHAT_ACCENT_HOVER },
             }}
           >
             結果を見る
@@ -86,23 +97,33 @@ export function ChatInputBar({
             <Paper
               elevation={0}
               sx={{
-                p: 1.5,
+                p: 1,
                 borderRadius: 2,
                 border: '1px solid #e0e0e0',
                 backgroundColor: '#fafafa',
               }}
             >
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                選択肢を選んでください。任意で理由を入力してから送信できます（「その他」は自由記述）
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+                選んで送信できます。理由は任意です。
               </Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
+              <Stack
+                role="group"
+                aria-label="回答の選択肢"
+                spacing={0.5}
+                sx={{
+                  maxHeight: { xs: '34dvh', md: 220 },
+                  overflowY: 'auto',
+                }}
+              >
                 {choiceOptions.map((choice) => {
                   const isOtherChoice = choice.text.includes('その他')
                   const selected = selectedChoiceValue === choice.value
                   return (
                     <Button
                       key={`${choice.label}-${choice.text}`}
+                      fullWidth
                       variant={selected ? 'contained' : 'outlined'}
+                      aria-pressed={selected}
                       onClick={() => {
                         if (isOtherChoice) {
                           onOtherChoice()
@@ -113,29 +134,88 @@ export function ChatInputBar({
                       disabled={isLoading}
                       className={styles.choiceButton}
                       sx={{
-                        borderRadius: 2,
+                        borderRadius: 1.5,
                         ...(selected
                           ? {
-                              bgcolor: CHAT_BRAND,
+                              bgcolor: CHAT_ACCENT,
                               color: '#fff',
-                              '&:hover': { bgcolor: CHAT_BRAND_HOVER },
+                              fontWeight: 700,
+                              '&:hover': { bgcolor: CHAT_ACCENT_HOVER },
                             }
-                          : {}),
+                          : { fontWeight: 500 }),
                       }}
                     >
-                      {choice.label}. {choice.text}
+                      <Box
+                        component="span"
+                        sx={{
+                          display: 'flex',
+                          width: '100%',
+                          alignItems: 'flex-start',
+                          gap: 0.75,
+                          textAlign: 'left',
+                        }}
+                      >
+                        <Box component="span" sx={{ flex: 1 }}>
+                          {choice.label}. {choice.text}
+                        </Box>
+                        {selected && <Check aria-hidden sx={{ fontSize: 18, flexShrink: 0 }} />}
+                      </Box>
                     </Button>
                   )
                 })}
               </Stack>
             </Paper>
           )}
+          {/*
+            聞き取れなかったときは、何が起きたかと次にできることを出す。
+            マイクが使えなくてもキーボードで入力できることを必ず添える。
+          */}
+          {speech.error && (
+            <Alert severity="warning" sx={{ mb: 1 }} role="status">
+              {speech.error}
+            </Alert>
+          )}
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
+            {/*
+              音声入力。使えない環境（Firefox など）ではボタン自体を出さない。
+              押せるのに動かない状態より、無い方が分かりやすい。
+              アイコンだけのボタンなので aria-label と Tooltip を付ける（§17）。
+            */}
+            {speech.supported && (
+              <Tooltip
+                title={
+                  speech.listening
+                    ? '音声入力を止める'
+                    : speech.local
+                      ? // 端末内で処理しているときだけそう書く。
+                        // クラウドへ送っているのに「端末内」と書くと嘘になる。
+                        '音声で入力する（この端末内で処理します）'
+                      : '音声で入力する'
+                }
+              >
+                <span>
+                  <IconButton
+                    onClick={() => (speech.listening ? speech.stop() : speech.start())}
+                    disabled={isLoading || !!historyLoadError}
+                    aria-label={speech.listening ? '音声入力を止める' : '音声で入力する'}
+                    aria-pressed={speech.listening}
+                    sx={{
+                      width: 44,
+                      height: 44,
+                      mb: 0.5,
+                      color: speech.listening ? CHAT_ACCENT : 'text.secondary',
+                    }}
+                  >
+                    {speech.listening ? <Mic /> : <MicOff />}
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
             <TextField
               fullWidth
               multiline
-              minRows={2}
-              maxRows={6}
+              minRows={showChoiceButtons ? 1 : 2}
+              maxRows={showChoiceButtons ? 3 : 6}
               placeholder={inputPlaceholder}
               value={input}
               onChange={(e) => {
@@ -150,7 +230,11 @@ export function ChatInputBar({
               disabled={isLoading || !!historyLoadError}
               size="small"
               inputRef={inputRef}
-              helperText="改行: Enter　／　送信: Ctrl+Enter（Mac は ⌘+Enter）"
+              helperText={
+                showChoiceButtons
+                  ? 'Ctrl+Enterで送信'
+                  : '改行: Enter　／　送信: Ctrl+Enter（Mac は ⌘+Enter）'
+              }
               FormHelperTextProps={{ sx: { mx: 0.5 } }}
               sx={{
                 '& .MuiOutlinedInput-root': {
@@ -165,11 +249,11 @@ export function ChatInputBar({
               disabled={!canSend || isLoading || !!historyLoadError}
               aria-label="メッセージを送信"
               sx={{
-                bgcolor: CHAT_BRAND,
+                bgcolor: CHAT_ACCENT,
                 color: '#fff',
                 mb: 2.5,
                 '&:hover': {
-                  bgcolor: CHAT_BRAND_HOVER,
+                  bgcolor: CHAT_ACCENT_HOVER,
                 },
                 '&.Mui-disabled': {
                   bgcolor: '#e0e0e0',

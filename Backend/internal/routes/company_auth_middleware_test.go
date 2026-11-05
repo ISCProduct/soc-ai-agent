@@ -7,11 +7,13 @@ package routes
 // ここが落ちるとポータル全体の認可が抜ける。
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	companycontrollers "Backend/internal/controllers/company"
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
 
@@ -139,4 +141,110 @@ func TestEchoCompanyAuth_FailsClosedWithoutSecret(t *testing.T) {
 	}
 	assert.False(t, reached)
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}
+
+func newCompanyRepoMock(t *testing.T) (*repositories.CompanyRepository, sqlmock.Sqlmock) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}),
+		&gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	return repositories.NewCompanyRepository(db), mock
+}
+
+func runVerifiedCompany(t *testing.T, repo *repositories.CompanyRepository, companyID uint) (reached bool, status int) {
+	t.Helper()
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/company-portal/students", nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.CompanyIDContextKey, companyID))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := EchoRequireVerifiedCompany(repo)(func(c echo.Context) error {
+		reached = true
+		return c.NoContent(http.StatusOK)
+	})
+	if err := handler(c); err != nil {
+		e.HTTPErrorHandler(err, c)
+	}
+	return reached, rec.Code
+}
+
+func TestEchoRequireVerifiedCompany_RejectsUnverified(t *testing.T) {
+	repo, mock := newCompanyRepoMock(t)
+	mock.ExpectQuery("SELECT \\* FROM `companies`").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "is_verified"}).AddRow(10, false))
+
+	reached, status := runVerifiedCompany(t, repo, 10)
+	assert.False(t, reached, "未審査の企業が学生APIへ到達している")
+	assert.Equal(t, http.StatusForbidden, status)
+}
+
+func TestEchoRequireVerifiedCompany_AllowsVerified(t *testing.T) {
+	repo, mock := newCompanyRepoMock(t)
+	mock.ExpectQuery("SELECT \\* FROM `companies`").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "is_verified"}).AddRow(10, true))
+
+	reached, status := runVerifiedCompany(t, repo, 10)
+	assert.True(t, reached, "審査済みの企業が弾かれている")
+	assert.Equal(t, http.StatusOK, status)
+}
+
+func TestEchoRequireVerifiedCompany_RejectsMissingCompany(t *testing.T) {
+	repo, mock := newCompanyRepoMock(t)
+	mock.ExpectQuery("SELECT \\* FROM `companies`").WillReturnError(gorm.ErrRecordNotFound)
+
+	reached, status := runVerifiedCompany(t, repo, 10)
+	assert.False(t, reached)
+	assert.Equal(t, http.StatusForbidden, status)
+}
+
+// ルート登録そのものに審査チェックが付いていることを確認する。
+// ミドルウェア単体が正しくても、学生・スカウトの経路から外れていれば意味がない。
+func TestUnverifiedCompanyCannotReachStudentOrScoutAPIs(t *testing.T) {
+	users, userMock := newCompanyUserRepoMock(t)
+	companies, companyMock := newCompanyRepoMock(t)
+	e := echo.New()
+	api := e.Group("/api")
+	SetupCompanyAuthRoutes(
+		api,
+		&companycontrollers.CompanyAuthController{},
+		&companycontrollers.CompanyPortalController{},
+		&companycontrollers.CompanyStudentController{},
+		nil, nil, nil, nil,
+		&companycontrollers.CompanyPortalScoutController{},
+		testCompanySecret,
+		users,
+		companies,
+	)
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/company-portal/students"},
+		{http.MethodPost, "/api/company-portal/students/semantic-search"},
+		{http.MethodGet, "/api/company-portal/students/5"},
+		{http.MethodPost, "/api/company-portal/scouts"},
+		{http.MethodGet, "/api/company-portal/scout-templates"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			userMock.ExpectQuery("SELECT \\* FROM `company_users`").
+				WillReturnRows(sqlmock.NewRows([]string{"id", "company_id", "email", "password"}).
+					AddRow(1, 10, "hr@example.com", "hashed"))
+			companyMock.ExpectQuery("SELECT \\* FROM `companies`").
+				WillReturnRows(sqlmock.NewRows([]string{"id", "is_verified"}).AddRow(10, false))
+
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req.Header.Set("X-Company-User-Token", validCompanyToken(t))
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusForbidden, rec.Code, tc.path)
+			assert.Contains(t, rec.Body.String(), "審査が完了するまで")
+		})
+	}
 }

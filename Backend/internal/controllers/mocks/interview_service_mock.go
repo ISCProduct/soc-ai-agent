@@ -46,8 +46,8 @@ func (m *InterviewServiceMock) ListSessionsForOwner(userID, companyID uint, limi
 	return args.Get(0).([]interview.InterviewSessionResponse), args.Get(1).(int64), args.Error(2)
 }
 
-func (m *InterviewServiceMock) GetSessionDetailWithRole(userID uint, sessionID uint, role string) (*interview.InterviewDetailResponse, error) {
-	args := m.Called(userID, sessionID, role)
+func (m *InterviewServiceMock) GetSessionDetail(userID uint, sessionID uint) (*interview.InterviewDetailResponse, error) {
+	args := m.Called(userID, sessionID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -99,13 +99,14 @@ func (m *InterviewServiceMock) Turn(
 	userID uint,
 	sessionID uint,
 	audioData []byte,
-	history []map[string]string,
-	companyName, companyReading, position, companyInfo, companyType string,
+	companyName, companyReading string,
+	companyReadingResolved bool,
+	position, companyInfo, companyType string,
 	companyID uint,
 	turnCount, remainingSeconds, questionIndex, totalQuestions, questionElapsedSeconds, questionDurationSeconds int,
 ) (*interview.TurnResult, error) {
-	args := m.Called(ctx, userID, sessionID, audioData, history,
-		companyName, companyReading, position, companyInfo, companyType, companyID,
+	args := m.Called(ctx, userID, sessionID, audioData,
+		companyName, companyReading, companyReadingResolved, position, companyInfo, companyType, companyID,
 		turnCount, remainingSeconds, questionIndex, totalQuestions, questionElapsedSeconds, questionDurationSeconds)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)

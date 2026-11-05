@@ -73,8 +73,9 @@ func TestゴールデンセットでEvidence照合が正しく分かれる(t *te
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			score := textsim.ContentBestMatch(tt.text, spoken)
-			matched := score >= interview.EvidenceMatchThreshold
+			score := textsim.ContentBestMatch(tt.text, spoken.Content)
+			// 本番と同じ経路（数値の完全一致照合 #1596 を含む）で判定する。
+			matched := len(interview.ValidateEvidence(map[string]string{"logic": tt.text}, spoken).Unmatched) == 0
 			if matched != tt.wantMatch {
 				t.Errorf("一致度 %.3f（しきい値 %.3f）→ 照合=%v, want %v",
 					score, interview.EvidenceMatchThreshold, matched, tt.wantMatch)

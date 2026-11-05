@@ -3,15 +3,9 @@ package github
 import (
 	"Backend/internal/crypto"
 	"Backend/internal/models"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"encoding/base64"
-	"errors"
 	"fmt"
 	"log"
 	"os"
-	"strings"
 )
 
 // StoreAccessToken GitHubアクセストークンを AES-GCM で暗号化してDBに保存する（#326）
@@ -36,68 +30,16 @@ func (s *GitHubService) StoreAccessToken(userID uint, login, accessToken string)
 	return s.githubRepo.UpsertProfile(profile)
 }
 
-func encryptGitHubToken(token string) (string, error) {
-	key, err := getGitHubTokenEncryptionKey()
+// loadAccessToken StoreAccessToken と対になる復号。鍵未設定時は平文保存として扱う（#326）
+func loadAccessToken(userID uint, stored string) (string, error) {
+	encryptionKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
+	if encryptionKey == "" {
+		return stored, nil
+	}
+	decrypted, err := crypto.DecryptToken(stored, encryptionKey)
 	if err != nil {
-		return "", err
+		log.Printf("[GitHubService] failed to decrypt access token for user %d: %v", userID, err)
+		return "", &GitHubReauthRequiredError{Reason: "GitHubアクセストークンの復号に失敗しました。GitHubアカウントを再連携してください。"}
 	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return "", err
-	}
-	sealed := gcm.Seal(nil, nonce, []byte(token), nil)
-	payload := append(nonce, sealed...)
-	return base64.StdEncoding.EncodeToString(payload), nil
-}
-
-func decryptGitHubToken(encrypted string) (string, error) {
-	key, err := getGitHubTokenEncryptionKey()
-	if err != nil {
-		return "", err
-	}
-	raw, err := base64.StdEncoding.DecodeString(encrypted)
-	if err != nil {
-		return "", err
-	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-	if len(raw) < gcm.NonceSize() {
-		return "", errors.New("encrypted token payload too short")
-	}
-	nonce := raw[:gcm.NonceSize()]
-	ciphertext := raw[gcm.NonceSize():]
-	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return "", err
-	}
-	return string(plain), nil
-}
-
-func getGitHubTokenEncryptionKey() ([]byte, error) {
-	raw := strings.TrimSpace(os.Getenv(githubTokenEncryptionKeyEnv))
-	if raw == "" {
-		return nil, fmt.Errorf("%s is required", githubTokenEncryptionKeyEnv)
-	}
-	key, err := base64.StdEncoding.DecodeString(raw)
-	if err != nil {
-		return nil, fmt.Errorf("invalid %s: %w", githubTokenEncryptionKeyEnv, err)
-	}
-	if len(key) != 32 {
-		return nil, fmt.Errorf("%s must be base64-encoded 32-byte key", githubTokenEncryptionKeyEnv)
-	}
-	return key, nil
+	return decrypted, nil
 }

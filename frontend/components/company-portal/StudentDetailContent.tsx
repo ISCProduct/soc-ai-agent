@@ -18,6 +18,13 @@ import {
 import { PageContainer } from '@/components/admin/PageContainer'
 import { companyAuthService } from '@/lib/company/auth'
 import { companyStudentService, StudentDetail, StudentTag } from '@/lib/company/students'
+import { SendScoutDialog } from '@/components/company-portal/SendScoutDialog'
+
+/** スカウト公開に同意した学生の表示名。未設定のときはIDの仮名にしない。 */
+export function displayStudentName(name: string | undefined): string {
+  const trimmed = name?.trim() ?? ''
+  return trimmed || '氏名未設定'
+}
 
 /** 面接レポートのJSON文字列配列を安全にパースする（不正なJSONは無視する） */
 function parseJsonList(raw: string): string[] {
@@ -38,6 +45,7 @@ export function StudentDetailContent({ userId }: { userId: number }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [tagError, setTagError] = useState('')
+  const [scoutOpen, setScoutOpen] = useState(false)
 
   const load = useCallback(() => {
     companyStudentService
@@ -104,14 +112,27 @@ export function StudentDetailContent({ userId }: { userId: number }) {
   }
 
   const summary = detail.analysis.chat_summary
+  const studentName = displayStudentName(detail.analysis.name)
 
   return (
     <PageContainer maxWidth={880}>
-      <Button sx={{ mb: 2 }} onClick={() => router.push('/company-portal/students')}>
-        ← 一覧へ戻る
-      </Button>
+      <Stack
+        direction={{ xs: 'column', sm: 'row' }}
+        justifyContent="space-between"
+        alignItems={{ xs: 'stretch', sm: 'center' }}
+        spacing={1}
+        sx={{ mb: 2 }}
+      >
+        <Button onClick={() => router.push('/company-portal/students')}>← 一覧へ戻る</Button>
+        <Button variant="contained" onClick={() => setScoutOpen(true)}>
+          スカウトする
+        </Button>
+      </Stack>
 
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
+      <Typography variant="h4" fontWeight="bold">
+        {studentName}
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         学生プロフィール
       </Typography>
 
@@ -215,6 +236,13 @@ export function StudentDetailContent({ userId }: { userId: number }) {
           )}
         </CardContent>
       </Card>
+
+      <SendScoutDialog
+        open={scoutOpen}
+        userId={userId}
+        studentName={studentName}
+        onClose={() => setScoutOpen(false)}
+      />
     </PageContainer>
   )
 }

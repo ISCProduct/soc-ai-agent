@@ -1,13 +1,15 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Box, Container, Typography, Paper, List, ListItem, ListItemButton, ListItemText, Divider, CircularProgress, Button, Stack } from '@mui/material'
+import { Box, Container, Typography, Paper, List, ListItem, ListItemButton, ListItemText, Divider, Button, Stack } from '@mui/material'
 import { useRouter } from 'next/navigation'
 import { authService } from '@/lib/auth'
 import ChatIcon from '@mui/icons-material/Chat'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { parseChatSessionsResponse, type ChatSessionSummary } from './parseSessions'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
+import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 
 export default function PageContent() {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
@@ -70,14 +72,6 @@ export default function PageContent() {
     router.push('/')
   }
 
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <CircularProgress />
-      </Box>
-    )
-  }
-
   if (authError) {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
@@ -110,7 +104,9 @@ export default function PageContent() {
         チャット履歴
       </Typography>
 
-      {loadError ? (
+      {loading ? (
+        <ListSkeleton rows={4} label="チャット履歴を読み込み中" />
+      ) : loadError ? (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Stack spacing={2} alignItems="center">
             <Typography color="error">{loadError}</Typography>
@@ -123,10 +119,12 @@ export default function PageContent() {
           </Stack>
         </Paper>
       ) : sessions.length === 0 ? (
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <Typography color="text.secondary">
-            チャット履歴がありません
-          </Typography>
+        <Paper>
+          <EmptyState
+            title="まだチャット履歴がありません"
+            description="ホームでAIに就活の相談をすると、ここに会話が残ります。続きから再開することもできます。"
+            action={<Button variant="contained" onClick={() => router.push('/')}>AIに相談する</Button>}
+          />
         </Paper>
       ) : (
         <Paper>
