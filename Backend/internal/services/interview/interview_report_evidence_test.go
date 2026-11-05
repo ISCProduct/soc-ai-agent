@@ -67,6 +67,12 @@ func countNonEmpty(m map[string]string) int {
 // reportJSON はレポート1件分の LLM 応答を組み立てる。
 func reportJSON(t *testing.T, evidence, teacherEvidence map[string]string) string {
 	t.Helper()
+	return reportJSONWithIDs(t, evidence, teacherEvidence, nil)
+}
+
+// reportJSONWithIDs は発話IDを項目単位で差し替えられる reportJSON。
+func reportJSONWithIDs(t *testing.T, evidence, teacherEvidence map[string]string, idOverrides map[string]*uint) string {
+	t.Helper()
 	allEvidence := make(map[string]string, len(RubricKeys()))
 	evidenceIDs := make(map[string]*uint, len(RubricKeys()))
 	allTeacherEvidence := make(map[string]string, len(RubricKeys()))
@@ -77,8 +83,11 @@ func reportJSON(t *testing.T, evidence, teacherEvidence map[string]string) strin
 			evidenceIDs[key] = nil
 			continue
 		}
-		id := utteranceIDForQuote(allEvidence[key])
+		id := utteranceIDForQuote(t, allEvidence[key])
 		evidenceIDs[key] = &id
+	}
+	for key, id := range idOverrides {
+		evidenceIDs[key] = id
 	}
 	for key, value := range teacherEvidence {
 		allTeacherEvidence[key] = value
@@ -138,13 +147,19 @@ func chatStub(t *testing.T, responses ...string) (*openai.Client, func() int) {
 	return openai.NewWithBaseURL(server.URL, "gpt-4o-mini"), func() int { return calls }
 }
 
-func utteranceIDForQuote(quote string) uint {
+func utteranceIDForQuote(t *testing.T, quote string) uint {
+	t.Helper()
+	// 捏造にはLLMが実在の発話IDを添えた場合を再現する。
+	if quote == fabricated {
+		return 11
+	}
 	for _, utterance := range evidenceTestUtterances() {
 		if utterance.Role == "user" && strings.Contains(utterance.Text, quote) {
 			return utterance.ID
 		}
 	}
-	return 11
+	t.Fatalf("引用がテスト用の発話に見つからない: %q", quote)
+	return 0
 }
 
 // runReport はスタブを組んでレポートを1件生成する。
@@ -191,11 +206,11 @@ func savedTeacherEvidence(t *testing.T, report *models.InterviewReport) map[stri
 func savedEvidenceUtteranceIDs(t *testing.T, report *models.InterviewReport) map[string]uint {
 	t.Helper()
 	var got map[string]uint
-	if report.EvidenceUtteranceIDsJSON == "" {
+	if report.EvidenceUtteranceIDsJSON == nil {
 		return nil
 	}
-	if err := json.Unmarshal([]byte(report.EvidenceUtteranceIDsJSON), &got); err != nil {
-		t.Fatalf("evidence_utterance_ids_json が読めない (%q): %v", report.EvidenceUtteranceIDsJSON, err)
+	if err := json.Unmarshal([]byte(*report.EvidenceUtteranceIDsJSON), &got); err != nil {
+		t.Fatalf("evidence_utterance_ids_json が読めない (%q): %v", *report.EvidenceUtteranceIDsJSON, err)
 	}
 	return got
 }
@@ -309,8 +324,8 @@ func TestGenerateReport_EvidenceVerification(t *testing.T) {
 					if _, ok := gotIDs[key]; ok {
 						t.Errorf("空の evidence[%s] に発話IDが残っている: %v", key, gotIDs[key])
 					}
-				} else if gotIDs[key] != utteranceIDForQuote(want) {
-					t.Errorf("evidence_utterance_ids[%s]=%d want %d", key, gotIDs[key], utteranceIDForQuote(want))
+				} else if wantID := utteranceIDForQuote(t, want); gotIDs[key] != wantID {
+					t.Errorf("evidence_utterance_ids[%s]=%d want %d", key, gotIDs[key], wantID)
 				}
 			}
 			gotTeacher := savedTeacherEvidence(t, report)
@@ -336,6 +351,8 @@ func TestValidateEvidenceReferences(t *testing.T) {
 	id := uint(11)
 	aiID := uint(10)
 	wrongUserID := uint(12)
+	unknownID := uint(999)
+	zeroID := uint(0)
 
 	tests := []struct {
 		name        string
@@ -344,10 +361,18 @@ func TestValidateEvidenceReferences(t *testing.T) {
 		wantMatched bool
 	}{
 		{name: "同じ発話の正確な引用", quote: userQuote, id: &id, wantMatched: true},
+		{name: "全角半角と空白のゆれ", quote: "部員が８人しか　いなくて", id: &id, wantMatched: true},
+		{name: "助詞が違う言い換え", quote: "部員は8人だけでした", id: &id, wantMatched: true},
+		{name: "相槌だけの引用", quote: "はい", id: &id},
+		{name: "1文字だけの引用", quote: "私", id: &id},
+		{name: "発話に無い数値", quote: "部員が9人しかいなくて", id: &id},
 		{name: "別の受験者発話ID", quote: userQuote, id: &wrongUserID},
 		{name: "面接官の発話ID", quote: "学生時代に力を入れたこと", id: &aiID},
+		{name: "存在しない発話ID", quote: userQuote, id: &unknownID},
+		{name: "発話IDが0", quote: userQuote, id: &zeroID},
 		{name: "一致しない引用", quote: fabricated, id: &id},
 		{name: "発話IDなし", quote: userQuote},
+		{name: "引用が空で発話IDだけある", quote: "", id: &id},
 	}
 
 	for _, tt := range tests {
@@ -364,6 +389,68 @@ func TestValidateEvidenceReferences(t *testing.T) {
 				t.Errorf("保存対象の発話ID=%d want %d", got.UtteranceIDs["logic"], id)
 			}
 		})
+	}
+}
+
+// LLM が返す発話IDの異常を generateReport の経路で検証する（#1775）。
+// 該当項目だけ根拠とIDを捨て、照合できた項目は残す。
+func TestGenerateReport_EvidenceUtteranceIDContract(t *testing.T) {
+	t.Parallel()
+
+	const key = "specificity"
+	unknownID := uint(999)
+	interviewerID := uint(10)
+	validID := uint(11)
+
+	tests := []struct {
+		name     string
+		evidence map[string]string
+		id       *uint
+	}{
+		{name: "存在しない発話ID", evidence: genuineEvidence(), id: &unknownID},
+		{name: "面接官の発話ID", evidence: genuineEvidence(), id: &interviewerID},
+		{name: "引用があるのに発話IDがnull", evidence: genuineEvidence(), id: nil},
+		{name: "引用が空なのに発話IDがある", evidence: withEvidence(genuineEvidence(), key, ""), id: &validID},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			response := reportJSONWithIDs(t, tt.evidence, genuineTeacherEvidence(), map[string]*uint{key: tt.id})
+			report, calls := runReport(t, evidenceTestUtterances(), response)
+
+			if got := calls(); got != reportGenerationAttempts {
+				t.Errorf("LLM呼び出し=%d want %d", got, reportGenerationAttempts)
+			}
+			gotEvidence := savedEvidence(t, report)
+			gotIDs := savedEvidenceUtteranceIDs(t, report)
+			if gotEvidence[key] != "" {
+				t.Errorf("evidence[%s]=%q want 空", key, gotEvidence[key])
+			}
+			if id, ok := gotIDs[key]; ok {
+				t.Errorf("evidence_utterance_ids[%s]=%d が残っている", key, id)
+			}
+			want := genuineEvidence()["logic"]
+			if gotEvidence["logic"] != want {
+				t.Errorf("照合できた根拠まで捨てている: %q", gotEvidence["logic"])
+			}
+			if wantID := utteranceIDForQuote(t, want); gotIDs["logic"] != wantID {
+				t.Errorf("evidence_utterance_ids[logic]=%d want %d", gotIDs["logic"], wantID)
+			}
+		})
+	}
+}
+
+// 照合できた発話IDが1件も無いときは NULL を保存する（#1775）。
+// JSON カラムへの空文字は strict モードの MySQL で ERROR 3140 になり、レポートの保存ごと失敗する。
+func TestGenerateReport_NoMatchedEvidenceSavesNullUtteranceIDs(t *testing.T) {
+	t.Parallel()
+
+	report, _ := runReport(t, evidenceTestUtterances(),
+		reportJSON(t, map[string]string{"logic": fabricated}, nil))
+
+	if report.EvidenceUtteranceIDsJSON != nil {
+		t.Fatalf("evidence_utterance_ids_json = %q, want NULL", *report.EvidenceUtteranceIDsJSON)
 	}
 }
 

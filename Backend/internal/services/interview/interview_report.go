@@ -112,14 +112,13 @@ func (s *InterviewService) runReportJob(sessionID uint) {
 func BuildTranscript(utterances []models.InterviewUtterance) string {
 	var b strings.Builder
 	for _, u := range utterances {
-		role := "User"
-		if u.Role == "ai" {
-			role = "Interviewer"
-			b.WriteString(role)
-		} else if u.ID > 0 {
-			b.WriteString(fmt.Sprintf("%s [utterance_id=%d]", role, u.ID))
-		} else {
-			b.WriteString(role)
+		switch {
+		case u.Role == "ai":
+			b.WriteString("Interviewer")
+		case u.ID > 0:
+			fmt.Fprintf(&b, "User [utterance_id=%d]", u.ID)
+		default:
+			b.WriteString("User")
 		}
 		b.WriteString(": ")
 		b.WriteString(strings.TrimSpace(u.Text))
@@ -312,7 +311,6 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 			// スコアと講評は残す（誤りを載せるより欠落させる。docs/wiki/scoring.md §2-3）。
 			blankUnmatchedEvidence(payload.Evidence, bestEvidence.Unmatched)
 			blankUnmatchedEvidence(teacherDetailedEvidence(payload), bestTeacher.Unmatched)
-			blankUnmatchedEvidenceIDs(payload.EvidenceUtteranceIDs, bestEvidence.Unmatched)
 			log.Printf("[Interview] report saved with blanked evidence (session %d): %s",
 				sessionID, strings.Join(bestUnmatched, ", "))
 		}
@@ -329,7 +327,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	// 乗らず、スコア反映へ進んでしまう。
 	scoresJSON := marshalOrEmpty(payload.Scores)
 	evidenceJSON := marshalOrEmpty(payload.Evidence)
-	evidenceUtteranceIDsJSON := marshalOrEmpty(evidenceIDsFromPointers(payload.EvidenceUtteranceIDs))
+	evidenceUtteranceIDsJSON := nullableJSON(marshalOrEmpty(evidenceIDsFromPointers(payload.EvidenceUtteranceIDs)))
 	strengthsJSON, _ := json.Marshal(payload.Strengths)
 	improvementsJSON, _ := json.Marshal(payload.Improvements)
 	teacherJSON := []byte("{}")
@@ -641,4 +639,15 @@ func marshalOrEmpty[T ~map[string]int | ~map[string]string | ~map[string]uint](m
 		return ""
 	}
 	return string(b)
+}
+
+// nullableJSON は空文字を nil に変換する。
+//
+// MySQL の JSON カラムは strict モードで空文字を保存できず（ERROR 3140）、
+// レポートの保存ごと失敗する。照合できた発話IDが1件も無いレポートは現実に発生する。
+func nullableJSON(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

@@ -64,7 +64,7 @@ export type InterviewReport = {
   summary_text: string
   scores_json: string
   evidence_json: string
-  evidence_utterance_ids_json?: string
+  evidence_utterance_ids_json?: string | null
   strengths_json?: string
   improvements_json?: string
   teacher_report_json?: string  // 教員のみ返却

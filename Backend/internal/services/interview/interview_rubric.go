@@ -228,7 +228,11 @@ type EvidenceReferenceCheck struct {
 	UtteranceIDs map[string]uint
 }
 
-// ValidateEvidenceReferences は引用が指定IDの受験者発話に含まれることを検証する。
+// ValidateEvidenceReferences は引用が指定IDの受験者発話に基づくことを検証する（#1775）。
+//
+// 照合そのものは ValidateEvidence に任せ、照合先を指定された発話1件に絞る。
+// 部分文字列の一致だと「はい」や「私」が根拠として通り、逆に全角半角や空白のゆれで
+// 正当な引用が落ちる。実測済みのしきい値と未発話の数値の検出をそのまま使う。
 func ValidateEvidenceReferences(
 	evidence map[string]string,
 	utteranceIDs map[string]*uint,
@@ -243,9 +247,9 @@ func ValidateEvidenceReferences(
 
 	result := EvidenceReferenceCheck{UtteranceIDs: make(map[string]uint)}
 	for _, key := range RubricKeys() {
-		quote := strings.TrimSpace(evidence[key])
+		quote := evidence[key]
 		id := utteranceIDs[key]
-		if quote == "" {
+		if strings.TrimSpace(quote) == "" {
 			if id != nil {
 				result.Checked++
 				result.Unmatched = append(result.Unmatched, key)
@@ -258,7 +262,12 @@ func ValidateEvidenceReferences(
 			continue
 		}
 		utterance, ok := byID[*id]
-		if !ok || !strings.Contains(utterance.Text, quote) {
+		if !ok {
+			result.Unmatched = append(result.Unmatched, key)
+			continue
+		}
+		spoken := SpokenContent([]models.InterviewUtterance{utterance})
+		if check := ValidateEvidence(map[string]string{key: quote}, spoken); len(check.Unmatched) > 0 {
 			result.Unmatched = append(result.Unmatched, key)
 			continue
 		}
@@ -285,14 +294,6 @@ func evidenceIDsFromPointers(ids map[string]*uint) map[string]uint {
 		}
 	}
 	return out
-}
-
-func blankUnmatchedEvidenceIDs(ids map[string]*uint, unmatched []string) {
-	for _, key := range unmatched {
-		if !strings.HasPrefix(key, "teacher.") {
-			delete(ids, key)
-		}
-	}
 }
 
 // SpokenContent は受験者(role=user)の発話を内容語だけに落として返す（#1527 / #1566）。

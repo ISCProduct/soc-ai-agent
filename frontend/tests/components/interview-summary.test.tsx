@@ -95,6 +95,69 @@ describe('InterviewSummary', () => {
     expect(screen.getByText('私は結論から説明しました。')).toBeInTheDocument()
   })
 
+  it('発話IDがNULLの旧レポートには発言へのリンクを出さない', () => {
+    const report: InterviewReport = {
+      session_id: 7,
+      summary_text: '要点を伝えられています。',
+      scores_json: JSON.stringify({ logic: 4 }),
+      evidence_json: JSON.stringify({ logic: '私は結論から説明しました。' }),
+      evidence_utterance_ids_json: null,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    }
+
+    render(<InterviewSummary report={report} utterances={[]} />)
+
+    expect(screen.getByText('「私は結論から説明しました。」')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '論理性の根拠発言を見る' })).not.toBeInTheDocument()
+  })
+
+  it('発話ログが無く取得もできないときは発言へのリンクを出さない', () => {
+    const report: InterviewReport = {
+      session_id: 7,
+      summary_text: '要点を伝えられています。',
+      scores_json: JSON.stringify({ logic: 4 }),
+      evidence_json: JSON.stringify({ logic: '私は結論から説明しました。' }),
+      evidence_utterance_ids_json: JSON.stringify({ logic: 42 }),
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    }
+    const getDetail = jest.spyOn(interviewApi, 'getDetail')
+
+    render(<InterviewSummary report={report} />)
+
+    expect(screen.queryByRole('button', { name: '論理性の根拠発言を見る' })).not.toBeInTheDocument()
+    expect(getDetail).not.toHaveBeenCalled()
+  })
+
+  it('発話IDが読み込んだログに無いときは見つからないことを伝える', () => {
+    const report: InterviewReport = {
+      session_id: 7,
+      summary_text: '要点を伝えられています。',
+      scores_json: JSON.stringify({ logic: 4 }),
+      evidence_json: JSON.stringify({ logic: '私は結論から説明しました。' }),
+      evidence_utterance_ids_json: JSON.stringify({ logic: 99 }),
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    }
+    const utterances: InterviewUtterance[] = [
+      {
+        id: 42,
+        session_id: 7,
+        role: 'user',
+        text: '別の発話です。',
+        created_at: '2026-01-01T00:00:00Z',
+      },
+    ]
+
+    render(<InterviewSummary report={report} utterances={utterances} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '論理性の根拠発言を見る' }))
+
+    expect(screen.getByText('該当発言が見つかりません。')).toBeInTheDocument()
+    expect(screen.getByText('別の発話です。')).toBeInTheDocument()
+  })
+
   it('ライブレポートでは必要になったときだけ発話ログを取得する', async () => {
     const report: InterviewReport = {
       session_id: 7,

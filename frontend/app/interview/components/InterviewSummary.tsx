@@ -90,12 +90,12 @@ export default function InterviewSummary({ report, utterances, userId, theme = '
   const showEvidenceUtterance = async (utteranceId: number) => {
     setActiveUtteranceId(utteranceId)
     setSourceError(null)
-    if (sourceUtterances !== null) return
+    if (sourceUtterances !== null || !userId) return
 
     const requestId = ++sourceRequestId.current
     setSourceLoading(true)
     try {
-      const detail = await interviewApi.getDetail(report.session_id, userId ?? 0)
+      const detail = await interviewApi.getDetail(report.session_id, userId)
       if (requestId !== sourceRequestId.current) return
       setSourceUtterances(detail.utterances)
     } catch {
@@ -180,7 +180,8 @@ export default function InterviewSummary({ report, utterances, userId, theme = '
                     <Typography variant="caption" sx={{ color: textMuted, display: 'block', lineHeight: 1.5 }}>
                       「{evidence[key]}」
                     </Typography>
-                    {evidenceUtteranceIDs[key] && (
+                    {/* 発話ログが無く取得もできない（userId なし）場合はボタンを出さない */}
+                    {evidenceUtteranceIDs[key] && (sourceUtterances !== null || Boolean(userId)) && (
                       <Button
                         size="small"
                         disabled={sourceLoading}
@@ -228,6 +229,9 @@ export default function InterviewSummary({ report, utterances, userId, theme = '
           sx={{ bgcolor: paperBg, border: paperBorder, p: 2, borderRadius: 2 }}
         >
           <Typography sx={{ color: textPrimary, fontWeight: 700, mb: 1.5 }}>発話ログ</Typography>
+          {sourceUtterances.length > 0 && !sourceUtterances.some((utterance) => utterance.id === activeUtteranceId) && (
+            <Alert severity="warning" sx={{ mb: 1.5 }}>該当発言が見つかりません。</Alert>
+          )}
           {sourceUtterances.length === 0 ? (
             <Typography variant="body2" sx={{ color: textMuted }}>この面接の発話ログはありません。</Typography>
           ) : (
@@ -402,8 +406,8 @@ export default function InterviewSummary({ report, utterances, userId, theme = '
   )
 }
 
-function parsePositiveNumberMap(value?: string): Record<string, number> {
-  const parsed = parseJsonSafe(value)
+function parsePositiveNumberMap(value?: string | null): Record<string, number> {
+  const parsed = parseJsonSafe(value ?? undefined)
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
 
   const result: Record<string, number> = {}
