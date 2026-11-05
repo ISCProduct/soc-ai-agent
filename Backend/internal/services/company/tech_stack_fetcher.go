@@ -206,10 +206,7 @@ func (f *TechStackFetcher) Acquire(ctx context.Context, companyName, websiteURL,
 	}
 
 	// 2) Search Lite → Parse
-	parseUser := fmt.Sprintf(
-		"企業「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空配列/空文字。推測禁止。\n%s",
-		companyName, schema,
-	)
+	parseUser := buildTechSearchParseUser(companyName, schema)
 	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 400)
 	if err != nil {
 		return nil, fmt.Errorf("%sの取得失敗: %w", domainLabel, err)
@@ -327,7 +324,26 @@ func techResultFromCompany(company *models.Company) *TechStackResult {
 // 企業名も企業行（自動収集・ゲスト投稿）由来なので同じく囲む。文中の「企業「%s」」に埋めると囲みの外に出る。
 func buildTechScrapeParseUser(companyName, domainLabel, schema, pageText string) string {
 	return fmt.Sprintf(
-		"次の企業の公開ページ本文です。本文に明示された%sのみ次のJSON形式で抽出してください。推測禁止。\n企業名:\n%s\n%s\n\n---\n本文:\n%s",
-		domainLabel, shared.WrapUntrustedText(companyName, "企業名"), schema, shared.WrapUntrustedText(pageText, "ページ本文"),
+		"次の企業の公開ページ本文です。本文に明示された%sのみ次のJSON形式で抽出してください。推測禁止。\n%s%s\n\n---\n本文:\n%s",
+		domainLabel, techCompanyNameSection(companyName), schema, shared.WrapUntrustedText(pageText, "ページ本文"),
 	)
+}
+
+// buildTechSearchParseUser は Search Lite の結果からの抽出指示を組み立てる（Acquire の2番目の経路）。
+// 公式ページ抽出と同じ企業名を使うので、こちらも囲む。片方だけだとスクレイプの失敗で囲みを迂回できる。
+func buildTechSearchParseUser(companyName, schema string) string {
+	return fmt.Sprintf(
+		"次の企業について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空配列/空文字。推測禁止。\n%s%s",
+		techCompanyNameSection(companyName), schema,
+	)
+}
+
+// techCompanyNameSection は「企業名:」の行と囲んだ企業名を返す。企業名が空ならラベルごと出さない
+// （WrapUntrustedText は空文字に空文字を返すので、ラベルだけが残らないようにする）。
+func techCompanyNameSection(companyName string) string {
+	wrapped := shared.WrapUntrustedText(companyName, "企業名")
+	if wrapped == "" {
+		return ""
+	}
+	return "企業名:\n" + wrapped + "\n"
 }
