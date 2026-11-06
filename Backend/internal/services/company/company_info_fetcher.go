@@ -6,6 +6,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/gbizinfo"
+	"Backend/internal/services/shared"
 	"context"
 	"encoding/json"
 	"errors"
@@ -559,18 +560,7 @@ func (f *CompanyInfoFetcher) acquireViaAISearch(ctx context.Context, companyName
 	}
 
 	systemPrompt := `あなたは企業情報の構造化アシスタントです。検索結果に明示された事実のみをJSON化してください。検索結果に無い項目は空文字または0。モデルの事前知識や推測で埋めてはいけません。従業員数は連結と単体を混ぜず、employee_count_basis に定義を必ず入れる。`
-	siteHint := ""
-	if websiteURL != "" {
-		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
-	}
-	searchPrompt := fmt.Sprintf(
-		`日本の企業「%s」%sについて、公開情報から確認できる事実だけを調べてください。対象: 企業概要・業種・本社所在地・公式サイトURL・設立年・従業員数・主要事業・企業文化・勤務スタイル・技術スタック・福利厚生。従業員数は直近有価証券報告書の連結を優先し、連結なら連結、単体しか無ければ単体と明記してください。各事実の根拠URLを含めてください。不明な項目は推測せず「不明」と書いてください。非上場企業も含め、公式サイト・採用ページ・登記情報などから確認できる範囲のみ。`,
-		companyName, siteHint,
-	)
-	parseUser := fmt.Sprintf(
-		"企業名「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空文字または0。推測禁止。\n%s",
-		companyName, companyInfoJSONSchema,
-	)
+	searchPrompt, parseUser := buildCompanyInfoSearchPrompts(companyName, websiteURL)
 	// 検索は企業ごとに1回に寄せる。relations / tech も同じ結果を使うため、
 	// web_search の固定課金(8,000トークン/call)が1社1回で済む(#1124)。
 	// 共有が未注入なら従来どおり検索+解析をまとめて行う。
@@ -655,6 +645,32 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// buildCompanyInfoSearchPrompts は企業情報の検索プロンプトと抽出プロンプトを組み立てる。
+// 検索プロンプトはそのまま検索クエリになるので企業名を整え、抽出プロンプトでは囲む（#1970 のレビュー）。
+func buildCompanyInfoSearchPrompts(companyName, websiteURL string) (searchPrompt, parseUser string) {
+	siteHint := ""
+	if websiteURL != "" {
+		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
+	}
+	searchPrompt = fmt.Sprintf(
+		`日本の企業「%s」%sについて、公開情報から確認できる事実だけを調べてください。対象: 企業概要・業種・本社所在地・公式サイトURL・設立年・従業員数・主要事業・企業文化・勤務スタイル・技術スタック・福利厚生。従業員数は直近有価証券報告書の連結を優先し、連結なら連結、単体しか無ければ単体と明記してください。各事実の根拠URLを含めてください。不明な項目は推測せず「不明」と書いてください。非上場企業も含め、公式サイト・採用ページ・登記情報などから確認できる範囲のみ。`,
+		shared.InlinePromptName(companyName), siteHint,
+	)
+	parseUser = fmt.Sprintf(
+		"次の企業について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空文字または0。推測禁止。\n%s%s",
+		shared.UntrustedSection(companyName, "企業名"), companyInfoJSONSchema,
+	)
+	return searchPrompt, parseUser
+}
+
+// buildCompanyInfoExtractUser は gBiz の事実テキストからの抽出指示を組み立てる。企業名は囲む（#1970 のレビュー）。
+func buildCompanyInfoExtractUser(companyName, websiteURL, factsText string) string {
+	return fmt.Sprintf(
+		"次の企業（参考URL: %s）について、次の事実テキストのみを根拠にJSON化してください。\n%s%s\n\n事実テキスト:\n%s",
+		websiteURL, shared.UntrustedSection(companyName, "企業名"), companyInfoJSONSchema, strings.TrimSpace(factsText),
+	)
+}
+
 // acquireCheapExtract は gBiz 事実テキストからの安価 Extract（Search なし）。後方互換・テスト用。
 func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyName, websiteURL, factsText string) (*CompanyInfoResult, error) {
 	if f.llm == nil || f.llm.Client == nil {
@@ -662,10 +678,7 @@ func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyNam
 	}
 
 	systemPrompt := `あなたは企業情報の構造化アシスタントです。与えられた事実テキストに書かれている内容のみをJSON化してください。テキストに無い項目は空文字または0。推測禁止。`
-	userPrompt := fmt.Sprintf(
-		"企業名「%s」（参考URL: %s）について、次の事実テキストのみを根拠にJSON化してください。\n%s\n\n事実テキスト:\n%s",
-		companyName, websiteURL, companyInfoJSONSchema, strings.TrimSpace(factsText),
-	)
+	userPrompt := buildCompanyInfoExtractUser(companyName, websiteURL, factsText)
 	if strings.TrimSpace(factsText) == "" {
 		return f.acquireViaAISearch(ctx, companyName, websiteURL)
 	}

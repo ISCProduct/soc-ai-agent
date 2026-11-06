@@ -151,6 +151,8 @@ func (f *TechStackFetcher) FetchAndSave(ctx context.Context, companyID uint, for
 
 // techAcquirePrompts は業種に応じた抽出スキーマ・システムプロンプト・検索プロンプト・表示名を返す。
 func techAcquirePrompts(industry, companyName, websiteURL string) (schema, systemPrompt, searchPrompt, domainLabel string) {
+	// 検索プロンプトはそのまま検索クエリになるので、囲まずに名前として整える（#1970 のレビュー）
+	searchName := shared.InlinePromptName(companyName)
 	profile := companyfields.Resolve(industry)
 	siteHint := websiteURLOrUnknown(websiteURL)
 	if profile.ID == companyfields.ProfileManufacturing {
@@ -158,7 +160,7 @@ func techAcquirePrompts(industry, companyName, websiteURL string) (schema, syste
 			`あなたは製造業の技術・設備情報の構造化アシスタントです。入力テキストに明示された製品技術・生産設備・生産方式のみをJSON化してください。推測で埋めてはいけません。ITのプログラミング言語を無理に埋めないでください。不明な項目は空配列または空文字にしてください。`,
 			fmt.Sprintf(
 				`日本の製造企業「%s」の主要技術・製品技術・生産設備・拠点・生産方式を調べてください。公式サイト: %s。会社案内・製品紹介・工場紹介・採用ページに書かれている事実のみを根拠URL付きで列挙してください。プログラミング言語やCI/CDは、公開情報に明示がある場合のみ。`,
-				companyName, siteHint,
+				searchName, siteHint,
 			),
 			"設備・技術"
 	}
@@ -166,7 +168,7 @@ func techAcquirePrompts(industry, companyName, websiteURL string) (schema, syste
 		`あなたは技術スタックの構造化アシスタントです。入力テキストに明示された技術のみをJSON化してください。推測で埋めてはいけません。不明な項目は空配列または空文字にしてください。`,
 		fmt.Sprintf(
 			`日本のIT企業「%s」の技術スタックを調べてください。公式サイト: %s。採用ページ・技術ブログ・エンジニア向け情報・求人票に書かれている言語・フレームワーク・クラウド・CI/CD・開発手法を、根拠URL付きで列挙してください。公開情報として確認できる事実のみ。非上場企業も含めます。`,
-			companyName, siteHint,
+			searchName, siteHint,
 		),
 		"技術スタック"
 }
@@ -338,12 +340,7 @@ func buildTechSearchParseUser(companyName, schema string) string {
 	)
 }
 
-// techCompanyNameSection は「企業名:」の行と囲んだ企業名を返す。企業名が空ならラベルごと出さない
-// （WrapUntrustedText は空文字に空文字を返すので、ラベルだけが残らないようにする）。
+// techCompanyNameSection は「企業名:」の行と囲んだ企業名を返す。企業名が空ならラベルごと出さない。
 func techCompanyNameSection(companyName string) string {
-	wrapped := shared.WrapUntrustedText(companyName, "企業名")
-	if wrapped == "" {
-		return ""
-	}
-	return "企業名:\n" + wrapped + "\n"
+	return shared.UntrustedSection(companyName, "企業名")
 }
