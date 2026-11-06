@@ -329,6 +329,19 @@ GET /api/admin/costs/monthly   # 月別コスト
 - Realtime: `REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200` を超えるとメール/Slack
   - `REALTIME_ALERT_EMAILS` / `REALTIME_ALERT_SLACK_WEBHOOK_URL`
 
+
+### AI利用予算（利用者・学校単位）
+
+利用者と学校ごとに日次・月次の上限を設定できる（`/api/admin/ai-budgets`、管理画面のコスト画面）。上限は既定で未設定で、0 は「上限なし」を表す。
+
+- **判定:** AI を実行するルートで、認証の後に過去の利用額を読む。超過なら 429 と `code: ai_budget_exceeded`、判定できなければ 503（fail-closed）を返す
+- **超過の許容:** ロックも予約もしない。同時に走ったリクエストのぶんだけ上限を少し超えることがある。ロックを持つと AI の応答待ちの間 DB 接続を占有し、同じ学校の利用者を直列化するため
+- **窓:** 日次は毎日 0:00、月次は毎月 1 日 0:00（いずれも日本時間）に切り替わる。既存のコスト集計は UTC 基準なので、月末月初の数字は一致しない
+- **集計対象:** `api_call_logs` と `realtime_usage_logs`。終了していないリアルタイム音声は経過時間から見積もる。学校は記録時点の所属で帰属する。導入前のログには `school_id` がないので、導入した月の学校の月次は実態より小さく出る
+- **対象外:** 開始後の面接（turn / utterances / finish）と保存済みレポートのメール送信は止めない。未ログインの利用者はレート制限で保護する。面接レポートと診断後のマッチングはワーカーで動くので止めないが、利用額は利用者に帰属させる
+- **DB 接続:** `DB_MAX_OPEN_CONNS`（既定30）と `DB_MAX_IDLE_CONNS`（既定10）でタスクごとの接続数を制限する。prod には接続数のアラーム（`rds_connections`）がある
+- **既存のブレーキとの違い:** `OpenAIFallbackGuard` はフォールバックの課金だけを見る別の財布で、DB 障害時は fail-open。`OPENAI_COST_ALERT_THRESHOLD_USD` は通知だけで止めない
+
 ### govulncheck の例外
 
 CI の `Security scan (govulncheck)` は、コードから到達する脆弱性があると失敗する。修正版がなく、該当機能を使っていない場合だけ、`.github/govulncheck-allowlist.json` に理由と期限を付けて例外にできる。次の場合は例外が効かなくなり、CI が失敗する。

@@ -25,6 +25,8 @@ type APICallLog struct {
 	Feature string `gorm:"size:64;not null;default:'unknown'" json:"feature"`
 	// 実行主体。バッチ経路は主体を持たないため nil。
 	UserID *uint `json:"user_id,omitempty"`
+	// 呼び出し時点の学校所属。users.school_id の後日変更で過去実績を移動させない。
+	SchoolID *uint `json:"school_id,omitempty"`
 	// 配賦先の学校/企業。解決できない場合は nil。
 	OrganizationID *uint `json:"organization_id,omitempty"`
 	// STT/TTS はトークンではなく音声の長さが課金単位になる。
