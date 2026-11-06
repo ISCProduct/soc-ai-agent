@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	admincontrollers "Backend/internal/controllers/admin"
 	companycontrollers "Backend/internal/controllers/company"
 	usercontrollers "Backend/internal/controllers/user"
 
@@ -56,15 +57,16 @@ func Inventory() []Route {
 	api := e.Group("/api")
 
 	SetupAuthRoutes(api, nil, nil, "", nil, nil)
-	SetupChatRoutes(api, nil, nil, "", nil, nil)
-	SetupCompanyRoutes(api, nil)
+	budget := NewAIBudgetGuards(nil)
+	SetupChatRoutes(api, nil, nil, "", nil, nil, budget)
+	SetupCompanyRoutes(api, nil, "", nil, nil, budget)
 	SetupAdminRoutes(api,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "")
-	SetupResumeRoutes(api, nil, "", nil, nil)
-	SetupInterviewRoutes(api, nil, nil, "", nil, nil)
-	SetupGitHubRoutes(api, nil, "", nil, nil)
-	SetupESRoutes(api, nil, nil, "", nil, nil)
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", &admincontrollers.AIBudgetController{})
+	SetupResumeRoutes(api, nil, "", nil, nil, budget)
+	SetupInterviewRoutes(api, nil, nil, "", nil, nil, budget)
+	SetupGitHubRoutes(api, nil, "", nil, nil, budget)
+	SetupESRoutes(api, nil, nil, "", nil, nil, budget)
 	SetupScheduleRoutes(api, nil, "", nil, nil)
 	SetupGoogleCalendarRoutes(api, nil, "", nil, nil)
 	SetupApplicationRoutes(api, nil, nil, "", nil, nil)
@@ -81,7 +83,7 @@ func Inventory() []Route {
 		"", nil, nil)
 	SetupUserRoutes(api, nil, nil, nil, nil,
 		&usercontrollers.StudentScoutController{},
-		"", nil, nil)
+		"", nil, nil, &usercontrollers.AIBudgetController{})
 	SetupCollectiveInsightRoutes(api, nil, "", nil, nil)
 	SetupAssessmentRoutes(api, nil, "", nil, nil)
 	SetupAssessmentSchoolRoutes(api, nil, nil, nil, "")

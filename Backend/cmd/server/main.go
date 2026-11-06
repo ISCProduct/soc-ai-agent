@@ -293,6 +293,8 @@ func main() {
 	appStatusRepo := repositories.NewUserApplicationStatusRepository(db)
 	// APIコストモニタリング
 	apiCallLogRepo := repositories.NewAPICallLogRepository(db)
+	aiBudgetRepo := repositories.NewAIBudgetRepository(db)
+	aiBudgetService := costs.NewAIBudgetService(aiBudgetRepo)
 	realtimeUsageRepo := repositories.NewRealtimeUsageRepository(db)
 
 	// サービス層の初期化
@@ -514,6 +516,8 @@ func main() {
 	adminDashboardController.SetSchoolService(schoolService)
 	adminDashboardController.SetOrganizationService(organizationService)
 	adminCostsController := admincontrollers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
+	adminAIBudgetController := admincontrollers.NewAIBudgetController(aiBudgetService)
+	userAIBudgetController := usercontrollers.NewAIBudgetController(aiBudgetService)
 	adminVectorController := admincontrollers.NewAdminVectorController(admin.NewAdminVectorService())
 	profileRecalcService := flywheel.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
 	profileRecalcController := admincontrollers.NewAdminProfileRecalculationController(profileRecalcService)
@@ -641,8 +645,9 @@ func main() {
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret, userDeletionService, organizationService)
-	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret, userDeletionService, organizationService)
-	routes.SetupCompanyRoutes(api, relationController)
+	aiBudgetGuards := routes.NewAIBudgetGuards(aiBudgetService)
+	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
+	routes.SetupCompanyRoutes(api, relationController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	industryWeightProfileRepo := repositories.NewIndustryWeightProfileRepository(db)
 	teacherInsightService := teacher.NewStudentInsightService(userRepo, userWeightScoreRepo, industryRepo, industryWeightProfileRepo)
 	// 低マッチのまま進行中の応募を教員一覧に出す（#1028）
@@ -657,8 +662,8 @@ func main() {
 	teacherGuidanceController := insightcontrollers.NewTeacherGuidanceController(guidanceService, schoolService)
 	teacherESReviewController := insightcontrollers.NewTeacherESReviewController(esReviewRepo)
 	studentGuidanceController := usercontrollers.NewStudentGuidanceController(guidanceService)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, teacherGuidanceController, teacherESReviewController, userRepo, schoolService, cfg.AdminSecret)
-	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, teacherGuidanceController, teacherESReviewController, userRepo, schoolService, cfg.AdminSecret, adminAIBudgetController)
+	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 適性検査 第1段（#1678）。結果は source=assessment で user_weight_scores へ入り、マッチングへ合流する
 	assessmentRepo := repositories.NewAssessmentRepository(db)
 	matchingService.SetAssessmentScoreReader(assessmentRepo)
@@ -672,9 +677,9 @@ func main() {
 	// matchingService へは繋がない。性格検査とはテーブル・型・パスを分けている。
 	abilityRepo := repositories.NewAbilityRepository(db)
 	routes.SetupAbilityRoutes(api, abilitycontrollers.NewController(abilitysvc.NewService(abilityRepo)), cfg.UserSecret, userDeletionService, organizationService)
-	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
-	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)
-	routes.SetupESRoutes(api, esRewriteController, esReviewController, cfg.UserSecret, userDeletionService, organizationService)
+	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
+	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
+	routes.SetupESRoutes(api, esRewriteController, esReviewController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)
@@ -707,7 +712,7 @@ func main() {
 	companyPortalScoutController := companycontrollers.NewCompanyPortalScoutController(scoutService)
 	studentScoutController := usercontrollers.NewStudentScoutController(scoutService)
 	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyPortalInterviewQuestionController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, companyPortalSchoolApplicationController, companyPortalScoutController, cfg.CompanyUserSecret, companyUserRepo, companyRepo)
-	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, studentGuidanceController, studentScoutController, cfg.UserSecret, userDeletionService, organizationService)
+	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, studentGuidanceController, studentScoutController, cfg.UserSecret, userDeletionService, organizationService, userAIBudgetController)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
 	api.GET("/whats-new", releaseNoteController.List, routes.EchoUserAuth(cfg.UserSecret, userDeletionService))

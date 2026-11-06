@@ -15,6 +15,7 @@ import { ArrowLeft, Info } from 'lucide-react'
 import { authService } from '@/lib/auth'
 import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { cn } from '@/lib/utils'
+import { AIBudgetSettings } from '@/components/admin/AIBudgetSettings'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
@@ -300,6 +301,8 @@ export default function PageContent() {
           </button>
         </div>
       )}
+
+      <AIBudgetSettings />
 
       {/* KPI Cards */}
       <div className="flex flex-wrap gap-4 mb-6">

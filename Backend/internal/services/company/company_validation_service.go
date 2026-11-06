@@ -6,6 +6,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -245,6 +246,12 @@ func (s *CompanyValidationService) validateWithWebSearch(ctx context.Context, qu
 			Confidence:    "low",
 			Query:         query,
 		}, nil
+	}
+
+	// singleflight の外で利用者ごとに判定する。中で判定すると、待機側の利用者が
+	// リーダーの判定結果を共有し、別の学校の上限で止められたりすり抜けたりする。
+	if err := usagectx.CheckAIBudget(ctx); err != nil {
+		return nil, err
 	}
 
 	run := func() (*CompanyValidationResult, error) {

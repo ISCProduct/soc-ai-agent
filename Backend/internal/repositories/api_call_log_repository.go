@@ -17,8 +17,23 @@ func NewAPICallLogRepository(db *gorm.DB) *APICallLogRepository {
 	return &APICallLogRepository{db: db}
 }
 
+// Create はログを保存する。school_id は呼び出し時点の所属として利用者から引く。
+// users.school_id を集計時に JOIN すると、所属が変わったときに過去の実績まで移動する。
+// リクエストごとに所属を受け渡さず記録時に引くので、予算判定の有無によらず全経路に効く。
 func (r *APICallLogRepository) Create(log *models.APICallLog) error {
+	if log.UserID != nil && log.SchoolID == nil {
+		log.SchoolID = schoolIDForLog(r.db, *log.UserID)
+	}
 	return r.db.Create(log).Error
+}
+
+// schoolIDForLog は利用者の所属校を返す。引けないときは nil を返し、利用ログの記録は止めない。
+func schoolIDForLog(db *gorm.DB, userID uint) *uint {
+	var row struct{ SchoolID *uint }
+	if err := db.Model(&models.User{}).Select("school_id").Where("id = ?", userID).Take(&row).Error; err != nil {
+		return nil
+	}
+	return row.SchoolID
 }
 
 type DailyCostRow struct {
