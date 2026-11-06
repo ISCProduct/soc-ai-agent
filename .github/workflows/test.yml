@@ -76,10 +76,18 @@ jobs:
       # GO-2026-6610〜6617 の fixed は 1.26.9 / 1.27.2 で、1.25 系には入らない。
       # 1.26.9 の crypto/x509 は GO-2026-6809 が残り、fixed は 1.26.10。
       # Go を動かすときはここの対応バージョンも合わせて見直すこと。
+      #
+      # 修正版のない脆弱性は .github/govulncheck-allowlist.json に理由と期限を付けて載せる。
+      # 期限切れ、修正版の公開、前提の機能の使用のどれかに当たると失敗する。
+      # 対象は Backend だけ。Go モジュールを増やすときは govulncheck と --source-root の両方に足す。
       - name: Security scan (govulncheck)
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
-          govulncheck ./...
+          govulncheck -format json ./... > "$RUNNER_TEMP/govulncheck.json"
+          python3 ../.github/scripts/govulncheck_filter.py \
+            --report "$RUNNER_TEMP/govulncheck.json" \
+            --allowlist ../.github/govulncheck-allowlist.json \
+            --source-root .
 
   # 旧 audit-frontend (npm audit) の置き換え (#1132)。
   #
@@ -112,6 +120,10 @@ jobs:
       # 以前はこの検証を上のステップのコメントだけが約束していて、実体が無かった。
       - name: ワークフロー埋め込み Python の構文検査
         run: ./automation/test/workflow-embedded-python-test.sh
+
+      # govulncheck の例外判定。例外が広がると本物の脆弱性を見逃したまま CI が通る。
+      - name: govulncheck の例外判定
+        run: ./automation/test/govulncheck-filter-test.sh
 
       # 版番号の比較対象。checkout の既定は fetch-depth=1 で origin/develop を
       # 持たないため、ここで取得する。

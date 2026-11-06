@@ -1,6 +1,10 @@
 package company
 
-import "testing"
+import (
+	"testing"
+
+	"Backend/internal/models"
+)
 
 func TestFirstNonEmpty(t *testing.T) {
 	tests := []struct {
@@ -62,18 +66,20 @@ func TestMergeCompanyInfoGaps(t *testing.T) {
 				FoundedYear: 0,
 			},
 			ai: &CompanyInfoResult{
-				Description:  "AI概要",
-				Industry:     "IT",
-				Location:     "大阪",
-				FoundedYear:  1990,
-				MainBusiness: "ソフトウェア開発",
+				Description:   "AI概要",
+				Industry:      "IT",
+				Location:      "大阪",
+				FoundedYear:   1990,
+				MainBusiness:  "ソフトウェア開発",
+				PromptVersion: "v2",
 			},
 			want: &CompanyInfoResult{
-				Description:  "既存概要",
-				Industry:     "IT",
-				Location:     "東京",
-				FoundedYear:  1990,
-				MainBusiness: "ソフトウェア開発",
+				Description:   "既存概要",
+				Industry:      "IT",
+				Location:      "東京",
+				FoundedYear:   1990,
+				MainBusiness:  "ソフトウェア開発",
+				PromptVersion: "v2",
 			},
 		},
 		{
@@ -103,6 +109,7 @@ func TestMergeCompanyInfoGaps(t *testing.T) {
 				WorkStyle:      "リモート",
 				TechStack:      "Go",
 				WelfareDetails: "住宅手当",
+				PromptVersion:  "v2",
 			},
 			want: &CompanyInfoResult{
 				Description:        "AI概要",
@@ -117,6 +124,7 @@ func TestMergeCompanyInfoGaps(t *testing.T) {
 				WorkStyle:          "リモート",
 				TechStack:          "Go",
 				WelfareDetails:     "住宅手当",
+				PromptVersion:      "v2",
 			},
 		},
 		{
@@ -171,5 +179,21 @@ func assertCompanyInfoResult(t *testing.T, got, want *CompanyInfoResult) {
 	}
 	if got.WelfareDetails != want.WelfareDetails {
 		t.Errorf("WelfareDetails = %q, want %q", got.WelfareDetails, want.WelfareDetails)
+	}
+	if got.PromptVersion != want.PromptVersion {
+		t.Errorf("PromptVersion = %q, want %q", got.PromptVersion, want.PromptVersion)
+	}
+}
+
+func TestApplyCompanyInfoResult_StoresPromptVersionOnlyWhenAILogged(t *testing.T) {
+	company := &models.Company{InfoPromptVersion: "v1"}
+	applyCompanyInfoResult(company, &CompanyInfoResult{PromptVersion: "v2"})
+	if company.InfoPromptVersion != "v2" {
+		t.Fatalf("InfoPromptVersion = %q, want v2", company.InfoPromptVersion)
+	}
+
+	applyCompanyInfoResult(company, &CompanyInfoResult{})
+	if company.InfoPromptVersion != "v2" {
+		t.Fatalf("non-AI result cleared InfoPromptVersion: %q", company.InfoPromptVersion)
 	}
 }

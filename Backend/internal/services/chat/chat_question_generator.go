@@ -78,6 +78,8 @@ var phaseCategories = map[string][]string{
 }
 
 func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, targetLevel string, currentPhase *entity.UserAnalysisProgress) (string, uint, string, error) {
+	ctx, resolvedVersion := prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration)
+
 	// 狙った軸は呼び出し元に返す。ここはフェーズで絞った allowedCategories から
 	// 選ぶので、呼び出し元が allCategories から決めた軸とは一致しないことがある。
 	// 採点側が質問文から軸を推測し直すと、キーワードに当たらない質問が既定の
@@ -264,6 +266,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	questionText = strings.TrimSpace(questionText)
 	questionText = strings.Trim(questionText, `"「」`)
 
+	promptVersion := resolvedVersion
 	// フォールバック: AIが空を返した場合は簡易質問を使用する
 	if questionText == "" {
 		fallbackQuestion := s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
@@ -272,6 +275,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		} else {
 			questionText = "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
 		}
+		promptVersion = ""
 	}
 
 	// 選択肢必須フェーズで選択肢がない場合は再生成
@@ -373,13 +377,14 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	}
 
 	aiGenQuestion := &models.AIGeneratedQuestion{
-		UserID:       userID,
-		SessionID:    sessionID,
-		TemplateID:   nil, // AI生成の場合はNULL
-		QuestionText: questionText,
-		Weight:       7, // 戦略的質問は重み高め
-		IsAnswered:   false,
-		ContextData:  fmt.Sprintf(`{"target_category": "%s", "purpose": "%s"}`, targetCategory, questionPurpose),
+		UserID:        userID,
+		SessionID:     sessionID,
+		TemplateID:    nil, // AI生成の場合はNULL
+		QuestionText:  questionText,
+		Weight:        7, // 戦略的質問は重み高め
+		IsAnswered:    false,
+		PromptVersion: promptVersion,
+		ContextData:   fmt.Sprintf(`{"target_category": "%s", "purpose": "%s"}`, targetCategory, questionPurpose),
 	}
 
 	if err := s.aiGeneratedQuestionRepo.Create(aiGenQuestion); err != nil {
