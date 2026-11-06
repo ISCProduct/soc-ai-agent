@@ -15,6 +15,11 @@ name: Backlog と GitHub のズレ検知
 on:
   schedule:
     # 10:10 JST（01:10 UTC）平日。期限リマインド(9:30 JST)の後に出す。
+    #
+    # schedule は**既定ブランチ(main)の最新コミット**でしか発火しない。
+    # このファイルが main へ届くまで定期実行は始まらない（develop に居る間は
+    # workflow_dispatch で動かす）。このリポジトリの cron を持つワークフローは
+    # すべて main にある。
     - cron: '10 1 * * 1-5'
   workflow_dispatch:
     inputs:

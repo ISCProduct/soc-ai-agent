@@ -772,6 +772,9 @@ go run ./cmd/aibench -target chat-answer -manifest ../docs/research/ai-eval/chat
 | `item_missing_fields` | quote / message / suggestion のいずれかが空 |
 | `severity_invalid` | severity が info / warning / critical 以外 |
 | `quote_not_in_text` | **quote が本文に存在しない（捏造）**。空白と改行の差は無視して照合する |
+| `rewrite_missing` | rewrite（原文をそのまま置き換える一文）が空。ただし認識スコアが `OCRRewriteMinConfidence`（0.6）未満の行は空が正しいので数えない（#1942） |
+| `rewrite_same_as_quote` | rewrite が quote と同じ（空白と改行の差は無視）。置き換えになっていない |
+| `rewrite_on_low_confidence` | マニフェストの `ocr_line_confidence` が 0.6 未満の行に対して rewrite を返した。その行の一部だけを含む複数行の引用も数える。誤認識を根拠にした言い換え |
 
 **`interview-report`**
 

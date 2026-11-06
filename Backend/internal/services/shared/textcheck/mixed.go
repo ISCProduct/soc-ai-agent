@@ -227,6 +227,8 @@ func (r MixedStyle) Check(text string) []Finding {
 	depth := 0 // 「」『』の入れ子の深さ。引用の中の文末は、引用を含む文の一部として扱う
 	for i, c := range rs {
 		switch c {
+		case '\n':
+			depth = 0 // 閉じ忘れた引用を次の行に持ち越さない（#1965 のレビュー）
 		case '「', '『':
 			depth++
 		case '」', '』':

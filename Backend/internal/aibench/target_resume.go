@@ -41,12 +41,13 @@ func (t *resumeTarget) Endpoint() string { return "openai:/responses" }
 // 通し、本文の1文字を引いた実測値**で、#1584 でルーブリックに 0〜5 のレベル定義を足して
 // 1153 → 2384 に増えた（約2.1倍）。
 // #1600 で応募情報とOCR本文をノンス付き区切りで囲んだ分（宣言文2つ）がさらに乗り、
-// 実測 2685 になった。本文を空にして測ると WrapUntrustedText が空を返して
+// 実測 2685 になった。#1942 で rewrite の契約と出力例を足して実測 2829 になった。
+// 本文を空にして測ると WrapUntrustedText が空を返して
 // 宣言文が乗らず、約136トークン過小になる（#1644）。
 //
 // ここを更新し忘れると事前の概算コストが過小になり、-yes を付けずに回したときの
 // 確認画面が実費と合わなくなる。TestResumePromptOverheadTokens_MatchesPrompt が検出する。
-const resumePromptOverheadTokens = 2685
+const resumePromptOverheadTokens = 2829
 
 func (t *resumeTarget) EstimateTokens(c Case) (int, int) {
 	// 出力は max_output_tokens を上限とする。
@@ -54,7 +55,7 @@ func (t *resumeTarget) EstimateTokens(c Case) (int, int) {
 }
 
 func (t *resumeTarget) Run(ctx context.Context, c Case) Observation {
-	prompt := resume.BuildReviewPromptFromText(c.Input.ResumeText, c.Input.CompanyName, c.Input.JobTitle, "", c.Input.CandidateType)
+	prompt := resume.BuildReviewPromptFromTextWithConfidence(c.Input.ResumeText, c.Input.OCRLineConfidence, c.Input.CompanyName, c.Input.JobTitle, "", c.Input.CandidateType)
 	// 本番は JSON mode で呼ぶ（#1583）ので、ハーネスも true で揃える。
 	res := CallResponses(ctx, t.model, resume.ReviewSystemPrompt, prompt, resume.ReviewTemperature, resume.ReviewMaxOutputTokens, true)
 	return evaluateResumeResponse(newObservation(c), c, res)
@@ -79,7 +80,10 @@ type resumeReviewItem struct {
 	Quote      string `json:"quote"`
 	Message    string `json:"message"`
 	Suggestion string `json:"suggestion"`
-	Severity   string `json:"severity"`
+	// Rewrite は quote をそのまま置き換える一文（#1942）。空は欠落として数える。
+	// 低信頼行では空が正しく、文が入っている方が違反。
+	Rewrite  string `json:"rewrite"`
+	Severity string `json:"severity"`
 }
 
 var resumeSeverities = []string{"info", "warning", "critical"}
@@ -147,6 +151,7 @@ func evaluateResumeResponse(o Observation, c Case, res CallResult) Observation {
 	// 本文に無い引用は位置合わせに失敗し、指摘そのものが学生に届かない。
 	source := normalizeForQuote(c.Input.ResumeText)
 	fabricated, missingFields, badSeverity := 0, 0, 0
+	missingRewrite, lowRewrite, sameRewrite := 0, 0, 0
 	for _, it := range resp.Items {
 		if strings.TrimSpace(it.Quote) == "" || strings.TrimSpace(it.Message) == "" || strings.TrimSpace(it.Suggestion) == "" {
 			missingFields++
@@ -157,6 +162,18 @@ func evaluateResumeResponse(o Observation, c Case, res CallResult) Observation {
 		}
 		if !strings.Contains(source, normalizeForQuote(it.Quote)) {
 			fabricated++
+		}
+		// 低信頼行への書き換えは、本文に引用が無くても別に数える。
+		// プロンプトは「空文字にせよ」と要求しており、捏造とは直し方が違う。
+		rewrite := strings.TrimSpace(it.Rewrite)
+		low := quoteOnLowConfidenceLine(it.Quote, c.Input.ResumeText, c.Input.OCRLineConfidence)
+		switch {
+		case rewrite == "" && !low:
+			missingRewrite++
+		case rewrite != "" && low:
+			lowRewrite++
+		case rewrite != "" && normalizeForQuote(rewrite) == normalizeForQuote(it.Quote):
+			sameRewrite++
 		}
 	}
 	// 違反名に件数を埋め込まないこと。集計側（ViolationCounts）でキーが
@@ -170,5 +187,108 @@ func evaluateResumeResponse(o Observation, c Case, res CallResult) Observation {
 	if fabricated > 0 {
 		o.Violations = append(o.Violations, "quote_not_in_text")
 	}
+	if missingRewrite > 0 {
+		o.Violations = append(o.Violations, "rewrite_missing")
+	}
+	if lowRewrite > 0 {
+		o.Violations = append(o.Violations, "rewrite_on_low_confidence")
+	}
+	if sameRewrite > 0 {
+		o.Violations = append(o.Violations, "rewrite_same_as_quote")
+	}
 	return o
+}
+
+// quoteOnLowConfidenceLine は、引用が認識スコア下限未満の行に当たるかを返す。
+//
+// スコアが無い・範囲外の行は不明なので当たらない（本番が書き換えを禁止しないのと同じ）。
+// 行が引用を含む、または6文字以上の行が引用に含まれるとき当たったとみなす。
+// 短い行の包含は表の見出しが長い引用に偶然入るのを避けるため見ない。
+// 引用が複数行にまたがり、低信頼行の一部だけを含む場合も当たったとみなす。
+// 行全体の包含だけだと、隣の誤読を少しだけ取り込んだ引用を見逃す。
+func quoteOnLowConfidenceLine(quote, resumeText string, confidence []float64) bool {
+	if len(confidence) == 0 {
+		return false
+	}
+	normQuote := normalizeForQuote(quote)
+	if normQuote == "" {
+		return false
+	}
+	type row struct {
+		norm string
+		low  bool
+	}
+	var rows []row
+	i := 0
+	for _, line := range strings.Split(resumeText, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var score float64
+		known := false
+		if i < len(confidence) {
+			score = confidence[i]
+			known = score >= 0 && score <= 1
+		}
+		i++
+		normLine := normalizeForQuote(line)
+		low := known && score < resume.OCRRewriteMinConfidence
+		rows = append(rows, row{norm: normLine, low: low})
+		if !low || normLine == "" {
+			continue
+		}
+		if strings.Contains(normLine, normQuote) {
+			return true
+		}
+		if len([]rune(normLine)) >= 6 && strings.Contains(normQuote, normLine) {
+			return true
+		}
+	}
+	// 本番の照合窓と同じく、連続する最大4行を見る。
+	for size := 2; size <= 4; size++ {
+		for start := 0; start+size <= len(rows); start++ {
+			var b strings.Builder
+			low := false
+			for _, row := range rows[start : start+size] {
+				b.WriteString(row.norm)
+				if row.low {
+					low = true
+				}
+			}
+			if !low {
+				continue
+			}
+			joined := b.String()
+			if joined == "" || (!strings.Contains(joined, normQuote) && !strings.Contains(normQuote, joined)) {
+				continue
+			}
+			for _, row := range rows[start : start+size] {
+				if row.low && lineTouchesQuote(normQuote, row.norm) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// lineTouchesQuote は、低信頼行の6文字以上が引用に入っているかを返す。
+// 行全体が引用に含まれない折り返しでも、誤読部分を拾う。
+func lineTouchesQuote(normQuote, normLine string) bool {
+	if normLine == "" {
+		return false
+	}
+	if strings.Contains(normQuote, normLine) || strings.Contains(normLine, normQuote) {
+		return true
+	}
+	runes := []rune(normLine)
+	if len(runes) < 6 {
+		return false
+	}
+	for i := 0; i+6 <= len(runes); i++ {
+		if strings.Contains(normQuote, string(runes[i:i+6])) {
+			return true
+		}
+	}
+	return false
 }

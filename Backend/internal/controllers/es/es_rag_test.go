@@ -1,17 +1,42 @@
 package es
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"Backend/internal/controllers/httpapi"
+	"Backend/internal/middleware"
 	"Backend/internal/openai"
 	"Backend/internal/usagectx"
 
 	"github.com/labstack/echo/v4"
 )
+
+func TestESReviewRequestError_Deadline(t *testing.T) {
+	err := esReviewRequestError(errors.Join(errors.New("request failed"), context.DeadlineExceeded))
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("error type = %T, want *echo.HTTPError", err)
+	}
+	if httpErr.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want %d", httpErr.Code, http.StatusGatewayTimeout)
+	}
+	resp, ok := httpErr.Message.(middleware.APIError)
+	if !ok {
+		t.Fatalf("message type = %T, want middleware.APIError", httpErr.Message)
+	}
+	if resp.Code != httpapi.ErrCodeGatewayTimeout {
+		t.Fatalf("code = %q, want %q", resp.Code, httpapi.ErrCodeGatewayTimeout)
+	}
+	if got, want := resp.Msg, "ES添削に時間がかかっています。時間をおいて再度お試しください。"; got != want {
+		t.Fatalf("message = %q, want %q", got, want)
+	}
+}
 
 // ragStub は RAG の /es/review を模す。受け取ったリクエスト本文を記録する。
 func ragStub(t *testing.T, status int, body string, gotBody *map[string]any) *httptest.Server {

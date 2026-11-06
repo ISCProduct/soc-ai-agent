@@ -49,6 +49,7 @@ func DefaultRules(charLimit int, mode string) []Rule {
 		MixedNumeral{},
 		MixedEra{},
 		MixedStyle{},
+		SpokenLanguage{},
 		DateOrder{},
 		CharLimit{Limit: charLimit, Mode: mode},
 	}

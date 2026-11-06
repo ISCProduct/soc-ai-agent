@@ -10,7 +10,10 @@ import (
 	"log"
 	"math"
 	"strings"
+	"time"
 )
+
+const analysisSummaryLLMTimeout = 60 * time.Second
 
 type AnalysisScores struct {
 	JobScore      float64 `json:"job_score"`
@@ -58,6 +61,22 @@ type LLMStructuredSummary struct {
 	Strengths               []string `json:"strengths"`
 	Concerns                []string `json:"concerns"`
 	RecommendedWorkingStyle string   `json:"recommended_working_style"`
+}
+
+func analysisSummaryResponseSchema() *openai.ResponseSchema {
+	return &openai.ResponseSchema{
+		Name: "analysis_summary",
+		Schema: json.RawMessage(`{
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["strengths", "concerns", "recommended_working_style"],
+			"properties": {
+				"strengths": {"type": "array", "items": {"type": "string"}},
+				"concerns": {"type": "array", "items": {"type": "string"}},
+				"recommended_working_style": {"type": "string"}
+			}
+		}`),
+	}
 }
 
 type AnalysisSummary struct {
@@ -165,7 +184,6 @@ func NewAnalysisScoringService(
 }
 
 func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userID uint, sessionID string) (*AnalysisSummary, error) {
-	_ = ctx
 	jobScore, err := s.calculateJobScore(userID, sessionID)
 	if err != nil {
 		return nil, err
@@ -226,8 +244,12 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 日本語で簡潔に記述してください。`
 			userPrompt := "解析メタ情報: " + string(contextBytes) + "\n\n直近のユーザーメッセージ:\n" + userContext
 
-			aiCtx := usagectx.WithFeature(context.Background(), usagectx.FeatureAnalysisScoring)
-			raw, err := s.aiClient.ChatCompletionJSON(aiCtx, systemPrompt, userPrompt, 0.2, 400)
+			// リクエストの ctx を引き継ぐ。誰も受け取らない要約に課金しないよう、クライアントが
+			// 切断したら LLM 呼び出しも止める。その場合 LLM 要約なしで返り、保存もしないので、
+			// 次回のリクエストで生成し直される。
+			aiCtx, cancel := context.WithTimeout(usagectx.WithFeature(ctx, usagectx.FeatureAnalysisScoring), analysisSummaryLLMTimeout)
+			raw, err := s.aiClient.ChatCompletionWithSchema(aiCtx, systemPrompt, userPrompt, 0.2, 400, analysisSummaryResponseSchema())
+			cancel()
 			if err == nil && strings.TrimSpace(raw) != "" {
 				// パースを試みる
 				var parsed LLMStructuredSummary

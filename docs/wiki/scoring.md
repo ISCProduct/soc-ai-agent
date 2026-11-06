@@ -245,7 +245,7 @@ PRD でも「初期データ投入作業自体はスコープ外」としてい�
 チャット由来の行（`source='chat'`）には触らない。検査は専用の `session_id`（`assessment:<uuid>`）に書き、
 マッチングは「最新のチャット診断」と「最新の**標準**検査」を明示的に合成する（同じ session_id に混ぜると後勝ちで値が不定になるため）。
 
-- 合成比率は暫定で chat : assessment = 0.5 : 0.5。根拠は無い。選考通過率との相関を見て調整する
+- 合成比率は暫定で chat : assessment = 0.5 : 0.5。根拠となる較正は未実施で、現行の相関・較正APIも比率を評価できない。変更には応募時点のスコア記録と検証済みの較正が必要（[調査・手順](./score-calibration.md)）
 - 片方しか無いときはそのまま使う（欠損カテゴリを0で埋めない。埋めると未受検者の全スコアが半分になる）
 - `ASSESSMENT_SCORE_MERGE=false` で合流だけ止められる（検査の受検・結果表示は使える）
 - **学校独自テンプレートはマッチングに使わない。** 提出しても `user_weight_scores` へは書かず（結果は `assessment_results` にだけ残る）、
@@ -736,33 +736,11 @@ cd Backend && go test ./internal/services/flywheel/ -run DryRun -v
 
 ## 7. スコア精度検証・キャリブレーション（#203）
 
-実際の選考通過率とスコアの相関を分析し、スコアの重み係数を調整します。
+現行の検証APIは調査用の集計であり、スコアの妥当性や較正済み重みを示しません。データ要件・現状の判定・較正手順は[スコアキャリブレーション調査・手順](./score-calibration.md)を参照してください。
 
-### 相関分析
+### 現行APIの注意
 
-```
-GET /api/admin/score-validation/correlation
-```
-
-10 カテゴリそれぞれについて、スコアバンド（0-20, 21-40, 41-60, 61-80, 81-100）ごとの選考通過率を集計します。
-
-### A/Bテスト
-
-```
-POST /api/admin/score-validation/variants
-```
-
-異なるスコア計算ロジックを A/B テストして有効性を検証します。
-
-### キャリブレーション実行
-
-```
-POST /api/admin/score-validation/calibration/run
-```
-
-通過率との相関が低いカテゴリの重み係数（`ScoreCalibrationWeight`）を自動調整します。
-
-詳細は [スコアキャリブレーション手順書](./score-calibration.md) を参照してください。
+`GET /api/admin/score-validation/correlation` はユーザーIDだけでスコアと応募結果を結合するため、応募時点のスコアと結果の対応を保証しません。`POST /api/admin/score-validation/calibration/run` が保存する値も通過率比とその近似であり、実測相関・検証済みの重みではありません。データの時点対応と妥当性が確認されるまで、このAPIを較正や本番係数の変更に使わないでください。
 
 ---
 
@@ -888,6 +866,27 @@ summary / strengths / improvements はスコアと独立して有用なので届
 - `EvidenceMatchThreshold` 未満の項目を未照合とする
 
 **照合はローカル計算だけで行う。LLM を再度呼ばない**（追加コスト0、レイテンシ数十ms）。
+
+#### 根拠と発話の紐づけ（#1775）
+
+学生向けの `evidence` は、項目ごとに引用元の発話IDも検証して保存する。
+
+| 項目 | 内容 |
+| --- | --- |
+| LLM の出力 | `evidence_utterance_ids`（評価項目 → 発話ID または `null`） |
+| 検証 | `ValidateEvidenceReferences`。指定IDの `role=user` の発話1件に絞って `ValidateEvidence` と同じ照合を行う |
+| 保存先 | `interview_reports.evidence_utterance_ids_json` |
+| API | レポートの `evidence_utterance_ids_json`（評価項目 → 発話ID の JSON 文字列 または `null`） |
+
+- 範囲外のID、面接官のID、照合できない引用は、その項目の根拠とIDを捨てる
+- 引用が空なのにIDがある項目も未照合として扱う
+- 教員向けの `teacher.detailed_evidence` は発話IDを持たず、従来どおり受験者の全発話と照合する
+- 照合できたIDが1件も無いときは `NULL` を保存する。MySQL の JSON カラムは strict モードで空文字を保存できない
+- 新カラムが `NULL` の旧レポートには「発言を見る」を出さず、従来の表示にする
+
+**照合の精度は下の表と同じで、一字一句の一致は保証しない。** 言い換えも通るので、
+画面の引用が発話の文字列と完全に同じとは限らない。内容語が重なる別の発話IDも、
+未発話の数値を含まなければ通ることがある。正確な引用はプロンプトで要求している。
 
 #### なぜ内容語だけで照合するか（#1566）
 
@@ -1380,5 +1379,5 @@ JSON mode を入れて指示遵守率は0%→100%、破損率は0%のまま。
 ## 関連ドキュメント
 
 - [AIフライホイール設計](./flywheel.md) — フライホイール全体設計
-- [スコアキャリブレーション](./score-calibration.md) — キャリブレーション実施手順
+- [スコアキャリブレーション](./score-calibration.md) — データ要件・現状判定（現状は較正不可）
 - [システム概要](./overview.md) — アーキテクチャ全体
