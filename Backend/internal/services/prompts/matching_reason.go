@@ -1,9 +1,5 @@
 package prompts
 
-// MatchingReasonPromptVersion は後方互換のための固定バージョン定数です。
-// 新規コードでは GetMatchingReasonPromptVersion() を使用してください。
-const MatchingReasonPromptVersion = "matching_reason_v2"
-
 // GetMatchingReasonPromptVersion はマッチング理由工程の版を返す。
 func GetMatchingReasonPromptVersion() string {
 	version := ResolvePromptVersion(StageMatchingReason)

@@ -803,6 +803,8 @@ func applyCompanyInfoResult(company *models.Company, result *CompanyInfoResult) 
 	if result.WelfareDetails != "" {
 		company.WelfareDetails = result.WelfareDetails
 	}
+	// AI が本文を作ったときだけ版を更新する。gBiz だけの再取得では前回 AI が作った本文が
+	// 残るので、last_model_used が変わっても、残っている本文の版を消さない。
 	if result.PromptVersion != "" {
 		company.InfoPromptVersion = result.PromptVersion
 	}

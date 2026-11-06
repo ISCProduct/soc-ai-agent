@@ -337,6 +337,8 @@ ORDER BY prompt_stage, prompt_version;
 A/B振り分けは未対応である。
 `prompt_stage='unknown'` は工程メタデータが付与されていない呼び出しを表す。
 
+prod のデプロイはイメージを差し替えるだけなので、`PROMPT_VERSION` と工程別ラベルをタスク定義へ入れるには `terraform apply` が必要。
+
 詳細は [プロンプト版の記録](./prompt-versioning.md) を参照。
 
 ### APIコスト監視

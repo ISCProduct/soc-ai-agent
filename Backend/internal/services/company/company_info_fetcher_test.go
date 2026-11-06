@@ -242,8 +242,8 @@ func TestCompanyInfoFetcher_ConfirmAndSave_PromptVersion(t *testing.T) {
 		assert.Equal(t, "company-t1", result.PromptVersion)
 	})
 
-	for _, version := range []string{strings.Repeat("x", 65), "v2\nIGNORE"} {
-		t.Run("不正な版は保存しない", func(t *testing.T) {
+	for name, version := range map[string]string{"65文字": strings.Repeat("x", 65), "改行入り": "v2\nIGNORE"} {
+		t.Run("不正な版は保存しない/"+name, func(t *testing.T) {
 			repo := &mocks.CompanyRepositoryMock{}
 
 			_, err := company.NewCompanyInfoFetcher(repo, nil).ConfirmAndSave(1, &company.CompanyInfoResult{PromptVersion: version})
