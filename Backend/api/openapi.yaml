@@ -3728,7 +3728,9 @@ paths:
     get:
       tags: [admin-score]
       summary: ユーザースコア再計算の見積もり
-      description: 旧計算版の件数と、保守的なAI費用概算を返す。
+      description: |
+        旧計算版の件数と、保守的なAI費用概算を返す。
+        実行中または一時停止中のジョブがあれば active_job に入れて返す（無ければ null）。
       security: [{ adminAuth: [] }]
       responses:
         "200":
@@ -3826,6 +3828,28 @@ paths:
         "403": { $ref: "#/components/responses/PlatformAdminOnly" }
         "409":
           description: ジョブが一時停止中ではない
+
+  /api/admin/user-score-recalculation/jobs/{job_id}/cancel:
+    post:
+      tags: [admin-score]
+      summary: 一時停止中のユーザースコア再計算を中止する
+      description: 再計算済みのセッションは元に戻らない。未処理のセッションは次のジョブの対象になる。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 中止後のジョブ
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "404":
+          description: ジョブが存在しない
+        "409":
+          description: ジョブが一時停止中ではない、または実行中のバッチが残っている
 
   /api/admin/costs/summary:
     get:

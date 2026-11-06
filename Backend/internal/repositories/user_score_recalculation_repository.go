@@ -7,12 +7,16 @@ import (
 
 	"Backend/internal/models"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 var ErrUserScoreRecalculationRunning = errors.New("user score recalculation job is already running")
 var ErrUserScoreRecalculationBatchBusy = errors.New("user score recalculation batch is already running")
+var ErrUserScoreRecalculationStatusChanged = errors.New("user score recalculation job status changed before update")
+
+const mysqlDuplicateEntry = 1062
 
 type UserScoreRecalculationRepository struct {
 	db *gorm.DB
@@ -22,19 +26,15 @@ func NewUserScoreRecalculationRepository(db *gorm.DB) *UserScoreRecalculationRep
 	return &UserScoreRecalculationRepository{db: db}
 }
 
+// Create はジョブを作成する。実行中・一時停止中のジョブは active_slot の一意制約で
+// 1件に制限される。COUNT してから作る方式と違い、同時リクエストでも2件にならない。
 func (r *UserScoreRecalculationRepository) Create(job *models.UserScoreRecalculationJob) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		var active int64
-		if err := tx.Model(&models.UserScoreRecalculationJob{}).
-			Where("status IN ?", []string{models.UserScoreRecalculationJobRunning, models.UserScoreRecalculationJobPaused}).
-			Count(&active).Error; err != nil {
-			return err
-		}
-		if active > 0 {
-			return ErrUserScoreRecalculationRunning
-		}
-		return tx.Create(job).Error
-	})
+	err := r.db.Create(job).Error
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == mysqlDuplicateEntry {
+		return ErrUserScoreRecalculationRunning
+	}
+	return err
 }
 
 func (r *UserScoreRecalculationRepository) FindByID(id uint) (*models.UserScoreRecalculationJob, error) {
@@ -45,40 +45,56 @@ func (r *UserScoreRecalculationRepository) FindByID(id uint) (*models.UserScoreR
 	return &job, nil
 }
 
+// FindActive は実行中または一時停止中のジョブを返す。無ければ nil。
+func (r *UserScoreRecalculationRepository) FindActive() (*models.UserScoreRecalculationJob, error) {
+	var jobs []models.UserScoreRecalculationJob
+	if err := r.db.
+		Where("status IN ?", []string{models.UserScoreRecalculationJobRunning, models.UserScoreRecalculationJobPaused}).
+		Limit(1).
+		Find(&jobs).Error; err != nil {
+		return nil, err
+	}
+	if len(jobs) == 0 {
+		return nil, nil
+	}
+	return &jobs[0], nil
+}
+
 func (r *UserScoreRecalculationRepository) UpdateStatus(id uint, status string) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		expectedStatus := models.UserScoreRecalculationJobRunning
-		if status == models.UserScoreRecalculationJobRunning {
-			expectedStatus = models.UserScoreRecalculationJobPaused
-		} else if status != models.UserScoreRecalculationJobPaused {
-			return fmt.Errorf("unsupported recalculation job status %q", status)
-		}
-		if status == models.UserScoreRecalculationJobRunning {
-			var active int64
-			if err := tx.Model(&models.UserScoreRecalculationJob{}).
-				Where("status = ? AND id <> ?", models.UserScoreRecalculationJobRunning, id).
-				Count(&active).Error; err != nil {
-				return err
-			}
-			if active > 0 {
-				return ErrUserScoreRecalculationRunning
-			}
-		}
-		result := tx.Model(&models.UserScoreRecalculationJob{}).
-			Where("id = ? AND status = ?", id, expectedStatus).
-			Updates(map[string]any{"status": status, "updated_at": time.Now()})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			var current models.UserScoreRecalculationJob
-			if err := tx.First(&current, id).Error; err != nil {
-				return err
-			}
-			return fmt.Errorf("recalculation job %d changed status before update", id)
-		}
-		return nil
-	})
+	expectedStatus := models.UserScoreRecalculationJobRunning
+	if status == models.UserScoreRecalculationJobRunning {
+		expectedStatus = models.UserScoreRecalculationJobPaused
+	} else if status != models.UserScoreRecalculationJobPaused {
+		return fmt.Errorf("unsupported recalculation job status %q", status)
+	}
+	result := r.db.Model(&models.UserScoreRecalculationJob{}).
+		Where("id = ? AND status = ?", id, expectedStatus).
+		Updates(map[string]any{"status": status, "updated_at": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserScoreRecalculationStatusChanged
+	}
+	return nil
+}
+
+// Cancel は一時停止中のジョブを中止する。実行中のバッチが残っている間は中止しない。
+// 中止すると次のジョブを作れるので、古いバッチと新しいジョブが同じセッションを
+// 同時に書き換えないようにするため。
+func (r *UserScoreRecalculationRepository) Cancel(id uint) error {
+	now := time.Now()
+	result := r.db.Model(&models.UserScoreRecalculationJob{}).
+		Where("id = ? AND status = ? AND (batch_lease_until IS NULL OR batch_lease_until < ?)",
+			id, models.UserScoreRecalculationJobPaused, now).
+		Updates(map[string]any{"status": models.UserScoreRecalculationJobCancelled, "updated_at": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserScoreRecalculationStatusChanged
+	}
+	return nil
 }
 
 func (r *UserScoreRecalculationRepository) ClaimBatch(id uint) (string, error) {
@@ -115,15 +131,16 @@ func (r *UserScoreRecalculationRepository) ReleaseBatch(id uint, token string) e
 		Error
 }
 
-func (r *UserScoreRecalculationRepository) Advance(id, cursor uint, token string, failed bool, failure error) error {
+// Advance は1セッション分の進捗を保存する。failure は失敗の分類で、成功なら空。
+func (r *UserScoreRecalculationRepository) Advance(id, cursor uint, token, failure string) error {
 	updates := map[string]any{
 		"cursor_score_id":    cursor,
 		"processed_sessions": gorm.Expr("processed_sessions + 1"),
 		"updated_at":         time.Now(),
 	}
-	if failed {
+	if failure != "" {
 		updates["failed_sessions"] = gorm.Expr("failed_sessions + 1")
-		updates["last_error"] = failure.Error()
+		updates["last_error"] = failure
 	}
 	result := r.db.Model(&models.UserScoreRecalculationJob{}).
 		Where("id = ? AND batch_lease_token = ?", id, token).
@@ -153,7 +170,9 @@ func (r *UserScoreRecalculationRepository) CompleteIfFinished(id uint, finished 
 			return err
 		}
 		switch job.Status {
-		case models.UserScoreRecalculationJobCompleted, models.UserScoreRecalculationJobPaused:
+		case models.UserScoreRecalculationJobCompleted,
+			models.UserScoreRecalculationJobPaused,
+			models.UserScoreRecalculationJobCancelled:
 			return nil
 		default:
 			return fmt.Errorf("job %d is not running", id)

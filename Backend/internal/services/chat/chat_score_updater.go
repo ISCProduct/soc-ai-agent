@@ -13,6 +13,33 @@ import (
 	"gorm.io/gorm"
 )
 
+// scoreAnswer は回答を選択肢と文章に振り分けて採点し、スコアを更新する。
+// 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
+func (s *ChatService) scoreAnswer(ctx context.Context, userID uint, sessionID, answer string, jobCategoryID uint, history []models.ChatMessage) bool {
+	trimmedAnswer := strings.TrimSpace(answer)
+	lastAssistantQuestion := findLastAssistantQuestion(history)
+	resolved := ResolveChoiceAnswer(lastAssistantQuestion, trimmedAnswer)
+	log.Printf("[ProcessChat] Checking answer: raw=%q resolved_choice=%v letter=%q reason=%q free_text=%v\n",
+		trimmedAnswer, resolved.IsChoice, resolved.Letter, resolved.Reason, resolved.IsFreeText)
+	isQualityAnswer := false
+	if resolved.IsChoice && s.isChoiceAnswer(resolved.Letter) {
+		log.Printf("[ProcessChat] Processing as choice answer\n")
+		var err error
+		isQualityAnswer, err = s.processChoiceAnswer(ctx, userID, sessionID, resolved.Letter, resolved.Reason, history, jobCategoryID)
+		if err != nil {
+			log.Printf("Warning: failed to process choice answer: %v\n", err)
+		}
+	} else {
+		log.Printf("[ProcessChat] Processing as text answer\n")
+		var err error
+		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, userID, sessionID, resolved.Text, jobCategoryID, history)
+		if err != nil {
+			log.Printf("Warning: failed to update weights: %v\n", err)
+		}
+	}
+	return isQualityAnswer
+}
+
 // analyzeAndUpdateWeights ユーザーの回答を分析し重み係数を更新する。
 // 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
 //
@@ -211,6 +238,10 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 
 // RecalculateChatSession は保存済みの質問・回答だけからチャットスコアを再構築する。
 // 書き込みは呼び出し側が同一トランザクションで置き換える。
+//
+// ライブ採点（scoreAnswer）とは別の実装なので、同じ入力で同じ値になることを
+// chat_score_recalculation_test.go で突き合わせている。職種の選択状態（jobRoleSet）は
+// 履歴から復元できないので false を渡す。precheckHuman が現状未使用なので値は変わらない。
 func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, sessionID string) (map[string]int, error) {
 	messages, err := s.chatMessageRepo.FindBySessionIDForUser(sessionID, userID)
 	if err != nil {

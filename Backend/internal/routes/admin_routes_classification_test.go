@@ -134,6 +134,7 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"POST /user-score-recalculation/jobs/:job_id/run":    classPlatform,
 		"POST /user-score-recalculation/jobs/:job_id/pause":  classPlatform,
 		"POST /user-score-recalculation/jobs/:job_id/resume": classPlatform,
+		"POST /user-score-recalculation/jobs/:job_id/cancel": classPlatform,
 		"GET /score-validation/correlation":                  classPlatform,
 		"GET /score-validation/phase-metrics":                classPlatform,
 		"GET /score-validation/calibration":                  classPlatform,

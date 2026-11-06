@@ -26,16 +26,37 @@ type Preview = {
   estimated_llm_calls: number
   estimated_cost_usd: number
   cost_estimate_note: string
+  active_job: Job | null
 }
+
+type JobStatus = 'running' | 'paused' | 'completed' | 'cancelled'
 
 type Job = {
   id: number
   calculation_version: string
-  status: 'running' | 'paused' | 'completed'
+  status: JobStatus
   total_sessions: number
   processed_sessions: number
   failed_sessions: number
   estimated_cost_usd: number
+  last_error?: string
+}
+
+const JOB_STATUS_LABELS: Record<JobStatus, string> = {
+  running: '実行中',
+  paused: '一時停止中',
+  completed: '完了',
+  cancelled: '中止',
+}
+
+const FAILURE_LABELS: Record<string, string> = {
+  load_failed: '会話履歴を読み込めませんでした',
+  no_scores: '採点できる回答がありませんでした',
+  save_failed: 'スコアを保存できませんでした',
+}
+
+function isJobStatus(value: unknown): value is JobStatus {
+  return value === 'running' || value === 'paused' || value === 'completed' || value === 'cancelled'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -53,22 +74,33 @@ function parsePreview(value: unknown): Preview | null {
     typeof estimated_cost_usd !== 'number' ||
     typeof cost_estimate_note !== 'string'
   ) return null
-  return { calculation_version, eligible_sessions, unsupported_sessions, estimated_llm_calls, estimated_cost_usd, cost_estimate_note }
+  const active_job = parseJob(value.active_job)
+  if (value.active_job !== null && !active_job) return null
+  return { calculation_version, eligible_sessions, unsupported_sessions, estimated_llm_calls, estimated_cost_usd, cost_estimate_note, active_job }
 }
 
 function parseJob(value: unknown): Job | null {
   if (!isRecord(value)) return null
-  const { id, calculation_version, status, total_sessions, processed_sessions, failed_sessions, estimated_cost_usd } = value
+  const { id, calculation_version, status, total_sessions, processed_sessions, failed_sessions, estimated_cost_usd, last_error } = value
   if (
     typeof id !== 'number' ||
     typeof calculation_version !== 'string' ||
-    (status !== 'running' && status !== 'paused' && status !== 'completed') ||
+    !isJobStatus(status) ||
     typeof total_sessions !== 'number' ||
     typeof processed_sessions !== 'number' ||
     typeof failed_sessions !== 'number' ||
     typeof estimated_cost_usd !== 'number'
   ) return null
-  return { id, calculation_version, status, total_sessions, processed_sessions, failed_sessions, estimated_cost_usd }
+  return {
+    id,
+    calculation_version,
+    status,
+    total_sessions,
+    processed_sessions,
+    failed_sessions,
+    estimated_cost_usd,
+    last_error: typeof last_error === 'string' ? last_error : undefined,
+  }
 }
 
 function errorMessage(value: unknown, fallback: string): string {
@@ -84,6 +116,7 @@ export default function PageContent() {
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const [error, setError] = useState('')
   const stopRequested = useRef(false)
   const activeJobID = useRef<number | null>(null)
@@ -127,12 +160,17 @@ export default function PageContent() {
       if (!newPreview) throw new Error('再計算対象の見積もりを読み取れませんでした')
       setPreview(newPreview)
       const storedID = window.localStorage.getItem('user-score-recalculation-job')
-      if (storedID) {
-        const storedJob = parseJob(await request(`jobs/${encodeURIComponent(storedID)}`))
-        if (storedJob) {
-          setJob(storedJob)
-          if (storedJob.status === 'running') void runBatches(storedJob.id)
+      if (newPreview.active_job) {
+        // 自分が始めたジョブだけ自動で続ける。他の管理者のジョブは、開いただけで
+        // 費用が発生しないように「続行」を押すまで動かさない。
+        setJob(newPreview.active_job)
+        if (newPreview.active_job.status === 'running' && storedID === String(newPreview.active_job.id)) {
+          void runBatches(newPreview.active_job.id)
         }
+      } else if (storedID) {
+        // 進行中のジョブが無ければ、前回のジョブの結果を表示する。
+        const storedJob = parseJob(await request(`jobs/${encodeURIComponent(storedID)}`))
+        if (storedJob) setJob(storedJob)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : '再計算対象を取得できませんでした')
@@ -181,6 +219,25 @@ export default function PageContent() {
       void runBatches(updated.id)
     } catch (e) {
       setError(e instanceof Error ? e.message : '再計算を再開できませんでした')
+    }
+  }
+
+  const continueJob = () => {
+    if (!job) return
+    window.localStorage.setItem('user-score-recalculation-job', String(job.id))
+    void runBatches(job.id)
+  }
+
+  const cancelJob = async () => {
+    setCancelConfirmOpen(false)
+    if (!job) return
+    setError('')
+    try {
+      const updated = parseJob(await request(`jobs/${job.id}/cancel`, 'POST'))
+      if (!updated) throw new Error('中止状態を読み取れませんでした')
+      setJob(updated)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '再計算を中止できませんでした')
     }
   }
 
@@ -233,7 +290,7 @@ export default function PageContent() {
               <Button
                 variant="contained"
                 sx={{ mt: 2 }}
-                disabled={preview.eligible_sessions === 0 || (job?.status === 'running') || processing}
+                disabled={preview.eligible_sessions === 0 || job?.status === 'running' || job?.status === 'paused' || processing}
                 onClick={() => setConfirmOpen(true)}
               >
                 再計算を開始
@@ -243,7 +300,7 @@ export default function PageContent() {
           {job && (
             <Paper variant="outlined" sx={{ p: 2 }}>
               <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1}>
-                <Typography variant="h6">ジョブ #{job.id} — {job.status === 'running' ? '実行中' : job.status === 'paused' ? '一時停止中' : '完了'}</Typography>
+                <Typography variant="h6">ジョブ #{job.id} — {JOB_STATUS_LABELS[job.status]}</Typography>
                 <Typography variant="body2" color="text.secondary">版 {job.calculation_version}</Typography>
               </Stack>
               <LinearProgress variant="determinate" value={progress} sx={{ my: 2 }} />
@@ -251,18 +308,33 @@ export default function PageContent() {
                 {job.processed_sessions} / {job.total_sessions} セッション処理済み
                 {job.failed_sessions > 0 && `（失敗 ${job.failed_sessions} 件）`}
               </Typography>
+              {job.failed_sessions > 0 && job.last_error && (
+                <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+                  直近の失敗: {FAILURE_LABELS[job.last_error] ?? job.last_error}
+                </Typography>
+              )}
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                 費用概算: ${job.estimated_cost_usd.toFixed(4)} USD
               </Typography>
               <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+                {job.status === 'running' && !processing && (
+                  <Button variant="contained" onClick={continueJob}>
+                    続行
+                  </Button>
+                )}
                 {job.status === 'running' && (
-                  <Button variant="outlined" disabled={!processing} onClick={() => void pauseJob()}>
+                  <Button variant="outlined" onClick={() => void pauseJob()}>
                     一時停止
                   </Button>
                 )}
                 {job.status === 'paused' && (
                   <Button variant="contained" disabled={processing} onClick={() => void resumeJob()}>
                     再開
+                  </Button>
+                )}
+                {job.status === 'paused' && (
+                  <Button variant="outlined" color="error" disabled={processing} onClick={() => setCancelConfirmOpen(true)}>
+                    中止
                   </Button>
                 )}
                 {processing && <CircularProgress size={24} aria-label="再計算中" />}
@@ -285,6 +357,18 @@ export default function PageContent() {
         <DialogActions>
           <Button onClick={() => setConfirmOpen(false)}>キャンセル</Button>
           <Button variant="contained" onClick={() => void startJob()}>開始する</Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog open={cancelConfirmOpen} onClose={() => setCancelConfirmOpen(false)}>
+        <DialogTitle>再計算を中止しますか？</DialogTitle>
+        <DialogContent>
+          <Typography>
+            再計算済みのセッションは元に戻りません。未処理のセッションは、次に開始するジョブの対象になります。
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCancelConfirmOpen(false)}>戻る</Button>
+          <Button variant="contained" color="error" onClick={() => void cancelJob()}>中止する</Button>
         </DialogActions>
       </Dialog>
     </PageContainer>

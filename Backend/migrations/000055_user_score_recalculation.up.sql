@@ -21,6 +21,10 @@ CREATE TABLE `user_score_recalculation_jobs` (
   `batch_lease_until` datetime(3) DEFAULT NULL,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
+  -- 実行中・一時停止中だけ 1、それ以外は NULL。一意制約は NULL を重複とみなさないので、
+  -- 進行中のジョブを1件に制限できる（#1770。同時に開始しても LLM 費用が2重にならない）。
+  `active_slot` tinyint GENERATED ALWAYS AS (CASE WHEN `status` IN ('running', 'paused') THEN 1 ELSE NULL END) VIRTUAL,
   PRIMARY KEY (`id`),
-  KEY `idx_user_score_recalculation_jobs_status` (`status`)
+  KEY `idx_user_score_recalculation_jobs_status` (`status`),
+  UNIQUE KEY `uq_user_score_recalculation_jobs_active_slot` (`active_slot`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -6,6 +6,15 @@ const (
 	UserScoreRecalculationJobRunning   = "running"
 	UserScoreRecalculationJobPaused    = "paused"
 	UserScoreRecalculationJobCompleted = "completed"
+	UserScoreRecalculationJobCancelled = "cancelled"
+)
+
+// 再計算に失敗したセッションの分類。last_error にはこの分類だけを保存し、
+// エラー本文はサーバーログに出す（SQL や回答内容を管理画面へ出さないため）。
+const (
+	UserScoreRecalculationFailureLoad     = "load_failed"
+	UserScoreRecalculationFailureNoScores = "no_scores"
+	UserScoreRecalculationFailureSave     = "save_failed"
 )
 
 type UserScoreRecalculationJob struct {
@@ -18,7 +27,7 @@ type UserScoreRecalculationJob struct {
 	ProcessedSessions  uint       `gorm:"not null;default:0" json:"processed_sessions"`
 	FailedSessions     uint       `gorm:"not null;default:0" json:"failed_sessions"`
 	EstimatedCostUSD   float64    `gorm:"type:decimal(12,6);not null;default:0" json:"estimated_cost_usd"`
-	LastError          string     `gorm:"type:text" json:"-"`
+	LastError          string     `gorm:"type:text" json:"last_error,omitempty"`
 	BatchLeaseToken    *string    `gorm:"type:char(36)" json:"-"`
 	BatchLeaseUntil    *time.Time `gorm:"type:datetime(3)" json:"-"`
 	CreatedAt          time.Time  `json:"created_at"`

@@ -157,6 +157,7 @@ func SetupAdminRoutes(
 	admin.POST("/user-score-recalculation/jobs/:job_id/run", userScoreRecalculationController.RunBatch, platform)
 	admin.POST("/user-score-recalculation/jobs/:job_id/pause", userScoreRecalculationController.Pause, platform)
 	admin.POST("/user-score-recalculation/jobs/:job_id/resume", userScoreRecalculationController.Resume, platform)
+	admin.POST("/user-score-recalculation/jobs/:job_id/cancel", userScoreRecalculationController.Cancel, platform)
 
 	admin.GET("/score-validation/correlation", scoreValidationController.GetCorrelation, platform)
 	admin.GET("/score-validation/phase-metrics", scoreValidationController.GetPhaseMetrics, platform)

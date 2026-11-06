@@ -2,6 +2,7 @@ package admin
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -23,6 +24,7 @@ func NewUserScoreRecalculationController(service *adminservice.UserScoreRecalcul
 func (c *UserScoreRecalculationController) Preview(ctx echo.Context) error {
 	result, err := c.service.Preview()
 	if err != nil {
+		log.Printf("[UserScoreRecalculation] preview failed: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "スコア再計算の見積もりに失敗しました")
 	}
 	return ctx.JSON(http.StatusOK, result)
@@ -34,6 +36,7 @@ func (c *UserScoreRecalculationController) Start(ctx echo.Context) error {
 		if adminservice.IsRecalculationJobAlreadyRunning(err) {
 			return echo.NewHTTPError(http.StatusConflict, "実行中または一時停止中の再計算ジョブがあります")
 		}
+		log.Printf("[UserScoreRecalculation] start failed: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "再計算ジョブを開始できませんでした")
 	}
 	return ctx.JSON(http.StatusCreated, job)
@@ -45,11 +48,8 @@ func (c *UserScoreRecalculationController) GetJob(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "job_id が不正です")
 	}
 	job, err := c.service.GetJob(id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return echo.NewHTTPError(http.StatusNotFound, "再計算ジョブが見つかりません")
-	}
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "再計算ジョブを取得できませんでした")
+		return recalculationJobError(id, err)
 	}
 	return ctx.JSON(http.StatusOK, job)
 }
@@ -60,11 +60,8 @@ func (c *UserScoreRecalculationController) RunBatch(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "job_id が不正です")
 	}
 	job, err := c.service.RunBatch(ctx.Request().Context(), id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return echo.NewHTTPError(http.StatusNotFound, "再計算ジョブが見つかりません")
-	}
 	if err != nil {
-		return echo.NewHTTPError(http.StatusConflict, err.Error())
+		return recalculationJobError(id, err)
 	}
 	return ctx.JSON(http.StatusOK, job)
 }
@@ -77,6 +74,10 @@ func (c *UserScoreRecalculationController) Resume(ctx echo.Context) error {
 	return c.setJobStatus(ctx, c.service.Resume)
 }
 
+func (c *UserScoreRecalculationController) Cancel(ctx echo.Context) error {
+	return c.setJobStatus(ctx, c.service.Cancel)
+}
+
 func (c *UserScoreRecalculationController) setJobStatus(
 	ctx echo.Context,
 	update func(uint) (*models.UserScoreRecalculationJob, error),
@@ -86,13 +87,23 @@ func (c *UserScoreRecalculationController) setJobStatus(
 		return echo.NewHTTPError(http.StatusBadRequest, "job_id が不正です")
 	}
 	job, err := update(id)
+	if err != nil {
+		return recalculationJobError(id, err)
+	}
+	return ctx.JSON(http.StatusOK, job)
+}
+
+// recalculationJobError はエラーを HTTP の応答へ変換する。
+// 状態の競合だけを 409 にし、それ以外は本文をログに残して 500 を返す。
+func recalculationJobError(id uint, err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return echo.NewHTTPError(http.StatusNotFound, "再計算ジョブが見つかりません")
 	}
-	if err != nil {
-		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	if message, ok := adminservice.RecalculationConflictMessage(err); ok {
+		return echo.NewHTTPError(http.StatusConflict, message)
 	}
-	return ctx.JSON(http.StatusOK, job)
+	log.Printf("[UserScoreRecalculation] job=%d request failed: %v", id, err)
+	return echo.NewHTTPError(http.StatusInternalServerError, "再計算ジョブの処理に失敗しました")
 }
 
 func parseRecalculationJobID(ctx echo.Context) (uint, error) {

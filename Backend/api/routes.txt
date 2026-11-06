@@ -123,6 +123,7 @@ GET /api/admin/training/export
 GET /api/admin/training/stats
 POST /api/admin/user-score-recalculation/jobs
 GET /api/admin/user-score-recalculation/jobs/:job_id
+POST /api/admin/user-score-recalculation/jobs/:job_id/cancel
 POST /api/admin/user-score-recalculation/jobs/:job_id/pause
 POST /api/admin/user-score-recalculation/jobs/:job_id/resume
 POST /api/admin/user-score-recalculation/jobs/:job_id/run
