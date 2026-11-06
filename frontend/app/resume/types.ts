@@ -1,3 +1,5 @@
+import type { FormatFinding } from '@/components/FormatFindingsSection'
+
 /**
  * 履歴書レビューページ向けの共有型。
  */
@@ -8,6 +10,12 @@ export type ReviewItem = {
   severity: string
   message: string
   suggestion?: string
+  /** 指摘が指している原文 */
+  quote?: string
+  /** quote をそのまま置き換えられる一文。AIの提案であり、確定した本文ではない */
+  rewrite?: string
+  /** low_ocr_confidence のとき、読み取りが不確かなので書き換え案を出していない */
+  rewrite_withheld?: string
 }
 
 export type ReviewResult = {
@@ -21,6 +29,8 @@ export type ReviewResult = {
   }
   items: ReviewItem[]
   annotated_available: boolean
+  /** ルールによる形式チェックの指摘(#1530)。古い応答には無い */
+  format_findings?: FormatFinding[]
 }
 
 export type CompanyCandidate = {
@@ -33,10 +43,5 @@ export type CompanyCandidate = {
   evidence_urls?: string[]
 }
 
-export type SeverityChipColor = 'error' | 'warning' | 'info' | 'default'
-
-export type SeverityConfig = {
-  color: SeverityChipColor
-  label: string
-  borderColor: string
-}
+// 重要度の表示は形式チェック（#1530）と共通なので lib/severity.ts に置く
+export type { SeverityChipColor, SeverityConfig } from '@/lib/severity'

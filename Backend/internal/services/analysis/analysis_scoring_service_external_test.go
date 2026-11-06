@@ -6,12 +6,14 @@ package analysis_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"Backend/domain/entity"
 	"Backend/internal/models"
@@ -23,9 +25,17 @@ import (
 )
 
 // newOpenAITestServer は簡易な OpenAI テストサーバーを起動して指定の応答を返します。
-func newOpenAITestServerForAnalysis(t *testing.T, responseBody string) (*httptest.Server, *openaiPkg.Client) {
+func newOpenAITestServerForAnalysis(t *testing.T, responseBody string) (*httptest.Server, *openaiPkg.Client, <-chan []byte) {
 	t.Helper()
+	requestBodies := make(chan []byte, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read request", http.StatusBadRequest)
+			return
+		}
+		requestBodies <- body
+
 		w.Header().Set("Content-Type", "application/json")
 		resp := openai.ChatCompletionResponse{
 			ID:    "test-id",
@@ -43,7 +53,7 @@ func newOpenAITestServerForAnalysis(t *testing.T, responseBody string) (*httptes
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(srv.Close)
-	return srv, openaiPkg.NewWithBaseURL(srv.URL, "gpt-4o")
+	return srv, openaiPkg.NewWithBaseURL(srv.URL, "gpt-4o"), requestBodies
 }
 
 // mock implementations
@@ -129,7 +139,7 @@ func (m *mockUserWeightScoreRepo) CountByUserAndSession(userID uint, sessionID s
 func TestBuildAnalysisSummary_WithLLM(t *testing.T) {
 	// モック OpenAI サーバー: 構造化JSONを返す
 	responseBody := `{"strengths": ["技術志向"], "concerns": ["面接準備不足"], "recommended_working_style": "チームで協調しつつ個人で裁量を持つ"}`
-	srv, aiClient := newOpenAITestServerForAnalysis(t, responseBody)
+	srv, aiClient, requestBodies := newOpenAITestServerForAnalysis(t, responseBody)
 	_ = srv
 
 	chatRepo := &mockChatMessageRepo{}
@@ -146,6 +156,38 @@ func TestBuildAnalysisSummary_WithLLM(t *testing.T) {
 	assert.Contains(t, summary.LLMStructured.Strengths, "技術志向")
 	// 永続化が呼ばれていること
 	assert.Equal(t, responseBody, convRepo.saved)
+
+	var requestBody []byte
+	select {
+	case requestBody = <-requestBodies:
+	case <-time.After(5 * time.Second):
+		t.Fatal("OpenAI API にリクエストが送信されなかった")
+	}
+
+	var request struct {
+		ResponseFormat struct {
+			Type       string `json:"type"`
+			JSONSchema struct {
+				Name   string          `json:"name"`
+				Strict bool            `json:"strict"`
+				Schema json.RawMessage `json:"schema"`
+			} `json:"json_schema"`
+		} `json:"response_format"`
+	}
+	assert.NoError(t, json.Unmarshal(requestBody, &request))
+	assert.Equal(t, "json_schema", request.ResponseFormat.Type)
+	assert.Equal(t, "analysis_summary", request.ResponseFormat.JSONSchema.Name)
+	assert.True(t, request.ResponseFormat.JSONSchema.Strict)
+
+	var schema struct {
+		AdditionalProperties bool                       `json:"additionalProperties"`
+		Required             []string                   `json:"required"`
+		Properties           map[string]json.RawMessage `json:"properties"`
+	}
+	assert.NoError(t, json.Unmarshal(request.ResponseFormat.JSONSchema.Schema, &schema))
+	assert.False(t, schema.AdditionalProperties)
+	assert.ElementsMatch(t, []string{"strengths", "concerns", "recommended_working_style"}, schema.Required)
+	assert.Len(t, schema.Properties, 3)
 }
 
 func TestRuleBasedFutureAnalyzerScore(t *testing.T) {

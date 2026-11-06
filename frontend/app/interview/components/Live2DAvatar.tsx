@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { Box } from '@mui/material'
 
-import { ensureCubismCore, DEFAULT_MODEL_URL, DEFAULT_SHADER_PATH } from '@/lib/interview/live2d-loader'
+import { ensureCubismCore, modelUrlForGender, DEFAULT_SHADER_PATH } from '@/lib/interview/live2d-loader'
 import type { Live2DFrameworkModel as Live2DFrameworkModelClass } from '@/lib/interview/live2d-framework-model'
 import {
   inspectLive2DModel,
@@ -18,6 +18,7 @@ import {
 } from '@/lib/interview/live2d-params'
 import { Live2DMotion, pulse } from '@/lib/interview/live2d-motion'
 import { getAiAudioMeter } from '@/lib/interview/ai-audio-meter'
+import { FEMALE_OVERLAY_MESH_IDS, OVERLAY_MESH_IDS } from '@/lib/interview/live2d-overlay'
 
 // 全身絵の余白を切って顔を大きく見せる。FACE_FOCUS_Y は画像の上端0・下端1とした顔の中心位置。
 // 書き出し済み男性モデルの絵に合わせた値なので、モデルを差し替えたら見直すこと。
@@ -71,6 +72,7 @@ function modelDirOf(modelUrl: string): { dir: string; fileName: string } {
  * `level`/`speaking` の音声振幅で駆動する（Avatar2D と同じ入力源）。
  */
 export default function Live2DAvatar({
+  gender,
   level,
   speaking,
   active,
@@ -149,11 +151,19 @@ export default function Live2DAvatar({
       gl.clearColor(0, 0, 0, 0)
 
       resize()
-      const { dir, fileName } = modelDirOf(DEFAULT_MODEL_URL)
+      const { dir, fileName } = modelDirOf(modelUrlForGender(gender))
 
       let loaded: Live2DFrameworkModelClass
       try {
-        loaded = await Live2DFrameworkModel.load(gl, dir, fileName, DEFAULT_SHADER_PATH, canvas.width, canvas.height)
+        loaded = await Live2DFrameworkModel.load(
+          gl,
+          dir,
+          fileName,
+          DEFAULT_SHADER_PATH,
+          canvas.width,
+          canvas.height,
+          gender === 'female' ? FEMALE_OVERLAY_MESH_IDS : OVERLAY_MESH_IDS,
+        )
       } catch (err) {
         bail('モデルを読み込めなかった（public/live2d/model/ に未配置の可能性）', err)
         return
@@ -209,7 +219,7 @@ export default function Live2DAvatar({
           if (c.blinkParamIds.length > 0) {
             for (const id of c.blinkParamIds) model.setParameterValue(id, eyeOpenness)
           }
-          // 差分画像を重ねるタイプのモデル（目閉じ・口開きがパラメータに結び付いていない）用。
+          // Cubism側の本リギングが終わるまで、モデルごとの差分画像の不透明度を補正する。
           model.setOverlayState(eyeOpenness, mouthValue)
         }
 
@@ -248,7 +258,7 @@ export default function Live2DAvatar({
       motionRef.current = null
       capsRef.current = null
     }
-  }, [])
+  }, [gender])
 
   return (
     <Box

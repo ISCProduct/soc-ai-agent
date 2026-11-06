@@ -17,9 +17,9 @@ import (
 // evidenceTestUtterances は生成テスト用の面接ログ。
 func evidenceTestUtterances() []models.InterviewUtterance {
 	return []models.InterviewUtterance{
-		{Role: "ai", Text: "学生時代に力を入れたことを教えてください。"},
-		{Role: "user", Text: "はい、私は大学時代に軽音サークルの代表を務めていました。入学した当初は部員が8人しかいなくて、このままだと廃部になるという話が出ていました。"},
-		{Role: "user", Text: "そこで私が新歓ライブの企画を提案して、SNSでの告知を担当しました。結果として、翌年の新入部員は23人まで増えて、部員数を3倍にすることができました。"},
+		{ID: 10, Role: "ai", Text: "学生時代に力を入れたことを教えてください。"},
+		{ID: 11, Role: "user", Text: "はい、私は大学時代に軽音サークルの代表を務めていました。入学した当初は部員が8人しかいなくて、このままだと廃部になるという話が出ていました。"},
+		{ID: 12, Role: "user", Text: "そこで私が新歓ライブの企画を提案して、SNSでの告知を担当しました。結果として、翌年の新入部員は23人まで増えて、部員数を3倍にすることができました。"},
 	}
 }
 
@@ -29,8 +29,8 @@ func genuineEvidence() map[string]string {
 		"logic":         "結果として、翌年の新入部員は23人まで増えて、部員数を3倍にすることができました。",
 		"specificity":   "入学した当初は部員が8人しかいなくて",
 		"ownership":     "そこで私が新歓ライブの企画を提案して、SNSでの告知を担当しました。",
-		"communication": "新歓ライブを企画してSNS告知を担当し、部員数を3倍にした",
-		"enthusiasm":    "私は大学時代に軽音サークルの代表を務めていました",
+		"communication": "SNSでの告知を担当しました。",
+		"enthusiasm":    "軽音サークルの代表を務めていました。",
 	}
 }
 
@@ -67,15 +67,41 @@ func countNonEmpty(m map[string]string) int {
 // reportJSON はレポート1件分の LLM 応答を組み立てる。
 func reportJSON(t *testing.T, evidence, teacherEvidence map[string]string) string {
 	t.Helper()
+	return reportJSONWithIDs(t, evidence, teacherEvidence, nil)
+}
+
+// reportJSONWithIDs は発話IDを項目単位で差し替えられる reportJSON。
+func reportJSONWithIDs(t *testing.T, evidence, teacherEvidence map[string]string, idOverrides map[string]*uint) string {
+	t.Helper()
+	allEvidence := make(map[string]string, len(RubricKeys()))
+	evidenceIDs := make(map[string]*uint, len(RubricKeys()))
+	allTeacherEvidence := make(map[string]string, len(RubricKeys()))
+	for _, key := range RubricKeys() {
+		allEvidence[key] = evidence[key]
+		allTeacherEvidence[key] = teacherEvidence[key]
+		if allEvidence[key] == "" {
+			evidenceIDs[key] = nil
+			continue
+		}
+		id := utteranceIDForQuote(t, allEvidence[key])
+		evidenceIDs[key] = &id
+	}
+	for key, id := range idOverrides {
+		evidenceIDs[key] = id
+	}
+	for key, value := range teacherEvidence {
+		allTeacherEvidence[key] = value
+	}
 	body, err := json.Marshal(reportPayload{
-		Summary:      "落ち着いて回答できていました。",
-		Scores:       map[string]int{"logic": 3, "specificity": 2, "ownership": 4, "communication": 3, "enthusiasm": 4},
-		Evidence:     evidence,
-		Strengths:    []string{"結論から話せる"},
-		Improvements: []string{"数値を添える"},
+		Summary:              "落ち着いて回答できていました。",
+		Scores:               map[string]int{"logic": 3, "specificity": 2, "ownership": 4, "communication": 3, "enthusiasm": 4},
+		Evidence:             allEvidence,
+		EvidenceUtteranceIDs: evidenceIDs,
+		Strengths:            []string{"結論から話せる"},
+		Improvements:         []string{"数値を添える"},
 		Teacher: &teacherReport{
 			OverallComment:   "指導しやすい",
-			DetailedEvidence: teacherEvidence,
+			DetailedEvidence: allTeacherEvidence,
 			CoachingPoints:   []string{"数値を促す"},
 		},
 	})
@@ -91,6 +117,24 @@ func chatStub(t *testing.T, responses ...string) (*openai.Client, func() int) {
 	t.Helper()
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ResponseFormat struct {
+				Type       string `json:"type"`
+				JSONSchema struct {
+					Name   string          `json:"name"`
+					Strict bool            `json:"strict"`
+					Schema json.RawMessage `json:"schema"`
+				} `json:"json_schema"`
+			} `json:"response_format"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("OpenAIリクエストが読めない: %v", err)
+		} else if request.ResponseFormat.Type != "json_schema" ||
+			request.ResponseFormat.JSONSchema.Name != "interview_report" ||
+			!request.ResponseFormat.JSONSchema.Strict ||
+			len(request.ResponseFormat.JSONSchema.Schema) == 0 {
+			t.Errorf("Structured Outputs が指定されていない: %+v", request.ResponseFormat)
+		}
 		content := responses[min(calls, len(responses)-1)]
 		calls++
 		w.Header().Set("Content-Type", "application/json")
@@ -101,6 +145,21 @@ func chatStub(t *testing.T, responses ...string) (*openai.Client, func() int) {
 	}))
 	t.Cleanup(server.Close)
 	return openai.NewWithBaseURL(server.URL, "gpt-4o-mini"), func() int { return calls }
+}
+
+func utteranceIDForQuote(t *testing.T, quote string) uint {
+	t.Helper()
+	// 捏造にはLLMが実在の発話IDを添えた場合を再現する。
+	if quote == fabricated {
+		return 11
+	}
+	for _, utterance := range evidenceTestUtterances() {
+		if utterance.Role == "user" && strings.Contains(utterance.Text, quote) {
+			return utterance.ID
+		}
+	}
+	t.Fatalf("引用がテスト用の発話に見つからない: %q", quote)
+	return 0
 }
 
 // runReport はスタブを組んでレポートを1件生成する。
@@ -142,6 +201,18 @@ func savedTeacherEvidence(t *testing.T, report *models.InterviewReport) map[stri
 		t.Fatalf("teacher_report_json が読めない (%q): %v", report.TeacherReportJSON, err)
 	}
 	return got.DetailedEvidence
+}
+
+func savedEvidenceUtteranceIDs(t *testing.T, report *models.InterviewReport) map[string]uint {
+	t.Helper()
+	var got map[string]uint
+	if report.EvidenceUtteranceIDsJSON == nil {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(*report.EvidenceUtteranceIDsJSON), &got); err != nil {
+		t.Fatalf("evidence_utterance_ids_json が読めない (%q): %v", *report.EvidenceUtteranceIDsJSON, err)
+	}
+	return got
 }
 
 // TestGenerateReport_EvidenceVerification は #1527 の中心的な回帰テスト。
@@ -244,9 +315,17 @@ func TestGenerateReport_EvidenceVerification(t *testing.T) {
 			}
 
 			gotEvidence := savedEvidence(t, report)
+			gotIDs := savedEvidenceUtteranceIDs(t, report)
 			for key, want := range tt.wantEvidence {
 				if gotEvidence[key] != want {
 					t.Errorf("evidence[%s]=%q want %q: %s", key, gotEvidence[key], want, tt.why)
+				}
+				if want == "" {
+					if _, ok := gotIDs[key]; ok {
+						t.Errorf("空の evidence[%s] に発話IDが残っている: %v", key, gotIDs[key])
+					}
+				} else if wantID := utteranceIDForQuote(t, want); gotIDs[key] != wantID {
+					t.Errorf("evidence_utterance_ids[%s]=%d want %d", key, gotIDs[key], wantID)
 				}
 			}
 			gotTeacher := savedTeacherEvidence(t, report)
@@ -263,6 +342,115 @@ func TestGenerateReport_EvidenceVerification(t *testing.T) {
 				t.Error("講評まで捨てている")
 			}
 		})
+	}
+}
+
+func TestValidateEvidenceReferences(t *testing.T) {
+	utterances := evidenceTestUtterances()
+	userQuote := "部員が8人しかいなくて"
+	id := uint(11)
+	aiID := uint(10)
+	wrongUserID := uint(12)
+	unknownID := uint(999)
+	zeroID := uint(0)
+
+	tests := []struct {
+		name        string
+		quote       string
+		id          *uint
+		wantMatched bool
+	}{
+		{name: "同じ発話の正確な引用", quote: userQuote, id: &id, wantMatched: true},
+		{name: "全角半角と空白のゆれ", quote: "部員が８人しか　いなくて", id: &id, wantMatched: true},
+		{name: "助詞が違う言い換え", quote: "部員は8人だけでした", id: &id, wantMatched: true},
+		{name: "相槌だけの引用", quote: "はい", id: &id},
+		{name: "1文字だけの引用", quote: "私", id: &id},
+		{name: "発話に無い数値", quote: "部員が9人しかいなくて", id: &id},
+		{name: "別の受験者発話ID", quote: userQuote, id: &wrongUserID},
+		{name: "面接官の発話ID", quote: "学生時代に力を入れたこと", id: &aiID},
+		{name: "存在しない発話ID", quote: userQuote, id: &unknownID},
+		{name: "発話IDが0", quote: userQuote, id: &zeroID},
+		{name: "一致しない引用", quote: fabricated, id: &id},
+		{name: "発話IDなし", quote: userQuote},
+		{name: "引用が空で発話IDだけある", quote: "", id: &id},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ValidateEvidenceReferences(
+				map[string]string{"logic": tt.quote},
+				map[string]*uint{"logic": tt.id},
+				utterances,
+			)
+			if matched := len(got.Unmatched) == 0; matched != tt.wantMatched {
+				t.Fatalf("matched=%v want %v; unmatched=%v", matched, tt.wantMatched, got.Unmatched)
+			}
+			if tt.wantMatched && got.UtteranceIDs["logic"] != id {
+				t.Errorf("保存対象の発話ID=%d want %d", got.UtteranceIDs["logic"], id)
+			}
+		})
+	}
+}
+
+// LLM が返す発話IDの異常を generateReport の経路で検証する（#1775）。
+// 該当項目だけ根拠とIDを捨て、照合できた項目は残す。
+func TestGenerateReport_EvidenceUtteranceIDContract(t *testing.T) {
+	t.Parallel()
+
+	const key = "specificity"
+	unknownID := uint(999)
+	interviewerID := uint(10)
+	validID := uint(11)
+
+	tests := []struct {
+		name     string
+		evidence map[string]string
+		id       *uint
+	}{
+		{name: "存在しない発話ID", evidence: genuineEvidence(), id: &unknownID},
+		{name: "面接官の発話ID", evidence: genuineEvidence(), id: &interviewerID},
+		{name: "引用があるのに発話IDがnull", evidence: genuineEvidence(), id: nil},
+		{name: "引用が空なのに発話IDがある", evidence: withEvidence(genuineEvidence(), key, ""), id: &validID},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			response := reportJSONWithIDs(t, tt.evidence, genuineTeacherEvidence(), map[string]*uint{key: tt.id})
+			report, calls := runReport(t, evidenceTestUtterances(), response)
+
+			if got := calls(); got != reportGenerationAttempts {
+				t.Errorf("LLM呼び出し=%d want %d", got, reportGenerationAttempts)
+			}
+			gotEvidence := savedEvidence(t, report)
+			gotIDs := savedEvidenceUtteranceIDs(t, report)
+			if gotEvidence[key] != "" {
+				t.Errorf("evidence[%s]=%q want 空", key, gotEvidence[key])
+			}
+			if id, ok := gotIDs[key]; ok {
+				t.Errorf("evidence_utterance_ids[%s]=%d が残っている", key, id)
+			}
+			want := genuineEvidence()["logic"]
+			if gotEvidence["logic"] != want {
+				t.Errorf("照合できた根拠まで捨てている: %q", gotEvidence["logic"])
+			}
+			if wantID := utteranceIDForQuote(t, want); gotIDs["logic"] != wantID {
+				t.Errorf("evidence_utterance_ids[logic]=%d want %d", gotIDs["logic"], wantID)
+			}
+		})
+	}
+}
+
+// 照合できた発話IDが1件も無いときは NULL を保存する（#1775）。
+// JSON カラムへの空文字は strict モードの MySQL で ERROR 3140 になり、レポートの保存ごと失敗する。
+func TestGenerateReport_NoMatchedEvidenceSavesNullUtteranceIDs(t *testing.T) {
+	t.Parallel()
+
+	report, _ := runReport(t, evidenceTestUtterances(),
+		reportJSON(t, map[string]string{"logic": fabricated}, nil))
+
+	if report.EvidenceUtteranceIDsJSON != nil {
+		t.Fatalf("evidence_utterance_ids_json = %q, want NULL", *report.EvidenceUtteranceIDsJSON)
 	}
 }
 

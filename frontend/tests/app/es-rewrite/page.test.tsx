@@ -545,3 +545,49 @@ describe('ESRewritePage 差分と指摘アンカー (#1532)', () => {
     expect(await screen.findByText('改善前後に差分はありませんでした。')).toBeInTheDocument()
   })
 })
+
+describe('ESRewritePage 形式チェックの表示 (#1530)', () => {
+  const REVIEW_BASE = {
+    specificity_score: 7,
+    star_score: 6,
+    length_balance_score: 5,
+    feedback: 'フィードバック本文',
+    improved_text: '改善後の文章',
+  }
+
+  const review = async (result: Record<string, unknown>) => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => result })
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: '私はすごく頑張った。' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+    await screen.findByText('添削スコア')
+  }
+
+  beforeEach(() => {
+    global.fetch = jest.fn()
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  it('format_findings を「必ず直す」として出し、送った本文から該当箇所を抜き出す', async () => {
+    await review({
+      ...REVIEW_BASE,
+      format_findings: [
+        { rule: 'spoken_language', severity: 'warning', start: 2, end: 5, message: '「すごく」は話し言葉です。', fix: 'とても・非常に' },
+      ],
+    })
+    expect(screen.getByText('必ず直す')).toBeInTheDocument()
+    expect(screen.getByText('「すごく」')).toBeInTheDocument()
+    expect(screen.getByText('直し方: とても・非常に')).toBeInTheDocument()
+  })
+
+  it('format_findings が無い古い応答では「必ず直す」を出さない', async () => {
+    await review(REVIEW_BASE)
+    expect(screen.queryByText('必ず直す')).toBeNull()
+  })
+})

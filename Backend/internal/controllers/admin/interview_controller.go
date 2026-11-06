@@ -6,6 +6,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/auth"
+	"Backend/internal/services/companyportal"
 	"Backend/internal/services/interview"
 	"Backend/internal/services/school"
 	"Backend/internal/services/shared"
@@ -144,6 +145,16 @@ func (c *AdminInterviewController) CreateCompanyQuestion(ctx echo.Context) error
 		IsRequired:       req.IsRequired,
 		EvaluationIntent: intent,
 	}
+	if err := validateCompanyQuestion(q); err != nil {
+		return err
+	}
+	existing, err := c.companyQuestionRepo.FindByCompanyID(companyID)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	if err := companyportal.ValidateInterviewQuestionCount(len(existing)); err != nil {
+		return companyQuestionValidationError(err)
+	}
 	if err := c.companyQuestionRepo.Create(q); err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -208,10 +219,37 @@ func (c *AdminInterviewController) UpdateCompanyQuestion(ctx echo.Context) error
 		}
 		q.EvaluationIntent = intent
 	}
+	if err := validateCompanyQuestion(q); err != nil {
+		return err
+	}
 	if err := c.companyQuestionRepo.Update(q); err != nil {
 		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, q)
+}
+
+// validateCompanyQuestion は企業ポータルと同じ制約（文字数・優先度）を管理者経路にも適用する。
+// 同じテーブルを両方の経路で操作するので、片方だけ緩いと制約が破れる。
+func validateCompanyQuestion(q *models.InterviewCompanyQuestion) error {
+	input := companyportal.InterviewQuestionInput{
+		Position:     q.Position,
+		Category:     q.Category,
+		QuestionText: q.QuestionText,
+		Priority:     q.Priority,
+		IsRequired:   q.IsRequired,
+	}
+	if err := input.Validate(); err != nil {
+		return companyQuestionValidationError(err)
+	}
+	return nil
+}
+
+func companyQuestionValidationError(err error) error {
+	var validationErr *shared.ValidationError
+	if errors.As(err, &validationErr) {
+		return echo.NewHTTPError(http.StatusBadRequest, validationErr.Message)
+	}
+	return httpapi.InternalError(err)
 }
 
 // DeleteCompanyQuestion DELETE /api/admin/companies/:id/interview-questions/:qid

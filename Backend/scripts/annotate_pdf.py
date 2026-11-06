@@ -121,17 +121,27 @@ def wrap_text(draw, text, font, max_width):
 
 
 def draw_number_badge(page, rect, number, severity):
+    """番号印を本文の外に置く。
+
+    矩形の左上角を中心にすると円の半分が行頭に重なり、指摘された文字が読めない。
+    左に余白が無いときは行の上、上も無ければ行の下へ逃がす。
+    """
     c = get_color(severity)
-    size = 14
-    cx = rect.x0
-    cy = rect.y0
-    page.draw_circle((cx, cy), size / 2, color=c["badge"], fill=c["badge"])
-    page.insert_text(
-        (cx - size / 2 + 2, cy - size / 2 + 2),
-        str(number),
-        fontsize=8,
-        color=c["label_fg"],
-    )
+    radius = 7
+    gap = 2
+    cx = rect.x0 - radius - gap
+    cy = rect.y0 + radius
+    bounds = page.rect
+    if cx - radius < bounds.x0:
+        cx = min(max(rect.x0 + radius, bounds.x0 + radius), bounds.x1 - radius)
+        cy = rect.y0 - radius - gap
+        if cy - radius < bounds.y0:
+            cy = min(rect.y1 + radius + gap, bounds.y1 - radius)
+    page.draw_circle((cx, cy), radius, color=c["badge"], fill=c["badge"])
+    label = str(number)
+    # insert_text の座標はベースライン。1桁は円の中央付近に載せる。
+    half = 2 if len(label) == 1 else 4
+    page.insert_text((cx - half, cy + 3), label, fontsize=8, color=c["label_fg"])
 
 
 def annotate_pages(doc, items):
@@ -164,7 +174,15 @@ def annotate_pages(doc, items):
                 )
 
         c = get_color(severity)
-        page.draw_rect(rect, color=c["border"], fill=c["highlight"], width=1.5)
+        # 既定の不透明塗り（fill_opacity=1, overlay=True）は本文を隠す。
+        # 薄い塗りにして、指摘された文字が読めるようにする（#1942）。
+        page.draw_rect(
+            rect,
+            color=c["border"],
+            fill=c["highlight"],
+            width=1.5,
+            fill_opacity=0.28,
+        )
         draw_number_badge(page, rect, idx, severity)
 
 
@@ -218,6 +236,9 @@ def render_review_page(items, page_width_pt, page_height_pt, font_path):
         page_num = item.get("page_number", 1)
         message = item.get("message", "")
         suggestion = item.get("suggestion", "")
+        quote = item.get("quote", "") or ""
+        rewrite = item.get("rewrite", "") or ""
+        withheld = item.get("rewrite_withheld", "") or ""
         c = get_color(severity)
         chip_color = c["pil_chip"]
         label = c["ja"] or severity
@@ -246,18 +267,31 @@ def render_review_page(items, page_width_pt, page_height_pt, font_path):
         y += max(badge_size, ch) + int(6 * scale)
 
         text_x = margin + int(10 * scale)
-        for line in wrap_text(draw, message, body_font, w - text_x - margin):
-            if y > h - margin:
-                break
-            draw.text((text_x, y), line, font=body_font, fill=(20, 20, 20))
-            y += body_line_h
 
-        if suggestion:
-            for line in wrap_text(draw, "改善案: " + suggestion, small_font, w - text_x - margin - int(16 * scale)):
+        def draw_wrapped(text, font, line_h, fill):
+            nonlocal y
+            for line in wrap_text(draw, text, font, w - text_x - margin):
                 if y > h - margin:
                     break
-                draw.text((text_x + int(16 * scale), y), line, font=small_font, fill=(60, 100, 60))
-                y += small_line_h
+                draw.text((text_x, y), line, font=font, fill=fill)
+                y += line_h
+
+        if quote:
+            draw_wrapped("原文: " + quote, body_font, body_line_h, (20, 20, 20))
+        if withheld == "low_ocr_confidence":
+            draw_wrapped(
+                "書き換え案: 読み取りの信頼度が低いため出していません。元の書類を見て書き直してください。",
+                small_font,
+                small_line_h,
+                (90, 70, 20),
+            )
+        elif rewrite:
+            draw_wrapped("書き換え案（AIの提案。事実と見比べてください）: " + rewrite, body_font, body_line_h, (20, 20, 20))
+        if message:
+            draw_wrapped(message, body_font, body_line_h, (20, 20, 20))
+        if suggestion and suggestion != rewrite:
+            label = "補足: " if (quote or rewrite or withheld) else "改善案: "
+            draw_wrapped(label + suggestion, small_font, small_line_h, (60, 100, 60))
 
         y += int(10 * scale)
         draw.line([(margin, y), (w - margin, y)], fill=(220, 220, 220), width=1)
