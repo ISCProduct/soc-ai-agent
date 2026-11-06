@@ -9,7 +9,12 @@ import (
 	"fmt"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+// ErrRecalculationTargetChanged は、対象を選んだ後でセッションが再計算できなくなったことを示す。
+// 履歴書・ES・面接のスコアが途中で反映された場合に返す。
+var ErrRecalculationTargetChanged = errors.New("recalculation target is no longer eligible")
 
 type UserWeightScoreRepository struct {
 	db *gorm.DB
@@ -186,16 +191,18 @@ func recalculationEligibleCondition() string {
   AND NOT EXISTS (
     SELECT 1 FROM es_reviews er
     WHERE er.user_id = uws.user_id AND er.scored_at IS NOT NULL
-      AND %s
+      AND (%s OR %s)
   )
   AND NOT EXISTS (
     SELECT 1 FROM interview_sessions ins
     JOIN interview_reports ir ON ir.session_id = ins.id
     WHERE ins.user_id = uws.user_id AND ir.scores_applied_at IS NOT NULL
-      AND %s
+      AND (%s OR %s)
   )`,
 		scoreSessionAtTime("uws", "er.scored_at"),
+		scoreSessionTouchedAfter("uws", "er.scored_at"),
 		scoreSessionAtTime("uws", "ir.scores_applied_at"),
+		scoreSessionTouchedAfter("uws", "ir.scores_applied_at"),
 	)
 }
 
@@ -230,9 +237,49 @@ func scoreSessionAtTime(scoreAlias, appliedAt string) string {
 )`, scoreAlias, scoreAlias, appliedAt)
 }
 
+// scoreSessionTouchedAfter は、反映時刻より前に作られ、反映時刻以降に更新された行が
+// セッションにあるかを判定する条件を返す。
+//
+// 面接は反映時刻を確保してから行を更新するので、更新した行の updated_at は反映時刻より
+// 後になる。全行が更新されたセッションは scoreSessionAtTime の候補から外れ、加点済みと
+// 判定できない。誤って再計算すると加点が消えるので、迷う場合は対象外に倒す。
+// 再計算で作り直した行は created_at も新しくなるので、この条件には当たらない。
+func scoreSessionTouchedAfter(scoreAlias, appliedAt string) string {
+	return fmt.Sprintf(`EXISTS (
+  SELECT 1 FROM user_weight_scores touched
+  WHERE touched.user_id = %[1]s.user_id
+    AND touched.session_id = %[1]s.session_id
+    AND touched.created_at <= %[2]s
+    AND touched.updated_at >= %[2]s
+)`, scoreAlias, appliedAt)
+}
+
 // ReplaceChatSessionScores atomically replaces a replayed chat session's scores.
+//
+// 再計算は LLM を何度も呼ぶので、対象を選んでから置換するまでに履歴書・ES・面接の
+// スコアが反映されることがある。行をロックしてから対象の条件を確かめ直し、外れていれば
+// ErrRecalculationTargetChanged を返す。確かめずに置換すると、反映された加点が消える。
 func (r *UserWeightScoreRepository) ReplaceChatSessionScores(userID uint, sessionID string, scores map[string]int, version string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		var lockedIDs []uint
+		if err := tx.Model(&models.UserWeightScore{}).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND session_id = ? AND source = ?", userID, sessionID, models.ScoreSourceChat).
+			Pluck("id", &lockedIDs).Error; err != nil {
+			return err
+		}
+		var eligible int64
+		if err := tx.Raw(fmt.Sprintf(`
+SELECT COUNT(*)
+FROM user_weight_scores uws
+WHERE uws.user_id = ? AND uws.session_id = ? AND uws.calculation_version <> ?
+  AND %s`, recalculationEligibleCondition()), userID, sessionID, version).Scan(&eligible).Error; err != nil {
+			return err
+		}
+		if eligible == 0 {
+			return ErrRecalculationTargetChanged
+		}
+
 		var existing models.UserWeightScore
 		err := tx.Where("user_id = ? AND session_id = ? AND source = ?", userID, sessionID, models.ScoreSourceChat).
 			First(&existing).Error

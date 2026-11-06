@@ -19,18 +19,25 @@ var (
 	ErrRecalculationJobNotPaused  = errors.New("一時停止中のジョブではありません")
 )
 
+// RecalculationMatchingRunner はスコア置換後に企業マッチングを作り直す。
+type RecalculationMatchingRunner interface {
+	CalculateMatching(ctx context.Context, userID uint, sessionID string) error
+}
+
 type UserScoreRecalculationService struct {
-	scores *repositories.UserWeightScoreRepository
-	jobs   *repositories.UserScoreRecalculationRepository
-	chat   *chat.ChatService
+	scores   *repositories.UserWeightScoreRepository
+	jobs     *repositories.UserScoreRecalculationRepository
+	chat     *chat.ChatService
+	matching RecalculationMatchingRunner
 }
 
 func NewUserScoreRecalculationService(
 	scores *repositories.UserWeightScoreRepository,
 	jobs *repositories.UserScoreRecalculationRepository,
 	chatService *chat.ChatService,
+	matching RecalculationMatchingRunner,
 ) *UserScoreRecalculationService {
-	return &UserScoreRecalculationService{scores: scores, jobs: jobs, chat: chatService}
+	return &UserScoreRecalculationService{scores: scores, jobs: jobs, chat: chatService, matching: matching}
 }
 
 type UserScoreRecalculationPreview struct {
@@ -72,7 +79,10 @@ func (s *UserScoreRecalculationService) estimate(stats repositories.UserScoreRec
 		UnsupportedSessions: stats.UnsupportedSessions,
 		EstimatedLLMCalls:   stats.EligibleAnswers,
 		EstimatedCostUSD:    estimatedCost,
-		CostEstimateNote:    "回答1件あたり入力2048・出力256トークン、全回答でLLM評価が発生する前提の概算です。実際の呼び出し数と費用はこれを下回る場合があります。",
+		CostEstimateNote: "回答1件あたり入力2048・出力256トークン、全回答でLLM評価が発生する前提の概算です。" +
+			"ローカル推論先の構成では、全件が OpenAI へフォールバックした場合の上限を示します。" +
+			"実際の呼び出し数と費用はこれを下回る場合があります。" +
+			"MATCHING_REASON_USE_AI を有効にしている場合のマッチング理由の生成費用は含みません。",
 	}
 }
 
@@ -242,11 +252,33 @@ func (s *UserScoreRecalculationService) recalculateTarget(
 		logRecalculationFailure(jobID, target, models.UserScoreRecalculationFailureNoScores, errors.New("採点できる回答がありません"))
 		return models.UserScoreRecalculationFailureNoScores, nil
 	}
+	return s.saveRecalculatedScores(ctx, jobID, target, scores, version), nil
+}
+
+// saveRecalculatedScores はスコアを置換して企業マッチングを作り直し、失敗の分類を返す（成功なら空）。
+func (s *UserScoreRecalculationService) saveRecalculatedScores(
+	ctx context.Context,
+	jobID uint,
+	target repositories.UserScoreRecalculationTarget,
+	scores map[string]int,
+	version string,
+) string {
 	if err := s.scores.ReplaceChatSessionScores(target.UserID, target.SessionID, scores, version); err != nil {
-		logRecalculationFailure(jobID, target, models.UserScoreRecalculationFailureSave, err)
-		return models.UserScoreRecalculationFailureSave, nil
+		failure := models.UserScoreRecalculationFailureSave
+		if errors.Is(err, repositories.ErrRecalculationTargetChanged) {
+			failure = models.UserScoreRecalculationFailureTargetChanged
+		}
+		logRecalculationFailure(jobID, target, failure, err)
+		return failure
 	}
-	return "", nil
+	// 保存済みの user_company_matches は自動では更新されない。作り直さないと、
+	// 利用者には旧スコアの企業順位が出続ける。スコアは保存済みなので、失敗しても
+	// 進捗は進める（次の診断やスコア反映で作り直される）。
+	if err := s.matching.CalculateMatching(ctx, target.UserID, target.SessionID); err != nil {
+		logRecalculationFailure(jobID, target, models.UserScoreRecalculationFailureMatching, err)
+		return models.UserScoreRecalculationFailureMatching
+	}
+	return ""
 }
 
 func logRecalculationFailure(jobID uint, target repositories.UserScoreRecalculationTarget, failure string, err error) {

@@ -71,7 +71,15 @@ func (s *ChatService) RecalculationModel() (string, bool) {
 		return "", false
 	}
 	provider, _, _ := s.aiClient.Providers()
-	return s.aiClient.DefaultModel, provider == "openai"
+	if provider == "openai" {
+		return s.aiClient.DefaultModel, true
+	}
+	// ローカル推論先でも、障害時は OpenAI へ再送されて課金される。
+	// 管理者が承認する金額を超えないよう、全件が再送された場合で見積もる。
+	if model, ok := s.aiClient.TextFallbackModel(); ok {
+		return model, true
+	}
+	return s.aiClient.DefaultModel, false
 }
 
 // ChatRequest チャットリクエスト

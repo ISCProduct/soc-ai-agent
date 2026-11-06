@@ -12,9 +12,11 @@ const (
 // 再計算に失敗したセッションの分類。last_error にはこの分類だけを保存し、
 // エラー本文はサーバーログに出す（SQL や回答内容を管理画面へ出さないため）。
 const (
-	UserScoreRecalculationFailureLoad     = "load_failed"
-	UserScoreRecalculationFailureNoScores = "no_scores"
-	UserScoreRecalculationFailureSave     = "save_failed"
+	UserScoreRecalculationFailureLoad          = "load_failed"
+	UserScoreRecalculationFailureNoScores      = "no_scores"
+	UserScoreRecalculationFailureSave          = "save_failed"
+	UserScoreRecalculationFailureTargetChanged = "target_changed"
+	UserScoreRecalculationFailureMatching      = "matching_failed"
 )
 
 type UserScoreRecalculationJob struct {

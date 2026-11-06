@@ -521,6 +521,7 @@ func main() {
 		userWeightScoreRepo,
 		repositories.NewUserScoreRecalculationRepository(db),
 		chatService,
+		matchingService,
 	)
 	userScoreRecalculationController := admincontrollers.NewUserScoreRecalculationController(userScoreRecalculationService)
 	companyEntryService := company.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)

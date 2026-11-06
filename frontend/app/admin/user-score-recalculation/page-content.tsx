@@ -53,6 +53,8 @@ const FAILURE_LABELS: Record<string, string> = {
   load_failed: '会話履歴を読み込めませんでした',
   no_scores: '採点できる回答がありませんでした',
   save_failed: 'スコアを保存できませんでした',
+  target_changed: '途中で履歴書・ES・面接のスコアが反映されたので、再計算しませんでした',
+  matching_failed: 'スコアは保存しましたが、企業マッチングを更新できませんでした',
 }
 
 function isJobStatus(value: unknown): value is JobStatus {
