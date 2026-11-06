@@ -142,12 +142,29 @@ variable "prompt_version" {
   type        = string
   description = "後方互換の共通プロンプト版ラベル。本文を変更するリリースと同時に更新する"
   default     = "v2"
+
+  # アプリ側の promptVersionPattern と揃える。値は .env へそのまま書かれるので、
+  # 改行などで別の環境変数行を注入できないようにする。
+  validation {
+    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", var.prompt_version))
+    error_message = "prompt_version は英数字で始まり、英数字・.・_・- のみの最大64文字で指定してください。"
+  }
 }
 
 variable "prompt_versions" {
   type        = map(string)
   description = "工程別プロンプト版ラベル。本文を変更するリリースと同時に更新する"
   default     = {}
+
+  # キーの誤字は環境変数名がずれて黙って無視されるので、4工程に限定する。
+  validation {
+    condition = alltrue([
+      for stage, version in var.prompt_versions :
+      contains(["question_generation", "score_evaluation", "matching_reason", "company_extraction"], stage)
+      && can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", version))
+    ])
+    error_message = "prompt_versions のキーは question_generation / score_evaluation / matching_reason / company_extraction のいずれかで、値は prompt_version と同じ形式にしてください。"
+  }
 }
 
 variable "frontend_api_base_url" {

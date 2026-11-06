@@ -188,17 +188,7 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 
 	if existingScore == nil {
 		// 新規作成: 絶対値でセット
-		var err error
-		if promptVersion == "" {
-			err = s.userWeightScoreRepo.SetScore(userID, sessionID, category, score)
-		} else if repo, ok := s.userWeightScoreRepo.(interface {
-			SetScoreWithPromptVersion(uint, string, string, int, string) error
-		}); ok {
-			err = repo.SetScoreWithPromptVersion(userID, sessionID, category, score, promptVersion)
-		} else {
-			return fmt.Errorf("score repository cannot persist prompt version")
-		}
-		if err != nil {
+		if err := s.userWeightScoreRepo.SetScoreWithPromptVersion(userID, sessionID, category, score, promptVersion); err != nil {
 			return fmt.Errorf("failed to create score: %w", err)
 		}
 		log.Printf("[Choice Answer] Created new score: %s = %d\n", category, score)
@@ -206,21 +196,12 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 		// 移動平均で更新（直近回答の影響を反映）: 差分を加算
 		newScore := int(math.Round(float64(existingScore.Score)*0.7 + float64(score)*0.3))
 		delta := newScore - existingScore.Score
-		if delta == 0 && promptVersion == "" {
+		// スコアも版も変わらないなら UPDATE しない
+		if delta == 0 && (promptVersion == "" || promptVersion == existingScore.PromptVersion) {
 			log.Printf("[Choice Answer] Score unchanged: %s = %d\n", category, existingScore.Score)
 			return nil
 		}
-		var err error
-		if promptVersion == "" {
-			err = s.userWeightScoreRepo.AddScore(userID, sessionID, category, delta)
-		} else if repo, ok := s.userWeightScoreRepo.(interface {
-			AddScoreWithPromptVersion(uint, string, string, int, string) error
-		}); ok {
-			err = repo.AddScoreWithPromptVersion(userID, sessionID, category, delta, promptVersion)
-		} else {
-			return fmt.Errorf("score repository cannot persist prompt version")
-		}
-		if err != nil {
+		if err := s.userWeightScoreRepo.AddScoreWithPromptVersion(userID, sessionID, category, delta, promptVersion); err != nil {
 			return fmt.Errorf("failed to update score: %w", err)
 		}
 		log.Printf("[Choice Answer] Updated score: %s = %d (average)\n", category, newScore)

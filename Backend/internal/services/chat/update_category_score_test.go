@@ -113,3 +113,26 @@ func TestUpdateCategoryScore_UpdatesPromptVersionWhenScoreIsUnchanged(t *testing
 		t.Fatalf("version was not updated at zero score delta: %+v", repo)
 	}
 }
+
+func TestUpdateCategoryScore_SkipsUpdateWhenScoreAndPromptVersionAreUnchanged(t *testing.T) {
+	tests := []struct {
+		name          string
+		promptVersion string
+	}{
+		{name: "同じ版", promptVersion: "v2"},
+		{name: "版なし（ルール評価）", promptVersion: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &mockWeightScoreRepo{findResult: &entity.UserWeightScore{Score: 50, PromptVersion: "v2"}}
+			s := &ChatService{userWeightScoreRepo: repo}
+
+			if err := s.updateCategoryScore(1, "session-1", "技術志向", 50, tt.promptVersion); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if repo.addCalled {
+				t.Fatalf("score and version are unchanged, but update was issued: %+v", repo)
+			}
+		})
+	}
+}
