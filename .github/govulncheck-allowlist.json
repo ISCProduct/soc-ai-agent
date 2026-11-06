@@ -1,0 +1,24 @@
+[
+  {
+    "id": "GO-2026-6875",
+    "module": "github.com/labstack/echo/v4",
+    "reason": "Echo の Proxy ミドルウェアが X-Real-IP をそのまま転送する問題。アプリは Proxy を使っていない。v4 に修正版がなく、関数の指定もないので、Echo を呼ぶだけで検出される。",
+    "expires": "2026-12-31",
+    "forbidden_patterns": [
+      "\\.(Proxy|ProxyWithConfig)\\(",
+      "\\.ProxyConfig\\b"
+    ]
+  },
+  {
+    "id": "GO-2026-6872",
+    "module": "github.com/labstack/echo/v4",
+    "reason": "Echo の RealIP と標準の RateLimiter が詐称できる X-Forwarded-For の先頭を読む問題。アプリは自前の middleware.GetClientIP（XFF の末尾を読む）を使っている。v4 に修正版がなく、関数の指定もないので、Echo を呼ぶだけで検出される。",
+    "expires": "2026-12-31",
+    "forbidden_patterns": [
+      "\\.RealIP\\(",
+      "\\.(RateLimiter|RateLimiterWithConfig)\\(",
+      "\\.RateLimiterConfig\\b",
+      "echo-contrib/jaegertracing"
+    ]
+  }
+]
