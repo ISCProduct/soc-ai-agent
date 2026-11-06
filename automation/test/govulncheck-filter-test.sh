@@ -17,6 +17,9 @@ cat > "$WORK/src/app.go" <<'EOF'
 package app
 
 // c.RealIP() はコメントなので検出しない
+/*
+c.RealIP() はブロックコメントでも検出しない
+*/
 func handler() { doWork() }
 EOF
 cat > "$WORK/src/app_test.go" <<'EOF'
@@ -47,7 +50,7 @@ check() {
   out=$(python3 "$FILTER" --report "$4" --allowlist "$WORK/allow.json" --source-root "$WORK/src" --today "${5:-2026-11-06}" 2>&1)
   rc=$?
   if [ "$rc" -ne "$2" ] || ! grep -qF "$3" <<< "$out"; then
-    echo "FAIL $1: rc=$rc（期待 $2）、「$3」を含むはず"
+    echo "FAIL ${1}: rc=${rc}（期待 ${2}）、「${3}」を含むはず"
     echo "$out" | sed 's/^/    /'
     fail=$((fail + 1))
   else
@@ -82,6 +85,15 @@ cat > "$WORK/module-only.json" <<'EOF'
 {"finding": {"osv": "GO-9", "trace": [{"module": "example.com/unused"}]}}
 EOF
 check "コードから到達しないものは数えない" 0 "PASSED" "$WORK/module-only.json"
+
+cp "$WORK/allow.json" "$WORK/allow.bak"
+for entry_patterns in '' ', "forbidden_patterns": []'; do
+  cat > "$WORK/allow.json" <<EOF
+[{"id": "GO-1", "module": "example.com/echo", "reason": "test", "expires": "2026-12-31"$entry_patterns}]
+EOF
+  check "禁止パターンが無い例外は設定エラーにする[$entry_patterns]" 1 "設定エラー" "$WORK/listed.json"
+done
+mv "$WORK/allow.bak" "$WORK/allow.json"
 
 cat >> "$WORK/src/app.go" <<'EOF'
 

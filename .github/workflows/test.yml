@@ -79,6 +79,7 @@ jobs:
       #
       # 修正版のない脆弱性は .github/govulncheck-allowlist.json に理由と期限を付けて載せる。
       # 期限切れ、修正版の公開、前提の機能の使用のどれかに当たると失敗する。
+      # 対象は Backend だけ。Go モジュールを増やすときは govulncheck と --source-root の両方に足す。
       - name: Security scan (govulncheck)
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.8.0

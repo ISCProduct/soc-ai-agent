@@ -63,8 +63,16 @@ def find_forbidden(source_root, patterns):
     for path in sorted(Path(source_root).rglob("*.go")):
         if path.name.endswith("_test.go"):
             continue
+        in_block_comment = False
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if line.lstrip().startswith("//"):
+            stripped = line.lstrip()
+            if in_block_comment:
+                in_block_comment = "*/" not in stripped
+                continue
+            if stripped.startswith("/*"):
+                in_block_comment = "*/" not in stripped
+                continue
+            if stripped.startswith("//"):
                 continue
             if any(pattern.search(line) for pattern in compiled):
                 hits.append(f"{path}:{number}: {line.strip()}")
@@ -79,7 +87,10 @@ def rejection_reason(entry, finding, today, source_root):
         return f'修正版が出ています（{", ".join(sorted(finding["fixed"]))}）。依存を更新し、例外を消してください'
     if finding["modules"] != {entry["module"]}:
         return f'例外の対象外のモジュールで検出されました（{", ".join(sorted(finding["modules"]))}）'
-    hits = find_forbidden(source_root, entry.get("forbidden_patterns", []))
+    patterns = entry.get("forbidden_patterns")
+    if not patterns:
+        return "例外リストの設定エラーです。forbidden_patterns を指定してください"
+    hits = find_forbidden(source_root, patterns)
     if hits:
         return "例外の前提である機能を使っています:\n      " + "\n      ".join(hits)
     return None

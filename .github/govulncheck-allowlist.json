@@ -17,7 +17,8 @@
     "forbidden_patterns": [
       "\\.RealIP\\(",
       "\\.(RateLimiter|RateLimiterWithConfig)\\(",
-      "\\.RateLimiterConfig\\b"
+      "\\.RateLimiterConfig\\b",
+      "echo-contrib/jaegertracing"
     ]
   }
 ]
