@@ -560,6 +560,7 @@ func main() {
 	studentSearchRepo := repositories.NewStudentSearchRepository(db)
 	companyStudentTagRepo := repositories.NewCompanyStudentTagRepository(db)
 	studentSemanticClient := hr.NewStudentSemanticClient()
+	hrStudentAnalysisService.SetIdentityRevealer(studentSearchRepo)
 	studentSearchService := hr.NewStudentSearchService(studentSearchRepo, companyStudentTagRepo, studentSemanticClient)
 	industryRepo := repositories.NewIndustryRepository(db)
 	companyStudentController := companycontrollers.NewCompanyStudentController(studentSearchService, hrStudentAnalysisService, industryRepo)

@@ -46,7 +46,9 @@ export default function PageContent() {
   const [blockedIds, setBlockedIds] = useState<number[]>([])
   const [opened, setOpened] = useState<StudentScout | null>(null)
   const [blockTarget, setBlockTarget] = useState<StudentScout | null>(null)
+  const [pendingId, setPendingId] = useState<number | null>(null)
   const loadSeq = useRef(0)
+  const actionSeq = useRef<Record<number, number>>({})
 
   const load = useCallback(async (nextOffset: number) => {
     const seq = ++loadSeq.current
@@ -74,33 +76,57 @@ export default function PageContent() {
     void load(0)
   }, [router, load])
 
+  const beginAction = (id: number) => {
+    const seq = (actionSeq.current[id] ?? 0) + 1
+    actionSeq.current[id] = seq
+    setPendingId(id)
+    return seq
+  }
+
+  const isCurrentAction = (id: number, seq: number) => actionSeq.current[id] === seq
+
   const openScout = async (s: StudentScout) => {
+    const seq = beginAction(s.id)
     try {
       const viewed = await studentScoutService.view(s.id)
+      if (!isCurrentAction(s.id, seq)) return
       setItems((prev) =>
         prev.map((x) => (x.id === s.id ? { ...x, status: viewed.status } : x)),
       )
       setOpened({ ...s, status: viewed.status, message: viewed.message || s.message })
     } catch (e) {
+      if (!isCurrentAction(s.id, seq)) return
       setError(e instanceof Error ? e.message : '内容を開けませんでした')
+    } finally {
+      if (isCurrentAction(s.id, seq)) setPendingId((cur) => (cur === s.id ? null : cur))
     }
   }
 
   const accept = async (id: number) => {
+    const seq = beginAction(id)
     try {
       const res = await studentScoutService.accept(id)
+      if (!isCurrentAction(id, seq)) return
       setItems((prev) => prev.map((x) => (x.id === id ? { ...x, status: res.status } : x)))
     } catch (e) {
+      if (!isCurrentAction(id, seq)) return
       setError(e instanceof Error ? e.message : '承諾に失敗しました')
+    } finally {
+      if (isCurrentAction(id, seq)) setPendingId((cur) => (cur === id ? null : cur))
     }
   }
 
   const decline = async (id: number) => {
+    const seq = beginAction(id)
     try {
       const res = await studentScoutService.decline(id)
+      if (!isCurrentAction(id, seq)) return
       setItems((prev) => prev.map((x) => (x.id === id ? { ...x, status: res.status } : x)))
     } catch (e) {
+      if (!isCurrentAction(id, seq)) return
       setError(e instanceof Error ? e.message : '辞退に失敗しました')
+    } finally {
+      if (isCurrentAction(id, seq)) setPendingId((cur) => (cur === id ? null : cur))
     }
   }
 
@@ -190,16 +216,16 @@ export default function PageContent() {
                 <Chip size="small" label={SCOUT_STATUS_LABEL[s.status]} />
               </Stack>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1.5 }}>
-                <Button variant="contained" size="small" onClick={() => void openScout(s)}>
+                <Button variant="contained" size="small" disabled={pendingId === s.id} onClick={() => void openScout(s)}>
                   内容を確認
                 </Button>
                 {(s.status === 'sent' || s.status === 'viewed') && (
-                  <Button size="small" onClick={() => void accept(s.id)}>
+                  <Button size="small" disabled={pendingId === s.id} onClick={() => void accept(s.id)}>
                     このスカウトを承諾
                   </Button>
                 )}
                 {s.status !== 'declined' && (
-                  <Button size="small" onClick={() => void decline(s.id)}>
+                  <Button size="small" disabled={pendingId === s.id} onClick={() => void decline(s.id)}>
                     このスカウトを辞退
                   </Button>
                 )}

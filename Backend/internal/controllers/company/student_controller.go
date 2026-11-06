@@ -31,7 +31,7 @@ type industryLister interface {
 }
 
 type studentVisibleAnalysisService interface {
-	GetAnalysisForVisibleStudent(targetUserID uint) (*hrsvc.StudentAnalysisResponse, error)
+	GetAnalysisForVisibleStudent(companyID, targetUserID uint) (*hrsvc.StudentAnalysisResponse, error)
 }
 
 // CompanyStudentController は企業ポータルの学生検索・タグ管理（#1094）。
@@ -125,7 +125,7 @@ func (c *CompanyStudentController) Detail(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
-	analysis, err := c.analysis.GetAnalysisForVisibleStudent(userID)
+	analysis, err := c.analysis.GetAnalysisForVisibleStudent(companyID, userID)
 	if err != nil {
 		return mapStudentSearchError(err)
 	}

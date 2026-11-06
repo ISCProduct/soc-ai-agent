@@ -83,7 +83,7 @@ type companyStudentAnalysisStub struct {
 	err  error
 }
 
-func (s *companyStudentAnalysisStub) GetAnalysisForVisibleStudent(uint) (*hrsvc.StudentAnalysisResponse, error) {
+func (s *companyStudentAnalysisStub) GetAnalysisForVisibleStudent(uint, uint) (*hrsvc.StudentAnalysisResponse, error) {
 	return s.resp, s.err
 }
 
