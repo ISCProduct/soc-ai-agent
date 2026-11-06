@@ -16,6 +16,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -99,11 +100,14 @@ func main() {
 		fmt.Println("\n-dry-run のためAPIは呼びません")
 		return
 	}
-	if os.Getenv("OPENAI_API_KEY") == "" {
-		// キー無しでもツール自体は壊れない。CIやキー未配布の環境で
-		// 「実行できなかった」ことが分かるように終了コードを分ける。
-		fmt.Fprintln(os.Stderr, "\nOPENAI_API_KEY が未設定のため実APIの比較をスキップしました")
-		os.Exit(3)
+	if _, err := sttbench.APIConfigFromEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "\n音声推論先の設定エラー: %v\n", err)
+		if errors.Is(err, sttbench.ErrMissingOpenAIAPIKey) {
+			// キー無しでもツール自体は壊れない。CIやキー未配布の環境で
+			// 「実行できなかった」ことが分かるように終了コードを分ける。
+			os.Exit(3)
+		}
+		os.Exit(2)
 	}
 
 	modelList := strings.Split(*models, ",")

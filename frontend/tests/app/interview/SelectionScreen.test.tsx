@@ -46,6 +46,8 @@ describe('SelectionScreen', () => {
         setSelectedPosition={setSelectedPosition}
         companyHints={null}
         hintsLoading={false}
+        hintsError={null}
+        onRetryHints={noop}
         questionDurationSeconds={180}
         onStartInterview={noop}
         {...overrides}
@@ -58,9 +60,31 @@ describe('SelectionScreen', () => {
     renderScreen()
 
     expect(screen.getByText('IT業界キャリアエージェント')).toBeInTheDocument()
-    expect(screen.getByText('練習する企業・職種を選ぶ')).toBeInTheDocument()
     expect(screen.getByText('企業未選択')).toBeInTheDocument()
     expect(screen.getAllByText(POSITIONS[0].title).length).toBeGreaterThan(0)
+  })
+
+  it('面接傾向の取得失敗を表示して再試行できる', () => {
+    const retry = jest.fn()
+    renderScreen({
+      interviewCompany: { id: 1, name: 'テスト株式会社' },
+      hintsError: '企業の面接傾向を取得できませんでした',
+      onRetryHints: retry,
+    })
+
+    expect(screen.getByRole('alert')).toHaveTextContent('面接は開始できます')
+    fireEvent.click(screen.getByRole('button', { name: '再試行' }))
+    expect(retry).toHaveBeenCalledTimes(1)
+  })
+
+  it('企業面接ヒントの取得中でも面接を開始できる', () => {
+    renderScreen({
+      interviewCompany: { id: 1, name: 'テスト株式会社' },
+      hintsLoading: true,
+    })
+
+    expect(screen.getByRole('button', { name: '面接を開始する' })).toBeEnabled()
+    expect(screen.getByText('企業情報を読み込み中...')).toBeInTheDocument()
   })
 
   it('職種カードをキーボード（Enter）で選択できる', () => {

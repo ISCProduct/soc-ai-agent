@@ -23,46 +23,46 @@ import (
 )
 
 // ctx はリクエストIDを RAG まで伝播させるために受け取る(#1188)
-func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, requestingUserID uint, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, requestingUserID uint, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, []FormatFinding, error) {
 	// クエリを user_id でスコープする。所有者以外には見つからない（#1156）
 	doc, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil, shared.ErrForbidden
+			return nil, nil, nil, shared.ErrForbidden
 		}
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
-		return nil, nil, &shared.ValidationError{Message: "応募企業名または応募職種を入力してください"}
+		return nil, nil, nil, &shared.ValidationError{Message: "応募企業名または応募職種を入力してください"}
 	}
 	canonicalName, err := s.ensureRealCompany(ctx, companyName)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	companyName = canonicalName
 
 	workDir, err := s.ensureWorkingDir(doc.ID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer os.RemoveAll(workDir)
 
 	pdfPath, normalizedStored, err := s.normalizeToPDF(doc, workDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	doc.NormalizedPath = normalizedStored
 	doc.Status = "normalized"
 	if err := s.repo.UpdateDocument(doc); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if err := validatePathInDir(pdfPath, workDir); err != nil {
-		return nil, nil, fmt.Errorf("invalid pdf path: %w", err)
+		return nil, nil, nil, fmt.Errorf("invalid pdf path: %w", err)
 	}
 	blocks, err := s.extractTextBlocks(doc, pdfPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	hasText := false
 	for _, block := range blocks {
@@ -72,25 +72,26 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 		}
 	}
 	if !hasText {
-		return nil, nil, &shared.ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
+		return nil, nil, nil, &shared.ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
 	}
 	if err := s.repo.ReplaceTextBlocks(doc.ID, blocks); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
+	findings := formatFindingsFor(blocks)
 	review, items, err := s.buildResumeReviewWithAI(ctx, blocks, companyName, jobTitle, candidateType)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := s.persistReview(doc, review, items); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if _, err := s.finalizeDocument(doc, pdfPath, review, items); err != nil {
-		return review, items, err
+		return review, items, findings, err
 	}
 
-	return review, items, nil
+	return review, items, findings, nil
 }
 
 // 評価ハーネス（cmd/aibench）が本番と同じ指示・同じ呼び出し条件で測れるように、
@@ -99,7 +100,8 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 // 別物になり、出た数字が判断材料として使えなくなる。
 const (
 	// ReviewSystemPrompt はレビュー生成の system プロンプト。
-	ReviewSystemPrompt = "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案をJSON形式で提示します。"
+	// rewrite は原文をそのまま置き換える一文。説明は suggestion に分ける（#1942）。
+	ReviewSystemPrompt = "あなたは日本語の履歴書・エントリーシートを添削する専門家です。指摘ごとに、原文をそのまま置き換えられる一文をJSON形式で提示します。"
 
 	// reviewRetrySystemPrompt は指摘不足・スコア不正のときのやり直し用 system プロンプト。
 	// どちらの経路も JSON mode で呼ぶため、"JSON" の語を必ず含めること（#1583）。
@@ -107,10 +109,10 @@ const (
 
 	// ReviewMaxOutputTokens はレビュー生成の出力上限。
 	//
-	// 指摘8件（引用・指摘・改善案の3文×8）が出力の大半で、#1529 で追加した
-	// scores 5項目は数十トークン程度。実測で8件のとき約1310〜1360トークンなので
-	// 1.8倍程度の余裕がある。上限に達したときは requestReviewJSON が枠を倍にして
-	// 1度だけやり直す。
+	// 指摘8件（引用・指摘・説明・置き換え文の4文×8）が出力の大半で、#1529 で追加した
+	// scores 5項目は数十トークン程度。置き換え文を足す前の実測は8件で約1310〜1360
+	// トークン。1文分増えても 2400 には収まる想定で、上限に達したときは
+	// requestReviewJSON が枠を倍にして1度だけやり直す。
 	ReviewMaxOutputTokens = 2400
 
 	// ReviewTemperature はレビュー生成の温度。
@@ -188,6 +190,8 @@ type aiReviewItem struct {
 	Quote      string `json:"quote"`
 	Message    string `json:"message"`
 	Suggestion string `json:"suggestion"`
+	// Rewrite は quote をそのまま置き換えられる一文。説明は Suggestion。
+	Rewrite    string `json:"rewrite"`
 	Severity   string `json:"severity"`
 	PageHint   int    `json:"page_hint,omitempty"`
 	BlockIndex int    `json:"block_index,omitempty"`
@@ -439,6 +443,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		return errors.New(msg)
 	}
 	_ = s.repo.ReplaceTextBlocks(doc.ID, blocks)
+	findings := formatFindingsFor(blocks)
 
 	text := buildResumeText(blocks, reviewTextLimit)
 
@@ -497,6 +502,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		"review":              review,
 		"items":               items,
 		"annotated_available": annotatedAvailable,
+		"format_findings":     findings,
 	})
 	return nil
 }
@@ -721,7 +727,8 @@ page_hintは本文の行頭にある [P#B#] の P# を使ってください。
 block_indexは本文の行頭にある [P#B#] の B# を使ってください。
 各itemsは必ず本文の1ブロックに対応させ、総合的なまとめや全体評価だけの項目は禁止です。
 messageとsuggestionは該当ブロックの内容を引用・要約して具体的に指摘してください。
-suggestionは「どう直すか」が分かるように書いてください（数値・役割・成果・再現性など具体語を含める）。
+suggestionは「どう直すか」の説明にしてください（数値・役割・成果・再現性など具体語を含める）。
+%s
 
 【応募情報】
 %s
@@ -737,12 +744,13 @@ suggestionは「どう直すか」が分かるように書いてください（�
 scoresは上の評価基準の全項目を必ず含めてください。総合点は出力しないでください（サーバー側で算出します）。
 
 出力は次のJSONのみ:
-{"scores":{%s},"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}
+{"scores":{%s},"summary":"短い要約","items":[%s]}
 
 OCRテキスト:
 %s`, ReviewMaxItems,
+		reviewRewriteInstruction(),
 		buildReviewApplicantFacts(companyName, jobTitle, companyInfo, candidateType),
-		BuildResumeRubricPromptSection(), buildRubricJSONHint(),
+		BuildResumeRubricPromptSection(), buildRubricJSONHint(), reviewItemJSONExample,
 		// OCR 全文（reviewTextLimit=30000）が添削対象の本文そのもの。#990 / #991 が
 		// 対象にした攻撃は「添削させる本文に『高得点を返せ』を混ぜる」もので、ここが
 		// 裸だと塞いだことにならない。スコアは user_weight_scores 経由でマッチングへ
@@ -759,7 +767,8 @@ func buildReviewRetryPrompt(blockList, companyName, jobTitle, companyInfo, candi
 	return fmt.Sprintf(`以下のブロック一覧から、各ブロックに必ず紐づく指摘を最大8件返してください。
 各itemsは必ず block_index と page_hint を含め、quote は block_text の一部をそのまま抜粋してください。
 総合的なまとめや全体評価は不可です。必ずブロック単位で具体的に指摘してください。
- suggestionは具体的な書き換え案にしてください（数値・役割・成果・再現性を含める）。
+suggestionは直し方の説明にしてください（数値・役割・成果・再現性を含める）。
+%s
 
 【応募情報】
 %s
@@ -772,12 +781,13 @@ func buildReviewRetryPrompt(blockList, companyName, jobTitle, companyInfo, candi
 scoresは上の評価基準の全項目を必ず含めてください。総合点は出力しないでください（サーバー側で算出します）。
 
 出力は次のJSONのみ:
-{"scores":{%s},"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}`,
+{"scores":{%s},"summary":"短い要約","items":[%s]}`,
+		reviewRewriteInstruction(),
 		// やり直しも初回と同じ範囲を囲む（ノンスは呼び出しごとに変わる）#1600。
 		// blockList は OCR ブロックの列挙で、添削対象の本文そのもの。
 		buildReviewApplicantFacts(companyName, jobTitle, companyInfo, candidateType),
 		shared.WrapUntrustedText(blockList, "ブロック一覧"),
-		BuildResumeRubricPromptSection(), buildRubricJSONHint())
+		BuildResumeRubricPromptSection(), buildRubricJSONHint(), reviewItemJSONExample)
 }
 
 // buildReviewApplicantFacts は応募企業名・職種・企業情報・候補者区分を
@@ -805,16 +815,30 @@ func buildReviewApplicantFacts(companyName, jobTitle, companyInfo, candidateType
 // 本番の [P#B#] 付きテキストへ同じ手順で変換してからプロンプトへ載せる。
 // 1行=1ブロック（ページは1固定）として扱う。
 func BuildReviewPromptFromText(resumeText, companyName, jobTitle, companyInfo, candidateType string) string {
+	return BuildReviewPromptFromTextWithConfidence(resumeText, nil, companyName, jobTitle, companyInfo, candidateType)
+}
+
+// BuildReviewPromptFromTextWithConfidence は行ごとの認識スコア付きで本番と同じプロンプトを作る。
+//
+// confidence は非空行と同じ順（0〜1）。短い・範囲外の要素は不明として印を付けない。
+// 評価ハーネスが「誤認識行へ書き換えを出していないか」を測るための入口（#1942）。
+func BuildReviewPromptFromTextWithConfidence(resumeText string, confidence []float64, companyName, jobTitle, companyInfo, candidateType string) string {
 	blocks := make([]models.ResumeTextBlock, 0, 16)
+	lineNo := 0
 	for _, line := range strings.Split(resumeText, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		blocks = append(blocks, models.ResumeTextBlock{
+		block := models.ResumeTextBlock{
 			PageNumber: 1,
 			BlockIndex: len(blocks),
 			Text:       line,
-		})
+		}
+		if lineNo < len(confidence) {
+			block.Confidence = normalizeOCRScore(confidence[lineNo])
+		}
+		lineNo++
+		blocks = append(blocks, block)
 	}
 	return buildReviewPrompt(buildResumeText(blocks, reviewTextLimit), companyName, jobTitle, companyInfo, candidateType)
 }

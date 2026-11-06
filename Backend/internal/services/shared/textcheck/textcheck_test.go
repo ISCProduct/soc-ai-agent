@@ -169,7 +169,7 @@ func TestDefaultRules_ContainsAllRules(t *testing.T) {
 		got = append(got, r.Name())
 	}
 	sort.Strings(got)
-	want := []string{"char_limit", "date_order", "mixed_era", "mixed_numeral", "mixed_style", "mixed_width"}
+	want := []string{"char_limit", "date_order", "mixed_era", "mixed_numeral", "mixed_style", "mixed_width", "spoken_language"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("DefaultRules = %v, want %v", got, want)
 	}

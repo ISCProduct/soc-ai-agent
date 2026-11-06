@@ -70,7 +70,9 @@ jobs:
             CHANGED=$(git diff --name-only "$BEFORE" HEAD)
             echo "changed files:"
             echo "$CHANGED"
-            echo "frontend=$(echo "$CHANGED" | grep -q '^frontend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            # 資産取得スクリプトを直したときも frontend を作り直す。ここに入れないと
+            # スクリプトだけ変えた push ではビルドが省かれ、修正が反映されない。
+            echo "frontend=$(echo "$CHANGED" | grep -qE '^frontend/|^automation/ops/fetch-live2d-assets\.sh$' && echo true || echo false)" >> "$GITHUB_OUTPUT"
             echo "backend=$(echo "$CHANGED" | grep -q '^Backend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
             echo "rag=$(echo "$CHANGED" | grep -q '^rag/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
           fi
@@ -135,6 +137,10 @@ jobs:
       # 数えるため、この2件の余分が本番イメージの保持枠を食い潰していた（#1518）。
       # provenance は誰も参照していないので止める（ECRは staging と本番で共用）。
       - name: Build and push images (frontend/backend/rag-review, parallel)
+        env:
+          # ${{ }} を run に直接書くと、シェルが解析する前に値へ置換される。
+          # 値に $(...) が入ると実行されてしまうため env: 経由で渡す。
+          LIVE2D_ASSETS_BUCKET: ${{ vars.LIVE2D_ASSETS_BUCKET || 'soc-build-assets-508897596159' }}
         run: |
           set -e
           pids=()
@@ -143,12 +149,19 @@ jobs:
           # 同じシークレットから渡すと、staging を有効化した瞬間に次の本番デプロイでも
           # 有効になってしまい、環境ごとに段階導入できない。シークレットを分ける。
           if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then
+            # Live2Dの Core とモデルはライセンス上このリポジトリに置けないので、
+            # 非公開バケットからビルドコンテキストへ展開する。揃っていなければここで
+            # 落ちる（資産が無いまま NEXT_PUBLIC_LIVE2D_ENABLED=true のイメージを作らせない）。
+            # バックグラウンドのビルドより前に、同期的に終わらせる。
+            # 詳細は docs/wiki/live2d-assets.md。
+            ./automation/ops/fetch-live2d-assets.sh
             (cd frontend && docker buildx build --platform linux/amd64 --provenance=false \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }} \
               --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND_STAGING }} \
               --build-arg NEXT_PUBLIC_APP_ENV=staging \
               --build-arg NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }} \
+              --build-arg NEXT_PUBLIC_LIVE2D_ENABLED=true \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging \
               --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging,mode=max \
               -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
@@ -610,7 +623,9 @@ jobs:
             CHANGED=$(git diff --name-only "$BEFORE" HEAD)
             echo "changed files:"
             echo "$CHANGED"
-            echo "frontend=$(echo "$CHANGED" | grep -q '^frontend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            # 資産取得スクリプトを直したときも frontend を作り直す。ここに入れないと
+            # スクリプトだけ変えた push ではビルドが省かれ、修正が反映されない。
+            echo "frontend=$(echo "$CHANGED" | grep -qE '^frontend/|^automation/ops/fetch-live2d-assets\.sh$' && echo true || echo false)" >> "$GITHUB_OUTPUT"
             echo "backend=$(echo "$CHANGED" | grep -q '^Backend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
             echo "rag=$(echo "$CHANGED" | grep -q '^rag/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
           fi
@@ -662,17 +677,28 @@ jobs:
       # apt-get等の重いレイヤーから毎回リビルドされてしまう)。3イメージを並列ビルドする
       # --provenance=false の理由は staging 側のビルドステップのコメントを参照（#1518）。
       - name: Build and push images (frontend/backend/rag-review, parallel)
+        env:
+          # ${{ }} を run に直接書くと、シェルが解析する前に値へ置換される。
+          # 値に $(...) が入ると実行されてしまうため env: 経由で渡す。
+          LIVE2D_ASSETS_BUCKET: ${{ vars.LIVE2D_ASSETS_BUCKET || 'soc-build-assets-508897596159' }}
         run: |
           set -e
           pids=()
 
           if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then
+            # Live2Dの Core とモデルはライセンス上このリポジトリに置けないので、
+            # 非公開バケットからビルドコンテキストへ展開する。揃っていなければここで
+            # 落ちる（資産が無いまま NEXT_PUBLIC_LIVE2D_ENABLED=true のイメージを作らせない）。
+            # バックグラウンドのビルドより前に、同期的に終わらせる。
+            # 詳細は docs/wiki/live2d-assets.md。
+            ./automation/ops/fetch-live2d-assets.sh
             (cd frontend && docker buildx build --platform linux/amd64 --provenance=false \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }} \
               --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND_PROD }} \
               --build-arg NEXT_PUBLIC_APP_ENV=production \
               --build-arg NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }} \
+              --build-arg NEXT_PUBLIC_LIVE2D_ENABLED=true \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production \
               --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production,mode=max \
               -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &

@@ -13,7 +13,8 @@ import type { ICubismModelSetting } from '@/vendor/live2d-framework/src/icubismm
 import { CubismUserModel } from '@/vendor/live2d-framework/src/model/cubismusermodel'
 import { CubismMatrix44 } from '@/vendor/live2d-framework/src/math/cubismmatrix44'
 import { buildCapabilitiesInfo, type Live2DFrameworkCapabilitiesInfo } from './live2d-capabilities-info'
-import { OVERLAY_MESH_IDS, overlayOpacities } from './live2d-overlay'
+import { OVERLAY_MESH_IDS, applyOverlayToDrawables, type OverlayMeshIds } from './live2d-overlay'
+import { verticesExtent } from './live2d-extent'
 
 export type { Live2DFrameworkCapabilitiesInfo }
 
@@ -62,6 +63,8 @@ export class Live2DFrameworkModel extends CubismUserModel {
   private readonly viewMatrix = new CubismMatrix44()
   private overlay = { eyeOpen: 1, mouthOpen: 0 }
   private overlayIndices: { eyesClosed: number; mouthOpen: number } | null = null
+  private baseIndex: number | null = null
+  private measuredExtent: { width: number; height: number } | null = null
 
   static async load(
     gl: WebGLRenderingContext,
@@ -70,6 +73,7 @@ export class Live2DFrameworkModel extends CubismUserModel {
     shaderPath: string,
     initialWidthPx: number,
     initialHeightPx: number,
+    overlayMeshIds: OverlayMeshIds = OVERLAY_MESH_IDS,
   ): Promise<Live2DFrameworkModel> {
     const model = new Live2DFrameworkModel()
 
@@ -87,8 +91,12 @@ export class Live2DFrameworkModel extends CubismUserModel {
     // （面接画面を開き直すたびに増える）。失敗時は必ず release してから投げ直す。
     try {
       const drawableIds: string[] = Array.from(model.getModel().getModel().drawables.ids)
-      const eyesClosed = drawableIds.indexOf(OVERLAY_MESH_IDS.eyesClosed)
-      const mouthOpen = drawableIds.indexOf(OVERLAY_MESH_IDS.mouthOpen)
+      const eyesClosed = drawableIds.indexOf(overlayMeshIds.eyesClosed)
+      const mouthOpen = drawableIds.indexOf(overlayMeshIds.mouthOpen)
+      const base = drawableIds.indexOf(overlayMeshIds.base)
+      // base は差分2枚とは独立に持つ。まとめて1つにすると、差分が欠けたモデルでは
+      // 通常絵の不透明度・可視フラグの補正も効かなくなり、何も描画されない。
+      model.baseIndex = base >= 0 ? base : null
       if (eyesClosed >= 0 && mouthOpen >= 0) model.overlayIndices = { eyesClosed, mouthOpen }
 
       const physicsFileName = setting.getPhysicsFileName()
@@ -150,7 +158,7 @@ export class Live2DFrameworkModel extends CubismUserModel {
     this.overlay = { eyeOpen, mouthOpen }
   }
 
-  /** 差分ArtMeshを持つモデルか（書き出し済み男性モデルは true）。 */
+  /** 差分ArtMeshを持つモデルか（書き出し済みの男性・女性モデルはいずれも true）。 */
   hasOverlayMeshes(): boolean {
     return this.overlayIndices !== null
   }
@@ -165,28 +173,57 @@ export class Live2DFrameworkModel extends CubismUserModel {
   }
 
   private applyOverlayOpacities(): void {
-    const indices = this.overlayIndices
-    if (!indices) return
-    const { eyesClosed, mouthOpen } = overlayOpacities(this.overlay.eyeOpen, this.overlay.mouthOpen)
-    // Core の drawables.opacities は描画側(renderer)が読むのと同じ配列。update() のたびに
-    // Core が計算し直すので、毎フレームこの直後に上書きする。
-    const opacities = this.getModel().getModel().drawables.opacities
-    opacities[indices.eyesClosed] = eyesClosed
-    opacities[indices.mouthOpen] = mouthOpen
+    if (this.overlayIndices === null && this.baseIndex === null) return
+    const drawables = this.getModel().getModel().drawables
+    applyOverlayToDrawables(
+      drawables.opacities,
+      drawables.dynamicFlags,
+      {
+        base: this.baseIndex,
+        eyesClosed: this.overlayIndices?.eyesClosed ?? null,
+        mouthOpen: this.overlayIndices?.mouthOpen ?? null,
+      },
+      this.overlay.eyeOpen,
+      this.overlay.mouthOpen,
+    )
+  }
+
+  /**
+   * 全drawableの頂点から、実際の絵の見た目サイズ(unit空間)を測る。
+   *
+   * `getCanvasWidth()/getCanvasHeight()` は Cubism Editor のキャンバス設定値をそのまま
+   * 返すので、書き出しによっては実際の絵のサイズと食い違う（女性モデルで確認: 申告値が
+   * 実寸の約0.6倍しかなく、拡大されて画面外へはみ出し何も映らなかった）。見た目の
+   * スケールは実測した頂点の外接矩形から出す方が、Editor側の設定に左右されず安全。
+   *
+   * 頂点は update() のたびに変わるが、全身の外接矩形は口や目の開閉では実質変わらない。
+   * 毎フレーム全頂点を走るのは無駄なので初回だけ測って使い回す。
+   */
+  private measureExtent(): { width: number; height: number } {
+    if (this.measuredExtent) return this.measuredExtent
+    const model = this.getModel()
+    const vertexArrays: ArrayLike<number>[] = []
+    const drawableCount = model.getDrawableCount()
+    for (let i = 0; i < drawableCount; i++) vertexArrays.push(model.getDrawableVertices(i))
+    this.measuredExtent = verticesExtent(vertexArrays)
+    return this.measuredExtent
   }
 
   /**
    * canvasのピクセルサイズいっぱいに、アスペクト比を保ったまま("contain")収まるスケールで描画する。
-   * Cubismのunit空間はCore依存（CanvasWidth/Height ÷ PixelsPerUnit）なので、
-   * 「1 unit が何pxか」を幅・高さそれぞれで求めて小さい方を採用する。
+   * 「1 unit が何pxか」を幅・高さそれぞれで求めて小さい方を採用する（`measureExtent`参照）。
    *
    * `zoom` > 1 で拡大し、`focusY`（モデル画像の上端を0・下端を1とした位置）が
    * canvasの縦中央に来るようにずらす。全身絵の余白を切って顔を大きく見せるのに使う。
+   *
+   * ponytail: 平行移動は unit 原点基準のまま（外接矩形の中心基準にしていない）。
+   * 現行の男女モデルは絵が原点中心に収まっており、`FACE_ZOOM` / `FACE_FOCUS_Y`
+   * （`Live2DAvatar.tsx`）もその前提で実画面を見て決めてある。原点から外接矩形の
+   * 中心がずれたモデルに差し替えると絵が寄るので、そのときは外接矩形の中心へ
+   * 合わせる平行移動に変え、合わせて `FACE_FOCUS_Y` を見直す。
    */
   draw(gl: WebGLRenderingContext, canvasWidthPx: number, canvasHeightPx: number, margin = 0.98, zoom = 1, focusY = 0.5): void {
-    const model = this.getModel()
-    const canvasWidthUnit = model.getCanvasWidth()
-    const canvasHeightUnit = model.getCanvasHeight()
+    const { width: canvasWidthUnit, height: canvasHeightUnit } = this.measureExtent()
     if (canvasWidthUnit <= 0 || canvasHeightUnit <= 0) return
 
     const pxPerUnit = Math.min(canvasWidthPx / canvasWidthUnit, canvasHeightPx / canvasHeightUnit) * margin * zoom

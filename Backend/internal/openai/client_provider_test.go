@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // clearAIEnv は AI 関連の環境変数をテスト間で確実に初期化する。
@@ -590,6 +591,250 @@ func TestNilClientReturnsErrAIUnavailable(t *testing.T) {
 	}
 	if !cli.Degraded() {
 		t.Error("nil クライアントは Degraded() = true であるべき")
+	}
+}
+
+// llmTestCalls は論理コールの締切を共有する2つの呼び出しをテーブルにしたもの。
+var llmTestCalls = []struct {
+	name string
+	call func(*Client, context.Context) error
+}{
+	{
+		name: "ChatCompletionJSON",
+		call: func(cli *Client, ctx context.Context) error {
+			_, err := cli.ChatCompletionJSON(ctx, "sys", "user", 0, 16)
+			return err
+		},
+	},
+	{
+		name: "WebSearchJSON",
+		call: func(cli *Client, ctx context.Context) error {
+			_, err := cli.WebSearchJSON(ctx, "user", 600)
+			return err
+		},
+	},
+}
+
+func setLLMDuration(t *testing.T, target *time.Duration, value time.Duration) {
+	t.Helper()
+	old := *target
+	*target = value
+	t.Cleanup(func() { *target = old })
+}
+
+func newLLMTestClient(t *testing.T, handler http.HandlerFunc) *Client {
+	t.Helper()
+	clearAIEnv(t)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	t.Setenv("AI_TEXT_PROVIDER", "local")
+	t.Setenv("AI_TEXT_BASE_URL", srv.URL)
+	t.Setenv("AI_TEXT_MODEL", "test-model")
+	cli, err := NewFromEnv("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cli
+}
+
+// hangUntilCanceled はリクエストが打ち切られるまで応答しない。
+// 打ち切られない実装でも srv.Close が止まらないよう上限を設ける。
+func hangUntilCanceled(r *http.Request) {
+	select {
+	case <-r.Context().Done():
+	case <-time.After(5 * time.Second):
+	}
+}
+
+func TestLLMCallTimeoutStopsRetriesAndBackoff(t *testing.T) {
+	servers := []struct {
+		name    string
+		respond func(http.ResponseWriter, *http.Request)
+	}{
+		{name: "応答待ちで締切", respond: func(_ http.ResponseWriter, r *http.Request) { hangUntilCanceled(r) }},
+		// 再試行可能なエラーの直後はバックオフ待ちに入る。待ちが締切で中断されないと2秒以上かかる。
+		{name: "バックオフ待ちで締切", respond: func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		}},
+	}
+
+	for _, tt := range llmTestCalls {
+		for _, server := range servers {
+			t.Run(tt.name+"/"+server.name, func(t *testing.T) {
+				setLLMDuration(t, &llmMinAttemptRemaining, 0)
+				var requests atomic.Int32
+				cli := newLLMTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+					requests.Add(1)
+					server.respond(w, r)
+				})
+
+				ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+				defer cancel()
+				started := time.Now()
+				err := tt.call(cli, ctx)
+				elapsed := time.Since(started)
+
+				if !errors.Is(err, ErrAICallTimeout) {
+					t.Fatalf("error = %v, want ErrAICallTimeout", err)
+				}
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("error = %v, want context deadline exceeded", err)
+				}
+				if elapsed > time.Second {
+					t.Fatalf("call took %s after its deadline", elapsed)
+				}
+				if got := requests.Load(); got != 1 {
+					t.Fatalf("request count = %d, want 1 (no retry after caller deadline)", got)
+				}
+			})
+		}
+	}
+}
+
+// 呼び出し側に締切が無くても、論理コールの上限で打ち切られることを検証する。
+func TestLLMLogicalCallTimeoutApplies(t *testing.T) {
+	for _, tt := range llmTestCalls {
+		t.Run(tt.name, func(t *testing.T) {
+			setLLMDuration(t, &llmMinAttemptRemaining, 0)
+			setLLMDuration(t, &chatCompletionCallTimeout, 100*time.Millisecond)
+			setLLMDuration(t, &webSearchCallTimeout, 100*time.Millisecond)
+			cli := newLLMTestClient(t, func(_ http.ResponseWriter, r *http.Request) { hangUntilCanceled(r) })
+
+			started := time.Now()
+			err := tt.call(cli, context.Background())
+
+			if !errors.Is(err, ErrAICallTimeout) {
+				t.Fatalf("error = %v, want ErrAICallTimeout", err)
+			}
+			if elapsed := time.Since(started); elapsed > time.Second {
+				t.Fatalf("call took %s, want about the logical call timeout", elapsed)
+			}
+		})
+	}
+}
+
+func TestLLMSkipsAttemptWhenRemainingTooShort(t *testing.T) {
+	for _, tt := range llmTestCalls {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests atomic.Int32
+			cli := newLLMTestClient(t, func(http.ResponseWriter, *http.Request) { requests.Add(1) })
+
+			ctx, cancel := context.WithTimeout(context.Background(), llmMinAttemptRemaining/2)
+			defer cancel()
+			err := tt.call(cli, ctx)
+
+			if !errors.Is(err, ErrAICallTimeout) {
+				t.Fatalf("error = %v, want ErrAICallTimeout", err)
+			}
+			if got := requests.Load(); got != 0 {
+				t.Fatalf("request count = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestLLMClientCancelIsNotCallTimeout(t *testing.T) {
+	for _, tt := range llmTestCalls {
+		t.Run(tt.name, func(t *testing.T) {
+			cli := newLLMTestClient(t, func(http.ResponseWriter, *http.Request) {})
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			err := tt.call(cli, ctx)
+
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("error = %v, want context canceled", err)
+			}
+			if errors.Is(err, ErrAICallTimeout) {
+				t.Fatalf("error = %v, canceled call must not be ErrAICallTimeout", err)
+			}
+		})
+	}
+}
+
+// 1試行目が試行上限で打ち切られても、論理コールの残り時間で2試行目が成功することを検証する。
+func TestChatCompletionRetriesAfterAttemptTimeout(t *testing.T) {
+	setLLMDuration(t, &chatCompletionAttemptCap, 50*time.Millisecond)
+	var requests atomic.Int32
+	cli := newLLMTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			hangUntilCanceled(r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"{\"ok\":true}"}}]}`))
+	})
+
+	got, err := cli.ChatCompletionJSON(context.Background(), "sys", "user", 0, 16)
+	if err != nil {
+		t.Fatalf("ChatCompletionJSON returned error: %v", err)
+	}
+	if got != `{"ok":true}` {
+		t.Fatalf("content = %q", got)
+	}
+	if n := requests.Load(); n != 2 {
+		t.Fatalf("request count = %d, want 2", n)
+	}
+}
+
+// web_search は検索ごとに課金されるので、試行タイムアウトでは再試行しない。
+func TestWebSearchDoesNotRetryAttemptTimeout(t *testing.T) {
+	setLLMDuration(t, &webSearchAttemptCap, 50*time.Millisecond)
+	var requests atomic.Int32
+	cli := newLLMTestClient(t, func(_ http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		hangUntilCanceled(r)
+	})
+
+	_, err := cli.WebSearchJSON(context.Background(), "user", 600)
+
+	if !errors.Is(err, ErrAICallTimeout) {
+		t.Fatalf("error = %v, want ErrAICallTimeout", err)
+	}
+	if n := requests.Load(); n != 1 {
+		t.Fatalf("request count = %d, want 1", n)
+	}
+}
+
+func TestCallAttemptTimeout(t *testing.T) {
+	const attemptCap = 10 * time.Second
+	setLLMDuration(t, &llmMinAttemptRemaining, time.Second)
+
+	withDeadline := func(remaining time.Duration) context.Context {
+		ctx, cancel := context.WithTimeout(context.Background(), remaining)
+		t.Cleanup(cancel)
+		return ctx
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name    string
+		ctx     context.Context
+		wantErr error
+		wantMin time.Duration
+		wantMax time.Duration
+	}{
+		{name: "締切なしは上限", ctx: context.Background(), wantMin: attemptCap, wantMax: attemptCap},
+		{name: "残りが上限より長いなら上限", ctx: withDeadline(time.Minute), wantMin: attemptCap, wantMax: attemptCap},
+		{name: "残りが上限より短いなら残り時間", ctx: withDeadline(5 * time.Second), wantMin: 4 * time.Second, wantMax: 5 * time.Second},
+		{name: "残りが最小残時間未満なら試行しない", ctx: withDeadline(500 * time.Millisecond), wantErr: context.DeadlineExceeded},
+		{name: "期限切れ", ctx: withDeadline(-time.Second), wantErr: context.DeadlineExceeded},
+		{name: "キャンセル済み", ctx: canceled, wantErr: context.Canceled},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := callAttemptTimeout(tt.ctx, attemptCap)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantErr != nil {
+				return
+			}
+			if got < tt.wantMin || got > tt.wantMax {
+				t.Fatalf("timeout = %s, want %s..%s", got, tt.wantMin, tt.wantMax)
+			}
+		})
 	}
 }
 

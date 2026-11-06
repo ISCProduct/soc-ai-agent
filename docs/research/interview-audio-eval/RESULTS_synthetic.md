@@ -5,6 +5,25 @@
 - ツール: `Backend/cmd/sttbench`
 - 実行: `go run ./cmd/sttbench -manifest ../docs/research/interview-audio-eval/manifest.jsonl -format wav -out <リポジトリ外>`
 
+## ローカルSTTの評価
+
+`sttbench` は面接本体と同じ `AI_AUDIO_PROVIDER` / `AI_AUDIO_BASE_URL` を参照する。
+ローカルの OpenAI 互換サーバーで測る場合、OpenAI API キーは不要。
+
+```sh
+AI_AUDIO_PROVIDER=local \
+AI_AUDIO_BASE_URL=http://localhost:9000/v1 \
+go run ./cmd/sttbench \
+  -manifest ../docs/research/interview-audio-eval/manifest.jsonl \
+  -models <ローカルSTTモデル名> -format wav -out /tmp/stt-local.json
+```
+
+エンドポイントは `/audio/transcriptions` に対応する必要がある。OpenAI のキーを使う場合は
+従来どおり `OPENAI_API_KEY` を設定し、`AI_AUDIO_PROVIDER` を `openai` にする。
+面接本体のローカルモデル名は既存の `OPENAI_WHISPER_MODEL` / `OPENAI_TTS_MODEL` で指定する。
+レポートのローカル費用は API 利用料のみ（0 USD）で、計算資源・電力の費用は含まない。
+このツールは STT の品質と遅延を測るもので、TTS の音声品質やローカル実行コストは別途評価する。
+
 ## 結果
 
 | モデル | 平均CER | 意味CER | 固有名詞 | 数値 | 失敗率 | $/面接(発話10分) |

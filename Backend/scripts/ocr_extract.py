@@ -8,7 +8,31 @@ import sys
 import traceback
 
 import fitz  # PyMuPDF
-from paddleocr import PaddleOCR
+
+
+def parse_ocr_line(idx, line):
+    """PaddleOCR の1行をブロックJSONにする。認識スコアは捨てない（#1942）。
+
+    line は [bbox, (text, score)]。score が無い形式は confidence を付けない。
+    """
+    bbox, rec = line
+    text = ""
+    score = None
+    if isinstance(rec, (list, tuple)) and len(rec) >= 2:
+        text = "" if rec[0] is None else str(rec[0])
+        score = rec[1]
+    elif rec is not None:
+        text = str(rec)
+    x_coords = [p[0] for p in bbox]
+    y_coords = [p[1] for p in bbox]
+    block = {
+        "block_index": idx,
+        "text": text,
+        "bbox": [min(x_coords), min(y_coords), max(x_coords), max(y_coords)],
+    }
+    if score is not None:
+        block["confidence"] = float(score)
+    return block
 
 
 def ocr_page(ocr, pix):
@@ -19,14 +43,7 @@ def ocr_page(ocr, pix):
     if not result or not result[0]:
         return blocks
     for idx, line in enumerate(result[0]):
-        bbox, (text, _score) = line
-        x_coords = [p[0] for p in bbox]
-        y_coords = [p[1] for p in bbox]
-        blocks.append({
-            "block_index": idx,
-            "text": text,
-            "bbox": [min(x_coords), min(y_coords), max(x_coords), max(y_coords)],
-        })
+        blocks.append(parse_ocr_line(idx, line))
     return blocks
 
 
@@ -65,6 +82,13 @@ def main():
 
     if not os.path.exists(args.input):
         print(f"input file not found: {args.input}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        from paddleocr import PaddleOCR
+    except Exception as e:
+        print(f"PaddleOCR import failed: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
     try:
