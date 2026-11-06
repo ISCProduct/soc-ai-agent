@@ -34,6 +34,9 @@ var upsertAssignments = clause.AssignmentColumns([]string{
 	"communication_match",
 	"matched_axis_count",
 	"match_reason",
+	// 理由と一緒に更新する。AI理由を作らない再計算では空になり、
+	// 存在しないAI理由を古い版が生成したことにならない。
+	"match_reason_prompt_version",
 	"updated_at",
 })
 

@@ -688,8 +688,9 @@ module "backend" {
   # リスト長が unknown になり、モジュール側の count が plan 時に評価できない。
   # 中身が必ず1件以上あることは静的に分かっているので、ここで真偽値を渡す。
   create_secrets_policy = true
-  environment = {
+  environment = merge({
     APP_ENV                     = "production"
+    PROMPT_VERSION              = var.prompt_version
     AWS_REGION                  = var.region
     AWS_S3_BUCKET               = module.s3.bucket_id
     EMAIL_PROVIDER              = "resend"
@@ -721,7 +722,10 @@ module "backend" {
     SENTRY_ENVIRONMENT = "production"
     # Cloud Map(Service Discovery)経由でrag-reviewタスクへ到達する
     RAG_REVIEW_URL = "http://rag-review.${aws_service_discovery_private_dns_namespace.internal.name}:9000"
-  }
+    }, {
+    for stage, version in var.prompt_versions :
+    "PROMPT_VERSION_${upper(stage)}" => version
+  })
   extra_container_definitions = [
     {
       name      = "redis"
