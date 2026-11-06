@@ -68,6 +68,31 @@ func buildInterviewSystemPrompt(
 	}
 	currentTopic := interviewTopics[topicIndex]
 	remainingTopics := len(interviewTopics) - topicIndex - 1
+	topicPosition := fmt.Sprintf("%d/%d", topicIndex+1, len(interviewTopics))
+	if directive != nil && strings.TrimSpace(directive.Category) != "" {
+		currentTopic = directive.Category
+		topicPosition = "企業別カテゴリ"
+		topicIndex = -1
+		for i, topic := range interviewTopics {
+			if topic == directive.Category {
+				topicIndex = i
+				topicPosition = fmt.Sprintf("%d/%d", topicIndex+1, len(interviewTopics))
+				break
+			}
+		}
+		if topicIndex < 0 {
+			currentTopic = "企業別"
+		}
+		turnsOnTopic = 1
+		if directive.IsDeepening {
+			turnsOnTopic = maxTurnsPerTopic
+		}
+		if topicIndex < 0 {
+			remainingTopics = len(interviewTopics)
+		} else {
+			remainingTopics = len(interviewTopics) - topicIndex - 1
+		}
+	}
 
 	// 【役割の徹底】は #1223。面接官が企業側であること・逆質問には自分が答えることは
 	// 従来プロンプトに書かれておらず、モデルの暗黙の補完に依存していた。
@@ -94,8 +119,8 @@ func buildInterviewSystemPrompt(
   質問に進める`
 
 	// 現在のトピックと進行状況を明示
-	base += fmt.Sprintf("\n\n【現在の面接状況】\n現在のトピック: %s（%d/%d）\n現在のトピックでの質問回数: %d/%d回",
-		currentTopic, topicIndex+1, len(interviewTopics), turnsOnTopic, maxTurnsPerTopic)
+	base += fmt.Sprintf("\n\n【現在の面接状況】\n現在のトピック: %s（%s）\n現在のトピックでの質問回数: %d/%d回",
+		currentTopic, topicPosition, turnsOnTopic, maxTurnsPerTopic)
 	base += fmt.Sprintf(
 		"\n\n【質問タイムボックス】\n1質問あたりの目安: 約%d分（%d秒）\n現在の質問番号: %d/%d\nこの質問の経過時間: %d秒\nこの質問の残り目安: %d秒",
 		questionDurationSeconds/60,
@@ -131,6 +156,13 @@ func buildInterviewSystemPrompt(
 - 同一トピックへの深掘りは最大1回までとし、現在のトピックでの質問回数が2回に達したら必ず次のトピックへ移行してください
 - 1つの質問は約3分を目安にし、目安時間に達したら自然に次の質問へ移行してください
 - トピックを移行する際は「ありがとうございます。次に〜についてお聞きします。」と自然につないでください`
+
+	if directive != nil {
+		base += `
+
+【質問キューとの整合】
+今回の質問カテゴリは面接質問キューに従ってください。企業独自のカテゴリを標準トピックへ無理に読み替えず、質問キューの順序を優先してください。`
+	}
 
 	if companyName != "" || position != "" {
 		// 【面接情報】はブロックごと非信頼テキストとして囲む（#1600）。

@@ -236,6 +236,7 @@ type TurnResult struct {
 	QuestionSource         string
 	QuestionCategory       string
 	IsDeepening            bool
+	TotalQuestions         int
 	ResolvedCompanyID      uint
 	CustomQuestionsEnabled bool
 }
