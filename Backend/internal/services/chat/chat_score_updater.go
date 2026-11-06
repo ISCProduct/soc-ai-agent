@@ -13,6 +13,33 @@ import (
 	"gorm.io/gorm"
 )
 
+// scoreAnswer は回答を選択肢と文章に振り分けて採点し、スコアを更新する。
+// 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
+func (s *ChatService) scoreAnswer(ctx context.Context, userID uint, sessionID, answer string, jobCategoryID uint, history []models.ChatMessage) bool {
+	trimmedAnswer := strings.TrimSpace(answer)
+	lastAssistantQuestion := findLastAssistantQuestion(history)
+	resolved := ResolveChoiceAnswer(lastAssistantQuestion, trimmedAnswer)
+	log.Printf("[ProcessChat] Checking answer: raw=%q resolved_choice=%v letter=%q reason=%q free_text=%v\n",
+		trimmedAnswer, resolved.IsChoice, resolved.Letter, resolved.Reason, resolved.IsFreeText)
+	isQualityAnswer := false
+	if resolved.IsChoice && s.isChoiceAnswer(resolved.Letter) {
+		log.Printf("[ProcessChat] Processing as choice answer\n")
+		var err error
+		isQualityAnswer, err = s.processChoiceAnswer(ctx, userID, sessionID, resolved.Letter, resolved.Reason, history, jobCategoryID)
+		if err != nil {
+			log.Printf("Warning: failed to process choice answer: %v\n", err)
+		}
+	} else {
+		log.Printf("[ProcessChat] Processing as text answer\n")
+		var err error
+		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, userID, sessionID, resolved.Text, jobCategoryID, history)
+		if err != nil {
+			log.Printf("Warning: failed to update weights: %v\n", err)
+		}
+	}
+	return isQualityAnswer
+}
+
 // analyzeAndUpdateWeights ユーザーの回答を分析し重み係数を更新する。
 // 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
 //
@@ -207,6 +234,68 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 	}
 
 	return nil
+}
+
+// RecalculateChatSession は保存済みの質問・回答だけからチャットスコアを再構築する。
+// 書き込みは呼び出し側が同一トランザクションで置き換える。
+//
+// ライブ採点（scoreAnswer）とは別の実装なので、同じ入力で同じ値になることを
+// chat_score_recalculation_test.go で突き合わせている。職種の選択状態（jobRoleSet）は
+// 履歴から復元できないので false を渡す。precheckHuman が現状未使用なので値は変わらない。
+func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, sessionID string) (map[string]int, error) {
+	messages, err := s.chatMessageRepo.FindBySessionIDForUser(sessionID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load chat session for recalculation: %w", err)
+	}
+
+	scores := make(map[string]int)
+	for i, message := range messages {
+		if message.Role != "user" {
+			continue
+		}
+		if i+1 < len(messages) && messages[i+1].Role == "assistant" &&
+			isValidationFeedbackMessage(messages[i+1].Content) {
+			continue
+		}
+		question, category := lastQuestionForScoring(messages[:i+1])
+		if strings.TrimSpace(question) == "" || (category == "" && s.isJobSelectionQuestion(question)) {
+			continue
+		}
+		if category == "" {
+			category = s.inferCategoryFromQuestion(question)
+		}
+
+		resolved := ResolveChoiceAnswer(question, message.Content)
+		var result HumanScoreResult
+		scoreInput := message.Content
+		if resolved.IsChoice && s.isChoiceAnswer(resolved.Letter) {
+			result = s.answerEvaluator.EvaluateHumanScoring(question, resolved.Letter, true, false, nil)
+			if result.Action != PrecheckScore {
+				continue
+			}
+			result.Score, _ = AdjustChoiceAxisScore(result.Score, resolved.Reason)
+			scoreInput = resolved.Letter
+		} else {
+			if resolved.IsFreeText {
+				scoreInput = resolved.Text
+			}
+			result = s.answerEvaluator.EvaluateHumanScoringWithContext(ctx, question, scoreInput, false, false, nil)
+			if result.Action == PrecheckSkip || result.Action == PrecheckIgnore {
+				continue
+			}
+			result = floorEngagedShortScore(scoreInput, result)
+		}
+		if result.Score <= 0 {
+			continue
+		}
+
+		if current, exists := scores[category]; exists {
+			scores[category] = int(math.Round(float64(current)*0.7 + float64(result.Score)*0.3))
+		} else {
+			scores[category] = result.Score
+		}
+	}
+	return scores, nil
 }
 
 // isChoiceAnswer 選択肢回答かどうかを判定

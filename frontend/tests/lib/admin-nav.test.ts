@@ -55,6 +55,12 @@ describe('ADMIN_NAV', () => {
     expect(new Set(hrefs).size).toBe(hrefs.length)
   })
 
+  it('ユーザースコア再計算をプラットフォーム管理へ表示する', () => {
+    const item = ADMIN_NAV.flatMap((group) => group.items).find((candidate) => candidate.href === '/admin/user-score-recalculation')
+    expect(item?.title).toBe('ユーザースコア再計算')
+    expect(visibleAdminNav(true).flatMap((group) => group.items)).toContain(item)
+  })
+
   it('全項目に説明と具体的な操作名がある', () => {
     // §13: ボタンには具体的な操作名を使う（「OK」「実行」を避ける）。
     for (const item of ADMIN_NAV.flatMap((g) => g.items)) {

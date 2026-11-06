@@ -5,9 +5,17 @@ import (
 	"Backend/domain/mapper"
 	"Backend/domain/valueobject"
 	"Backend/internal/models"
+	"encoding/json"
+	"errors"
+	"fmt"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+// ErrRecalculationTargetChanged は、対象を選んだ後でセッションが再計算できなくなったことを示す。
+// 履歴書・ES・面接のスコアが途中で反映された場合に返す。
+var ErrRecalculationTargetChanged = errors.New("recalculation target is no longer eligible")
 
 type UserWeightScoreRepository struct {
 	db *gorm.DB
@@ -43,11 +51,12 @@ func (r *UserWeightScoreRepository) SetScoreWithSource(userID uint, sessionID, c
 		absoluteScore = 100
 	}
 	score := models.UserWeightScore{
-		UserID:         userID,
-		SessionID:      sessionID,
-		WeightCategory: category,
-		Score:          absoluteScore,
-		Source:         source,
+		UserID:             userID,
+		SessionID:          sessionID,
+		WeightCategory:     category,
+		Score:              absoluteScore,
+		Source:             source,
+		CalculationVersion: models.CurrentUserScoreCalculationVersion,
 	}
 	if err := fillOrganizationID(r.db, userID, &score.OrganizationID); err != nil {
 		return err
@@ -70,6 +79,7 @@ func (r *UserWeightScoreRepository) AddScore(userID uint, sessionID, category st
 		userID, sessionID, category).First(&score).Error; err != nil {
 		return err
 	}
+	// 既存スコアを混ぜる加算では、過去版の値が残るため計算版を更新しない。
 	return r.db.Model(&score).Update(
 		"score",
 		gorm.Expr("GREATEST(0, LEAST(100, score + ?))", delta),
@@ -118,6 +128,282 @@ func (r *UserWeightScoreRepository) CountByUserAndSession(userID uint, sessionID
 		Where("user_id = ? AND session_id = ?", userID, sessionID).
 		Count(&count).Error
 	return count, err
+}
+
+type UserScoreRecalculationTarget struct {
+	ScoreID   uint
+	UserID    uint
+	SessionID string
+}
+
+type UserScoreRecalculationStats struct {
+	EligibleSessions    uint
+	UnsupportedSessions uint
+	MaxScoreID          uint
+	EligibleAnswers     uint
+}
+
+// RecalculationStats returns chat sessions whose scores are out of date. Sessions
+// with cross-feature contributions are excluded because their aggregate cannot be
+// reconstructed from chat messages alone.
+func (r *UserWeightScoreRepository) RecalculationStats(version string) (UserScoreRecalculationStats, error) {
+	var stats UserScoreRecalculationStats
+	err := r.db.Raw(fmt.Sprintf(`
+SELECT
+  COALESCE(MAX(uws.id), 0) AS max_score_id,
+  COUNT(DISTINCT CASE WHEN %[1]s
+    THEN CONCAT(uws.user_id, ':', uws.session_id) END) AS eligible_sessions,
+  COUNT(DISTINCT CONCAT(uws.user_id, ':', uws.session_id)) -
+  COUNT(DISTINCT CASE WHEN %[1]s
+    THEN CONCAT(uws.user_id, ':', uws.session_id) END) AS unsupported_sessions
+FROM user_weight_scores uws
+WHERE uws.calculation_version <> ?`, recalculationEligibleCondition()), version).Scan(&stats).Error
+	if err != nil {
+		return stats, err
+	}
+	err = r.db.Raw(fmt.Sprintf(`
+SELECT COUNT(*)
+FROM chat_messages cm
+WHERE cm.role = 'user'
+  AND EXISTS (
+    SELECT 1 FROM user_weight_scores uws
+    WHERE uws.user_id = cm.user_id AND uws.session_id = cm.session_id
+      AND uws.calculation_version <> ?
+      AND %s
+  )`, recalculationEligibleCondition()), version).Scan(&stats.EligibleAnswers).Error
+	return stats, err
+}
+
+// recalculationEligibleCondition は別名 uws のスコア行が再計算できるかを判定する条件を返す。
+// 見積もりと実際の対象がずれると進捗と完了判定が狂うので、全クエリでこの条件を共有する。
+func recalculationEligibleCondition() string {
+	return fmt.Sprintf(`uws.source = 'chat'
+  AND LEFT(uws.session_id, 10) <> 'interview-'
+  AND EXISTS (
+    SELECT 1 FROM chat_messages eligible_cm
+    WHERE eligible_cm.user_id = uws.user_id AND eligible_cm.session_id = uws.session_id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM resume_documents rd
+    JOIN resume_reviews rr ON rr.document_id = rd.id
+    WHERE rd.user_id = uws.user_id AND rd.session_id = uws.session_id
+      AND rr.score IS NOT NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM es_reviews er
+    WHERE er.user_id = uws.user_id AND er.scored_at IS NOT NULL
+      AND (%s OR %s)
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM interview_sessions ins
+    JOIN interview_reports ir ON ir.session_id = ins.id
+    WHERE ins.user_id = uws.user_id AND ir.scores_applied_at IS NOT NULL
+      AND (%s OR %s)
+  )`,
+		scoreSessionAtTime("uws", "er.scored_at"),
+		scoreSessionTouchedAfter("uws", "er.scored_at"),
+		scoreSessionAtTime("uws", "ir.scores_applied_at"),
+		scoreSessionTouchedAfter("uws", "ir.scores_applied_at"),
+	)
+}
+
+func (r *UserWeightScoreRepository) FindNextRecalculationTargets(version string, maxScoreID, cursor uint, limit int) ([]UserScoreRecalculationTarget, error) {
+	var targets []UserScoreRecalculationTarget
+	if limit <= 0 {
+		return targets, nil
+	}
+	err := r.db.Raw(fmt.Sprintf(`
+SELECT MIN(uws.id) AS score_id, uws.user_id, uws.session_id
+FROM user_weight_scores uws
+WHERE uws.calculation_version <> ?
+  AND uws.id <= ?
+  AND %s
+GROUP BY uws.user_id, uws.session_id
+HAVING MIN(uws.id) > ?
+ORDER BY MIN(uws.id)
+LIMIT ?`, recalculationEligibleCondition()), version, maxScoreID, cursor, limit).Scan(&targets).Error
+	return targets, err
+}
+
+func scoreSessionAtTime(scoreAlias, appliedAt string) string {
+	return fmt.Sprintf(`%s.session_id = (
+  SELECT prior.session_id
+  FROM user_weight_scores prior
+  WHERE prior.user_id = %s.user_id
+    AND prior.source <> 'assessment'
+    AND LEFT(prior.session_id, 10) <> 'interview-'
+    AND prior.updated_at <= %s
+  ORDER BY prior.updated_at DESC, prior.id DESC
+  LIMIT 1
+)`, scoreAlias, scoreAlias, appliedAt)
+}
+
+// scoreSessionTouchedAfter は、反映時刻より前に作られ、反映時刻以降に更新された行が
+// セッションにあるかを判定する条件を返す。
+//
+// 面接は反映時刻を確保してから行を更新するので、更新した行の updated_at は反映時刻より
+// 後になる。全行が更新されたセッションは scoreSessionAtTime の候補から外れ、加点済みと
+// 判定できない。誤って再計算すると加点が消えるので、迷う場合は対象外に倒す。
+// 再計算で作り直した行は created_at も新しくなるので、この条件には当たらない。
+func scoreSessionTouchedAfter(scoreAlias, appliedAt string) string {
+	return fmt.Sprintf(`EXISTS (
+  SELECT 1 FROM user_weight_scores touched
+  WHERE touched.user_id = %[1]s.user_id
+    AND touched.session_id = %[1]s.session_id
+    AND touched.created_at <= %[2]s
+    AND touched.updated_at >= %[2]s
+)`, scoreAlias, appliedAt)
+}
+
+// ReplaceChatSessionScores atomically replaces a replayed chat session's scores.
+//
+// 再計算は LLM を何度も呼ぶので、対象を選んでから置換するまでに履歴書・ES・面接の
+// スコアが反映されることがある。行をロックしてから対象の条件を確かめ直し、外れていれば
+// ErrRecalculationTargetChanged を返す。確かめずに置換すると、反映された加点が消える。
+//
+// 置換前の行は jobID に紐づけて残し、RollbackRecalculatedSessions で元に戻せるようにする。
+func (r *UserWeightScoreRepository) ReplaceChatSessionScores(jobID, userID uint, sessionID string, scores map[string]int, version string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var lockedIDs []uint
+		if err := tx.Model(&models.UserWeightScore{}).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND session_id = ? AND source = ?", userID, sessionID, models.ScoreSourceChat).
+			Pluck("id", &lockedIDs).Error; err != nil {
+			return err
+		}
+		var eligible int64
+		if err := tx.Raw(fmt.Sprintf(`
+SELECT COUNT(*)
+FROM user_weight_scores uws
+WHERE uws.user_id = ? AND uws.session_id = ? AND uws.calculation_version <> ?
+  AND %s`, recalculationEligibleCondition()), userID, sessionID, version).Scan(&eligible).Error; err != nil {
+			return err
+		}
+		if eligible == 0 {
+			return ErrRecalculationTargetChanged
+		}
+
+		var existing []models.UserWeightScore
+		if err := tx.Where("user_id = ? AND session_id = ? AND source = ?", userID, sessionID, models.ScoreSourceChat).
+			Find(&existing).Error; err != nil {
+			return err
+		}
+		payload, err := json.Marshal(existing)
+		if err != nil {
+			return err
+		}
+		if err := tx.Create(&models.UserScoreRecalculationSnapshot{
+			JobID: jobID, UserID: userID, SessionID: sessionID, ScoresJSON: string(payload),
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ? AND session_id = ? AND source = ?", userID, sessionID, models.ScoreSourceChat).
+			Delete(&models.UserWeightScore{}).Error; err != nil {
+			return err
+		}
+		for category, score := range scores {
+			normalized, err := valueobject.ParseWeightCategory(category)
+			if err != nil {
+				return err
+			}
+			row := models.UserWeightScore{
+				UserID: userID, SessionID: sessionID, Source: models.ScoreSourceChat,
+				WeightCategory: string(normalized), Score: max(0, min(100, score)),
+				CalculationVersion: version,
+			}
+			if len(existing) > 0 {
+				row.OrganizationID = existing[0].OrganizationID
+			} else if err := fillOrganizationID(tx, userID, &row.OrganizationID); err != nil {
+				return err
+			}
+			if err := tx.Create(&row).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// ChatSessionScoreMap はセッションのチャットスコアをカテゴリ別に返す。
+func (r *UserWeightScoreRepository) ChatSessionScoreMap(userID uint, sessionID string) (map[string]int, error) {
+	var rows []models.UserWeightScore
+	if err := r.db.Where("user_id = ? AND session_id = ? AND source = ?", userID, sessionID, models.ScoreSourceChat).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	scores := make(map[string]int, len(rows))
+	for _, row := range rows {
+		scores[row.WeightCategory] = row.Score
+	}
+	return scores, nil
+}
+
+// RecalculationRollbackResult は1回のロールバックの結果。
+type RecalculationRollbackResult struct {
+	// Restored は元に戻したセッション。企業マッチングの作り直しに使う。
+	Restored []UserScoreRecalculationTarget
+	// Skipped は再計算の後に更新があったので戻さなかったセッションの数。
+	Skipped int
+}
+
+// RollbackRecalculatedSessions はジョブのスナップショットを limit 件まで元に戻す。
+// 処理したスナップショットは消すので、繰り返し呼ぶと残りを処理できる。
+func (r *UserWeightScoreRepository) RollbackRecalculatedSessions(jobID uint, version string, limit int) (RecalculationRollbackResult, error) {
+	var result RecalculationRollbackResult
+	var snapshots []models.UserScoreRecalculationSnapshot
+	if err := r.db.Where("job_id = ?", jobID).Order("id").Limit(limit).Find(&snapshots).Error; err != nil {
+		return result, err
+	}
+	for _, snapshot := range snapshots {
+		restored, err := r.rollbackSnapshot(snapshot, version)
+		if err != nil {
+			return result, err
+		}
+		if restored {
+			result.Restored = append(result.Restored, UserScoreRecalculationTarget{UserID: snapshot.UserID, SessionID: snapshot.SessionID})
+		} else {
+			result.Skipped++
+		}
+	}
+	return result, nil
+}
+
+// rollbackSnapshot は1セッションを元に戻す。再計算の後にチャット回答や履歴書・ES・面接の
+// 反映があったセッションは、戻すとその更新が消えるので戻さない。
+func (r *UserWeightScoreRepository) rollbackSnapshot(snapshot models.UserScoreRecalculationSnapshot, version string) (bool, error) {
+	var rows []models.UserWeightScore
+	if err := json.Unmarshal([]byte(snapshot.ScoresJSON), &rows); err != nil {
+		return false, fmt.Errorf("snapshot %d: %w", snapshot.ID, err)
+	}
+	restored := false
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		scope := tx.Model(&models.UserWeightScore{}).
+			Where("user_id = ? AND session_id = ? AND source = ?", snapshot.UserID, snapshot.SessionID, models.ScoreSourceChat)
+		var lockedIDs []uint
+		if err := scope.Session(&gorm.Session{}).Clauses(clause.Locking{Strength: "UPDATE"}).Pluck("id", &lockedIDs).Error; err != nil {
+			return err
+		}
+		var changed int64
+		if err := scope.Session(&gorm.Session{}).
+			Where("calculation_version <> ? OR updated_at > created_at", version).
+			Count(&changed).Error; err != nil {
+			return err
+		}
+		if len(lockedIDs) > 0 && changed == 0 {
+			if err := tx.Where("id IN ?", lockedIDs).Delete(&models.UserWeightScore{}).Error; err != nil {
+				return err
+			}
+			for i := range rows {
+				rows[i].ID = 0
+				if err := tx.Create(&rows[i]).Error; err != nil {
+					return err
+				}
+			}
+			restored = true
+		}
+		return tx.Delete(&models.UserScoreRecalculationSnapshot{}, snapshot.ID).Error
+	})
+	return restored, err
 }
 
 // FindLatestByUser ユーザーの最新セッションのスコアを取得する。

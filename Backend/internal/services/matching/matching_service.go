@@ -422,6 +422,11 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 	return reason, nil
 }
 
+// ReasonUsesAI はマッチング理由を AI で生成する設定かを返す。費用の見積もりに使う。
+func ReasonUsesAI() bool {
+	return matchingReasonUseAI()
+}
+
 func matchingReasonUseAI() bool {
 	v := strings.TrimSpace(os.Getenv("MATCHING_REASON_USE_AI"))
 	return strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
