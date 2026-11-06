@@ -175,7 +175,7 @@ func TestReplaceChatSessionScores_RechecksEligibilityUnderLock(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectRollback()
 
-	err := repo.ReplaceChatSessionScores(7, "session-1", map[string]int{"技術志向": 80}, "v2")
+	err := repo.ReplaceChatSessionScores(1, 7, "session-1", map[string]int{"技術志向": 80}, "v2")
 	if !errors.Is(err, repositories.ErrRecalculationTargetChanged) {
 		t.Fatalf("err = %v, want ErrRecalculationTargetChanged", err)
 	}

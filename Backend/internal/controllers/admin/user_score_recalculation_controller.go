@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
 	adminservice "Backend/internal/services/admin"
 
@@ -72,6 +73,30 @@ func (c *UserScoreRecalculationController) Pause(ctx echo.Context) error {
 
 func (c *UserScoreRecalculationController) Resume(ctx echo.Context) error {
 	return c.setJobStatus(ctx, c.service.Resume)
+}
+
+// DryRun は POST /api/admin/user-score-recalculation/dry-run。保存せずに再計算後の値を返す。
+func (c *UserScoreRecalculationController) DryRun(ctx echo.Context) error {
+	limit := httpapi.LimitQuery(ctx, "limit", 3)
+	result, err := c.service.DryRun(ctx.Request().Context(), limit)
+	if err != nil {
+		log.Printf("[UserScoreRecalculation] dry-run failed: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "ドライランに失敗しました")
+	}
+	return ctx.JSON(http.StatusOK, result)
+}
+
+// Rollback は POST /api/admin/user-score-recalculation/jobs/:job_id/rollback。
+func (c *UserScoreRecalculationController) Rollback(ctx echo.Context) error {
+	id, err := parseRecalculationJobID(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "job_id が不正です")
+	}
+	result, err := c.service.Rollback(ctx.Request().Context(), id)
+	if err != nil {
+		return recalculationJobError(id, err)
+	}
+	return ctx.JSON(http.StatusOK, result)
 }
 
 func (c *UserScoreRecalculationController) Cancel(ctx echo.Context) error {

@@ -3,6 +3,8 @@ package admin
 import (
 	"context"
 	"errors"
+	"flag"
+	"os"
 	"testing"
 
 	"Backend/internal/models"
@@ -65,6 +67,7 @@ func TestSaveRecalculatedScores(t *testing.T) {
 			if tt.eligible > 0 {
 				mock.ExpectQuery("SELECT \\* FROM `user_weight_scores`").
 					WillReturnRows(sqlmock.NewRows([]string{"id", "organization_id"}).AddRow(1, 3))
+				mock.ExpectExec("INSERT INTO `user_score_recalculation_snapshots`").WillReturnResult(sqlmock.NewResult(1, 1))
 				mock.ExpectExec("DELETE FROM `user_weight_scores`").WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectExec("INSERT INTO `user_weight_scores`").WillReturnResult(sqlmock.NewResult(2, 1))
 				mock.ExpectCommit()
@@ -93,5 +96,46 @@ func TestSaveRecalculatedScores(t *testing.T) {
 				t.Fatalf("expectations not met: %v", err)
 			}
 		})
+	}
+}
+
+var updateDryRunGolden = flag.Bool("update", false, "ドライランのゴールデンファイルを更新する")
+
+func intPtr(value int) *int { return &value }
+
+// 表の形をゴールデンで固定する。更新: go test ./internal/services/admin/ -run DryRun -update
+func TestFormatUserScoreRecalculationDryRun(t *testing.T) {
+	out := FormatUserScoreRecalculationDryRun([]RecalculationDryRunSession{
+		{ScoreID: 1, UserID: 7, Scores: []RecalculationDryRunScore{
+			{Category: "チームワーク志向", Current: intPtr(50), Recalculated: intPtr(62)},
+			{Category: "技術志向", Current: intPtr(80), Recalculated: intPtr(75)},
+			{Category: "新しい軸", Recalculated: intPtr(40)},
+			{Category: "消える軸", Current: intPtr(30)},
+		}},
+		{ScoreID: 2, UserID: 8, Failure: models.UserScoreRecalculationFailureLoad},
+		{ScoreID: 3, UserID: 9},
+	}) + FormatUserScoreRecalculationDryRun(nil)
+
+	const golden = "testdata/user_score_recalculation_dryrun.golden"
+	if *updateDryRunGolden {
+		if err := os.WriteFile(golden, []byte(out), 0o644); err != nil {
+			t.Fatalf("ゴールデンの更新に失敗: %v", err)
+		}
+		return
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("ゴールデンが読めない: %v", err)
+	}
+	if out != string(want) {
+		t.Errorf("--- want ---\n%s\n--- got ---\n%s", want, out)
+	}
+}
+
+func TestCompareRecalculatedScores(t *testing.T) {
+	got := compareRecalculatedScores(map[string]int{"a": 1, "b": 2}, map[string]int{"b": 3, "c": 4})
+	if len(got) != 3 || got[0].Category != "a" || got[0].Recalculated != nil ||
+		*got[1].Current != 2 || *got[1].Recalculated != 3 || got[2].Current != nil {
+		t.Fatalf("got %+v", got)
 	}
 }

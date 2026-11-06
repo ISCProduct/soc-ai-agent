@@ -119,6 +119,10 @@ export default function PageContent() {
   const [processing, setProcessing] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
+  const [rollbackConfirmOpen, setRollbackConfirmOpen] = useState(false)
+  const [rollbackMessage, setRollbackMessage] = useState('')
+  const [dryRunText, setDryRunText] = useState('')
+  const [dryRunning, setDryRunning] = useState(false)
   const [error, setError] = useState('')
   const stopRequested = useRef(false)
   const activeJobID = useRef<number | null>(null)
@@ -243,6 +247,56 @@ export default function PageContent() {
     }
   }
 
+  const runDryRun = async () => {
+    setError('')
+    setDryRunning(true)
+    try {
+      const body = await request('dry-run', 'POST')
+      if (!isRecord(body) || typeof body.text !== 'string') throw new Error('ドライランの結果を読み取れませんでした')
+      setDryRunText(body.text)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'ドライランに失敗しました')
+    } finally {
+      setDryRunning(false)
+    }
+  }
+
+  const rollbackJob = async () => {
+    setRollbackConfirmOpen(false)
+    if (!job) return
+    setError('')
+    setRollbackMessage('')
+    setProcessing(true)
+    let restored = 0
+    let skipped = 0
+    let matchingFailed = 0
+    try {
+      for (;;) {
+        const body = await request(`jobs/${job.id}/rollback`, 'POST')
+        if (
+          !isRecord(body) ||
+          typeof body.restored !== 'number' ||
+          typeof body.skipped !== 'number' ||
+          typeof body.matching_failed !== 'number' ||
+          typeof body.remaining !== 'number'
+        ) throw new Error('復元の結果を読み取れませんでした')
+        restored += body.restored
+        skipped += body.skipped
+        matchingFailed += body.matching_failed
+        if (body.remaining === 0) break
+      }
+      setRollbackMessage(
+        `${restored} セッションを元に戻しました。再計算の後に更新があった ${skipped} セッションは戻していません。` +
+        (matchingFailed > 0 ? `${matchingFailed} セッションは企業マッチングを更新できませんでした。` : ''),
+      )
+      void loadData()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '元に戻せませんでした')
+    } finally {
+      setProcessing(false)
+    }
+  }
+
   if (!platformReady) return null
   const progress = job && job.total_sessions > 0
     ? Math.min(100, Math.round(job.processed_sessions / job.total_sessions * 100))
@@ -297,6 +351,26 @@ export default function PageContent() {
               >
                 再計算を開始
               </Button>
+              <Button
+                variant="outlined"
+                sx={{ mt: 2, ml: 1 }}
+                disabled={preview.eligible_sessions === 0 || dryRunning || processing}
+                onClick={() => void runDryRun()}
+              >
+                {dryRunning ? '確認中…' : '再計算後の値を確認'}
+              </Button>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                先頭の3セッションだけを再計算して、保存せずに現在の値と比べます。LLM を呼ぶので費用がかかります。
+              </Typography>
+              {dryRunText && (
+                <Typography
+                  component="pre"
+                  variant="body2"
+                  sx={{ mt: 1, p: 1, overflowX: 'auto', bgcolor: 'action.hover', fontFamily: 'monospace' }}
+                >
+                  {dryRunText}
+                </Typography>
+              )}
             </Paper>
           )}
           {job && (
@@ -318,6 +392,9 @@ export default function PageContent() {
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                 費用概算: ${job.estimated_cost_usd.toFixed(4)} USD
               </Typography>
+              {rollbackMessage && (
+                <Alert severity="info" sx={{ mt: 2 }}>{rollbackMessage}</Alert>
+              )}
               <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
                 {job.status === 'running' && !processing && (
                   <Button variant="contained" onClick={continueJob}>
@@ -337,6 +414,11 @@ export default function PageContent() {
                 {job.status === 'paused' && (
                   <Button variant="outlined" color="error" disabled={processing} onClick={() => setCancelConfirmOpen(true)}>
                     中止
+                  </Button>
+                )}
+                {(job.status === 'completed' || job.status === 'cancelled') && (
+                  <Button variant="outlined" color="error" disabled={processing} onClick={() => setRollbackConfirmOpen(true)}>
+                    元に戻す
                   </Button>
                 )}
                 {processing && <CircularProgress size={24} aria-label="再計算中" />}
@@ -365,12 +447,24 @@ export default function PageContent() {
         <DialogTitle>再計算を中止しますか？</DialogTitle>
         <DialogContent>
           <Typography>
-            再計算済みのセッションは元に戻りません。未処理のセッションは、次に開始するジョブの対象になります。
+            再計算済みのセッションは新しい値のまま残ります（中止の後に「元に戻す」で戻せます）。未処理のセッションは、次に開始するジョブの対象になります。
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCancelConfirmOpen(false)}>戻る</Button>
           <Button variant="contained" color="error" onClick={() => void cancelJob()}>中止する</Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog open={rollbackConfirmOpen} onClose={() => setRollbackConfirmOpen(false)}>
+        <DialogTitle>再計算の前の値に戻しますか？</DialogTitle>
+        <DialogContent>
+          <Typography>
+            このジョブが置き換えたスコアを元に戻し、企業マッチングも作り直します。再計算の後にチャット回答や履歴書・ES・面接の反映があったセッションは戻しません。
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRollbackConfirmOpen(false)}>戻る</Button>
+          <Button variant="contained" color="error" onClick={() => void rollbackJob()}>元に戻す</Button>
         </DialogActions>
       </Dialog>
     </PageContainer>

@@ -3902,6 +3902,49 @@ paths:
         "409":
           description: ジョブが一時停止中ではない、または実行中のバッチが残っている
 
+  /api/admin/user-score-recalculation/jobs/{job_id}/rollback:
+    post:
+      tags: [admin-score]
+      summary: 再計算で置き換えたスコアを元に戻す
+      description: |
+        最大20セッションずつ戻す。応答の remaining が 0 になるまで繰り返す。
+        再計算の後に更新があったセッションは戻さず skipped に数える。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 復元の結果（restored / skipped / matching_failed / remaining）
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "404":
+          description: ジョブが存在しない
+        "409":
+          description: 実行中または一時停止中のジョブがある
+
+  /api/admin/user-score-recalculation/dry-run:
+    post:
+      tags: [admin-score]
+      summary: 再計算後の値を保存せずに確認する
+      description: 対象の先頭から最大5セッションを再計算して現在の値と比べる。LLM を呼ぶので費用がかかる。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 3
+            maximum: 5
+      responses:
+        "200":
+          description: セッションごとの比較（sessions）と比較表（text）
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
   /api/admin/costs/summary:
     get:
       tags: [admin-costs]

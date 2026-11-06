@@ -45,6 +45,13 @@ func (r *UserScoreRecalculationRepository) FindByID(id uint) (*models.UserScoreR
 	return &job, nil
 }
 
+// CountSnapshots は元に戻せるセッションの数を返す。
+func (r *UserScoreRecalculationRepository) CountSnapshots(jobID uint) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.UserScoreRecalculationSnapshot{}).Where("job_id = ?", jobID).Count(&count).Error
+	return count, err
+}
+
 // FindActive は実行中または一時停止中のジョブを返す。無ければ nil。
 func (r *UserScoreRecalculationRepository) FindActive() (*models.UserScoreRecalculationJob, error) {
 	var jobs []models.UserScoreRecalculationJob

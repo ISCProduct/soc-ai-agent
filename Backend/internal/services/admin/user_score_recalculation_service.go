@@ -5,6 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
+	"slices"
+	"strconv"
+	"strings"
 
 	"Backend/internal/models"
 	"Backend/internal/repositories"
@@ -12,11 +16,19 @@ import (
 	"Backend/internal/services/costs"
 )
 
-const userScoreRecalculationBatchSize = 10
+const (
+	userScoreRecalculationBatchSize = 10
+	// recalculationDryRunMaxSessions はドライランで再計算するセッションの上限。LLM の費用がかかる。
+	recalculationDryRunMaxSessions = 5
+	// recalculationRollbackBatchSize は1回のロールバックで戻すセッションの上限。
+	// マッチングの作り直しがあるので、1リクエストを長くしない。
+	recalculationRollbackBatchSize = 20
+)
 
 var (
 	ErrRecalculationJobNotRunning = errors.New("実行中のジョブではありません")
 	ErrRecalculationJobNotPaused  = errors.New("一時停止中のジョブではありません")
+	ErrRecalculationJobActive     = errors.New("実行中または一時停止中のジョブがある間は元に戻せません")
 )
 
 // RecalculationMatchingRunner はスコア置換後に企業マッチングを作り直す。
@@ -263,7 +275,7 @@ func (s *UserScoreRecalculationService) saveRecalculatedScores(
 	scores map[string]int,
 	version string,
 ) string {
-	if err := s.scores.ReplaceChatSessionScores(target.UserID, target.SessionID, scores, version); err != nil {
+	if err := s.scores.ReplaceChatSessionScores(jobID, target.UserID, target.SessionID, scores, version); err != nil {
 		failure := models.UserScoreRecalculationFailureSave
 		if errors.Is(err, repositories.ErrRecalculationTargetChanged) {
 			failure = models.UserScoreRecalculationFailureTargetChanged
@@ -286,6 +298,165 @@ func logRecalculationFailure(jobID uint, target repositories.UserScoreRecalculat
 		jobID, target.ScoreID, target.UserID, target.SessionID, failure, err)
 }
 
+// UserScoreRecalculationRollback は1回のロールバックの結果。Remaining が 0 になるまで繰り返す。
+type UserScoreRecalculationRollback struct {
+	Restored       int   `json:"restored"`
+	Skipped        int   `json:"skipped"`
+	MatchingFailed int   `json:"matching_failed"`
+	Remaining      int64 `json:"remaining"`
+}
+
+// Rollback はジョブが置き換えたスコアを元に戻し、企業マッチングも作り直す。
+func (s *UserScoreRecalculationService) Rollback(ctx context.Context, id uint) (*UserScoreRecalculationRollback, error) {
+	job, err := s.jobs.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+	active, err := s.jobs.FindActive()
+	if err != nil {
+		return nil, err
+	}
+	if active != nil {
+		return nil, ErrRecalculationJobActive
+	}
+	batch, err := s.scores.RollbackRecalculatedSessions(id, job.CalculationVersion, recalculationRollbackBatchSize)
+	if err != nil {
+		return nil, fmt.Errorf("スコアの復元に失敗: %w", err)
+	}
+	result := &UserScoreRecalculationRollback{Restored: len(batch.Restored), Skipped: batch.Skipped}
+	for _, target := range batch.Restored {
+		if err := s.matching.CalculateMatching(ctx, target.UserID, target.SessionID); err != nil {
+			logRecalculationFailure(id, target, models.UserScoreRecalculationFailureMatching, err)
+			result.MatchingFailed++
+		}
+	}
+	result.Remaining, err = s.jobs.CountSnapshots(id)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// RecalculationDryRunScore は1カテゴリの現在の値と再計算後の値。値がなければ nil。
+type RecalculationDryRunScore struct {
+	Category     string `json:"category"`
+	Current      *int   `json:"current"`
+	Recalculated *int   `json:"recalculated"`
+}
+
+// RecalculationDryRunSession は1セッションのドライラン結果。
+type RecalculationDryRunSession struct {
+	ScoreID uint                       `json:"score_id"`
+	UserID  uint                       `json:"user_id"`
+	Scores  []RecalculationDryRunScore `json:"scores"`
+	Failure string                     `json:"failure,omitempty"`
+}
+
+// UserScoreRecalculationDryRun はドライランの結果。Text は比較表。
+type UserScoreRecalculationDryRun struct {
+	Sessions []RecalculationDryRunSession `json:"sessions"`
+	Text     string                       `json:"text"`
+}
+
+// DryRun は対象の先頭 limit セッションを再計算し、保存せずに現在の値と比べる。
+// 再計算と同じ LLM を呼ぶので、費用を抑えるためセッション数に上限を置く。
+func (s *UserScoreRecalculationService) DryRun(ctx context.Context, limit int) (*UserScoreRecalculationDryRun, error) {
+	limit = max(1, min(limit, recalculationDryRunMaxSessions))
+	stats, err := s.scores.RecalculationStats(models.CurrentUserScoreCalculationVersion)
+	if err != nil {
+		return nil, fmt.Errorf("スコア再計算対象の取得に失敗: %w", err)
+	}
+	targets, err := s.scores.FindNextRecalculationTargets(models.CurrentUserScoreCalculationVersion, stats.MaxScoreID, 0, limit)
+	if err != nil {
+		return nil, fmt.Errorf("再計算対象の取得に失敗: %w", err)
+	}
+	sessions := make([]RecalculationDryRunSession, 0, len(targets))
+	for _, target := range targets {
+		session := RecalculationDryRunSession{ScoreID: target.ScoreID, UserID: target.UserID}
+		recalculated, err := s.chat.RecalculateChatSession(ctx, target.UserID, target.SessionID)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		if err != nil {
+			logRecalculationFailure(0, target, models.UserScoreRecalculationFailureLoad, err)
+			session.Failure = models.UserScoreRecalculationFailureLoad
+			sessions = append(sessions, session)
+			continue
+		}
+		current, err := s.scores.ChatSessionScoreMap(target.UserID, target.SessionID)
+		if err != nil {
+			return nil, fmt.Errorf("現在のスコアの取得に失敗: %w", err)
+		}
+		session.Scores = compareRecalculatedScores(current, recalculated)
+		sessions = append(sessions, session)
+	}
+	return &UserScoreRecalculationDryRun{Sessions: sessions, Text: FormatUserScoreRecalculationDryRun(sessions)}, nil
+}
+
+func compareRecalculatedScores(current, recalculated map[string]int) []RecalculationDryRunScore {
+	categories := make(map[string]struct{}, len(current)+len(recalculated))
+	for category := range current {
+		categories[category] = struct{}{}
+	}
+	for category := range recalculated {
+		categories[category] = struct{}{}
+	}
+	scores := make([]RecalculationDryRunScore, 0, len(categories))
+	for _, category := range slices.Sorted(maps.Keys(categories)) {
+		score := RecalculationDryRunScore{Category: category}
+		if value, ok := current[category]; ok {
+			score.Current = &value
+		}
+		if value, ok := recalculated[category]; ok {
+			score.Recalculated = &value
+		}
+		scores = append(scores, score)
+	}
+	return scores
+}
+
+// FormatUserScoreRecalculationDryRun はドライランの結果を比較表にする。
+// flywheel.FormatScoreMappingDryRun と同じく、表の形はゴールデンで固定する。
+func FormatUserScoreRecalculationDryRun(sessions []RecalculationDryRunSession) string {
+	var b strings.Builder
+	b.WriteString("=== スコア再計算のドライラン（保存していません）===\n")
+	if len(sessions) == 0 {
+		b.WriteString("再計算の対象はありません\n")
+		return b.String()
+	}
+	for _, session := range sessions {
+		fmt.Fprintf(&b, "\n--- user_id=%d score_id=%d ---\n", session.UserID, session.ScoreID)
+		if session.Failure != "" {
+			fmt.Fprintf(&b, "再計算できませんでした: %s\n", session.Failure)
+			continue
+		}
+		if len(session.Scores) == 0 {
+			b.WriteString("採点できる回答がありません\n")
+			continue
+		}
+		b.WriteString("現在 | 再計算後 | 差分 | カテゴリ\n")
+		for _, score := range session.Scores {
+			fmt.Fprintf(&b, "%4s | %8s | %4s | %s\n",
+				dryRunValue(score.Current), dryRunValue(score.Recalculated), dryRunDelta(score), score.Category)
+		}
+	}
+	return b.String()
+}
+
+func dryRunValue(value *int) string {
+	if value == nil {
+		return "-"
+	}
+	return strconv.Itoa(*value)
+}
+
+func dryRunDelta(score RecalculationDryRunScore) string {
+	if score.Current == nil || score.Recalculated == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%+d", *score.Recalculated-*score.Current)
+}
+
 func IsRecalculationJobAlreadyRunning(err error) bool {
 	return errors.Is(err, repositories.ErrUserScoreRecalculationRunning)
 }
@@ -294,7 +465,7 @@ func IsRecalculationJobAlreadyRunning(err error) bool {
 // 競合でなければ false。
 func RecalculationConflictMessage(err error) (string, bool) {
 	switch {
-	case errors.Is(err, ErrRecalculationJobNotRunning), errors.Is(err, ErrRecalculationJobNotPaused):
+	case errors.Is(err, ErrRecalculationJobNotRunning), errors.Is(err, ErrRecalculationJobNotPaused), errors.Is(err, ErrRecalculationJobActive):
 		return err.Error(), true
 	case errors.Is(err, repositories.ErrUserScoreRecalculationBatchBusy):
 		return "このジョブのバッチを別の処理が実行中です", true

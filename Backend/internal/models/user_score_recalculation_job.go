@@ -37,3 +37,18 @@ type UserScoreRecalculationJob struct {
 }
 
 func (UserScoreRecalculationJob) TableName() string { return "user_score_recalculation_jobs" }
+
+// UserScoreRecalculationSnapshot は再計算で置き換える前のチャットスコア。
+// ScoresJSON は []UserWeightScore の JSON で、列が増えても失わないよう行全体を残す。
+type UserScoreRecalculationSnapshot struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	JobID      uint      `gorm:"not null" json:"job_id"`
+	UserID     uint      `gorm:"not null" json:"user_id"`
+	SessionID  string    `gorm:"size:100;not null" json:"session_id"`
+	ScoresJSON string    `gorm:"column:scores_json;type:json;not null" json:"-"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+func (UserScoreRecalculationSnapshot) TableName() string {
+	return "user_score_recalculation_snapshots"
+}
