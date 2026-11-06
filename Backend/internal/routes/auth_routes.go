@@ -19,7 +19,7 @@ func SetupAuthRoutes(api *echo.Group, authController *authcontrollers.AuthContro
 	auth.POST("/register", authController.Register)
 	// レート制限ミドルウェアはnet/httpベースのため echo.WrapMiddleware で変換して適用
 	auth.POST("/login", authController.Login, echoLoginRateLimit())
-	auth.POST("/guest", authController.CreateGuest, echoGuestAIRateLimit())
+	auth.POST("/guest", authController.CreateGuest)
 	auth.GET("/verify-email", authController.VerifyEmail)
 	auth.POST("/forgot-password", authController.RequestPasswordReset, echoPasswordResetRateLimit())
 	auth.POST("/reset-password", authController.ResetPassword)

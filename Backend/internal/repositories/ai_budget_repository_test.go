@@ -47,7 +47,7 @@ func TestAIBudgetRepositoryUsageCosts(t *testing.T) {
 				WillReturnRows(sqlmock.NewRows([]string{"daily", "monthly"}).AddRow(1.5, 10.0))
 			// 終了していないリアルタイム音声を見積もりに含めることを固定する。
 			mock.ExpectQuery(`(?s)WHEN ended_at IS NULL THEN TIMESTAMPDIFF.*FROM realtime_usage_logs\s+WHERE `+tt.column+` = \? AND started_at >= \?`).
-				WithArgs(dayStart, 0.18, 0.18, uint(7), monthStart).
+				WithArgs(dayStart, sqlmock.AnyArg(), 0.18, sqlmock.AnyArg(), 0.18, uint(7), monthStart).
 				WillReturnRows(sqlmock.NewRows([]string{"daily", "monthly"}).AddRow(0.5, 2.0))
 
 			daily, monthly, err := repo.UsageCosts(context.Background(), tt.scope, 7, dayStart, monthStart, 0.18)

@@ -108,14 +108,17 @@ FROM api_call_logs
 WHERE %s = ? AND called_at >= ?`, column), dayStart, scopeID, monthStart).Scan(&api).Error; err != nil {
 		return 0, 0, err
 	}
-	const realtimeCost = `CASE WHEN ended_at IS NULL THEN TIMESTAMPDIFF(SECOND, started_at, UTC_TIMESTAMP()) * (? / 60.0) ELSE cost_usd END`
+	// 現在時刻は DB の関数ではなく引数で渡す。started_at と同じ DSN の loc で変換されるので、
+	// コンテナの TZ を変えても経過時間がずれない。
+	now := time.Now().UTC()
+	const realtimeCost = `CASE WHEN ended_at IS NULL THEN TIMESTAMPDIFF(SECOND, started_at, ?) * (? / 60.0) ELSE cost_usd END`
 	if err := r.db.WithContext(ctx).Raw(fmt.Sprintf(`
 SELECT
   COALESCE(SUM(CASE WHEN started_at >= ? THEN %[1]s ELSE 0 END), 0) AS daily,
   COALESCE(SUM(%[1]s), 0) AS monthly
 FROM realtime_usage_logs
 WHERE %[2]s = ? AND started_at >= ?`, realtimeCost, column),
-		dayStart, realtimeRatePerMinute, realtimeRatePerMinute, scopeID, monthStart).Scan(&realtime).Error; err != nil {
+		dayStart, now, realtimeRatePerMinute, now, realtimeRatePerMinute, scopeID, monthStart).Scan(&realtime).Error; err != nil {
 		return 0, 0, err
 	}
 	return api.Daily + realtime.Daily, api.Monthly + realtime.Monthly, nil
