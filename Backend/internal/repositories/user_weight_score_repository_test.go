@@ -149,7 +149,7 @@ func TestRecalculationQueriesScopeCrossFeatureExclusionsToAppliedSession(t *test
 	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\)` + exclusions).
 		WithArgs("v2").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(5))
-	mock.ExpectQuery(`(?s)SELECT MIN\(uws\.id\)` + exclusions).
+	mock.ExpectQuery(`(?s)SELECT MIN\(uws\.id\)`+exclusions).
 		WithArgs("v2", uint(100), uint(0), 10).
 		WillReturnRows(sqlmock.NewRows([]string{"score_id", "user_id", "session_id"}))
 
