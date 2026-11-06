@@ -10,10 +10,12 @@ import (
 	"strconv"
 	"strings"
 
+	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services/chat"
 	"Backend/internal/services/costs"
+	"Backend/internal/services/matching"
 )
 
 const (
@@ -80,22 +82,33 @@ func (s *UserScoreRecalculationService) Preview() (*UserScoreRecalculationPrevie
 
 func (s *UserScoreRecalculationService) estimate(stats repositories.UserScoreRecalculationStats) *UserScoreRecalculationPreview {
 	model, billable := s.chat.RecalculationModel()
+	calls := estimateRecalculationLLMCalls(stats, matching.ReasonUsesAI(), config.MatchingReasonAITopN())
 	estimatedCost := 0.0
-	if billable && stats.EligibleAnswers > 0 {
+	if billable && calls > 0 {
 		// すべての回答に短文・境界値評価が発生した場合として保守的に見積もる。
-		estimatedCost = costs.EstimateCostUSD(model, 2048, 256) * float64(stats.EligibleAnswers)
+		estimatedCost = costs.EstimateCostUSD(model, 2048, 256) * float64(calls)
 	}
 	return &UserScoreRecalculationPreview{
 		CalculationVersion:  models.CurrentUserScoreCalculationVersion,
 		EligibleSessions:    stats.EligibleSessions,
 		UnsupportedSessions: stats.UnsupportedSessions,
-		EstimatedLLMCalls:   stats.EligibleAnswers,
+		EstimatedLLMCalls:   calls,
 		EstimatedCostUSD:    estimatedCost,
 		CostEstimateNote: "回答1件あたり入力2048・出力256トークン、全回答でLLM評価が発生する前提の概算です。" +
 			"ローカル推論先の構成では、全件が OpenAI へフォールバックした場合の上限を示します。" +
 			"実際の呼び出し数と費用はこれを下回る場合があります。" +
-			"MATCHING_REASON_USE_AI を有効にしている場合のマッチング理由の生成費用は含みません。",
+			"MATCHING_REASON_USE_AI が有効なら、セッションごとのマッチング理由の生成も含みます。",
 	}
+}
+
+// estimateRecalculationLLMCalls は LLM 呼び出しの上限を返す。回答ごとの評価に加えて、
+// マッチング理由を AI で作る設定なら、置換のたびに上位 topN 社ぶんの理由を生成する。
+func estimateRecalculationLLMCalls(stats repositories.UserScoreRecalculationStats, reasonUsesAI bool, topN int) uint {
+	calls := stats.EligibleAnswers
+	if reasonUsesAI && topN > 0 {
+		calls += stats.EligibleSessions * uint(topN)
+	}
+	return calls
 }
 
 func (s *UserScoreRecalculationService) Start() (*models.UserScoreRecalculationJob, error) {

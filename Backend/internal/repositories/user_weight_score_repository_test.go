@@ -140,14 +140,16 @@ func TestAddScore_ClampsToZeroOneHundred(t *testing.T) {
 func TestRecalculationQueriesScopeCrossFeatureExclusionsToAppliedSession(t *testing.T) {
 	repo, mock := newScoreRepoTestDB(t)
 
-	mock.ExpectQuery(`(?s)SELECT COALESCE\(MAX\(uws\.id\).*uws\.session_id = \(.*prior\.updated_at <= er\.scored_at.*uws\.session_id = \(.*prior\.updated_at <= ir\.scores_applied_at.*WHERE uws\.calculation_version <> \?`).
+	// 除外条件が消えると加点が戻せない形で失われるので、枝を1つずつ固定する。
+	const exclusions = `.*rr\.score IS NOT NULL.*uws\.session_id = \(.*prior\.updated_at <= er\.scored_at.*touched\.updated_at >= er\.scored_at.*uws\.session_id = \(.*prior\.updated_at <= ir\.scores_applied_at.*touched\.updated_at >= ir\.scores_applied_at`
+	mock.ExpectQuery(`(?s)SELECT COALESCE\(MAX\(uws\.id\)` + exclusions + `.*WHERE uws\.calculation_version <> \?`).
 		WithArgs("v2").
 		WillReturnRows(sqlmock.NewRows([]string{"max_score_id", "eligible_sessions", "unsupported_sessions"}).
 			AddRow(100, 2, 1))
-	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\).*prior\.updated_at <= er\.scored_at.*prior\.updated_at <= ir\.scores_applied_at`).
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\)` + exclusions).
 		WithArgs("v2").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(5))
-	mock.ExpectQuery(`(?s)SELECT MIN\(uws\.id\).*uws\.session_id = \(.*prior\.updated_at <= er\.scored_at.*uws\.session_id = \(.*prior\.updated_at <= ir\.scores_applied_at`).
+	mock.ExpectQuery(`(?s)SELECT MIN\(uws\.id\)` + exclusions).
 		WithArgs("v2", uint(100), uint(0), 10).
 		WillReturnRows(sqlmock.NewRows([]string{"score_id", "user_id", "session_id"}))
 

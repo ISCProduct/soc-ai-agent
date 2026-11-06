@@ -139,3 +139,24 @@ func TestCompareRecalculatedScores(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+func TestEstimateRecalculationLLMCalls(t *testing.T) {
+	stats := repositories.UserScoreRecalculationStats{EligibleSessions: 3, EligibleAnswers: 40}
+	tests := []struct {
+		name         string
+		reasonUsesAI bool
+		topN         int
+		want         uint
+	}{
+		{name: "AI理由なしは回答の評価だけ", topN: 20, want: 40},
+		{name: "AI理由ありはセッションごとの上位N社を足す", reasonUsesAI: true, topN: 20, want: 100},
+		{name: "上位0社なら足さない", reasonUsesAI: true, topN: 0, want: 40},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := estimateRecalculationLLMCalls(stats, tt.reasonUsesAI, tt.topN); got != tt.want {
+				t.Fatalf("got %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
