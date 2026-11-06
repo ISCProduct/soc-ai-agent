@@ -29,7 +29,8 @@ import (
 )
 
 // exitCodeNoEvaluation は全ケースが API エラーで終わったモデルがあるときの終了コード。
-// 設定エラーの 2、キー未配布の 3 と分ける。
+// 設定エラーの 2、キー未配布の 3 と分ける。go run 経由では 1 になるので、
+// 終了コードで判定するときはビルドしたバイナリを実行する。
 const exitCodeNoEvaluation = 4
 
 // parseHintsContext は `会社名|読み|職種|企業情報` を分解する。

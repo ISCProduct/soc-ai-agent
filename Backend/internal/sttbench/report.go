@@ -35,7 +35,7 @@ func PrintSummary(w io.Writer, model string, s *ModelSummary) {
 		fmt.Fprintf(w, "%-26s %8s %8s %10s %10s %6s %8d\n",
 			c.ID, cerOrDash(c.CER, !c.Errored), cerOrDash(c.SemanticCER, !c.Errored), kw, num, mark, c.LatencyMS)
 	}
-	// 平均の母数は「APIが成功し、かつ認識失敗でもない件数」。
+	// 平均の母数は「APIが成功した件数」。認識失敗は測定結果なので母数に入る。
 	// APIエラー件数を必ず添えるのは、残高切れで大半が落ちた run を
 	// 「CERが改善した」と読まないため。
 	scored := len(s.Cases) - s.ErroredCases
