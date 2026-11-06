@@ -182,6 +182,7 @@ func TestAIBudgetGuardsAreAttachedToRoutes(t *testing.T) {
 	SetupInterviewRoutes(api, nil, nil, secret, nil, nil, budget)
 	SetupGitHubRoutes(api, nil, secret, nil, nil, budget)
 	SetupESRoutes(api, nil, nil, secret, nil, nil, budget)
+	SetupAssessmentRoutes(api, nil, secret, nil, nil, budget)
 
 	token, err := middleware.GenerateJWT(1, "user@example.com", secret)
 	if err != nil {
@@ -203,11 +204,13 @@ func TestAIBudgetGuardsAreAttachedToRoutes(t *testing.T) {
 		{http.MethodPost, "/api/realtime/token", immediate},
 		{http.MethodPost, "/api/interviews/1/start", immediate},
 		{http.MethodPost, "/api/interviews/1/report/regenerate", immediate},
-		{http.MethodPost, "/api/interviews/1/send-report", immediate},
 		{http.MethodGet, "/api/interviews/1/phrase-suggestions", immediate},
 		{http.MethodGet, "/api/companies/web-search", deferred},
 		{http.MethodPost, "/api/companies/validate", deferred},
 		{http.MethodPost, "/api/github/repo/summarize", deferred},
+		{http.MethodPost, "/api/assessments/sessions/1/submit", deferred},
+		// 保存済みのレポートをメールで送るだけで AI を呼ばない。
+		{http.MethodPost, "/api/interviews/1/send-report", 0},
 		// 開始後の面接は予算超過で中断しない。ガードに当たらなければよい（want は 0）。
 		// ハンドラが nil なので、ガードを通り抜けた先は 400 や Recover の 500 になる。
 		{http.MethodPost, "/api/interviews/1/utterances", 0},

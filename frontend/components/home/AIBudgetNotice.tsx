@@ -14,6 +14,7 @@ type PeriodStatus = {
 type BudgetStatus = {
   user: { daily: PeriodStatus; monthly: PeriodStatus }
   school_blocked: boolean
+  limit_configured: boolean
   allowed: boolean
 }
 
@@ -53,18 +54,27 @@ export function AIBudgetNotice() {
   }, [])
 
   useEffect(() => {
-    let timer: number | undefined
     let cancelled = false
-    void fetchStatus().then((first) => {
-      // 上限がない利用者には表示するものがないので、問い合わせを続けない。
-      if (cancelled || !first || (first.allowed && !hasUserLimit(first))) return
-      timer = window.setInterval(() => {
-        if (!document.hidden) void fetchStatus()
-      }, POLL_INTERVAL_MS)
+    let timer: number | undefined
+    const stop = () => {
+      if (timer !== undefined) window.clearInterval(timer)
+      timer = undefined
+    }
+    // 上限がない利用者には表示するものがないので問い合わせを止める。
+    // 取得に失敗したときは上限の有無が分からないので、回復するまで続ける。
+    const refresh = async () => {
+      const latest = await fetchStatus()
+      if (latest && !latest.limit_configured) stop()
+    }
+    timer = window.setInterval(() => {
+      if (!document.hidden) void refresh()
+    }, POLL_INTERVAL_MS)
+    void refresh().then(() => {
+      if (cancelled) stop()
     })
     return () => {
       cancelled = true
-      if (timer !== undefined) window.clearInterval(timer)
+      stop()
     }
   }, [fetchStatus])
 

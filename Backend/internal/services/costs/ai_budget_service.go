@@ -64,13 +64,44 @@ func NewAIBudgetService(repo aiBudgetRepository) *AIBudgetService {
 	}
 }
 
+// AIBudgetSettingUsage は管理画面に出す、上限と現在の利用額。
+type AIBudgetSettingUsage struct {
+	models.AIBudgetSetting
+	DailyUsedUSD   float64 `json:"daily_used_usd"`
+	MonthlyUsedUSD float64 `json:"monthly_used_usd"`
+}
+
+// budgetWindow は日次・月次の窓の開始時刻を返す。
+func budgetWindow(now time.Time) (localNow, dayStart, monthStart time.Time) {
+	localNow = now.In(aiBudgetLocation)
+	dayStart = time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, aiBudgetLocation)
+	monthStart = time.Date(localNow.Year(), localNow.Month(), 1, 0, 0, 0, 0, aiBudgetLocation)
+	return localNow, dayStart, monthStart
+}
+
+// ListSettingsWithUsage は設定の一覧に現在の利用額を付けて返す。limit は呼び出し側で 100 件までに絞られる。
+func (s *AIBudgetService) ListSettingsWithUsage(ctx context.Context, limit, offset int) ([]AIBudgetSettingUsage, int64, error) {
+	settings, total, err := s.ListSettings(ctx, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	_, dayStart, monthStart := budgetWindow(s.now())
+	rows := make([]AIBudgetSettingUsage, 0, len(settings))
+	for _, setting := range settings {
+		daily, monthly, err := s.repo.UsageCosts(ctx, setting.Scope, setting.ScopeID, dayStart, monthStart, s.realtimeRatePerMinute)
+		if err != nil {
+			return nil, 0, err
+		}
+		rows = append(rows, AIBudgetSettingUsage{AIBudgetSetting: setting, DailyUsedUSD: daily, MonthlyUsedUSD: monthly})
+	}
+	return rows, total, nil
+}
+
 func (s *AIBudgetService) Status(ctx context.Context, userID uint) (AIBudgetStatus, error) {
 	if s == nil || s.repo == nil || userID == 0 {
 		return AIBudgetStatus{}, errors.New("AI budget service is not configured")
 	}
-	now := s.now().In(aiBudgetLocation)
-	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, aiBudgetLocation)
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, aiBudgetLocation)
+	now, dayStart, monthStart := budgetWindow(s.now())
 	userStatus, err := s.scopeStatus(ctx, models.AIBudgetScopeUser, userID, dayStart, monthStart)
 	if err != nil {
 		return AIBudgetStatus{}, err

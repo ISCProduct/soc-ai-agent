@@ -516,7 +516,7 @@ func main() {
 	adminDashboardController.SetSchoolService(schoolService)
 	adminDashboardController.SetOrganizationService(organizationService)
 	adminCostsController := admincontrollers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
-	adminAIBudgetController := admincontrollers.NewAIBudgetController(aiBudgetService)
+	adminAIBudgetController := admincontrollers.NewAIBudgetController(aiBudgetService, auditLogService)
 	userAIBudgetController := usercontrollers.NewAIBudgetController(aiBudgetService)
 	adminVectorController := admincontrollers.NewAdminVectorController(admin.NewAdminVectorService())
 	profileRecalcService := flywheel.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
@@ -668,7 +668,7 @@ func main() {
 	assessmentRepo := repositories.NewAssessmentRepository(db)
 	matchingService.SetAssessmentScoreReader(assessmentRepo)
 	assessmentService := assessmentsvc.NewService(assessmentRepo, matchingService, userWeightScoreRepo)
-	routes.SetupAssessmentRoutes(api, assessmentcontrollers.NewController(assessmentService), cfg.UserSecret, userDeletionService, organizationService)
+	routes.SetupAssessmentRoutes(api, assessmentcontrollers.NewController(assessmentService), cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 適性検査 第2段（#1675）。学校独自テンプレートはマッチングに合流させない
 	routes.SetupAssessmentSchoolRoutes(api, assessmentcontrollers.NewSchoolController(assessmentsvc.NewSchoolService(assessmentRepo)), userRepo, schoolService, cfg.AdminSecret)
 
@@ -769,6 +769,11 @@ func main() {
 	// サーバー起動
 	port := cfg.ServerPort
 	slog.Info("Starting server", "port", port)
+	// ヘッダーの読み取りと keep-alive の放置に上限を置く。WriteTimeout は履歴書レビューの
+	// SSE を途中で切るので設定しない。予算判定はロックを持たないので、書き込みの遅い
+	// クライアントが他の利用者を止めることはない。
+	e.Server.ReadHeaderTimeout = 10 * time.Second
+	e.Server.IdleTimeout = 120 * time.Second
 	if err := e.Start(":" + port); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}

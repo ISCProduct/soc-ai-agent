@@ -22,7 +22,10 @@ type aiBudgetResponse struct {
 	Date          string                    `json:"date"`
 	User          costs.AIBudgetScopeStatus `json:"user"`
 	SchoolBlocked bool                      `json:"school_blocked"`
-	Allowed       bool                      `json:"allowed"`
+	// LimitConfigured は個人または学校の上限があるか。学校の金額を見せずに、
+	// 画面が状態の確認を続けるべきかを伝える。
+	LimitConfigured bool `json:"limit_configured"`
+	Allowed         bool `json:"allowed"`
 }
 
 // Me は GET /api/user/ai-budget の利用者の残量と、学校の上限で止まっているかを返す。
@@ -37,9 +40,14 @@ func (c *AIBudgetController) Me(ctx echo.Context) error {
 	}
 	schoolBlocked := status.School != nil && (status.School.Daily.Exceeded || status.School.Monthly.Exceeded)
 	return ctx.JSON(http.StatusOK, aiBudgetResponse{
-		Date:          status.Date,
-		User:          status.User,
-		SchoolBlocked: schoolBlocked,
-		Allowed:       status.Allowed,
+		Date:            status.Date,
+		User:            status.User,
+		SchoolBlocked:   schoolBlocked,
+		LimitConfigured: hasLimit(status.User) || (status.School != nil && hasLimit(*status.School)),
+		Allowed:         status.Allowed,
 	})
+}
+
+func hasLimit(scope costs.AIBudgetScopeStatus) bool {
+	return scope.Daily.LimitUSD > 0 || scope.Monthly.LimitUSD > 0
 }

@@ -24,7 +24,7 @@ func SetupInterviewRoutes(api *echo.Group, interviewController *interviewcontrol
 	interviews.GET("/:id/report", interviewController.GetReport)
 	// 生成ジョブが失われたレポートをユーザー操作で作り直すための回復経路(#1476)
 	interviews.POST("/:id/report/regenerate", interviewController.RegenerateReport, budget.Immediate)
-	interviews.POST("/:id/send-report", interviewController.SendReport, budget.Immediate)
+	interviews.POST("/:id/send-report", interviewController.SendReport)
 	// 動画だけはグローバルの 32M 制限から除外してあるので、ここで上限を置く
 	// （maxVideoSize=500MB + multipart のオーバーヘッド分）。
 	interviews.POST("/:id/upload-video", interviewController.UploadVideo, echomw.BodyLimit("512M"))

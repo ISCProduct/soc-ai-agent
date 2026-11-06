@@ -14,6 +14,8 @@ type BudgetSetting = {
   scope_id: number
   daily_limit_usd: number
   monthly_limit_usd: number
+  daily_used_usd: number
+  monthly_used_usd: number
 }
 
 type BudgetListResponse = {
@@ -43,8 +45,8 @@ async function readBudgetResponse<T extends BudgetListResponse | BudgetActionRes
   return data
 }
 
-function limitLabel(value: number): string {
-  return value > 0 ? `$${value.toFixed(2)}` : '上限なし'
+function limitLabel(limit: number, used: number): string {
+  return limit > 0 ? `$${used.toFixed(2)} / $${limit.toFixed(2)}` : `$${used.toFixed(2)}（上限なし）`
 }
 
 export function AIBudgetSettings() {
@@ -66,13 +68,9 @@ export function AIBudgetSettings() {
     setLoading(true)
     setError('')
     try {
-      const user = authService.getStoredUser()
       const params = new URLSearchParams({ limit: String(PAGE_LIMIT), offset: String(requestedOffset) })
       const response = await fetch(`/api/admin/ai-budgets?${params.toString()}`, {
-        headers: {
-          'X-Admin-Email': user?.email ?? '',
-          'X-Admin-Token': authService.getStoredToken() || '',
-        },
+        headers: authService.getAdminFetchHeaders(),
         cache: 'no-store',
       })
       const data = await readBudgetResponse<BudgetListResponse>(response)
@@ -112,13 +110,11 @@ export function AIBudgetSettings() {
     setError('')
     setMessage('')
     try {
-      const user = authService.getStoredUser()
       const response = await fetch('/api/admin/ai-budgets', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'X-Admin-Email': user?.email ?? '',
-          'X-Admin-Token': authService.getStoredToken() || '',
+          ...authService.getAdminFetchHeaders(),
         },
         body: JSON.stringify({
           scope,
@@ -142,17 +138,13 @@ export function AIBudgetSettings() {
     setError('')
     setMessage('')
     try {
-      const user = authService.getStoredUser()
       const params = new URLSearchParams({
         scope: setting.scope,
         scope_id: String(setting.scope_id),
       })
       const response = await fetch(`/api/admin/ai-budgets?${params}`, {
         method: 'DELETE',
-        headers: {
-          'X-Admin-Email': user?.email ?? '',
-          'X-Admin-Token': authService.getStoredToken() || '',
-        },
+        headers: authService.getAdminFetchHeaders(),
       })
       await readBudgetResponse<BudgetActionResponse>(response)
       setMessage('AI利用上限を解除しました')
@@ -245,8 +237,8 @@ export function AIBudgetSettings() {
               <tr>
                 <th className="px-3 py-2 font-medium">対象</th>
                 <th className="px-3 py-2 font-medium">ID</th>
-                <th className="px-3 py-2 font-medium">日次</th>
-                <th className="px-3 py-2 font-medium">月次</th>
+                <th className="px-3 py-2 font-medium">日次（利用 / 上限）</th>
+                <th className="px-3 py-2 font-medium">月次（利用 / 上限）</th>
                 <th className="px-3 py-2 font-medium">操作</th>
               </tr>
             </thead>
@@ -255,8 +247,8 @@ export function AIBudgetSettings() {
                 <tr key={`${setting.scope}-${setting.scope_id}`} className="border-t">
                   <td className="px-3 py-2">{setting.scope === 'user' ? '利用者' : '学校'}</td>
                   <td className="px-3 py-2">{setting.scope_id}</td>
-                  <td className="px-3 py-2">{limitLabel(setting.daily_limit_usd)}</td>
-                  <td className="px-3 py-2">{limitLabel(setting.monthly_limit_usd)}</td>
+                  <td className="px-3 py-2">{limitLabel(setting.daily_limit_usd, setting.daily_used_usd)}</td>
+                  <td className="px-3 py-2">{limitLabel(setting.monthly_limit_usd, setting.monthly_used_usd)}</td>
                   <td className="px-3 py-2">
                     <button
                       type="button"

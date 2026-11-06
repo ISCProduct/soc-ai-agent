@@ -12,6 +12,7 @@ import (
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/matching"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -168,7 +169,8 @@ func (c *ChatController) runBackgroundMatching(userID uint, sessionID string) {
 	}
 	defer c.matchingRunning.Delete(sessionID)
 
-	ctx, cancel := context.WithTimeout(context.Background(), matchingRunTimeout)
+	// バックグラウンドには actor が届かない。載せないと AI 理由の費用が誰の予算にも入らない。
+	ctx, cancel := context.WithTimeout(usagectx.WithActor(context.Background(), userID, 0), matchingRunTimeout)
 	defer cancel()
 
 	var lastErr error

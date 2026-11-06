@@ -297,6 +297,11 @@ func hardDeleteUserData(tx *gorm.DB, userID uint) error {
 		return err
 	}
 
+	// 個人の AI 利用上限。scope_id は外部キーを持てないので明示的に消す。
+	if err := tx.Where("scope = ? AND scope_id = ?", models.AIBudgetScopeUser, userID).Delete(&models.AIBudgetSetting{}).Error; err != nil {
+		return err
+	}
+
 	// リフレッシュトークンを削除（#616）
 	if err := tx.Where("user_id = ?", userID).Delete(&models.UserRefreshToken{}).Error; err != nil {
 		return err

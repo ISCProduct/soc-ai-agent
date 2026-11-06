@@ -224,6 +224,10 @@ func (s *CompanyValidationService) SearchCandidates(ctx context.Context, query s
 	}
 
 	validated, err := s.Validate(ctx, q)
+	if errors.Is(err, usagectx.ErrAIBudgetExceeded) || errors.Is(err, usagectx.ErrAIBudgetUnavailable) {
+		// 上限で止めたことを利用者へ伝える。空の結果にすると該当企業なしに見える。
+		return out, err
+	}
 	if err != nil {
 		// WEB 補完失敗時も DB 結果（空）を返し、UI でメッセージ表示できるようにする
 		return out, nil
