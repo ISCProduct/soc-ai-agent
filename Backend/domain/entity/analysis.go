@@ -62,6 +62,7 @@ type UserWeightScore struct {
 	WeightCategory     string
 	Score              int
 	CalculationVersion string
+	PromptVersion      string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }

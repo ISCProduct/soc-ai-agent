@@ -17,6 +17,7 @@ func UserWeightScoreToEntity(m *models.UserWeightScore) *entity.UserWeightScore 
 		WeightCategory:     m.WeightCategory,
 		Score:              m.Score,
 		CalculationVersion: m.CalculationVersion,
+		PromptVersion:      m.PromptVersion,
 		CreatedAt:          m.CreatedAt,
 		UpdatedAt:          m.UpdatedAt,
 	}

@@ -349,6 +349,24 @@ jobs:
               chmod +x /tmp/edge-sync/ensure-edge-compose.sh
               /tmp/edge-sync/ensure-edge-compose.sh /opt/app/docker-compose.yml
               cd /opt/app
+              # 以前の user_data が全工程に自動注入していた v2 を取り除く (#1778)。
+              # 残すと PROMPT_VERSION を一括変更しても v2 に固定される。4行すべてが =v2 の
+              # ときだけ旧注入とみなし、運用者が一部の工程だけ固定した値は消さない。
+              # 4工程すべてを意図して v2 に固定した場合も消えるが、共通の既定も v2 なので結果は同じ。
+              if [ -f .env ]; then
+                LEGACY_PROMPT_KEYS="PROMPT_VERSION_QUESTION_GENERATION PROMPT_VERSION_SCORE_EVALUATION PROMPT_VERSION_MATCHING_REASON PROMPT_VERSION_COMPANY_EXTRACTION"
+                LEGACY_PROMPT_COUNT=0
+                for key in $LEGACY_PROMPT_KEYS; do
+                  if grep -q "^${key}=v2\$" .env; then
+                    LEGACY_PROMPT_COUNT=$((LEGACY_PROMPT_COUNT + 1))
+                  fi
+                done
+                if [ "$LEGACY_PROMPT_COUNT" = "4" ]; then
+                  for key in $LEGACY_PROMPT_KEYS; do
+                    sed -i "/^${key}=v2\$/d" .env
+                  done
+                fi
+              fi
               # 既存インスタンスの .env は S3_BUCKET のみ。アプリは AWS_S3_BUCKET を読む。
               if [ -f .env ] && grep -q '^S3_BUCKET=' .env && ! grep -q '^AWS_S3_BUCKET=' .env; then
                 echo "AWS_S3_BUCKET=$(grep '^S3_BUCKET=' .env | cut -d= -f2-)" >> .env
@@ -416,6 +434,18 @@ jobs:
               docker compose down --remove-orphans || true
               docker system prune -af
               docker compose pull
+              # DBマイグレーション適用(#618)。新コードは新しい列を読み書きするので、
+              # 起動より先に適用する(#1778)。DB接続が間に合わないことがあるためリトライする。
+              MIGRATE_OK=0
+              for i in $(seq 1 10); do
+                docker compose run --rm --no-deps -T backend /bin/migrate up && { MIGRATE_OK=1; break; }
+                echo "migrate retry ($i)..."
+                sleep 5
+              done
+              if [ "$MIGRATE_OK" != "1" ]; then
+                echo "migration failed" >&2
+                exit 1
+              fi
               docker compose up -d
               df -h /
               # up -d の直後はまだ running になっていないことがある。特に新規インスタンスの
@@ -433,19 +463,6 @@ jobs:
                   exit 1
                 }
               done
-
-              # DBマイグレーション適用(#618)。backend起動直後はDB接続が間に合わない
-              # ことがあるためリトライする。
-              MIGRATE_OK=0
-              for i in $(seq 1 10); do
-                docker compose exec -T backend /bin/migrate up && { MIGRATE_OK=1; break; }
-                echo "migrate retry ($i)..."
-                sleep 5
-              done
-              if [ "$MIGRATE_OK" != "1" ]; then
-                echo "migration failed" >&2
-                exit 1
-              fi
             '
 
       - name: Revoke runner IP for SSH

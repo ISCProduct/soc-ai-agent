@@ -219,33 +219,39 @@ func usageCostUSD(u openaiPkg.Usage) float64 {
 // 集計するので、通常の OpenAI 利用（企業検索など）が保険の予算を食わない。
 func (s *APICostService) LogUsage(u openaiPkg.Usage) {
 	safego.Go(func() {
-		cost := usageCostUSD(u)
-		entry := &models.APICallLog{
-			Model:            u.Model,
-			PromptTokens:     u.PromptTokens,
-			CompletionTokens: u.CompletionTokens,
-			TotalTokens:      u.PromptTokens + u.CompletionTokens,
-			CostUSD:          cost,
-			Provider:         u.Provider,
-			ViaFallback:      u.ViaFallback,
-			CalledAt:         time.Now().UTC(),
-			// 配賦軸（#1294）。Feature が空の経路は unknown として残し、
-			// 「まだ計測できていない経路」を件数で追えるようにする。
-			Feature:        featureOrUnknown(u.Feature),
-			UserID:         u.UserID,
-			OrganizationID: u.OrganizationID,
-			AudioSeconds:   u.AudioSeconds,
-			Characters:     u.Characters,
-			WebSearchCalls: u.WebSearchCalls,
-			LatencyMs:      u.LatencyMs,
-			CacheHit:       u.CacheHit,
-		}
+		entry := apiCallLogFromUsage(u, time.Now().UTC())
 		if err := s.repo.Create(entry); err != nil {
 			log.Printf("[APICost] failed to log: %v", err)
 			return
 		}
 		s.checkAndNotifyThreshold()
 	})
+}
+
+// apiCallLogFromUsage は使用量を api_call_logs の1行へ変換する。
+func apiCallLogFromUsage(u openaiPkg.Usage, calledAt time.Time) *models.APICallLog {
+	return &models.APICallLog{
+		Model:            u.Model,
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		TotalTokens:      u.PromptTokens + u.CompletionTokens,
+		CostUSD:          usageCostUSD(u),
+		Provider:         u.Provider,
+		ViaFallback:      u.ViaFallback,
+		CalledAt:         calledAt,
+		// 配賦軸（#1294）。Feature が空の経路は unknown として残し、
+		// 「まだ計測できていない経路」を件数で追えるようにする。
+		Feature:        featureOrUnknown(u.Feature),
+		PromptStage:    promptStageOrUnknown(u.PromptStage),
+		PromptVersion:  u.PromptVersion,
+		UserID:         u.UserID,
+		OrganizationID: u.OrganizationID,
+		AudioSeconds:   u.AudioSeconds,
+		Characters:     u.Characters,
+		WebSearchCalls: u.WebSearchCalls,
+		LatencyMs:      u.LatencyMs,
+		CacheHit:       u.CacheHit,
+	}
 }
 
 // checkAndNotifyThreshold は当月（UTC）累計が閾値を超えたら Slack/Discord に通知する。
@@ -490,4 +496,11 @@ func featureOrUnknown(feature string) string {
 		return usagectx.FeatureUnknown
 	}
 	return feature
+}
+
+func promptStageOrUnknown(stage string) string {
+	if stage == "" {
+		return usagectx.FeatureUnknown
+	}
+	return stage
 }

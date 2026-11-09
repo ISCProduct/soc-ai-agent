@@ -16,6 +16,7 @@ type UserWeightScore struct {
 	WeightCategory     string    `gorm:"size:100;not null;index:idx_user_category" json:"category"`
 	Score              int       `gorm:"default:0" json:"score"`
 	CalculationVersion string    `gorm:"size:32;not null;default:legacy" json:"calculation_version"`
+	PromptVersion      string    `gorm:"size:64;not null;default:''" json:"prompt_version,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }

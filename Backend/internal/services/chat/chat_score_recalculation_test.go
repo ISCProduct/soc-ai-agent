@@ -50,6 +50,15 @@ func (r *parityScoreRepository) AddScore(_ uint, _, category string, delta int) 
 	return nil
 }
 
+// ライブ採点は評価に使ったプロンプト版も一緒に保存する（#1778）。スコアの突き合わせでは版は見ない。
+func (r *parityScoreRepository) SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore int, _ string) error {
+	return r.SetScore(userID, sessionID, category, absoluteScore)
+}
+
+func (r *parityScoreRepository) AddScoreWithPromptVersion(userID uint, sessionID, category string, delta int, _ string) error {
+	return r.AddScore(userID, sessionID, category, delta)
+}
+
 func (r *parityScoreRepository) FindByUserSessionAndCategory(_ uint, _, category string) (*entity.UserWeightScore, error) {
 	score, ok := r.scores[category]
 	if !ok {
