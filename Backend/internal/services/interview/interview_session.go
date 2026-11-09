@@ -28,6 +28,9 @@ const (
 var (
 	ErrUtteranceTooLong  = errors.New("utterance too long")
 	ErrTooManyUtterances = errors.New("too many utterances in session")
+	// ErrClientAIUtterance は、クライアントが面接官（role=ai）の発話を申告したことを示す（#1969）。
+	// 面接官の発話は /start-turn・/turn でサーバーが生成して保存するので、クライアントからは受け付けない。
+	ErrClientAIUtterance = errors.New("role=ai は受け付けません。面接官の発話はサーバーが保存します")
 )
 
 // interviewBudgetGuard は月次上限の判定面。未設定なら常に許可する。
@@ -140,7 +143,12 @@ func (s *InterviewService) EnsureSessionOwnership(userID uint, sessionID uint) e
 	return nil
 }
 
-// SaveUtterance は発話を保存する。clientUtteranceID は発話ごとにクライアントが発行する一意ID(#1476)。
+// SaveUtterance はクライアントが申告した発話を保存する。clientUtteranceID は発話ごとにクライアントが
+// 発行する一意ID(#1476)。
+//
+// 受け付けるのは role=user だけ（#1969）。面接官の発話は /start-turn・/turn でサーバーが保存する
+// （saveTurnUtterances）。クライアントの申告を受け付けると、面接官が言っていない質問を書き起こしに
+// 混ぜられ、レポートと evidence の照合元が汚れる。
 //
 // 保存は結果不明のまま失敗しうる（応答のロスト、クライアント側タイムアウト）ため、
 // クライアントは同じ ID を付けたまま再送する。重複判定はサーバー側でしかできないので
@@ -155,7 +163,10 @@ func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role strin
 		return shared.ErrForbidden
 	}
 	role = strings.ToLower(strings.TrimSpace(role))
-	if role != "user" && role != "ai" {
+	if role == "ai" {
+		return ErrClientAIUtterance
+	}
+	if role != "user" {
 		return errors.New("invalid role")
 	}
 	text = strings.TrimSpace(text)
@@ -186,6 +197,48 @@ func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role strin
 		utter.ClientUtteranceID = &id
 	}
 	return s.utterRepo.Create(utter)
+}
+
+// turnUtterance はターンでサーバーが得た発話。
+type turnUtterance struct {
+	role string
+	text string
+}
+
+// saveTurnUtterances は /start-turn・/turn でサーバーが得た発話を、渡した順に保存する（#1969）。
+//
+// /turn ではユーザーの発話もサーバーの文字起こしなので、面接官の発話と一緒にここで保存する。
+// クライアントが応答を受け取ってからユーザーの発話を保存すると、サーバーが先に保存した
+// 面接官の発話より後ろに並び、書き起こしの順番が入れ替わる。
+//
+// 長さと件数の上限は SaveUtterance と揃える。長すぎる発話は切り詰め、上限に達したら
+// ErrTooManyUtterances を返す。空の発話は保存しない。
+func (s *InterviewService) saveTurnUtterances(sessionID uint, utterances ...turnUtterance) error {
+	if s.utterRepo == nil {
+		return errors.New("utterance repository is not configured")
+	}
+	existing, err := s.utterRepo.FindBySessionID(sessionID)
+	if err != nil {
+		return err
+	}
+	count := len(existing)
+	for _, u := range utterances {
+		text := strings.TrimSpace(u.text)
+		if text == "" {
+			continue
+		}
+		if count >= maxUtterancesPerSession {
+			return ErrTooManyUtterances
+		}
+		if runes := []rune(text); len(runes) > maxUtteranceRunes {
+			text = string(runes[:maxUtteranceRunes])
+		}
+		if err := s.utterRepo.Create(&models.InterviewUtterance{SessionID: sessionID, Role: u.role, Text: text}); err != nil {
+			return err
+		}
+		count++
+	}
+	return nil
 }
 
 // ListAllSessionsAdmin lists all interview sessions without performing a user-level admin check.

@@ -226,6 +226,17 @@ func (s *InterviewService) Turn(
 		aiText = interviewFallbackReplyText
 	}
 
+	// 書き起こしはサーバーが保存する（#1969）。ユーザー → 面接官の順に並べる。
+	// TTS の前に保存し、読み上げに失敗しても書き起こしは残す。
+	utteranceSaveFailed := false
+	if err := s.saveTurnUtterances(sessionID,
+		turnUtterance{role: "user", text: userText},
+		turnUtterance{role: "ai", text: aiText},
+	); err != nil {
+		log.Printf("[Interview] save turn utterances session=%d: %v", sessionID, err)
+		utteranceSaveFailed = true
+	}
+
 	// TTS: AI返答を音声化（企業名は読み仮名に置換して誤読を防ぐ。表示用のaiTextはそのまま保持）。
 	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
@@ -247,6 +258,7 @@ func (s *InterviewService) Turn(
 		CompanyReadingResolved: companyReadingResolved,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
+		UtteranceSaveFailed:    utteranceSaveFailed,
 	}
 	if directive != nil {
 		result.QuestionSource = directive.Source
@@ -341,6 +353,13 @@ func (s *InterviewService) StartTurn(
 		aiText = "本日はよろしくお願いします。早速ですが、簡単に自己紹介をお願いできますか？"
 	}
 
+	// 冒頭の質問もサーバーが書き起こしへ保存する（#1969）。
+	utteranceSaveFailed := false
+	if err := s.saveTurnUtterances(sessionID, turnUtterance{role: "ai", text: aiText}); err != nil {
+		log.Printf("[Interview] save start-turn utterance session=%d: %v", sessionID, err)
+		utteranceSaveFailed = true
+	}
+
 	// TTS: 企業名は読み仮名に置換して誤読を防ぐ（表示用のaiTextはそのまま保持）。
 	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
@@ -361,6 +380,7 @@ func (s *InterviewService) StartTurn(
 		CompanyReadingResolved: companyReadingResolved,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
+		UtteranceSaveFailed:    utteranceSaveFailed,
 	}
 	if directive != nil {
 		result.QuestionSource = directive.Source
