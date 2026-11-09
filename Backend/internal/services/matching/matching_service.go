@@ -407,8 +407,9 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 		return BuildMatchReason(match, userScores), nil
 	}
 
-	userPrompt := buildMatchingReasonUserPrompt(match, userScores)
+	ctx, promptVersion := prompts.WithPromptVersion(ctx, prompts.StageMatchingReason)
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureMatchingReason)
+	userPrompt := buildMatchingReasonUserPromptWithVersion(match, userScores, promptVersion)
 	reason, err := s.aiClient.ResponsesWithTemperature(
 		ctx,
 		prompts.MatchingReasonSystemPrompt,
@@ -424,6 +425,7 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 	if reason == "" {
 		return BuildMatchReason(match, userScores), nil
 	}
+	match.MatchReasonPromptVersion = promptVersion
 	return reason, nil
 }
 
@@ -433,6 +435,12 @@ func matchingReasonUseAI() bool {
 }
 
 func buildMatchingReasonUserPrompt(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) string {
+	return buildMatchingReasonUserPromptWithVersion(
+		match, userScores, prompts.ResolvePromptVersion(prompts.StageMatchingReason),
+	)
+}
+
+func buildMatchingReasonUserPromptWithVersion(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore, version string) string {
 	company := match.Company
 	companyInfo := fmt.Sprintf(
 		"- 企業名: %s\n- 業界: %s\n- 主事業: %s\n- 文化: %s\n- 働き方: %s\n- 開発スタイル: %s\n- 技術スタック: %s",
@@ -446,7 +454,7 @@ func buildMatchingReasonUserPrompt(match *entity.UserCompanyMatch, userScores []
 	)
 	return fmt.Sprintf(
 		prompts.MatchingReasonUserPromptTemplate,
-		prompts.MatchingReasonPromptVersion,
+		prompts.FormatMatchingReasonPromptVersion(version),
 		shared.WrapUntrustedText(companyInfo, "企業情報"),
 		formatTopUserScores(userScores),
 		formatTopMatchAxes(match),

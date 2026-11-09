@@ -111,6 +111,12 @@ type matchingScoreRepo struct {
 
 func (s *matchingScoreRepo) SetScore(uint, string, string, int) error { return nil }
 func (s *matchingScoreRepo) AddScore(uint, string, string, int) error { return nil }
+func (s *matchingScoreRepo) SetScoreWithPromptVersion(uint, string, string, int, string) error {
+	return nil
+}
+func (s *matchingScoreRepo) AddScoreWithPromptVersion(uint, string, string, int, string) error {
+	return nil
+}
 func (s *matchingScoreRepo) FindByUserAndSession(uint, string) ([]entity.UserWeightScore, error) {
 	return s.scores, nil
 }

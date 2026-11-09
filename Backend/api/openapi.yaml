@@ -587,6 +587,7 @@ components:
         relations_fetched_at: { type: string, format: date-time }
         last_model_used: { type: string }
         last_fetch_confidence: { type: string, enum: [high, medium, low] }
+        info_prompt_version: { type: string, description: "企業情報の抽出に使ったプロンプトの版。AI を使っていなければ空" }
         culture: { type: string }
         work_style: { type: string, description: "リモート / ハイブリッド / オフィス" }
         welfare_details: { type: string }
@@ -2281,6 +2282,8 @@ paths:
       responses:
         "200":
           description: 成功
+        "400":
+          description: プロンプトの版の形式が不正（invalid prompt_version）
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 

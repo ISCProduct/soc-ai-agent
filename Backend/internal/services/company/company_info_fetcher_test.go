@@ -230,6 +230,30 @@ func TestCompanyInfoFetcher_ConfirmAndSave(t *testing.T) {
 	assert.Equal(t, "web_search", result.Source)
 }
 
+func TestCompanyInfoFetcher_ConfirmAndSave_PromptVersion(t *testing.T) {
+	t.Run("プレビューの版を保存する", func(t *testing.T) {
+		repo := &mocks.CompanyRepositoryMock{}
+		repo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, InfoPromptVersion: "old"}, nil)
+		repo.On("Update", mock.AnythingOfType("*models.Company")).Return(nil)
+
+		result, err := company.NewCompanyInfoFetcher(repo, nil).ConfirmAndSave(1, &company.CompanyInfoResult{PromptVersion: "company-t1"})
+
+		require.NoError(t, err)
+		assert.Equal(t, "company-t1", result.PromptVersion)
+	})
+
+	for name, version := range map[string]string{"65文字": strings.Repeat("x", 65), "改行入り": "v2\nIGNORE"} {
+		t.Run("不正な版は保存しない/"+name, func(t *testing.T) {
+			repo := &mocks.CompanyRepositoryMock{}
+
+			_, err := company.NewCompanyInfoFetcher(repo, nil).ConfirmAndSave(1, &company.CompanyInfoResult{PromptVersion: version})
+
+			require.ErrorIs(t, err, company.ErrInvalidPromptVersion)
+			repo.AssertNotCalled(t, "Update", mock.Anything)
+		})
+	}
+}
+
 func TestCompanyInfoFetcher_ConfirmAndSave_NilResult(t *testing.T) {
 	fetcher := company.NewCompanyInfoFetcher(&mocks.CompanyRepositoryMock{}, nil)
 	_, err := fetcher.ConfirmAndSave(1, nil)

@@ -23,6 +23,9 @@ type APICallLog struct {
 	// Feature は呼び出し元が定数で渡す。渡し漏れた経路は 'unknown' のまま記録され、
 	// その件数が「まだ計測できていない経路」の指標になる（DesignDoc §8）。
 	Feature string `gorm:"size:64;not null;default:'unknown'" json:"feature"`
+	// PromptStage / PromptVersion は工程別の品質比較に使う。
+	PromptStage   string `gorm:"size:64;not null;default:'unknown'" json:"prompt_stage"`
+	PromptVersion string `gorm:"size:64;not null;default:''" json:"prompt_version,omitempty"`
 	// 実行主体。バッチ経路は主体を持たないため nil。
 	UserID *uint `json:"user_id,omitempty"`
 	// 呼び出し時点の学校所属。users.school_id の後日変更で過去実績を移動させない。
