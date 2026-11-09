@@ -44,6 +44,16 @@ DB_HOST=127.0.0.1 go run ./cmd/migrate force <N>  # バージョンを強制設�
 
 `SEED_DATA=true go run ./cmd/migrate` で up 後に初期データを投入します。
 
+初期データには、L1 カタログの約800社（`Backend/config/l1_catalog_seed.csv`、実行ファイルに埋め込み）が含まれます。社名で upsert するので、何度流しても重複しません。CSV は gBizINFO から `automation/l1_catalog/generate.py` で作ります。業種は社名キーワードによる推定なので、一度だけ、ローカルで Claude に調べさせて補います（本番の処理ではありません）:
+
+```bash
+cd Backend
+ANTHROPIC_API_KEY=... go run ./cmd/l1enrich -limit 5   # まず少数で確認
+ANTHROPIC_API_KEY=... go run ./cmd/l1enrich            # 全件。中断しても再実行で続きから
+```
+
+業種の確認、公式サイトの補完、IT 企業でない社名の除外を行い、CSV を更新します（結果は `l1_enrich_cache.jsonl` に残ります。`-model` で費用を下げられます）。
+
 ## スキーマ変更の手順
 
 1. `Backend/migrations/` に連番でファイルを追加する

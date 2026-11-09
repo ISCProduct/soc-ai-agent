@@ -16,12 +16,16 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
+	l1catalog "Backend/config"
 	"Backend/internal/models"
+	"Backend/internal/repositories"
+	"Backend/internal/services/company"
 	"Backend/migrations"
 )
 
@@ -140,7 +144,26 @@ func runSeed(dsn string) error {
 		return err
 	}
 	// SeedData の中で SeedPredefinedQuestions も呼ばれる
-	return models.SeedData(db)
+	if err := models.SeedData(db); err != nil {
+		return err
+	}
+	return seedL1Catalog(db)
+}
+
+// seedL1Catalog は L1 カタログ（約800社）を投入する。社名で upsert するので何度流しても重複しない。
+func seedL1Catalog(db *gorm.DB) error {
+	rows, err := company.ParseL1SeedCSV(strings.NewReader(l1catalog.SeedCSV))
+	if err != nil {
+		return fmt.Errorf("L1カタログCSVの読み込みに失敗: %w", err)
+	}
+	res, err := company.ImportL1Seed(repositories.NewCompanyRepository(db), rows)
+	if err != nil {
+		return err
+	}
+	if len(res.Errors) > 0 {
+		return fmt.Errorf("L1カタログの投入に失敗した行があります（%d件）: %s", len(res.Errors), res.Errors[0])
+	}
+	return nil
 }
 
 func seedData(db *gorm.DB) error {
