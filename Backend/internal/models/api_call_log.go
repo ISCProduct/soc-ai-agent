@@ -26,6 +26,8 @@ type APICallLog struct {
 	// PromptStage / PromptVersion は工程別の品質比較に使う。
 	PromptStage   string `gorm:"size:64;not null;default:'unknown'" json:"prompt_stage"`
 	PromptVersion string `gorm:"size:64;not null;default:''" json:"prompt_version,omitempty"`
+	// PromptABGroup は A/B で割り当てた版（#1976）。A/B の対象外の呼び出しは空。
+	PromptABGroup string `gorm:"column:prompt_ab_group;size:64;not null;default:''" json:"prompt_ab_group,omitempty"`
 	// 実行主体。バッチ経路は主体を持たないため nil。
 	UserID *uint `json:"user_id,omitempty"`
 	// 配賦先の学校/企業。解決できない場合は nil。

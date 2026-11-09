@@ -48,9 +48,11 @@ type promptVersionKey struct{}
 type actorKey struct{}
 
 // PromptVersion は工程と版を表す利用量記録用メタデータ。
+// Group は A/B で割り当てた版。A/B の対象外なら空（#1976）。
 type PromptVersion struct {
 	Stage   string
 	Version string
+	Group   string
 }
 
 // actor は実行主体と配賦先。どちらも解決できないことがあるためポインタで持つ。
@@ -82,10 +84,15 @@ func Feature(ctx context.Context) string {
 
 // WithPromptVersion はAI呼び出しの工程別プロンプト版を記録用contextに載せる。
 func WithPromptVersion(ctx context.Context, stage, version string) context.Context {
+	return WithPromptAssignment(ctx, stage, version, "")
+}
+
+// WithPromptAssignment は版と A/B の群を記録用 context に載せる。group は A/B の対象外なら空。
+func WithPromptAssignment(ctx context.Context, stage, version, group string) context.Context {
 	if ctx == nil || stage == "" || version == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, promptVersionKey{}, PromptVersion{Stage: stage, Version: version})
+	return context.WithValue(ctx, promptVersionKey{}, PromptVersion{Stage: stage, Version: version, Group: group})
 }
 
 // PromptVersionFromContext は工程別プロンプト版を取り出す。未設定ならゼロ値を返す。

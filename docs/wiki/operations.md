@@ -334,7 +334,17 @@ ORDER BY prompt_stage, prompt_version;
 質問・評価・企業情報・マッチング理由の生成結果に記録されたラベルは、それぞれ
 `ai_generated_questions.prompt_version`、`user_weight_scores.prompt_version`、
 `companies.info_prompt_version`、`user_company_matches.match_reason_prompt_version` で確認する。
-A/B振り分けは未対応である。
+A/B 割当（`PROMPT_AB_<STAGE>`）を設定した工程は、割り当てた群ごとに比べる。群が空の呼び出しは A/B の対象外:
+
+```sql
+SELECT prompt_stage, prompt_ab_group, COUNT(*) AS calls, SUM(cost_usd) AS cost_usd
+FROM api_call_logs
+WHERE called_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY AND prompt_ab_group <> ''
+GROUP BY prompt_stage, prompt_ab_group
+ORDER BY prompt_stage, prompt_ab_group;
+```
+
+設定が無効（候補の本文が未登録など）なら、起動後の最初の呼び出しで `プロンプトの A/B 設定を無視します` の警告が出る。
 `prompt_stage='unknown'` は工程メタデータが付与されていない呼び出しを表す。
 
 prod のデプロイはイメージを差し替えるだけなので、`PROMPT_VERSION` と工程別ラベルをタスク定義へ入れるには `terraform apply` が必要。

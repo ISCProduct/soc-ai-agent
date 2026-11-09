@@ -244,6 +244,7 @@ func apiCallLogFromUsage(u openaiPkg.Usage, calledAt time.Time) *models.APICallL
 		Feature:        featureOrUnknown(u.Feature),
 		PromptStage:    promptStageOrUnknown(u.PromptStage),
 		PromptVersion:  u.PromptVersion,
+		PromptABGroup:  u.PromptABGroup,
 		UserID:         u.UserID,
 		OrganizationID: u.OrganizationID,
 		AudioSeconds:   u.AudioSeconds,

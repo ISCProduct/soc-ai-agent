@@ -407,7 +407,7 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 	userPrompt := buildMatchingReasonUserPromptWithVersion(match, userScores, promptVersion)
 	reason, err := s.aiClient.ResponsesWithTemperature(
 		ctx,
-		prompts.MatchingReasonSystemPrompt,
+		prompts.Body(prompts.StageMatchingReason, promptVersion, prompts.BodyMatchingReasonSystem, prompts.MatchingReasonSystemPrompt),
 		userPrompt,
 		0.4,
 	)
