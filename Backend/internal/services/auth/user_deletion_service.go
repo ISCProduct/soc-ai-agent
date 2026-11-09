@@ -114,6 +114,13 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 			return err
 		}
 
+		// 元のメールアドレスの仮登録（本登録が完了する前に作られた行）を消す。
+		// 下でメールをスクランブルすると、パージ時には元のアドレスが分からず消せなくなる（#2140 のレビュー）。
+		// 消せなければ退会全体を巻き戻す（個人情報を残したまま退会済みにしない）。0件は正常。
+		if err := tx.Where("email = ?", email).Delete(&models.PendingRegistration{}).Error; err != nil {
+			return fmt.Errorf("delete pending registrations: %w", err)
+		}
+
 		// メール再利用を許し、ログイン不能にする
 		user.WithdrawnAt = &now
 		user.Email = fmt.Sprintf("withdrawn+%d@deleted.invalid", userID)

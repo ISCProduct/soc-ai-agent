@@ -170,3 +170,39 @@ func TestPurgeOne_PurgedAtUpdateFails_StillSucceedsAndLogged(t *testing.T) {
 		t.Errorf("purged_at を記録できなかったことがログに出ていない: %q", got)
 	}
 }
+
+// #2140 のレビュー: 退会（論理削除）のとき、スクランブルする前に元のメールアドレスの仮登録を消す。
+// 消せなければ退会全体を巻き戻し、メールのスクランブルも行わない。
+func TestDeleteUser_PendingRegistrationDeleteFails_RollsBack(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}),
+		&gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("gorm: %v", err)
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT \\* FROM `users` WHERE `users`.`id` = \\?").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "email", "withdrawn_at"}).AddRow(9, "del@example.com", nil))
+	mock.ExpectQuery("SELECT \\* FROM `interview_videos`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery("SELECT \\* FROM `resume_documents`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectExec("INSERT INTO `withdrawn_users`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("DELETE FROM `pending_registrations` WHERE email = \\?").
+		WithArgs("del@example.com").
+		WillReturnError(errors.New("db down"))
+	mock.ExpectRollback()
+
+	err = NewUserDeletionService(db, nil, nil).DeleteUser(9, UserDeletionActor{Kind: "self"})
+
+	if err == nil || !strings.Contains(err.Error(), "delete pending registrations") {
+		t.Fatalf("仮登録を消せなかったので退会を失敗として返すべき: %v", err)
+	}
+	// UPDATE `users`（スクランブル）が来れば、期待に無い呼び出しとしてここで分かる
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected DB calls: %v", err)
+	}
+}
