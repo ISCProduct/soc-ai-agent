@@ -54,7 +54,11 @@ func (s *AuthService) Login(req LoginRequest, tenantOrgID uint) (*AuthResponse, 
 	if cost, err := bcrypt.Cost([]byte(user.Password)); err == nil && cost < bcryptCost {
 		if rehashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost); err == nil {
 			user.Password = string(rehashed)
-			_ = s.userRepo.UpdateUser(user)
+			// パスワードは正しいのでログインは続ける。保存できなくても古いハッシュのまま残るだけで、
+			// 次回のログインでもう一度再ハッシュされる。失敗はログで分かるようにする（#2002）
+			if err := s.userRepo.UpdateUser(user); err != nil {
+				log.Printf("[AuthService] failed to save rehashed password user_id=%d: %v", user.ID, err)
+			}
 		}
 	}
 
@@ -78,7 +82,11 @@ func (s *AuthService) Login(req LoginRequest, tenantOrgID uint) (*AuthResponse, 
 			reVerExpires := time.Now().Add(24 * time.Hour)
 			user.EmailVerificationExpires = &reVerExpires
 			user.EmailVerifiedAt = nil
-			s.userRepo.UpdateUser(user)
+			// トークンを保存できないままメールを送ると、届いたリンクが使えない（DB にトークンが無い）。
+			// 次のログインでも同じことが起きて抜け出せないので、メールは送らずにエラーを返す（#2002）
+			if err := s.userRepo.UpdateUser(user); err != nil {
+				return nil, fmt.Errorf("failed to save re-verification token: %w", err)
+			}
 			appURL := config.AppURL()
 			if s.jobs != nil {
 				if err := s.jobs.EnqueueEmailReVerification(user.ID, user.Email, user.Name, user.EmailVerificationToken, appURL); err != nil {
