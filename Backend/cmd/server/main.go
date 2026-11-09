@@ -415,6 +415,7 @@ func main() {
 	crossFeatureService := flywheel.NewCrossFeatureIntegrationService(userWeightScoreRepo)
 	interviewService.SetCrossFeatureService(crossFeatureService)
 	interviewService.SetMatchingRunner(matchingService)
+	interviewService.SetAIBudget(aiBudgetService)
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
@@ -430,6 +431,7 @@ func main() {
 	authController := authcontrollers.NewAuthController(authService, cfg.UserSecret)
 	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService)
 	chatController := chatcontrollers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
+	chatController.SetAIBudget(aiBudgetService)
 	if jobEnqueuer != nil {
 		chatController.SetJobEnqueuer(jobEnqueuer)
 	}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert } from '@mui/material'
 import { authService } from '@/lib/auth'
 
@@ -37,8 +37,20 @@ function formatRemaining(status: BudgetStatus): string {
 // 上限がない利用者や取得に失敗したときは何も表示しない（AI の利用は実行時に別途判定される）。
 export function AIBudgetNotice() {
   const [status, setStatus] = useState<BudgetStatus | null>(null)
+  // 取得のたびに番号を進め、戻った時点で最新の番号の応答だけを反映する。
+  // 遅れて戻った古い応答が新しい残量を上書きしないようにするため。
+  const latestRequest = useRef(0)
+  const mounted = useRef(false)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   const fetchStatus = useCallback(async (): Promise<BudgetStatus | null> => {
+    const request = ++latestRequest.current
     try {
       const response = await fetch('/api/user/ai-budget', {
         headers: authService.getUserFetchHeaders(),
@@ -46,6 +58,8 @@ export function AIBudgetNotice() {
       })
       if (!response.ok) return null
       const data = (await response.json()) as BudgetStatus
+      // 古い応答とアンマウント後の応答は捨てる。問い合わせを止める判断にも使わない。
+      if (!mounted.current || request !== latestRequest.current) return null
       setStatus(data)
       return data
     } catch {

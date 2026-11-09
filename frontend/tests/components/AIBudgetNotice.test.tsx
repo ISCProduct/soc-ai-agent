@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { AIBudgetNotice } from '@/components/home/AIBudgetNotice'
 
 jest.mock('@/lib/auth', () => ({
@@ -67,6 +67,36 @@ describe('AIBudgetNotice', () => {
     mockBudget({ user: { daily: period(1, 0.25), monthly: period(0) }, school_blocked: false, limit_configured: true, allowed: true })
     render(<AIBudgetNotice />)
     expect(await screen.findByText(/今日はあと \$0\.25/)).toBeInTheDocument()
+  })
+
+  it('遅れて戻った古い応答で、新しい残量を上書きしない', async () => {
+    jest.useFakeTimers()
+    try {
+      const fresh = { user: { daily: period(1, 0.75), monthly: period(0) }, school_blocked: false, limit_configured: true, allowed: true }
+      const stale = { ...fresh, user: { daily: period(1, 0.25), monthly: period(0) } }
+      let resolveFirst: (value: unknown) => void = () => {}
+      const first = new Promise((resolve) => {
+        resolveFirst = resolve
+      })
+      global.fetch = jest
+        .fn()
+        .mockReturnValueOnce(first)
+        .mockResolvedValueOnce({ ok: true, json: async () => fresh }) as unknown as typeof fetch
+      render(<AIBudgetNotice />)
+      // 最初の取得が戻る前に、次のポーリングが新しい残量を受け取る。
+      await act(async () => {
+        jest.advanceTimersByTime(60_000)
+      })
+      expect(await screen.findByText(/今日はあと \$0\.75/)).toBeInTheDocument()
+      // 最初の取得が遅れて古い残量を返しても、表示は新しいまま。
+      await act(async () => {
+        resolveFirst({ ok: true, json: async () => stale })
+      })
+      expect(screen.getByText(/今日はあと \$0\.75/)).toBeInTheDocument()
+      expect(screen.queryByText(/\$0\.25/)).not.toBeInTheDocument()
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it('学校の上限で止まっているときは金額を出さずに伝える', async () => {

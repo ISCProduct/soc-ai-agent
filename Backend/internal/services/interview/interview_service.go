@@ -8,6 +8,7 @@ import (
 	"Backend/internal/services/email"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"log"
 	"sync"
@@ -31,6 +32,7 @@ type InterviewService struct {
 	realtimeUsageService *costs.RealtimeUsageService
 	crossFeature         *flywheel.CrossFeatureIntegrationService
 	matchingRunner       MatchingRunner
+	aiBudget             costs.AIBudgetStatusProvider
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
 	questionStateRepo    repository.InterviewQuestionStateRepository
 	skillScoreRepo       SkillScoreReader
@@ -107,6 +109,18 @@ func (s *InterviewService) SetCrossFeatureService(cf *flywheel.CrossFeatureInteg
 // SetMatchingRunner は面接→スコア反映後の再マッチングを注入する（オプション）。
 func (s *InterviewService) SetMatchingRunner(m MatchingRunner) {
 	s.matchingRunner = m
+}
+
+// SetAIBudget は面接後の再マッチングで AI 理由を作る前の予算判定を設定する（#1776）。
+func (s *InterviewService) SetAIBudget(p costs.AIBudgetStatusProvider) {
+	s.aiBudget = p
+}
+
+// rematchContext は面接後の再マッチング用の context を作る。レポートのワーカーから
+// 切り離して走るので、費用の配賦先（actor）と予算判定をここで載せる。
+func (s *InterviewService) rematchContext(userID, organizationID uint) context.Context {
+	ctx := usagectx.WithActor(context.Background(), userID, organizationID)
+	return costs.WithUserAIBudgetCheck(ctx, s.aiBudget, userID)
 }
 
 // SetJobEnqueuer は面接レポート等の永続キュー投入先を設定する（#617）。

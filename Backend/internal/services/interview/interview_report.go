@@ -407,7 +407,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		} else if s.matchingRunner != nil && !repositories.IsInterviewSnapshotSession(targetSession) {
 			userID, sessionID := session.UserID, targetSession
 			safego.Go(func() {
-				if err := s.matchingRunner.CalculateMatching(usagectx.WithActor(context.Background(), userID, session.OrganizationID), userID, sessionID); err != nil {
+				if err := s.matchingRunner.CalculateMatching(s.rematchContext(userID, session.OrganizationID), userID, sessionID); err != nil {
 					log.Printf("[CrossFeature] rematch after interview failed user=%d session=%s: %v\n", userID, sessionID, err)
 				}
 			})

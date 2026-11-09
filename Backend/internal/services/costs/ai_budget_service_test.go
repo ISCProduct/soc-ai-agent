@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"Backend/internal/models"
+	"Backend/internal/repositories"
 )
 
 type fakeAIBudgetUsage struct {
@@ -24,6 +25,8 @@ type fakeAIBudgetRepository struct {
 	dayStart   time.Time
 	monthStart time.Time
 	usageCalls int
+	list       []models.AIBudgetSetting
+	batchCalls map[string][]uint
 }
 
 func budgetTestKey(scope string, scopeID uint) string {
@@ -39,7 +42,23 @@ func (r *fakeAIBudgetRepository) FindSetting(_ context.Context, scope string, sc
 }
 
 func (r *fakeAIBudgetRepository) ListSettings(context.Context, int, int) ([]models.AIBudgetSetting, int64, error) {
-	return nil, 0, nil
+	return r.list, int64(len(r.list)), nil
+}
+
+func (r *fakeAIBudgetRepository) UsageCostsByScope(
+	_ context.Context, scope string, scopeIDs []uint, _, _ time.Time, _ float64,
+) (map[uint]repositories.AIBudgetUsage, error) {
+	if r.batchCalls == nil {
+		r.batchCalls = map[string][]uint{}
+	}
+	r.batchCalls[scope] = append(r.batchCalls[scope], scopeIDs...)
+	result := map[uint]repositories.AIBudgetUsage{}
+	for _, id := range scopeIDs {
+		if usage, ok := r.usage[budgetTestKey(scope, id)]; ok {
+			result[id] = repositories.AIBudgetUsage{Daily: usage.daily, Monthly: usage.monthly}
+		}
+	}
+	return result, nil
 }
 
 func (r *fakeAIBudgetRepository) SaveSetting(_ context.Context, setting *models.AIBudgetSetting) error {
@@ -206,5 +225,34 @@ func TestAIBudgetSetLimit(t *testing.T) {
 				t.Fatalf("saved = %+v", repo.saved)
 			}
 		})
+	}
+}
+
+// 一覧の利用額は、設定1件ごとではなく対象の種類ごとに1回だけ読む。
+func TestAIBudgetListSettingsWithUsage_種類ごとにまとめて読む(t *testing.T) {
+	repo := &fakeAIBudgetRepository{
+		list: []models.AIBudgetSetting{
+			{Scope: models.AIBudgetScopeSchool, ScopeID: 3, DailyLimitUSD: 50},
+			{Scope: models.AIBudgetScopeUser, ScopeID: 1, DailyLimitUSD: 1},
+			{Scope: models.AIBudgetScopeUser, ScopeID: 2, MonthlyLimitUSD: 10},
+		},
+		usage: map[string]fakeAIBudgetUsage{
+			budgetTestKey(models.AIBudgetScopeSchool, 3): {daily: 20, monthly: 100},
+			budgetTestKey(models.AIBudgetScopeUser, 1):   {daily: 0.5, monthly: 3},
+		},
+	}
+	rows, total, err := NewAIBudgetService(repo).ListSettingsWithUsage(context.Background(), 50, 0)
+	if err != nil {
+		t.Fatalf("ListSettingsWithUsage returned error: %v", err)
+	}
+	if total != 3 || len(rows) != 3 {
+		t.Fatalf("total=%d rows=%d", total, len(rows))
+	}
+	if repo.usageCalls != 0 || len(repo.batchCalls) != 2 ||
+		len(repo.batchCalls[models.AIBudgetScopeUser]) != 2 || len(repo.batchCalls[models.AIBudgetScopeSchool]) != 1 {
+		t.Fatalf("usageCalls=%d batchCalls=%v", repo.usageCalls, repo.batchCalls)
+	}
+	if rows[0].DailyUsedUSD != 20 || rows[1].MonthlyUsedUSD != 3 || rows[2].DailyUsedUSD != 0 {
+		t.Fatalf("rows=%+v", rows)
 	}
 }

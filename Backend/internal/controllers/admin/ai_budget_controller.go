@@ -41,7 +41,7 @@ func (c *AIBudgetController) List(ctx echo.Context) error {
 	if raw := ctx.QueryParam("offset"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 0 || parsed > maxAIBudgetOffset {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid offset")
+			return echo.NewHTTPError(http.StatusBadRequest, "offset が不正です")
 		}
 		offset = parsed
 	}

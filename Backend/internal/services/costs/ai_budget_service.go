@@ -2,6 +2,7 @@ package costs
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/repositories"
 	"Backend/internal/services/shared"
 	"context"
 	"errors"
@@ -47,6 +48,7 @@ type aiBudgetRepository interface {
 	DeleteSetting(context.Context, string, uint) error
 	SchoolIDForUser(context.Context, uint) (*uint, error)
 	UsageCosts(ctx context.Context, scope string, scopeID uint, dayStart, monthStart time.Time, realtimeRatePerMinute float64) (daily, monthly float64, err error)
+	UsageCostsByScope(ctx context.Context, scope string, scopeIDs []uint, dayStart, monthStart time.Time, realtimeRatePerMinute float64) (map[uint]repositories.AIBudgetUsage, error)
 	ScopeExists(context.Context, string, uint) (bool, error)
 }
 
@@ -80,19 +82,33 @@ func budgetWindow(now time.Time) (localNow, dayStart, monthStart time.Time) {
 }
 
 // ListSettingsWithUsage は設定の一覧に現在の利用額を付けて返す。limit は呼び出し側で 100 件までに絞られる。
+// 利用額は対象の種類ごとに1本の集計で読む。設定1件ごとに読むと、1ページで最大100本になる。
 func (s *AIBudgetService) ListSettingsWithUsage(ctx context.Context, limit, offset int) ([]AIBudgetSettingUsage, int64, error) {
 	settings, total, err := s.ListSettings(ctx, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
 	_, dayStart, monthStart := budgetWindow(s.now())
-	rows := make([]AIBudgetSettingUsage, 0, len(settings))
+	idsByScope := make(map[string][]uint, 2)
 	for _, setting := range settings {
-		daily, monthly, err := s.repo.UsageCosts(ctx, setting.Scope, setting.ScopeID, dayStart, monthStart, s.realtimeRatePerMinute)
+		idsByScope[setting.Scope] = append(idsByScope[setting.Scope], setting.ScopeID)
+	}
+	usageByScope := make(map[string]map[uint]repositories.AIBudgetUsage, len(idsByScope))
+	for _, scope := range []string{models.AIBudgetScopeUser, models.AIBudgetScopeSchool} {
+		ids := idsByScope[scope]
+		if len(ids) == 0 {
+			continue
+		}
+		usage, err := s.repo.UsageCostsByScope(ctx, scope, ids, dayStart, monthStart, s.realtimeRatePerMinute)
 		if err != nil {
 			return nil, 0, err
 		}
-		rows = append(rows, AIBudgetSettingUsage{AIBudgetSetting: setting, DailyUsedUSD: daily, MonthlyUsedUSD: monthly})
+		usageByScope[scope] = usage
+	}
+	rows := make([]AIBudgetSettingUsage, 0, len(settings))
+	for _, setting := range settings {
+		usage := usageByScope[setting.Scope][setting.ScopeID]
+		rows = append(rows, AIBudgetSettingUsage{AIBudgetSetting: setting, DailyUsedUSD: usage.Daily, MonthlyUsedUSD: usage.Monthly})
 	}
 	return rows, total, nil
 }

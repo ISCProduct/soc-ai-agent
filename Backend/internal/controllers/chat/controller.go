@@ -7,6 +7,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services/chat"
+	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
 	"Backend/internal/services/email"
 	ifaces "Backend/internal/services/interfaces"
@@ -38,6 +39,7 @@ type ChatController struct {
 	qualityRepo     *repositories.DiagnosisQualityRepository
 	matchingTimers  sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
 	matchingRunning sync.Map // key: sessionID, value: struct{}（実行中の多重起動防止, #1167）
+	aiBudget        costs.AIBudgetStatusProvider
 }
 
 const minEvaluatedCategoriesForFinal = 4
@@ -63,6 +65,12 @@ func NewChatController(chatService ifaces.ChatService, matchingService ifaces.Ma
 		userRepo:        userRepo,
 		emailService:    emailService,
 	}
+}
+
+// SetAIBudget はバックグラウンドのマッチングで AI 理由を作る前の予算判定を設定する（#1776）。
+// 設定しないと、上限を超えた利用者にも AI 理由の費用がかかる。
+func (c *ChatController) SetAIBudget(p costs.AIBudgetStatusProvider) {
+	c.aiBudget = p
 }
 
 // SetJobEnqueuer は診断妥当性ジョブ等の投入先を設定する。
@@ -170,8 +178,10 @@ func (c *ChatController) runBackgroundMatching(userID uint, sessionID string) {
 	defer c.matchingRunning.Delete(sessionID)
 
 	// バックグラウンドには actor が届かない。載せないと AI 理由の費用が誰の予算にも入らない。
+	// 予算判定もリクエストの context にしか載らないので、ここで載せ直す。
 	ctx, cancel := context.WithTimeout(usagectx.WithActor(context.Background(), userID, 0), matchingRunTimeout)
 	defer cancel()
+	ctx = costs.WithUserAIBudgetCheck(ctx, c.aiBudget, userID)
 
 	var lastErr error
 

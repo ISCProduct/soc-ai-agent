@@ -3,7 +3,9 @@ package repositories
 import (
 	"Backend/internal/models"
 	"context"
+	"errors"
 	"fmt"
+	stdlog "log"
 	"time"
 
 	"gorm.io/gorm"
@@ -28,9 +30,16 @@ func (r *APICallLogRepository) Create(log *models.APICallLog) error {
 }
 
 // schoolIDForLog は利用者の所属校を返す。引けないときは nil を返し、利用ログの記録は止めない。
+//
+// 利用者がいないときと、DB の失敗で引けなかったときを分ける。後者は学校の利用額から
+// 外れる（学校の上限だけを設定している場合はそのぶん上限の外になる）ので、ログに残して
+// 気づけるようにする。
 func schoolIDForLog(db *gorm.DB, userID uint) *uint {
 	var row struct{ SchoolID *uint }
 	if err := db.Model(&models.User{}).Select("school_id").Where("id = ?", userID).Take(&row).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			stdlog.Printf("[AIBudget] school lookup failed, usage is recorded without school_id: user_id=%d: %v", userID, err)
+		}
 		return nil
 	}
 	return row.SchoolID

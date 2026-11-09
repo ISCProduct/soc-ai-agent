@@ -6,14 +6,11 @@ import (
 	"Backend/internal/usagectx"
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/labstack/echo/v4"
 )
 
-type aiBudgetStatusProvider interface {
-	Status(context.Context, uint) (costs.AIBudgetStatus, error)
-}
+type aiBudgetStatusProvider = costs.AIBudgetStatusProvider
 
 // AIBudgetGuards はAIを実行するルートに付ける予算判定のミドルウェア。
 // 認証ミドルウェアの後段に付ける。失効トークンや退会済みの利用者に判定の費用を使わないため。
@@ -74,18 +71,9 @@ func echoDeferredAIBudget(service aiBudgetStatusProvider) echo.MiddlewareFunc {
 	}
 }
 
+// checkAIBudget はバックグラウンドの経路と同じ判定を使う（costs.CheckUserAIBudget）。
 func checkAIBudget(ctx context.Context, service aiBudgetStatusProvider, userID uint) error {
-	if service == nil {
-		return fmt.Errorf("%w: service is not configured", usagectx.ErrAIBudgetUnavailable)
-	}
-	status, err := service.Status(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("%w: %v", usagectx.ErrAIBudgetUnavailable, err)
-	}
-	if !status.Allowed {
-		return usagectx.ErrAIBudgetExceeded
-	}
-	return nil
+	return costs.CheckUserAIBudget(ctx, service, userID)
 }
 
 func isAIBudgetExceeded(err error) bool {

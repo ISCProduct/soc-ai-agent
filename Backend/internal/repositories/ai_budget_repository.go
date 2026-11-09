@@ -71,17 +71,13 @@ func (r *AIBudgetRepository) SchoolIDForUser(ctx context.Context, userID uint) (
 	return row.SchoolID, nil
 }
 
-// aiBudgetCosts は1つの表から読んだ日次・月次の利用額。
-type aiBudgetCosts struct {
+// AIBudgetUsage は利用者または学校の日次・月次の利用額。
+type AIBudgetUsage struct {
 	Daily   float64
 	Monthly float64
 }
 
 // UsageCosts は利用者または学校に配賦された日次・月次の利用額を返す。
-//
-// realtimeRatePerMinute は終了していないリアルタイム音声の見積もりに使う。cost_usd は終了時に
-// 書かれるので、離脱したセッションを 0 として数えると上限を回避できてしまう。
-// 管理画面のコスト集計（realtime_usage_repository.go）と同じ見積もり方に揃える。
 func (r *AIBudgetRepository) UsageCosts(
 	ctx context.Context,
 	scope string,
@@ -89,6 +85,32 @@ func (r *AIBudgetRepository) UsageCosts(
 	dayStart, monthStart time.Time,
 	realtimeRatePerMinute float64,
 ) (daily, monthly float64, err error) {
+	usage, err := r.UsageCostsByScope(ctx, scope, []uint{scopeID}, dayStart, monthStart, realtimeRatePerMinute)
+	if err != nil {
+		return 0, 0, err
+	}
+	return usage[scopeID].Daily, usage[scopeID].Monthly, nil
+}
+
+// UsageCostsByScope は、同じ種類の対象（利用者または学校）の利用額を1本の集計で返す。
+// 利用のない対象は結果に含まれない（ゼロ値で読める）。予算判定と管理画面の一覧で
+// 集計の式を共有するため、1件の判定もこれを通す。
+//
+// 終了していないリアルタイム音声は、cost_usd が終了時に書かれるので、経過時間と
+// realtimeRatePerMinute から見積もる。離脱したセッションを 0 として数えると上限を回避できる。
+//   - 日次は、当日0時以降の経過だけを足す。日付をまたいで続く通話も新しい日の上限に入る。
+//   - 月次は、開始から現在までを開始月に足す（月をまたいだ継続は開始月に入る）。
+//   - started_at が現在より後なら 0 にする。負の見積もりが合計を減らし、上限をすり抜けないように。
+//
+// 現在時刻は DB の関数ではなく引数で渡す。started_at と同じ DSN の loc で変換されるので、
+// コンテナの TZ を変えても経過時間がずれない。
+func (r *AIBudgetRepository) UsageCostsByScope(
+	ctx context.Context,
+	scope string,
+	scopeIDs []uint,
+	dayStart, monthStart time.Time,
+	realtimeRatePerMinute float64,
+) (map[uint]AIBudgetUsage, error) {
 	var column string
 	switch scope {
 	case models.AIBudgetScopeUser:
@@ -96,32 +118,53 @@ func (r *AIBudgetRepository) UsageCosts(
 	case models.AIBudgetScopeSchool:
 		column = "school_id"
 	default:
-		return 0, 0, gorm.ErrInvalidData
+		return nil, gorm.ErrInvalidData
 	}
-
-	var api, realtime aiBudgetCosts
-	if err := r.db.WithContext(ctx).Raw(fmt.Sprintf(`
-SELECT
-  COALESCE(SUM(CASE WHEN called_at >= ? THEN cost_usd ELSE 0 END), 0) AS daily,
-  COALESCE(SUM(cost_usd), 0) AS monthly
-FROM api_call_logs
-WHERE %s = ? AND called_at >= ?`, column), dayStart, scopeID, monthStart).Scan(&api).Error; err != nil {
-		return 0, 0, err
+	result := make(map[uint]AIBudgetUsage, len(scopeIDs))
+	if len(scopeIDs) == 0 {
+		return result, nil
 	}
-	// 現在時刻は DB の関数ではなく引数で渡す。started_at と同じ DSN の loc で変換されるので、
-	// コンテナの TZ を変えても経過時間がずれない。
 	now := time.Now().UTC()
-	const realtimeCost = `CASE WHEN ended_at IS NULL THEN TIMESTAMPDIFF(SECOND, started_at, ?) * (? / 60.0) ELSE cost_usd END`
-	if err := r.db.WithContext(ctx).Raw(fmt.Sprintf(`
-SELECT
-  COALESCE(SUM(CASE WHEN started_at >= ? THEN %[1]s ELSE 0 END), 0) AS daily,
-  COALESCE(SUM(%[1]s), 0) AS monthly
-FROM realtime_usage_logs
-WHERE %[2]s = ? AND started_at >= ?`, realtimeCost, column),
-		dayStart, now, realtimeRatePerMinute, now, realtimeRatePerMinute, scopeID, monthStart).Scan(&realtime).Error; err != nil {
-		return 0, 0, err
+	var rows []struct {
+		ScopeID uint
+		Daily   float64
+		Monthly float64
 	}
-	return api.Daily + realtime.Daily, api.Monthly + realtime.Monthly, nil
+	if err := r.db.WithContext(ctx).Raw(fmt.Sprintf(`
+SELECT scope_id, COALESCE(SUM(daily), 0) AS daily, COALESCE(SUM(monthly), 0) AS monthly
+FROM (
+  SELECT %[1]s AS scope_id,
+    CASE WHEN called_at >= ? THEN cost_usd ELSE 0 END AS daily,
+    cost_usd AS monthly
+  FROM api_call_logs
+  WHERE %[1]s IN ? AND called_at >= ?
+  UNION ALL
+  SELECT %[1]s AS scope_id,
+    CASE
+      WHEN ended_at IS NULL THEN
+        GREATEST(TIMESTAMPDIFF(SECOND, GREATEST(started_at, CAST(? AS DATETIME(3))), ?), 0) * (? / 60.0)
+      WHEN started_at >= ? THEN cost_usd
+      ELSE 0
+    END AS daily,
+    CASE
+      WHEN ended_at IS NULL THEN GREATEST(TIMESTAMPDIFF(SECOND, started_at, ?), 0) * (? / 60.0)
+      ELSE cost_usd
+    END AS monthly
+  FROM realtime_usage_logs
+  WHERE %[1]s IN ? AND started_at >= ?
+) costs_by_scope
+GROUP BY scope_id`, column),
+		dayStart, scopeIDs, monthStart,
+		dayStart, now, realtimeRatePerMinute, dayStart,
+		now, realtimeRatePerMinute,
+		scopeIDs, monthStart,
+	).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.ScopeID] = AIBudgetUsage{Daily: row.Daily, Monthly: row.Monthly}
+	}
+	return result, nil
 }
 
 func (r *AIBudgetRepository) ScopeExists(ctx context.Context, scope string, scopeID uint) (bool, error) {
