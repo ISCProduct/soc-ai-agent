@@ -152,7 +152,16 @@ func runSeed(dsn string) error {
 
 // seedL1Catalog は L1 カタログ（約800社）を投入する。社名で upsert するので何度流しても重複しない。
 func seedL1Catalog(db *gorm.DB) error {
-	rows, err := company.ParseL1SeedCSV(strings.NewReader(l1catalog.SeedCSV))
+	src := l1catalog.SeedCSV
+	// L1_SEED_CSV を指定すると、埋め込みの代わりにそのファイルを投入する（4万社などローカル用）。
+	if path := os.Getenv("L1_SEED_CSV"); path != "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("L1_SEED_CSV を読めません: %w", err)
+		}
+		src = string(b)
+	}
+	rows, err := company.ParseL1SeedCSV(strings.NewReader(src))
 	if err != nil {
 		return fmt.Errorf("L1カタログCSVの読み込みに失敗: %w", err)
 	}

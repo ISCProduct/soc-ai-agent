@@ -166,3 +166,8 @@ frontend/public/live2d/interviewers/**
 # 再配布可・コミットが前提（無いとビルドしたアプリがそもそも動かない）。
 !frontend/public/live2d/shaders/
 !frontend/public/live2d/shaders/*
+
+# ローカル用の大きな候補リストと、l1enrich の結果キャッシュ（コミットしない）
+Backend/config/l1_it_candidates.csv
+Backend/l1_enrich_cache.jsonl
+l1_enrich_cache.jsonl

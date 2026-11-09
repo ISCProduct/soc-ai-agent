@@ -45,20 +45,20 @@ func TestEnrichRejectsBadValues(t *testing.T) {
 
 func TestApply(t *testing.T) {
 	rows := [][]string{
-		{"name", "industry", "segment", "website_url", "publish"},
-		{"A", "情報通信業", "core", "", "true"},
-		{"B", "情報通信業", "sme_si", "", "true"},
-		{"C", "情報通信業", "sme_si", "", "true"},
+		{"name", "industry", "segment", "website_url", "publish", "description"},
+		{"A", "情報通信業", "core", "", "true", ""},
+		{"B", "情報通信業", "sme_si", "", "true", ""},
+		{"C", "情報通信業", "sme_si", "", "true", ""},
 	}
 	cache := map[string]result{
-		"A": {IsIT: true, Industry: "ソフトウェア", WebsiteURL: "https://a.example"},
+		"A": {IsIT: true, Industry: "ソフトウェア", WebsiteURL: "https://a.example", Description: "業務ソフト"},
 		"B": {IsIT: false},
 	}
 	out, dropped := apply(rows, cache, false)
 	if dropped != 1 || len(out) != 3 {
 		t.Fatalf("dropped=%d len=%d", dropped, len(out))
 	}
-	if out[1][1] != "ソフトウェア" || out[1][3] != "https://a.example" {
+	if out[1][1] != "ソフトウェア" || out[1][3] != "https://a.example" || out[1][5] != "業務ソフト" {
 		t.Fatalf("A が更新されていない: %v", out[1])
 	}
 	if out[2][0] != "C" || out[2][1] != "情報通信業" { // 未調査はそのまま残す

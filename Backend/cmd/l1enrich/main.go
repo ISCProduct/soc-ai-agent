@@ -19,6 +19,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -26,6 +27,9 @@ import (
 
 // 業種の選択肢。固定にして表記ゆれを防ぐ。
 var industries = []string{"情報サービス・SI", "ソフトウェア", "インターネット・Web", "通信", "製造業", "金融・保険", "小売・サービス", "建設・不動産", "運輸・エネルギー", "その他"}
+
+// 使用量の合計。費用の見積りに使う。
+var inTok, outTok, searches atomic.Int64
 
 type result struct {
 	Name        string `json:"name"`
@@ -38,9 +42,9 @@ type result struct {
 func main() {
 	in := flag.String("in", "config/l1_catalog_seed.csv", "更新する CSV")
 	cachePath := flag.String("cache", "l1_enrich_cache.jsonl", "結果の保存先。あれば続きから実行する")
-	model := flag.String("model", "claude-opus-5-5", "使うモデル。費用を下げるなら claude-sonnet-5-5 など")
+	model := flag.String("model", "claude-haiku-4-5", "使うモデル。質を上げるなら claude-sonnet-5-5 など")
 	limit := flag.Int("limit", 0, "未処理のうち先頭から N 社だけ処理する（0 は全件）")
-	workers := flag.Int("workers", 4, "並列数")
+	workers := flag.Int("workers", 8, "並列数")
 	keepNonIT := flag.Bool("keep-non-it", false, "IT 企業でないと判定された社名も残す")
 	flag.Parse()
 
@@ -99,6 +103,7 @@ func main() {
 	out, dropped := apply(rows, cache, *keepNonIT)
 	writeCSV(*in, out)
 	log.Printf("CSV を更新: %d 社（IT 企業でないため除外 %d 社）", len(out)-1, dropped)
+	log.Printf("使用量: 入力 %d トークン / 出力 %d トークン / Web 検索 %d 回", inTok.Load(), outTok.Load(), searches.Load())
 }
 
 // enrich は 1 社分を Claude の Web 検索で調べる。
@@ -112,19 +117,19 @@ func enrich(ctx context.Context, client anthropic.Client, model, name string) (r
 {"industry":"","is_it_company":false,"website_url":"","description":""}`, name, strings.Join(industries, " / "))
 
 	params := anthropic.MessageNewParams{
-		Model:        anthropic.Model(model),
-		MaxTokens:    8000, // 思考トークンも含まれる
-		OutputConfig: anthropic.OutputConfigParam{Effort: anthropic.OutputConfigEffortLow},
-		Tools: []anthropic.ToolUnionParam{{
-			OfWebSearchTool20260209: &anthropic.WebSearchTool20260209Param{MaxUses: anthropic.Int(3)},
-		}},
-		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(prompt))},
+		Model:     anthropic.Model(model),
+		MaxTokens: 8000, // 思考トークンも含まれる
+		Tools:     []anthropic.ToolUnionParam{searchTool(model)},
+		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(prompt))},
 	}
 	for range 4 { // pause_turn は続行する
 		resp, err := client.Messages.New(ctx, params)
 		if err != nil {
 			return result{}, err
 		}
+		inTok.Add(resp.Usage.InputTokens)
+		outTok.Add(resp.Usage.OutputTokens)
+		searches.Add(resp.Usage.ServerToolUse.WebSearchRequests)
 		switch resp.StopReason {
 		case anthropic.StopReasonPauseTurn:
 			params.Messages = append(params.Messages, resp.ToParam())
@@ -135,6 +140,15 @@ func enrich(ctx context.Context, client anthropic.Client, model, name string) (r
 		return parseResult(name, resp)
 	}
 	return result{}, fmt.Errorf("pause_turn が続いた")
+}
+
+// searchTool は Web 検索ツール。件数が多いので 1 社 1 回に絞る。
+// 動的フィルタ版（_20260209）は新しいモデルだけなので、Haiku 4.5 などは基本版を使う。
+func searchTool(model string) anthropic.ToolUnionParam {
+	if strings.Contains(model, "haiku") {
+		return anthropic.ToolUnionParam{OfWebSearchTool20250305: &anthropic.WebSearchTool20250305Param{MaxUses: anthropic.Int(1)}}
+	}
+	return anthropic.ToolUnionParam{OfWebSearchTool20260209: &anthropic.WebSearchTool20260209Param{MaxUses: anthropic.Int(1)}}
 }
 
 func parseResult(name string, resp *anthropic.Message) (result, error) {
@@ -180,6 +194,9 @@ func apply(rows [][]string, cache map[string]result, keepNonIT bool) ([][]string
 			if res.WebsiteURL != "" {
 				row[3] = res.WebsiteURL
 			}
+			if res.Description != "" {
+				row[5] = res.Description
+			}
 		}
 		out = append(out, row)
 	}
@@ -202,11 +219,18 @@ func readCSV(path string) [][]string {
 	}
 	defer f.Close()
 	r := csv.NewReader(f)
-	r.FieldsPerRecord = 5
+	r.FieldsPerRecord = -1
 	rows, err := r.ReadAll()
 	if err != nil || len(rows) < 2 {
 		log.Fatalf("CSV を読めません: %v", err)
 	}
+	// 列は name,industry,segment,website_url,publish,description。description が無い CSV は空で補う。
+	for i := range rows {
+		for len(rows[i]) < 6 {
+			rows[i] = append(rows[i], "")
+		}
+	}
+	rows[0][5] = "description"
 	return rows
 }
 
