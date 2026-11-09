@@ -18,6 +18,10 @@ var ErrUserScoreRecalculationStatusChanged = errors.New("user score recalculatio
 
 const mysqlDuplicateEntry = 1062
 
+// userScoreRecalculationBatchLease はバッチのリースの長さ。RunBatch がセッションごとに
+// RenewBatch で延ばすので、1セッションの再計算にかかる時間より長ければよい。
+const userScoreRecalculationBatchLease = 10 * time.Minute
+
 type UserScoreRecalculationRepository struct {
 	db *gorm.DB
 }
@@ -112,7 +116,7 @@ func (r *UserScoreRecalculationRepository) ClaimBatch(id uint) (string, error) {
 			id, models.UserScoreRecalculationJobRunning, now).
 		Updates(map[string]any{
 			"batch_lease_token": token,
-			"batch_lease_until": now.Add(10 * time.Minute),
+			"batch_lease_until": now.Add(userScoreRecalculationBatchLease),
 			"updated_at":        now,
 		})
 	if result.Error != nil {
@@ -129,6 +133,37 @@ func (r *UserScoreRecalculationRepository) ClaimBatch(id uint) (string, error) {
 		return "", ErrUserScoreRecalculationBatchBusy
 	}
 	return token, nil
+}
+
+// RenewBatch はバッチのリースを延ばす。リースは取得時から一定時間で切れるので、
+// セッションの区切りごとに呼ぶ。延ばさないと、回答の多いセッションが続いて期限を過ぎた
+// ときに、別の「続行」や画面の再読込が同じジョブを取得し、同じセッションの LLM 呼び出しが重なる。
+//
+// トークンが変わっていれば、期限切れの間に別のバッチが取得している。
+// ErrUserScoreRecalculationBatchBusy を返すので、呼び出し側は LLM を呼ぶ前に打ち切る。
+func (r *UserScoreRecalculationRepository) RenewBatch(id uint, token string) error {
+	now := time.Now()
+	result := r.db.Model(&models.UserScoreRecalculationJob{}).
+		Where("id = ? AND batch_lease_token = ?", id, token).
+		Updates(map[string]any{"batch_lease_until": now.Add(userScoreRecalculationBatchLease), "updated_at": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	// MySQL は値が変わらなかった行を数えない。ClaimBatch と同じミリ秒で延ばすと0行になるので、
+	// トークンがまだ自分のものかを読み直して区別する。
+	var owned int64
+	if err := r.db.Model(&models.UserScoreRecalculationJob{}).
+		Where("id = ? AND batch_lease_token = ?", id, token).
+		Count(&owned).Error; err != nil {
+		return err
+	}
+	if owned == 0 {
+		return ErrUserScoreRecalculationBatchBusy
+	}
+	return nil
 }
 
 func (r *UserScoreRecalculationRepository) ReleaseBatch(id uint, token string) error {

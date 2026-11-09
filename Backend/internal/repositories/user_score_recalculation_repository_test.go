@@ -133,3 +133,39 @@ func TestUserScoreRecalculationRepository_PauseOnlyUpdatesRunningJob(t *testing.
 		t.Fatalf("expectations not met: %v", err)
 	}
 }
+
+func TestUserScoreRecalculationRepository_RenewBatchOnlyWithOwnToken(t *testing.T) {
+	tests := []struct {
+		name         string
+		rowsAffected int64
+		owned        int
+		wantErr      error
+	}{
+		{name: "自分のトークンならリースを延ばす", rowsAffected: 1},
+		// 取得と同じミリ秒で延ばすと値が変わらず、MySQL は0行と返す
+		{name: "値が変わらず0行でも自分のトークンなら成功", rowsAffected: 0, owned: 1},
+		{name: "別のバッチが取得していたら実行中として返す", rowsAffected: 0, owned: 0, wantErr: ErrUserScoreRecalculationBatchBusy},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, mock := newUserScoreRecalculationRepoTest(t)
+			mock.ExpectBegin()
+			mock.ExpectExec("UPDATE `user_score_recalculation_jobs` SET `batch_lease_until`=\\?,`updated_at`=\\? WHERE id = \\? AND batch_lease_token = \\?").
+				WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), uint(12), "token").
+				WillReturnResult(sqlmock.NewResult(0, tt.rowsAffected))
+			mock.ExpectCommit()
+			if tt.rowsAffected == 0 {
+				mock.ExpectQuery("SELECT count\\(\\*\\) FROM `user_score_recalculation_jobs` WHERE id = \\? AND batch_lease_token = \\?").
+					WithArgs(uint(12), "token").
+					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(tt.owned))
+			}
+
+			if err := repo.RenewBatch(12, "token"); !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("expectations not met: %v", err)
+			}
+		})
+	}
+}

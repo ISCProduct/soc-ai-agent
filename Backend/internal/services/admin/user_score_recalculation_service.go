@@ -225,6 +225,12 @@ func (s *UserScoreRecalculationService) RunBatch(ctx context.Context, id uint) (
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		// リースは取得時から一定時間で切れる。セッションの区切りで延ばさないと、長い
+		// バッチの途中で別のリクエストが同じジョブを取得し、同じセッションの LLM を呼ぶ。
+		// 延ばせなければ別のバッチが取得済みなので、LLM を呼ぶ前に打ち切る。
+		if err := s.jobs.RenewBatch(id, leaseToken); err != nil {
+			return nil, err
+		}
 		failure, err := s.recalculateTarget(ctx, id, target, job.CalculationVersion)
 		if err != nil {
 			return nil, err
@@ -274,10 +280,31 @@ func (s *UserScoreRecalculationService) recalculateTarget(
 		return models.UserScoreRecalculationFailureLoad, nil
 	}
 	if len(scores) == 0 {
-		logRecalculationFailure(jobID, target, models.UserScoreRecalculationFailureNoScores, errors.New("採点できる回答がありません"))
-		return models.UserScoreRecalculationFailureNoScores, nil
+		return s.markUnscorableSession(jobID, target, version), nil
 	}
 	return s.saveRecalculatedScores(ctx, jobID, target, scores, version), nil
+}
+
+// markUnscorableSession は採点できる回答が無いセッションを、スコアを残したまま現行の
+// 計算版にして、失敗の分類を返す。計算版が古いままだと次のジョブで先頭に戻り、履歴が
+// 変わらなくても同じ LLM 評価の費用がジョブのたびにかかる。一時的な失敗（load_failed）と
+// 違い、やり直しても結果は変わらない。
+func (s *UserScoreRecalculationService) markUnscorableSession(
+	jobID uint,
+	target repositories.UserScoreRecalculationTarget,
+	version string,
+) string {
+	if err := s.scores.MarkChatSessionCalculationVersion(target.UserID, target.SessionID, version); err != nil {
+		failure := models.UserScoreRecalculationFailureSave
+		if errors.Is(err, repositories.ErrRecalculationTargetChanged) {
+			failure = models.UserScoreRecalculationFailureTargetChanged
+		}
+		logRecalculationFailure(jobID, target, failure, err)
+		return failure
+	}
+	logRecalculationFailure(jobID, target, models.UserScoreRecalculationFailureNoScores,
+		errors.New("採点できる回答がありません。スコアは残し、計算版だけ現行にしました"))
+	return models.UserScoreRecalculationFailureNoScores
 }
 
 // saveRecalculatedScores はスコアを置換して企業マッチングを作り直し、失敗の分類を返す（成功なら空）。

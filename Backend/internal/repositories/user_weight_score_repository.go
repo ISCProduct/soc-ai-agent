@@ -289,23 +289,8 @@ func scoreSessionTouchedAfter(scoreAlias, appliedAt string) string {
 // 置換前の行は jobID に紐づけて残し、RollbackRecalculatedSessions で元に戻せるようにする。
 func (r *UserWeightScoreRepository) ReplaceChatSessionScores(jobID, userID uint, sessionID string, scores map[string]int, version string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		var lockedIDs []uint
-		if err := tx.Model(&models.UserWeightScore{}).
-			Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("user_id = ? AND session_id = ? AND source = ?", userID, sessionID, models.ScoreSourceChat).
-			Pluck("id", &lockedIDs).Error; err != nil {
+		if err := lockEligibleChatSession(tx, userID, sessionID, version); err != nil {
 			return err
-		}
-		var eligible int64
-		if err := tx.Raw(fmt.Sprintf(`
-SELECT COUNT(*)
-FROM user_weight_scores uws
-WHERE uws.user_id = ? AND uws.session_id = ? AND uws.calculation_version <> ?
-  AND %s`, recalculationEligibleCondition()), userID, sessionID, version).Scan(&eligible).Error; err != nil {
-			return err
-		}
-		if eligible == 0 {
-			return ErrRecalculationTargetChanged
 		}
 
 		var existing []models.UserWeightScore
@@ -347,6 +332,52 @@ WHERE uws.user_id = ? AND uws.session_id = ? AND uws.calculation_version <> ?
 		}
 		return nil
 	})
+}
+
+// MarkChatSessionCalculationVersion は、採点できる回答が無かったセッションの計算版だけを
+// 現行にする。スコアは置き換えない。
+//
+// 計算版が古いままだと、次のジョブで対象の先頭に戻る。履歴が変わらなくても、短文・境界値の
+// LLM 評価がジョブのたびに繰り返される。現行の計算式で再計算した結果が「採点できる回答なし」
+// なので、既存の値は残したまま計算版だけを進める。置換と同じく、ロックしてから対象の条件を
+// 確かめ直し、外れていれば ErrRecalculationTargetChanged を返す。
+//
+// updated_at は動かさない。最新セッションの判定（FindLatestByUser など）と、履歴書・ES・面接の
+// 加点の判定（scoreSessionAtTime / scoreSessionTouchedAfter）が updated_at を見るため。
+// スナップショットは残さないので、ロールバックしても計算版は戻らない（スコアは変わっていない）。
+func (r *UserWeightScoreRepository) MarkChatSessionCalculationVersion(userID uint, sessionID, version string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockEligibleChatSession(tx, userID, sessionID, version); err != nil {
+			return err
+		}
+		return tx.Model(&models.UserWeightScore{}).
+			Where("user_id = ? AND session_id = ? AND source = ?", userID, sessionID, models.ScoreSourceChat).
+			UpdateColumn("calculation_version", version).Error
+	})
+}
+
+// lockEligibleChatSession はセッションのチャットスコア行をロックし、まだ再計算の対象かを
+// 確かめ直す。外れていれば ErrRecalculationTargetChanged を返す。
+func lockEligibleChatSession(tx *gorm.DB, userID uint, sessionID, version string) error {
+	var lockedIDs []uint
+	if err := tx.Model(&models.UserWeightScore{}).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("user_id = ? AND session_id = ? AND source = ?", userID, sessionID, models.ScoreSourceChat).
+		Pluck("id", &lockedIDs).Error; err != nil {
+		return err
+	}
+	var eligible int64
+	if err := tx.Raw(fmt.Sprintf(`
+SELECT COUNT(*)
+FROM user_weight_scores uws
+WHERE uws.user_id = ? AND uws.session_id = ? AND uws.calculation_version <> ?
+  AND %s`, recalculationEligibleCondition()), userID, sessionID, version).Scan(&eligible).Error; err != nil {
+		return err
+	}
+	if eligible == 0 {
+		return ErrRecalculationTargetChanged
+	}
+	return nil
 }
 
 // ChatSessionScoreMap はセッションのチャットスコアをカテゴリ別に返す。

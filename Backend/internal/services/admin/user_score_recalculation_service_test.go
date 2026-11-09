@@ -99,6 +99,109 @@ func TestSaveRecalculatedScores(t *testing.T) {
 	}
 }
 
+func newRecalculationServiceSQLMock(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock作成失敗: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}),
+		&gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("gorm作成失敗: %v", err)
+	}
+	return db, mock
+}
+
+// 採点できる回答が無いセッションは、スコアを置き換えずに計算版だけを進め、次のジョブの
+// 対象から外す。updated_at を動かすと最新セッションと加点の判定が変わるので、SET は
+// calculation_version だけであることも確かめる。
+func TestMarkUnscorableSession(t *testing.T) {
+	tests := []struct {
+		name        string
+		eligible    int
+		updateErr   error
+		wantFailure string
+	}{
+		{name: "計算版だけを現行にして no_scores として数える", eligible: 1, wantFailure: models.UserScoreRecalculationFailureNoScores},
+		{name: "途中で加点されたら計算版も変えない", eligible: 0, wantFailure: models.UserScoreRecalculationFailureTargetChanged},
+		{name: "更新に失敗したら保存失敗として残す", eligible: 1, updateErr: errors.New("db down"), wantFailure: models.UserScoreRecalculationFailureSave},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock := newRecalculationServiceSQLMock(t)
+			mock.ExpectBegin()
+			mock.ExpectQuery("SELECT `id` FROM `user_weight_scores`").
+				WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+			mock.ExpectQuery(`SELECT COUNT\(\*\)`).
+				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(tt.eligible))
+			if tt.eligible > 0 {
+				update := mock.ExpectExec("^UPDATE `user_weight_scores` SET `calculation_version`=\\? WHERE user_id = \\? AND session_id = \\? AND source = \\?$").
+					WithArgs("v2", uint(7), "session-1", models.ScoreSourceChat)
+				if tt.updateErr != nil {
+					update.WillReturnError(tt.updateErr)
+					mock.ExpectRollback()
+				} else {
+					update.WillReturnResult(sqlmock.NewResult(0, 2))
+					mock.ExpectCommit()
+				}
+			} else {
+				mock.ExpectRollback()
+			}
+
+			service := &UserScoreRecalculationService{scores: repositories.NewUserWeightScoreRepository(db)}
+			target := repositories.UserScoreRecalculationTarget{ScoreID: 1, UserID: 7, SessionID: "session-1"}
+
+			if got := service.markUnscorableSession(1, target, "v2"); got != tt.wantFailure {
+				t.Fatalf("failure = %q, want %q", got, tt.wantFailure)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("expectations not met: %v", err)
+			}
+		})
+	}
+}
+
+// リースを延ばせなければ別のバッチが同じジョブを取得している。LLM を呼ぶ前に打ち切り、
+// 自分のリースの解放だけを試みる。chat は nil なので、再計算に進むと panic する。
+func TestRunBatchStopsBeforeLLMWhenLeaseIsLost(t *testing.T) {
+	db, mock := newRecalculationServiceSQLMock(t)
+	jobRows := func() *sqlmock.Rows {
+		return sqlmock.NewRows([]string{"id", "calculation_version", "status", "max_score_id", "cursor_score_id"}).
+			AddRow(12, "v2", models.UserScoreRecalculationJobRunning, 100, 0)
+	}
+	mock.ExpectQuery("SELECT \\* FROM `user_score_recalculation_jobs`").WillReturnRows(jobRows())
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `user_score_recalculation_jobs` SET `batch_lease_token`").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery(`SELECT MIN\(uws.id\) AS score_id`).
+		WillReturnRows(sqlmock.NewRows([]string{"score_id", "user_id", "session_id"}).AddRow(5, 7, "session-1"))
+	mock.ExpectQuery("SELECT \\* FROM `user_score_recalculation_jobs`").WillReturnRows(jobRows())
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `user_score_recalculation_jobs` SET `batch_lease_until`=\\?,`updated_at`=\\? WHERE id = \\? AND batch_lease_token = \\?").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `user_score_recalculation_jobs`").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `user_score_recalculation_jobs` SET `batch_lease_token`=\\?,`batch_lease_until`=\\?,`updated_at`=\\? WHERE id = \\? AND batch_lease_token = \\?").
+		WithArgs(nil, nil, sqlmock.AnyArg(), uint(12), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+
+	service := &UserScoreRecalculationService{
+		scores: repositories.NewUserWeightScoreRepository(db),
+		jobs:   repositories.NewUserScoreRecalculationRepository(db),
+	}
+	if _, err := service.RunBatch(context.Background(), 12); !errors.Is(err, repositories.ErrUserScoreRecalculationBatchBusy) {
+		t.Fatalf("err = %v, want %v", err, repositories.ErrUserScoreRecalculationBatchBusy)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 var updateDryRunGolden = flag.Bool("update", false, "ドライランのゴールデンファイルを更新する")
 
 func intPtr(value int) *int { return &value }
