@@ -11,7 +11,7 @@ langchain-core>=1.7.3,<2.0
 langchain-openai>=1.7.3,<2.0
 langchain-text-splitters>=1.0,<2.0
 # openai SDK 2.x 系（litellm との両立）
-openai>=3.31.0,<4.0
+openai>=3.46.0,<4.0
 # /metrics 公開（#1186）
 prometheus-fastapi-instrumentator==8.1.0
 # エラートラッキング（#1185）。DSN 未設定時は起動時に何もしない。
