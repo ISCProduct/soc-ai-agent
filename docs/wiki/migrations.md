@@ -186,8 +186,8 @@ frontend の不具合に見えるため、まず backend のログを確認し�
 | 26 | `user_company_matches` に `matched_axis_count`（マッチ度の算出軸数）→ 下の注意を読むこと |
 | 27 | `diagnosis_quality_reports`（診断妥当性フラグ） |
 | 28 | ビジネス思考系質問のカテゴリ再配置（成長志向からの切り離し） |
-| 57 | AI利用予算の設定（`ai_budget_settings`） |
-| 58 | `api_call_logs` と `realtime_usage_logs` に `school_id` と予算集計用のインデックスを追加 |
+| 62 | AI利用予算の設定（`ai_budget_settings`） |
+| 63 | `api_call_logs` と `realtime_usage_logs` に `school_id` と予算集計用のインデックスを追加 |
 
 ### version 26 適用時の注意（#1124）
 
