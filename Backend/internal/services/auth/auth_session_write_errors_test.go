@@ -87,6 +87,13 @@ func TestLogin_RehashSaveFails_StillLogsIn(t *testing.T) {
 	if strings.Contains(buf.String(), user.Email) {
 		t.Errorf("ログにメールアドレスを出さない: %q", buf.String())
 	}
+	// 後の最終ログイン更新は成功する。そこで新しいハッシュが保存されると、ログと実際がずれる（#2141 のレビュー）
+	if repo.calls != 2 {
+		t.Fatalf("UpdateUser の呼び出しが %d 回（再ハッシュと最終ログイン更新の2回のはず）", repo.calls)
+	}
+	if cost, _ := bcrypt.Cost([]byte(repo.user.Password)); cost != bcrypt.MinCost {
+		t.Errorf("再ハッシュの保存に失敗したのに、新しいハッシュ（cost=%d）が後から保存された", cost)
+	}
 }
 
 func TestLogin_RehashSaved_NoExtraLog(t *testing.T) {

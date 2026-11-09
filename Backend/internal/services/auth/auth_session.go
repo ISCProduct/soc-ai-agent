@@ -53,10 +53,14 @@ func (s *AuthService) Login(req LoginRequest, tenantOrgID uint) (*AuthResponse, 
 	// コストが古い場合は再ハッシュ（#328: bcryptCost=12 への移行）
 	if cost, err := bcrypt.Cost([]byte(user.Password)); err == nil && cost < bcryptCost {
 		if rehashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost); err == nil {
+			previous := user.Password
 			user.Password = string(rehashed)
 			// パスワードは正しいのでログインは続ける。保存できなくても古いハッシュのまま残るだけで、
-			// 次回のログインでもう一度再ハッシュされる。失敗はログで分かるようにする（#2002）
+			// 次回のログインでもう一度再ハッシュされる。失敗はログで分かるようにする（#2002）。
+			// 失敗時はメモリ上も元のハッシュに戻す。戻さないと、後の最終ログイン更新で新しいハッシュが
+			// 保存され、「保存に失敗した」というログと実際の状態がずれる（#2141 のレビュー）
 			if err := s.userRepo.UpdateUser(user); err != nil {
+				user.Password = previous
 				log.Printf("[AuthService] failed to save rehashed password user_id=%d: %v", user.ID, err)
 			}
 		}
