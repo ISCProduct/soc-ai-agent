@@ -331,13 +331,14 @@ func (s *CompanyEntryService) sendInviteEmail(submission *models.CompanyEntrySub
 }
 
 func (s *CompanyEntryService) markEmailFailed(submissionID uint, msg string) {
-	// 送信の失敗を記録できないと email_last_error が空のまま残るので、記録の失敗もログに出す（#2000）
+	// 送信の失敗を記録できないと email_last_error が空のまま残るので、記録の失敗もログに出す（#2000）。
+	// msg はログに出さない。仮登録の Create の一意制約違反などでは、メールアドレスや招待トークンが入る（#2136 のレビュー）
 	if err := s.db.Model(&models.CompanyEntrySubmission{}).Where("id = ?", submissionID).Updates(map[string]any{
 		"email_status":     "failed",
 		"email_last_error": msg,
 		"email_attempts":   gorm.Expr("email_attempts + 1"),
 	}).Error; err != nil {
-		log.Printf("[CompanyEntry] failed to record invite email failure submission=%d (send error: %s): %v", submissionID, msg, err)
+		log.Printf("[CompanyEntry] failed to record invite email failure submission=%d: %v", submissionID, err)
 	}
 }
 

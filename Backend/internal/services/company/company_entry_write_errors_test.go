@@ -111,11 +111,12 @@ func TestSendInviteEmail_Normal_NoExtraLog(t *testing.T) {
 }
 
 // 仮登録の削除と作成が失敗し、さらに送信失敗の記録も失敗する。どれもログに残り、false を返す。
+// 作成の失敗理由（一意制約違反のメッセージ）にはメールアドレスやトークンが入るので、ログには出さない（#2136 のレビュー）。
 func TestSendInviteEmail_PendingAndFailureRecordFail_Logged(t *testing.T) {
 	buf := captureCompanyEntryLog(t)
 	svc, mock := newInviteTestService(t, nil, entryPendingRepoStub{
 		deleteErr: errors.New("delete failed"),
-		createErr: errors.New("duplicate token"),
+		createErr: errors.New("Error 1062: Duplicate entry 'hr@example.com' for key 'idx_email'"),
 	})
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE `company_entry_submissions`").WillReturnError(errors.New("db down"))
@@ -130,11 +131,14 @@ func TestSendInviteEmail_PendingAndFailureRecordFail_Logged(t *testing.T) {
 	got := strings.Join(companyEntryLines(buf), "\n")
 	for _, want := range []string{
 		"delete previous pending registration failed submission=8: delete failed",
-		"failed to record invite email failure submission=8 (send error: duplicate token): db down",
+		"failed to record invite email failure submission=8: db down",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("ログに %q が無い:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "hr@example.com") || strings.Contains(got, "Duplicate entry") {
+		t.Errorf("送信失敗の理由（メールアドレス入り）をログに出した:\n%s", got)
 	}
 }
 
