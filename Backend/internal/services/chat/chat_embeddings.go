@@ -3,6 +3,7 @@ package chat
 import (
 	"Backend/domain/entity"
 	"Backend/internal/models"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -69,7 +70,7 @@ func (s *ChatService) ensureUserEmbedding(ctx context.Context, userID uint, sess
 		return nil
 	}
 
-	ctxReq, cancel := context.WithTimeout(ctx, 45*time.Second)
+	ctxReq, cancel := context.WithTimeout(usagectx.WithFeature(ctx, usagectx.FeatureEmbedding), 45*time.Second)
 	defer cancel()
 
 	vector, err := s.aiClient.Embedding(ctxReq, text)
@@ -111,7 +112,7 @@ func (s *ChatService) ensureJobCategoryEmbedding(ctx context.Context, jobCategor
 		return nil
 	}
 
-	ctxReq, cancel := context.WithTimeout(ctx, 45*time.Second)
+	ctxReq, cancel := context.WithTimeout(usagectx.WithFeature(ctx, usagectx.FeatureEmbedding), 45*time.Second)
 	defer cancel()
 
 	vector, err := s.aiClient.Embedding(ctxReq, text)

@@ -3,6 +3,7 @@ package chat
 import (
 	"Backend/domain/entity"
 	"Backend/internal/models"
+	"Backend/internal/usagectx"
 	"context"
 	"errors"
 	"log"
@@ -44,6 +45,8 @@ func (s *ChatService) GetUserChatSessions(userID uint) ([]models.ChatSession, er
 
 // aiCallWithRetries AI呼び出しをリトライして安定化させる（最大3回）
 func (s *ChatService) aiCallWithRetries(ctx context.Context, prompt string) (string, error) {
+	// 呼び出し元の多くは質問の生成・言い換え。別の用途（職種の採点など）は呼び出し元で機能名を付ける（#1993）
+	ctx = usagectx.WithDefaultFeature(ctx, usagectx.FeatureChatQuestion)
 	var resp string
 	var err error
 	backoffs := []time.Duration{500 * time.Millisecond, 1 * time.Second, 2 * time.Second}
