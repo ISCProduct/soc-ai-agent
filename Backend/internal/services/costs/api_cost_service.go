@@ -25,7 +25,6 @@ var modelPricing = map[string][2]float64{
 	"gpt-4-turbo":            {10.00, 30.00},
 	"gpt-4":                  {30.00, 60.00},
 	"gpt-3.5-turbo":          {0.50, 1.50},
-	"gpt-5.2":                {2.50, 10.00}, // treated as gpt-4o class
 	"o1":                     {15.00, 60.00},
 	"o1-mini":                {3.00, 12.00},
 	"o3":                     {10.00, 40.00},
@@ -38,6 +37,83 @@ var modelPricing = map[string][2]float64{
 	"gpt-4o-search-preview":      {2.50, 10.00},
 	"gpt-4o-mini-search-preview": {0.15, 0.60},
 	"gpt-5-search-api":           {2.50, 10.00},
+}
+
+// 単価の根拠（#2004）。見た目では推定値か実価格かが区別できなかったので、表を分けて持つ。
+const (
+	// PriceBasisListed は modelPricing の単価（公開価格、または AI_MODEL_PRICING_JSON で運用側が上書きした単価）。
+	PriceBasisListed = "listed"
+	// PriceBasisEstimated は estimatedPricing の単価（実価格を確認していない推定値）。
+	PriceBasisEstimated = "estimated"
+	// PriceBasisUnknown は単価表に無いモデル。少なく見積もらないよう gpt-4o の単価で計算している。
+	PriceBasisUnknown = "unknown"
+)
+
+// estimatedPricing は実価格を確認していない推定値（USD per 1M tokens）。
+// 実価格を確認したら modelPricing へ移す。運用で先に直すなら AI_MODEL_PRICING_JSON で上書きする
+// （上書きしたモデルは運用側が確認した単価として listed 扱いになり、ここから外れる）。
+var estimatedPricing = map[string][2]float64{
+	"gpt-5.2": {2.50, 10.00}, // gpt-4o クラスとして推定
+}
+
+// unknownModelPricing は単価表に無いモデルに使う単価（gpt-4o 単価。過小評価しない）。
+var unknownModelPricing = [2]float64{2.50, 10.00}
+
+// pricingWarned は、推定値・単価未登録で計算したことを、モデルごとに1回だけログに出すための記録。
+var pricingWarned sync.Map
+
+// lookupPricing はモデル名から単価と、その根拠を返す。
+//
+// バージョン付きモデル名（gpt-4o-2024-08-06 等）に対応するため前方一致を使うが、
+// 必ず**最長一致**を取る。
+//
+// 以前は map を range して最初に一致したもので break していた。Go の map の
+// 反復順序はランダムなので、"gpt-4o-mini" が "gpt-4o" の前方一致に当たると
+// 16.7倍高い gpt-4o 単価で記録されていた。しかも実行ごとに結果が変わる。
+// 実測（本番相当DB, 2026-08-13以降）では gpt-4o-mini の 892万入力トークンが
+// $26.32 として記録されており、正しい mini 単価なら $1.79 だった。
+// コスト削減の判断材料が15倍近く狂っていたことになる。
+func lookupPricing(model string) ([2]float64, string) {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	pricing, basis, best := unknownModelPricing, PriceBasisUnknown, ""
+	for _, table := range []struct {
+		prices map[string][2]float64
+		basis  string
+	}{{modelPricing, PriceBasisListed}, {estimatedPricing, PriceBasisEstimated}} {
+		for k, p := range table.prices {
+			if lower != k && !strings.HasPrefix(lower, k+"-") && !strings.HasPrefix(lower, k+":") {
+				continue
+			}
+			// 同じ長さなら先に見た表（modelPricing = listed）を優先する
+			if len(k) > len(best) {
+				best, pricing, basis = k, p, table.basis
+			}
+		}
+	}
+	return pricing, basis
+}
+
+// PriceBasis はモデル名から単価の根拠（PriceBasisListed / Estimated / Unknown）を返す。
+func PriceBasis(model string) string {
+	_, basis := lookupPricing(model)
+	return basis
+}
+
+// warnPricingOnce は、推定値・単価未登録の単価で計算したことを、モデルごとに1回だけログに出す。
+// 黙って gpt-4o 単価で集計されると、画面の金額と請求額のずれに気づけない（#2004）。
+func warnPricingOnce(model, basis string) {
+	if basis == PriceBasisListed {
+		return
+	}
+	if _, loaded := pricingWarned.LoadOrStore(basis+":"+model, struct{}{}); loaded {
+		return
+	}
+	switch basis {
+	case PriceBasisEstimated:
+		log.Printf("[APICost] %q は推定単価で計算しています（実価格を確認したら単価表へ移すか %s で上書きしてください）", model, modelPricingOverrideEnv)
+	case PriceBasisUnknown:
+		log.Printf("[APICost] %q は単価表に無いため gpt-4o の単価で計算しています（%s で単価を登録してください）", model, modelPricingOverrideEnv)
+	}
 }
 
 // 音声経路の単価（#1294 DesignDoc §3.4）。
@@ -119,6 +195,8 @@ func applyModelPricingOverride(raw string) {
 			continue
 		}
 		modelPricing[key] = [2]float64{rates[0], rates[1]}
+		// 運用側が単価を指定したので、推定値ではなくなる（#2004）
+		delete(estimatedPricing, key)
 	}
 }
 
@@ -131,30 +209,8 @@ func calculateCost(provider, model string, promptTokens, completionTokens int) f
 	if provider != "" && !strings.EqualFold(provider, "openai") {
 		return 0
 	}
-	lower := strings.ToLower(strings.TrimSpace(model))
-
-	// バージョン付きモデル名（gpt-4o-2024-08-06 等）に対応するため前方一致を使うが、
-	// 必ず**最長一致**を取る。
-	//
-	// 以前は map を range して最初に一致したもので break していた。Go の map の
-	// 反復順序はランダムなので、"gpt-4o-mini" が "gpt-4o" の前方一致に当たると
-	// 16.7倍高い gpt-4o 単価で記録されていた。しかも実行ごとに結果が変わる。
-	// 実測（本番相当DB, 2026-08-13以降）では gpt-4o-mini の 892万入力トークンが
-	// $26.32 として記録されており、正しい mini 単価なら $1.79 だった。
-	// コスト削減の判断材料が15倍近く狂っていたことになる。
-	pricing := [2]float64{2.50, 10.00} // 未知モデルは gpt-4o 単価に倒す（過小評価しない）
-	best := ""
-	for k := range modelPricing {
-		if lower != k && !strings.HasPrefix(lower, k+"-") && !strings.HasPrefix(lower, k+":") {
-			continue
-		}
-		if len(k) > len(best) {
-			best = k
-		}
-	}
-	if best != "" {
-		pricing = modelPricing[best]
-	}
+	pricing, basis := lookupPricing(model)
+	warnPricingOnce(model, basis)
 
 	inputCost := float64(promptTokens) * pricing[0] / 1_000_000
 	outputCost := float64(completionTokens) * pricing[1] / 1_000_000
@@ -380,6 +436,9 @@ type ModelCostSummary struct {
 	TotalCostUSD float64 `json:"total_cost_usd"`
 	TotalTokens  int64   `json:"total_tokens"`
 	CallCount    int64   `json:"call_count"`
+	// PriceBasis は単価の根拠（listed / estimated / unknown, #2004）。画面で「推定」「単価未登録」を示す。
+	// 金額が0のモデル（ローカル推論など、単価を使っていないもの）は空にする。
+	PriceBasis string `json:"price_basis,omitempty"`
 }
 
 func (s *APICostService) GetDailyCosts(nDays int) ([]DailyCostSummary, error) {
@@ -429,8 +488,18 @@ func (s *APICostService) GetModelBreakdown(since time.Time) ([]ModelCostSummary,
 			TotalTokens:  r.TotalTokens,
 			CallCount:    r.CallCount,
 		}
+		result[i].PriceBasis = summaryPriceBasis(r.Model, r.TotalCostUSD)
 	}
 	return result, nil
+}
+
+// summaryPriceBasis は内訳の1行に付ける単価の根拠を返す。金額が0の行（ローカル推論など、
+// 単価を使っていない行）は空にする。単価表に無いローカルのモデル名が「単価未登録」と出ないようにするため。
+func summaryPriceBasis(model string, totalCostUSD float64) string {
+	if totalCostUSD <= 0 {
+		return ""
+	}
+	return PriceBasis(model)
 }
 
 // UsageBreakdownSummary は軸ごとの利用量集計（#1294）。
