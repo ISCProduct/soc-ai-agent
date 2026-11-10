@@ -30,6 +30,14 @@ class Document:
     text: str
     company: str = ""
     role: str = ""
+    # company_original はサニタイズ前の企業名。本番と同じくキャッシュキーの企業ハッシュに使う（#938）
+    company_original: str = ""
+    # stale は取得時刻を鮮度の期限より前にして保存する文書。検索結果に出てはいけない
+    stale: bool = False
+
+    @property
+    def company_identity(self) -> tuple:
+        return (self.company, self.company_original)
 
 
 @dataclass(frozen=True)
@@ -39,6 +47,11 @@ class Query:
     relevant: List[str]
     company: str = ""
     role: str = ""
+    company_original: str = ""
+
+    @property
+    def company_identity(self) -> tuple:
+        return (self.company, self.company_original)
 
 
 @dataclass
@@ -55,10 +68,24 @@ def _check_pii(where: str, text: str) -> None:
             raise DatasetError(f"{where}: {label}らしき文字列が含まれている。評価セットは匿名の合成データにすること")
 
 
+def _check_pii_everywhere(where: str, value) -> None:
+    """本文だけでなく、ID・企業名・説明など全ての文字列を検査する。"""
+    if isinstance(value, str):
+        _check_pii(where, value)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _check_pii_everywhere(f"{where}.{key}", key)
+            _check_pii_everywhere(f"{where}.{key}", item)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _check_pii_everywhere(f"{where}[{index}]", item)
+
+
 def load_dataset(path: Path) -> Dataset:
     """評価セットを読み込み、ID の重複・正解の参照先・本文の重複・個人情報を検証する。"""
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     name = raw.get("name") or Path(path).stem
+    _check_pii_everywhere(name, raw)
     documents: List[Document] = []
     for item in raw.get("documents", []):
         doc = Document(
@@ -66,6 +93,8 @@ def load_dataset(path: Path) -> Dataset:
             text=str(item["text"]).strip(),
             company=str(item.get("company", "")),
             role=str(item.get("role", "")),
+            company_original=str(item.get("company_original", "")),
+            stale=bool(item.get("stale", False)),
         )
         if not doc.id or not doc.text:
             raise DatasetError(f"{name}: id と text は必須")
@@ -79,6 +108,7 @@ def load_dataset(path: Path) -> Dataset:
             relevant=[str(r) for r in item.get("relevant", [])],
             company=str(item.get("company", "")),
             role=str(item.get("role", "")),
+            company_original=str(item.get("company_original", "")),
         )
         if not query.query or not query.relevant:
             raise DatasetError(f"{name}/{query.id}: query と relevant は必須")
@@ -103,6 +133,9 @@ def load_dataset(path: Path) -> Dataset:
         missing = [r for r in query.relevant if r not in by_id]
         if missing:
             raise DatasetError(f"{name}/{query.id}: 正解 {missing} が文書に無い")
+        stale = [r for r in query.relevant if by_id[r].stale]
+        if stale:
+            raise DatasetError(f"{name}/{query.id}: 期限切れの文書 {stale} を正解にしている（返ってはいけない文書）")
     if not documents or not queries:
         raise DatasetError(f"{name}: 文書とクエリは1件以上必要")
     return Dataset(name=name, documents=documents, queries=queries, by_id=by_id)

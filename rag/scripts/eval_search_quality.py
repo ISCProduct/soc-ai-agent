@@ -27,6 +27,7 @@ from evaluation.search_quality.dataset import DATA_DIR, default_dataset_path, lo
 from evaluation.search_quality.embedders import get_embedder  # noqa: E402
 from evaluation.search_quality.memory_store import MemoryClient  # noqa: E402
 from evaluation.search_quality.runner import (  # noqa: E402
+    INVARIANTS,
     compare_to_baseline,
     evaluate_company_research,
     evaluate_student_search,
@@ -66,8 +67,9 @@ def to_markdown(report: Dict[str, Any]) -> str:
         lines.append("|---|---|")
         for metric, value in summary["mean"].items():
             lines.append(f"| {metric} | {value:.4f} |")
-        if "foreign_documents" in summary:
-            lines.append(f"| 他社の文書が混ざった件数 | {summary['foreign_documents']} |")
+        for key, label in INVARIANTS.items():
+            if key in summary:
+                lines.append(f"| {label}件数（0 でなければ失敗） | {summary[key]} |")
         lines.append("")
     return "\n".join(lines)
 

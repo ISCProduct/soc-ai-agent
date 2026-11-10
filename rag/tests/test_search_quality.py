@@ -96,6 +96,9 @@ def _write(tmp_path, data):
         # 個人情報らしき文字列
         {"documents": [{"id": "d1", "text": "連絡先 taro@example.com"}], "queries": [{"id": "q1", "query": "問い", "relevant": ["d1"]}]},
         {"documents": [{"id": "d1", "text": "電話 090-1234-5678"}], "queries": [{"id": "q1", "query": "問い", "relevant": ["d1"]}]},
+        # 本文以外の項目（企業名・説明・ID）も検査する
+        {"documents": [{"id": "d1", "text": "本文", "company": "taro@example.com"}], "queries": [{"id": "q1", "query": "問い", "relevant": ["d1"]}]},
+        {"description": "連絡先 03-1234-5678", "documents": [{"id": "d1", "text": "本文"}], "queries": [{"id": "q1", "query": "問い", "relevant": ["d1"]}]},
         # 正解が空
         {"documents": [{"id": "d1", "text": "本文"}], "queries": [{"id": "q1", "query": "問い", "relevant": []}]},
     ],
@@ -126,7 +129,43 @@ def test_company_research_never_returns_other_companies():
     by_id = {doc.id: doc for doc in dataset.documents}
     for query, row in zip(dataset.queries, summary["per_query"]):
         assert row["ranked"], f"{query.id}: 同じ企業の文書が1件も返らない"
-        assert {by_id[doc_id].company for doc_id in row["ranked"]} == {query.company}
+        # サニタイズ前の企業名（企業ハッシュ）まで一致すること
+        assert {by_id[doc_id].company_identity for doc_id in row["ranked"]} == {query.company_identity}
+
+
+def test_company_research_separates_companies_with_colliding_names():
+    """表記違いで同じ名前にサニタイズされる2社を、本番と同じ企業ハッシュ付きのキーで分ける（#938）。"""
+    dataset = load_dataset(default_dataset_path("company_research"))
+    summary = evaluate_company_research(dataset, hash_embedder(), MemoryClient())
+    rows = {row["id"]: row for row in summary["per_query"]}
+    assert rows["cq11"]["ranked"] and all(doc_id.startswith("m1-") for doc_id in rows["cq11"]["ranked"])
+    assert rows["cq12"]["ranked"] and all(doc_id.startswith("m2-") for doc_id in rows["cq12"]["ranked"])
+
+
+def test_company_research_never_returns_stale_documents():
+    """期限切れの文書（a-eng-5）は、クエリに最も近くても返らない。"""
+    dataset = load_dataset(default_dataset_path("company_research"))
+    summary = evaluate_company_research(dataset, hash_embedder(), MemoryClient())
+    assert summary["stale_documents"] == 0
+    assert all("a-eng-5" not in row["ranked"] for row in summary["per_query"])
+
+
+def test_company_research_caps_results_at_five():
+    """みなと商事の営業は6件ある。本番と同じく上位5件で打ち切られる。"""
+    dataset = load_dataset(default_dataset_path("company_research"))
+    summary = evaluate_company_research(dataset, hash_embedder(), MemoryClient())
+    rows = {row["id"]: row for row in summary["per_query"]}
+    assert summary["over_limit_queries"] == 0
+    assert len(rows["cq05"]["ranked"]) == 5
+
+
+def test_stale_document_cannot_be_relevant(tmp_path):
+    data = {
+        "documents": [{"id": "d1", "text": "本文", "stale": True}, {"id": "d2", "text": "別の本文"}],
+        "queries": [{"id": "q1", "query": "問い", "relevant": ["d1"]}],
+    }
+    with pytest.raises(DatasetError):
+        load_dataset(_write(tmp_path, data))
 
 
 def test_company_research_falls_back_to_same_company_when_role_is_missing():
@@ -155,3 +194,11 @@ def test_compare_to_baseline_reports_regressions():
     regressions = compare_to_baseline(report, baseline)
     assert len(regressions) == 2
     assert compare_to_baseline(report, baseline, tolerance=0.2)[0].startswith("x 他社")
+
+
+@pytest.mark.parametrize("key", ["foreign_documents", "stale_documents", "over_limit_queries"])
+def test_invariants_fail_even_if_baseline_has_them(key):
+    """不変条件は基準値と比べない。0 を超えた値で基準値を更新しても失敗のまま。"""
+    report = {"x": {"mean": {}, key: 1}}
+    baseline = {"x": {"mean": {}, key: 1}}
+    assert len(compare_to_baseline(report, baseline)) == 1

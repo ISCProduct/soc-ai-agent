@@ -52,36 +52,92 @@ def evaluate_student_search(dataset: Dataset, embed: Embedder, client: Any, ks: 
     return _summary(dataset, per_query)
 
 
+# STALE_FETCHED_AT は期限切れとして保存する文書の取得時刻（鮮度の期限より十分前）。
+STALE_FETCHED_AT = "2000-01-01T00:00:00+00:00"
+
+
+def _cache_key(company: str, role: str, company_original: str) -> str:
+    """本番と同じキー生成。company_original があれば企業ハッシュを付け、表記違いの衝突を分ける（#938）。"""
+    return vector_store.build_cache_key("company_research", company, role, company_original=company_original or None)
+
+
+def _mark_stale(client: Any, cache_key: str, docs: List, embeddings: List[List[float]]) -> None:
+    """stale の文書だけ、取得時刻を期限切れにして同じ ID で上書きする。
+
+    set_cached_documents は取得時刻を常に「今」にするので、そのままでは鮮度の判定（_is_fresh）が
+    壊れても結果が変わらない。期限切れの文書を混ぜ、それが返らないことを確かめる。
+    """
+    meta = vector_store.parse_cache_key(cache_key)
+    collection = client.get_collection(vector_store._sanitize_collection_name(meta["collection"]))
+    ids = vector_store._doc_ids(cache_key, len(docs))
+    for doc_id, doc, embedding in zip(ids, docs, embeddings):
+        if not doc.stale:
+            continue
+        collection.upsert(
+            ids=[doc_id],
+            documents=[doc.text],
+            embeddings=[embedding],
+            metadatas=[{
+                "company": meta["company"],
+                "company_hash": meta.get("company_hash", ""),
+                "role": meta["role"],
+                "doc_type": meta["doc_type"],
+                "source": "search_quality_eval",
+                "fetched_at": STALE_FETCHED_AT,
+                "cache_key": meta["cache_key"],
+            }],
+        )
+
+
 def evaluate_company_research(dataset: Dataset, embed: Embedder, client: Any, ks: Sequence[int] = COMPANY_KS) -> Dict[str, Any]:
-    """企業リサーチ。企業・職種ごとにキャッシュへ保存し、本番と同じ絞り込み（企業・職種、職種が
-    無ければ同じ企業）と件数で取る。他社の文書が混ざった件数も数える（混ざってはいけない）。"""
+    """企業リサーチ。企業・職種ごとにキャッシュへ保存し、本番と同じ絞り込み（企業［＋企業ハッシュ］・職種、
+    職種が無ければ同じ企業）・鮮度・件数で取る。次の3つは0件でなければならない:
+      - foreign_documents: 他社（企業名またはサニタイズ前の企業名が違う）の文書が混ざった件数
+      - stale_documents: 期限切れの文書が返った件数
+      - over_limit_queries: 上限（5件）を超えて返ったクエリの数
+    """
     by_text = {doc.text: doc for doc in dataset.documents}
     groups: Dict[tuple, List] = {}
     for doc in dataset.documents:
-        groups.setdefault((doc.company, doc.role), []).append(doc)
+        groups.setdefault((doc.company, doc.role, doc.company_original), []).append(doc)
     per_query: List[Dict[str, Any]] = []
-    foreign = 0
+    foreign = stale = over_limit = 0
     with use_chroma_client(client):
-        for (company, role), docs in groups.items():
-            cache_key = vector_store.build_cache_key("company_research", company, role)
-            vector_store.set_cached_documents(
-                cache_key, [doc.text for doc in docs], embed([doc.text for doc in docs]), source="search_quality_eval"
-            )
+        for (company, role, company_original), docs in groups.items():
+            cache_key = _cache_key(company, role, company_original)
+            embeddings = embed([doc.text for doc in docs])
+            vector_store.set_cached_documents(cache_key, [doc.text for doc in docs], embeddings, source="search_quality_eval")
+            if any(doc.stale for doc in docs):
+                _mark_stale(client, cache_key, docs, embeddings)
         for query in dataset.queries:
-            cache_key = vector_store.build_cache_key("company_research", query.company, query.role)
+            cache_key = _cache_key(query.company, query.role, query.company_original)
             texts = vector_store.get_cached_documents(cache_key, embed([query.query])[0], n_results=COMPANY_RESEARCH_N_RESULTS)
+            if len(texts) > COMPANY_RESEARCH_N_RESULTS:
+                over_limit += 1
             ranked = []
             for text in texts:
                 doc = by_text.get(text)
                 if doc is None:
                     continue
-                if doc.company != query.company:
+                if doc.company_identity != query.company_identity:
                     foreign += 1
+                if doc.stale:
+                    stale += 1
                 ranked.append(doc.id)
             per_query.append({"id": query.id, "ranked": ranked, **evaluate_query(ranked, query.relevant, ks)})
     summary = _summary(dataset, per_query)
     summary["foreign_documents"] = foreign
+    summary["stale_documents"] = stale
+    summary["over_limit_queries"] = over_limit
     return summary
+
+
+# INVARIANTS は基準値に関係なく、0 でなければ失敗にする件数（検索経路の不変条件）。
+INVARIANTS = {
+    "foreign_documents": "他社の文書が混ざった",
+    "stale_documents": "期限切れの文書が返った",
+    "over_limit_queries": "上限を超えて返った",
+}
 
 
 def _summary(dataset: Dataset, per_query: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -104,6 +160,8 @@ def compare_to_baseline(report: Dict[str, Any], baseline: Dict[str, Any], tolera
             base_value = base.get("mean", {}).get(metric)
             if base_value is not None and value < base_value - tolerance - 1e-9:
                 regressions.append(f"{target} {metric}: {value:.4f} < 基準 {base_value:.4f}")
-        if summary.get("foreign_documents", 0) > base.get("foreign_documents", 0):
-            regressions.append(f"{target} 他社の文書が混ざった: {summary['foreign_documents']} 件")
+        # 不変条件は基準値と比べない。0 を超えた基準値で更新されても、ずっと失敗にする
+        for key, label in INVARIANTS.items():
+            if summary.get(key, 0) > 0:
+                regressions.append(f"{target} {label}: {summary[key]} 件（0 でなければならない）")
     return regressions

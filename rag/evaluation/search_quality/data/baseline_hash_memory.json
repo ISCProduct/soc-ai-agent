@@ -6,35 +6,37 @@
     "mean": {
       "mrr": 0.9318,
       "precision@1": 0.9091,
-      "recall@1": 0.5985,
+      "recall@1": 0.6591,
       "ndcg@1": 0.9091,
       "precision@3": 0.4848,
-      "recall@3": 0.8258,
-      "ndcg@3": 0.8535,
-      "precision@5": 0.3273,
-      "recall@5": 0.9015,
-      "ndcg@5": 0.8788,
-      "precision@10": 0.1727,
-      "recall@10": 0.947,
-      "ndcg@10": 0.8964
+      "recall@3": 0.8864,
+      "ndcg@3": 0.9018,
+      "precision@5": 0.3091,
+      "recall@5": 0.9318,
+      "ndcg@5": 0.9105,
+      "precision@10": 0.1636,
+      "recall@10": 0.9773,
+      "ndcg@10": 0.9281
     }
   },
   "company_research": {
     "dataset": "company_research",
-    "documents": 14,
-    "queries": 10,
+    "documents": 21,
+    "queries": 12,
     "mean": {
-      "mrr": 0.95,
-      "precision@1": 0.9,
-      "recall@1": 0.9,
-      "ndcg@1": 0.9,
+      "mrr": 0.9583,
+      "precision@1": 0.9167,
+      "recall@1": 0.9167,
+      "ndcg@1": 0.9167,
       "precision@3": 0.3333,
       "recall@3": 1.0,
-      "ndcg@3": 0.9631,
+      "ndcg@3": 0.9692,
       "precision@5": 0.2,
       "recall@5": 1.0,
-      "ndcg@5": 0.9631
+      "ndcg@5": 0.9692
     },
-    "foreign_documents": 0
+    "foreign_documents": 0,
+    "stale_documents": 0,
+    "over_limit_queries": 0
   }
 }
