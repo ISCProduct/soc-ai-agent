@@ -32,6 +32,8 @@ func TestLoadManifestは不正な行で止まる(t *testing.T) {
 		{name: "ES本文が無い", lines: []string{`{"id":"a","target":"es","label":"good","input":{}}`}, wantErr: "es_text は必須"},
 		{name: "履歴書本文が無い", lines: []string{`{"id":"a","target":"resume","label":"good","input":{}}`}, wantErr: "resume_text は必須"},
 		{name: "面接ログが無い", lines: []string{`{"id":"a","target":"interview-report","label":"good","input":{}}`}, wantErr: "transcript は必須"},
+		{name: "チャット回答の質問が無い", lines: []string{`{"id":"a","target":"chat-answer","label":"good","input":{"answer":"回答"}}`}, wantErr: "question と input.answer は必須"},
+		{name: "チャット回答の回答が無い", lines: []string{`{"id":"a","target":"chat-answer","label":"good","input":{"question":"質問"}}`}, wantErr: "question と input.answer は必須"},
 		{name: "idの重複", lines: []string{valid, valid}, wantErr: "重複"},
 		{name: "空ファイル", lines: []string{""}, wantErr: "ケースがありません"},
 	}
@@ -86,6 +88,7 @@ func TestゴールデンセットがCommitされている(t *testing.T) {
 		{file: "es.jsonl", target: TargetES},
 		{file: "resume.jsonl", target: TargetResume},
 		{file: "interview-report.jsonl", target: TargetInterviewReport},
+		{file: "chat-answer.jsonl", target: TargetChatAnswer},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -151,6 +154,9 @@ func Testゴールデンセットのラベルが表層特徴だけで当たら�
 		{file: "resume.jsonl", maxChars: 0.47, maxNumeric: 0.37, maxProper: 0.59},
 		// #1635 で30件→42件に追加。実測 chars +0.515 / numeric +0.153 / proper +0.000
 		{file: "interview-report.jsonl", maxChars: 0.57, maxNumeric: 0.21, maxProper: 0.05},
+		// SOCAIAGENT-450 で新設（30件）。実測 chars +0.234 / numeric -0.016 / proper +0.000。
+		// 同じ質問に良/中/悪を1件ずつ置き、長さは「短い良×長い悪」「長い良×短い悪」を半々にしてある。
+		{file: "chat-answer.jsonl", maxChars: 0.29, maxNumeric: 0.04, maxProper: 0.05},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -223,6 +229,13 @@ func TestCaseの入力本文と表層特徴(t *testing.T) {
 			wantText:  "User: ３名で対応しました",
 			wantChars: 15,
 			wantNums:  1, // 全角数字も数値トークンとして数える
+		},
+		{
+			name:      "chat-answer は回答だけを見る（質問は全ラベル共通なので数えない）",
+			c:         Case{Target: TargetChatAnswer, Input: Input{Question: "質問は文字数に入らない", Answer: "3日続けた"}},
+			wantText:  "3日続けた",
+			wantChars: 5,
+			wantNums:  1,
 		},
 		{
 			name:      "未知の target は空（数えない）",

@@ -151,8 +151,12 @@ type Summary struct {
 	UnstableCaseIDs []string `json:"unstable_case_ids,omitempty"`
 
 	// 弁別力: ゴールドラベル（良/中/悪）とスコアの順位相関（1.0が完全一致）。
-	LabelRankCorrelation float64            `json:"label_rank_correlation"`
-	MeanScoreByLabel     map[string]float64 `json:"mean_score_by_label"`
+	LabelRankCorrelation float64 `json:"label_rank_correlation"`
+	// PairwiseAgreement はラベルが異なるケースの組のうち、スコアの大小がラベルの大小と
+	// 一致した割合（1.0 が完全一致、0.5 が当てずっぽう）。PairwiseComparable は比べた組の数。
+	PairwiseAgreement  float64            `json:"pairwise_agreement"`
+	PairwiseComparable int                `json:"pairwise_comparable"`
+	MeanScoreByLabel   map[string]float64 `json:"mean_score_by_label"`
 
 	// 交絡: 入力の文字数とスコアの順位相関。**弁別力と必ず並べて読む。**
 	// ラベルとの相関が高くてもこれが同じくらい高ければ、その測定は
@@ -324,6 +328,7 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	}
 	sort.Strings(s.UnstableCaseIDs)
 	s.LabelRankCorrelation = SpearmanCorrelation(labelSeries, scoreSeries)
+	s.PairwiseAgreement, s.PairwiseComparable = PairwiseAgreement(labelSeries, scoreSeries)
 	s.LengthRankCorrelation = SpearmanCorrelation(charSeries, scoreSeries)
 	s.LabelLengthRankCorrelation = SpearmanCorrelation(labelSeries, charSeries)
 	s.LengthMetricsMeasured = true

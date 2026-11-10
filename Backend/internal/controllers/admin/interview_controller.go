@@ -6,6 +6,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/auth"
+	"Backend/internal/services/companyportal"
 	"Backend/internal/services/interview"
 	"Backend/internal/services/school"
 	"Backend/internal/services/shared"
@@ -76,7 +77,7 @@ func (c *AdminInterviewController) ensureSchoolAccessForUser(ctx echo.Context, o
 	if err != nil || owner == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
-	return httpapi.EnsureAdminSchoolAccess(ctx, c.schools, owner.SchoolID)
+	return httpapi.EnsureAdminSchoolAccessForUser(ctx, c.schools, owner.OrganizationID, owner.SchoolID)
 }
 
 // SetOpenAIClient OpenAIクライアントを注入する
@@ -115,11 +116,12 @@ func (c *AdminInterviewController) CreateCompanyQuestion(ctx echo.Context) error
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
 	}
 	var req struct {
-		Position     string `json:"position"`
-		Category     string `json:"category"`
-		QuestionText string `json:"question_text"`
-		Priority     int    `json:"priority"`
-		IsRequired   bool   `json:"is_required"`
+		Position         string `json:"position"`
+		Category         string `json:"category"`
+		QuestionText     string `json:"question_text"`
+		Priority         int    `json:"priority"`
+		IsRequired       bool   `json:"is_required"`
+		EvaluationIntent string `json:"evaluation_intent"`
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
@@ -130,13 +132,28 @@ func (c *AdminInterviewController) CreateCompanyQuestion(ctx echo.Context) error
 	if req.Category == "" || req.QuestionText == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "category and question_text are required")
 	}
+	intent, err := normalizeEvaluationIntent(req.EvaluationIntent)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 	q := &models.InterviewCompanyQuestion{
-		CompanyID:    companyID,
-		Position:     req.Position,
-		Category:     req.Category,
-		QuestionText: req.QuestionText,
-		Priority:     req.Priority,
-		IsRequired:   req.IsRequired,
+		CompanyID:        companyID,
+		Position:         req.Position,
+		Category:         req.Category,
+		QuestionText:     req.QuestionText,
+		Priority:         req.Priority,
+		IsRequired:       req.IsRequired,
+		EvaluationIntent: intent,
+	}
+	if err := validateCompanyQuestion(q); err != nil {
+		return err
+	}
+	existing, err := c.companyQuestionRepo.FindByCompanyID(companyID)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	if err := companyportal.ValidateInterviewQuestionCount(len(existing)); err != nil {
+		return companyQuestionValidationError(err)
 	}
 	if err := c.companyQuestionRepo.Create(q); err != nil {
 		return httpapi.InternalError(err)
@@ -162,11 +179,12 @@ func (c *AdminInterviewController) UpdateCompanyQuestion(ctx echo.Context) error
 		return echo.NewHTTPError(http.StatusNotFound, "Question not found")
 	}
 	var req struct {
-		Position     *string `json:"position"`
-		Category     *string `json:"category"`
-		QuestionText *string `json:"question_text"`
-		Priority     *int    `json:"priority"`
-		IsRequired   *bool   `json:"is_required"`
+		Position         *string `json:"position"`
+		Category         *string `json:"category"`
+		QuestionText     *string `json:"question_text"`
+		Priority         *int    `json:"priority"`
+		IsRequired       *bool   `json:"is_required"`
+		EvaluationIntent *string `json:"evaluation_intent"`
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
@@ -194,10 +212,44 @@ func (c *AdminInterviewController) UpdateCompanyQuestion(ctx echo.Context) error
 	if req.IsRequired != nil {
 		q.IsRequired = *req.IsRequired
 	}
+	if req.EvaluationIntent != nil {
+		intent, err := normalizeEvaluationIntent(*req.EvaluationIntent)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		q.EvaluationIntent = intent
+	}
+	if err := validateCompanyQuestion(q); err != nil {
+		return err
+	}
 	if err := c.companyQuestionRepo.Update(q); err != nil {
 		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, q)
+}
+
+// validateCompanyQuestion は企業ポータルと同じ制約（文字数・優先度）を管理者経路にも適用する。
+// 同じテーブルを両方の経路で操作するので、片方だけ緩いと制約が破れる。
+func validateCompanyQuestion(q *models.InterviewCompanyQuestion) error {
+	input := companyportal.InterviewQuestionInput{
+		Position:     q.Position,
+		Category:     q.Category,
+		QuestionText: q.QuestionText,
+		Priority:     q.Priority,
+		IsRequired:   q.IsRequired,
+	}
+	if err := input.Validate(); err != nil {
+		return companyQuestionValidationError(err)
+	}
+	return nil
+}
+
+func companyQuestionValidationError(err error) error {
+	var validationErr *shared.ValidationError
+	if errors.As(err, &validationErr) {
+		return echo.NewHTTPError(http.StatusBadRequest, validationErr.Message)
+	}
+	return httpapi.InternalError(err)
 }
 
 // DeleteCompanyQuestion DELETE /api/admin/companies/:id/interview-questions/:qid
@@ -258,11 +310,12 @@ func (c *AdminInterviewController) GenerateCompanyQuestions(ctx echo.Context) er
 
 // GeneratedQuestion はAI生成の質問候補（IDなし）。
 type GeneratedQuestion struct {
-	Category     string `json:"category"`
-	Position     string `json:"position"`
-	QuestionText string `json:"question_text"`
-	Priority     int    `json:"priority"`
-	IsRequired   bool   `json:"is_required"`
+	Category         string `json:"category"`
+	Position         string `json:"position"`
+	QuestionText     string `json:"question_text"`
+	Priority         int    `json:"priority"`
+	IsRequired       bool   `json:"is_required"`
+	EvaluationIntent string `json:"evaluation_intent"`
 }
 
 // generateQuestionsWithAI は企業情報をもとにAIで面接質問を生成する。
@@ -302,7 +355,8 @@ JSON配列形式のみで回答（説明文不要）:
     "position": "対象職種（全職種共通なら空文字）",
     "question_text": "質問文",
     "priority": 優先度（0〜9の整数、小さいほど重要）,
-    "is_required": true or false
+    "is_required": true or false,
+    "evaluation_intent": "この質問で評価したい観点（100字以内。例: 困難に直面したときの粘り強さ）"
   }
 ]`, companyFacts)
 
@@ -319,11 +373,12 @@ JSON配列形式のみで回答（説明文不要）:
 	}
 
 	var raw []struct {
-		Category     string `json:"category"`
-		Position     string `json:"position"`
-		QuestionText string `json:"question_text"`
-		Priority     int    `json:"priority"`
-		IsRequired   bool   `json:"is_required"`
+		Category         string `json:"category"`
+		Position         string `json:"position"`
+		QuestionText     string `json:"question_text"`
+		Priority         int    `json:"priority"`
+		IsRequired       bool   `json:"is_required"`
+		EvaluationIntent string `json:"evaluation_intent"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr[start:end+1]), &raw); err != nil {
 		return nil, fmt.Errorf("JSONパース失敗: %w", err)
@@ -345,11 +400,12 @@ JSON配列形式のみで回答（説明文不要）:
 			continue
 		}
 		result = append(result, &GeneratedQuestion{
-			Category:     cat,
-			Position:     strings.TrimSpace(r.Position),
-			QuestionText: qt,
-			Priority:     r.Priority,
-			IsRequired:   r.IsRequired,
+			Category:         cat,
+			Position:         strings.TrimSpace(r.Position),
+			QuestionText:     qt,
+			Priority:         r.Priority,
+			IsRequired:       r.IsRequired,
+			EvaluationIntent: clipEvaluationIntent(r.EvaluationIntent),
 		})
 	}
 	return result, nil

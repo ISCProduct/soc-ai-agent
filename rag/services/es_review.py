@@ -10,12 +10,14 @@ import json
 import logging
 import math
 import os
+import re
 import time
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 
-from models import ESReviewResponse, ESReviewUsage, ESStarBreakdown
+from models import ESReviewFeedbackItem, ESReviewResponse, ESReviewUsage, ESStarBreakdown
 from services.sanitize import _sanitize_company_name_for_query, _wrap_untrusted_text
 
 logger = logging.getLogger("main")
@@ -23,8 +25,11 @@ logger = logging.getLogger("main")
 # プロンプト版:
 #   v2 で「評価＋対策」と「改善文」の2呼び出しに分割した(#1521)
 #   v3 で文字数上限の指示(#1523)とSTAR分解(#1533)を第2呼び出しへ統合した
-#   v4 で改善文の目標字数を数値で明示し、元より短いときは1回作り直す(#1606)
-_PROMPT_VERSION = "es_review_v4"
+#   v4 で評価ごとの原文引用と改善ヒントを追加した(#1532)
+#   v5 でリライト経路では表示しない指摘出力を省いた(#1532)
+#   v6 で改善文の目標字数を数値で明示する。元より短いときは警告し、
+#   効果の無かった作り直しは呼ばない(#1606)
+_PROMPT_VERSION = "es_review_v6"
 
 # 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測レートは素材で大きく散る
 # （英数混在 0.20 / 日本語＋英数 0.53 / 漢字かな混在 0.78〜0.81 / ひらがな主体 0.91 /
@@ -44,18 +49,14 @@ _JP_TOKENS_PER_CHAR = 0.85
 _IMPROVED_TEXT_TARGET_LOW_RATIO = 1.1
 _IMPROVED_TEXT_RATIO = 1.3
 # これを下回る改善文は要約になっている（#1606。10,000字が約360字＝4%まで縮んだ実測）。
-# 下限はハーネスの improved_text_ratio と同じ100%。110%まで上げると、
-# すでに十分な短いESまで作り直し、品質と比較の前提が変わる。
+# 下限はハーネスの improved_text_ratio と同じ100%。
+# gpt-4o の実測では短い改善文の作り直しがほとんど伸びなかったので、追加では呼ばない。
 _IMPROVED_TEXT_MIN_RATIO = 1.0
-# 短すぎる改善文の作り直しは1回だけ。
-# 45秒は「次の呼び出しを始めるか」の判断で、始まった呼び出しの長さは縛らない。
-# 1回は最大60秒（SDKの再試行でさらに伸びる）なので、評価＋改善文のあとでは
-# Backend の85秒（#1556）を超えることがある。超えない保証ではない。
-_MAX_SHORT_TEXT_RETRIES = 1
 # JSONのキー・括弧・エスケープ分の固定オーバーヘッド
 _JSON_OVERHEAD_TOKENS = 120
-# feedback(400字) + company_strategy(400字) + 余裕
-_REVIEW_TEXT_CHARS = 900
+# feedback(400字) + company_strategy(400字) + feedback_items(最大1120字) + 余裕
+_REVIEW_TEXT_CHARS = 2100
+_REVIEW_WITHOUT_FEEDBACK_ITEMS_CHARS = 900
 # STAR分解4項目（各100字以内）の説明文ぶん。第2呼び出しの予算に上乗せする(#1533)
 _STAR_TEXT_CHARS = 400
 # 1回の出力に許す上限（再試行時の引き上げもここで打ち止め）。
@@ -268,6 +269,125 @@ def _clamp_company_fit(value: Any) -> Optional[int]:
         return None
 
 
+_FEEDBACK_SCORE_KEYS = {
+    "specificity_score",
+    "star_score",
+    "company_fit_score",
+    "length_balance_score",
+}
+_UNSAFE_FEEDBACK_CHARACTERS = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u061c\u200e\u200f"
+    r"\u202a-\u202e\u2066-\u2069\ufeff]"
+)
+
+
+def _normalize_excerpt_with_offsets(text: str) -> Tuple[str, List[int], List[int]]:
+    """幅・結合文字・空白を正規化し、正規化後の文字列から元の範囲を引ける形にする。"""
+    normalized_chars: List[str] = []
+    starts: List[int] = []
+    ends: List[int] = []
+    index = 0
+    while index < len(text):
+        start = index
+        cluster = text[index]
+        index += 1
+        while index < len(text) and (
+            unicodedata.combining(text[index]) > 0 or text[index] in "\uff9e\uff9f"
+        ):
+            cluster += text[index]
+            index += 1
+
+        for char in unicodedata.normalize("NFKC", cluster):
+            if _UNSAFE_FEEDBACK_CHARACTERS.fullmatch(char):
+                continue
+            if char.isspace():
+                if normalized_chars and normalized_chars[-1] == " ":
+                    ends[-1] = index
+                    continue
+                char = " "
+            normalized_chars.append(char)
+            starts.append(start)
+            ends.append(index)
+
+    normalized = "".join(normalized_chars)
+    left = len(normalized) - len(normalized.lstrip())
+    right = len(normalized.rstrip())
+    return normalized[left:right], starts[left:right], ends[left:right]
+
+
+def _safe_feedback_text(value: str) -> str:
+    """LLM の指摘から制御文字と双方向制御文字を除く。"""
+    return _UNSAFE_FEEDBACK_CHARACTERS.sub("", value).strip()
+
+
+def _parse_feedback_items(
+    value: Any,
+    source_text: str,
+    include_company_fit: bool,
+) -> List[ESReviewFeedbackItem]:
+    """モデルが返した引用を原文で検証し、誤った位置へのリンクを防ぐ(#1532)。"""
+    if not isinstance(value, list):
+        return []
+
+    normalized_source, source_starts, source_ends = _normalize_excerpt_with_offsets(source_text)
+    items: List[ESReviewFeedbackItem] = []
+    seen_score_keys: set[str] = set()
+    for candidate in value[:4]:
+        if not isinstance(candidate, dict):
+            continue
+        score_key = candidate.get("score_key")
+        source_excerpt = candidate.get("source_excerpt")
+        issue = candidate.get("issue")
+        suggestion = candidate.get("suggestion")
+        if (
+            not isinstance(score_key, str)
+            or score_key not in _FEEDBACK_SCORE_KEYS
+            or (score_key == "company_fit_score" and not include_company_fit)
+            or score_key in seen_score_keys
+            or not isinstance(source_excerpt, str)
+            or not isinstance(issue, str)
+            or not isinstance(suggestion, str)
+        ):
+            continue
+
+        source_excerpt = _safe_feedback_text(source_excerpt)
+        issue = _safe_feedback_text(issue)
+        suggestion = _safe_feedback_text(suggestion)
+        if (
+            not source_excerpt
+            or len(source_excerpt) > 120
+            or not issue
+            or len(issue) > 80
+            or not suggestion
+            or len(suggestion) > 80
+        ):
+            continue
+
+        normalized_excerpt, _, _ = _normalize_excerpt_with_offsets(source_excerpt)
+        if not normalized_excerpt or len(normalized_excerpt) > 120:
+            continue
+        start = normalized_source.find(normalized_excerpt)
+        if start < 0 or normalized_source.find(normalized_excerpt, start + 1) >= 0:
+            # 曖昧な引用を誤った箇所へリンクしない。モデルがより具体的な引用を返せる。
+            continue
+        source_start = source_starts[start]
+        source_end = source_ends[start + len(normalized_excerpt) - 1]
+        source_excerpt = _UNSAFE_FEEDBACK_CHARACTERS.sub("", source_text[source_start:source_end]).strip()
+        if not source_excerpt or len(source_excerpt) > 120:
+            continue
+
+        items.append(
+            ESReviewFeedbackItem(
+                score_key=score_key,
+                source_excerpt=source_excerpt,
+                issue=issue,
+                suggestion=suggestion,
+            )
+        )
+        seen_score_keys.add(score_key)
+    return items
+
+
 def _parse_star(value: Any) -> ESStarBreakdown:
     """STAR分解を取り出す。欠けていても落とさず空文字で返す(#1533)。"""
     if not isinstance(value, dict):
@@ -353,6 +473,7 @@ def _run_es_review(
         tech_stack: str = "",
         char_limit: Optional[int] = None,
         char_limit_mode: str = "within",
+        include_feedback_items: bool = True,
 ) -> ESReviewResponse:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -442,9 +563,9 @@ def _run_es_review(
         else '"company_strategy": null'
     )
     feedback_hint = (
-        "具体性・STAR準拠・企業適合性・文字数について400字程度でアドバイス。企業特化のアドバイスを含めてください"
+        "具体性・STAR準拠・企業適合性・文字数について400字程度で総評。企業特化の観点も含めてください"
         if has_company_context
-        else "具体性・STAR準拠・文字数について400字程度でアドバイス。企業情報は与えられていないため、企業適合性には触れないでください"
+        else "具体性・STAR準拠・文字数について400字程度で総評。企業情報はないため企業適合性には触れないでください"
     )
     # 文字数バランスの採点基準。指定字数があるならそれに対する評価にする(#1523)
     length_balance_hint = (
@@ -457,6 +578,25 @@ def _run_es_review(
     # ノンスを混ぜるため / #1565）。第1呼び出しのLLMはES本文の区切りを見ているので、
     # それを feedback に引用させて第2呼び出しのブロックを閉じる余地がある。区切りを
     # 使い回さず囲み直せば第2呼び出しの区切りは第1と別物になり、その経路が塞がる。
+    feedback_items_field = (
+        '''  "feedback_items": [
+    {
+      "score_key": "<specificity_score | star_score | company_fit_score | length_balance_score>",
+      "source_excerpt": "<ES文章から連続して引用した120字以内の箇所>",
+      "issue": "<その箇所に対する具体的な指摘。80字以内>",
+      "suggestion": "<改善すると評価が上がる書き方。80字以内>"
+    }
+  ],'''
+        if include_feedback_items
+        else '  "feedback_items": [],'
+    )
+    feedback_items_instruction = (
+        """feedback_items は評価項目ごとに最大1件、合計最大4件にしてください。
+source_excerpt は【ES文章】内の連続した文章を正確に引用してください。言い換えや推測した文章を引用してはいけません。
+該当箇所を特定できない場合は、その項目を出力しないでください。"""
+        if include_feedback_items
+        else "feedback_items は空配列にしてください。"
+    )
     review_user_prompt = (
             f"【質問種別】{_wrap_untrusted_text(question_type, '質問種別')}"
             + char_limit_block
@@ -471,8 +611,12 @@ def _run_es_review(
   {company_fit_key},
   "length_balance_score": <{length_balance_hint}>,
   "feedback": "<{feedback_hint}>",
+{feedback_items_field}
   {company_strategy_key}
-}}"""
+}}
+
+{feedback_items_instruction}
+企業情報がなく企業適合性を採点しない場合、その項目は含めないでください。"""
     )
 
     # --- 第2呼び出し: improved_text + STAR分解（第1のfeedbackを改善の観点として渡す） ---
@@ -546,7 +690,11 @@ def _run_es_review(
             model,
             review_system_prompt,
             review_user_prompt,
-            _estimate_max_tokens(_REVIEW_TEXT_CHARS),
+            _estimate_max_tokens(
+                _REVIEW_TEXT_CHARS
+                if include_feedback_items
+                else _REVIEW_WITHOUT_FEEDBACK_ITEMS_CHARS
+            ),
             label="review",
             tally=tally,
         )
@@ -633,64 +781,11 @@ def _run_es_review(
                 )
 
         # char_limit が無いとき、元より短い改善文は要約になっている（#1606）。
-        # 目標字数を数値で渡してもモデルが守るとは限らないので、実測して1回だけ作り直す。
-        # max_tokens は渡さない（入力長に比例させると #1564 の飽和が戻る）。
+        # 目標字数はプロンプトに書く。gpt-4o の実測では作り直しが +20字しか動かなかったため、
+        # 追加の呼び出しはせず、短かったことを警告する。
         length_floor = _improved_length_floor(source_chars) if char_limit is None else 0
         improved_length_satisfied: Optional[bool] = None
         if length_floor > 0:
-            for attempt in range(1, _MAX_SHORT_TEXT_RETRIES + 1):
-                if improved_length >= length_floor:
-                    break
-                elapsed = time.monotonic() - started_at
-                if elapsed >= _CHAR_LIMIT_RETRY_DEADLINE_SEC:
-                    logger.warning(
-                        "es review short text retry skipped by deadline elapsed=%.1fs length=%d floor=%d",
-                        elapsed, improved_length, length_floor,
-                    )
-                    break
-                target_low_chars, target_high_chars = _improved_length_bounds(source_chars)
-                logger.info(
-                    "es review improved text too short length=%d source=%d floor=%d attempt=%d",
-                    improved_length, source_chars, length_floor, attempt,
-                )
-                retry_note = (
-                    f"\n\n【前回の生成結果】{improved_length}字で、元の文章（{source_chars}字）より短いです。"
-                    f"要約せず、{target_low_chars}〜{target_high_chars}字で書き直してください。"
-                )
-                # 作り直しは品質のための任意の1回。上限到達・タイムアウト・不正JSONで
-                # 失敗しても、最初の改善文は有効なので捨てない。ここで例外を外へ出すと
-                # 422/500 になり、本文も improved_length_satisfied: false の警告も届かない。
-                try:
-                    retry_data = _call_json_with_retry(
-                        client,
-                        model,
-                        improved_system_prompt,
-                        _improved_user_prompt(feedback, retry_note),
-                        None,
-                        label="improved_text",
-                        tally=tally,
-                        truncated_message=improved_truncated_message,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "es review short text retry failed; keeping previous text error=%s length=%d",
-                        _brief_error(exc), improved_length,
-                    )
-                    break
-                candidate = _text_field(retry_data, "improved_text")
-                candidate_len = count_es_chars(candidate)
-                # 長くなったときだけ替える。空や短い結果で1回目の本文と STAR を潰さない。
-                # star が無い採用は本文だけ替え、1回目の分解を残す。
-                if candidate_len > improved_length:
-                    improved_data = _with_kept_star(improved_data, retry_data)
-                    improved_text = candidate
-                    improved_length = candidate_len
-                else:
-                    logger.warning(
-                        "es review short text retry not adopted length=%d prev=%d",
-                        candidate_len, improved_length,
-                    )
-                    break
             improved_length_satisfied = improved_length >= length_floor
             if not improved_length_satisfied:
                 logger.warning(
@@ -710,6 +805,15 @@ def _run_es_review(
             company_fit_score=_clamp_company_fit(company_fit),
             length_balance_score=_clamp_score(review_data.get("length_balance_score", 5)),
             feedback=feedback,
+            feedback_items=(
+                _parse_feedback_items(
+                    review_data.get("feedback_items"),
+                    es_text,
+                    include_company_fit=has_company_context,
+                )
+                if include_feedback_items
+                else []
+            ),
             improved_text=improved_text,
             company_strategy=str(company_strategy) if company_strategy is not None else None,
             company_context_source=company_context_source if has_company_context else "none",

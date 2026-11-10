@@ -31,9 +31,11 @@ func (s *InterviewService) advanceQuestionPlan(
 	if err != nil {
 		return nil, err
 	}
+	totalQuestions := int(count)
 	if count == 0 {
 		customQuestions := s.fetchCustomQuestions(companyID, position)
-		queue := BuildQuestionQueue(session.ID, customQuestions)
+		queue := BuildQuestionQueue(session.ID, customQuestions, companyQuestionHintsFromContext(ctx)...)
+		totalQuestions = len(queue)
 		if err := s.questionStateRepo.CreateBatch(queue); err != nil {
 			return nil, err
 		}
@@ -55,23 +57,26 @@ func (s *InterviewService) advanceQuestionPlan(
 				}
 				parentID := asked.ID
 				followUp := &models.InterviewQuestionState{
-					SessionID:     session.ID,
-					Source:        questionSourceFollowUp,
-					Category:      asked.Category,
-					QuestionText:  followUpText,
-					Status:        questionStatusAsked,
-					ParentStateID: &parentID,
-					Depth:         asked.Depth + 1,
-					SortOrder:     asked.SortOrder,
+					SessionID:         session.ID,
+					Source:            questionSourceFollowUp,
+					Category:          asked.Category,
+					CompanyQuestionID: asked.CompanyQuestionID,
+					QuestionText:      followUpText,
+					Status:            questionStatusAsked,
+					ParentStateID:     &parentID,
+					Depth:             asked.Depth + 1,
+					SortOrder:         asked.SortOrder,
 				}
 				if err := s.questionStateRepo.Create(followUp); err != nil {
 					return nil, err
 				}
 				return &questionDirective{
-					Text:        followUpText,
-					Source:      questionSourceFollowUp,
-					Category:    asked.Category,
-					IsDeepening: true,
+					Text:              followUpText,
+					Source:            questionSourceFollowUp,
+					Category:          asked.Category,
+					CompanyQuestionID: asked.CompanyQuestionID,
+					IsDeepening:       true,
+					TotalQuestions:    totalQuestions + 1,
 				}, nil
 			}
 		}
@@ -81,6 +86,7 @@ func (s *InterviewService) advanceQuestionPlan(
 	if err != nil {
 		return nil, err
 	}
+	totalQuestions = len(states)
 	next := selectNextPending(states)
 	if next == nil {
 		return nil, nil
@@ -90,9 +96,11 @@ func (s *InterviewService) advanceQuestionPlan(
 		return nil, err
 	}
 	return &questionDirective{
-		Text:     next.QuestionText,
-		Source:   next.Source,
-		Category: next.Category,
+		Text:              next.QuestionText,
+		Source:            next.Source,
+		Category:          next.Category,
+		CompanyQuestionID: next.CompanyQuestionID,
+		TotalQuestions:    totalQuestions,
 	}, nil
 }
 

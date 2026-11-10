@@ -101,6 +101,78 @@ COMMANDS='[
     ]
   },
   {
+    "name": "link",
+    "description": "DiscordメンバーをBacklogのメンバーに紐づけます(通知のメンションと本人確認に使います)",
+    "type": 1,
+    "dm_permission": false,
+    "default_member_permissions": "0",
+    "options": [
+      {
+        "name": "member",
+        "description": "Discordのメンバー",
+        "type": 6,
+        "required": true
+      },
+      {
+        "name": "backlog",
+        "description": "Backlogでの名前(候補から選択)",
+        "type": 3,
+        "required": true,
+        "autocomplete": true
+      }
+    ]
+  },
+  {
+    "name": "unlink",
+    "description": "DiscordメンバーとBacklogの紐づけを解除します",
+    "type": 1,
+    "dm_permission": false,
+    "default_member_permissions": "0",
+    "options": [
+      {
+        "name": "member",
+        "description": "Discordのメンバー",
+        "type": 6,
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "deadline",
+    "description": "自分の課題の期限を、新しい期限と理由を入力して変更します（Backlogに反映されます）",
+    "type": 1,
+    "dm_permission": false,
+    "options": [
+      {
+        "name": "issue",
+        "description": "課題（自分が担当の課題が候補に出ます）",
+        "type": 3,
+        "required": true,
+        "autocomplete": true
+      },
+      {
+        "name": "date",
+        "description": "新しい期限（2026-11-12 または 11/12）",
+        "type": 3,
+        "required": true
+      },
+      {
+        "name": "reason",
+        "description": "理由（200文字まで）",
+        "type": 3,
+        "required": true,
+        "max_length": 200
+      }
+    ]
+  },
+  {
+    "name": "link-list",
+    "description": "DiscordとBacklogの紐づけ一覧を表示します",
+    "type": 1,
+    "dm_permission": false,
+    "default_member_permissions": "0"
+  },
+  {
     "name": "prod",
     "description": "本番環境を起動/停止します",
     "type": 1,

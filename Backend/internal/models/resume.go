@@ -26,12 +26,16 @@ type ResumeDocument struct {
 }
 
 type ResumeTextBlock struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	DocumentID uint      `gorm:"not null;index" json:"document_id"`
-	PageNumber int       `gorm:"not null" json:"page_number"`
-	BlockIndex int       `gorm:"not null" json:"block_index"`
-	Text       string    `gorm:"type:text;not null" json:"text"`
-	BBox       string    `gorm:"type:json;not null" json:"bbox"`
+	ID         uint   `gorm:"primaryKey" json:"id"`
+	DocumentID uint   `gorm:"not null;index" json:"document_id"`
+	PageNumber int    `gorm:"not null" json:"page_number"`
+	BlockIndex int    `gorm:"not null" json:"block_index"`
+	Text       string `gorm:"type:text;not null" json:"text"`
+	BBox       string `gorm:"type:json;not null" json:"bbox"`
+	// Confidence は PaddleOCR の行認識スコア（0〜1）。
+	// NULL は信頼度不明（#1942 以前の行、平文入力）。不明な行は書き換えを禁止しない。
+	// 下限未満の行は誤認識として、書き換え案を出さない。
+	Confidence *float64  `gorm:"column:confidence" json:"confidence,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -52,13 +56,21 @@ type ResumeReview struct {
 }
 
 type ResumeReviewItem struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	ReviewID   uint      `gorm:"not null;index" json:"review_id"`
-	PageNumber int       `gorm:"not null" json:"page_number"`
-	BBox       string    `gorm:"type:json;not null" json:"bbox"`
-	Severity   string    `gorm:"size:20;not null" json:"severity"` // info, warning, critical
-	Message    string    `gorm:"type:text;not null" json:"message"`
-	Suggestion string    `gorm:"type:text" json:"suggestion,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         uint   `gorm:"primaryKey" json:"id"`
+	ReviewID   uint   `gorm:"not null;index" json:"review_id"`
+	PageNumber int    `gorm:"not null" json:"page_number"`
+	BBox       string `gorm:"type:json;not null" json:"bbox"`
+	Severity   string `gorm:"size:20;not null" json:"severity"` // info, warning, critical
+	Message    string `gorm:"type:text;not null" json:"message"`
+	// Quote は指摘が指している原文。注釈PDFと画面の「原文」に使う。
+	Quote      string `gorm:"type:text" json:"quote,omitempty"`
+	Suggestion string `gorm:"type:text" json:"suggestion,omitempty"`
+	// Rewrite は Quote をそのまま置き換えられる一文。説明文は Suggestion に残す。
+	// 空は「書き換え案なし」（読み取り不確か、または #1942 以前の行）。
+	Rewrite string `gorm:"type:text" json:"rewrite,omitempty"`
+	// RewriteWithheld は Rewrite を空にした理由。low_ocr_confidence のとき画面は
+	// 「読み取りが不確かだから出していない」と出す。空は理由なし。
+	RewriteWithheld string    `gorm:"size:32" json:"rewrite_withheld,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }

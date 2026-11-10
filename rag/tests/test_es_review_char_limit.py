@@ -15,7 +15,6 @@ from services.es_review import (
     _CHAR_LIMIT_RETRY_DEADLINE_SEC,
     _CHAR_LIMIT_TOO_TIGHT_MESSAGE,
     _IMPROVED_TEXT_MIN_RATIO,
-    _MAX_SHORT_TEXT_RETRIES,
     _MAX_CHAR_LIMIT_RETRIES,
     _STAR_TEXT_CHARS,
     _brief_error,
@@ -257,19 +256,18 @@ def test_no_char_limit_leaves_satisfied_null(monkeypatch):
 
 
 def test_length_floor_constants_are_pinned():
-    """下限を110%へ上げると、足りている短いESまで作り直す。回数を増やすと85秒を超える。"""
+    """下限を110%へ上げると、足りている短いESまで警告する。"""
     assert _IMPROVED_TEXT_MIN_RATIO == 1.0
-    assert _MAX_SHORT_TEXT_RETRIES == 1
     assert _improved_length_floor(10000) == 10000
     assert _improved_length_bounds(10000) == (11000, 13000)
     assert _improved_length_bounds(6000) == (6600, 7800)
 
 
-def test_long_es_that_shrinks_is_regenerated_once_without_max_tokens(monkeypatch):
-    """10,000字が360字まで縮んだら、実測字数を渡して1回だけ作り直す(#1606)。
+def test_long_es_that_shrinks_warns_without_another_call(monkeypatch):
+    """10,000字が360字まで縮んでも、追加の呼び出しはしない(#1606)。
 
-    入力上限は6,000字だが、サービスを直接呼んだ10,000字でも同じ検査をする。
-    max_tokens は渡さない。入力長に比例させると #1564 の飽和が戻る。
+    gpt-4o の実測では作り直しがほとんど伸びなかった。目標字数は1回目の指示に書き、
+    短いまま警告する。max_tokens は渡さない。
     """
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     source = "あ" * 10000
@@ -278,37 +276,33 @@ def test_long_es_that_shrinks_is_regenerated_once_without_max_tokens(monkeypatch
     result = _run(client, es_text=source)
 
     prompts = _improved_calls(client)
-    assert len(prompts) == 2
+    assert len(prompts) == 1
     assert "元の文章は10000字です。改善後は11000〜13000字" in prompts[0]
-    assert "360字で、元の文章（10000字）より短いです" in prompts[1]
-    assert "11000〜13000字で書き直してください" in prompts[1]
+    assert "より短いです" not in prompts[0]
     for call in client.chat.completions.create.call_args_list:
         user = next(msg["content"] for msg in call.kwargs["messages"] if msg["role"] == "user")
         if "【添削フィードバック】" in user:
             assert "max_tokens" not in call.kwargs
-    assert result.improved_text_length == 11000
-    assert result.improved_length_satisfied is True
+    assert result.improved_text_length == 360
+    assert result.improved_length_satisfied is False
     assert result.char_limit_satisfied is None
 
 
-def test_short_text_retry_is_capped_and_keeps_the_text(monkeypatch):
-    """1回作り直しても短いままなら、切り詰めず短かったことを返す。"""
+def test_short_text_keeps_the_first_text_without_another_call(monkeypatch):
+    """短い改善文のあとに長い応答を用意しても呼ばず、1回目を残して警告する。"""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     client = _client([360, 400, 9000])
 
     result = _run(client, es_text="あ" * 6000)
 
-    assert len(_improved_calls(client)) == 1 + _MAX_SHORT_TEXT_RETRIES
-    assert result.improved_text_length == 400
+    assert len(_improved_calls(client)) == 1
+    assert result.improved_text_length == 360
     assert result.improved_length_satisfied is False
-    assert count_es_chars(result.improved_text) == 400
+    assert count_es_chars(result.improved_text) == 360
 
 
-def test_short_text_retry_failure_keeps_the_first_text(monkeypatch):
-    """作り直しが上限到達や不正JSONでも、最初の改善文と「短い」警告を返す。
-
-    例外を外へ出すと 422/500 になり、生成済みの本文も improved_length_satisfied も消える。
-    """
+def test_short_text_does_not_call_again_after_a_bad_second_payload(monkeypatch):
+    """短い改善文のあとが不正JSONでも、その呼び出し自体を始めない。"""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     improved_calls = {"n": 0}
 
@@ -338,7 +332,7 @@ def test_short_text_retry_failure_keeps_the_first_text(monkeypatch):
 
     result = _run(client, es_text="あ" * 6000)
 
-    assert improved_calls["n"] == 2
+    assert improved_calls["n"] == 1
     assert result.improved_text_length == 360
     assert result.improved_length_satisfied is False
     assert result.improved_text == "あ" * 360
@@ -385,26 +379,19 @@ def test_shorter_or_empty_retry_keeps_the_first_text_and_star(monkeypatch):
         assert result.star.situation == "最初の状況"
 
 
-def test_adopted_retry_without_star_keeps_the_first_star(monkeypatch):
-    """長くなった作り直しに star が無い、または object でないときは1回目の STAR を残す。"""
+def test_longer_second_payload_is_not_called(monkeypatch):
+    """短い1回目のあとに長い応答を用意しても、追加呼び出しはしない。"""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     first_star = {"situation": "最初の状況", "task": "課題", "action": "行動", "result": "成果"}
-    long_text = "あ" * 7000
-    cases = [
-        {"improved_text": long_text},
-        {"improved_text": long_text, "star": None},
-        {"improved_text": long_text, "star": "状況だけ"},
-    ]
-    for second in cases:
-        client = _review_then_improved([
-            {"improved_text": "あ" * 360, "star": first_star},
-            second,
-        ])
-        result = _run(client, es_text="あ" * 6000)
-        assert result.improved_text == long_text
-        assert result.improved_length_satisfied is True
-        assert result.star.situation == "最初の状況"
-        assert result.star.task == "課題"
+    client = _review_then_improved([
+        {"improved_text": "あ" * 360, "star": first_star},
+        {"improved_text": "あ" * 7000},
+    ])
+    result = _run(client, es_text="あ" * 6000)
+    assert result.improved_text == "あ" * 360
+    assert result.improved_length_satisfied is False
+    assert result.star.situation == "最初の状況"
+    assert result.star.task == "課題"
 
 
 def test_null_improved_text_is_not_the_word_none(monkeypatch):

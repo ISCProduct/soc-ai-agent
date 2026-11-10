@@ -177,6 +177,9 @@ func (s *InterviewService) Turn(
 	if err != nil {
 		log.Printf("[Interview] advanceQuestionPlan error: %v", err)
 	}
+	if directive != nil && directive.TotalQuestions > 0 {
+		totalQuestions = directive.TotalQuestions
+	}
 
 	// 履歴はクライアントから受け取らず、保存済みの発話から組み直す（#1636）。
 	// クライアントの history は件数・長さ・role のどれも信頼できない。
@@ -249,6 +252,7 @@ func (s *InterviewService) Turn(
 		result.QuestionSource = directive.Source
 		result.QuestionCategory = directive.Category
 		result.IsDeepening = directive.IsDeepening
+		result.TotalQuestions = directive.TotalQuestions
 	}
 	return result, nil
 }
@@ -299,6 +303,9 @@ func (s *InterviewService) StartTurn(
 	directive, err := s.advanceQuestionPlan(ctx, session, companyID, position, companyName, "", true)
 	if err != nil {
 		log.Printf("[Interview] advanceQuestionPlan error: %v", err)
+	}
+	if directive != nil && directive.TotalQuestions > 0 {
+		totalQuestions = directive.TotalQuestions
 	}
 
 	systemPromptStart := buildInterviewSystemPrompt(
@@ -359,6 +366,7 @@ func (s *InterviewService) StartTurn(
 		result.QuestionSource = directive.Source
 		result.QuestionCategory = directive.Category
 		result.IsDeepening = directive.IsDeepening
+		result.TotalQuestions = directive.TotalQuestions
 	}
 	return result, nil
 }

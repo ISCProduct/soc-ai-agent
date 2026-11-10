@@ -24,7 +24,7 @@ func TestEvaluateResumeResponse(t *testing.T) {
 		return fmt.Sprintf(`"scores":{"specificity":%d,"achievement":%d,"role_fit":%d,"completeness":%d,"readability":%d}`,
 			sp, ac, rf, co, re)
 	}
-	item := `{"quote":"接客のアルバイトで売上を前年比120%に伸ばしました","message":"指摘","suggestion":"改善案","severity":"warning"}`
+	item := `{"quote":"接客のアルバイトで売上を前年比120%に伸ばしました","message":"指摘","suggestion":"改善案","rewrite":"接客のアルバイトで店舗売上を前年比120%に伸ばしました","severity":"warning"}`
 	okJSON := `{` + scores(4, 3, 3, 4, 3) + `,"summary":"要約","items":[` + item + `]}`
 	// 総合 = (30*4+20*3+15*3+20*4+15*3)/(100*5)*100 = 70
 	const okScore = 0.70
@@ -92,7 +92,7 @@ func TestEvaluateResumeResponse(t *testing.T) {
 		{
 			name: "本文に無い引用は捏造として数える",
 			res: CallResult{Text: `{` + scores(4, 3, 3, 4, 3) + `,"summary":"要約","items":[` +
-				`{"quote":"TOEIC900点を取得しました","message":"指摘","suggestion":"改善案","severity":"info"}]}`},
+				`{"quote":"TOEIC900点を取得しました","message":"指摘","suggestion":"改善案","rewrite":"TOEIC900点を取得し、日常会話で使っています","severity":"info"}]}`},
 			wantScore:      okScore,
 			wantViolations: []string{"quote_not_in_text"},
 		},
@@ -100,21 +100,21 @@ func TestEvaluateResumeResponse(t *testing.T) {
 			// 引用時の改行・空白の入れ直しは捏造ではない
 			name: "空白と改行の差は捏造にしない",
 			res: CallResult{Text: `{` + scores(4, 3, 3, 4, 3) + `,"summary":"要約","items":[` +
-				`{"quote":"接客のアルバイトで 売上を前年比120%に\n伸ばしました","message":"指摘","suggestion":"改善案","severity":"info"}]}`},
+				`{"quote":"接客のアルバイトで 売上を前年比120%に\n伸ばしました","message":"指摘","suggestion":"改善案","rewrite":"接客のアルバイトで店舗売上を前年比120%に伸ばしました","severity":"info"}]}`},
 			wantScore: okScore,
 		},
 		{
 			name: "itemsが上限超え",
 			res: CallResult{Text: `{` + scores(4, 3, 3, 4, 3) + `,"summary":"要約","items":[` +
-				strings.Repeat(`{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","severity":"info"},`, 8) +
-				`{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","severity":"info"}]}`},
+				strings.Repeat(`{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","rewrite":"研究室でGoのCLIを3ヶ月で公開しました","severity":"info"},`, 8) +
+				`{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","rewrite":"研究室でGoのCLIを3ヶ月で公開しました","severity":"info"}]}`},
 			wantScore:      okScore,
 			wantViolations: []string{"items_over_limit"},
 		},
 		{
 			name: "severityが規定外",
 			res: CallResult{Text: `{` + scores(4, 3, 3, 4, 3) + `,"summary":"要約","items":[` +
-				`{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","severity":"高"}]}`},
+				`{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","rewrite":"研究室でGoのCLIを3ヶ月で公開しました","severity":"高"}]}`},
 			wantScore:      okScore,
 			wantViolations: []string{"severity_invalid"},
 		},
@@ -128,7 +128,7 @@ func TestEvaluateResumeResponse(t *testing.T) {
 		{
 			name: "summaryが空",
 			res: CallResult{Text: `{` + scores(4, 3, 3, 4, 3) + `,"summary":"","items":[` +
-				`{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","severity":"info"}]}`},
+				`{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","rewrite":"研究室でGoのCLIを3ヶ月で公開しました","severity":"info"}]}`},
 			wantScore:      okScore,
 			wantViolations: []string{"summary_empty"},
 		},
@@ -149,9 +149,76 @@ func TestEvaluateResumeResponse(t *testing.T) {
 
 // 総合スコアは本番（resume.ComputeResumeOverallScore）と同じ値でなければ、
 // ハーネスの数字がユーザーに見える点数と乖離する。
+func TestEvaluateResumeResponse_書き換え案(t *testing.T) {
+	resumeText := "接客のアルバイトで売上を前年比120%に伸ばしました\n研究室でGoのCLIツールを作りました"
+	scores := `"scores":{"specificity":4,"achievement":3,"role_fit":3,"completeness":4,"readability":3}`
+	plain := Case{ID: "r-rewrite", Label: LabelGood, Target: TargetResume,
+		Input: Input{ResumeText: resumeText, CandidateType: "new_grad"}}
+	// 1行目だけ下限未満。2行目は信頼できる。
+	lowFirst := plain
+	lowFirst.Input.OCRLineConfidence = []float64{0.2, 0.95}
+	body := func(rawItem string) CallResult {
+		return CallResult{Text: `{` + scores + `,"summary":"要約","items":[` + rawItem + `]}`}
+	}
+	first := `{"quote":"接客のアルバイトで売上を前年比120%に伸ばしました","message":"指摘","suggestion":"改善案"`
+	second := `{"quote":"研究室でGoのCLIツールを作りました","message":"指摘","suggestion":"改善案"`
+
+	tests := []struct {
+		name           string
+		c              Case
+		res            CallResult
+		wantViolations []string
+	}{
+		{
+			name:           "置き換え文が無い",
+			c:              plain,
+			res:            body(first + `,"severity":"info"}`),
+			wantViolations: []string{"rewrite_missing"},
+		},
+		{
+			name:           "原文の写しは置き換えになっていない",
+			c:              plain,
+			res:            body(first + `,"rewrite":"接客のアルバイトで売上を前年比120%に伸ばしました","severity":"info"}`),
+			wantViolations: []string{"rewrite_same_as_quote"},
+		},
+		{
+			name:           "低信頼の行へ書き換えを出す",
+			c:              lowFirst,
+			res:            body(first + `,"rewrite":"店舗売上を前年比120%に伸ばしました","severity":"info"}`),
+			wantViolations: []string{"rewrite_on_low_confidence"},
+		},
+		{
+			name: "低信頼の行の書き換えが空なら違反にしない",
+			c:    lowFirst,
+			res:  body(first + `,"severity":"info"}`),
+		},
+		{
+			name: "信頼できる行の置き換えは違反にしない",
+			c:    lowFirst,
+			res:  body(second + `,"rewrite":"研究室でGoのCLIを3ヶ月で公開しました","severity":"info"}`),
+		},
+		{
+			name: "複数行の引用が低信頼行の一部を含む",
+			c: Case{ID: "r-span", Label: LabelGood, Target: TargetResume, Input: Input{
+				ResumeText:        "学生時代はサークルの新人勧誘を担当し、\n50名の入会に貢獣しました。",
+				OCRLineConfidence: []float64{0.95, 0.3},
+				CandidateType:     "new_grad",
+			}},
+			res:            body(`{"quote":"学生時代はサークルの新人勧誘を担当し、50名の入会に貢","message":"指摘","suggestion":"改善案","rewrite":"学生時代はサークルの新人勧誘を担当し、50名の入会につなげました","severity":"info"}`),
+			wantViolations: []string{"rewrite_on_low_confidence"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := evaluateResumeResponse(Observation{CaseID: tt.c.ID, Label: tt.c.Label}, tt.c, tt.res)
+			checkObservation(t, got, false, "", 0.70, tt.wantViolations)
+		})
+	}
+}
+
 func TestEvaluateResumeResponseは本番と同じ総合スコアを出す(t *testing.T) {
 	body := `{"scores":{"specificity":5,"achievement":5,"role_fit":5,"completeness":5,"readability":5},` +
-		`"summary":"要約","items":[{"quote":"本文","message":"m","suggestion":"s","severity":"info"}]}`
+		`"summary":"要約","items":[{"quote":"本文","message":"m","suggestion":"s","rewrite":"本文に数値を足した一文です","severity":"info"}]}`
 	c := Case{ID: "r-002", Label: LabelGood, Input: Input{ResumeText: "本文", CandidateType: "new_grad"}}
 	got := evaluateResumeResponse(Observation{CaseID: c.ID}, c, CallResult{Text: body})
 	if got.RawScore != 100 || got.Score != 1.0 {
@@ -161,7 +228,7 @@ func TestEvaluateResumeResponseは本番と同じ総合スコアを出す(t *tes
 	// 候補者区分で重みが変わる（新卒は具体性重視、中途は成果重視）。
 	// 区分を無視すると、同じ出力でも本番と違う点数になる。
 	lowAchievement := `{"scores":{"specificity":5,"achievement":0,"role_fit":5,"completeness":5,"readability":5},` +
-		`"summary":"要約","items":[{"quote":"本文","message":"m","suggestion":"s","severity":"info"}]}`
+		`"summary":"要約","items":[{"quote":"本文","message":"m","suggestion":"s","rewrite":"本文に数値を足した一文です","severity":"info"}]}`
 	newGrad := evaluateResumeResponse(Observation{}, Case{Input: Input{ResumeText: "本文", CandidateType: "new_grad"}},
 		CallResult{Text: lowAchievement})
 	midCareer := evaluateResumeResponse(Observation{}, Case{Input: Input{ResumeText: "本文", CandidateType: "mid_career"}},

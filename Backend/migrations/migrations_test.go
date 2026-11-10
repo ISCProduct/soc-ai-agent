@@ -165,3 +165,39 @@ func TestMigrationVersionsAreContiguous(t *testing.T) {
 		}
 	}
 }
+
+// TestColumnOnlyRollbackKeepsData は「列やインデックスを戻すだけの down」が行を消していないことを検証する。
+//
+// 000049 の down は追加した3列とインデックスを戻すだけなのに、学校独自テンプレートと
+// その受検を DELETE していた。assessment_answers / assessment_results は session への
+// ON DELETE CASCADE なので、列を戻すだけのロールバックで学生の回答と結果まで失う。
+// テーブルそのものを落とす down（機能の撤去）は、行を残すと孤児になるので対象外。
+func TestColumnOnlyRollbackKeepsData(t *testing.T) {
+	entries, err := migrationFiles.ReadDir(".")
+	if err != nil {
+		t.Fatalf("埋め込みディレクトリの読み込みに失敗: %v", err)
+	}
+	// 行を消す文。コメント行(--)は除くため、文の先頭に現れるものだけ見る。
+	destructive := regexp.MustCompile(`(?im)^\s*(DELETE\s+FROM|TRUNCATE)\b`)
+	dropsTable := regexp.MustCompile(`(?i)\bDROP\s+TABLE\b`)
+
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".down.sql") {
+			continue
+		}
+		data, err := migrationFiles.ReadFile(name)
+		if err != nil {
+			t.Fatalf("%s の読み込みに失敗: %v", name, err)
+		}
+		sql := string(data)
+		if dropsTable.MatchString(sql) {
+			continue // 機能ごと撤去する down
+		}
+		if loc := destructive.FindString(sql); loc != "" {
+			t.Errorf("%s: テーブルを落とさない down が行を消している (%q)。"+
+				"列・インデックスを戻すだけのロールバックで利用者のデータを失う",
+				name, strings.TrimSpace(loc))
+		}
+	}
+}

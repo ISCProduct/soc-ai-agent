@@ -60,11 +60,11 @@ func Inventory() []Route {
 	SetupCompanyRoutes(api, nil)
 	SetupAdminRoutes(api,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "")
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "")
 	SetupResumeRoutes(api, nil, "", nil, nil)
 	SetupInterviewRoutes(api, nil, nil, "", nil, nil)
 	SetupGitHubRoutes(api, nil, "", nil, nil)
-	SetupESRoutes(api, nil, nil)
+	SetupESRoutes(api, nil, nil, "", nil, nil)
 	SetupScheduleRoutes(api, nil, "", nil, nil)
 	SetupGoogleCalendarRoutes(api, nil, "", nil, nil)
 	SetupApplicationRoutes(api, nil, nil, "", nil, nil)
@@ -72,7 +72,7 @@ func Inventory() []Route {
 	// nil を渡すとそのブロックが登録されず、カタログから静かに漏れる。
 	// ゼロ値のポインタは非 nil なのでブロックを通り、ハンドラは値として
 	// 受け取るだけなので中身は呼ばれない。
-	SetupCompanyAuthRoutes(api, nil, nil, nil,
+	SetupCompanyAuthRoutes(api, nil, nil, &companycontrollers.CompanyPortalInterviewQuestionController{}, nil,
 		&companycontrollers.CompanyPortalApplicationController{},
 		&companycontrollers.CompanyPortalJobController{},
 		&companycontrollers.CompanyPortalProfileController{},
@@ -84,6 +84,8 @@ func Inventory() []Route {
 		"", nil, nil)
 	SetupCollectiveInsightRoutes(api, nil, "", nil, nil)
 	SetupAssessmentRoutes(api, nil, "", nil, nil)
+	SetupAssessmentSchoolRoutes(api, nil, nil, nil, "")
+	SetupAbilityRoutes(api, nil, "", nil, nil)
 
 	out := make([]Route, 0, len(e.Routes())+len(mainGoRoutes))
 	for _, r := range e.Routes() {

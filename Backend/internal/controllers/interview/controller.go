@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
@@ -288,6 +289,10 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 	companyInfo := r.FormValue("company_info")
 	companyType := r.FormValue("company_type")
 	companyID := uint(parseFormInt(r, "company_id", 0))
+	questionHints, err := parseCompanyQuestionHints(r.FormValue("question_hints"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company question hints")
+	}
 
 	turnCount := parseFormInt(r, "turn_count", 0)
 	remainingSeconds := parseFormInt(r, "remaining_seconds", 0)
@@ -307,7 +312,7 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 	}
 
 	result, err := c.interviewService.Turn(
-		r.Context(),
+		interviewsvc.WithCompanyQuestionHints(r.Context(), questionHints),
 		userID,
 		sessionID,
 		audioData,
@@ -347,6 +352,7 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		"question_source":          result.QuestionSource,
 		"question_category":        result.QuestionCategory,
 		"is_deepening":             result.IsDeepening,
+		"total_questions":          result.TotalQuestions,
 		"resolved_company_id":      result.ResolvedCompanyID,
 		"custom_questions_enabled": result.CustomQuestionsEnabled,
 		"company_reading":          result.CompanyReading,
@@ -371,23 +377,27 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	var req struct {
-		CompanyName             string `json:"company_name"`
-		CompanyReading          string `json:"company_reading"`
-		Position                string `json:"position"`
-		CompanyInfo             string `json:"company_info"`
-		CompanyType             string `json:"company_type"`
-		CompanyID               uint   `json:"company_id"`
-		QuestionIndex           int    `json:"question_index"`
-		TotalQuestions          int    `json:"total_questions"`
-		QuestionElapsedSeconds  int    `json:"question_elapsed_seconds"`
-		QuestionDurationSeconds int    `json:"question_duration_seconds"`
+		CompanyName             string   `json:"company_name"`
+		CompanyReading          string   `json:"company_reading"`
+		Position                string   `json:"position"`
+		CompanyInfo             string   `json:"company_info"`
+		CompanyType             string   `json:"company_type"`
+		CompanyID               uint     `json:"company_id"`
+		QuestionHints           []string `json:"question_hints"`
+		QuestionIndex           int      `json:"question_index"`
+		TotalQuestions          int      `json:"total_questions"`
+		QuestionElapsedSeconds  int      `json:"question_elapsed_seconds"`
+		QuestionDurationSeconds int      `json:"question_duration_seconds"`
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
+	if err := validateCompanyQuestionHints(req.QuestionHints); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company question hints")
+	}
 
 	result, err := c.interviewService.StartTurn(
-		ctx.Request().Context(),
+		interviewsvc.WithCompanyQuestionHints(ctx.Request().Context(), req.QuestionHints),
 		userID,
 		sessionID,
 		req.CompanyName,
@@ -421,6 +431,7 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		"question_source":          result.QuestionSource,
 		"question_category":        result.QuestionCategory,
 		"is_deepening":             result.IsDeepening,
+		"total_questions":          result.TotalQuestions,
 		"resolved_company_id":      result.ResolvedCompanyID,
 		"custom_questions_enabled": result.CustomQuestionsEnabled,
 		"company_reading":          result.CompanyReading,
@@ -430,6 +441,35 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
 	audioPart.Write(result.Audio)
 	mw.Close()
+	return nil
+}
+
+func parseCompanyQuestionHints(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	if len(raw) > 16*1024 {
+		return nil, fmt.Errorf("company question hints are too large")
+	}
+	var hints []string
+	if err := json.Unmarshal([]byte(raw), &hints); err != nil {
+		return nil, fmt.Errorf("invalid company question hints: %w", err)
+	}
+	if err := validateCompanyQuestionHints(hints); err != nil {
+		return nil, err
+	}
+	return hints, nil
+}
+
+func validateCompanyQuestionHints(hints []string) error {
+	if len(hints) > 5 {
+		return fmt.Errorf("too many company question hints")
+	}
+	for _, hint := range hints {
+		if utf8.RuneCountInString(hint) > 300 {
+			return fmt.Errorf("company question hint is too long")
+		}
+	}
 	return nil
 }
 
@@ -554,11 +594,8 @@ func (c *InterviewController) Get(ctx echo.Context) error {
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	role := ctx.QueryParam("role")
-	if role == "" {
-		role = "student"
-	}
-	resp, err := c.interviewService.GetSessionDetailWithRole(userID, sessionID, role)
+	// 教員用レポートの開示可否は実ロールからサービス側で決める。role クエリは認可に使わない(#1814)。
+	resp, err := c.interviewService.GetSessionDetail(userID, sessionID)
 	if err != nil {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())

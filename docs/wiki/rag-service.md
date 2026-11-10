@@ -124,6 +124,14 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
   "company_fit_score": null,
   "length_balance_score": 5,
   "feedback": "...",
+  "feedback_items": [
+    {
+      "score_key": "specificity_score",
+      "source_excerpt": "原文からの引用",
+      "issue": "この箇所の指摘",
+      "suggestion": "改善のヒント"
+    }
+  ],
   "improved_text": "...",
   "company_strategy": null,
   "company_context_source": "none",
@@ -135,13 +143,15 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 ```
 
 - `company_context_source`: 企業コンテキストの取得元（`company_brief` / `cache` / `web_search` / `none`）
+- `feedback_items`: 評価項目ごとの指摘（最大4件）。`source_excerpt` は幅・結合文字・空白を正規化して原文位置を確認し、曖昧な重複引用や該当箇所を特定できない指摘は除外する。LLM由来の指摘文から制御・双方向制御文字を除く（#1532）
 - **企業コンテキストが0件（`none`）のときは企業名もプロンプトへ入れず、`company_fit_score` と `company_strategy` は必ず `null`** になる（モデルの内部知識による根拠の無い企業評価を防ぐ / #1524）
 - 生成は2回の呼び出しに分割している（#1521）
   - 第1: スコア4軸 + `feedback` + `company_strategy`（企業情報の生データはこちらだけに渡す）
   - 第2: `improved_text` のみ（第1の `feedback` を「改善の観点」として渡す。企業情報は再投入しない＝入力トークンの二重計上を避ける）
   - ES本文・質問種別・フィードバックは呼び出しごとに `_wrap_untrusted_text` で囲み直す。第1の区切りを feedback に引用させて第2のブロックを閉じる経路を塞ぐため、区切りを使い回さない（#1565）
 - `max_tokens` の決め方は段で違う（詳細は後述「出力上限の決め方」/ #1564）
-  - 評価の段: 日本語 **0.85トークン/文字** × 900字 + JSONオーバーヘッド120 = 885（`_estimate_max_tokens`）
+  - 評価の段（ES添削）: 総評400字 + 企業対策400字 + 指摘最大4件（最大1120字）と余裕を含む**約2,100字**に、日本語 **0.85トークン/文字**を掛け、JSONオーバーヘッド120を加算 = 1,905（`_estimate_max_tokens`）
+  - 評価の段（ESリライト）: 指摘は生成しないため**約900字**に同じ見積もりを適用 = 885。画面に出さない指摘の生成費用を避ける（#1532）
   - 改善文の段: **`max_tokens` を渡さない**（入力長から見積もらず、モデル自身の出力上限に任せる）
 - `finish_reason == "length"`（出力上限到達）を検知したら上限を2倍にして**1回だけ**再試行する。既に天井なら引き上げ余地が無いので再試行しない（改善文の段は `max_tokens` を渡さない＝引き上げ余地が無いので再試行せず、上限到達時は2呼び出しで 422 を返す）
 - 再試行しても上限に達した場合は 422 を返す。案内文は段ごとに変える（評価の出力量はESの長さに依存しないため、そちらで「文字数を減らして」と案内しても直らない）
@@ -156,6 +166,7 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
   - 企業名あり × `none` 以外（企業情報は取得できたが点数化できなかった）: 「今回は企業適合性の点数を算出できませんでした」。ここで「公開情報が見つかりませんでした」と出すと、同じ画面に出る企業対策アドバイスと矛盾する
   - `company_strategy` が null なら対策アドバイスのカードごと非表示
 - FEの入力欄は `maxLength=6000`（RAGの `es_text` 上限と同値 / #1564）。超過分を送ると FastAPI のバリデーション 422 になり、その `detail` は配列＋ES全文を含むため利用者向けの文面にならない。FE 側も 422 の `detail` は「200字以内で `{`/`[` 始まりでない」ものだけ表示する（#1015 の生JSONを出さない方針）
+- FEは原文と改善文の差分をブラウザ内で計算する（#1532）。計算量の上限を超えた場合は差分を全面置換で簡易表示し、その旨を画面に通知する
 - OpenAI SDK の `max_retries` は 1 を明示している。経路のタイムアウトは #1556 で CloudFront / ALB / staging の edge nginx を90秒へ揃え、Backend 側の `/api/es/review` は上流より1段短い85秒にした（上流の汎用504より先に手放してログに原因を残すため）
 
 ### 設問の文字数上限（#1523）
@@ -169,14 +180,12 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 
 ### 長文で改善文が縮むとき（#1606）
 
-- プロンプト版は `es_review_v4`。`char_limit` が無いときの字数指示は「110〜130%を目安」ではなく、`count_es_chars` で数えた元の字数と目標レンジ（切り上げた110〜130%）を書く。要約して短くしないことも書く
-- 生成後、改善文が元の文章（100%）を下回っていたら**改善文だけ**を1回（`_MAX_SHORT_TEXT_RETRIES`）作り直す。再生成プロンプトには「直前は N 字で、元の M 字より短い」と実測値を入れる。評価は作り直さない。`max_tokens` は渡さない
-- 作り直しを始めるかどうかは #1523 と同じ45秒で判断する。始まった呼び出しの所要は縛らないので、Backend の85秒を超えることがある
-- 作り直しが上限到達・タイムアウト・不正JSONで失敗しても、空や前回より短い結果でも、最初の改善文と STAR は捨てない。長くなったときだけ本文を替える。そのとき `star` が object でなければ1回目の STAR を残す。`improved_text` が文字列でない応答は空として扱い、`null` を `"None"` として採用しない。捨てると本文も `improved_length_satisfied: false` の警告も届かない
+- プロンプト版は `es_review_v6`。`char_limit` が無いときの字数指示は「110〜130%を目安」ではなく、`count_es_chars` で数えた元の字数と目標レンジ（切り上げた110〜130%）を書く。要約して短くしないことも書く
+- 生成後、改善文が元の文章（100%）を下回っていても**追加の呼び出しはしない**。2026-11-05 の gpt-4o 実測（6,000字・1本）では、作り直しが 349字から 369字までしか伸びず、目標の 6,600〜7,800字に届かなかった。効果の無い呼び出しへ課金しない
+- 短いまま `improved_length_satisfied: false` で返す。FEは「生成された文章が元の文章より短くなりました」と出し、このまま提出せず元の文章と見比べるよう案内する。100%はハーネスの `improved_text_ratio` の下限と同じ。ハーネスの `runeLen` は改行を数えるので、改行のある文章ではここの `count_es_chars` と値は一致しない
 - 上限なしの最初の改善文がモデルの出力上限で切れても 422 にしない。読めた文、または空を短いまま返し、警告を残す
-- それでも短ければ切り詰めず、`improved_length_satisfied: false` で返す。FEは「生成された文章が元の文章より短くなりました」と出し、このまま提出せず元の文章と見比べるよう案内する。下限を110%にしないのは、すでに十分な短いESまで作り直すと品質が変わるため。100%はハーネスの `improved_text_ratio` の下限と同じ。ハーネスの `runeLen` は改行を数えるので、改行のある文章ではここの `count_es_chars` と値は一致しない
-- コストの見積もり（6,000字・`char_limit` なし・企業情報なし、`_JP_TOKENS_PER_CHAR = 0.85`、gpt-4o の入力 $2.50/1M・出力 $10/1M、プロンプトキャッシュなし）。モデルが目標の110〜130%を書いた場合、作り直しが無くても出力が約800トークンから約7,000トークンになり、1件あたり約2.2倍（$0.045 → $0.097）。作り直しまで成功すると約2.7倍（$0.120）。月10,000件なら +$527〜+$752。この上限は、長いESの要約を止めるために受け入れる
-- 2026-11-05 に gpt-4o で同じ条件の6,000字を1本流した。改善文は349字（3.98秒、completion 387、`finish_reason=stop`）、作り直しは369字（4.41秒、completion 389、`finish_reason=stop`）。評価を含めた合計は13.6秒、completion 1,109。60秒には掛からなかった。この1本は目標の6,600〜7,800字を書かず、`improved_length_satisfied` は false のまま。長い出力の見積もりは、モデルが指示どおり書いた場合の上限として残す
+- `improved_text` が文字列でない応答は空として扱う。`null` を `"None"` として採用しない
+- 2026-11-05 の実測は、評価 5.16秒 / completion 333、改善文 3.98秒 / 349字 / completion 387、作り直し 4.41秒 / 369字 / completion 389。合計 13.6秒。60秒には掛からなかった。作り直しをやめたあとも、モデルが指示どおり長く書いた場合のコスト上限（約2.2倍、月10,000件で +$527）は残る
 - `char_limit` があるときはこの検査をしない（短くする指定が目的。字数は `char_limit_satisfied` で見る）
 - 公開APIの入力上限は 6,000字のまま（#1564）。10,000字はここで拒否する。6,000字の130%はトークン見積もり上 `_MAX_OUTPUT_TOKENS` に収まるが、モデルが実際にその長さを書くかはハーネスの `improved_chars` / `improved_text_ratio` で入力長ごとに見る
 
@@ -185,9 +194,33 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 - ESの評価・書き換えの実装は `services/es_review.py` のみ。Backend の `/api/es/review`（ES添削タブ）と `/api/es/rewrite`（ESリライトタブ）はどちらも RAG の `/es/review` を呼ぶ
 - 旧実装では `/api/es/rewrite` が Backend 内の独自プロンプト（gpt-4o-mini・**インジェクション対策なし**・字数指示120〜150%）で生成していたため、同じESでも添削タブと違う書き換え案が返っていた。統合でプロンプト・出力スキーマ・インジェクション対策が1箇所になった
 - `/api/es/rewrite` のレスポンスは従来互換（`rewritten_text` / `star`）。`improved_text` を `rewritten_text` に詰め替えて返し、`improved_text_length` / `char_limit_satisfied` / `improved_length_satisfied` を追加している
+- ESリライトは評価根拠を表示しないため、内部フラグで `feedback_items` の生成を省略し、評価段の出力予算も縮める（#1532）
 - STAR分解（`star`）は改善文と同じ第2呼び出しで生成する。ES添削タブは `star_score`、ESリライトタブは `star` の内訳を同じレスポンスから表示する
 - **デプロイ順は rag-review を backend より先**にする（`.github/workflows/deployment.yml`）。Backend の ES 経路は生成を RAG へ委譲しており、旧 RAG は Pydantic の `extra=ignore` で `char_limit` / `tech_stack` を**黙って捨てる**ため、逆順だとロール中の数分だけ「字数上限を指定しても無視され、画面に手がかりも出ない」窓ができる
 - コストの機能別内訳（`es_review` / `es_rewrite`）は、RAG が返す `usage` を Backend が `openai.Client.ReportProxyUsage` で `api_call_logs` へ記録して残す。RAG 自身は記録先を持たないため、この経路が唯一の記録手段（統合前は RAG 経由の添削ぶんが記録されていなかった）。`usage` は内部情報なので Backend が転送前に本文から取り除く
+
+### 形式チェック `format_findings`（#1530）
+
+- Backend の `/api/es/review` と `/api/es/rewrite` は、RAG の応答に `format_findings` を足して返す。RAG の `/es/review` 自体は返さない
+- 検査は `Backend/internal/services/shared/textcheck` のルールだけで行い、LLM は呼ばない。学生の原文の純関数で RAG の応答に依存しないため、`postESReview` の中ではなく両ハンドラで原文に対して走らせる
+- ルールは `textcheck.DefaultRules`（`mixed_width` / `mixed_numeral` / `mixed_era` / `mixed_style` / `date_order` / `char_limit`）。`char_limit` は `char_limit` を指定したときだけ指摘する
+- 字数の数え方と許容範囲は、上記の `count_es_chars` / `_CHAR_LIMIT_RANGE` に揃える（Go 側は `textcheck.CountChars`）。`char_limit_satisfied` は**改善文**について、`format_findings` の `char_limit` は**原文**についての判定
+- 位置（`start` / `end`）は、**リクエストで送った原文（trim 前）**を UTF-16 のコード単位で数えた位置。FE の文字列の添字と同じ単位
+- 並びは重要度順（`critical` → `warning` → `info`、同じなら位置順）。指摘が無いときは `[]`
+- RAG の応答が200でも JSON オブジェクトでないときは、添削は `format_findings` を付けずに RAG の応答をそのまま返す（付加機能のために添削結果まで失わせない）
+- 誤字脱字の検出は辞書が要るため初期範囲外。`format_findings` の永続化は #1531 の担当
+
+#### 履歴書（段2後半）
+
+- `POST /api/resume/review` の応答と、`/api/resume/review/stream` の `complete` イベントに `format_findings` を載せる。保存はしない（#1531）。
+- ブロックを改行でつないだ全文にルールをかけ（文体の混在は履歴書全体で見る）、指摘をブロックに戻す。`start`/`end` はそのブロックの `text` の中の位置（UTF-16）。`page_hint` と `block_index`（0 から）は必ず含む。
+  - 指摘は、終わりの文字（文体の混在なら文末）があるブロックに割り当てる。句点の無い見出しブロックの直後の文が、見出しを指さないようにするため。
+  - 画面はブロックの本文を持たないので、該当箇所の文字列を `excerpt` で返す（空白は1つにまとめ、30字を超えたら「…」で切る）。
+- 使うルール: `mixed_style`・`date_order`・`spoken_language`・`blank_field`。`mixed_width`・`mixed_numeral`・`mixed_era` は、欄ごとに書き方が決まる履歴書では自然に混ざるので使わない。`char_limit` は ES だけ。
+- `spoken_language`（ES でも使う）: すごく・すごい・やっぱり・やっぱ・ちゃんと・いっぱい、略語の バイト（アルバイト・メガバイトなどカタカナに続くものは除く）・就活、文頭（本文の先頭・改行の後・文末の後。行頭の空白と箇条書きの記号は飛ばす）の なので、・でも、・だから、は warning。させていただ の2回目以降は info。「」『』の中は見ない。
+- `blank_field`: 氏名・生年月日・住所・志望動機・自己PR の見出しと完全に一致するブロック（空白と全角はそろえて比べる）の次が、無いか見出しなら info。見出しが見つからなければ何も出さない。
+- 引用の深さは改行で 0 に戻す（`mixed_style`・`spoken_language`）。閉じ忘れた引用で、それ以降を見逃さないため。
+- 誤字脱字は対象外。
 
 ### 入力上限の決め方（#1564）
 

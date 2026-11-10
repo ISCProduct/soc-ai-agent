@@ -57,10 +57,9 @@ def test_es_text_is_wrapped_with_untrusted_delimiters(sequential_nonce, monkeypa
             context_docs=[],
         )
 
-    # 評価と改善文に加え、改善文が元より短いときの作り直しも囲む（#1521 / #1606）。
-    # call_args だけ見ると最後の呼び出ししか確認できずカバレッジが落ちる。
+    # 評価と改善文の両方を囲む（#1521）。短い改善文のための追加呼び出しはしない（#1606）。
     calls = mock_client.chat.completions.create.call_args_list
-    assert len(calls) == 3
+    assert len(calls) == 2
     es_nonces = []
     for call in calls:
         user_message = _user_message(call)

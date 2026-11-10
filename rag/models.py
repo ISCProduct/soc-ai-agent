@@ -97,6 +97,8 @@ class ESReviewRequest(BaseModel):
     )
     # within: 超過不可（「400字以内」）/ around: +10%まで許容（「400字程度」）
     char_limit_mode: Literal["within", "around"] = "within"
+    # ESリライトは評価根拠を表示しないため、不要な生成を省く（Backend内部から指定）。
+    include_feedback_items: bool = True
 
     @field_validator("company_context")
     @classmethod
@@ -126,12 +128,27 @@ class ESReviewUsage(BaseModel):
     calls: int = 0
 
 
+class ESReviewFeedbackItem(BaseModel):
+    """原文の箇所に結びついた添削指摘(#1532)。"""
+
+    score_key: Literal[
+        "specificity_score",
+        "star_score",
+        "company_fit_score",
+        "length_balance_score",
+    ]
+    source_excerpt: str = Field(max_length=120)
+    issue: str = Field(max_length=80)
+    suggestion: str = Field(max_length=80)
+
+
 class ESReviewResponse(BaseModel):
     specificity_score: int  # 1-10: 具体性
     star_score: int  # 1-10: STAR法準拠
     company_fit_score: Optional[int]  # 1-10: 企業適合性（企業名なしは null）
     length_balance_score: int  # 1-10: 文字数バランス（char_limit 指定時は指定字数に対する評価 / #1523）
     feedback: str  # 全体フィードバック文
+    feedback_items: List[ESReviewFeedbackItem] = Field(default_factory=list)
     improved_text: str  # 改善後テキスト
     company_strategy: Optional[str] = None  # 企業特化の対策アドバイス（企業名なしは null）
     # 企業コンテキストの取得元(#1524)

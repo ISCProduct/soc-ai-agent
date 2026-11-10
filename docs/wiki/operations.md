@@ -4,6 +4,7 @@
 
 1. [デプロイ手順](#1-デプロイ手順)
    - [停止日の本番デプロイ](#11-停止日の本番デプロイ-1518)
+   - [staging の自動停止とデプロイの競合](#12-staging-の自動停止とデプロイの競合-1693)
 2. [定期バッチ作業](#2-定期バッチ作業)
 3. [監視項目](#3-監視項目)
    - [リクエストIDでサービス横断追跡](#31-リクエストidでサービス横断追跡-1188)
@@ -12,6 +13,7 @@
    - [エラートラッキング(Sentry)の有効化](#34-エラートラッキングsentryの有効化-1185)
    - [エラートラッキング（Sentry）](#34-エラートラッキングsentry619--1185)
    - [クライアントIPをBFFからBackendへ引き継ぐ](#35-クライアントipをbffからbackendへ引き継ぐ-1407)
+   - [プロンプト版ラベルの切り替えと比較](#36-プロンプト版ラベルの切り替えと比較-1778)
 4. [障害対応](#4-障害対応)
 5. [データベース管理](#5-データベース管理)
 6. [管理画面操作](#6-管理画面操作)
@@ -56,7 +58,7 @@ curl http://localhost:8080/healthz
 
 バージョン管理型マイグレーション（`Backend/migrations/`、`cmd/migrate`）を使用（GORMの `AutoMigrate` は禁止）。CI/CD（`.github/workflows/deployment.yml`）で以下の通り自動適用される（#618）。
 
-- **staging**: `docker compose up -d` 後、backendコンテナ内で `docker compose exec -T backend /bin/migrate up` を実行。失敗するとデプロイジョブが失敗する。
+- **staging**: `docker compose up -d` の前に `docker compose run --rm --no-deps -T backend /bin/migrate up` を実行。失敗するとサービスを起動せず、デプロイジョブが失敗する。
 - **production**: 新イメージのタスク定義を登録し、backendサービスと同じネットワーク設定でワンオフECSタスクとして `/bin/migrate up` を実行。マイグレーションが失敗した場合はサービスの更新（新イメージへの切り替え）自体を行わない。
 
 手動実行する場合:
@@ -238,6 +240,44 @@ index+attestation の分だけ減らしている（provenance は誰も参照し
 
 ---
 
+## 1.2 staging の自動停止とデプロイの競合 (#1693)
+
+staging はコスト削減のため、デプロイから1時間で自動停止する（`deployment.yml` の
+`staging-auto-stop` ジョブが `sleep 3600` の後に ASG を desired=0、RDS を停止する）。
+1時間以内に次のデプロイが来れば、同じ concurrency group `staging-auto-stop` で
+前回分がキャンセルされ、実質タイマーがリセットされる。
+
+**キャンセルはデプロイの開始時点で行う。** auto-stop は `deploy-staging` の後続なので、
+デプロイ成功後にしかキャンセルが掛からないようにすると、デプロイ中（や失敗時）に
+前回の auto-stop が発火して起動中の staging を落とす。これを避けるため、
+`deploy-staging` と並んで走る空ジョブ `cancel-staging-auto-stop` が
+同じ group を先に押さえる。
+
+それでもキャンセルの取り合いには数秒〜数十秒の隙があるため、
+`Wait for staging infra ready` は待機ループの中で ASG の `DesiredCapacity` を
+毎回読み、0 に戻っていたら 1 へ上げ直す（自己修復）。
+**desired が 0 の周回では EC2 の state を見ない。** desired=0 の直後でも
+終了処理が始まるまでインスタンスは `running` のままで、そこで待機を抜けると
+これから落とされる台へデプロイしてしまう。
+
+### 失敗したときの読み方
+
+末尾の `desired:` を先に見る。
+
+- `desired: 0` — 5分間 0 のままだった。上げ直しが効いていないので、前回の auto-stop が
+  まだ生きているか、ASG の min/max や権限を疑う。desired が 0 の周回では state を
+  読まないため `state: unread` と出る（インスタンスの有無は分からない）。
+- `desired: 1` かつ `state: None` — desired は戻っているがインスタンスが現れない
+  （`None` = 該当インスタンスなし）。AZ の容量不足や launch template の不備を疑う。
+- `desired: unknown` — ASG を読めていない。権限か API 障害。
+
+いずれも再実行で復帰することが多いが、`desired: 0` が続くなら
+auto-stop のキャンセルが効いていない。
+
+判定ロジックは `automation/test/staging-infra-wait-test.sh` が固定している。
+
+---
+
 ## 2. 定期バッチ作業
 
 ### 週次推奨作業
@@ -272,6 +312,35 @@ curl -X POST http://localhost:8080/api/admin/score-validation/calibration/run \
 
 ## 3. 監視項目
 
+### 3.6 プロンプト版ラベルの切り替えと比較 (#1778)
+
+版ラベルはプロンプト本文を識別する運用メタデータである。本文を変更するリリースでは、同じリリースで
+`PROMPT_VERSION_<STAGE>` も更新する。工程別値は `PROMPT_VERSION` より優先され、未設定時は `v2`。
+設定例と Terraform 変数は `.env.example` と `infra/terraform/environments/` を参照する。
+
+staging の Terraform 変数 `prompt_version` / `prompt_versions` は新規インスタンスの user_data にしか
+届かない。稼働中のインスタンスへ反映するときは、`/opt/app/.env` も手で更新する。
+
+デプロイ後、利用ログの工程別件数と版ラベルを確認する:
+
+```sql
+SELECT prompt_stage, prompt_version, COUNT(*) AS calls
+FROM api_call_logs
+WHERE called_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY
+GROUP BY prompt_stage, prompt_version
+ORDER BY prompt_stage, prompt_version;
+```
+
+質問・評価・企業情報・マッチング理由の生成結果に記録されたラベルは、それぞれ
+`ai_generated_questions.prompt_version`、`user_weight_scores.prompt_version`、
+`companies.info_prompt_version`、`user_company_matches.match_reason_prompt_version` で確認する。
+A/B振り分けは未対応である。
+`prompt_stage='unknown'` は工程メタデータが付与されていない呼び出しを表す。
+
+prod のデプロイはイメージを差し替えるだけなので、`PROMPT_VERSION` と工程別ラベルをタスク定義へ入れるには `terraform apply` が必要。
+
+詳細は [プロンプト版の記録](./prompt-versioning.md) を参照。
+
 ### APIコスト監視
 
 OpenAI APIのコストを管理画面で確認できます:
@@ -289,6 +358,16 @@ GET /api/admin/costs/monthly   # 月別コスト
   - 同一月は1回のみ通知
 - Realtime: `REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200` を超えるとメール/Slack
   - `REALTIME_ALERT_EMAILS` / `REALTIME_ALERT_SLACK_WEBHOOK_URL`
+
+### govulncheck の例外
+
+CI の `Security scan (govulncheck)` は、コードから到達する脆弱性があると失敗する。修正版がなく、該当機能を使っていない場合だけ、`.github/govulncheck-allowlist.json` に理由と期限を付けて例外にできる。次の場合は例外が効かなくなり、CI が失敗する。
+
+- 期限を過ぎた
+- 修正版が公開された（依存を更新して例外を消す）
+- 例外の前提である機能をコードが使い始めた（`forbidden_patterns`）
+
+**現在の例外（期限 2026-12-31）:** Echo v4 の GO-2026-6875（`Proxy` の X-Real-IP 転送）と GO-2026-6872（`RealIP` と標準 `RateLimiter` の XFF 先頭の信頼）。v4 には修正版がなく、v5.4.0 以降で修正されている。アプリは該当機能を使わず、レート制限は自前の `middleware.GetClientIP` が XFF の末尾を読む。期限までに、v4 の修正版を待つか v5 へ移行するかを判断する。
 
 ### 面接セッション監視
 
@@ -454,6 +533,12 @@ EventBridge Scheduler へ移すまで（#1388）は、以下を手順として�
    Discord で `/prod state:on`
 
    これでオーバーライドが `on` になり、日付リストに関係なく起動する。
+
+   `/prod state:on expiry:<YYYY-MM-DD>` の形にすると、その日に自動で `auto` へ戻る。
+   復帰日なしの `on` は戻し忘れると課金が続くため、展示会が終わったら
+   **`/prod state:auto` に戻す**。復帰日を過ぎた `on:<過去日>` は失効扱いになり、
+   スケジューラもデプロイ後の停止処理も `auto` と同じに読む
+   （`automation/test/prod-deploy-scale-down-test.sh` で固定）。
 
    **Discord の返信が「反映を開始しました」であることを確認する。**
    即時実行は `GITHUB_DISPATCH_TOKEN` / `GITHUB_DISPATCH_REPO` が揃っているときだけで、
@@ -682,7 +767,7 @@ IP単位の制限を任意のIPごとに分散できてしまう。
 
 | 変数 | 置き場所 | 値 |
 | --- | --- | --- |
-| `BFF_INTERNAL_TOKEN` | frontend タスクと backend タスクの両方 | 同じランダム文字列。prod は Secrets Manager `soc-app/bff-internal` の `bff_internal_token`、staging は EC2 の共有 `.env` + SSM `/soc-stg/bff-internal-token`（いずれも Terraform の `random_password` が生成。staging は全インスタンスで同一必須） |
+| `BFF_INTERNAL_TOKEN` | frontend タスクと backend タスクの両方 | 同じランダム文字列。prod は Secrets Manager `soc-app/bff-internal` の `bff_internal_token`、staging は Secrets Manager `soc-stg/app-env` の `bff_internal_token`（EC2 の共有 `.env` へ起動時に展開）+ SSM `/soc-stg/bff-internal-token`（いずれも Terraform の `random_password` が生成。staging は全インスタンスで同一必須） |
 | `TRUSTED_PROXY_HOPS` | frontend タスクのみ | frontend の手前にいる**必ず通る**プロキシの段数。prod(CloudFront+ALB)=2、prod で `enable_error_fallback=false`(ALBのみ)=1、staging(ALB+edge nginx)=2、ローカル=未設定(1) |
 | `CLOUDFRONT_ORIGIN_TOKEN` | frontend タスクのみ | CloudFront が `X-Origin-Token` として付ける値。Secrets Manager `soc-app/bff-internal` の `cloudfront_origin_token`。CloudFront を迂回できる環境（prod）でのみ設定する |
 
@@ -764,9 +849,45 @@ aws ecs wait services-stable --cluster soc-app --services backend frontend
 本番が停止日（`desired_count=0`）なら update-service だけ打っておけばよく、
 `services-stable` は即座に返る。次にスケジューラが起動した時点で新リビジョンが使われる。
 
+### staging の `.env` はどこから来るか (#1158)
+
+staging は EC2 上の docker compose で、全コンテナが `/opt/app/.env`（0600）を共有する。
+**シークレットは user_data に平文で置かない。** user_data は launch template の
+バージョンとして保存されるため、`ec2:DescribeLaunchTemplateVersions` を持つ IAM ユーザー
+なら誰でも読めてしまう（インスタンス上からは IMDS 経由でも読める）。実際にこの経路で
+staging の `ADMIN_SECRET` が読め、本番と同値だったため本番の管理者権限が取れる状態に
+なっていた。
+
+| 値 | 置き場所 |
+| --- | --- |
+| `DB_PASSWORD` | Secrets Manager `<project>/db` の `password`（正本は `modules/rds` の `random_password`） |
+| `OPENAI_API_KEY` / `RESEND_API_KEY` / `GOOGLE_CLIENT_SECRET` / `GITHUB_CLIENT_SECRET` / `GITHUB_DISPATCH_TOKEN` / `HOUJIN_BANGOU_APP_ID` / `GBIZINFO_API_KEY` / `SENTRY_DSN` / `ADMIN_SECRET` / `SERVICE_SECRET` | Secrets Manager `<project>/app-env`（初回 apply のみ tfvars から書き込み、以降は Secrets Manager 側が正） |
+| `USER_SECRET` / `OAUTH_STATE_SECRET` / `TOKEN_ENCRYPTION_KEY` / `BFF_INTERNAL_TOKEN` | Secrets Manager `<project>/app-env`（Terraform の `random_password` が生成） |
+| 上記以外（ドメイン・モデル名・ポートなど） | user_data（秘密ではないのでそのまま） |
+
+user_data は起動時にインスタンスロールでこの2本を読み、`.env` へ展開する。
+取得に失敗した場合は `.env` を書かずに異常終了する（空の値のまま起動して
+「認証だけ通らない」状態になるのを避けるため）。
+
+`<project>/app-env` のキー名は `.env` の変数名の小文字。user_data 側は
+`to_entries | ascii_upcase` で展開するだけなので、**新しいシークレットを配るときは
+`environments/staging/main.tf` の `aws_secretsmanager_secret_version.app_env` に
+キーを足せばよい**（user_data の編集は不要）。
+
+`SERVICE_SECRET` だけは CI（`sync-whats-new`）が staging の
+`/api/admin/whats-new/ingest` を既知の値で叩くため自動生成にできない。GitHub の
+リポジトリシークレット `SERVICE_SECRET` と同値にし、**`ADMIN_SECRET` とも本番とも
+必ず別値**にする。
+
+値のローテーションは `terraform apply` では行えない（`ignore_changes = [secret_string]`）。
+AWS CLI で書き換える。手順は本番と同じなので
+[`prod-secrets-rotation.md`](prod-secrets-rotation.md) を参照（`--secret-id` を
+`soc-stg/app-env` に読み替える）。**書き換えたあと反映するにはインスタンスの入れ替えが必要**
+（user_data は起動時にしか読まない）。
+
 ### staging の既存インスタンスへ反映する
 
-staging は EC2 上の docker compose で、`.env` を書くのは launch template の user_data
+`.env` を書くのは launch template の user_data
 だけ。ASG は `version = "$Latest"` を指定しており、新しい LT 版を作っても**この指定自体は
 変化しない**ため instance refresh は起きない。つまり apply しても稼働中のインスタンスは
 古い `.env` のままになる。
@@ -784,7 +905,7 @@ backend を叩くため、インスタンス毎に生成した値だと組み合
 
 | 対象 | 経路 |
 | --- | --- |
-| 新規インスタンス | launch template の user_data が `random_password.bff_internal_token` を直接書く |
+| 新規インスタンス | launch template の user_data が Secrets Manager `<project>/app-env` の `bff_internal_token` を読んで `.env` へ書く |
 | 稼働中インスタンス | `deployment.yml` が SSM `/<project>/bff-internal-token` を読んで `.env` を上書き |
 
 SSM パラメータの中身は `random_password.bff_internal_token` と同じ値なので、
@@ -792,6 +913,13 @@ SSM パラメータの中身は `random_password.bff_internal_token` と同じ�
 `.env` は変更しない（user_data が書いた正しい値を消さないため）。
 `deployment.yml` は **running のインスタンス全台**へ SSH するので、ASG が複数台へ
 増えていても配り漏れは出ない。
+
+同じ経路を `SERVICE_SECRET`（CI・運用からのサービス間呼び出し用。#1158）にも使う。
+出どころは `var.service_secret_plain` で、新規インスタンスは user_data、稼働中インスタンスは
+SSM `/<project>/service-secret` から受け取る。届いていないと staging への更新情報の
+取り込みが 503 のまま回復しない（`X-Admin-Secret` が照合するのは `ADMIN_SECRET` ではなく
+`SERVICE_SECRET`）。SSM 経由で配るシークレットを増やしたときの継ぎ足しの足し忘れは
+`automation/test/staging-env-topup-test.sh` が検出する。
 
 デプロイを待たずに確認するなら。**トークンの値そのものは表示しない**
 （端末のスクロールバック・セッション録画・貼り付けたログに残り、拾った者は
@@ -1170,6 +1298,6 @@ GET /api/admin/audit-logs
 
 frontend は CloudFront 経由で、ALB が 500/502/503/504 を返すと
 `s3://soc-app-errors-production/service-unavailable.html` へフェイルオーバーする
-（`enable_error_fallback`、既定 `true`）。学生には「接続できません」の案内が出る。
+（`enable_error_fallback`、既定 `true`）。学生には「ただいまメンテナンス中です」の案内が出る。
 
 API (`api.shukatsu-ai.jp`) は JSON を返す前提のため対象外で、素の503になる。

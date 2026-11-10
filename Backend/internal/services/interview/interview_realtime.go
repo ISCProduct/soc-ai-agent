@@ -10,9 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
+
+const interviewPhraseSuggestionsLLMTimeout = 60 * time.Second
 
 func (s *InterviewService) GetReport(userID uint, sessionID uint) (*models.InterviewReport, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
@@ -29,7 +32,7 @@ func (s *InterviewService) GetReport(userID uint, sessionID uint) (*models.Inter
 		}
 		return nil, err
 	}
-	return report, nil
+	return s.redactTeacherReport(userID, report), nil
 }
 
 // GetPhraseSuggestions はセッションのユーザー発話を分析し、言い換え提案を返す。
@@ -73,7 +76,9 @@ func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint
 
 	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewRealtime)
-	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.5, 1000, model)
+	llmCtx, cancel := context.WithTimeout(ctx, interviewPhraseSuggestionsLLMTimeout)
+	defer cancel()
+	raw, err := s.openaiClient.ChatCompletionJSON(llmCtx, systemPrompt, userPrompt, 0.5, 1000, model)
 	if err != nil {
 		return nil, err
 	}

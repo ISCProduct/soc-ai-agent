@@ -45,6 +45,8 @@ type esRewriteResponse struct {
 	CharLimitSatisfied *bool `json:"char_limit_satisfied"`
 	// 改善文が元の文章以上か。char_limit 指定時は null（#1606）
 	ImprovedLengthSatisfied *bool `json:"improved_length_satisfied"`
+	// 学生の原文に対する形式チェック（#1530）。RAG の応答とは独立に Go 側で検査する
+	FormatFindings []formatFinding `json:"format_findings"`
 }
 
 // Rewrite POST /api/es/rewrite
@@ -58,6 +60,8 @@ func (c *ESRewriteController) Rewrite(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
+	// 形式チェックの位置は、利用者が送った原文（trim 前）を基準にする（#1530）
+	rawText := req.OriginalText
 	req.OriginalText = strings.TrimSpace(req.OriginalText)
 	if req.OriginalText == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "original_text is required")
@@ -69,12 +73,13 @@ func (c *ESRewriteController) Rewrite(ctx echo.Context) error {
 	// 未ログイン利用が仕様の経路なので主体は載らないことがある。機能名だけ付けて
 	// 費用を機能別に割る（#1294）。es_rewrite と es_review の内訳はここで分かれる。
 	status, body, err := postESReview(ctx, esReviewRAGRequest{
-		ESText:        req.OriginalText,
-		QuestionType:  req.QuestionType,
-		CompanyName:   req.CompanyName,
-		TechStack:     req.TechStack,
-		CharLimit:     req.CharLimit,
-		CharLimitMode: req.CharLimitMode,
+		ESText:               req.OriginalText,
+		QuestionType:         req.QuestionType,
+		CompanyName:          req.CompanyName,
+		TechStack:            req.TechStack,
+		CharLimit:            req.CharLimit,
+		CharLimitMode:        req.CharLimitMode,
+		IncludeFeedbackItems: false,
 	}, c.openaiClient, usagectx.FeatureESRewrite)
 	if err != nil {
 		return err
@@ -95,5 +100,6 @@ func (c *ESRewriteController) Rewrite(ctx echo.Context) error {
 		ImprovedTextLength:      rag.ImprovedTextLength,
 		CharLimitSatisfied:      rag.CharLimitSatisfied,
 		ImprovedLengthSatisfied: rag.ImprovedLengthSatisfied,
+		FormatFindings:          formatFindings(rawText, req.CharLimit, req.CharLimitMode),
 	})
 }

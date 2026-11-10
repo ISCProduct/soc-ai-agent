@@ -1,17 +1,42 @@
 package es
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"Backend/internal/controllers/httpapi"
+	"Backend/internal/middleware"
 	"Backend/internal/openai"
 	"Backend/internal/usagectx"
 
 	"github.com/labstack/echo/v4"
 )
+
+func TestESReviewRequestError_Deadline(t *testing.T) {
+	err := esReviewRequestError(errors.Join(errors.New("request failed"), context.DeadlineExceeded))
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("error type = %T, want *echo.HTTPError", err)
+	}
+	if httpErr.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want %d", httpErr.Code, http.StatusGatewayTimeout)
+	}
+	resp, ok := httpErr.Message.(middleware.APIError)
+	if !ok {
+		t.Fatalf("message type = %T, want middleware.APIError", httpErr.Message)
+	}
+	if resp.Code != httpapi.ErrCodeGatewayTimeout {
+		t.Fatalf("code = %q, want %q", resp.Code, httpapi.ErrCodeGatewayTimeout)
+	}
+	if got, want := resp.Msg, "ES添削に時間がかかっています。時間をおいて再度お試しください。"; got != want {
+		t.Fatalf("message = %q, want %q", got, want)
+	}
+}
 
 // ragStub は RAG の /es/review を模す。受け取ったリクエスト本文を記録する。
 func ragStub(t *testing.T, status int, body string, gotBody *map[string]any) *httptest.Server {
@@ -44,6 +69,7 @@ const ragOKBody = `{
   "company_fit_score": null,
   "length_balance_score": 5,
   "feedback": "フィードバック",
+  "feedback_items": [{"score_key": "specificity_score", "source_excerpt": "元の文章", "issue": "具体性を追加", "suggestion": "数値を示す"}],
   "improved_text": "改善後の文章",
   "company_strategy": null,
   "company_context_source": "none",
@@ -85,6 +111,9 @@ func TestRewrite_UsesRAGReviewAndKeepsResponseShape(t *testing.T) {
 	}
 	if ragReq["char_limit"] != float64(400) || ragReq["char_limit_mode"] != "around" {
 		t.Errorf("char_limit = %v / %v", ragReq["char_limit"], ragReq["char_limit_mode"])
+	}
+	if ragReq["include_feedback_items"] != false {
+		t.Errorf("リライトで指摘項目の生成を有効にしている: %+v", ragReq)
 	}
 
 	var got esRewriteResponse
@@ -146,6 +175,9 @@ func TestReview_ForwardsCharLimitAndStripsUsage(t *testing.T) {
 	if ragReq["char_limit_mode"] != "around" {
 		t.Errorf("char_limit_mode = %v, want around", ragReq["char_limit_mode"])
 	}
+	if ragReq["include_feedback_items"] != true {
+		t.Errorf("添削の指摘項目生成が有効でない: %+v", ragReq)
+	}
 
 	var got map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
@@ -154,7 +186,7 @@ func TestReview_ForwardsCharLimitAndStripsUsage(t *testing.T) {
 	if _, ok := got["usage"]; ok {
 		t.Errorf("usage がレスポンスに漏れている: %s", rec.Body.String())
 	}
-	for _, key := range []string{"feedback", "improved_text", "star", "improved_text_length", "char_limit_satisfied", "improved_length_satisfied", "company_context_source"} {
+	for _, key := range []string{"feedback", "feedback_items", "improved_text", "star", "improved_text_length", "char_limit_satisfied", "improved_length_satisfied", "company_context_source"} {
 		if _, ok := got[key]; !ok {
 			t.Errorf("%s が転送されていない: %s", key, rec.Body.String())
 		}

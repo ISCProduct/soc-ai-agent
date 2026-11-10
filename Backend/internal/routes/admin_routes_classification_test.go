@@ -48,6 +48,7 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"GET /users":                                            classStaff,
 		"GET /teacher/students/tendency-analysis":               classStaff,
 		"POST /teacher/students/:id/guidances":                  classStaff,
+		"GET /teacher/students/:id/es-reviews":                  classStaff,
 		"GET /interviews":                                       classStaff,
 		"GET /interviews/:id/videos":                            classStaff,
 		"GET /interviews/videos/:video_id/url":                  classStaff,
@@ -196,6 +197,7 @@ const classificationAdminSecret = "test-admin-secret"
 var schoolScopedRoutes = map[string]bool{
 	"GET /users": true,
 	"GET /teacher/students/tendency-analysis": true,
+	"GET /teacher/students/:id/es-reviews":    true,
 	"GET /interviews":                         true,
 	"GET /dashboard/users":                    true,
 	"GET /dashboard/export/csv":               true,
@@ -258,7 +260,7 @@ func newClassificationEcho(t *testing.T) (*echo.Echo, sqlmock.Sqlmock) {
 	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
 		staffWithSchoolID: {{ID: 5}},
 		adminWithSchoolID: {{ID: 5}},
-	}})
+	}}, nil)
 
 	e := echo.New()
 	registerAdminRoutesWithNilControllers(e.Group("/api"), repositories.NewUserRepository(db), schools, classificationAdminSecret)

@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense } from 'react'
+import { Suspense, type ReactNode } from 'react'
 import dynamic from 'next/dynamic'
 import { Box, CircularProgress } from '@mui/material'
 import { PageLoading } from '@/components/common/PageLoading'
@@ -24,6 +24,20 @@ const CompanyDetailView = dynamic(() => import('./components/CompanyDetailView')
     </Box>
   ),
 })
+
+/**
+ * エラー・0件は一覧と同じく、余白を全幅の外側に置き内側だけ CONTENT_MAX_WIDTH にする。
+ * 同じボックスに maxWidth と padding を置くと、分析カードが広幅で 32px(sm) / 16px(xs) 右へずれる。
+ */
+function ResultsFallbackColumn({ children }: { children: ReactNode }) {
+  return (
+    <Box sx={{ width: '100%', p: { xs: 2, sm: 4 } }}>
+      <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', width: '100%' }}>
+        {children}
+      </Box>
+    </Box>
+  )
+}
 
 /**
  * マッチング結果ページのオーケストレーション。
@@ -61,6 +75,7 @@ function ResultsContent() {
     applyingId,
     snackbar,
     isGuestUser,
+    applyEnabled,
     handleSendEmail,
     handleBack,
     handleReset,
@@ -84,7 +99,7 @@ function ResultsContent() {
 
   if (error) {
     return (
-      <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', p: { xs: 2, sm: 4 }, width: '100%' }}>
+      <ResultsFallbackColumn>
         <AnalysisScoreCard
           analysisScores={analysisScores}
           scoreComment={scoreComment}
@@ -96,13 +111,13 @@ function ResultsContent() {
           onBack={handleBack}
           onReset={handleReset}
         />
-      </Box>
+      </ResultsFallbackColumn>
     )
   }
 
   if (companies.length === 0) {
     return (
-      <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', p: { xs: 2, sm: 4 }, width: '100%' }}>
+      <ResultsFallbackColumn>
         <AnalysisScoreCard
           analysisScores={analysisScores}
           scoreComment={scoreComment}
@@ -110,7 +125,7 @@ function ResultsContent() {
           onRetryAnalysis={handleRetryAnalysis}
         />
         <ResultsNoMatchView onReset={handleReset} />
-      </Box>
+      </ResultsFallbackColumn>
     )
   }
 
@@ -149,6 +164,7 @@ function ResultsContent() {
       applyingId={applyingId}
       snackbar={snackbar}
       isGuestUser={isGuestUser}
+      applyEnabled={applyEnabled}
       onCloseSnackbar={handleCloseSnackbar}
       onBack={handleBack}
       onReset={handleReset}

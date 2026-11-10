@@ -6,6 +6,10 @@ db_instance_class = "db.t4g.micro"
 db_name          = "app_db"
 
 domain_name = "shukatsu-ai.jp"
+
+# 全工程共通のラベル。本文の更新時に同じリリースで変更する。
+# prompt_version  = "v2"
+# prompt_versions = { question_generation = "v2" }
 # 既定: stg.shukatsu-ai.jp（FE） / api-stg.shukatsu-ai.jp（BE）
 # staging_subdomain     = "stg"
 # staging_api_subdomain = "api-stg"
@@ -13,6 +17,16 @@ domain_name = "shukatsu-ai.jp"
 # 既存 ECR のイメージ（タグは staging 用を推奨）
 backend_image  = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-backend:staging"
 frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:staging"
+
+# CI(更新情報の取り込み)が X-Admin-Secret で叩くための共有シークレット（#1158・必須）。
+# GitHub のリポジトリシークレット SERVICE_SECRET と同じ値にする。
+# ADMIN_SECRET(管理者トークンのHMAC鍵)とは必ず別値にすること。
+# 生成例: python3 -c "import secrets; print(secrets.token_urlsafe(36))"
+# 形式は英数字・アンダースコア・ハイフンのみ32文字以上（variables.tf の validation）。
+# この値は .env の1行として Compose が読むため、$ ・ # ・空白・改行を含む値は壊れる。
+# 下の値はプレースホルダー。そのまま apply すると validation で止まる
+# （そのまま通ると、リポジトリを読める第三者がサービス間エンドポイントを叩けてしまう）。
+service_secret_plain = "change-me-service-secret"
 
 # staging 用 OpenAI キーの Secrets Manager ARN（未設定でも apply は可能だが BE の AI 機能は動かない）
 # openai_secret_arn = "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:stg/openai/api-key-xxxxxx"
@@ -36,3 +50,10 @@ frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:s
 # 未設定でも /prod は動作するが、反映は次の毎時実行(最大1時間後)になる。
 # github_dispatch_token = "<GitHub Fine-grained PAT: Actions=Read and write>"
 # github_dispatch_repo  = "ISCProduct/soc-ai-agent"
+#
+# /link で Backlog のメンバー一覧を引くAPIキー(読み取りのみ)。
+# 未設定なら /link /unlink /link-list は「利用できません」を返す。他のコマンドには影響しない。
+# backlog_api_key = "<Backlog API キー>"
+#
+# Backlog の期限リマインドの投稿先 Webhook URL。未設定ならリマインドは動かない。
+# discord_reminder_webhook_url = "https://discord.com/api/webhooks/<id>/<token>"

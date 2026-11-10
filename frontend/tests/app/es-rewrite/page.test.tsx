@@ -452,3 +452,234 @@ describe('ESRewritePage 設問の文字数上限 (#1523)', () => {
     expect(screen.getByRole('button', { name: '添削する' })).not.toBeDisabled()
   })
 })
+
+// 同一設問の前回との差分（#1531）。
+// 前回が無い項目に ±0 を出すと「評価された結果の±0」と「比べる相手がいない」が
+// 区別できなくなるため、何も出さないことまで固定する。
+describe('ESRewritePage 前回との差分 (#1531)', () => {
+  const baseResult = {
+    specificity_score: 7,
+    star_score: 6,
+    company_fit_score: null,
+    length_balance_score: 5,
+    feedback: 'フィードバック本文',
+    improved_text: '改善後の文章',
+  }
+
+  const reviewWith = async (result: Record<string, unknown>) => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => result })
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: '元の文章です。' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+    await screen.findByText('添削スコア')
+  }
+
+  beforeEach(() => {
+    global.fetch = jest.fn()
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+
+  it('設問を送信本文に載せる', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => baseResult })
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: '元の文章です。' },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/学生時代に力を入れたことを教えてください/), {
+      target: { value: '学生時代に力を入れたことは？' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+    await screen.findByText('添削スコア')
+
+    const body = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body)
+    expect(body.question).toBe('学生時代に力を入れたことは？')
+  })
+
+  it('前回がある項目は増減を出す', async () => {
+    await reviewWith({
+      ...baseResult,
+      previous: {
+        id: 1,
+        created_at: '2026-10-01T00:00:00Z',
+        question: '設問',
+        question_type: 'ガクチカ',
+        specificity_score: 4, // 7 - 4 = +3
+        star_score: 6, // 変化なし
+        length_balance_score: 8, // 5 - 8 = -3
+      },
+    })
+
+    expect(screen.getByText('▲3')).toBeInTheDocument()
+    expect(screen.getByText('±0')).toBeInTheDocument()
+    expect(screen.getByText('▼3')).toBeInTheDocument()
+    expect(screen.getByText(/同じ設問の前回/)).toBeInTheDocument()
+  })
+
+  it('前回が無ければ増減を出さない', async () => {
+    await reviewWith(baseResult)
+
+    expect(screen.queryByText('±0')).not.toBeInTheDocument()
+    expect(screen.queryByText(/同じ設問の前回/)).not.toBeInTheDocument()
+  })
+})
+
+describe('ESRewritePage 差分と指摘アンカー (#1532)', () => {
+  beforeEach(() => {
+    global.fetch = jest.fn()
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+
+  it('原文と改善文の追加・削除を示し、指摘から添削時の原文へ移動できる', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7,
+        star_score: 6,
+        company_fit_score: null,
+        length_balance_score: 5,
+        feedback: '行動を具体的に説明しましょう。',
+        improved_text: '私は主体的に取り組みました。',
+        feedback_items: [
+          {
+            score_key: 'specificity_score',
+            source_excerpt: '頑張りました',
+            issue: '行動の具体性が不足しています。',
+            suggestion: 'どのように取り組んだかを書きましょう。',
+          },
+        ],
+      }),
+    })
+
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    const originalField = screen.getByPlaceholderText(/チームで開発した経験があります/)
+    fireEvent.change(originalField, { target: { value: '私は頑張りました。' } })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    await screen.findByText('添削スコア')
+    expect(document.querySelector('del')).toHaveTextContent('頑張り')
+    expect(document.querySelector('ins')).toHaveTextContent('主体的に取り組み')
+    expect(document.querySelector('ins')).toHaveStyle({ textDecoration: 'underline' })
+
+    const sourceLink = screen.getByRole('link', { name: '原文の該当箇所を見る' })
+    expect(sourceLink).toHaveAttribute('href', '#es-original-anchor-0')
+    const anchor = document.getElementById('es-original-anchor-0')
+    expect(anchor).toHaveTextContent('頑張り')
+
+    fireEvent.change(originalField, { target: { value: '別の文章に変更しました。' } })
+    expect(anchor).toHaveTextContent('頑張り')
+
+    fireEvent.click(sourceLink)
+    expect(document.activeElement).toBe(anchor)
+  })
+
+  it('差分が簡易表示になる場合はその旨を通知する', async () => {
+    const original = '。'.repeat(2100)
+    const improved = '、'.repeat(2100)
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7,
+        star_score: 6,
+        company_fit_score: null,
+        length_balance_score: 5,
+        feedback: 'フィードバック',
+        improved_text: improved,
+        feedback_items: [],
+      }),
+    })
+
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: original },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    expect(
+      await screen.findByText(/文章が長いため差分を簡易表示しています/),
+    ).toBeInTheDocument()
+  })
+
+  it('変更がない場合は差分がないことを通知する', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7,
+        star_score: 6,
+        company_fit_score: null,
+        length_balance_score: 5,
+        feedback: 'フィードバック',
+        improved_text: '文章はそのままです。',
+        feedback_items: [],
+      }),
+    })
+
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: '文章はそのままです。' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    expect(await screen.findByText('改善前後に差分はありませんでした。')).toBeInTheDocument()
+  })
+})
+
+describe('ESRewritePage 形式チェックの表示 (#1530)', () => {
+  const REVIEW_BASE = {
+    specificity_score: 7,
+    star_score: 6,
+    length_balance_score: 5,
+    feedback: 'フィードバック本文',
+    improved_text: '改善後の文章',
+  }
+
+  const review = async (result: Record<string, unknown>) => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => result })
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: '私はすごく頑張った。' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+    await screen.findByText('添削スコア')
+  }
+
+  beforeEach(() => {
+    global.fetch = jest.fn()
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  it('format_findings を「必ず直す」として出し、送った本文から該当箇所を抜き出す', async () => {
+    await review({
+      ...REVIEW_BASE,
+      format_findings: [
+        { rule: 'spoken_language', severity: 'warning', start: 2, end: 5, message: '「すごく」は話し言葉です。', fix: 'とても・非常に' },
+      ],
+    })
+    expect(screen.getByText('必ず直す')).toBeInTheDocument()
+    expect(screen.getByText('「すごく」')).toBeInTheDocument()
+    expect(screen.getByText('直し方: とても・非常に')).toBeInTheDocument()
+  })
+
+  it('format_findings が無い古い応答では「必ず直す」を出さない', async () => {
+    await review(REVIEW_BASE)
+    expect(screen.queryByText('必ず直す')).toBeNull()
+  })
+})

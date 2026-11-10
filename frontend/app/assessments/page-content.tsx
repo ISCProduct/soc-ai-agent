@@ -9,6 +9,7 @@ import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import {
   STATUS_DISPLAY,
   assessmentApi,
+  formatDueAt,
   type AssessmentSession,
   type AssessmentSummary,
 } from '@/lib/assessments'
@@ -94,6 +95,18 @@ export default function PageContent() {
                       {st.label}
                     </Typography>
                   </Stack>
+                  {a.scope === 'school' && (
+                    <Typography variant="body2" color="text.secondary" mt={0.5} data-testid="assessment-school-note">
+                      学校が用意した検査です。おすすめ企業の計算には使われません。
+                    </Typography>
+                  )}
+                  {a.due_at && (
+                    <Typography variant="body2" fontWeight={a.overdue ? 'bold' : undefined} mt={0.5} data-testid="assessment-due">
+                      {a.overdue && <span aria-hidden="true">⚠ </span>}
+                      {`受検期限 ${formatDueAt(a.due_at)}`}
+                      {a.overdue ? '（期限を過ぎています。今からでも受検できます）' : ''}
+                    </Typography>
+                  )}
                   {a.description && (
                     <Typography variant="body2" color="text.secondary" mt={0.5}>
                       {a.description}

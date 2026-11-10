@@ -1,11 +1,17 @@
 package es
 
 import (
+	"Backend/internal/controllers/httpapi"
+	"Backend/internal/middleware"
+	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/ragclient"
+	"Backend/internal/services/esreview"
 	"Backend/internal/usagectx"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -20,14 +26,24 @@ type ESReviewController struct {
 	// openaiClient は生成には使わない。RAG が実行した生成のトークン使用量を
 	// api_call_logs へ記録するためだけに持つ(#1533)。nil でも動く。
 	openaiClient *openai.Client
+	// reviews は添削結果の永続化(#1531)。未注入なら保存しない（従来どおり転送だけ）。
+	reviews *esreview.Service
 }
 
 func NewESReviewController(openaiClient *openai.Client) *ESReviewController {
 	return &ESReviewController{openaiClient: openaiClient}
 }
 
+// SetReviewService は添削結果の永続化を注入する(#1531、オプション)。
+func (c *ESReviewController) SetReviewService(s *esreview.Service) {
+	c.reviews = s
+}
+
 type esReviewRequest struct {
-	ESText       string `json:"es_text"`
+	ESText string `json:"es_text"`
+	// Question は利用者が入力した設問文(#1531)。同一設問の前回結果と突き合わせるのに使う。
+	// 種別だけだと「学チカ」と「ガクチカ」が別扱いになり差分が出ない。未指定でも添削はできる。
+	Question     string `json:"question"`
 	QuestionType string `json:"question_type"`
 	CompanyName  string `json:"company_name"`
 	// CharLimit / CharLimitMode は設問の文字数上限(#1523)。
@@ -39,12 +55,13 @@ type esReviewRequest struct {
 // esReviewRAGRequest は RAG の /es/review へ送る本文。
 // ES添削・ESリライトの両タブが同じ経路・同じプロンプトを使う(#1533)。
 type esReviewRAGRequest struct {
-	ESText        string `json:"es_text"`
-	QuestionType  string `json:"question_type"`
-	CompanyName   string `json:"company_name,omitempty"`
-	TechStack     string `json:"tech_stack,omitempty"`
-	CharLimit     *int   `json:"char_limit,omitempty"`
-	CharLimitMode string `json:"char_limit_mode,omitempty"`
+	ESText               string `json:"es_text"`
+	QuestionType         string `json:"question_type"`
+	CompanyName          string `json:"company_name,omitempty"`
+	TechStack            string `json:"tech_stack,omitempty"`
+	CharLimit            *int   `json:"char_limit,omitempty"`
+	CharLimitMode        string `json:"char_limit_mode,omitempty"`
+	IncludeFeedbackItems bool   `json:"include_feedback_items"`
 }
 
 // esReviewRAGUsage は RAG が返すトークン使用量（公開APIへは出さない / #1533）。
@@ -63,6 +80,16 @@ type esReviewRAGResponse struct {
 	ImprovedLengthSatisfied *bool             `json:"improved_length_satisfied"`
 	Star                    starBreakdown     `json:"star"`
 	Usage                   *esReviewRAGUsage `json:"usage"`
+	// 永続化に使う評価項目(#1531)。
+	//
+	// 必須の3項目もポインタで受ける。値型だと項目が欠けた応答で 0 になり、
+	// 丸めて 1（最低評価）として履歴とスコアに流れる。欠落を最低評価として
+	// 記録するのは「基準の無い減点」で、履歴書が #1529 で明示的に避けた判断と逆向き。
+	SpecificityScore   *int   `json:"specificity_score"`
+	StarScore          *int   `json:"star_score"`
+	LengthBalanceScore *int   `json:"length_balance_score"`
+	CompanyFitScore    *int   `json:"company_fit_score"`
+	Feedback           string `json:"feedback"`
 }
 
 // Review POST /api/es/review
@@ -71,6 +98,8 @@ func (c *ESReviewController) Review(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
+	// 形式チェックの位置は、利用者が送った原文（trim 前）を基準にする（#1530）
+	rawText := req.ESText
 	req.ESText = strings.TrimSpace(req.ESText)
 	if req.ESText == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "es_text is required")
@@ -81,18 +110,139 @@ func (c *ESReviewController) Review(ctx echo.Context) error {
 
 	log.Printf("es_review: rag request question_type=%q company=%q char_limit=%v", req.QuestionType, req.CompanyName, req.CharLimit)
 	status, respBody, err := postESReview(ctx, esReviewRAGRequest{
-		ESText:        req.ESText,
-		QuestionType:  req.QuestionType,
-		CompanyName:   req.CompanyName,
-		CharLimit:     req.CharLimit,
-		CharLimitMode: req.CharLimitMode,
+		ESText:               req.ESText,
+		QuestionType:         req.QuestionType,
+		CompanyName:          req.CompanyName,
+		CharLimit:            req.CharLimit,
+		CharLimitMode:        req.CharLimitMode,
+		IncludeFeedbackItems: true,
 	}, c.openaiClient, usagectx.FeatureESReview)
 	if err != nil {
 		return err
 	}
+	if status != http.StatusOK {
+		return ctx.JSONBlob(status, respBody)
+	}
 
-	// RAGからのレスポンスをそのままクライアントへ転送（usage だけは取り除く）
-	return ctx.JSONBlob(status, respBody)
+	// RAG の応答（usage は取り除き済み）に、原文の形式チェック結果を足す（#1530）
+	body, err := withFormatFindings(respBody, formatFindings(rawText, req.CharLimit, req.CharLimitMode))
+	if err != nil {
+		// 形式チェックは付加機能なので、RAG の応答が想定外の形でも添削結果はそのまま返す
+		log.Printf("es_review: format_findings を付けられないため RAG の応答を素通しする: %v", err)
+		body = respBody
+	}
+	// 添削が成功したときだけ履歴に残す(#1531)。失敗した応答まで残すと、
+	// 前回との差分が「失敗した回」と比較されて意味を失う。
+	return ctx.JSONBlob(status, c.persist(ctx, req, body))
+}
+
+// persist は添削結果を保存し、同一設問の前回結果を previous として本文へ足す。
+//
+// 保存できなくても添削そのものは成立しているので、本文はそのまま返す。
+// 履歴が残らないことより、添削が使えなくなることの方が重い。
+func (c *ESReviewController) persist(ctx echo.Context, req esReviewRequest, body []byte) []byte {
+	if c.reviews == nil {
+		return body
+	}
+	// 未ログインでも使える経路なので、実行者が取れないときは保存しない(#1531)。
+	userID, ok := middleware.UserIDFromContext(ctx.Request().Context())
+	if !ok || userID == 0 {
+		return body
+	}
+	var parsed esReviewRAGResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		log.Printf("[ESReview] RAG応答を解釈できず保存をスキップ user=%d: %v", userID, err)
+		return body
+	}
+	// 組織が確定しないまま保存すると、既定組織の行として永続化され、
+	// 教員向けクエリの学園一致条件に永久に当たらなくなる（誰も気づけない）。
+	// 添削そのものは返すので、保存だけ諦める（#1531）。
+	orgID, ok := middleware.OrganizationIDFromContext(ctx.Request().Context())
+	if !ok || orgID == 0 {
+		log.Printf("[ESReview] 組織が解決できないため保存をスキップ user=%d", userID)
+		return body
+	}
+	// 評価が1つでも欠けた応答は履歴に残さない。差分もスコア連携も評価を前提にしており、
+	// 欠けた行を残すと「最低評価の回」として後から比較されてしまう。
+	if parsed.SpecificityScore == nil || parsed.StarScore == nil || parsed.LengthBalanceScore == nil {
+		log.Printf("[ESReview] RAG応答に評価が欠けているため保存をスキップ user=%d", userID)
+		return body
+	}
+
+	var charLimit *uint
+	if req.CharLimit != nil && *req.CharLimit > 0 {
+		v := uint(*req.CharLimit)
+		charLimit = &v
+	}
+
+	_, previous, err := c.reviews.Save(esreview.Input{
+		UserID:             userID,
+		OrganizationID:     orgID,
+		Question:           req.Question,
+		QuestionType:       req.QuestionType,
+		CompanyName:        req.CompanyName,
+		ESText:             req.ESText,
+		CharLimit:          charLimit,
+		CharLimitMode:      req.CharLimitMode,
+		SpecificityScore:   *parsed.SpecificityScore,
+		StarScore:          *parsed.StarScore,
+		LengthBalanceScore: *parsed.LengthBalanceScore,
+		CompanyFitScore:    parsed.CompanyFitScore,
+		Feedback:           parsed.Feedback,
+		ImprovedText:       parsed.ImprovedText,
+	})
+	if err != nil {
+		log.Printf("[ESReview] 保存に失敗 user=%d: %v", userID, err)
+		return body
+	}
+	if previous == nil {
+		return body
+	}
+	return withPrevious(body, previous)
+}
+
+// esReviewPrevious は前回の添削のうち差分表示に使う項目だけ(#1531)。
+//
+// models.ESReview をそのまま返すと ES本文・改善文・フィードバック全文まで
+// レスポンスに乗る。本人のデータなので漏洩ではないが、画面が使うのは
+// 日付とスコアだけで、無駄に重い。
+type esReviewPrevious struct {
+	ID                 uint   `json:"id"`
+	CreatedAt          string `json:"created_at"`
+	Question           string `json:"question"`
+	QuestionType       string `json:"question_type"`
+	SpecificityScore   uint8  `json:"specificity_score"`
+	StarScore          uint8  `json:"star_score"`
+	LengthBalanceScore uint8  `json:"length_balance_score"`
+	CompanyFitScore    *uint8 `json:"company_fit_score"`
+}
+
+// withPrevious は本文に previous を足す。解釈できない本文は触らずに返す
+// （表示を壊さないことを優先し、差分だけ諦める）。
+func withPrevious(body []byte, previous *models.ESReview) []byte {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return body
+	}
+	encoded, err := json.Marshal(esReviewPrevious{
+		ID:                 previous.ID,
+		CreatedAt:          previous.CreatedAt.Format(time.RFC3339),
+		Question:           previous.Question,
+		QuestionType:       previous.QuestionType,
+		SpecificityScore:   previous.SpecificityScore,
+		StarScore:          previous.StarScore,
+		LengthBalanceScore: previous.LengthBalanceScore,
+		CompanyFitScore:    previous.CompanyFitScore,
+	})
+	if err != nil {
+		return body
+	}
+	raw["previous"] = encoded
+	merged, err := json.Marshal(raw)
+	if err != nil {
+		return body
+	}
+	return merged
 }
 
 // postESReview は RAG の /es/review を呼び、(ステータス, 本文, エラー) を返す。
@@ -138,7 +288,7 @@ func postESReview(ctx echo.Context, payload esReviewRAGRequest, cli *openai.Clie
 	started := time.Now()
 	resp, err := client.Do(ragReq)
 	if err != nil {
-		return 0, nil, echo.NewHTTPError(http.StatusBadGateway, "RAG service unavailable: "+err.Error())
+		return 0, nil, esReviewRequestError(err)
 	}
 	defer resp.Body.Close()
 
@@ -150,6 +300,13 @@ func postESReview(ctx echo.Context, payload esReviewRAGRequest, cli *openai.Clie
 		respBody = consumeRAGUsage(ctx, cli, feature, respBody, time.Since(started))
 	}
 	return resp.StatusCode, respBody, nil
+}
+
+func esReviewRequestError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return httpapi.NewAPIError(http.StatusGatewayTimeout, httpapi.ErrCodeGatewayTimeout, "ES添削に時間がかかっています。時間をおいて再度お試しください。")
+	}
+	return echo.NewHTTPError(http.StatusBadGateway, "RAG service unavailable: "+err.Error())
 }
 
 // consumeRAGUsage は RAG レスポンスの usage を api_call_logs へ記録し、本文から取り除く。

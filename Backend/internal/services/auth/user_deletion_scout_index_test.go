@@ -51,6 +51,7 @@ func TestDeleteUser_SyncsScoutIndex(t *testing.T) {
 		WithArgs(uint(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "stored_path", "normalized_path", "annotated_path"}))
 	mock.ExpectExec("INSERT INTO `withdrawn_users`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("DELETE FROM `pending_registrations`").WillReturnResult(sqlmock.NewResult(0, 0)) // #2140 のレビュー
 	mock.ExpectExec("UPDATE `users` SET").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE `user_refresh_tokens` SET").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -97,6 +98,7 @@ func TestDeleteUser_WithoutScoutSyncer(t *testing.T) {
 		WithArgs(uint(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "stored_path", "normalized_path", "annotated_path"}))
 	mock.ExpectExec("INSERT INTO `withdrawn_users`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("DELETE FROM `pending_registrations`").WillReturnResult(sqlmock.NewResult(0, 0)) // #2140 のレビュー
 	mock.ExpectExec("UPDATE `users` SET").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE `user_refresh_tokens` SET").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()

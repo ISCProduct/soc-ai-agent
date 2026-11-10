@@ -20,6 +20,7 @@ from services.es_review import (
     _REVIEW_TRUNCATED_MESSAGE,
     _TOO_LONG_MESSAGE,
     _estimate_max_tokens,
+    _parse_feedback_items,
     _run_es_review,
 )
 
@@ -36,10 +37,29 @@ _REVIEW_PAYLOAD = {
     "company_fit_score": 8,
     "length_balance_score": 5,
     "feedback": "具体性を高めましょう",
+    "feedback_items": [
+        {
+            "score_key": "specificity_score",
+            "source_excerpt": "学生時代に力を入れたこと",
+            "issue": "行動の具体性が不足しています。",
+            "suggestion": "実際に行った工夫を加えましょう。",
+        },
+        {
+            "score_key": "star_score",
+            "source_excerpt": "実際にはない引用",
+            "issue": "根拠のない箇所です。",
+            "suggestion": "この項目は表示しないでください。",
+        },
+        {
+            "score_key": "company_fit_score",
+            "source_excerpt": "学生時代に力を入れたこと",
+            "issue": "企業の人物像との接点が伝わりません。",
+            "suggestion": "企業情報と経験の接点を加えましょう。",
+        },
+    ],
     "company_strategy": "企業対策の助言",
 }
-# 既定の入力（14字）以上の長さにする。短いと #1606 の作り直しが入り、
-# 「通常は2呼び出し」のテストが別の理由で落ちる。
+# 既定の入力（14字）以上の長さにする。短いと improved_length_satisfied が false になる。
 _IMPROVED_PAYLOAD = {"improved_text": "改善後の文章。具体的な行動を書き足した。"}
 
 
@@ -84,6 +104,169 @@ def _run(client, **kwargs):
         return _run_es_review(**params)
 
 
+def test_feedback_items_are_deduplicated_and_trimmed():
+    items = _parse_feedback_items(
+        [
+            {
+                "score_key": "specificity_score",
+                "source_excerpt": "  原文の一部  ",
+                "issue": "  指摘  ",
+                "suggestion": "  改善案  ",
+            },
+            {
+                "score_key": "specificity_score",
+                "source_excerpt": "別の原文",
+                "issue": "重複した指摘",
+                "suggestion": "別の改善案",
+            },
+        ],
+        source_text="原文の一部",
+        include_company_fit=True,
+    )
+
+    assert len(items) == 1
+    assert items[0].source_excerpt == "原文の一部"
+    assert items[0].issue == "指摘"
+    assert items[0].suggestion == "改善案"
+
+
+@pytest.mark.parametrize(
+        ("field", "length", "max_length"),
+        [
+            ("source_excerpt", 120, 120),
+            ("issue", 80, 80),
+            ("suggestion", 80, 80),
+        ],
+)
+def test_feedback_items_accept_fields_at_length_limit(field, length, max_length):
+    candidate = {
+        "score_key": "specificity_score",
+        "source_excerpt": "原文",
+        "issue": "指摘",
+        "suggestion": "改善案",
+    }
+    candidate[field] = "x" * length
+    source_text = candidate["source_excerpt"]
+
+    items = _parse_feedback_items(
+        [candidate],
+        source_text=source_text,
+        include_company_fit=True,
+    )
+    assert len(items) == 1
+    assert len(getattr(items[0], field)) == max_length
+
+
+@pytest.mark.parametrize(
+        ("field", "length"),
+        [
+            ("source_excerpt", 121),
+            ("issue", 81),
+            ("suggestion", 81),
+        ],
+)
+def test_feedback_items_reject_fields_over_length_limit(field, length):
+    candidate = {
+        "score_key": "specificity_score",
+        "source_excerpt": "原文",
+        "issue": "指摘",
+        "suggestion": "改善案",
+    }
+    candidate[field] = "x" * length
+
+    assert _parse_feedback_items(
+        [candidate],
+        source_text=candidate["source_excerpt"],
+        include_company_fit=True,
+    ) == []
+
+
+def test_feedback_items_ignore_unmatched_source_excerpts():
+    assert _parse_feedback_items(
+        [
+            {
+                "score_key": "specificity_score",
+                "source_excerpt": "原文にない引用",
+                "issue": "指摘",
+                "suggestion": "改善案",
+            }
+        ],
+        source_text="別の原文",
+        include_company_fit=True,
+    ) == []
+
+
+def test_feedback_items_match_width_whitespace_and_combining_variants():
+    source = "ＡＢＣ\r\nカ\u3099クチカ"
+    items = _parse_feedback_items(
+        [
+            {
+                "score_key": "specificity_score",
+                "source_excerpt": "ABC ガクチカ",
+                "issue": "引用形式の揺れを許容する",
+                "suggestion": "原文の記述を具体化する",
+            }
+        ],
+        source_text=source,
+        include_company_fit=True,
+    )
+
+    assert len(items) == 1
+    assert items[0].source_excerpt == source
+
+
+def test_feedback_items_drop_ambiguous_quotes_and_strip_controls():
+    items = _parse_feedback_items(
+        [
+            {
+                "score_key": "specificity_score",
+                "source_excerpt": "同じ引用",
+                "issue": "不明瞭\u202eな指摘\x01",
+                "suggestion": "具体化する\u2066",
+            },
+            {
+                "score_key": "star_score",
+                "source_excerpt": "一意な引用",
+                "issue": "不明瞭\u202eな指摘\x01",
+                "suggestion": "具体化する\u2066",
+            },
+        ],
+        source_text="同じ引用、同じ引用。一意な引用",
+        include_company_fit=True,
+    )
+
+    assert len(items) == 1
+    assert items[0].source_excerpt == "一意な引用"
+    assert items[0].issue == "不明瞭な指摘"
+    assert items[0].suggestion == "具体化する"
+
+
+def test_feedback_items_consider_at_most_four_model_candidates():
+    candidates = [
+        {
+            "score_key": "unknown_score",
+            "source_excerpt": "原文",
+            "issue": "指摘",
+            "suggestion": "改善案",
+        }
+        for _ in range(4)
+    ]
+    candidates.append(
+        {
+            "score_key": "specificity_score",
+            "source_excerpt": "原文",
+            "issue": "指摘",
+            "suggestion": "改善案",
+        }
+    )
+
+    assert _parse_feedback_items(
+        candidates,
+        source_text="原文",
+        include_company_fit=True,
+    ) == []
+
+
 def test_review_is_split_into_two_calls(monkeypatch):
     """評価と改善文が別々の呼び出しになり、通常時は追加呼び出しをしない。"""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
@@ -94,6 +277,24 @@ def test_review_is_split_into_two_calls(monkeypatch):
     assert client.chat.completions.create.call_count == 2
     assert result.feedback == "具体性を高めましょう"
     assert result.improved_text == "改善後の文章。具体的な行動を書き足した。"
+    assert len(result.feedback_items) == 1
+    assert result.feedback_items[0].source_excerpt == "学生時代に力を入れたこと"
+    first_prompt = client.chat.completions.create.call_args_list[0].kwargs["messages"][1]["content"]
+    assert '"feedback_items"' in first_prompt
+    assert "連続して引用した" in first_prompt
+
+
+def test_rewrite_skips_unused_feedback_item_generation(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    client = _mock_client()
+
+    result = _run(client, include_feedback_items=False)
+
+    first_call = client.chat.completions.create.call_args_list[0]
+    review_prompt = first_call.kwargs["messages"][1]["content"]
+    assert "source_excerpt" not in review_prompt
+    assert first_call.kwargs["max_tokens"] == _estimate_max_tokens(900)
+    assert result.feedback_items == []
 
 
 def test_retry_once_on_length_finish_reason(monkeypatch):
@@ -133,7 +334,7 @@ def test_second_length_on_improved_stage_keeps_the_warning(chars, monkeypatch):
     """上限なしの改善文が出力上限で切れても 422 にしない（#1606）。
 
     422 にすると本文も「短い」警告も届かない。max_tokens は渡さない（#1564）ので
-    同じ呼び出しの中では引き上げない。空の結果は短いので、作り直しを1回だけ試みる。
+    同じ呼び出しの中では引き上げない。空でも追加の呼び出しはしない。
     """
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     client = _mock_client(["stop", "length", "length"])
@@ -142,8 +343,8 @@ def test_second_length_on_improved_stage_keeps_the_warning(chars, monkeypatch):
 
     assert result.improved_text == ""
     assert result.improved_length_satisfied is False
-    # 評価1 + 改善文1 + 短いときの作り直し1
-    assert client.chat.completions.create.call_count == 3
+    # 評価1 + 改善文1。短いときの作り直しはしない。
+    assert client.chat.completions.create.call_count == 2
     for improved_call in client.chat.completions.create.call_args_list[1:]:
         assert "max_tokens" not in improved_call.kwargs
 
@@ -153,7 +354,7 @@ def test_second_length_on_improved_stage_keeps_the_warning(chars, monkeypatch):
     [
         (0, 400),  # 下限
         (100, 400),  # 下限
-        (_REVIEW_TEXT_CHARS, 885),  # 本番で唯一この関数を使う経路（評価の段）
+        (_REVIEW_TEXT_CHARS, 1905),  # 本番で唯一この関数を使う経路（評価の段）
         (1000, 970),
         (20000, _MAX_OUTPUT_TOKENS),  # 天井で打ち止め
     ],
@@ -175,9 +376,9 @@ def test_review_budget_covers_measured_token_rate():
     """
     assert _JP_TOKENS_PER_CHAR >= 0.85
     budget = _estimate_max_tokens(_REVIEW_TEXT_CHARS)
-    # feedback 400字 + company_strategy 400字 を最も重い素材（半角カナ 1.71 tok/char・実測）
-    # で書かれても、再試行1回の引き上げ（2倍）までに収まること
-    assert budget * 2 > 800 * 1.71
+    # feedback 400字 + company_strategy 400字 + 指摘4件(各220字)を
+    # 最も重い素材（半角カナ 1.71 tok/char・実測）で書かれても、再試行1回分までに収まる。
+    assert budget * 2 > 1680 * 1.71
     assert budget * 2 <= _MAX_OUTPUT_TOKENS
 
 
@@ -209,8 +410,8 @@ def test_improved_text_budget_does_not_depend_on_input_length(chars, monkeypatch
 
     _run(client, es_text="あ" * chars)
 
-    # 長文では改善文が短く返り、#1606 の作り直しが1回入る。その呼び出しにも
-    # max_tokens を渡さない（渡すと入力長で天井に張り付く #1564 が戻る）。
+    # 長文でも改善文の呼び出しに max_tokens を渡さない
+    # （渡すと入力長で天井に張り付く #1564 が戻る）。短いときの追加呼び出しはしない。
     improved_calls = [
         call for call in client.chat.completions.create.call_args_list
         if "【添削フィードバック】" in next(
@@ -254,6 +455,7 @@ def test_company_context_present_keeps_company_fields(monkeypatch):
     assert result.company_fit_score == 8
     assert result.company_strategy == "企業対策の助言"
     assert result.company_context_source == "web_search"
+    assert any(item.score_key == "company_fit_score" for item in result.feedback_items)
     review_user = next(
         msg["content"]
         for msg in client.chat.completions.create.call_args_list[0].kwargs["messages"]
@@ -343,8 +545,8 @@ def test_prompt_injection_guard_on_both_calls(monkeypatch):
 
     _run(client, es_text=injected)
 
-    # 注入文は改善文スタブより長いので、短さの作り直しが1回入る。そのプロンプトも囲む。
-    assert client.chat.completions.create.call_count == 3
+    # 注入文は改善文スタブより長いが、短さのための追加呼び出しはしない。
+    assert client.chat.completions.create.call_count == 2
     for call in client.chat.completions.create.call_args_list:
         messages = call.kwargs["messages"]
         user = next(msg["content"] for msg in messages if msg["role"] == "user")

@@ -18,6 +18,8 @@ import {
   shouldSendChatOnKeyDown,
   stripChoiceLines,
   writeStoredJobCategoryId,
+  historyToMessages,
+  isHistoryCompletionMessage,
 } from '@/components/mui-chat/utils'
 
 describe('extractChoices', () => {
@@ -403,5 +405,46 @@ describe('最初の案内（INITIAL_GREETING）', () => {
   it('最初の質問まで辿り着ける長さに収める', () => {
     // 会話型は一度に少ししか表示できない。長いと読み飛ばされる。
     expect(INITIAL_GREETING.length).toBeLessThan(220)
+  })
+})
+
+/**
+ * 履歴→表示用メッセージの変換（#SOCAIAGENT-417）。
+ *
+ * useMuiChat の中に埋まっていて、画面を描かないと検証できなかった。
+ * Loading と Empty の切り替えはこの結果が0件かどうかで決まるので、
+ * ここだけ単体で確かめられるようにする。
+ */
+describe('historyToMessages', () => {
+  it('APIの履歴を表示用メッセージに移す', () => {
+    const messages = historyToMessages([
+      { id: 7, role: 'assistant', content: '質問です', created_at: '2026-10-01T09:05:00Z' },
+      { id: 8, role: 'user', content: '回答です', created_at: '2026-10-01T09:06:00Z' },
+    ])
+
+    expect(messages).toHaveLength(2)
+    expect(messages[0]).toMatchObject({ id: '7', role: 'assistant', content: '質問です' })
+    expect(messages[0].timestamp.toISOString()).toBe('2026-10-01T09:05:00.000Z')
+    expect(messages[1]).toMatchObject({ id: '8', role: 'user' })
+  })
+
+  it('履歴が無ければ空で返す', () => {
+    // 空なら呼び出し側が挨拶を入れる。ここで挨拶を作らない。
+    expect(historyToMessages([])).toEqual([])
+    expect(historyToMessages(null)).toEqual([])
+  })
+})
+
+describe('isHistoryCompletionMessage', () => {
+  it('完了の案内を見分ける', () => {
+    expect(isHistoryCompletionMessage('分析が完了しました！')).toBe(true)
+    expect(isHistoryCompletionMessage('全てのフェーズが完了しています')).toBe(true)
+    expect(isHistoryCompletionMessage('最適な企業をマッチングしました')).toBe(true)
+  })
+
+  it('通常の質問は完了にしない', () => {
+    expect(isHistoryCompletionMessage('次の質問です')).toBe(false)
+    expect(isHistoryCompletionMessage('')).toBe(false)
+    expect(isHistoryCompletionMessage(undefined)).toBe(false)
   })
 })

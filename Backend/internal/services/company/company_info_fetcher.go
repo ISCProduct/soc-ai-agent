@@ -6,6 +6,9 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/gbizinfo"
+	"Backend/internal/services/prompts"
+	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -35,6 +38,7 @@ type CompanyInfoResult struct {
 	SourceURL          string `json:"source_url,omitempty"`
 	ModelUsed          string `json:"model_used,omitempty"`
 	Confidence         string `json:"confidence,omitempty"`
+	PromptVersion      string `json:"prompt_version,omitempty"`
 	// Phase 3 運用メタ: TTL / 予算ガードで Search をスキップしたとき
 	FromCache      bool   `json:"from_cache,omitempty"`
 	BudgetExceeded bool   `json:"budget_exceeded,omitempty"`
@@ -174,11 +178,18 @@ func (f *CompanyInfoFetcher) FetchAndSaveDetails(ctx context.Context, companyID 
 	return err
 }
 
+// ErrInvalidPromptVersion は確定保存で受け取った版ラベルの形式が不正なことを表す。
+var ErrInvalidPromptVersion = errors.New("invalid prompt_version")
+
 // ConfirmAndSave はプレビュー済みの構造化結果を LLM 再実行なしで DB に確定保存する。
 // info_fetched_at / last_model_used / last_fetch_confidence も同時更新する。
 func (f *CompanyInfoFetcher) ConfirmAndSave(companyID uint, result *CompanyInfoResult) (*CompanyInfoResult, error) {
 	if result == nil {
 		return nil, fmt.Errorf("result is required")
+	}
+	// 版はクライアントから届く値なので信頼しない。varchar(64) を超えると保存全体が失敗する。
+	if result.PromptVersion != "" && !prompts.ValidPromptVersion(result.PromptVersion) {
+		return nil, ErrInvalidPromptVersion
 	}
 	company, err := f.repo.FindByID(companyID)
 	if err != nil {
@@ -357,6 +368,7 @@ func (f *CompanyInfoFetcher) recentlyFailedProvision(key string) bool {
 
 // Acquire は企業名から基本情報をプレビュー取得する（DB 非更新）。
 func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteURL string) (*CompanyInfoResult, error) {
+	ctx = f.withCompanyExtractionVersion(ctx)
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
@@ -370,6 +382,7 @@ func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteUR
 }
 
 func (f *CompanyInfoFetcher) acquireForCompany(ctx context.Context, company *models.Company) (*CompanyInfoResult, error) {
+	ctx = f.withCompanyExtractionVersion(ctx)
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
@@ -380,6 +393,11 @@ func (f *CompanyInfoFetcher) acquireForCompany(ctx context.Context, company *mod
 	}
 
 	return f.acquireViaAISearch(ctx, company.Name, company.WebsiteURL)
+}
+
+func (f *CompanyInfoFetcher) withCompanyExtractionVersion(ctx context.Context) context.Context {
+	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageCompanyExtraction)
+	return ctx
 }
 
 func (f *CompanyInfoFetcher) acquireFromGBizCompany(ctx context.Context, company *models.Company) (*CompanyInfoResult, error) {
@@ -403,7 +421,13 @@ func (f *CompanyInfoFetcher) acquireFromGBizCompany(ctx context.Context, company
 			company.EmployeeCount = hit.EmployeeNumber
 			company.EmployeeCountBasis = models.EmployeeCountBasisStandalone
 		}
-		_ = f.repo.Update(company)
+		// 名前検索で見つけた法人番号などの保存。失敗しても続ける。SyncCompany は DB から読み直すので、
+		// 保存できていなければ国税庁 API で法人番号を引き直す（引けなければ AI 検索に回る）。
+		// ここでエラーを返すと、引き直せる場合でも AI 検索に回り、費用が増える。
+		// AI で取得した結果の保存（FetchAndSave など）は、もともとエラーを返している（#2002）
+		if err := f.repo.Update(company); err != nil {
+			log.Printf("gbizinfo search hit save failed company_id=%d: %v (continuing; sync will look it up again)", company.ID, err)
+		}
 	}
 
 	if _, err := f.gbiz.SyncCompany(ctx, company.ID); err != nil {
@@ -549,6 +573,7 @@ func (f *CompanyInfoFetcher) acquireFromWebsite(ctx context.Context, companyName
 	if result.WebsiteURL == "" {
 		result.WebsiteURL = strings.TrimSpace(websiteURL)
 	}
+	result.PromptVersion = promptVersionFromContext(ctx)
 	return result, nil
 }
 
@@ -559,18 +584,7 @@ func (f *CompanyInfoFetcher) acquireViaAISearch(ctx context.Context, companyName
 	}
 
 	systemPrompt := `あなたは企業情報の構造化アシスタントです。検索結果に明示された事実のみをJSON化してください。検索結果に無い項目は空文字または0。モデルの事前知識や推測で埋めてはいけません。従業員数は連結と単体を混ぜず、employee_count_basis に定義を必ず入れる。`
-	siteHint := ""
-	if websiteURL != "" {
-		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
-	}
-	searchPrompt := fmt.Sprintf(
-		`日本の企業「%s」%sについて、公開情報から確認できる事実だけを調べてください。対象: 企業概要・業種・本社所在地・公式サイトURL・設立年・従業員数・主要事業・企業文化・勤務スタイル・技術スタック・福利厚生。従業員数は直近有価証券報告書の連結を優先し、連結なら連結、単体しか無ければ単体と明記してください。各事実の根拠URLを含めてください。不明な項目は推測せず「不明」と書いてください。非上場企業も含め、公式サイト・採用ページ・登記情報などから確認できる範囲のみ。`,
-		companyName, siteHint,
-	)
-	parseUser := fmt.Sprintf(
-		"企業名「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空文字または0。推測禁止。\n%s",
-		companyName, companyInfoJSONSchema,
-	)
+	searchPrompt, parseUser := buildCompanyInfoSearchPrompts(companyName, websiteURL)
 	// 検索は企業ごとに1回に寄せる。relations / tech も同じ結果を使うため、
 	// web_search の固定課金(8,000トークン/call)が1社1回で済む(#1124)。
 	// 共有が未注入なら従来どおり検索+解析をまとめて行う。
@@ -604,10 +618,14 @@ func (f *CompanyInfoFetcher) acquireViaAISearch(ctx context.Context, companyName
 	result.SourceURL = strings.TrimSpace(websiteURL)
 	result.ModelUsed = modelsUsed
 	result.Confidence = companyfetch.ConfidenceMedium
+	result.PromptVersion = promptVersionFromContext(ctx)
 	return result, nil
 }
 
 func mergeCompanyInfoGaps(base, ai *CompanyInfoResult) {
+	if ai.PromptVersion != "" {
+		base.PromptVersion = ai.PromptVersion
+	}
 	if base.Description == "" {
 		base.Description = ai.Description
 	}
@@ -655,6 +673,32 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// buildCompanyInfoSearchPrompts は企業情報の検索プロンプトと抽出プロンプトを組み立てる。
+// 検索プロンプトはそのまま検索クエリになるので企業名を整え、抽出プロンプトでは囲む（#1970 のレビュー）。
+func buildCompanyInfoSearchPrompts(companyName, websiteURL string) (searchPrompt, parseUser string) {
+	siteHint := ""
+	if websiteURL != "" {
+		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
+	}
+	searchPrompt = fmt.Sprintf(
+		`日本の企業「%s」%sについて、公開情報から確認できる事実だけを調べてください。対象: 企業概要・業種・本社所在地・公式サイトURL・設立年・従業員数・主要事業・企業文化・勤務スタイル・技術スタック・福利厚生。従業員数は直近有価証券報告書の連結を優先し、連結なら連結、単体しか無ければ単体と明記してください。各事実の根拠URLを含めてください。不明な項目は推測せず「不明」と書いてください。非上場企業も含め、公式サイト・採用ページ・登記情報などから確認できる範囲のみ。`,
+		shared.InlinePromptName(companyName), siteHint,
+	)
+	parseUser = fmt.Sprintf(
+		"次の企業について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空文字または0。推測禁止。\n%s%s",
+		shared.UntrustedSection(companyName, "企業名"), companyInfoJSONSchema,
+	)
+	return searchPrompt, parseUser
+}
+
+// buildCompanyInfoExtractUser は gBiz の事実テキストからの抽出指示を組み立てる。企業名は囲む（#1970 のレビュー）。
+func buildCompanyInfoExtractUser(companyName, websiteURL, factsText string) string {
+	return fmt.Sprintf(
+		"次の企業（参考URL: %s）について、次の事実テキストのみを根拠にJSON化してください。\n%s%s\n\n事実テキスト:\n%s",
+		websiteURL, shared.UntrustedSection(companyName, "企業名"), companyInfoJSONSchema, strings.TrimSpace(factsText),
+	)
+}
+
 // acquireCheapExtract は gBiz 事実テキストからの安価 Extract（Search なし）。後方互換・テスト用。
 func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyName, websiteURL, factsText string) (*CompanyInfoResult, error) {
 	if f.llm == nil || f.llm.Client == nil {
@@ -662,10 +706,7 @@ func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyNam
 	}
 
 	systemPrompt := `あなたは企業情報の構造化アシスタントです。与えられた事実テキストに書かれている内容のみをJSON化してください。テキストに無い項目は空文字または0。推測禁止。`
-	userPrompt := fmt.Sprintf(
-		"企業名「%s」（参考URL: %s）について、次の事実テキストのみを根拠にJSON化してください。\n%s\n\n事実テキスト:\n%s",
-		companyName, websiteURL, companyInfoJSONSchema, strings.TrimSpace(factsText),
-	)
+	userPrompt := buildCompanyInfoExtractUser(companyName, websiteURL, factsText)
 	if strings.TrimSpace(factsText) == "" {
 		return f.acquireViaAISearch(ctx, companyName, websiteURL)
 	}
@@ -681,7 +722,16 @@ func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyNam
 	result.Source = companyfetch.SourceLLMExtract
 	result.ModelUsed = model
 	result.Confidence = companyfetch.ConfidenceMedium
+	result.PromptVersion = promptVersionFromContext(ctx)
 	return result, nil
+}
+
+func promptVersionFromContext(ctx context.Context) string {
+	assignment := usagectx.PromptVersionFromContext(ctx)
+	if assignment.Stage != string(prompts.StageCompanyExtraction) {
+		return ""
+	}
+	return assignment.Version
 }
 
 func parseCompanyInfoResult(text string) (*CompanyInfoResult, error) {
@@ -721,6 +771,7 @@ func companyInfoFromModel(company *models.Company) *CompanyInfoResult {
 		SourceURL:          company.SourceURL,
 		ModelUsed:          company.LastModelUsed,
 		Confidence:         company.LastFetchConfidence,
+		PromptVersion:      company.InfoPromptVersion,
 	}
 }
 
@@ -770,6 +821,11 @@ func applyCompanyInfoResult(company *models.Company, result *CompanyInfoResult) 
 	}
 	if result.WelfareDetails != "" {
 		company.WelfareDetails = result.WelfareDetails
+	}
+	// AI が本文を作ったときだけ版を更新する。gBiz だけの再取得では前回 AI が作った本文が
+	// 残るので、last_model_used が変わっても、残っている本文の版を消さない。
+	if result.PromptVersion != "" {
+		company.InfoPromptVersion = result.PromptVersion
 	}
 }
 

@@ -151,6 +151,8 @@ func (f *TechStackFetcher) FetchAndSave(ctx context.Context, companyID uint, for
 
 // techAcquirePrompts は業種に応じた抽出スキーマ・システムプロンプト・検索プロンプト・表示名を返す。
 func techAcquirePrompts(industry, companyName, websiteURL string) (schema, systemPrompt, searchPrompt, domainLabel string) {
+	// 検索プロンプトはそのまま検索クエリになるので、囲まずに名前として整える（#1970 のレビュー）
+	searchName := shared.InlinePromptName(companyName)
 	profile := companyfields.Resolve(industry)
 	siteHint := websiteURLOrUnknown(websiteURL)
 	if profile.ID == companyfields.ProfileManufacturing {
@@ -158,7 +160,7 @@ func techAcquirePrompts(industry, companyName, websiteURL string) (schema, syste
 			`あなたは製造業の技術・設備情報の構造化アシスタントです。入力テキストに明示された製品技術・生産設備・生産方式のみをJSON化してください。推測で埋めてはいけません。ITのプログラミング言語を無理に埋めないでください。不明な項目は空配列または空文字にしてください。`,
 			fmt.Sprintf(
 				`日本の製造企業「%s」の主要技術・製品技術・生産設備・拠点・生産方式を調べてください。公式サイト: %s。会社案内・製品紹介・工場紹介・採用ページに書かれている事実のみを根拠URL付きで列挙してください。プログラミング言語やCI/CDは、公開情報に明示がある場合のみ。`,
-				companyName, siteHint,
+				searchName, siteHint,
 			),
 			"設備・技術"
 	}
@@ -166,7 +168,7 @@ func techAcquirePrompts(industry, companyName, websiteURL string) (schema, syste
 		`あなたは技術スタックの構造化アシスタントです。入力テキストに明示された技術のみをJSON化してください。推測で埋めてはいけません。不明な項目は空配列または空文字にしてください。`,
 		fmt.Sprintf(
 			`日本のIT企業「%s」の技術スタックを調べてください。公式サイト: %s。採用ページ・技術ブログ・エンジニア向け情報・求人票に書かれている言語・フレームワーク・クラウド・CI/CD・開発手法を、根拠URL付きで列挙してください。公開情報として確認できる事実のみ。非上場企業も含めます。`,
-			companyName, siteHint,
+			searchName, siteHint,
 		),
 		"技術スタック"
 }
@@ -206,10 +208,7 @@ func (f *TechStackFetcher) Acquire(ctx context.Context, companyName, websiteURL,
 	}
 
 	// 2) Search Lite → Parse
-	parseUser := fmt.Sprintf(
-		"企業「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空配列/空文字。推測禁止。\n%s",
-		companyName, schema,
-	)
+	parseUser := buildTechSearchParseUser(companyName, schema)
 	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 400)
 	if err != nil {
 		return nil, fmt.Errorf("%sの取得失敗: %w", domainLabel, err)
@@ -324,9 +323,24 @@ func techResultFromCompany(company *models.Company) *TechStackResult {
 }
 
 // buildTechScrapeParseUser は採用ページ本文からの抽出指示を組み立てる。本文は外部サイト由来なので囲む（#1636）。
+// 企業名も企業行（自動収集・ゲスト投稿）由来なので同じく囲む。文中の「企業「%s」」に埋めると囲みの外に出る。
 func buildTechScrapeParseUser(companyName, domainLabel, schema, pageText string) string {
 	return fmt.Sprintf(
-		"企業「%s」の公開ページ本文です。本文に明示された%sのみ次のJSON形式で抽出してください。推測禁止。\n%s\n\n---\n本文:\n%s",
-		companyName, domainLabel, schema, shared.WrapUntrustedText(pageText, "ページ本文"),
+		"次の企業の公開ページ本文です。本文に明示された%sのみ次のJSON形式で抽出してください。推測禁止。\n%s%s\n\n---\n本文:\n%s",
+		domainLabel, techCompanyNameSection(companyName), schema, shared.WrapUntrustedText(pageText, "ページ本文"),
 	)
+}
+
+// buildTechSearchParseUser は Search Lite の結果からの抽出指示を組み立てる（Acquire の2番目の経路）。
+// 公式ページ抽出と同じ企業名を使うので、こちらも囲む。片方だけだとスクレイプの失敗で囲みを迂回できる。
+func buildTechSearchParseUser(companyName, schema string) string {
+	return fmt.Sprintf(
+		"次の企業について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空配列/空文字。推測禁止。\n%s%s",
+		techCompanyNameSection(companyName), schema,
+	)
+}
+
+// techCompanyNameSection は「企業名:」の行と囲んだ企業名を返す。企業名が空ならラベルごと出さない。
+func techCompanyNameSection(companyName string) string {
+	return shared.UntrustedSection(companyName, "企業名")
 }

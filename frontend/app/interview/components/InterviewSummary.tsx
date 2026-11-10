@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Box,
   Chip,
@@ -13,10 +13,11 @@ import {
   Tooltip,
   Typography,
   Alert,
+  Button,
 } from '@mui/material'
 import CheckIcon from '@mui/icons-material/Check'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import { InterviewReport, PhraseSuggestion, interviewApi } from '@/lib/interview'
+import { InterviewReport, InterviewUtterance, PhraseSuggestion, interviewApi } from '@/lib/interview'
 import { parseJsonSafe } from '@/lib/interview/utils'
 
 import { UI } from '@/lib/design/tokens'
@@ -31,12 +32,13 @@ const SCORE_LABELS: Record<string, string> = {
 
 interface Props {
   report: InterviewReport
+  utterances?: InterviewUtterance[]
   userId?: number
   /** dark = dark background (finished screen), light = light background (history page) */
   theme?: 'dark' | 'light'
 }
 
-export default function InterviewSummary({ report, userId, theme = 'dark' }: Props) {
+export default function InterviewSummary({ report, utterances, userId, theme = 'dark' }: Props) {
   const isDark = theme === 'dark'
   const paperBg = isDark ? UI.nightPanel : '#fff'
   const paperBorder = isDark ? '1px solid rgba(255,255,255,0.08)' : `1px solid ${UI.ruleSoft}`
@@ -48,6 +50,11 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null)
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
+  const [sourceUtterances, setSourceUtterances] = useState<InterviewUtterance[] | null>(utterances ?? null)
+  const [sourceLoading, setSourceLoading] = useState(false)
+  const [sourceError, setSourceError] = useState<string | null>(null)
+  const [activeUtteranceId, setActiveUtteranceId] = useState<number | null>(null)
+  const sourceRequestId = useRef(0)
 
   useEffect(() => {
     if (!userId || !report.session_id) return
@@ -62,6 +69,43 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
       .finally(() => setSuggestionsLoading(false))
   }, [report.session_id, userId])
 
+  useEffect(() => {
+    sourceRequestId.current += 1
+    setSourceUtterances(utterances ?? null)
+    setSourceLoading(false)
+    setActiveUtteranceId(null)
+    setSourceError(null)
+    return () => {
+      sourceRequestId.current += 1
+    }
+  }, [report.session_id, utterances])
+
+  useEffect(() => {
+    if (activeUtteranceId === null || sourceUtterances === null) return
+    const target = document.getElementById(utteranceElementId(report.session_id, activeUtteranceId))
+    target?.focus({ preventScroll: true })
+    target?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+  }, [activeUtteranceId, report.session_id, sourceUtterances])
+
+  const showEvidenceUtterance = async (utteranceId: number) => {
+    setActiveUtteranceId(utteranceId)
+    setSourceError(null)
+    if (sourceUtterances !== null || !userId) return
+
+    const requestId = ++sourceRequestId.current
+    setSourceLoading(true)
+    try {
+      const detail = await interviewApi.getDetail(report.session_id, userId)
+      if (requestId !== sourceRequestId.current) return
+      setSourceUtterances(detail.utterances)
+    } catch {
+      if (requestId !== sourceRequestId.current) return
+      setSourceError('面接ログを取得できませんでした。通信状態を確認して再試行してください。')
+    } finally {
+      if (requestId === sourceRequestId.current) setSourceLoading(false)
+    }
+  }
+
   const handleCopy = async (text: string, idx: number) => {
     await navigator.clipboard.writeText(text)
     setCopiedIdx(idx)
@@ -70,6 +114,7 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
 
   const scores = parseJsonSafe(report.scores_json) as Record<string, number> | null
   const evidence = parseJsonSafe(report.evidence_json) as Record<string, string> | null
+  const evidenceUtteranceIDs = parsePositiveNumberMap(report.evidence_utterance_ids_json)
   const strengths = parseJsonSafe(report.strengths_json) as string[] | null
   const improvements = parseJsonSafe(report.improvements_json) as string[] | null
 
@@ -81,7 +126,10 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
     : null
 
   return (
-    <Stack spacing={2}>
+    // AIの生成文に空白を含まない長い文字列（URLなど）が混じると、既定の
+    // overflow-wrap では折り返さずページ全体が横にはみ出す（#1863）。
+    // overflow-wrap は継承するので、根で一度指定すれば配下の文に効く。
+    <Stack spacing={2} sx={{ overflowWrap: 'anywhere' }}>
       {/* Summary text */}
       <Paper sx={{ bgcolor: paperBg, border: paperBorder, p: 3, borderRadius: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
@@ -128,13 +176,108 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
                   }}
                 />
                 {evidence?.[key] && (
-                  <Typography variant="caption" sx={{ color: textMuted, mt: 0.5, display: 'block', lineHeight: 1.5 }}>
-                    「{evidence[key]}」
-                  </Typography>
+                  <Box sx={{ mt: 0.5 }}>
+                    <Typography variant="caption" sx={{ color: textMuted, display: 'block', lineHeight: 1.5 }}>
+                      「{evidence[key]}」
+                    </Typography>
+                    {/* 発話ログが無く取得もできない（userId なし）場合はボタンを出さない */}
+                    {evidenceUtteranceIDs[key] && (sourceUtterances !== null || Boolean(userId)) && (
+                      <Button
+                        size="small"
+                        disabled={sourceLoading}
+                        aria-label={`${SCORE_LABELS[key] ?? key}の根拠発言を見る`}
+                        aria-controls={`interview-transcript-${report.session_id}`}
+                        aria-expanded={sourceUtterances !== null && activeUtteranceId !== null}
+                        onClick={() => void showEvidenceUtterance(evidenceUtteranceIDs[key])}
+                        sx={{ mt: 0.25, minHeight: 36, px: 0.5, color: isDark ? '#8ab4f8' : '#1d4ed8', textTransform: 'none' }}
+                      >
+                        {sourceLoading ? '発言を読み込み中...' : '発言を見る'}
+                      </Button>
+                    )}
+                  </Box>
                 )}
               </Box>
             ))}
           </Stack>
+        </Paper>
+      )}
+
+      {sourceError && (
+        <Alert
+          severity="error"
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => {
+                if (activeUtteranceId !== null) void showEvidenceUtterance(activeUtteranceId)
+              }}
+            >
+              再試行
+            </Button>
+          }
+        >
+          {sourceError}
+        </Alert>
+      )}
+
+      {sourceUtterances !== null && activeUtteranceId !== null && (
+        <Paper
+          id={`interview-transcript-${report.session_id}`}
+          role="region"
+          aria-label="面接発話ログ"
+          sx={{ bgcolor: paperBg, border: paperBorder, p: 2, borderRadius: 2 }}
+        >
+          <Typography sx={{ color: textPrimary, fontWeight: 700, mb: 1.5 }}>発話ログ</Typography>
+          {sourceUtterances.length > 0 && !sourceUtterances.some((utterance) => utterance.id === activeUtteranceId) && (
+            <Alert severity="warning" sx={{ mb: 1.5 }}>該当発言が見つかりません。</Alert>
+          )}
+          {sourceUtterances.length === 0 ? (
+            <Typography variant="body2" sx={{ color: textMuted }}>この面接の発話ログはありません。</Typography>
+          ) : (
+            <Stack spacing={1} sx={{ maxHeight: 360, overflowY: 'auto' }}>
+              {sourceUtterances.map((utterance) => (
+                <Box
+                  key={utterance.id}
+                  id={utteranceElementId(report.session_id, utterance.id)}
+                  tabIndex={utterance.id === activeUtteranceId ? -1 : undefined}
+                  aria-current={utterance.id === activeUtteranceId ? 'location' : undefined}
+                  sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: utterance.role === 'ai' ? 'flex-start' : 'flex-end',
+                    borderRadius: 1,
+                    outline: utterance.id === activeUtteranceId
+                      ? `2px solid ${isDark ? '#8ab4f8' : '#1d4ed8'}`
+                      : 'none',
+                    p: utterance.id === activeUtteranceId ? 1 : 0,
+                  }}
+                >
+                  <Typography variant="caption" sx={{ fontWeight: 700, color: textMuted, mb: 0.25 }}>
+                    {utterance.role === 'ai' ? '面接官AI' : 'あなた'}
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      maxWidth: '95%',
+                      borderRadius: 1,
+                      px: 1.25,
+                      py: 0.75,
+                      bgcolor: utterance.role === 'ai'
+                        ? (isDark ? '#3c4043' : UI.tint)
+                        : (isDark ? 'rgba(138,180,248,0.12)' : 'rgba(29,78,216,0.08)'),
+                      color: textSecondary,
+                      lineHeight: 1.6,
+                      whiteSpace: 'pre-wrap',
+                      overflowWrap: 'anywhere',
+                    }}
+                  >
+                    {utterance.text}
+                  </Typography>
+                </Box>
+              ))}
+            </Stack>
+          )}
         </Paper>
       )}
 
@@ -261,4 +404,21 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
       )}
     </Stack>
   )
+}
+
+function parsePositiveNumberMap(value?: string | null): Record<string, number> {
+  const parsed = parseJsonSafe(value ?? undefined)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+
+  const result: Record<string, number> = {}
+  for (const [key, id] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof id === 'number' && Number.isSafeInteger(id) && id > 0) {
+      result[key] = id
+    }
+  }
+  return result
+}
+
+function utteranceElementId(sessionId: number, utteranceId: number): string {
+  return `interview-utterance-${sessionId}-${utteranceId}`
 }

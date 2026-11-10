@@ -55,8 +55,9 @@ func (s *InterviewService) CreateSession(userID uint, language string, interview
 	// 対応言語のホワイトリスト。以前は空文字しか弾いておらず、未知の値が
 	// 採点プロンプトへ生で入った（normalizeLanguage のコメント参照、#1600）。
 	language = normalizeLanguage(language)
+	// 面接官は男性のみ。未指定・不正値は male（声も male 側になる）。
 	if interviewerGender != "male" && interviewerGender != "female" {
-		interviewerGender = "female"
+		interviewerGender = "male"
 	}
 	session := &models.InterviewSession{
 		UserID:            userID,
@@ -244,11 +245,9 @@ func (s *InterviewService) ListSessions(userID uint, all bool, limit int, offset
 	return toSessionResponses(sessions), total, nil
 }
 
+// GetSessionDetail は面接詳細を返す。教員用レポートを含めるかは呼び出し元の実ロールで
+// サーバー側が決める（クライアント送信の値は使わない。#1814）。
 func (s *InterviewService) GetSessionDetail(userID uint, sessionID uint) (*InterviewDetailResponse, error) {
-	return s.GetSessionDetailWithRole(userID, sessionID, "student")
-}
-
-func (s *InterviewService) GetSessionDetailWithRole(userID uint, sessionID uint, role string) (*InterviewDetailResponse, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -268,12 +267,7 @@ func (s *InterviewService) GetSessionDetailWithRole(userID uint, sessionID uint,
 		}
 		report = nil
 	}
-	// 教員以外には教員用レポートを返さない
-	if report != nil && role != "teacher" {
-		sanitized := *report
-		sanitized.TeacherReportJSON = ""
-		report = &sanitized
-	}
+	report = s.redactTeacherReport(userID, report)
 	return &InterviewDetailResponse{
 		Session:    *toSessionResponse(session),
 		Utterances: utterances,
