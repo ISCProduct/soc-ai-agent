@@ -20,13 +20,15 @@ import (
 // 署名付き URL（手元で計算するだけ）と、ローカルのテスト用サーバーへのアップロードを確かめる。
 
 // isolateAWSEnv は、手元の AWS 設定や EC2 のメタデータに触れないようにする。
-// LocalStack などのカスタムエンドポイント（AWS_ENDPOINT_URL*）も無視させる。設定された環境では
-// 署名付き URL の宛先が変わり、AWS のホストを前提にした検証が落ちる（#2148 のレビュー）。
+// LocalStack などのカスタムエンドポイント（AWS_ENDPOINT_URL*）、FIPS・デュアルスタックの指定も無視させる。
+// 設定された環境では署名付き URL の宛先（ホスト）が変わり、AWS のホストを前提にした検証が落ちる（#2148 のレビュー）。
 func isolateAWSEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("AWS_ENDPOINT_URL", "")
 	t.Setenv("AWS_ENDPOINT_URL_S3", "")
 	t.Setenv("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", "true")
+	t.Setenv("AWS_USE_FIPS_ENDPOINT", "false")
+	t.Setenv("AWS_USE_DUALSTACK_ENDPOINT", "false")
 	t.Setenv("AWS_CONFIG_FILE", t.TempDir()+"/none")
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", t.TempDir()+"/none")
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
@@ -68,6 +70,10 @@ func TestNewS3UploadService_Config(t *testing.T) {
 			}
 			if svc.bucket != tc.wantBucket || svc.region != tc.wantRegion || svc.client == nil || svc.uploader == nil {
 				t.Errorf("svc = bucket %q region %q client %v uploader %v", svc.bucket, svc.region, svc.client != nil, svc.uploader != nil)
+			}
+			// フィールドに入れただけでなく、実際の S3 クライアントにリージョンが効いていること（#2148 のレビュー）
+			if got := svc.client.Options().Region; got != tc.wantRegion {
+				t.Errorf("S3 クライアントのリージョン = %q, want %q", got, tc.wantRegion)
 			}
 		})
 	}
@@ -157,6 +163,8 @@ func TestUploadFile_ReturnsKeyAndURL(t *testing.T) {
 		t.Fatalf("リクエスト数 = %d", len(*got))
 	}
 	r := (*got)[0]
+	// 本文は完全一致ではなく Contains で見る。SDK はチェックサム付きの chunked 形式で送ることがあり、
+	// その枠の付き方は SDK のバージョンで変わりうるため（中身が含まれていることだけを確かめる）。
 	if r.method != http.MethodPut || r.path != "/b1/resumes/9/doc.pdf" || r.contentType != "application/pdf" || !strings.Contains(r.body, "%PDF-1.4") {
 		t.Errorf("送ったリクエスト = %+v", r)
 	}
@@ -174,4 +182,24 @@ func TestUploadFile_ErrorFromS3(t *testing.T) {
 	if key != "" || publicURL != "" {
 		t.Errorf("失敗したのに key/url を返した: %q %q", key, publicURL)
 	}
+}
+
+// 退会時の PII 削除で使う。成功時は対象のキーへ DELETE を送り、失敗はエラーとして返す（#2148 のレビュー）。
+func TestDeleteObject(t *testing.T) {
+	t.Run("成功", func(t *testing.T) {
+		svc, got := newLocalS3Service(t, http.StatusNoContent, "")
+		if err := svc.DeleteObject(context.Background(), "interview-videos/1/a.webm"); err != nil {
+			t.Fatalf("DeleteObject: %v", err)
+		}
+		if len(*got) != 1 || (*got)[0].method != http.MethodDelete || (*got)[0].path != "/b1/interview-videos/1/a.webm" {
+			t.Errorf("送ったリクエスト = %+v", *got)
+		}
+	})
+	t.Run("S3 のエラー", func(t *testing.T) {
+		svc, _ := newLocalS3Service(t, http.StatusForbidden,
+			`<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>`)
+		if err := svc.DeleteObject(context.Background(), "k"); err == nil || !strings.Contains(err.Error(), "s3 delete") {
+			t.Fatalf("err = %v", err)
+		}
+	})
 }
