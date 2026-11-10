@@ -107,15 +107,35 @@ func lookupPricing(model string) pricingMatch {
 			}
 		}
 	}
-	if m.basis == PriceBasisListed && !isSameModel(lower, m.key) {
+	// 公開価格・推定値のどちらでも、一致したのが別モデルなら inherited にする（推定値の表の
+	// gpt-5.2 に gpt-5.2-mini が当たる場合も、モデル自身の単価ではない。#2151 のレビュー）
+	if m.basis != PriceBasisUnknown && !isSameModel(lower, m.key) {
 		m.basis = PriceBasisInherited
 	}
 	return m
 }
 
-// isSameModel は、単価表のキーとモデル名が同じモデル（そのもの・日付付きの版・":" 付きの派生名）かを返す。
+// isSameModel は、単価表のキーとモデル名が同じモデルかを返す。同じモデルとみなすのは、
+//   - 名前がそのまま一致する
+//   - キーの後ろが「- と4桁の数字」で始まる版（gpt-4o-2024-08-06、gpt-4-0613、gpt-3.5-turbo-1106-preview）
+//   - キーの後ろが ":" の派生名
+//
+// 4桁にしているのは、gpt-4-32k のような別モデル（数字が2桁）や、o3-mini・gpt-4-turbo のような
+// 別モデル（数字で始まらない）を、同じモデルの版と取り違えないため（#2151 のレビュー）。
 func isSameModel(lowerModel, key string) bool {
-	return lowerModel == key || strings.HasPrefix(lowerModel, key+"-20") || strings.HasPrefix(lowerModel, key+":")
+	if lowerModel == key || strings.HasPrefix(lowerModel, key+":") {
+		return true
+	}
+	rest, ok := strings.CutPrefix(lowerModel, key+"-")
+	if !ok || len(rest) < 4 {
+		return false
+	}
+	for _, c := range rest[:4] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return len(rest) == 4 || rest[4] == '-'
 }
 
 // PriceBasis はモデル名から単価の根拠（PriceBasisListed / Estimated / Inherited / Unknown）を返す。
@@ -138,17 +158,27 @@ func warnPricingOnce(model string, m pricingMatch) {
 	case PriceBasisEstimated:
 		log.Printf("[APICost] %q は推定単価で計算しています（実価格を確認したら単価表へ移すか %s で上書きしてください）", name, modelPricingOverrideEnv)
 	case PriceBasisInherited:
-		log.Printf("[APICost] %q は単価表に無いため、別モデル %q の単価で計算しています（%s で単価を登録してください）", name, m.key, modelPricingOverrideEnv)
+		log.Printf("[APICost] %q は単価表に無いため、別モデル %q の単価（%s）で計算しています（%s で単価を登録してください）", name, m.key, tableNameOf(m.key), modelPricingOverrideEnv)
 	case PriceBasisUnknown:
 		log.Printf("[APICost] %q は単価表に無いため %s の単価で計算しています（%s で単価を登録してください）", name, unknownFallbackModel, modelPricingOverrideEnv)
 	}
 }
 
+// tableNameOf は、キーがどちらの表の単価かをログ用に返す。
+func tableNameOf(key string) string {
+	if _, ok := modelPricing[key]; ok {
+		return "公開価格"
+	}
+	return "推定値"
+}
+
 // isAudioPricedModel は、トークン単価ではなく音声の単価（分・文字数）で課金するモデルかを返す。
 // 内訳でこれらに「単価未登録」などのバッジを付けないため（#2151 のレビュー）。
+// 名前で判定するので、音声のモデル名の付け方（transcribe / whisper / tts）に頼っている。
 func isAudioPricedModel(model string) bool {
 	lower := strings.ToLower(model)
-	return strings.Contains(lower, "transcribe") || strings.Contains(lower, "whisper") || strings.HasPrefix(lower, "tts")
+	return strings.Contains(lower, "transcribe") || strings.Contains(lower, "whisper") ||
+		strings.HasPrefix(lower, "tts") || strings.Contains(lower, "-tts") // gpt-4o-mini-tts など
 }
 
 // 音声経路の単価（#1294 DesignDoc §3.4）。
@@ -225,8 +255,9 @@ func applyModelPricingOverride(raw string) {
 	}
 	for model, rates := range override {
 		key := strings.ToLower(strings.TrimSpace(model))
-		if key == "" || len(rates) != 2 || rates[0] < 0 || rates[1] < 0 {
-			log.Printf("[APICost] %s の %q を無視しました（[入力単価, 出力単価] の非負の2要素が必要）", modelPricingOverrideEnv, model)
+		// 入力・出力の両方が0の単価は受け付けない。0円で黙って集計されると、請求額とのずれに気づけない（#2151 のレビュー）
+		if key == "" || len(rates) != 2 || rates[0] < 0 || rates[1] < 0 || (rates[0] == 0 && rates[1] == 0) {
+			log.Printf("[APICost] %s の %q を無視しました（[入力単価, 出力単価] の非負の2要素で、両方0は不可）", modelPricingOverrideEnv, model)
 			continue
 		}
 		modelPricing[key] = [2]float64{rates[0], rates[1]}
@@ -474,7 +505,7 @@ type ModelCostSummary struct {
 	TotalCostUSD float64 `json:"total_cost_usd"`
 	TotalTokens  int64   `json:"total_tokens"`
 	CallCount    int64   `json:"call_count"`
-	// PriceBasis は単価の根拠（listed / estimated / unknown, #2004）。画面で「推定」「単価未登録」を示す。
+	// PriceBasis は単価の根拠（listed / estimated / inherited / unknown, #2004）。画面で「推定」「別モデル」「単価未登録」を示す。
 	// 金額が0のモデル（ローカル推論など、単価を使っていないもの）は空にする。
 	PriceBasis string `json:"price_basis,omitempty"`
 }
@@ -534,6 +565,10 @@ func (s *APICostService) GetModelBreakdown(since time.Time) ([]ModelCostSummary,
 // summaryPriceBasis は内訳の1行に付ける単価の根拠を返す。金額が0の行（ローカル推論など、
 // 単価を使っていない行）は空にする。単価表に無いローカルのモデル名が「単価未登録」と出ないようにするため。
 // 音声の単価（分・文字数）で課金するモデルも、トークン単価表を使っていないので空にする（#2151 のレビュー）。
+//
+// 根拠は記録した時点ではなく、集計した時点の単価表で決まる。AI_MODEL_PRICING_JSON を変えて再起動すると、
+// 過去の期間の行も新しい根拠で表示される。記録時の根拠を残すには api_call_logs に列が要るので、
+// 単価表を確定させる後続の対応（Issue #2004 の残り）で扱う。
 func summaryPriceBasis(model string, totalCostUSD float64) string {
 	if totalCostUSD <= 0 || isAudioPricedModel(model) {
 		return ""

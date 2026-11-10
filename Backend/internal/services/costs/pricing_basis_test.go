@@ -20,12 +20,22 @@ func TestPriceBasis(t *testing.T) {
 		{"gpt-5.2", PriceBasisEstimated},
 		{"gpt-5.2-2025-12-11", PriceBasisEstimated},
 		{"gpt-4o-2024-08-06", PriceBasisListed}, // 日付付きの版は同じモデル
+		// 日付の無い版名（- と4桁の数字）も同じモデル（#2151 のレビュー）
+		{"gpt-4-0613", PriceBasisListed},
+		{"gpt-4-1106-preview", PriceBasisListed},
+		{"gpt-3.5-turbo-0125", PriceBasisListed},
+		{"gpt-3.5-turbo-1106", PriceBasisListed},
+		// 数字が4桁でない・数字で始まらないものは別モデル
+		{"gpt-4-32k", PriceBasisInherited},
+		{"gpt-4-turbox", PriceBasisInherited},
 		{"gpt-4.1-mini", PriceBasisUnknown},
 		{"totally-new-model", PriceBasisUnknown},
 		// 前方一致で別モデルの単価に当たったものは、公開価格と区別する（#2151 のレビュー）
 		{"gpt-4o-realtime-preview", PriceBasisInherited},
 		{"o3-mini", PriceBasisInherited},
 		{"gpt-4o-mini-transcribe", PriceBasisInherited},
+		// 推定値の表でも、別モデルに当たったものは inherited（#2151 のレビュー）
+		{"gpt-5.2-mini", PriceBasisInherited},
 	}
 	for _, tc := range cases {
 		if got := PriceBasis(tc.model); got != tc.want {
@@ -105,6 +115,7 @@ func TestSummaryPriceBasis(t *testing.T) {
 		{"gpt-4o-mini-transcribe", 1.0, ""},
 		{"whisper-1", 1.0, ""},
 		{"tts-1", 1.0, ""},
+		{"gpt-4o-mini-tts", 1.0, ""}, // -tts を含む名前も音声のモデル（#2151 のレビュー）
 	}
 	for _, tc := range cases {
 		if got := summaryPriceBasis(tc.model, tc.cost); got != tc.want {
@@ -163,5 +174,34 @@ func TestUnknownModelFollowsOverriddenGPT4o(t *testing.T) {
 
 	if got := calculateCost("openai", "totally-new-model", 1_000_000, 1_000_000); got != 5.0 {
 		t.Errorf("未登録モデルが上書き後の gpt-4o 単価で計算されていない: %v", got)
+	}
+}
+
+// 入力・出力の両方が0の上書きは受け付けない（0円で黙って集計しない。#2151 のレビュー）。
+func TestApplyModelPricingOverride_RejectsZeroPrices(t *testing.T) {
+	savedListed, savedEstimated := maps.Clone(modelPricing), maps.Clone(estimatedPricing)
+	t.Cleanup(func() { modelPricing, estimatedPricing = savedListed, savedEstimated })
+	buf := captureCostLog(t)
+
+	before := modelPricing["gpt-4o"]
+	applyModelPricingOverride(`{"gpt-4o":[0,0],"gpt-4o-mini":[0,0.6]}`)
+
+	if got := modelPricing["gpt-4o"]; got != before {
+		t.Errorf("両方0の上書きが入った: %v", got)
+	}
+	if got := modelPricing["gpt-4o-mini"]; got != [2]float64{0, 0.6} {
+		t.Errorf("片方だけ0の上書きは受け付ける: %v", got)
+	}
+	if !strings.Contains(buf.String(), `"gpt-4o" を無視しました`) {
+		t.Errorf("無視したことがログに出ていない: %q", buf.String())
+	}
+}
+
+// 推定値の表の別モデルに当たったときは、推定値であることもログで分かる。
+func TestWarnPricingOnce_InheritedFromEstimated(t *testing.T) {
+	buf := captureCostLog(t)
+	calculateCost("openai", "gpt-5.2-mini-warn-test", 100, 100)
+	if got := buf.String(); !strings.Contains(got, `別モデル "gpt-5.2" の単価（推定値）`) {
+		t.Errorf("推定値の別モデルの単価であることがログで分からない: %q", got)
 	}
 }
