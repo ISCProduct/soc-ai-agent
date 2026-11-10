@@ -223,6 +223,7 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     renderHook(() => useInterviewSession({
       user,
       interviewCompany,
+      companyQuestionHints: [],
       selectedPosition,
       media,
       status: 'connected',

@@ -89,6 +89,70 @@ func EchoUserAuth(userSecret string, access auth.UserAccessGuard, orgs ...Organi
 	}
 }
 
+// EchoOptionalUserAuth は X-User-Token があれば実行者を載せ、無ければ素通りする（#1531）。
+//
+// ES添削は未ログインでも使える経路として開いている（認証を必須にすると、
+// ログイン前に試してもらう導線が壊れる）。一方で結果を履歴として残すには
+// 実行者が要る。そこで「あれば使う、無ければ従来どおり」にする。
+//
+// 壊れたトークン・退会済みユーザーは 401 ではなく「未ログイン」として扱う。
+// ここで弾くと、トークンの期限が切れただけで添削そのものが使えなくなる。
+// 本人として保存されないだけで、機能は従来どおり動く方を選ぶ。
+//
+// 必須認証が要る経路には使わないこと。EchoUserAuth と違って素通りする。
+func EchoOptionalUserAuth(userSecret string, access auth.UserAccessGuard, orgs ...OrganizationIDResolver) echo.MiddlewareFunc {
+	var resolver OrganizationIDResolver
+	if len(orgs) > 0 {
+		resolver = orgs[0]
+	}
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			token := c.Request().Header.Get("X-User-Token")
+			if userSecret == "" || token == "" {
+				return next(c)
+			}
+			userID, _, err := middleware.ParseJWT(token, userSecret)
+			// userID == 0 も弾く。ParseJWT は失敗時に 0 を返す約束だが、
+			// その内部規約に依存せずここで閉じる（依存すると、約束が変わったときに
+			// 誰のものか分からない実行者が載る）。
+			if err != nil || userID == 0 {
+				return next(c)
+			}
+			if access != nil {
+				if err := access.EnsureActiveUser(userID); err != nil {
+					return next(c)
+				}
+			}
+			var orgID uint
+			if resolver != nil {
+				resolved, err := resolver.ResolveOrganizationID(userID)
+				if err != nil || resolved == 0 {
+					// 組織が確定しない実行者は載せない。載せると、呼び出し側が
+					// 「本人は分かったが所属は分からない」状態で保存先を決めることになり、
+					// 既定組織へ倒すなどして別学園の行として永続化されうる（#1531）。
+					// 無効化された組織・一時的な DB 障害もここに入る。
+					return next(c)
+				}
+				orgID = resolved
+			}
+			ctx := context.WithValue(c.Request().Context(), middleware.UserIDContextKey, userID)
+			if orgID > 0 {
+				ctx = context.WithValue(ctx, middleware.OrganizationIDContextKey, orgID)
+				// テナントを跨いだアクセスは本人の所属として扱わない。
+				// 他学園のサブドメインから送られた添削が本人の学園の履歴に混ざると、
+				// 帰属が追えなくなる（EchoUserAuth は同じ状況を 403 にしている）。
+				if tenantOrgID, ok := middleware.TenantOrganizationIDFromContext(ctx); ok && tenantOrgID != orgID {
+					return next(c)
+				}
+			}
+			// AI利用量の配賦先も載せる（#1294）。未ログインのときは従来どおり NULL のまま。
+			ctx = usagectx.WithActor(ctx, userID, orgID)
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	}
+}
+
 // EchoTenantResolver は X-Tenant-Slug ヘッダー(学園サブドメインラベル)から組織を解決し、
 // リクエストコンテキストへ載せるEcho nativeミドルウェア。
 // ヘッダー未指定の場合は何もしない（テナント概念のないアクセスとの後方互換のため）。
@@ -113,15 +177,29 @@ func EchoTenantResolver(orgs *organization.OrganizationService) echo.MiddlewareF
 // EchoAdminAuth はX-Admin-Email / X-Admin-Tokenヘッダーを検証するEcho nativeミドルウェアを返す。
 // 検証済み管理者のユーザーIDを AdminUserIDContextKey へ格納する(後続のEchoAdminSchoolScope等が利用する)。
 // EchoStaticSecretAuth はログインユーザーを介さないサービス間呼び出し（CI等）向けの
-// 単純な共有シークレット認証。X-Admin-Secretヘッダーの値をadminSecretと定数時間比較する。
-func EchoStaticSecretAuth(adminSecret string) echo.MiddlewareFunc {
+// 単純な共有シークレット認証。X-Admin-Secretヘッダーの値をserviceSecretと定数時間比較する。
+//
+// ここで使うのは SERVICE_SECRET であって ADMIN_SECRET ではない(#1158)。
+// ADMIN_SECRET は管理者/職員トークンのHMAC鍵で、漏れると /api/admin/* の全権限が取れる。
+// CIは既知の値でこのエンドポイントを叩く必要があるため、両者を同じ値にすると
+// HMAC鍵の露出面がCIまで広がる。未設定時は503でfail-closeし、ADMIN_SECRETへは
+// フォールバックしない（フォールバックすると分離した意味が無くなる）。
+func EchoStaticSecretAuth(serviceSecret string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			if adminSecret == "" {
-				return echo.NewHTTPError(http.StatusServiceUnavailable, "Service Unavailable: admin authentication not configured")
+			if serviceSecret == "" {
+				// 設定不備の503であることを本文のコードで名乗る。
+				// api.* は ALB 直結(infra/terraform/environments/prod/main.tf の
+				// aws_route53_record.backend)なので、ALB が healthy target ゼロで返す503も
+				// 同じ 503 として CI に見える。CI はこのコードの有無で
+				// 「設定不備(放置しても直らない)」と「停止中(次回で回収される)」を分ける。
+				return echo.NewHTTPError(http.StatusServiceUnavailable, middleware.APIError{
+					Code: "SERVICE_SECRET_NOT_CONFIGURED",
+					Msg:  "Service Unavailable: service authentication not configured",
+				})
 			}
 			token := c.Request().Header.Get("X-Admin-Secret")
-			if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(adminSecret)) != 1 {
+			if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(serviceSecret)) != 1 {
 				return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 			}
 			return next(c)

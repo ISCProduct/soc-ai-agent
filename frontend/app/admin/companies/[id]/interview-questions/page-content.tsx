@@ -44,6 +44,7 @@ type Question = {
   position: string
   category: string
   question_text: string
+  evaluation_intent: string | null
   priority: number
   is_required: boolean
   created_at: string
@@ -54,6 +55,7 @@ type QuestionForm = {
   position: string
   category: string
   question_text: string
+  evaluation_intent: string
   priority: number
   is_required: boolean
 }
@@ -62,6 +64,7 @@ type GeneratedQuestion = {
   category: string
   position: string
   question_text: string
+  evaluation_intent?: string
   priority: number
   is_required: boolean
 }
@@ -70,6 +73,7 @@ const EMPTY_FORM: QuestionForm = {
   position: '',
   category: '志望動機',
   question_text: '',
+  evaluation_intent: '',
   priority: 0,
   is_required: false,
 }
@@ -124,7 +128,7 @@ export default function PageContent() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { fetchQuestions() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchQuestions() }, [id])
 
   const openCreate = () => {
     setEditingId(null)
@@ -138,6 +142,7 @@ export default function PageContent() {
       position: q.position,
       category: q.category,
       question_text: q.question_text,
+      evaluation_intent: q.evaluation_intent ?? '',
       priority: q.priority,
       is_required: q.is_required,
     })
@@ -308,6 +313,11 @@ export default function PageContent() {
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2" sx={{ lineHeight: 1.6 }}>{q.question_text}</Typography>
+                    {q.evaluation_intent && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                        観点: {q.evaluation_intent}
+                      </Typography>
+                    )}
                   </TableCell>
                   <TableCell>
                     {q.is_required && (
@@ -368,6 +378,18 @@ export default function PageContent() {
               multiline
               rows={3}
               placeholder="例: 直近のプロジェクトで最も難しかった技術的課題を教えてください。"
+            />
+            <TextField
+              label="評価したい観点（意図）"
+              value={form.evaluation_intent}
+              onChange={(e) => setForm(f => ({ ...f, evaluation_intent: e.target.value }))}
+              size="small"
+              fullWidth
+              multiline
+              rows={2}
+              inputProps={{ maxLength: 300 }}
+              placeholder="例: 困難に直面したとき、どう考えて粘り強く取り組んだか"
+              helperText={`AI面接官が深掘りの方向を決める参考にします。学生には伝えません（${form.evaluation_intent.length}/300字）`}
             />
             <TextField
               label="優先度（小さいほど先に使われる）"
@@ -439,6 +461,11 @@ export default function PageContent() {
                     <Chip label={`優先度 ${q.priority}`} size="small" variant="outlined" />
                   </Stack>
                   <Typography variant="body2">{q.question_text}</Typography>
+                  {q.evaluation_intent && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                      観点: {q.evaluation_intent}
+                    </Typography>
+                  )}
                 </Box>
               </Box>
             ))}

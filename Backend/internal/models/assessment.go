@@ -14,15 +14,19 @@ const (
 )
 
 type AssessmentTemplate struct {
-	ID          uint   `gorm:"primaryKey"`
-	SchoolID    *uint  // NULL は運営標準
-	Slug        string `gorm:"size:64"`
-	Title       string `gorm:"size:255"`
-	Description string
-	Version     int
-	IsStandard  bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID       uint  `gorm:"primaryKey"`
+	SchoolID *uint // NULL は運営標準
+	// OrganizationID は学校独自テンプレートのテナント境界（#1675）。運営標準は NULL。
+	OrganizationID *uint
+	Slug           string `gorm:"size:64"`
+	Title          string `gorm:"size:255"`
+	Description    string
+	Version        int
+	IsStandard     bool
+	DueAt          *time.Time // 受検期限。NULL は期限なし（#1675）
+	CreatedBy      *uint      // 作成した職員の users.id（監査用）
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type AssessmentQuestion struct {

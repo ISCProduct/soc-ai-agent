@@ -16,6 +16,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -26,6 +27,11 @@ import (
 	"Backend/internal/services/interview"
 	"Backend/internal/sttbench"
 )
+
+// exitCodeNoEvaluation は全ケースが API エラーで終わったモデルがあるときの終了コード。
+// 設定エラーの 2、キー未配布の 3 と分ける。go run 経由では 1 になるので、
+// 終了コードで判定するときはビルドしたバイナリを実行する。
+const exitCodeNoEvaluation = 4
 
 // parseHintsContext は `会社名|読み|職種|企業情報` を分解する。
 // 足りない要素は空文字。多すぎる場合、余りは企業情報へ寄せる
@@ -99,11 +105,14 @@ func main() {
 		fmt.Println("\n-dry-run のためAPIは呼びません")
 		return
 	}
-	if os.Getenv("OPENAI_API_KEY") == "" {
-		// キー無しでもツール自体は壊れない。CIやキー未配布の環境で
-		// 「実行できなかった」ことが分かるように終了コードを分ける。
-		fmt.Fprintln(os.Stderr, "\nOPENAI_API_KEY が未設定のため実APIの比較をスキップしました")
-		os.Exit(3)
+	if _, err := sttbench.APIConfigFromEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "\n音声推論先の設定エラー: %v\n", err)
+		if errors.Is(err, sttbench.ErrMissingOpenAIAPIKey) {
+			// キー無しでもツール自体は壊れない。CIやキー未配布の環境で
+			// 「実行できなかった」ことが分かるように終了コードを分ける。
+			os.Exit(3)
+		}
+		os.Exit(2)
 	}
 
 	modelList := strings.Split(*models, ",")
@@ -137,5 +146,12 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("\n結果を %s に書き出しました（リポジトリ外に置くこと）\n", *out)
+	}
+
+	// 全件 API エラーのモデルがある run を、スクリプトから成功と読まれないようにする。
+	// 調査できるように、結果を書き出してから終了する。
+	if unevaluated := sttbench.UnevaluatedModels(report); len(unevaluated) > 0 {
+		fmt.Fprintf(os.Stderr, "\n1件も評価できなかったモデル: %s\n", strings.Join(unevaluated, ", "))
+		os.Exit(exitCodeNoEvaluation)
 	}
 }

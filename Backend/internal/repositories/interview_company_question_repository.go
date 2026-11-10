@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"errors"
 
 	"gorm.io/gorm"
 )
@@ -31,6 +32,18 @@ func (r *InterviewCompanyQuestionRepository) FindByID(id uint) (*models.Intervie
 	var q models.InterviewCompanyQuestion
 	err := r.db.First(&q, id).Error
 	if err != nil {
+		return nil, err
+	}
+	return &q, nil
+}
+
+func (r *InterviewCompanyQuestionRepository) FindByIDForCompany(id, companyID uint) (*models.InterviewCompanyQuestion, error) {
+	var q models.InterviewCompanyQuestion
+	err := r.db.Where("id = ? AND company_id = ?", id, companyID).First(&q).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &q, nil

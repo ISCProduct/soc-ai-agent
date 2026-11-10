@@ -10,6 +10,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services/company"
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -119,6 +120,9 @@ func (c *AdminCompanyController) ConfirmCompanyInfo(ctx echo.Context) error {
 	}
 
 	result, err := c.infoFetcher.ConfirmAndSave(uint(id), &req)
+	if errors.Is(err, company.ErrInvalidPromptVersion) {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid prompt_version")
+	}
 	if err != nil {
 		return httpapi.InternalError(err)
 	}

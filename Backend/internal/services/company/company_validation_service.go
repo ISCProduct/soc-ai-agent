@@ -259,13 +259,14 @@ func (s *CompanyValidationService) validateWithWebSearch(ctx context.Context, qu
 			}
 		}
 
+		// 検索キーワードは学生・ゲストの入力。検索クエリになるので囲まずに整える（#1970 のレビュー）
 		prompt := fmt.Sprintf(`日本の実在企業かどうかだけを判定してください。推測で企業を作らないでください。
 検索対象: 「%s」
 
 次のJSONオブジェクトのみを返してください（説明文不要）:
 {"exists":true/false,"canonical_name":"正式な企業名（存在する場合）","evidence_urls":["公式サイト等のURL"],"confidence":"high|medium|low","description":"事業の1行説明"}
 
-exists=false の場合は canonical_name を空文字、evidence_urls を空配列にしてください。`, query)
+exists=false の場合は canonical_name を空文字、evidence_urls を空配列にしてください。`, shared.InlinePromptName(query))
 
 		text, err := s.openaiClient.WebSearchJSON(ctx, prompt, companyValidationMaxTok)
 		if err != nil {

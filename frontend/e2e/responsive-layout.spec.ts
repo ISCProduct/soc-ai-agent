@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
-import { setupAuth, TEST_USER } from './fixtures/auth'
+import { setupAuth, TEST_ADMIN, TEST_USER } from './fixtures/auth'
+import type { InterviewSession } from '../lib/interview'
 
 // 下部ナビが画面外へはみ出さないことの回帰テスト（UI監査 2026-09-21 / R1）。
 //
@@ -126,6 +127,53 @@ test.describe('レスポンシブ: 結果画面の列揃え', () => {
       ).toBeLessThanOrEqual(1)
     }
   })
+
+  // エラー・0件は一覧と別ラッパーだった。maxWidth と padding を同じボックスに置くと
+  // 分析カードが広幅で 32px(sm) / 16px(xs) 右へずれる。一覧のカードと左端を比べる。
+  test('エラー時の分析カードが一覧と同じ列に揃う', async ({ page }) => {
+    const ANALYSIS = {
+      score_comment: 'テスト用の分析コメントです。',
+      scores: { job_score: 0.8, interest_score: 0.7, aptitude_score: 0.6, future_score: 0.5 },
+    }
+    await setupAuth(page, TEST_USER)
+    await stubApi(page)
+    await page.route('**/api/chat/analysis*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ANALYSIS) }),
+    )
+    await page.route('**/api/chat/recommendations*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RECOMMENDATIONS) }),
+    )
+
+    const scoreHeading = page.getByText('どこまで聞けているか', { exact: true })
+    // sm の余白 32px と xs の余白 16px。縦を十分に取り、一覧側のスクロールバーで幅が減らないようにする。
+    for (const width of [2000, 500]) {
+      await page.setViewportSize({ width, height: 2400 })
+      await page.goto('/results?user_id=1&session_id=layout-check')
+      await expect(scoreHeading).toBeVisible()
+      const listBox = await scoreHeading.boundingBox()
+
+      await page.unroute('**/api/chat/recommendations*')
+      await page.route('**/api/chat/recommendations*', (route) =>
+        route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }),
+      )
+      await page.goto('/results?user_id=1&session_id=layout-check')
+      await expect(page.getByText('企業データの取得に失敗しました')).toBeVisible()
+      await expect(scoreHeading).toBeVisible()
+      const errorBox = await scoreHeading.boundingBox()
+
+      expect(listBox, `${width}px: 一覧の分析カードが取得できない`).not.toBeNull()
+      expect(errorBox, `${width}px: エラー時の分析カードが取得できない`).not.toBeNull()
+      expect(
+        Math.abs((listBox?.x ?? 0) - (errorBox?.x ?? 0)),
+        `${width}px で一覧(x=${listBox?.x})とエラー(x=${errorBox?.x})の分析カード左端がずれている`,
+      ).toBeLessThanOrEqual(1)
+
+      await page.unroute('**/api/chat/recommendations*')
+      await page.route('**/api/chat/recommendations*', (route) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RECOMMENDATIONS) }),
+      )
+    }
+  })
 })
 
 // AI面接・企業選択画面の列ずれの回帰テスト（SOCAIAGENT-443 / #1784）。
@@ -163,6 +211,379 @@ test.describe('レスポンシブ: AI面接・企業選択画面の列揃え', (
         Math.abs((row?.x ?? 0) - (h?.x ?? 0)),
         `${width}px でヘッダー行(x=${row?.x})と見出し(x=${h?.x})の左端がずれている`,
       ).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
+// 面接履歴画面の列ずれ（SOCAIAGENT-444 / #1781）。
+//
+// ヘッダーの中身は全幅の左寄せ、本文は maxWidth:1100 で中央寄せのため、
+// 広い画面ほどヘッダー見出しとトレンド・履歴列がずれる。
+// Controller.List の応答形（sessions/total/page/limit）と
+// Controller.GetTrend の応答形（points）に合わせてモックする。
+test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
+  // ヘッダー行・トレンド・履歴一覧の左端 = max(0, (画面幅 - 1100) / 2) + 左右余白（md 以上 32px / md 未満 16px）。
+  // 例: 2000px → 482 / 1440px → 202 / 1024px → 32 / 768px → 16。列幅の定数を変えたら、この式に従って変わる。
+  const SESSION_RESPONSE: { sessions: InterviewSession[]; total: number; page: number; limit: number } = {
+    sessions: [{
+      id: 1,
+      user_id: 1,
+      status: 'finished',
+      language: 'ja',
+      started_at: '2026-10-01T01:00:00Z',
+      ended_at: '2026-10-01T01:30:00Z',
+      estimated_cost_usd: 0.123,
+      template_version: 'v1',
+      created_at: '2026-10-01T01:00:00Z',
+      updated_at: '2026-10-01T01:30:00Z',
+    }],
+    total: 1,
+    page: 1,
+    limit: 10,
+  }
+
+  async function mockInterviewHistoryApi(
+    page: import('@playwright/test').Page,
+    sessions: InterviewSession[],
+    total: number,
+  ) {
+    // stubApi より後の route が優先される。
+    await page.route('**/api/interviews**', (route) => {
+      const { pathname } = new URL(route.request().url())
+      if (pathname === '/api/interviews') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ ...SESSION_RESPONSE, sessions, total }),
+        })
+      }
+      if (pathname === '/api/interviews/trend') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ points: [] }),
+        })
+      }
+      return route.fallback()
+    })
+  }
+
+  async function measureAlignment(
+    page: import('@playwright/test').Page,
+    historyContent: 'session' | 'empty',
+  ) {
+    const headerRow = page.getByTestId('history-header-row')
+    const trend = page.locator('.MuiPaper-root').filter({ hasText: 'パフォーマンストレンド' }).first()
+    const backButton = page.getByRole('button', { name: '面接画面へ戻る' })
+    const listContent = historyContent === 'session'
+      ? page.locator('.MuiPaper-root').filter({
+          has: page.getByText('面接セッション #1', { exact: true }),
+        }).first()
+      : page.locator('.MuiPaper-root').filter({ hasText: 'まだ面接の練習記録がありません' }).first()
+
+    await expect(headerRow).toBeVisible()
+    await expect(trend).toBeVisible()
+    await expect(backButton).toBeVisible()
+    await expect(listContent).toBeVisible()
+
+    const headerRowBox = await headerRow.boundingBox()
+    const trendBox = await trend.boundingBox()
+    const backButtonBox = await backButton.boundingBox()
+    const listBox = await listContent.boundingBox()
+    expect(headerRowBox, 'ヘッダー行が取得できない').not.toBeNull()
+    expect(trendBox, 'トレンドが取得できない').not.toBeNull()
+    expect(backButtonBox, '戻るボタンが取得できない').not.toBeNull()
+    expect(listBox, '履歴一覧または空状態が取得できない').not.toBeNull()
+    expect(Math.abs(headerRowBox!.width - trendBox!.width), `${page.viewportSize()!.width}px: ヘッダー列と本文列の幅が違う`).toBeLessThanOrEqual(1)
+
+    return {
+      width: page.viewportSize()!.width,
+      headerRowX: headerRowBox!.x,
+      trendX: trendBox!.x,
+      listX: listBox!.x,
+      trendDifference: Math.abs(headerRowBox!.x - trendBox!.x),
+      listDifference: Math.abs(headerRowBox!.x - listBox!.x),
+      backButtonDifference: Math.abs(
+        backButtonBox!.x + backButtonBox!.width - trendBox!.x - trendBox!.width,
+      ),
+    }
+  }
+
+  // 詳細パネルの横はみ出し（SOCAIAGENT-468 / #1863）。
+  //
+  // AIの生成文に空白を含まない長い文字列（URL など）が混じると、既定の
+  // overflow-wrap では折り返さずページ全体が横に伸びる。#1863 の実測では
+  // 98文字の URL ひとつで 1024px のとき scrollWidth が 1106 になっていた。
+  // 列揃えの検査は帯と本文の左端しか見ないので、この崩れは捕まらない。
+  //
+  // トレンドも3点返して recharts の ResponsiveContainer を実際に描かせる。
+  // 空配列だとチャートの描画経路を通らず、はみ出しを見落とす。
+  test('詳細パネルに空白なしの長文があってもページが横にはみ出さない', async ({ page }) => {
+    const LONG_URL = `https://example.com/${'a'.repeat(70)}`
+    const NO_SPACE_640 = 'あ'.repeat(640)
+    const REPORT = {
+      session_id: 1,
+      summary_text: `今回の面接の要約です。参考資料: ${LONG_URL}`,
+      scores_json: JSON.stringify({ logic: 4, specificity: 3 }),
+      evidence_json: JSON.stringify({ logic: LONG_URL }),
+      strengths_json: JSON.stringify([LONG_URL]),
+      improvements_json: JSON.stringify([NO_SPACE_640]),
+      teacher_report_json: JSON.stringify({
+        overall_comment: NO_SPACE_640,
+        coaching_points: [LONG_URL],
+        next_steps: [NO_SPACE_640],
+        detailed_evidence: { logic: NO_SPACE_640 },
+      }),
+      created_at: '2026-10-01T01:30:00Z',
+      updated_at: '2026-10-01T01:30:00Z',
+    }
+    const TREND_POINTS = [1, 2, 3].map((n) => ({
+      session_id: n,
+      created_at: `2026-10-0${n}T01:00:00Z`,
+      logic: 3,
+      specificity: 4,
+      ownership: 3,
+      communication: 4,
+      enthusiasm: 3,
+    }))
+
+    // 教員用レポートはサーバーが実ロールで返すか決める(#1814)。教員として見る。
+    await setupAuth(page, { ...TEST_USER, is_staff: true })
+    await stubApi(page)
+    await page.route('**/api/interviews**', (route) => {
+      const { pathname } = new URL(route.request().url())
+      const json = (body: unknown) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+      if (pathname === '/api/interviews') return json({ ...SESSION_RESPONSE })
+      if (pathname === '/api/interviews/trend') return json({ points: TREND_POINTS })
+      if (pathname === '/api/interviews/1') {
+        return json({ session: SESSION_RESPONSE.sessions[0], utterances: [], report: REPORT })
+      }
+      return route.fallback()
+    })
+
+    const overflows: Array<{ width: number; scrollWidth: number; clientWidth: number }> = []
+    for (const width of [2000, 1440, 1024, 900, 768, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/interview/history')
+      await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
+      await page.getByText('面接セッション #1', { exact: true }).click()
+      // 詳細パネルが開いたこと。教員用レポートまで出てから測る。
+      await expect(page.getByText('教員用詳細レポート', { exact: true })).toBeVisible({ timeout: 15000 })
+
+      const box = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+      overflows.push({ width, ...box })
+    }
+    // 幅ごとに fail-fast せず、全幅を測ってからまとめて判定する。
+    expect(
+      overflows.filter((o) => o.scrollWidth > o.clientWidth),
+      `横にはみ出した幅: ${JSON.stringify(overflows)}`,
+    ).toEqual([])
+  })
+
+  for (const historyContent of ['session', 'empty'] as const) {
+    test(`${historyContent === 'session' ? '履歴あり' : '空状態'}でもヘッダー・本文の左端が揃う`, async ({ page }) => {
+      await setupAuth(page, TEST_USER)
+      await stubApi(page)
+      await mockInterviewHistoryApi(
+        page,
+        historyContent === 'session' ? SESSION_RESPONSE.sessions : [],
+        historyContent === 'session' ? 1 : 0,
+      )
+
+      const measurements: Array<Awaited<ReturnType<typeof measureAlignment>>> = []
+      for (const width of [2000, 1440, 1024, 768, 390, 320]) {
+        await page.setViewportSize({ width, height: 900 })
+        await page.goto('/interview/history')
+        await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
+        await expect(
+          historyContent === 'session'
+            ? page.getByText('面接セッション #1', { exact: true })
+            : page.getByText('まだ面接の練習記録がありません'),
+        ).toBeVisible({ timeout: 15000 })
+        const measurement = await measureAlignment(page, historyContent)
+        const band = page.locator('header')
+        await expect(band).toHaveCount(1)
+        const bandBox = await band.boundingBox()
+        expect(bandBox, `${width}px: ヘッダー帯が取得できない`).not.toBeNull()
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth, `${width}px: 横方向にはみ出している`).toBeLessThanOrEqual(clientWidth)
+        expect(Math.abs(bandBox!.width - clientWidth), `${width}px: ヘッダー帯が全幅ではない`).toBeLessThanOrEqual(1)
+        measurements.push(measurement)
+      }
+
+      const misaligned = measurements.filter(
+        ({ trendDifference, listDifference, backButtonDifference }) =>
+          trendDifference > 1 ||
+          listDifference > 1 ||
+          backButtonDifference > 1,
+      )
+      expect(
+        misaligned,
+        '1pxを超えてずれている幅（見出し・トレンド・履歴の左端、および戻るボタン・列の右端）',
+      ).toEqual([])
+    })
+  }
+
+  test('教員モードのチップが見出しと同じ行に収まり、戻るボタンも列の右端に揃う', async ({ page }) => {
+    await setupAuth(page, { ...TEST_USER, is_staff: true })
+    await stubApi(page)
+    await mockInterviewHistoryApi(page, [], 0)
+
+    for (const width of [2000, 1440, 1024, 768, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/interview/history')
+      await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
+      await expect(page.getByText('まだ面接の練習記録がありません')).toBeVisible({ timeout: 15000 })
+
+      const headerRow = page.getByTestId('history-header-row')
+      const heading = page.getByRole('heading', { name: '面接履歴', exact: true })
+      const teacherChip = page.getByText('教員モード', { exact: true })
+      const backButton = page.getByRole('button', { name: '面接画面へ戻る' })
+      const trend = page.locator('.MuiPaper-root').filter({ hasText: 'パフォーマンストレンド' }).first()
+      await expect(headerRow).toBeVisible()
+      await expect(teacherChip).toBeVisible()
+
+      const headerRowBox = await headerRow.boundingBox()
+      const headingBox = await heading.boundingBox()
+      const chipBox = await teacherChip.boundingBox()
+      const backButtonBox = await backButton.boundingBox()
+      const trendBox = await trend.boundingBox()
+      expect(headerRowBox, `${width}px: ヘッダー行が取得できない`).not.toBeNull()
+      expect(headingBox, `${width}px: 見出しが取得できない`).not.toBeNull()
+      expect(chipBox, `${width}px: 教員モードのチップが取得できない`).not.toBeNull()
+      expect(backButtonBox, `${width}px: 戻るボタンが取得できない`).not.toBeNull()
+      expect(trendBox, `${width}px: トレンドが取得できない`).not.toBeNull()
+      expect(
+        Math.abs(headingBox!.y + headingBox!.height / 2 - (chipBox!.y + chipBox!.height / 2)),
+        `${width}px: 教員モードのチップが見出しと同じ行にない`,
+      ).toBeLessThanOrEqual(1)
+      expect(
+        Math.abs(backButtonBox!.x + backButtonBox!.width - trendBox!.x - trendBox!.width),
+        `${width}px: 戻るボタンが列の右端に揃っていない`,
+      ).toBeLessThanOrEqual(1)
+      const band = page.locator('header')
+      await expect(band).toHaveCount(1)
+      const bandBox = await band.boundingBox()
+      expect(bandBox, `${width}px: ヘッダー帯が取得できない`).not.toBeNull()
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+      expect(scrollWidth, `${width}px: 横方向にはみ出している`).toBeLessThanOrEqual(clientWidth)
+      expect(Math.abs(bandBox!.width - clientWidth), `${width}px: ヘッダー帯が全幅ではない`).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
+// ES添削画面の列ずれ（#1783）。
+// ヘッダーの帯は全幅の左寄せ、本文は maxWidth で中央寄せだったため、
+// 広い画面ほど見出しと入力欄の左端がずれる。帯は全幅のまま、中身だけ本文と同じ列に入れる。
+test.describe('レスポンシブ: ES添削画面の列揃え', () => {
+  test('ヘッダーと本文の左端が揃い、戻るボタンは列の右端に揃う', async ({ page }) => {
+    await setupAuth(page, TEST_USER)
+    await stubApi(page)
+
+    for (const width of [2000, 1440, 1024, 768]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/es-rewrite')
+      await expect(page.getByText('ES添削・リライト', { exact: true })).toBeVisible({ timeout: 15000 })
+
+      const headerRow = page.getByTestId('es-rewrite-header-row')
+      const modeButton = page.getByRole('button', { name: 'ES添削' })
+      const form = page.getByTestId('es-rewrite-form')
+      const backButton = page.getByRole('button', { name: 'ホームへ戻る' })
+      const band = page.getByTestId('es-rewrite-header')
+
+      await expect(headerRow).toBeVisible()
+      await expect(form).toBeVisible()
+
+      const headerRowBox = await headerRow.boundingBox()
+      const modeButtonBox = await modeButton.boundingBox()
+      const formBox = await form.boundingBox()
+      const backButtonBox = await backButton.boundingBox()
+      const bandBox = await band.boundingBox()
+      expect(headerRowBox, `${width}px: ヘッダー行が取得できない`).not.toBeNull()
+      expect(modeButtonBox, `${width}px: モード切替が取得できない`).not.toBeNull()
+      expect(formBox, `${width}px: 入力欄が取得できない`).not.toBeNull()
+      expect(backButtonBox, `${width}px: 戻るボタンが取得できない`).not.toBeNull()
+      expect(bandBox, `${width}px: ヘッダー帯が取得できない`).not.toBeNull()
+
+      expect(
+        Math.abs(headerRowBox!.x - modeButtonBox!.x),
+        `${width}px: 見出し列(x=${headerRowBox!.x})とモード切替(x=${modeButtonBox!.x})の左端`,
+      ).toBeLessThanOrEqual(1)
+      expect(
+        Math.abs(headerRowBox!.x - formBox!.x),
+        `${width}px: 見出し列(x=${headerRowBox!.x})と入力欄(x=${formBox!.x})の左端`,
+      ).toBeLessThanOrEqual(1)
+      // 戻るボタンはヘッダー行の flex 子なので、行自身の右端と比べると差は常に 0 になる。
+      // 本文の入力欄の右端と比べて、行だけ狭い・広いを検出する。
+      const backRight = backButtonBox!.x + backButtonBox!.width
+      const formRight = formBox!.x + formBox!.width
+      expect(
+        Math.abs(backRight - formRight),
+        `${width}px: 戻るボタンの右端(x=${backRight})が入力欄の右端(x=${formRight})に揃っていない`,
+      ).toBeLessThanOrEqual(1)
+
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+      expect(scrollWidth, `${width}px: 横方向にはみ出している`).toBeLessThanOrEqual(clientWidth)
+      expect(Math.abs(bandBox!.width - clientWidth), `${width}px: ヘッダー帯が全幅ではない`).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
+// 集合知画面の列ずれ（#1766）。
+// 帯は管理シェルの AppBar で全幅。本文は maxWidth 720 の中央寄せだったため、
+// 画面幅が 720 を超えてサイドバーが出る前（768px）だけ見出しが 32px 右へずれた。
+// 帯が出ている幅ではテキストの左端を比べる。帯が消える md 以上は見出しが見えることだけ見る。
+test.describe('レスポンシブ: 集合知画面の列揃え', () => {
+  test('帯の見出しと本文見出しの左端が揃う', async ({ page }) => {
+    await setupAuth(page, TEST_ADMIN)
+    await stubApi(page)
+    await page.route('**/api/admin/me/school-access*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ restricted: false, schools: [] }),
+      }),
+    )
+
+    for (const width of [2000, 1440, 1024, 768, 375]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/admin/collective-insights')
+
+      const heading = page.getByRole('main').getByRole('heading', { name: '集合知サマリー管理' })
+      await expect(heading).toBeVisible({ timeout: 15000 })
+      const bandTitle = page.getByRole('banner').getByText('集合知サマリー再構築', { exact: true })
+
+      // 帯（AppBar）は md（900px）未満だけ出る。出ていない幅では比べない。
+      if (width < 900) {
+        await expect(bandTitle, `${width}px: 帯の見出しが出ていない`).toBeVisible()
+        const band = await bandTitle.boundingBox()
+        const body = await heading.boundingBox()
+        expect(band, `${width}px: 帯の見出しが取得できない`).not.toBeNull()
+        expect(body, `${width}px: 本文見出しが取得できない`).not.toBeNull()
+        expect(
+          Math.abs(band!.x - body!.x),
+          `${width}px で帯(x=${band!.x})と本文(x=${body!.x})の左端がずれている`,
+        ).toBeLessThanOrEqual(8)
+      }
+
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+      expect(scrollWidth, `${width}px: 横方向にはみ出している`).toBeLessThanOrEqual(clientWidth)
     }
   })
 })

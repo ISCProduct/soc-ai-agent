@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 
 	"Backend/internal/companyfetch"
@@ -31,6 +32,7 @@ const (
 	ErrCodeServiceUnavail  = "SERVICE_UNAVAILABLE"
 	ErrCodeConflict        = "CONFLICT"
 	ErrCodeTooManyRequests = "TOO_MANY_REQUESTS"
+	ErrCodeGatewayTimeout  = "GATEWAY_TIMEOUT"
 )
 
 // ── ヘルパー関数 ──────────────────────────────────────────────────────────────
@@ -64,6 +66,11 @@ const InternalServerErrorMessage = "内部エラーが発生しました"
 // InternalError はエラーをログ出力しつつ echo.HTTPError を返す。
 func InternalError(err error) error {
 	LogError(err)
+	// 504 にするのは LLM の打ち切りだけ。DB・S3・RAG などの deadline は従来どおり 500 にする(#1779)。
+	if errors.Is(err, openai.ErrAICallTimeout) {
+		return NewAPIError(http.StatusGatewayTimeout, ErrCodeGatewayTimeout,
+			"処理に時間がかかっています。時間をおいて再度お試しください。")
+	}
 	// AI プロバイダ未設定・ローカル推論先の障害は設定/運用の問題で、リトライすれば
 	// 回復しうる。500 + 「内部エラー」だと API 利用者が原因を切り分けられないため
 	// 503 + 明示メッセージにする(#1293)。InternalError を通る全経路に一様に効かせる。
@@ -109,6 +116,48 @@ func EnsureAdminSchoolAccess(ctx echo.Context, schools *school.SchoolService, ta
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
 	}
 	if !allowed {
+		return echo.NewHTTPError(http.StatusForbidden, "school access denied")
+	}
+	return nil
+}
+
+// EnsureAdminSchoolAccessForUser は「対象ユーザー」に対する担当校スコープ検証（#1675）。
+//
+// users.school_id は本人の自己申告の学校名から解決されるため、素のまま
+// EnsureAdminSchoolAccess に渡してはいけない。学校が本人の学園に属していなければ
+// 未所属として扱い、担当校ありの管理者・職員には見せない（fail-close）。
+// 対象ユーザーを読んでから認可を判定する経路は、必ずこちらを使うこと。
+// 学校に属する行（卒業生就職情報の graduate_employments.school_id など）は
+// 管理画面で直接指定される値で自己申告ではないため、EnsureAdminSchoolAccess のままでよい。
+//
+// 無制限の管理者は学校で絞らないため、学校の引き直しもしない（余分な問い合わせを避ける）。
+func EnsureAdminSchoolAccessForUser(ctx echo.Context, schools *school.SchoolService, targetOrganizationID uint, targetSchoolID *uint) error {
+	if schools == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "school access check is not configured")
+	}
+	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	isPlatform := middleware.AdminIsPlatformFromContext(ctx.Request().Context())
+	restricted, allowedSchoolIDs, err := schools.ResolveAccess(isPlatform, adminUserID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
+	}
+	if !restricted {
+		return nil
+	}
+	// 拒否が確定している場合は学校を引かない。担当校0件の職員や、担当校に含まれない
+	// 学校を指す対象は、学園を確かめるまでもなく 403 になる。
+	if len(allowedSchoolIDs) == 0 || targetSchoolID == nil || !slices.Contains(allowedSchoolIDs, *targetSchoolID) {
+		return echo.NewHTTPError(http.StatusForbidden, "school access denied")
+	}
+	// 担当校に含まれていても、その学校が対象ユーザーの学園のものでなければ通さない。
+	effective, err := schools.EffectiveSchoolID(targetOrganizationID, targetSchoolID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
+	}
+	if effective == nil {
 		return echo.NewHTTPError(http.StatusForbidden, "school access denied")
 	}
 	return nil

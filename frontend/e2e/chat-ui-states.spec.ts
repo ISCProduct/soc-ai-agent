@@ -42,7 +42,10 @@ test.describe('チャットの状態表示', () => {
     // 初回（履歴0件）は「何をすればよいか」を示す挨拶と、押して答えられる選択肢を出す
     const greeting = log(page).getByRole('article').first()
     await expect(greeting).toContainText('どんな仕事に興味がありますか')
-    await expect(log(page).getByRole('button').first()).toBeVisible()
+    // まだ1問も答えていないことと、次の操作を空状態で示す（§24）
+    await expect(log(page)).toContainText('まだ回答がありません')
+    const options = log(page).getByRole('group', { name: '興味のある仕事の候補' })
+    await expect(options.getByRole('button').first()).toBeVisible()
   })
 
   test('履歴の取得に失敗したら空のままにせず、理由と再試行を出す', async ({ page }) => {

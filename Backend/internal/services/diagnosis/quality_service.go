@@ -13,8 +13,11 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
+
+const diagnosisQualityLLMTimeout = 60 * time.Second
 
 // QualityService は診断完了後に妥当性フラグを保存する（スコアは更新しない）。
 type QualityService struct {
@@ -308,7 +311,9 @@ JSONのみで返答:
 	)
 
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureDiagnosisQuality)
-	raw, err := s.aiClient.ChatCompletionJSON(ctx, system, user, 0.2, 400)
+	llmCtx, cancel := context.WithTimeout(ctx, diagnosisQualityLLMTimeout)
+	defer cancel()
+	raw, err := s.aiClient.ChatCompletionJSON(llmCtx, system, user, 0.2, 400)
 	if err != nil {
 		return nil, err
 	}

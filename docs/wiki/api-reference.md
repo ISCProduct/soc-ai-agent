@@ -36,13 +36,34 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 |---|---|---|
 | ユーザー | `X-User-Token` | 学生・教員。ログインで発行される短TTLのJWT |
 | 管理者 | `X-Admin-Email` + `X-Admin-Token` | 管理画面。管理者本人の認証 |
-| サービス間 | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない |
+| サービス間 | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない。照合値は `SERVICE_SECRET`（`ADMIN_SECRET` とは別値、#1158） |
 | 企業ポータル | Cookie 3本 | `company_user_id` / `company_user_token` / `company_refresh_token` |
 
 テナントを切り替える場合は `X-Tenant-Slug` を併せて送ります。
 
+### 管理者トークンの更新（SOCAIAGENT-476）
+
+管理者トークンは `"<発行時刻>.<HMAC>"` 形式で、既定の有効期間は7日です（`ADMIN_TOKEN_TTL_HOURS`）。
+ログインセッションの更新（`/api/auth/refresh`）のたびに再発行され、フロントの httpOnly Cookie
+`admin_token` に保持します。
+
+- `GET /api/auth/session`（フロントの Route Handler）は、管理者の場合に応答へ `token` を含めます。
+  管理画面（`AdminShell`）は、期限の1時間前から `X-Refresh-Admin-Token: 1` を付けて取り直します。
+- `POST /api/auth/session` で `adminToken` が無いとき、`DELETE` のときは `admin_token` Cookie を削除します。
+- フロントは7日固定（`frontend/lib/auth/admin-token.ts`）で期限を判定するため、
+  `ADMIN_TOKEN_TTL_HOURS` を短縮するときはフロント側も同時に変更してください。
+
 実装は `Backend/internal/routes/echo_adapter.go` の `EchoUserAuth` /
 `EchoAdminAuth` / `EchoStaticSecretAuth` です。
+
+`EchoStaticSecretAuth`（サービス間）が照合するのは `SERVICE_SECRET` で、
+`EchoAdminAuth`（管理者トークンのHMAC鍵）が使う `ADMIN_SECRET` とは別の値です。
+CI は既知の値でサービス間エンドポイントを叩く必要があるため、兼用すると
+HMAC鍵の露出面が CI まで広がります（#1158）。`SERVICE_SECRET` が未設定の場合は
+503 で拒否し、`ADMIN_SECRET` へのフォールバックはしません。プレースホルダー
+（`change-me-service-secret`）のままの場合と `ADMIN_SECRET` と同値の場合も未設定扱いです。
+この 503 の本文には `"code": "SERVICE_SECRET_NOT_CONFIGURED"` が入ります。ALB が
+healthy target ゼロで返す 503 と区別するためで、CI がこのコードを見ています。
 
 ### ロールと職員（staff）
 
@@ -197,6 +218,45 @@ Referer に user_id が残るだけです。
 
 ---
 
+## ES添削（#1531）
+
+| メソッド | パス | 概要 |
+|---------|------|------|
+| POST | `/api/es/review` | ES添削。成功時は履歴へ保存し、同一設問の前回結果を `previous` で返す |
+| POST | `/api/es/rewrite` | ESリライト（保存しない） |
+| GET | `/api/admin/teacher/students/{id}/es-reviews` | 教員向けの添削履歴。担当校スコープ |
+
+**認証は任意**。ES添削は未ログインでも使える経路として開いており（ログイン前に試す導線）、
+認証を必須にするとそれが壊れる。`EchoOptionalUserAuth` が `X-User-Token` を見て、
+あれば実行者を載せ、無ければ素通りする。壊れたトークン・退会済みユーザーも
+401 ではなく「未ログイン」として扱う。期限切れだけで添削そのものが使えなくなる方が重い。
+
+**保存は添削が成功したときだけ**。失敗した応答まで履歴に残すと、前回との差分が
+「失敗した回」と比較されて意味を失う。実行者が取れないときは保存しない（ゲストは
+ユーザー行を持つので、ログイン済みであれば昇格後も履歴が続く）。
+
+**前回との差分**は設問文を正規化した `question_key` で突き合わせる。種別
+（`question_type`）だけだと「学チカ」と「ガクチカ」が別扱いになり差分が永久に出ない。
+正規化で落とすのは空白と記号だけで、それ以上は落とさない（別の設問が同一視されるため）。
+前回は保存の**後**に引く。先に引くと自分自身が前回になって差分が常にゼロになる。
+
+設問文は**履歴の突き合わせにだけ使い、RAG の添削プロンプトには渡していない**。
+添削の内容は従来どおり `es_text` と `question_type` で決まる。
+プロンプトに渡すかどうかは RAG 側の変更になるため別課題。
+
+教員向けの履歴は、学校の学園・本人の学園・保存時点の学園の3つが揃う行だけを返す。
+`users.school_id` はプロフィールの学校名（自己申告）から解決されるため、
+学校だけで絞ると他学園の学生の履歴が混ざる（#1675 と同じ方針）。
+担当校外・他学園の学生は 404 ではなく空配列で返す（存在を明かさないため）。
+
+ES本文と改善文は `es_reviews` に残る。退会の猶予期間中は閲覧できず
+（`ListByUser` / `ListForSchoolStudent` とも `withdrawn_at IS NULL` を要求する）、
+物理削除時は `users` への FK CASCADE で一緒に消える。
+
+スコア連携は `docs/wiki/scoring.md` の「ES添削 → 10カテゴリ」を参照。
+
+---
+
 ## 企業ポータル（#1091 / #1196）
 
 企業担当者用。学生用(`X-User-Token`)・管理者用(`X-Admin-Token`)とは
@@ -250,13 +310,117 @@ Referer に user_id が残るだけです。
 
 ---
 
+## 適性検査（#1678 / #1675）
+
+学生に性格検査を配信する。名称は `assessment` で統一する（`aptitude` はチャット分析のフェーズ名で別物）。
+スキーマは `migrations/000048_assessments`（第1段）と `000049_assessment_school_templates`（第2段）。
+
+### 学生向け（`X-User-Token`）
+
+| メソッド | パス | 内容 |
+| --- | --- | --- |
+| GET | `/api/assessments` | 受けられる検査と自分の受検状況。運営標準 + 自分の学校の独自テンプレートだけ（他校のものは出ない） |
+| POST | `/api/assessments/:templateId/sessions` | 受検開始（受検中があればそれを返す）。他校の独自テンプレートは 404 |
+| GET | `/api/assessments/sessions/:sessionId` | 受検セッションと保存済みの回答 |
+| PUT | `/api/assessments/sessions/:sessionId/answers/:questionId` | 1問の回答保存（冪等） |
+| POST | `/api/assessments/sessions/:sessionId/submit` | 提出（二重提出は 409） |
+| GET | `/api/assessments/sessions/:sessionId/result` | 結果。`scope` が `standard` / `school` |
+
+一覧の各行に `scope`・`due_at`・`overdue` がある。期限を過ぎても受検・提出はできる（`overdue` は表示用）。
+
+学校独自テンプレートの可視範囲は `users.school_id` をそのまま信用しない。`school_id` はプロフィールの
+学校名から更新される（自己申告）ため、学校の `organization_id` が本人の `organization_id` と一致する
+ときだけ所属校として扱い、一致しなければ運営標準だけを見せる。受検セッションの各操作
+（取得・回答保存・提出・結果）も現在の所属校と照合し、学校が変わった後の旧学校の受検は 404。
+運営標準（`school_id` が NULL）は学校に紐づかないので影響を受けない。
+
+テナント境界は解決時と読み取り時の二段で閉じる（#1675）。
+
+- 解決時: `SchoolRepository.FindByName(name, organizationID)` は学園内の学校しか返さない。
+  `organization_id` は必須で、`0` は既定組織として扱う（`users` の保存側と同じ正規化）。
+  学校名から `school_id` を解決する経路は新規登録・ゲスト昇格・プロフィール更新の3つで、
+  いずれも本人の学園を渡す。解決できなかった学校名はログに残す（黙って学校向け機能から外れると気づけない）。
+- 読み取り時: 担当校（`EchoAdminSchoolScope` の結果）で `users` を絞るクエリは、学校の
+  `organization_id` と本人の `organization_id` の一致も要求する。境界の判定をデータの綺麗さに
+  依存させないため。一覧系の4経路（ユーザー一覧・生徒一覧・応募一覧・面接集計）は
+  `repositories.scopeUsersBySchool` に一本化してある。**新しく `users.school_id` で絞る経路を
+  足すときは必ずここを通すこと。** 素の `school_id` で絞ると同じ穴がその経路に開く。
+  1件ごとの認可判定は `httpapi.EnsureAdminSchoolAccessForUser` に通す。対象ユーザーを読んでから
+  認可するすべての経路（学生詳細・面接動画・ユーザー編集/削除・面談記録の作成）がこれを使う。
+  素の `EnsureAdminSchoolAccess` は、学校に属する行（卒業生就職情報の `school_id` など、
+  管理画面で直接指定され自己申告でない値）専用。
+  応募の `FindOwnerSchoolID` はリポジトリ側で学校を学園一致つきに LEFT JOIN している。
+  無制限の管理者は学校で絞らないので、学園一致の判定にも入らない。
+- 認可には脚が2本ある。「対象ユーザーの学校が本人の学園のものか」だけでなく、
+  **「呼び出し元の担当校が自分の学園のものか」**も要る。`ListSchoolsForAdmin` は自分の学園の
+  学校だけを返す。ここを閉じないと、越境した `admin_school_memberships` の行が1つあるだけで
+  他学園の学校が担当校として通り、その学校の学生は（学校と学生の学園が揃うので）
+  対象ユーザー側の判定をすべて通過してしまう。
+- 担当校の割当（`POST /api/admin/schools/:id/members`）も学園をまたげない。
+  `SchoolService` はユーザー参照を渡さないと `AddMember` が失敗する（fail-close）。
+  拒否の応答は「存在しない」と「他学園に存在する」を区別しない（打ち分けると、
+  担当校を持つ管理者が他学園のユーザーの存在を判定できてしまう）。理由はログに残す。
+- 既存の越境データは migration `000051`（`users.school_id`）と `000052`
+  （`admin_school_memberships`）で外した。どちらも down は復元すると越境状態に戻るため no-op。
+- 解決の失敗とルックアップのエラーは区別する。`resolveSchoolID` はエラーを返し、プロフィール
+  更新は**エラー時に既存の `school_id` を保つ**。一時的な DB エラーで在学生が担当校の教員の
+  一覧から黙って消えないようにするため。学校名が解決できなかった場合（エラーではない）は
+  `school_id` が NULL になり、ログに残る。
+- 既存データ: 穴が開いていた間に入った越境行は migration `000051_repair_cross_organization_school_id`
+  で外した（`school_id` のみ NULL にし、自己申告の `school_name` は残す）。`users.school_id` を書くのは
+  プロフィール更新とゲスト昇格の2経路だけで、どちらも上記の解決を通るため、以後は越境行が生まれない。
+
+適性検査の可視判定（`AssessmentRepository.FindUserSchoolID` と `Service.session`）は独自に学園一致を
+見ており、上の4経路とは別に閉じている。
+
+### 能力検査（学生向け、`X-User-Token`）
+
+性格検査とはパスを分ける（SOCAIAGENT-433）。能力検査の点数は `user_weight_scores` に入らず、マッチングには使わない。
+
+| メソッド | パス | 内容 |
+| --- | --- | --- |
+| GET | `/api/ability-assessments` | 受けられる能力検査と自分の受検状況。受検中のまま制限時間を過ぎたものは `status: expired` |
+| POST | `/api/ability-assessments/:templateId/sessions` | 受検開始（受検中があればそれを返す）。制限時間を過ぎた受検中は 410 |
+| GET | `/api/ability-assessments/sessions/:sessionId` | 問題と保存済みの回答。**正解は含まない** |
+| PUT | `/api/ability-assessments/sessions/:sessionId/answers/:questionId` | 1問の回答保存（冪等）。本文は `{"choice": 0始まりの添字}` |
+| POST | `/api/ability-assessments/sessions/:sessionId/submit` | 提出（二重提出は 409） |
+| GET | `/api/ability-assessments/sessions/:sessionId/result` | section 別の正答数と出題数 |
+
+- 受検中のレスポンスに `correct_choice` は出さない。採点はサーバ側のみ。
+- 制限時間はサーバが決める（開始時に `deadline_at` を凍結）。超過後の取得・回答・再開は **410**。
+  404（無い）・409（提出済み）と区別して返す。
+- **提出は締め切り後も 200 で通る。** 締め切り時点の回答で採点する。
+- 未回答は誤答扱いだが出題数には数える。
+
+### 学校側（`X-Admin-Email` / `X-Admin-Token`、担当校スコープ。職員も担当校内で使える）
+
+| メソッド | パス | 内容 |
+| --- | --- | --- |
+| GET | `/api/admin/assessment-templates?school_id=` | 学校独自テンプレートの一覧 + 選択できる正典カテゴリ（`categories`） |
+| POST | `/api/admin/assessment-templates?school_id=` | 作成。1〜60問、カテゴリは正典10個のみ。入力不正は 400（メッセージはそのまま画面に出せる） |
+| GET | `/api/admin/assessment-templates/:id/students?school_id=` | 学生ごとの受検状況。他校のテンプレートは 404 |
+
+- `school_id` は必須（システム管理者でも。未指定は 400）。担当校外は 403。
+- 担当校・作成者・`is_standard` は認証情報から決める。リクエスト本文の値は使わない。
+- 受検状況は 期限超過 → 未受検 → 途中 → 完了 の順。**スコアの生値は返さず**、提出済みの学生の上位2カテゴリ名だけ返す（数字を並べると成績表として読まれ、学生が正直に答えなくなるため）。
+- 学生の対象は `school_id` と `organization_id` が一致する在籍中（退会済みを除く）の `student` ロール。
+
 ## 選考管理（#201）
 
 | メソッド | パス | 概要 |
 |---------|------|------|
-| POST | `/api/applications` | 応募登録 |
+| POST | `/api/applications` | 応募登録。`STUDENT_APPLY_ENABLED` が `true` でない間は 403 |
+| GET | `/api/applications/availability` | 応募を受け付けているか（`{"enabled": bool}`）。画面のボタン表示に使う |
 | GET | `/api/applications` | 選考一覧 |
 | PUT | `/api/applications/{id}` | ステータス更新 |
+
+### 応募の開閉（SOCAIAGENT-403）
+
+学生の新規応募は既定で閉じている。開くときは Backend の環境変数 `STUDENT_APPLY_ENABLED=true` を設定して再起動する。
+
+- フロントは実行時に `GET /api/applications/availability` で取得する。再ビルドは不要。
+- 閉じている間、マッチング結果の応募ボタンは「応募は準備中」で無効になる。取得に失敗したときも閉じている側に倒す。
+- 登録済みの応募の閲覧・辞退・内定承諾、企業側の選考管理は影響を受けない。
 
 ### ステータス一覧
 ```

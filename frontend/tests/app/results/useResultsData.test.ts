@@ -75,3 +75,82 @@ describe('useResultsData fetchCompanies race condition (#988)', () => {
     expect(result.current.companies.map((c) => c.name)).toEqual(['S2 Company'])
   })
 })
+
+// SOCAIAGENT-403: 応募を閉じている間は、画面側でも応募APIを呼ばない。
+describe('useResultsData handleApply と応募の開閉', () => {
+  const company = {
+    id: '1',
+    matchId: 10,
+    name: 'A社',
+    industry: '',
+    location: '',
+    employees: '',
+    description: '',
+    matchScore: 90,
+    tags: [],
+    techStack: [],
+    isFavorited: false,
+    isApplied: false,
+  } as unknown as Parameters<ReturnType<typeof useResultsData>['handleApply']>[1]
+  const event = { stopPropagation: jest.fn() } as unknown as Parameters<ReturnType<typeof useResultsData>['handleApply']>[0]
+
+  function mockFetch(enabled: boolean) {
+    const fetchMock = jest.fn(async (url: string) => {
+      if (url === '/api/applications/availability') return { ok: true, json: async () => ({ enabled }) }
+      if (url === '/api/applications') return { ok: true, json: async () => ({ id: 99 }) }
+      return { ok: true, json: async () => ({}) }
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+    return fetchMock
+  }
+  const applyCalls = (m: jest.Mock) => m.mock.calls.filter(([u]) => u === '/api/applications')
+
+  beforeEach(() => {
+    params = new URLSearchParams({ user_id: '1', session_id: 's1' })
+  })
+
+  it('閉じている間は handleApply しても POST /api/applications を呼ばない', async () => {
+    const fetchMock = mockFetch(false)
+    const { result } = renderHook(() => useResultsData())
+    await act(async () => {})
+    expect(result.current.applyEnabled).toBe(false)
+
+    await act(async () => {
+      await result.current.handleApply(event, company)
+    })
+    expect(applyCalls(fetchMock)).toHaveLength(0)
+  })
+
+  it('開いていれば handleApply が POST /api/applications を呼ぶ', async () => {
+    const fetchMock = mockFetch(true)
+    const { result } = renderHook(() => useResultsData())
+    await act(async () => {})
+    expect(result.current.applyEnabled).toBe(true)
+
+    await act(async () => {
+      await result.current.handleApply(event, company)
+    })
+    expect(applyCalls(fetchMock)).toHaveLength(1)
+  })
+
+  it('応募が403で拒否されたら、応募可否を取り直して画面に反映する', async () => {
+    let enabled = true
+    const fetchMock = jest.fn(async (url: string) => {
+      if (url === '/api/applications/availability') return { ok: true, json: async () => ({ enabled }) }
+      if (url === '/api/applications') {
+        enabled = false // 表示後に Backend 側で閉じられた
+        return { ok: false, status: 403, json: async () => ({ error: '応募は現在受け付けていません' }) }
+      }
+      return { ok: true, json: async () => ({}) }
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+    const { result } = renderHook(() => useResultsData())
+    await act(async () => {})
+    expect(result.current.applyEnabled).toBe(true)
+
+    await act(async () => {
+      await result.current.handleApply(event, company)
+    })
+    expect(result.current.applyEnabled).toBe(false)
+  })
+})

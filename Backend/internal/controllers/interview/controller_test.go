@@ -296,7 +296,7 @@ func TestInterviewController_Get_Success(t *testing.T) {
 	c.SetParamValues("5")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("GetSessionDetailWithRole", uint(1), uint(5), "student").Return(&interview.InterviewDetailResponse{}, nil)
+	svc.On("GetSessionDetail", uint(1), uint(5)).Return(&interview.InterviewDetailResponse{}, nil)
 	testsupport.AssertStatus(t, newInterviewController(svc).Get, c, http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -310,7 +310,7 @@ func TestInterviewController_Get_Forbidden(t *testing.T) {
 	c.SetParamValues("5")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("GetSessionDetailWithRole", uint(1), uint(5), "student").Return(nil, shared.ErrForbidden)
+	svc.On("GetSessionDetail", uint(1), uint(5)).Return(nil, shared.ErrForbidden)
 	testsupport.AssertStatus(t, newInterviewController(svc).Get, c, http.StatusForbidden)
 }
 

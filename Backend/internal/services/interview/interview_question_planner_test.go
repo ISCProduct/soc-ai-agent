@@ -2,6 +2,8 @@ package interview
 
 import (
 	"Backend/internal/models"
+	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -20,6 +22,96 @@ func TestBuildQuestionQueueOrdersRequiredBeforeTopics(t *testing.T) {
 	}
 	if queue[len(queue)-1].QuestionText != "推奨質問" {
 		t.Fatalf("last item = %+v, want recommended custom question", queue[len(queue)-1])
+	}
+}
+
+func TestBuildQuestionQueueUsesGeneratedHintsOnlyWithoutCustomQuestions(t *testing.T) {
+	hints := []string{"  質問A  ", "質問A", "質問B"}
+	queue := BuildQuestionQueue(10, nil, hints...)
+	if len(queue) != len(interviewTopics)+2 {
+		t.Fatalf("queue length = %d, want %d", len(queue), len(interviewTopics)+2)
+	}
+	if queue[0].Source != questionSourceGenerated || queue[0].QuestionText != "質問A" {
+		t.Fatalf("first generated question = %+v", queue[0])
+	}
+	if queue[1].Source != questionSourceGenerated || queue[1].QuestionText != "質問B" {
+		t.Fatalf("second generated question = %+v", queue[1])
+	}
+
+	custom := []models.InterviewCompanyQuestion{{Category: "必須", QuestionText: "登録済み質問", IsRequired: true}}
+	withCustom := BuildQuestionQueue(11, custom, hints...)
+	for _, state := range withCustom {
+		if state.Source == questionSourceGenerated {
+			t.Fatalf("generated question was added despite saved custom questions: %+v", state)
+		}
+	}
+}
+
+type questionPlanStateRepoStub struct {
+	states []models.InterviewQuestionState
+}
+
+func (r *questionPlanStateRepoStub) CountBySessionID(uint) (int64, error) {
+	return int64(len(r.states)), nil
+}
+
+func (r *questionPlanStateRepoStub) CreateBatch(states []models.InterviewQuestionState) error {
+	r.states = append(r.states, states...)
+	return nil
+}
+
+func (r *questionPlanStateRepoStub) Create(state *models.InterviewQuestionState) error {
+	r.states = append(r.states, *state)
+	return nil
+}
+
+func (r *questionPlanStateRepoStub) Update(*models.InterviewQuestionState) error {
+	return nil
+}
+
+func (r *questionPlanStateRepoStub) FindBySessionID(uint) ([]models.InterviewQuestionState, error) {
+	return r.states, nil
+}
+
+func (r *questionPlanStateRepoStub) FindLatestAsked(uint) (*models.InterviewQuestionState, error) {
+	return nil, nil
+}
+
+func TestAdvanceQuestionPlanReportsActualQueueSize(t *testing.T) {
+	stateRepo := &questionPlanStateRepoStub{}
+	service := NewInterviewService(nil, nil, nil, nil, nil, nil, nil)
+	service.SetQuestionStateRepo(stateRepo)
+
+	directive, err := service.advanceQuestionPlan(
+		WithCompanyQuestionHints(context.Background(), []string{"企業別質問"}),
+		&models.InterviewSession{ID: 5},
+		0, "", "", "", true,
+	)
+	if err != nil {
+		t.Fatalf("advanceQuestionPlan() error = %v", err)
+	}
+	if directive == nil || directive.TotalQuestions != len(interviewTopics)+1 {
+		t.Fatalf("directive = %+v, want total questions %d", directive, len(interviewTopics)+1)
+	}
+}
+
+// 企業別質問の取得に失敗しても、標準トピックで面接を続ける。
+func TestAdvanceQuestionPlanContinuesWhenCustomQuestionsFail(t *testing.T) {
+	service := NewInterviewService(nil, nil, nil, nil, nil, nil, nil)
+	service.SetQuestionStateRepo(&questionPlanStateRepoStub{})
+	service.SetCompanyQuestionRepo(&interviewCompanyQuestionRepoStub{err: errors.New("database unavailable")})
+
+	directive, err := service.advanceQuestionPlan(
+		context.Background(),
+		&models.InterviewSession{ID: 5, CompanyID: 42},
+		42, "", "", "", true,
+	)
+
+	if err != nil {
+		t.Fatalf("advanceQuestionPlan() error = %v", err)
+	}
+	if directive == nil || directive.Source != questionSourceTopic {
+		t.Fatalf("directive = %+v, want a standard topic", directive)
 	}
 }
 
@@ -147,6 +239,20 @@ func TestBuildInterviewSystemPromptWithDirective(t *testing.T) {
 	)
 	if !containsAll(prompt, []string{"【今回の質問】", "深掘り質問", "具体的な失敗経験を教えてください。"}) {
 		t.Fatalf("prompt missing directive section: %s", prompt)
+	}
+}
+
+func TestBuildInterviewSystemPromptDoesNotMapCompanyCategoriesToStandardTopics(t *testing.T) {
+	prompt := buildInterviewSystemPrompt(
+		"テスト株式会社", "", "エンジニア", "", "general",
+		nil, nil, 0, 60, 1, 5, 0, 180,
+		&questionDirective{Text: "質問", Source: questionSourceGenerated, Category: "企業別質問"},
+	)
+	if !strings.Contains(prompt, "企業独自のカテゴリを標準トピックへ無理に読み替えず") {
+		t.Fatalf("prompt does not preserve the question queue category: %s", prompt)
+	}
+	if !strings.Contains(prompt, "残り5トピックあります") {
+		t.Fatalf("prompt does not retain all standard topics after company category: %s", prompt)
 	}
 }
 

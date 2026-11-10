@@ -608,7 +608,7 @@ cpr "123"
 | GitHub同期エラー | `TOKEN_ENCRYPTION_KEY` が設定されているか確認。未設定だとトークン暗号化がスキップされ警告ログが出力される |
 | CORS エラー（開発時） | `ALLOWED_ORIGINS=http://localhost:3000` を `.env` に設定（未設定時は全オリジン拒否） |
 | S3アップロード失敗 | `AWS_S3_BUCKET` と IAM権限（`s3:PutObject` / `s3:GetObject`）を確認 |
-| フロントビルド失敗 | Node.js 22 を使用（`frontend/.nvmrc`） |
+| フロントビルド失敗 | Node.js 24.22.1 を使用（`frontend/.nvmrc`） |
 | rag-review起動失敗 | `cd rag && pip install -r requirements.txt -c constraints.txt` で作り直す |
 
 ---
@@ -628,4 +628,4 @@ cpr "123"
 | [スコアリング・マッチング](./docs/wiki/scoring.md) | 開発者 | 10カテゴリスコア・マッチングアルゴリズム |
 | [運用手順書](./docs/wiki/operations.md) | 運用担当 | デプロイ・監視・バッチ・障害対応 |
 | [データプライバシー設計](./docs/wiki/data-privacy.md) | 開発者・法務 | 匿名化・同意管理の設計 |
-| [スコアキャリブレーション](./docs/wiki/score-calibration.md) | 運用担当 | スコア精度検証・改善手順 |
+| [スコアキャリブレーション](./docs/wiki/score-calibration.md) | 運用担当 | データ要件・現状判定（現状は較正不可） |

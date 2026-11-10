@@ -6,7 +6,8 @@ export const SIDEBAR_NAV_ITEMS = [
   { href: '/correlation-diagram', label: '企業相関図' },
   { href: '/chat-history', label: 'チャット履歴' },
   { href: '/resume', label: '履歴書レビュー' },
-  { href: '/assessments', label: '適性検査' },
+  { href: '/assessments', label: '適性検査（性格）' },
+  { href: '/ability-assessments', label: '適性検査（能力）' },
   { href: '/interview', label: '面接練習' },
   { href: '/interview/history', label: '面接履歴' },
   { href: '/es-rewrite', label: 'ESリライト・添削' },
@@ -43,6 +44,14 @@ export const GLOBAL_NAV_HOME_ITEMS = [
 /** 今いる画面がナビ項目に当たるか。/ は完全一致、それ以外は配下も含める。 */
 export function isCurrentNav(pathname: string, href: string): boolean {
   return href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`)
+}
+
+/**
+ * `allHrefs` の中に前方一致が重なる項目があるとき（例: /interview と /interview/history）、
+ * 最も長く一致する項目だけを現在地とする。GlobalNavMenu / AnalysisSidebar で共通利用（#403）。
+ */
+export function isCurrentNavExclusive(pathname: string, href: string, allHrefs: readonly string[]): boolean {
+  return isCurrentNav(pathname, href) && !allHrefs.some((o) => o.length > href.length && isCurrentNav(pathname, o))
 }
 
 const HIDE_BOTTOM_NAV = [

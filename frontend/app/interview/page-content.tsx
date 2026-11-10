@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { interviewLimits } from '@/lib/interview'
 import { authService, User } from '@/lib/auth'
 import ConsentDialog from './components/ConsentDialog'
-import SelectionScreen from './components/SelectionScreen'
+import SelectionScreen, { type CompanyHints } from './components/SelectionScreen'
 import LobbyScreen from './components/LobbyScreen'
 import ReportScreen from './components/ReportScreen'
 import { PageLoading } from '@/components/common/PageLoading'
@@ -53,13 +53,16 @@ function InterviewContent() {
   const [webSearchError, setWebSearchError] = useState<string | null>(null)
   const [webSearchRefreshKey, setWebSearchRefreshKey] = useState(0)
   const [positionCategory, setPositionCategory] = useState<'general' | 'sier'>('general')
-  const [companyHints, setCompanyHints] = useState<{ style_tags: string[]; top_questions: string[]; company_brief?: string } | null>(null)
+  const [companyHints, setCompanyHints] = useState<CompanyHints | null>(null)
   const [hintsLoading, setHintsLoading] = useState(false)
+  const [hintsError, setHintsError] = useState<string | null>(null)
+  const [hintsRefreshKey, setHintsRefreshKey] = useState(0)
 
   const media = useInterviewMedia({ loading, status })
   const session = useInterviewSession({
     user,
     interviewCompany,
+    companyQuestionHints: companyHints?.top_questions ?? [],
     selectedPosition,
     media,
     status,
@@ -162,26 +165,57 @@ function InterviewContent() {
       }
     }, companySearch ? 400 : 0)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [loading, companySearch, companySourceTab, companiesRefreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loading, companySearch, companySourceTab, companiesRefreshKey])
 
   // 企業別面接傾向ヒント取得
   useEffect(() => {
-    if (!interviewCompany?.name) { setCompanyHints(null); return }
+    setCompanyHints(null)
+    setHintsError(null)
+    if (!interviewCompany?.name) {
+      setHintsLoading(false)
+      return
+    }
+    setHintsLoading(true)
     let cancelled = false
     const timer = setTimeout(() => {
       setHintsLoading(true)
-      fetch('/api/companies/interview-hints', {
+      void fetch('/api/companies/interview-hints', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ company_name: interviewCompany.name, position: selectedPosition.title }),
       })
-        .then(r => r.ok ? r.json() : null)
-        .then(data => { if (!cancelled && data) setCompanyHints(data) })
-        .catch(() => {})
+        .then(async (response) => {
+          if (!response.ok) throw new Error('企業の面接傾向を取得できませんでした')
+          const data: unknown = await response.json()
+          if (
+            typeof data !== 'object'
+            || data === null
+            || !('style_tags' in data)
+            || !Array.isArray(data.style_tags)
+            || !data.style_tags.every((tag) => typeof tag === 'string')
+            || !('top_questions' in data)
+            || !Array.isArray(data.top_questions)
+            || !data.top_questions.every((question) => typeof question === 'string')
+            || ('company_brief' in data && typeof data.company_brief !== 'string')
+          ) {
+            throw new Error('企業の面接傾向を正しく読み取れませんでした')
+          }
+          if (!cancelled) setCompanyHints(data as CompanyHints)
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) {
+            setCompanyHints(null)
+            setHintsError(error instanceof Error ? error.message : '企業の面接傾向を取得できませんでした')
+          }
+        })
         .finally(() => { if (!cancelled) setHintsLoading(false) })
     }, 600)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [interviewCompany?.name, selectedPosition.title]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [interviewCompany?.name, selectedPosition.title, hintsRefreshKey])
+
+  const retryHints = useCallback(() => {
+    setHintsRefreshKey((key) => key + 1)
+  }, [])
 
   // WEB検索
   // 失敗とヒット0件を必ず区別する。以前はどちらも空配列にしていたため、
@@ -214,7 +248,7 @@ function InterviewContent() {
       }
     }, 500)
     return () => { cancelled = true; ac.abort(); clearTimeout(timer) }
-  }, [loading, companySearch, companySourceTab, webSearchRefreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loading, companySearch, companySourceTab, webSearchRefreshKey])
 
   const handleBackToSelection = useCallback(() => {
     clearInterviewLobbyDraft()
@@ -230,7 +264,7 @@ function InterviewContent() {
   const isActive = status === 'connecting' || status === 'connected'
   const isConnected = status === 'connected'
   const questionDurationSeconds = Math.max(60, interviewLimits.questionDurationSeconds || 180)
-  const totalQuestionCount = Math.max(1, selectedPosition.questions)
+  const totalQuestionCount = session.totalQuestionCount
   const questionProgress = Math.min(100, Math.round((session.questionElapsedSeconds / questionDurationSeconds) * 100))
   const questionRemainingSeconds = Math.max(0, questionDurationSeconds - session.questionElapsedSeconds)
   const questionRemainingLabel = (() => {
@@ -273,6 +307,8 @@ function InterviewContent() {
         setSelectedPosition={setSelectedPosition}
         companyHints={companyHints}
         hintsLoading={hintsLoading}
+        hintsError={hintsError}
+        onRetryHints={retryHints}
         questionDurationSeconds={questionDurationSeconds}
         onStartInterview={() => {
           if (interviewCompany?.name) {

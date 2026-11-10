@@ -1,10 +1,152 @@
 package chat
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
 	"Backend/domain/valueobject"
 	"Backend/internal/models"
-	"testing"
+	internalOpenAI "Backend/internal/openai"
 )
+
+type captureAIGeneratedQuestionRepository struct {
+	question *models.AIGeneratedQuestion
+}
+
+func (r *captureAIGeneratedQuestionRepository) Create(question *models.AIGeneratedQuestion) error {
+	r.question = question
+	return nil
+}
+
+func (*captureAIGeneratedQuestionRepository) FindBySessionID(string) ([]models.AIGeneratedQuestion, error) {
+	return nil, nil
+}
+
+func (*captureAIGeneratedQuestionRepository) FindByUserAndSession(uint, string) ([]models.AIGeneratedQuestion, error) {
+	return nil, nil
+}
+
+func (*captureAIGeneratedQuestionRepository) GetAskedQuestionIDs(uint, string) ([]uint, error) {
+	return nil, nil
+}
+
+func (*captureAIGeneratedQuestionRepository) UpdateAnswer(uint, string, int) error {
+	return nil
+}
+
+func (*captureAIGeneratedQuestionRepository) FindUnansweredBySession(string) (*models.AIGeneratedQuestion, error) {
+	return nil, nil
+}
+
+func TestGenerateStrategicQuestion_FallbackDoesNotRecordPromptVersion(t *testing.T) {
+	t.Setenv("PROMPT_VERSION", "v2")
+	t.Setenv("PROMPT_VERSION_QUESTION_GENERATION", "")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output_text": `"`,
+			"usage":       map[string]any{"input_tokens": 10, "output_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	questionRepo := &captureAIGeneratedQuestionRepository{}
+	service := &ChatService{
+		aiClient:                internalOpenAI.NewWithBaseURL(server.URL, "gpt-4o-mini"),
+		aiGeneratedQuestionRepo: questionRepo,
+	}
+
+	question, _, _, err := service.generateStrategicQuestion(
+		context.Background(),
+		nil,
+		42,
+		"session-1",
+		map[string]int{},
+		[]string{"創造性志向"},
+		map[string]bool{},
+		0,
+		0,
+		"新卒",
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("generateStrategicQuestion returned error: %v", err)
+	}
+	if question == "" {
+		t.Fatal("expected a fallback question")
+	}
+	if questionRepo.question == nil {
+		t.Fatal("expected the fallback question to be saved")
+	}
+	if questionRepo.question.PromptVersion != "" {
+		t.Fatalf("fallback prompt version = %q, want empty", questionRepo.question.PromptVersion)
+	}
+}
+
+// 戦略を通らない質問生成の経路も版を保存することを検証する（#1778）。
+func TestQuestionGenerationPaths_RecordPromptVersion(t *testing.T) {
+	t.Setenv("PROMPT_VERSION", "")
+	t.Setenv("PROMPT_VERSION_QUESTION_GENERATION", "question-t1")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output_text": "最近頑張ったことを教えてください",
+			"usage":       map[string]any{"input_tokens": 10, "output_tokens": 1},
+		})
+	}))
+	defer server.Close()
+
+	newService := func(usages *[]internalOpenAI.Usage) (*ChatService, *captureAIGeneratedQuestionRepository) {
+		client := internalOpenAI.NewWithBaseURL(server.URL, "gpt-4o-mini")
+		client.OnUsage = func(u internalOpenAI.Usage) { *usages = append(*usages, u) }
+		questionRepo := &captureAIGeneratedQuestionRepository{}
+		return &ChatService{
+			aiClient:                client,
+			aiGeneratedQuestionRepo: questionRepo,
+			userWeightScoreRepo:     &mockWeightScoreRepo{},
+		}, questionRepo
+	}
+	assertUsage := func(t *testing.T, usages []internalOpenAI.Usage) {
+		t.Helper()
+		if len(usages) == 0 {
+			t.Fatal("AI呼び出しの利用量が記録されていない")
+		}
+		for _, u := range usages {
+			if u.PromptStage != "question_generation" || u.PromptVersion != "question-t1" {
+				t.Fatalf("usage=(%q,%q), want (question_generation,question-t1)", u.PromptStage, u.PromptVersion)
+			}
+		}
+	}
+
+	t.Run("generateQuestionWithAI", func(t *testing.T) {
+		var usages []internalOpenAI.Usage
+		service, questionRepo := newService(&usages)
+
+		if _, _, err := service.generateQuestionWithAI(context.Background(), nil, 42, "session-1", 0, 0); err != nil {
+			t.Fatalf("generateQuestionWithAI returned error: %v", err)
+		}
+		if questionRepo.question == nil || questionRepo.question.PromptVersion != "question-t1" {
+			t.Fatalf("保存した質問=%+v, want PromptVersion=question-t1", questionRepo.question)
+		}
+		assertUsage(t, usages)
+	})
+
+	t.Run("simplifyQuestionWithAI", func(t *testing.T) {
+		var usages []internalOpenAI.Usage
+		service, _ := newService(&usages)
+
+		if _, err := service.simplifyQuestionWithAI(context.Background(), "難しい質問"); err != nil {
+			t.Fatalf("simplifyQuestionWithAI returned error: %v", err)
+		}
+		assertUsage(t, usages)
+	})
+}
 
 func TestIsJobSelectionQuestion(t *testing.T) {
 	s := &ChatService{}

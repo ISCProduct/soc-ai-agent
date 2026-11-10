@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>接続できません | 就活AI</title>
-  <meta name="description" content="サーバーに接続できませんでした。停止中またはメンテナンス中の可能性があります。" />
+  <title>メンテナンス中 | 就活AI</title>
+  <meta name="description" content="ただいまメンテナンス中です。恐れ入りますが、時間をおいて再度アクセスしてください。" />
   <meta name="robots" content="noindex, nofollow" />
-  <meta property="og:title" content="接続できません | 就活AI" />
-  <meta property="og:description" content="サーバーに接続できませんでした。停止中またはメンテナンス中の可能性があります。" />
+  <meta property="og:title" content="メンテナンス中 | 就活AI" />
+  <meta property="og:description" content="ただいまメンテナンス中です。恐れ入りますが、時間をおいて再度アクセスしてください。" />
   <meta property="og:type" content="website" />
   <meta property="og:locale" content="ja_JP" />
   <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="接続できません | 就活AI" />
-  <meta name="twitter:description" content="サーバーに接続できませんでした。停止中またはメンテナンス中の可能性があります。" />
+  <meta name="twitter:title" content="メンテナンス中 | 就活AI" />
+  <meta name="twitter:description" content="ただいまメンテナンス中です。恐れ入りますが、時間をおいて再度アクセスしてください。" />
   <style>
     * { box-sizing: border-box; }
     body {
@@ -47,9 +47,9 @@
 </head>
 <body>
   <main>
-    <div class="label" id="code-label">エラー 503</div>
-    <h1>接続できません</h1>
-    <p>サーバーに接続できませんでした。サービス停止中、またはメンテナンス中の可能性があります。しばらくしてから再試行してください。</p>
+    <div class="label" id="code-label">メンテナンス</div>
+    <h1>ただいまメンテナンス中です</h1>
+    <p>システムのメンテナンスを行っています。恐れ入りますが、時間をおいて再度アクセスしてください。</p>
     <div class="actions">
       <button type="button" class="primary" onclick="location.reload()">再試行</button>
       <a class="btn secondary" href="/">トップへ</a>
@@ -57,7 +57,7 @@
   </main>
   <script>
     var m = location.search.match(/[?&]code=(\d{3})/);
-    if (m) document.getElementById('code-label').textContent = 'エラー ' + m[1];
+    if (m) document.getElementById('code-label').textContent = 'メンテナンス（HTTP ' + m[1] + '）';
   </script>
 </body>
 </html>

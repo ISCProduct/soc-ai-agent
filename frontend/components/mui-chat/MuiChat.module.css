@@ -50,11 +50,16 @@
        ここで !important を付けると上書きできない。 */
 }
 
-/* 選択肢ボタン */
+/* 選択肢は1列の行。横並びのタイルにすると長文が不揃いな高さになる。 */
 .choiceButton {
-    font-size: 0.75rem !important;
-    padding-top: 6px !important;
-    padding-bottom: 6px !important;
+    font-size: 0.8125rem !important;
+    line-height: 1.35 !important;
+    padding: 6px 10px !important;
+    min-height: 40px !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
+    text-transform: none !important;
+    white-space: normal !important;
 }
 
 /* デスクトップ(md: 900px以上) */
@@ -88,7 +93,5 @@
 
     .choiceButton {
         font-size: 0.875rem !important;
-        padding-top: 8px !important;
-        padding-bottom: 8px !important;
     }
 }

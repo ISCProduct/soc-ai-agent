@@ -1,4 +1,6 @@
-FROM node:22-alpine
+# 24.22.1 は 2026-10-21 のセキュリティリリース。浮動タグの 24-alpine は 24.22.0 のまま残る。
+# 23 系は 2025-06-01 に EOL で、この修正は配信されない。
+FROM node:24.22.1-alpine
 
 WORKDIR /app
 
@@ -36,6 +38,13 @@ ARG NEXT_PUBLIC_APP_ENV
 ENV NEXT_PUBLIC_APP_ENV=$NEXT_PUBLIC_APP_ENV
 ARG NEXT_PUBLIC_SENTRY_RELEASE
 ENV NEXT_PUBLIC_SENTRY_RELEASE=$NEXT_PUBLIC_SENTRY_RELEASE
+# Live2D面接官を有効にするか。既定(未指定)は Avatar2D のまま。
+# Cubism Core とモデルはライセンス上リポジトリに置けず、デプロイ時に S3 から
+# ビルドコンテキストへ展開する（`docs/wiki/live2d-assets.md` 参照）。資産が無いまま
+# true にすると毎セッション404を取ってから Avatar2D へ落ちるので、資産を置く
+# ワークフローと必ずセットで渡す。
+ARG NEXT_PUBLIC_LIVE2D_ENABLED
+ENV NEXT_PUBLIC_LIVE2D_ENABLED=$NEXT_PUBLIC_LIVE2D_ENABLED
 
 RUN if [ "$NODE_ENV" = "production" ]; then npm run build; fi
 
