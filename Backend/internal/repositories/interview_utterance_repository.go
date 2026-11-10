@@ -30,6 +30,8 @@ func (r *InterviewUtteranceRepository) Create(utterance *models.InterviewUtteran
 
 func (r *InterviewUtteranceRepository) FindBySessionID(sessionID uint) ([]models.InterviewUtterance, error) {
 	var utterances []models.InterviewUtterance
-	err := r.db.Where("session_id = ?", sessionID).Order("created_at ASC").Find(&utterances).Error
+	// サーバーは1ターンの user と ai を続けて保存するので、created_at が同じミリ秒になりうる。
+	// 同値の順序は SQL では決まらないため、id で並びを固定する（#1969）。
+	err := r.db.Where("session_id = ?", sessionID).Order("created_at ASC, id ASC").Find(&utterances).Error
 	return utterances, err
 }

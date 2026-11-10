@@ -226,17 +226,6 @@ func (s *InterviewService) Turn(
 		aiText = interviewFallbackReplyText
 	}
 
-	// 書き起こしはサーバーが保存する（#1969）。ユーザー → 面接官の順に並べる。
-	// TTS の前に保存し、読み上げに失敗しても書き起こしは残す。
-	utteranceSaveFailed := false
-	if err := s.saveTurnUtterances(sessionID,
-		turnUtterance{role: "user", text: userText},
-		turnUtterance{role: "ai", text: aiText},
-	); err != nil {
-		log.Printf("[Interview] save turn utterances session=%d: %v", sessionID, err)
-		utteranceSaveFailed = true
-	}
-
 	// TTS: AI返答を音声化（企業名は読み仮名に置換して誤読を防ぐ。表示用のaiTextはそのまま保持）。
 	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
@@ -248,6 +237,22 @@ func (s *InterviewService) Turn(
 	if err != nil {
 		log.Printf("[Interview] tts error: %v", err)
 		audio = nil
+	}
+
+	// 書き起こしはサーバーが保存する（#1969）。ユーザー → 面接官の順に並べる。
+	// 応答を返す直前に保存し、クライアントが切断・タイムアウトした（context が終わった）ターンは
+	// 保存しない。届かなかった質問を書き起こしと次の履歴に残すと、会話とレポートが利用者の
+	// 体験とずれる。以前のクライアント保存（応答を受け取ったターンだけ保存）と同じ扱いにする。
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	utteranceSaveFailed := false
+	if err := s.saveTurnUtterances(sessionID,
+		turnUtterance{role: "user", text: userText},
+		turnUtterance{role: "ai", text: aiText},
+	); err != nil {
+		log.Printf("[Interview] save turn utterances session=%d: %v", sessionID, err)
+		utteranceSaveFailed = true
 	}
 
 	result := &TurnResult{
@@ -353,13 +358,6 @@ func (s *InterviewService) StartTurn(
 		aiText = "本日はよろしくお願いします。早速ですが、簡単に自己紹介をお願いできますか？"
 	}
 
-	// 冒頭の質問もサーバーが書き起こしへ保存する（#1969）。
-	utteranceSaveFailed := false
-	if err := s.saveTurnUtterances(sessionID, turnUtterance{role: "ai", text: aiText}); err != nil {
-		log.Printf("[Interview] save start-turn utterance session=%d: %v", sessionID, err)
-		utteranceSaveFailed = true
-	}
-
 	// TTS: 企業名は読み仮名に置換して誤読を防ぐ（表示用のaiTextはそのまま保持）。
 	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
@@ -371,6 +369,16 @@ func (s *InterviewService) StartTurn(
 	if err != nil {
 		log.Printf("[Interview] tts error: %v", err)
 		audio = nil
+	}
+
+	// 冒頭の質問もサーバーが書き起こしへ保存する（#1969）。届かなかった質問は保存しない。
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	utteranceSaveFailed := false
+	if err := s.saveTurnUtterances(sessionID, turnUtterance{role: "ai", text: aiText}); err != nil {
+		log.Printf("[Interview] save start-turn utterance session=%d: %v", sessionID, err)
+		utteranceSaveFailed = true
 	}
 
 	result := &TurnResult{

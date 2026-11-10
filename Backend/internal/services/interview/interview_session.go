@@ -1,9 +1,12 @@
 package interview
 
 import (
+	"log"
+
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"errors"
+	"github.com/google/uuid"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -28,9 +31,6 @@ const (
 var (
 	ErrUtteranceTooLong  = errors.New("utterance too long")
 	ErrTooManyUtterances = errors.New("too many utterances in session")
-	// ErrClientAIUtterance は、クライアントが面接官（role=ai）の発話を申告したことを示す（#1969）。
-	// 面接官の発話は /start-turn・/turn でサーバーが生成して保存するので、クライアントからは受け付けない。
-	ErrClientAIUtterance = errors.New("role=ai は受け付けません。面接官の発話はサーバーが保存します")
 )
 
 // interviewBudgetGuard は月次上限の判定面。未設定なら常に許可する。
@@ -146,9 +146,13 @@ func (s *InterviewService) EnsureSessionOwnership(userID uint, sessionID uint) e
 // SaveUtterance はクライアントが申告した発話を保存する。clientUtteranceID は発話ごとにクライアントが
 // 発行する一意ID(#1476)。
 //
-// 受け付けるのは role=user だけ（#1969）。面接官の発話は /start-turn・/turn でサーバーが保存する
-// （saveTurnUtterances）。クライアントの申告を受け付けると、面接官が言っていない質問を書き起こしに
+// 保存するのは role=user だけ（#1969）。面接官の発話は /start-turn・/turn でサーバーが保存する
+// （saveTurnUtterances）。クライアントの申告を保存すると、面接官が言っていない質問を書き起こしに
 // 混ぜられ、レポートと evidence の照合元が汚れる。
+//
+// role=ai は保存せずに成功を返す。デプロイ前から開いている画面はターンのたびに user/ai を送るので、
+// エラーにすると「記録できていない」と表示され続ける。同じ理由で、直前にサーバーが保存した
+// ユーザー発話と同じ文面の role=user も保存しない（二重保存を防ぐ）。
 //
 // 保存は結果不明のまま失敗しうる（応答のロスト、クライアント側タイムアウト）ため、
 // クライアントは同じ ID を付けたまま再送する。重複判定はサーバー側でしかできないので
@@ -164,7 +168,8 @@ func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role strin
 	}
 	role = strings.ToLower(strings.TrimSpace(role))
 	if role == "ai" {
-		return ErrClientAIUtterance
+		log.Printf("[Interview] client role=ai utterance ignored session=%d", sessionID)
+		return nil
 	}
 	if role != "user" {
 		return errors.New("invalid role")
@@ -181,6 +186,9 @@ func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role strin
 	existing, err := s.utterRepo.FindBySessionID(sessionID)
 	if err != nil {
 		return err
+	}
+	if duplicatesServerSavedUserUtterance(existing, text) {
+		return nil
 	}
 	if len(existing) >= maxUtterancesPerSession {
 		return ErrTooManyUtterances
@@ -205,11 +213,24 @@ type turnUtterance struct {
 	text string
 }
 
+// serverUtteranceIDPrefix はサーバーが保存した発話の client_utterance_id の接頭辞（#1969）。
+// 再試行を冪等にするために発話ごとに ID を振る。クライアントの ID（UUID）とは重ならない。
+const serverUtteranceIDPrefix = "srv-"
+
+// turnUtteranceSaveAttempts は発話1件を保存する最大回数。
+const turnUtteranceSaveAttempts = 3
+
+// turnUtteranceRetryWait は再試行までの待ち時間の単位。2回目はこの1倍、3回目は2倍待つ。
+var turnUtteranceRetryWait = 200 * time.Millisecond
+
 // saveTurnUtterances は /start-turn・/turn でサーバーが得た発話を、渡した順に保存する（#1969）。
 //
 // /turn ではユーザーの発話もサーバーの文字起こしなので、面接官の発話と一緒にここで保存する。
 // クライアントが応答を受け取ってからユーザーの発話を保存すると、サーバーが先に保存した
 // 面接官の発話より後ろに並び、書き起こしの順番が入れ替わる。
+//
+// 一時的な DB の失敗で発話が欠けないよう、1件ずつ再試行する。発話ごとに振った ID の一意制約で、
+// 結果が不明な失敗の後に再試行しても二重には保存されない（以前のクライアントの再試行と同じ扱い）。
 //
 // 長さと件数の上限は SaveUtterance と揃える。長すぎる発話は切り詰め、上限に達したら
 // ErrTooManyUtterances を返す。空の発話は保存しない。
@@ -233,12 +254,48 @@ func (s *InterviewService) saveTurnUtterances(sessionID uint, utterances ...turn
 		if runes := []rune(text); len(runes) > maxUtteranceRunes {
 			text = string(runes[:maxUtteranceRunes])
 		}
-		if err := s.utterRepo.Create(&models.InterviewUtterance{SessionID: sessionID, Role: u.role, Text: text}); err != nil {
+		id := serverUtteranceIDPrefix + uuid.NewString()
+		if err := s.createUtteranceWithRetry(models.InterviewUtterance{
+			SessionID: sessionID, Role: u.role, Text: text, ClientUtteranceID: &id,
+		}); err != nil {
 			return err
 		}
 		count++
 	}
 	return nil
+}
+
+// createUtteranceWithRetry は発話1件を最大 turnUtteranceSaveAttempts 回保存する。
+// 途中で接続が切れても、保存を始めた発話は最後まで試す（user だけ残って ai が欠けるのを避ける）。
+func (s *InterviewService) createUtteranceWithRetry(utter models.InterviewUtterance) error {
+	var err error
+	for attempt := 1; attempt <= turnUtteranceSaveAttempts; attempt++ {
+		row := utter
+		if err = s.utterRepo.Create(&row); err == nil {
+			return nil
+		}
+		if attempt < turnUtteranceSaveAttempts {
+			log.Printf("[Interview] save utterance retry session=%d role=%s attempt=%d: %v", utter.SessionID, utter.Role, attempt, err)
+			time.Sleep(time.Duration(attempt) * turnUtteranceRetryWait)
+		}
+	}
+	return err
+}
+
+// duplicatesServerSavedUserUtterance は、最後のユーザー発話がサーバーの保存したもので、
+// 文面が text と同じかを返す。デプロイ前から開いている画面が、サーバーの保存済みの回答を
+// もう一度送ってきた場合に当たる。
+func duplicatesServerSavedUserUtterance(existing []models.InterviewUtterance, text string) bool {
+	for i := len(existing) - 1; i >= 0; i-- {
+		u := existing[i]
+		if u.Role != "user" {
+			continue
+		}
+		return u.ClientUtteranceID != nil &&
+			strings.HasPrefix(*u.ClientUtteranceID, serverUtteranceIDPrefix) &&
+			strings.TrimSpace(u.Text) == text
+	}
+	return false
 }
 
 // ListAllSessionsAdmin lists all interview sessions without performing a user-level admin check.

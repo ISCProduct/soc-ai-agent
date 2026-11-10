@@ -120,6 +120,12 @@ export function useInterviewSession({
    * （終了時は cleanupConnection が再生を止めるため、再生まで待つと解決しない）。
    */
   const inFlightTurnRef = useRef<Promise<void>>(Promise.resolve())
+  /**
+   * /start-turn の応答(#1969)。サーバーは冒頭の質問を応答の直前に保存するので、/turn はこれを
+   * 待ってから送る。先に送ると、回答と次の質問が冒頭の質問より前に保存され、面接官の履歴からも
+   * 冒頭の質問が抜ける。/start-turn はタイムアウト付きなので、待ちは必ず終わる。
+   */
+  const startTurnSettledRef = useRef<Promise<void>>(Promise.resolve())
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recorderFormatRef = useRef<RecorderFormat>({ mimeType: '', ext: 'webm' })
   // 発話が確定しなかった録音を送らずに捨てるためのフラグ。
@@ -411,7 +417,9 @@ export function useInterviewSession({
       }
       return audio
     }
-    await playTurnAudio(receive())
+    const receiving = receive()
+    startTurnSettledRef.current = receiving.then(() => {}, () => {})
+    await playTurnAudio(receiving)
   }
 
   const handleJoinWithConsent = () => {
@@ -438,6 +446,7 @@ export function useInterviewSession({
     setUtteranceSaveFailed(false)
     // 前回の面接でハングしたターンを次の終了処理が待ち続けないよう、参加時に捨てる
     inFlightTurnRef.current = Promise.resolve()
+    startTurnSettledRef.current = Promise.resolve()
     media.setMicEnabled(true); media.setCameraEnabled(true)
     historyRef.current = []
     companyContextRef.current = { reading: '', readingResolved: false }
@@ -756,8 +765,10 @@ export function useInterviewSession({
     )
     const companyContextGeneration = companyContextGenerationRef.current
     const receive = async (): Promise<Blob> => {
-      // Backend は保存済みの発話から履歴を組み直す（#1636）。発話はサーバーが前のターンの中で
-      // 保存し終えてから応答するので、ここで待つものは無い(#1969)。
+      // Backend は保存済みの発話から履歴を組み直す（#1636）。発話はサーバーがターンの中で
+      // 保存し終えてから応答する。冒頭の質問より先に回答が保存されないよう、/start-turn の
+      // 応答を待ってから送る(#1969)。
+      await startTurnSettledRef.current
       await authService.ensureFreshUserToken()
       const { meta, audio } = await fetchAndReadWithTimeout(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
         method: 'POST',

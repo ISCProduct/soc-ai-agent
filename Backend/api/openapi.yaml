@@ -1255,12 +1255,12 @@ paths:
     post:
       tags: [interviews]
       summary: 学生の発話を記録する
-      description: "受け付けるのは role=user だけ。面接官（role=ai）の発話は /start-turn・/turn の中でサーバーが保存する（#1969）。"
+      description: "保存するのは role=user だけ。role=ai は保存せずに成功を返す。面接官の発話は /start-turn・/turn の中でサーバーが保存する（#1969）。"
       security: [{ userToken: [] }]
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses:
         "200": { description: 記録した }
-        "400": { description: role=ai、または長さ・件数の上限を超えた }
+        "400": { description: 長さ・件数の上限を超えた }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/interviews/{id}/report:
