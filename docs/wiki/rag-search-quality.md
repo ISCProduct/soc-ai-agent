@@ -9,7 +9,7 @@
 | 対象 | 通す経路（本番と同じ関数） | 固定セット |
 |---|---|---|
 | 学生検索 | `student_profile_store.upsert_student` → `query_students` | `rag/evaluation/search_quality/data/student_search.json`（学生20人・クエリ11件） |
-| 企業リサーチ | `vector_store.set_cached_documents` → `get_cached_documents`（企業［＋企業ハッシュ］・職種の絞り込み、職種が無ければ同じ企業へのフォールバック、鮮度判定、上位5件） | `rag/evaluation/search_quality/data/company_research.json`（架空の5社・文書21件・クエリ12件） |
+| 企業リサーチ | `vector_store.set_cached_documents` → `get_cached_documents`（企業［＋企業ハッシュ］・職種の絞り込み、職種が無ければ同じ企業へのフォールバック、鮮度判定、上位5件）。本番の入口 `services/cache.get_cached_context` は通さず、その中で呼ばれる `get_cached_documents` を直接呼ぶ（クエリ文字列の既定値と例外時の空返却は対象外）。件数5は `get_cached_context` と同じ値を評価側の定数 `COMPANY_RESEARCH_N_RESULTS` に持っているので、本番側を変えたらこちらも合わせる | `rag/evaluation/search_quality/data/company_research.json`（架空の5社・文書21件・クエリ12件） |
 
 指標（クエリごとに計算してマクロ平均）:
 
@@ -36,6 +36,9 @@ k は学生検索が 1・3・5・10、企業リサーチが 1・3・5（本番�
 - 個人情報の検査は本文だけでなく、ID・企業名・説明など全ての文字列にかかる
 
 ## 実行方法
+
+前提: `rag/requirements.txt` を入れた環境で実行する（`pip install -r requirements.txt -c constraints.txt`）。
+費用のかからない既定（ハッシュ埋め込み・メモリ上のストア）でも、検索経路の `vector_store` が chromadb を import するため。
 
 ```sh
 cd rag
@@ -65,6 +68,20 @@ OPENAI_EMBEDDING_MODEL=text-embedding-3-large \
   `python scripts/eval_search_quality.py --update-baseline`
 - OpenAI の埋め込みでの評価は費用と API キーが要るので CI では行わず、設定を変える PR の作成者が手元で実行し、
   前後の表を PR に貼る
+
+### 固定セットの限界
+
+固定セットは件数が少ない（学生検索はクエリ11件・上位10件まで、企業リサーチはクエリ12件で正解はほぼ1文書）。
+1クエリの変動で平均が8〜9ポイント動き、企業リサーチの Recall@3 は 1.0 で飽和している。本番の学生検索の既定 `top_k` は 50 だが、評価は上位10件までしか見ていない。
+CI での検索経路の回帰の検知には十分だが、**OpenAI の埋め込みでの前後比較（埋め込みモデルの採否など）の根拠にするには、固定セットの拡充が要る**。
+小さな差は測れていないものとして扱うこと。
+
+検索経路を変える PR は、意図した変化でも基準値との完全一致のテストが落ちる。変化を確かめたうえで基準値を更新し、その PR に含める。
+
+### 本番の内部実装への依存
+
+評価は `vector_store` の内部（`_chroma_client` / `_chroma_lock` / `_doc_ids` / `_sanitize_collection_name`）と、Chroma の API のうち検索経路が使う部分だけを再現したメモリ上のストアに依存している。
+`vector_store` の作りを変えたときは、`rag/evaluation/search_quality/runner.py` と `memory_store.py` も合わせて直す（壊れると基準値のテストが落ちる）。
 
 メモリ上のストアは Chroma の既定の距離（l2）に合わせている。本物の Chroma（`--store chroma`）と比べると、
 距離がほぼ同じ文書の下位の並びが入れ替わることがある（Chroma は近似近傍探索と float32 を使うため）。

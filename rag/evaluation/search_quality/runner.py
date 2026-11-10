@@ -17,14 +17,19 @@ from .embedders import Embedder
 from .metrics import evaluate_query, mean_scores
 
 STUDENT_KS = (1, 3, 5, 10)
-# 企業リサーチは本番（services/cache.get_cached_context）が上位5件だけを使う
+# 企業リサーチは本番（services/cache.get_cached_context）が上位5件だけを使う。
+# get_cached_context は n_results=5 を直接書いているので、本番側を変えたらここも合わせる
 COMPANY_RESEARCH_N_RESULTS = 5
 COMPANY_KS = (1, 3, 5)
 
 
 @contextlib.contextmanager
 def use_chroma_client(client: Any) -> Iterator[None]:
-    """検索経路が使う Chroma クライアントを一時的に差し替える。"""
+    """検索経路が使う Chroma クライアントを一時的に差し替える。
+
+    vector_store の内部（_chroma_client / _chroma_lock、_mark_stale が使う _doc_ids /
+    _sanitize_collection_name）に依存している。vector_store の作りを変えたときはここも直すこと。
+    """
     with vector_store._chroma_lock:
         previous = vector_store._chroma_client
         vector_store._chroma_client = client
