@@ -42,9 +42,13 @@ var modelPricing = map[string][2]float64{
 // 単価の根拠（#2004）。見た目では推定値か実価格かが区別できなかったので、表を分けて持つ。
 const (
 	// PriceBasisListed は modelPricing の単価（公開価格、または AI_MODEL_PRICING_JSON で運用側が上書きした単価）。
+	// 一致したキーがモデル名そのもの・日付付きの版（-20…）・":" 付きの派生名のときだけ。
 	PriceBasisListed = "listed"
 	// PriceBasisEstimated は estimatedPricing の単価（実価格を確認していない推定値）。
 	PriceBasisEstimated = "estimated"
+	// PriceBasisInherited は、単価表に無いモデルが前方一致で別モデルの単価に当たったもの
+	// （例: o3-mini → o3、gpt-4o-realtime-preview → gpt-4o）。モデル自身の単価ではない（#2151 のレビュー）。
+	PriceBasisInherited = "inherited"
 	// PriceBasisUnknown は単価表に無いモデル。少なく見積もらないよう gpt-4o の単価で計算している。
 	PriceBasisUnknown = "unknown"
 )
@@ -56,11 +60,19 @@ var estimatedPricing = map[string][2]float64{
 	"gpt-5.2": {2.50, 10.00}, // gpt-4o クラスとして推定
 }
 
-// unknownModelPricing は単価表に無いモデルに使う単価（gpt-4o 単価。過小評価しない）。
-var unknownModelPricing = [2]float64{2.50, 10.00}
+// unknownFallbackModel は単価表に無いモデルに使う単価のモデル（過小評価しない）。
+// AI_MODEL_PRICING_JSON で gpt-4o を上書きしたら、その値に追従する（#2151 のレビュー）。
+const unknownFallbackModel = "gpt-4o"
 
 // pricingWarned は、推定値・単価未登録で計算したことを、モデルごとに1回だけログに出すための記録。
 var pricingWarned sync.Map
+
+// pricingMatch は lookupPricing の結果。
+type pricingMatch struct {
+	prices [2]float64
+	basis  string
+	key    string // 一致した単価表のキー（未登録なら unknownFallbackModel）
+}
 
 // lookupPricing はモデル名から単価と、その根拠を返す。
 //
@@ -73,9 +85,13 @@ var pricingWarned sync.Map
 // 実測（本番相当DB, 2026-08-13以降）では gpt-4o-mini の 892万入力トークンが
 // $26.32 として記録されており、正しい mini 単価なら $1.79 だった。
 // コスト削減の判断材料が15倍近く狂っていたことになる。
-func lookupPricing(model string) ([2]float64, string) {
+//
+// 単価の選び方は前方一致のまま変えないが、一致したのが別モデル（o3-mini → o3 など）なら、
+// 根拠を inherited にして、公開価格と区別する。
+func lookupPricing(model string) pricingMatch {
 	lower := strings.ToLower(strings.TrimSpace(model))
-	pricing, basis, best := unknownModelPricing, PriceBasisUnknown, ""
+	m := pricingMatch{prices: modelPricing[unknownFallbackModel], basis: PriceBasisUnknown, key: unknownFallbackModel}
+	best := ""
 	for _, table := range []struct {
 		prices map[string][2]float64
 		basis  string
@@ -86,34 +102,53 @@ func lookupPricing(model string) ([2]float64, string) {
 			}
 			// 同じ長さなら先に見た表（modelPricing = listed）を優先する
 			if len(k) > len(best) {
-				best, pricing, basis = k, p, table.basis
+				best = k
+				m = pricingMatch{prices: p, basis: table.basis, key: k}
 			}
 		}
 	}
-	return pricing, basis
+	if m.basis == PriceBasisListed && !isSameModel(lower, m.key) {
+		m.basis = PriceBasisInherited
+	}
+	return m
 }
 
-// PriceBasis はモデル名から単価の根拠（PriceBasisListed / Estimated / Unknown）を返す。
+// isSameModel は、単価表のキーとモデル名が同じモデル（そのもの・日付付きの版・":" 付きの派生名）かを返す。
+func isSameModel(lowerModel, key string) bool {
+	return lowerModel == key || strings.HasPrefix(lowerModel, key+"-20") || strings.HasPrefix(lowerModel, key+":")
+}
+
+// PriceBasis はモデル名から単価の根拠（PriceBasisListed / Estimated / Inherited / Unknown）を返す。
 func PriceBasis(model string) string {
-	_, basis := lookupPricing(model)
-	return basis
+	return lookupPricing(model).basis
 }
 
-// warnPricingOnce は、推定値・単価未登録の単価で計算したことを、モデルごとに1回だけログに出す。
-// 黙って gpt-4o 単価で集計されると、画面の金額と請求額のずれに気づけない（#2004）。
-func warnPricingOnce(model, basis string) {
-	if basis == PriceBasisListed {
+// warnPricingOnce は、公開価格以外の単価で計算したことを、モデルごとに1回だけログに出す。
+// 黙って別の単価で集計されると、画面の金額と請求額のずれに気づけない（#2004）。
+func warnPricingOnce(model string, m pricingMatch) {
+	if m.basis == PriceBasisListed {
 		return
 	}
-	if _, loaded := pricingWarned.LoadOrStore(basis+":"+model, struct{}{}); loaded {
+	// 表の検索と同じく小文字にそろえる（GPT-5.2 と gpt-5.2 で2回出さない。#2151 のレビュー）
+	name := strings.ToLower(strings.TrimSpace(model))
+	if _, loaded := pricingWarned.LoadOrStore(m.basis+":"+name, struct{}{}); loaded {
 		return
 	}
-	switch basis {
+	switch m.basis {
 	case PriceBasisEstimated:
-		log.Printf("[APICost] %q は推定単価で計算しています（実価格を確認したら単価表へ移すか %s で上書きしてください）", model, modelPricingOverrideEnv)
+		log.Printf("[APICost] %q は推定単価で計算しています（実価格を確認したら単価表へ移すか %s で上書きしてください）", name, modelPricingOverrideEnv)
+	case PriceBasisInherited:
+		log.Printf("[APICost] %q は単価表に無いため、別モデル %q の単価で計算しています（%s で単価を登録してください）", name, m.key, modelPricingOverrideEnv)
 	case PriceBasisUnknown:
-		log.Printf("[APICost] %q は単価表に無いため gpt-4o の単価で計算しています（%s で単価を登録してください）", model, modelPricingOverrideEnv)
+		log.Printf("[APICost] %q は単価表に無いため %s の単価で計算しています（%s で単価を登録してください）", name, unknownFallbackModel, modelPricingOverrideEnv)
 	}
+}
+
+// isAudioPricedModel は、トークン単価ではなく音声の単価（分・文字数）で課金するモデルかを返す。
+// 内訳でこれらに「単価未登録」などのバッジを付けないため（#2151 のレビュー）。
+func isAudioPricedModel(model string) bool {
+	lower := strings.ToLower(model)
+	return strings.Contains(lower, "transcribe") || strings.Contains(lower, "whisper") || strings.HasPrefix(lower, "tts")
 }
 
 // 音声経路の単価（#1294 DesignDoc §3.4）。
@@ -209,11 +244,11 @@ func calculateCost(provider, model string, promptTokens, completionTokens int) f
 	if provider != "" && !strings.EqualFold(provider, "openai") {
 		return 0
 	}
-	pricing, basis := lookupPricing(model)
-	warnPricingOnce(model, basis)
+	m := lookupPricing(model)
+	warnPricingOnce(model, m)
 
-	inputCost := float64(promptTokens) * pricing[0] / 1_000_000
-	outputCost := float64(completionTokens) * pricing[1] / 1_000_000
+	inputCost := float64(promptTokens) * m.prices[0] / 1_000_000
+	outputCost := float64(completionTokens) * m.prices[1] / 1_000_000
 	return inputCost + outputCost
 }
 
@@ -256,9 +291,12 @@ func NewAPICostService(repo *repositories.APICallLogRepository) *APICostService 
 // web_search のツール料が丸ごと抜けていた。
 func usageCostUSD(u openaiPkg.Usage) float64 {
 	// 音声経路（STT/TTS）はトークンが返らない。秒数・文字数から計算する。
-	cost := calculateCost(u.Provider, u.Model, u.PromptTokens, u.CompletionTokens)
+	// 音声ではトークン単価表を引かない（引くと「単価表に無い」という実際と違う警告が出る。#2151 のレビュー）
+	var cost float64
 	if u.AudioSeconds > 0 || u.Characters > 0 {
 		cost = calculateAudioCost(u.Provider, u.AudioSeconds, u.Characters)
+	} else {
+		cost = calculateCost(u.Provider, u.Model, u.PromptTokens, u.CompletionTokens)
 	}
 	// web_search はトークンとは別に1コール単位で課金される。
 	// ローカル推論(provider != openai)には存在しないので加算しない。
@@ -495,8 +533,9 @@ func (s *APICostService) GetModelBreakdown(since time.Time) ([]ModelCostSummary,
 
 // summaryPriceBasis は内訳の1行に付ける単価の根拠を返す。金額が0の行（ローカル推論など、
 // 単価を使っていない行）は空にする。単価表に無いローカルのモデル名が「単価未登録」と出ないようにするため。
+// 音声の単価（分・文字数）で課金するモデルも、トークン単価表を使っていないので空にする（#2151 のレビュー）。
 func summaryPriceBasis(model string, totalCostUSD float64) string {
-	if totalCostUSD <= 0 {
+	if totalCostUSD <= 0 || isAudioPricedModel(model) {
 		return ""
 	}
 	return PriceBasis(model)

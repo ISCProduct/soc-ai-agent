@@ -17,6 +17,11 @@ describe('PriceBasisBadge', () => {
     expect(badge).toHaveAttribute('title', expect.stringContaining('gpt-4o'))
   })
 
+  it('別モデルの単価に当たったモデルには「別モデルの単価」を出す（#2151 のレビュー）', () => {
+    render(<PriceBasisBadge basis="inherited" />)
+    expect(screen.getByText('別モデルの単価')).toBeInTheDocument()
+  })
+
   it.each([['listed'], [undefined], ['']])('公開価格・根拠なし（%p）では何も出さない', (basis) => {
     const { container } = render(<PriceBasisBadge basis={basis} />)
     expect(container.firstChild).toBeNull()
