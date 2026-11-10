@@ -344,6 +344,8 @@ GROUP BY prompt_stage, prompt_ab_group
 ORDER BY prompt_stage, prompt_ab_group;
 ```
 
+設定は Terraform 変数 `prompt_ab`（例: `{ score_evaluation = "v2:50,v3:50" }`）で渡す。prod は `terraform apply` でタスク定義へ入る。
+staging は `prompt_versions` と同じく新規インスタンスの user_data にしか届かないので、稼働中のインスタンスは `/opt/app/.env` も手で更新する。
 設定が無効（候補の本文が未登録など）なら、起動後の最初の呼び出しで `プロンプトの A/B 設定を無視します` の警告が出る。
 `prompt_stage='unknown'` は工程メタデータが付与されていない呼び出しを表す。
 
