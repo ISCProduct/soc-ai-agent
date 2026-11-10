@@ -72,6 +72,7 @@ func TestGenerateStrategicQuestion_FallbackDoesNotRecordPromptVersion(t *testing
 		0,
 		"新卒",
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("generateStrategicQuestion returned error: %v", err)
