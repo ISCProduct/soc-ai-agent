@@ -95,6 +95,8 @@ go run ./cmd/aibench -diff /tmp/resume-prev.json,/tmp/resume-4o.json
 - **ES 添削は CI で測らない**（RAG の起動が要るため）。手元で測る
 - **結果**: ジョブサマリーに head の結果と base との差分を出し、劣化を検知したらジョブを失敗させる。結果JSONとログはアーティファクト（14日）に残る
 - **base に無い評価対象**（新しく足したもの）は差分を取らず、head だけ測る
+- **固定セットを変えた PR** は base と head で入力が違うので、差分は参考として出すだけで劣化の判定に使わない
+- **1件も計測できなかった**（API の障害・レート制限）場合と、head の事前検証（`-dry-run`）が失敗した場合はジョブを失敗させる
 - **シークレット**: `AIBENCH_OPENAI_API_KEY`。未設定やフォークの PR では、案内だけ出して成功で終わる
 - **所要時間**: 既定の5つを base と head で測ると 40〜60 分程度（逐次実行。`resume` が長い）
 
@@ -746,10 +748,11 @@ go run ./cmd/aibench -target chat-answer -manifest ../docs/research/ai-eval/chat
 
 この2つは LLM が点を付ける処理ではなく、出力を作る処理なので、**良/中/悪のラベルを付けない**。
 点は決まった計算で出す（弁別力・交絡の指標は計算されない）。破損率・再現性・指示遵守率は他と同じに読める。
+`-diff` では弁別力の代わりに**平均スコア**（全ケースの平均。結果JSONの `mean_score`）を比べ、0.05 以上下がったら劣化とする。
 
 | target | 本番の経路 | 点（0〜1） |
 |---|---|---|
-| `company-extract` | `company_info_fetcher.go` の `acquireCheapExtract`。本番と同じプロンプト・Structured Outputs のスキーマ（strict）・温度 0.2・上限 600 で呼び、本番と同じ `ParseCompanyInfoResult` で読む | 正解の項目（`expected`）と一致した割合。業種は完全一致、所在地・事業・技術は部分一致、設立年・従業員数は完全一致。`absent` の項目（事実テキストに無い）に値を入れたら外れ |
+| `company-extract` | `company_info_fetcher.go` の `acquireCheapExtract`。本番と同じプロンプト・Structured Outputs のスキーマ（strict）・温度 0.2・上限 600 で呼び、本番と同じ `ParseCompanyInfoResult` で読む | 正解の項目（`expected`）と一致した割合。業種・設立年・従業員数・従業員数の基準（連結/単体）・勤務形態（本番の正規化後の値）は完全一致、所在地・事業・技術・福利厚生は部分一致。`absent` の項目（事実テキストに無い）に値を入れたら外れ |
 | `matching-reason` | `matching_service.go` の `GenerateMatchReason`。本番と同じプロンプト・温度 0.4・`/responses` の上限 100（上限到達なら 200 で1回呼び直す） | 5項目を満たした割合: 120〜220字、2〜3文、企業側の事実に触れる（`must_mention_any`）、強みの軸に触れる（`strength_any`）、見出し・箇条書き・JSON を使わない |
 
 `matching-reason` は**入力に無い企業の事実を作っていないか（根拠のない記述）は判定していない**。機械的に判定できないため。

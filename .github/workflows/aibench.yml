@@ -56,7 +56,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
-      OPENAI_API_KEY: ${{ secrets.AIBENCH_OPENAI_API_KEY }}
       AIBENCH_TARGETS: ${{ github.event.inputs.targets || 'chat-answer,company-extract,matching-reason,resume,interview-report' }}
       AIBENCH_RUNS: ${{ github.event.inputs.runs || '2' }}
       AIBENCH_MAX_COST_USD: ${{ github.event.inputs.max_cost_usd || '1.00' }}
@@ -76,6 +75,8 @@ jobs:
 
       - name: aibench を実行して base と比べる
         env:
+          # API キーは実行するステップだけに渡す（checkout などのアクションへ渡さない）
+          OPENAI_API_KEY: ${{ secrets.AIBENCH_OPENAI_API_KEY }}
           AIBENCH_OUT_DIR: ${{ runner.temp }}/aibench
         run: ./automation/aibench/ci-run.sh
 

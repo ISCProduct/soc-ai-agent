@@ -56,14 +56,15 @@ declare -A skip=()
 for side in "${sides[@]}"; do
   for t in "${targets[@]}"; do
     manifest="${src[$side]}/docs/research/ai-eval/$t.jsonl"
-    if [ ! -f "$manifest" ]; then
-      skip[$side-$t]=1
-      continue
-    fi
     if ! est_out="$("$OUT/aibench-$side" -target "$t" -manifest "$manifest" -n "$RUNS" -dry-run 2>&1)"; then
-      # base にまだ無い評価対象など
-      skip[$side-$t]=1
-      continue
+      if [ "$side" = base ]; then
+        # base にまだ無い評価対象（固定セットや target が無い）は head だけ測る
+        skip[$side-$t]=1
+        continue
+      fi
+      # head の失敗は評価コードや固定セットの破損なので、飛ばさずに止める
+      summary "" "head / $t の事前検証（-dry-run）に失敗しました。評価コードか固定セットが壊れています:" '```' "$(printf '%s\n' "$est_out" | tail -20)" '```'
+      exit 1
     fi
     est="$(printf '%s\n' "$est_out" | sed -n 's/.*概算コスト \$\([0-9.]*\).*/\1/p' | head -1)"
     total="$(awk -v a="$total" -v b="${est:-0}" 'BEGIN { printf "%.4f", a + b }')"
@@ -90,6 +91,10 @@ for side in "${sides[@]}"; do
       "${cost_flag[@]}" -out "$OUT/$side-$t.json" >"$OUT/$side-$t.log" 2>&1; then
       summary "" "- ❌ $side / $t の実行に失敗しました（ログはアーティファクトの \`$side-$t.log\`）"
       failed=1
+    elif [ -z "$DRY" ] && grep -qE '"measured_runs": *0[,}]' "$OUT/$side-$t.json"; then
+      # 全呼び出しが通信エラー・レート制限などで測れなかった。ゼロ同士の比較は「劣化なし」に見えるので失敗にする
+      summary "" "- ❌ $side / $t は1件も計測できませんでした（API の障害・レート制限・残高を確認）"
+      failed=1
     fi
   done
 done
@@ -108,8 +113,13 @@ for t in "${targets[@]}"; do
   fi
   summary "<details><summary>head の結果</summary>" "" '```' "$(sed -n '\# / model=#,$p' "$OUT/head-$t.log" | head -80)" '```' "</details>"
   if [ "${#sides[@]}" -eq 2 ] && [ -f "$OUT/base-$t.json" ] && [ -f "$OUT/head-$t.json" ]; then
+    base_manifest="${src[base]}/docs/research/ai-eval/$t.jsonl"
+    head_manifest="$ROOT/docs/research/ai-eval/$t.jsonl"
     if "$OUT/aibench-head" -diff "$OUT/base-$t.json,$OUT/head-$t.json" >"$OUT/diff-$t.txt" 2>&1; then
       summary "base との差分: 劣化なし"
+    elif ! cmp -s "$base_manifest" "$head_manifest"; then
+      # 固定セットが変わると入力が違うので、差はモデルやプロンプトの劣化とは言えない。参考として出すだけにする
+      summary "base との差分: 固定セットが変わったため参考値です（劣化の判定に使いません）"
     else
       summary "base との差分: **劣化を検知しました**"
       regressed=1

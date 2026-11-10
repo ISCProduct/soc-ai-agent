@@ -121,6 +121,12 @@ type CompanyExtractExpected struct {
 	// FoundedYear / EmployeeCount は完全一致。
 	FoundedYear   int `json:"founded_year,omitempty"`
 	EmployeeCount int `json:"employee_count,omitempty"`
+	// EmployeeCountBasis は consolidated / standalone（完全一致。連結と単体で意味が変わる）。
+	EmployeeCountBasis string `json:"employee_count_basis,omitempty"`
+	// WorkStyle は本番の正規化後の値（リモート / ハイブリッド / オフィス）で完全一致。
+	WorkStyle string `json:"work_style,omitempty"`
+	// WelfareDetails は出力に含まれているべき語（部分一致）。
+	WelfareDetails string `json:"welfare_details,omitempty"`
 	// Absent は事実テキストに無いので空（0）でなければならない項目（JSON のキー名）。
 	// 値が入っていれば、根拠の無い値を作った（fabricated）として数える。
 	Absent []string `json:"absent,omitempty"`

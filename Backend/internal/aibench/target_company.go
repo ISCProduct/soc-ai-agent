@@ -95,7 +95,8 @@ func evaluateCompanyExtractResponse(o Observation, expected CompanyExtractExpect
 // companyExtractCheckCount は正解で確かめる項目の数。
 func companyExtractCheckCount(e CompanyExtractExpected) int {
 	n := len(e.Absent)
-	for _, set := range []bool{e.Industry != "", e.Location != "", e.MainBusiness != "", e.TechStack != "", e.FoundedYear != 0, e.EmployeeCount != 0} {
+	for _, set := range []bool{e.Industry != "", e.Location != "", e.MainBusiness != "", e.TechStack != "", e.FoundedYear != 0, e.EmployeeCount != 0,
+		e.EmployeeCountBasis != "", e.WorkStyle != "", e.WelfareDetails != ""} {
 		if set {
 			n++
 		}
@@ -130,6 +131,15 @@ func scoreCompanyExtract(r company.CompanyInfoResult, e CompanyExtractExpected) 
 	}
 	if e.EmployeeCount != 0 {
 		check("employee_count", r.EmployeeCount == e.EmployeeCount)
+	}
+	if e.EmployeeCountBasis != "" {
+		check("employee_count_basis", r.EmployeeCountBasis == e.EmployeeCountBasis)
+	}
+	if e.WorkStyle != "" {
+		check("work_style", r.WorkStyle == e.WorkStyle)
+	}
+	if e.WelfareDetails != "" {
+		check("welfare_details", containsNormalized(r.WelfareDetails, e.WelfareDetails))
 	}
 	for _, field := range e.Absent {
 		total++

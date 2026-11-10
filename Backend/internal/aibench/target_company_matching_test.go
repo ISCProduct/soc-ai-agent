@@ -219,3 +219,54 @@ func TestBundledManifests_CompanyAndMatching(t *testing.T) {
 		t.Fatal("chat-answer のラベル無しを通してしまう")
 	}
 }
+
+// ラベルなしの target は平均スコアの低下を劣化として検知する（弁別力が無いため）。
+func TestDiff_ラベルなしは平均スコアの低下を劣化にする(t *testing.T) {
+	prev := &Summary{Target: TargetCompanyExtract, MeasuredRuns: 24, MeanScore: 0.90}
+	cur := &Summary{Target: TargetCompanyExtract, MeasuredRuns: 24, MeanScore: 0.80}
+	regs, _ := Diff(prev, cur)
+	found := false
+	for _, r := range regs {
+		found = found || r.Metric == "平均スコア"
+	}
+	if !found {
+		t.Fatalf("平均スコアの低下を検知しない: %+v", regs)
+	}
+	// ラベルありの target と、計測0件の側では比べない
+	for _, tc := range []struct{ p, c *Summary }{
+		{&Summary{Target: TargetChatAnswer, MeasuredRuns: 10, MeanScore: 0.9}, &Summary{Target: TargetChatAnswer, MeasuredRuns: 10, MeanScore: 0.5}},
+		{&Summary{Target: TargetCompanyExtract, MeasuredRuns: 0}, &Summary{Target: TargetCompanyExtract, MeasuredRuns: 24, MeanScore: 0.5}},
+	} {
+		regs, _ := Diff(tc.p, tc.c)
+		for _, r := range regs {
+			if r.Metric == "平均スコア" {
+				t.Fatalf("比べてはいけない組で平均スコアを比べた: %+v", tc)
+			}
+		}
+	}
+}
+
+func TestAggregate_平均スコア(t *testing.T) {
+	obs := []Observation{
+		{CaseID: "a", Score: 1.0}, {CaseID: "a", Score: 0.5},
+		{CaseID: "b", Score: 0.25}, {CaseID: "b", Broken: true, BrokenReason: BrokenJSONInvalid},
+	}
+	s := Aggregate(TargetCompanyExtract, "m", "e", "t", obs)
+	// ケースごとの平均（0.75, 0.25）の平均
+	if s.MeanScore != 0.5 {
+		t.Fatalf("MeanScore = %v, want 0.5", s.MeanScore)
+	}
+}
+
+func TestScoreCompanyExtract_勤務形態と福利厚生と従業員数の基準(t *testing.T) {
+	e := CompanyExtractExpected{EmployeeCountBasis: "standalone", WorkStyle: "オフィス", WelfareDetails: "住宅手当"}
+	ok := company.CompanyInfoResult{EmployeeCountBasis: "standalone", WorkStyle: "オフィス", WelfareDetails: "住宅手当、資格取得支援"}
+	if passed, total, _ := scoreCompanyExtract(ok, e); passed != 3 || total != 3 {
+		t.Fatalf("passed=%d total=%d", passed, total)
+	}
+	ng := company.CompanyInfoResult{EmployeeCountBasis: "consolidated", WorkStyle: "リモート"}
+	_, _, violations := scoreCompanyExtract(ng, e)
+	if strings.Join(violations, ",") != "field_mismatch:employee_count_basis,field_mismatch:work_style,field_mismatch:welfare_details" {
+		t.Fatalf("violations = %v", violations)
+	}
+}
