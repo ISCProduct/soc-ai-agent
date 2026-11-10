@@ -9,6 +9,10 @@ import (
 // 字数の入力と期待値は rag/testdata/char_limit_cases.json に置く。
 // Go と RAG の pytest が同じファイルを読む。どちらかの数え方や許容範囲だけが変わると、
 // こちらが落ちる（#1957）。RAG のソースを正規表現で読むと、コメントや改行で落ちる。
+//
+// 上限 1000 は、下限比を 0.85 から 0.851 に動かしたとき切り捨て結果が 850 から 851 に変わる大きさ。
+// 400 と 800 ではその差が出ない。タブ・NBSP・全角空白は、端の空白の除去が半角スペースだけに
+// 縮んでも落ちるように置いてある。文中のタブは1文字のまま数える。
 func TestCharLimit_MatchesSharedGolden(t *testing.T) {
 	raw, err := os.ReadFile("../../../../../rag/testdata/char_limit_cases.json")
 	if err != nil {
