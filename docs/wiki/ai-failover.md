@@ -15,10 +15,12 @@ OpenAI の障害時に、音声面接（`/start-turn`・`/turn`）の STT・LLM�
 
 - **縮退するのは一時的な障害だけ**: 429・5xx・タイムアウト・接続できない（名前解決・接続拒否）。認証（401/403）・入力不正（400/422 など）は隠さずにそのまま返す。クライアントが切断したターンも縮退しない
 - **工程ごとに独立**: STT だけ落ちていれば STT だけローカルを使う
-- **Circuit Breaker**: 工程ごとに、縮退した失敗が続けて `AI_FAILOVER_BREAKER_THRESHOLD` 回（既定 3）起きたら、`AI_FAILOVER_BREAKER_COOLDOWN_SECONDS`（既定 30）秒の間 OpenAI を呼ばずにローカルへ回す。その後1回だけ OpenAI を試し、成功すれば戻す。障害中に毎回 OpenAI のタイムアウトを待たないため
-- **音声の形式**: ローカルの TTS は WAV を返す。応答の音声の Content-Type は中身から決める（WAV なら `audio/wav`、それ以外は `audio/mpeg`）。ブラウザはどちらもそのまま再生できる
+- **Circuit Breaker**: 工程ごとに、縮退した失敗が続けて `AI_FAILOVER_BREAKER_THRESHOLD` 回（既定 3）起きたら、`AI_FAILOVER_BREAKER_COOLDOWN_SECONDS`（既定 30）秒の間 OpenAI を呼ばずにローカルへ回す。その後1回だけ OpenAI を試し、成功すれば戻す。試しで認証・入力不正（縮退しない失敗）が返ったときも、OpenAI は応答しているので戻す。障害中に毎回 OpenAI のタイムアウトを待たないため
+- **待ち時間の予算**: フロントはターン全体を90秒で打ち切る。縮退できる工程では OpenAI を `AI_FAILOVER_PRIMARY_TIMEOUT_SECONDS`（既定 20）秒で切り、ローカルの1工程は `AI_FAILOVER_LOCAL_TIMEOUT_SECONDS`（既定 25）秒で切る。さらに縮退が有効なときはターン全体に80秒の期限を置き、間に合わない工程は言い換え応答・音声なしに落として、フロントの打ち切りより先に結果を返す
+- **音声の形式**: ローカルの TTS は WAV を返す。応答の音声の Content-Type は中身から決め（WAV なら `audio/wav`、それ以外は `audio/mpeg`）、フロントの multipart の解析（`parseMultipartResponse`）がその Content-Type のまま Blob にする
 - **応答のメタ**: ローカルで処理した工程を `ai_fallback`（例 `["stt","llm","tts"]`）で返す。OpenAI だけで済んだら空
-- **利用量**: ローカルで処理した STT・TTS は OpenAI の利用量として記録しない。STT をローカルで処理したターンは、OpenAI の高精度モデルへの再送もしない
+- **利用量**: OpenAI を試したら、失敗して縮退しても OpenAI の利用量として記録する（課金されている可能性があるため）。Circuit Breaker で OpenAI を飛ばしたときだけ記録しない。STT をローカルで処理したターンは、OpenAI の高精度モデルへの再送もしない
+- **観測ログ**: ローカルで文字起こししたターンの `stt observation` は、モデル名を `local:whisper.cpp` にする（OpenAI のモデルの品質・速度の集計に混ぜない）
 - **ローカルも失敗したら**: 今までと同じく、STT は「聞き取れませんでした」、LLM は言い換えの応答、TTS は音声なし（テキストのみ）で面接を続ける
 
 ## 設定
@@ -34,7 +36,11 @@ OpenAI の障害時に、音声面接（`/start-turn`・`/turn`）の STT・LLM�
 | `AI_FAILOVER_LOCAL_TTS_SPEAKER` | `1` | VOICEVOX の話者 ID |
 | `AI_FAILOVER_BREAKER_THRESHOLD` | `3` | 続けて失敗したら開く回数 |
 | `AI_FAILOVER_BREAKER_COOLDOWN_SECONDS` | `30` | 開いている時間 |
-| `AI_FAILOVER_LOCAL_TIMEOUT_SECONDS` | `60` | ローカルの推論先の待ち時間（GPU なしの推論 PC は遅いので長め） |
+| `AI_FAILOVER_PRIMARY_TIMEOUT_SECONDS` | `20` | 縮退できる工程で OpenAI を待つ上限 |
+| `AI_FAILOVER_LOCAL_TIMEOUT_SECONDS` | `25` | ローカルの1工程を待つ上限（ターン全体の80秒の期限の方が短ければそちらで切れる） |
+
+Terraform では `ai_failover_local_stt_url` / `ai_failover_local_llm_url` / `ai_failover_local_llm_model` / `ai_failover_local_tts_url` / `ai_failover_local_tts_speaker`（既定は空）で prod の Backend と staging の `.env` に渡す。
+staging は新規インスタンスの user_data にしか届かないので、稼働中のインスタンスは `/opt/app/.env` も手で更新する。
 
 ## 未対応（別の PR）
 

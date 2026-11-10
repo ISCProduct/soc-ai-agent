@@ -174,7 +174,8 @@ func newTestSpeech(primary Primary, localURL string) *Speech {
 	return New(primary, Config{
 		STTURL: localURL, LLMBaseURL: localURL + "/v1", LLMModel: "qwen3:1.7b",
 		TTSURL: localURL, TTSSpeaker: "3",
-		BreakerThreshold: 2, BreakerCooldown: time.Minute, LocalTimeout: 5 * time.Second,
+		BreakerThreshold: 2, BreakerCooldown: time.Minute,
+		PrimaryTimeout: 5 * time.Second, LocalTimeout: 5 * time.Second,
 	})
 }
 
@@ -184,17 +185,17 @@ func TestSpeech_一時的な障害ならローカルへ縮退する(t *testing.T
 	s := newTestSpeech(primary, local.URL)
 	ctx := context.Background()
 
-	text, fallback, err := s.Transcribe(ctx, []byte("audio"), "a.webm", "御社")
-	if err != nil || !fallback || text != "ローカルの文字起こし" {
-		t.Fatalf("STT: text=%q fallback=%v err=%v", text, fallback, err)
+	text, out, err := s.Transcribe(ctx, []byte("audio"), "a.webm", "御社")
+	if err != nil || !out.Local || text != "ローカルの文字起こし" {
+		t.Fatalf("STT: text=%q fallback=%v err=%v", text, out.Local, err)
 	}
-	reply, fallback, err := s.Chat(ctx, "system", []map[string]string{{"role": "user", "content": "回答"}})
-	if err != nil || !fallback || reply != "ローカルの応答" {
-		t.Fatalf("LLM: reply=%q fallback=%v err=%v（<think> は落とす）", reply, fallback, err)
+	reply, out, err := s.Chat(ctx, "system", []map[string]string{{"role": "user", "content": "回答"}})
+	if err != nil || !out.Local || reply != "ローカルの応答" {
+		t.Fatalf("LLM: reply=%q fallback=%v err=%v（<think> は落とす）", reply, out.Local, err)
 	}
-	audio, fallback, err := s.Speak(ctx, "次の質問です", "alloy")
-	if err != nil || !fallback || !IsWAV(audio) {
-		t.Fatalf("TTS: fallback=%v err=%v wav=%v", fallback, err, IsWAV(audio))
+	audio, out, err := s.Speak(ctx, "次の質問です", "alloy")
+	if err != nil || !out.Local || !IsWAV(audio) {
+		t.Fatalf("TTS: fallback=%v err=%v wav=%v", out.Local, err, IsWAV(audio))
 	}
 	if strings.Join(*paths, ",") != "/inference,/v1/chat/completions,/audio_query,/synthesis" {
 		t.Fatalf("ローカルへの呼び出し = %v", *paths)
@@ -206,8 +207,8 @@ func TestSpeech_認証や入力不正はローカルで隠さない(t *testing.T
 	primary := &fakePrimary{err: &openai.StatusError{Format: "error %d: %s", StatusCode: 401}}
 	s := newTestSpeech(primary, local.URL)
 
-	if _, fallback, err := s.Chat(context.Background(), "system", nil); err == nil || fallback {
-		t.Fatalf("fallback=%v err=%v, want エラーのまま", fallback, err)
+	if _, out, err := s.Chat(context.Background(), "system", nil); err == nil || out.Local {
+		t.Fatalf("fallback=%v err=%v, want エラーのまま", out.Local, err)
 	}
 	if len(*paths) != 0 {
 		t.Fatalf("ローカルを呼んだ: %v", *paths)
@@ -218,8 +219,8 @@ func TestSpeech_ローカル未設定なら今までと同じ(t *testing.T) {
 	primary := &fakePrimary{err: &openai.StatusError{Format: "error %d: %s", StatusCode: 503}}
 	s := New(primary, Config{BreakerThreshold: 1, BreakerCooldown: time.Minute})
 	for range 3 {
-		if _, fallback, err := s.Chat(context.Background(), "system", nil); err == nil || fallback {
-			t.Fatalf("fallback=%v err=%v", fallback, err)
+		if _, out, err := s.Chat(context.Background(), "system", nil); err == nil || out.Local {
+			t.Fatalf("fallback=%v err=%v", out.Local, err)
 		}
 	}
 	// Breaker を使わないので、毎回 OpenAI を呼ぶ
@@ -236,8 +237,8 @@ func TestSpeech_Breakerが開いたらOpenAIを呼ばない(t *testing.T) {
 	primary := &fakePrimary{err: &openai.StatusError{Format: "error %d: %s", StatusCode: 500}}
 	s := newTestSpeech(primary, local.URL)
 	for range 5 {
-		if _, fallback, err := s.Chat(context.Background(), "system", nil); err != nil || !fallback {
-			t.Fatalf("fallback=%v err=%v", fallback, err)
+		if _, out, err := s.Chat(context.Background(), "system", nil); err != nil || !out.Local {
+			t.Fatalf("fallback=%v err=%v", out.Local, err)
 		}
 	}
 	// 閾値 2 回で開き、その後は OpenAI を呼ばずにローカルへ
@@ -253,8 +254,8 @@ func TestSpeech_Breakerが開いたらOpenAIを呼ばない(t *testing.T) {
 func TestSpeech_OpenAIが成功ならローカルを呼ばない(t *testing.T) {
 	local, paths := newLocalServer(t)
 	s := newTestSpeech(&fakePrimary{}, local.URL)
-	if text, fallback, err := s.Transcribe(context.Background(), []byte("a"), "a.webm", ""); err != nil || fallback || text != "OpenAI の文字起こし" {
-		t.Fatalf("text=%q fallback=%v err=%v", text, fallback, err)
+	if text, out, err := s.Transcribe(context.Background(), []byte("a"), "a.webm", ""); err != nil || out.Local || text != "OpenAI の文字起こし" {
+		t.Fatalf("text=%q fallback=%v err=%v", text, out.Local, err)
 	}
 	if len(*paths) != 0 {
 		t.Fatalf("ローカルを呼んだ: %v", *paths)
@@ -280,6 +281,99 @@ func TestStripThinking(t *testing.T) {
 	} {
 		if got := stripThinking(in); got != want {
 			t.Errorf("stripThinking(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// 半開の試しで OpenAI が 401 を返したら、OpenAI は応答しているので閉じる。
+// 試しを終えずに返すと、以後ずっとローカルへ迂回して認証エラーが表に出なくなる。
+func TestSpeech_半開の試しが縮退しない失敗なら閉じる(t *testing.T) {
+	local, _ := newLocalServer(t)
+	primary := &fakePrimary{err: &openai.StatusError{Format: "error %d: %s", StatusCode: 503}}
+	s := newTestSpeech(primary, local.URL)
+	now := time.Now()
+	s.llmBreaker.now = func() time.Time { return now }
+	for range 2 {
+		_, _, _ = s.Chat(context.Background(), "system", nil)
+	}
+	if !s.llmBreaker.Open() {
+		t.Fatal("2回の 503 で開くはず")
+	}
+	now = now.Add(2 * time.Minute)
+	primary.err = &openai.StatusError{Format: "error %d: %s", StatusCode: 401}
+	if _, out, err := s.Chat(context.Background(), "system", nil); err == nil || out.Local || !out.PrimaryTried {
+		t.Fatalf("試しの 401 はそのまま返す: out=%+v err=%v", out, err)
+	}
+	// 閉じているので、次も OpenAI を呼ぶ（認証エラーが表に出続ける）
+	before := primary.calls.Load()
+	if _, out, err := s.Chat(context.Background(), "system", nil); err == nil || out.Local {
+		t.Fatalf("out=%+v err=%v", out, err)
+	}
+	if primary.calls.Load() != before+1 {
+		t.Fatal("Breaker が閉じず、OpenAI を呼ばなかった")
+	}
+}
+
+// Breaker で OpenAI を飛ばしたときは「OpenAI を試していない」（利用量を記録しない）。
+func TestSpeech_Breakerで飛ばしたらPrimaryTriedはfalse(t *testing.T) {
+	local, _ := newLocalServer(t)
+	primary := &fakePrimary{err: &openai.StatusError{Format: "error %d: %s", StatusCode: 503}}
+	s := newTestSpeech(primary, local.URL)
+	_, first, _ := s.Speak(context.Background(), "a", "alloy")
+	_, _, _ = s.Speak(context.Background(), "a", "alloy")
+	_, skipped, _ := s.Speak(context.Background(), "a", "alloy")
+	if !first.PrimaryTried || !first.Local {
+		t.Fatalf("1回目は OpenAI を試してから縮退: %+v", first)
+	}
+	if skipped.PrimaryTried || !skipped.Local {
+		t.Fatalf("Breaker が開いたら OpenAI を試さない: %+v", skipped)
+	}
+}
+
+// OpenAI が応答しないときは、上限（PrimaryTimeout）で切ってローカルへ回す。
+// 既定の60秒を待つと、フロントの90秒の打ち切りまでにローカルの時間が残らない。
+func TestSpeech_OpenAIが遅ければ上限で切って縮退する(t *testing.T) {
+	local, _ := newLocalServer(t)
+	s := newTestSpeech(slowPrimary{}, local.URL)
+	s.primaryTimeout = 50 * time.Millisecond
+	start := time.Now()
+	text, out, err := s.Chat(context.Background(), "system", nil)
+	if err != nil || !out.Local || text != "ローカルの応答" {
+		t.Fatalf("text=%q out=%+v err=%v", text, out, err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("OpenAI を待ちすぎた: %v", time.Since(start))
+	}
+}
+
+type slowPrimary struct{}
+
+func (slowPrimary) TranscribeWithHints(ctx context.Context, _ []byte, _, _ string) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+func (slowPrimary) ChatInterview(ctx context.Context, _ string, _ []map[string]string) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+func (slowPrimary) TTS(ctx context.Context, _, _ string) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// Qwen3 が推論（<think>）だけで max_tokens を使い切ったら、空の応答を成功にしない。
+func TestLocalLLM_thinkだけの応答はエラー(t *testing.T) {
+	for _, content := range []string{"<think>考え中</think>", "<think>閉じていない"} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			b, _ := json.Marshal(map[string]any{"choices": []map[string]any{{"message": map[string]string{"content": content}}}})
+			_, _ = w.Write(b)
+		}))
+		_, err := (&LocalLLM{BaseURL: server.URL, Model: "qwen3:1.7b"}).Chat(context.Background(), "system", nil)
+		server.Close()
+		if err == nil {
+			t.Fatalf("%q を成功にした", content)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package interview
 
 import (
+	"Backend/internal/aifailover"
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"context"
@@ -59,6 +60,8 @@ func (s *InterviewService) Turn(
 	questionElapsedSeconds int,
 	questionDurationSeconds int,
 ) (*TurnResult, error) {
+	ctx, cancelBudget := s.withTurnBudget(ctx)
+	defer cancelBudget()
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -118,14 +121,19 @@ func (s *InterviewService) Turn(
 	hintName, hintReading := s.sttHintCompany(companyID, companyName)
 	sttHints := BuildSTTHints(hintName, hintReading, companyInfo)
 	sttStart := time.Now()
-	userText, sttLocal, err := s.transcribe(ctx, audioData, audioFormat.AudioFilename(), sttHints)
+	userText, sttOutcome, err := s.transcribe(ctx, audioData, audioFormat.AudioFilename(), sttHints)
 	obs := ObserveTranscribe(sessionID, turnCount, len(audioData), audioFormat.MIME, sttStart, userText, err)
+	// 利用量は OpenAI のモデルで記録し、観測ログはローカルの結果を OpenAI のモデルの値として残さない（#1833）
+	usageObs := obs
+	if sttOutcome.Local {
+		obs.Model = localSTTModel
+	}
 
 	// 問題が疑われる結果だけ高精度モデルへ再送する（音声R&D Task 5）。
 	// 通常の発話は再送しない。再送率がそのまま追加費用になる。
 	// ローカルへ縮退した（OpenAI が障害中の）ターンは、OpenAI の高精度モデルへの再送をしない。
 	// 同じ障害で失敗するまで待つことになり、面接のターンが止まるため（#1833）。
-	if reason := NeedsSTTFallback(userText, err != nil, obs.AudioSeconds); reason != FallbackNone && !FallbackIsRedundant() && !sttLocal {
+	if reason := NeedsSTTFallback(userText, err != nil, obs.AudioSeconds); reason != FallbackNone && !FallbackIsRedundant() && !sttOutcome.Local {
 		// 費用は「再送したか」で決まるので、採用可否ではなくここで記録する
 		obs.FellBack = true
 		// 再送は「取れれば良い」もの。既定の60秒を待つと、そのターンの応答が
@@ -149,8 +157,11 @@ func (s *InterviewService) Turn(
 	// 利用量として記録する（#1294）。STT のレスポンスにはトークンが入らないため、
 	// 既に計測している音声秒数とレイテンシをそのまま渡す。
 	// 再送が発生した場合は2回課金されるので、その分も記録する。
-	if !sttLocal {
-		recordSTTUsage(ctx, s.openaiClient, obs)
+	// OpenAI を試したら、失敗していても課金されている可能性があるので記録する。
+	// Breaker で OpenAI を飛ばしたターンだけ記録しない（#1833）。
+	if sttOutcome.PrimaryTried {
+		usageObs.FellBack = obs.FellBack
+		recordSTTUsage(ctx, s.openaiClient, usageObs)
 	}
 
 	if err != nil {
@@ -224,7 +235,7 @@ func (s *InterviewService) Turn(
 		systemPrompt = nameCtx + "\n" + systemPrompt
 	}
 	// Chat失敗時も面接官としての言い換え応答にフォールバックし、ターンを中断させない（#910）
-	aiText, llmLocal, err := s.chatInterview(ctx, systemPrompt, history)
+	aiText, llmOutcome, err := s.chatInterview(ctx, systemPrompt, history)
 	if err != nil {
 		log.Printf("[Interview] chat error: %v", err)
 		aiText = interviewFallbackReplyText
@@ -235,10 +246,10 @@ func (s *InterviewService) Turn(
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
 	ttsText := applyCompanyReadingForTTS(aiText, companyName, companyReading)
 	ttsStart := time.Now()
-	audio, ttsLocal, err := s.speak(ctx, ttsText, voice)
+	audio, ttsOutcome, err := s.speak(ctx, ttsText, voice)
 	// 失敗しても課金されている可能性があるため、成否に関わらず記録する（#1294）。
-	// ローカルで読み上げたときは OpenAI の利用量ではないので記録しない（#1833）。
-	if !ttsLocal {
+	// Breaker で OpenAI を飛ばしてローカルで読み上げたときだけ記録しない（#1833）。
+	if ttsOutcome.PrimaryTried {
 		recordTTSUsage(ctx, s.openaiClient, ttsText, time.Since(ttsStart))
 	}
 	if err != nil {
@@ -254,7 +265,7 @@ func (s *InterviewService) Turn(
 		CompanyReadingResolved: companyReadingResolved,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
-		AIFallback:             fallbackStages(sttLocal, llmLocal, ttsLocal),
+		AIFallback:             fallbackStages(sttOutcome, llmOutcome, ttsOutcome),
 	}
 	if directive != nil {
 		result.QuestionSource = directive.Source
@@ -281,6 +292,8 @@ func (s *InterviewService) StartTurn(
 	questionElapsedSeconds int,
 	questionDurationSeconds int,
 ) (*TurnResult, error) {
+	ctx, cancelBudget := s.withTurnBudget(ctx)
+	defer cancelBudget()
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -341,7 +354,7 @@ func (s *InterviewService) StartTurn(
 		systemPromptStart = nameCtx + "\n" + systemPromptStart
 	}
 	// Chat失敗時も面接開始を中断させず、定型の冒頭挨拶にフォールバックする（#910）
-	aiText, llmLocal, err := s.chatInterview(ctx, systemPromptStart, []map[string]string{
+	aiText, llmOutcome, err := s.chatInterview(ctx, systemPromptStart, []map[string]string{
 		{"role": "user", "content": "面接を開始してください。最初の自己紹介・志望動機の質問からお願いします。"},
 	})
 	if err != nil {
@@ -354,10 +367,10 @@ func (s *InterviewService) StartTurn(
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
 	ttsText := applyCompanyReadingForTTS(aiText, companyName, companyReading)
 	ttsStart := time.Now()
-	audio, ttsLocal, err := s.speak(ctx, ttsText, voice)
+	audio, ttsOutcome, err := s.speak(ctx, ttsText, voice)
 	// 失敗しても課金されている可能性があるため、成否に関わらず記録する（#1294）。
-	// ローカルで読み上げたときは OpenAI の利用量ではないので記録しない（#1833）。
-	if !ttsLocal {
+	// Breaker で OpenAI を飛ばしてローカルで読み上げたときだけ記録しない（#1833）。
+	if ttsOutcome.PrimaryTried {
 		recordTTSUsage(ctx, s.openaiClient, ttsText, time.Since(ttsStart))
 	}
 	if err != nil {
@@ -372,7 +385,7 @@ func (s *InterviewService) StartTurn(
 		CompanyReadingResolved: companyReadingResolved,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
-		AIFallback:             fallbackStages(false, llmLocal, ttsLocal),
+		AIFallback:             fallbackStages(aifailover.Outcome{}, llmOutcome, ttsOutcome),
 	}
 	if directive != nil {
 		result.QuestionSource = directive.Source

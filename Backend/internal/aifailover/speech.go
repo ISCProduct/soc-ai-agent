@@ -24,6 +24,15 @@ type Primary interface {
 	TTS(ctx context.Context, text, voice string) ([]byte, error)
 }
 
+// Outcome は1回の呼び出しで何が起きたか。
+type Outcome struct {
+	// Local はローカルで処理した（またはローカルを試した）。
+	Local bool
+	// PrimaryTried は OpenAI を呼んだ。失敗しても課金されている可能性があるので、
+	// 利用量の記録はこれで決める（Breaker で OpenAI を飛ばしたときだけ false）。
+	PrimaryTried bool
+}
+
 // Speech は音声面接の STT / LLM / TTS を、工程ごとに OpenAI → ローカルの順で呼ぶ。
 // ローカルの接続先が無い工程は OpenAI だけを使う（今までと同じ）。
 type Speech struct {
@@ -35,9 +44,12 @@ type Speech struct {
 	sttBreaker *Breaker
 	llmBreaker *Breaker
 	ttsBreaker *Breaker
+
+	primaryTimeout time.Duration
+	localTimeout   time.Duration
 }
 
-// Config はローカルの接続先と Circuit Breaker の設定。空の接続先の工程は縮退しない。
+// Config はローカルの接続先と Circuit Breaker・待ち時間の設定。空の接続先の工程は縮退しない。
 type Config struct {
 	STTURL           string
 	LLMBaseURL       string
@@ -46,7 +58,12 @@ type Config struct {
 	TTSSpeaker       string
 	BreakerThreshold int
 	BreakerCooldown  time.Duration
-	LocalTimeout     time.Duration
+	// PrimaryTimeout は縮退できる工程で OpenAI を待つ上限。障害中に OpenAI の既定の待ち時間
+	// （60秒）を使い切ると、ローカルに回す時間が残らない。
+	PrimaryTimeout time.Duration
+	// LocalTimeout はローカルの1工程を待つ上限。呼び出し元の ctx の期限（ターン全体の予算）が
+	// これより短ければ、そちらで切れる。
+	LocalTimeout time.Duration
 }
 
 // ConfigFromEnv は環境変数から設定を読む。
@@ -58,7 +75,8 @@ type Config struct {
 //	AI_FAILOVER_LOCAL_TTS_SPEAKER 既定 1
 //	AI_FAILOVER_BREAKER_THRESHOLD 既定 3（連続失敗で開く回数）
 //	AI_FAILOVER_BREAKER_COOLDOWN_SECONDS 既定 30
-//	AI_FAILOVER_LOCAL_TIMEOUT_SECONDS 既定 60（GPU なしの推論 PC は遅いので長め）
+//	AI_FAILOVER_PRIMARY_TIMEOUT_SECONDS 既定 20（縮退できる工程で OpenAI を待つ上限）
+//	AI_FAILOVER_LOCAL_TIMEOUT_SECONDS 既定 25（ローカルの1工程を待つ上限）
 func ConfigFromEnv() Config {
 	return Config{
 		STTURL:           strings.TrimSpace(os.Getenv("AI_FAILOVER_LOCAL_STT_URL")),
@@ -68,7 +86,8 @@ func ConfigFromEnv() Config {
 		TTSSpeaker:       envOr("AI_FAILOVER_LOCAL_TTS_SPEAKER", "1"),
 		BreakerThreshold: envInt("AI_FAILOVER_BREAKER_THRESHOLD", 3),
 		BreakerCooldown:  time.Duration(envInt("AI_FAILOVER_BREAKER_COOLDOWN_SECONDS", 30)) * time.Second,
-		LocalTimeout:     time.Duration(envInt("AI_FAILOVER_LOCAL_TIMEOUT_SECONDS", 60)) * time.Second,
+		PrimaryTimeout:   time.Duration(envInt("AI_FAILOVER_PRIMARY_TIMEOUT_SECONDS", 20)) * time.Second,
+		LocalTimeout:     time.Duration(envInt("AI_FAILOVER_LOCAL_TIMEOUT_SECONDS", 25)) * time.Second,
 	}
 }
 
@@ -77,12 +96,15 @@ func New(primary Primary, cfg Config) *Speech {
 	if primary == nil {
 		return nil
 	}
-	httpClient := &http.Client{Timeout: cfg.LocalTimeout}
+	// 待ち時間は呼び出しごとに ctx で切る（工程の上限とターン全体の予算の短い方）
+	httpClient := &http.Client{}
 	s := &Speech{
-		primary:    primary,
-		sttBreaker: NewBreaker(cfg.BreakerThreshold, cfg.BreakerCooldown),
-		llmBreaker: NewBreaker(cfg.BreakerThreshold, cfg.BreakerCooldown),
-		ttsBreaker: NewBreaker(cfg.BreakerThreshold, cfg.BreakerCooldown),
+		primary:        primary,
+		sttBreaker:     NewBreaker(cfg.BreakerThreshold, cfg.BreakerCooldown),
+		llmBreaker:     NewBreaker(cfg.BreakerThreshold, cfg.BreakerCooldown),
+		ttsBreaker:     NewBreaker(cfg.BreakerThreshold, cfg.BreakerCooldown),
+		primaryTimeout: cfg.PrimaryTimeout,
+		localTimeout:   cfg.LocalTimeout,
 	}
 	if cfg.STTURL != "" {
 		s.stt = &LocalSTT{URL: cfg.STTURL, HTTP: httpClient}
@@ -96,69 +118,91 @@ func New(primary Primary, cfg Config) *Speech {
 	return s
 }
 
-// Transcribe は音声を文字にする。fallback は ローカルで処理したら true。
-func (s *Speech) Transcribe(ctx context.Context, audio []byte, filename, hints string) (text string, fallback bool, err error) {
-	var local func() (string, error)
+// Enabled はローカルへ縮退できる工程が1つでもあるかを返す。
+func (s *Speech) Enabled() bool {
+	return s != nil && (s.stt != nil || s.llm != nil || s.tts != nil)
+}
+
+// Transcribe は音声を文字にする。
+func (s *Speech) Transcribe(ctx context.Context, audio []byte, filename, hints string) (string, Outcome, error) {
+	var local func(context.Context) (string, error)
 	if s.stt != nil {
-		local = func() (string, error) { return s.stt.Transcribe(ctx, audio, filename, hints) }
+		local = func(c context.Context) (string, error) { return s.stt.Transcribe(c, audio, filename, hints) }
 	}
-	return run(ctx, StageSTT, s.sttBreaker, func() (string, error) {
-		return s.primary.TranscribeWithHints(ctx, audio, filename, hints)
+	return run(ctx, s, StageSTT, s.sttBreaker, func(c context.Context) (string, error) {
+		return s.primary.TranscribeWithHints(c, audio, filename, hints)
 	}, local)
 }
 
 // Chat は面接官の応答を作る。
-func (s *Speech) Chat(ctx context.Context, systemPrompt string, history []map[string]string) (text string, fallback bool, err error) {
-	var local func() (string, error)
+func (s *Speech) Chat(ctx context.Context, systemPrompt string, history []map[string]string) (string, Outcome, error) {
+	var local func(context.Context) (string, error)
 	if s.llm != nil {
-		local = func() (string, error) { return s.llm.Chat(ctx, systemPrompt, history) }
+		local = func(c context.Context) (string, error) { return s.llm.Chat(c, systemPrompt, history) }
 	}
-	return run(ctx, StageLLM, s.llmBreaker, func() (string, error) {
-		return s.primary.ChatInterview(ctx, systemPrompt, history)
+	return run(ctx, s, StageLLM, s.llmBreaker, func(c context.Context) (string, error) {
+		return s.primary.ChatInterview(c, systemPrompt, history)
 	}, local)
 }
 
 // Speak は読み上げの音声を作る。ローカル（VOICEVOX）は WAV を返す（OpenAI は mp3）。
-func (s *Speech) Speak(ctx context.Context, text, voice string) (audio []byte, fallback bool, err error) {
-	var local func() ([]byte, error)
+func (s *Speech) Speak(ctx context.Context, text, voice string) ([]byte, Outcome, error) {
+	var local func(context.Context) ([]byte, error)
 	if s.tts != nil {
-		local = func() ([]byte, error) { return s.tts.Speak(ctx, text) }
+		local = func(c context.Context) ([]byte, error) { return s.tts.Speak(c, text) }
 	}
-	return run(ctx, StageTTS, s.ttsBreaker, func() ([]byte, error) {
-		return s.primary.TTS(ctx, text, voice)
+	return run(ctx, s, StageTTS, s.ttsBreaker, func(c context.Context) ([]byte, error) {
+		return s.primary.TTS(c, text, voice)
 	}, local)
 }
 
 // run は OpenAI → ローカルの順に呼ぶ。
-//   - ローカルが無い工程は OpenAI の結果をそのまま返す（Breaker も使わない）
+//   - ローカルが無い工程は OpenAI の結果をそのまま返す（Breaker も待ち時間の上限も使わない）
 //   - Breaker が開いていれば OpenAI を飛ばしてローカルへ
 //   - OpenAI が縮退してよい失敗ならローカルへ。認証・入力不正などはそのまま返す
-func run[T any](ctx context.Context, stage string, breaker *Breaker, primary, local func() (T, error)) (T, bool, error) {
+//     （OpenAI は応答しているので Breaker は閉じる。半開の試しもここで終わる）
+func run[T any](ctx context.Context, s *Speech, stage string, breaker *Breaker, primary, local func(context.Context) (T, error)) (T, Outcome, error) {
 	if local == nil {
-		v, err := primary()
-		return v, false, err
+		v, err := primary(ctx)
+		return v, Outcome{PrimaryTried: true}, err
 	}
+	out := Outcome{}
 	if breaker.Allow() {
-		v, err := primary()
+		out.PrimaryTried = true
+		pctx, cancel := withTimeout(ctx, s.primaryTimeout)
+		v, err := primary(pctx)
+		cancel()
 		if err == nil {
 			breaker.Success()
-			return v, false, nil
+			return v, out, nil
 		}
 		if !Degradable(ctx, err) {
-			return v, false, err
+			breaker.Success()
+			return v, out, err
 		}
 		breaker.Failure()
 		log.Printf("[AIFailover] %s: OpenAI の一時的な障害のためローカルへ縮退します: %v", stage, err)
 	} else {
 		log.Printf("[AIFailover] %s: Circuit Breaker が開いているため OpenAI を呼ばずにローカルを使います", stage)
 	}
-	v, err := local()
+	out.Local = true
+	lctx, cancel := withTimeout(ctx, s.localTimeout)
+	defer cancel()
+	v, err := local(lctx)
 	if err != nil {
 		log.Printf("[AIFailover] %s: ローカルも失敗しました: %v", stage, err)
 		var zero T
-		return zero, true, err
+		return zero, out, err
 	}
-	return v, true, nil
+	return v, out, nil
+}
+
+// withTimeout は d が正なら期限を付ける。呼び出し元の期限の方が短ければそちらが効く。
+func withTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if d <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, d)
 }
 
 func envOr(name, def string) string {

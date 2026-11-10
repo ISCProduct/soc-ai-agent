@@ -64,10 +64,16 @@ func (l *LocalLLM) Chat(ctx context.Context, systemPrompt string, history []map[
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return "", fmt.Errorf("local llm: %w", err)
 	}
-	if len(result.Choices) == 0 || strings.TrimSpace(result.Choices[0].Message.Content) == "" {
+	if len(result.Choices) == 0 {
 		return "", errors.New("local llm: empty response")
 	}
-	return stripThinking(result.Choices[0].Message.Content), nil
+	// Qwen3 は max_tokens を推論（<think>）だけで使い切ることがある。除いた後が空なら失敗にして、
+	// 面接の言い換え応答へ回す（空の発話を成功として返さない）。
+	text := stripThinking(result.Choices[0].Message.Content)
+	if text == "" {
+		return "", errors.New("local llm: empty response after removing <think>")
+	}
+	return text, nil
 }
 
 // stripThinking は Qwen3 などが出す <think>…</think> を落とす。面接官の発話として読み上げないため。
