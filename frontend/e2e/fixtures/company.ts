@@ -94,9 +94,12 @@ export async function mockCompanyPortalApi(page: Page, handlers: Record<string, 
     const url = new URL(req.url())
     const path = url.pathname.replace(/^\/api\/company-portal/, '')
     const key = `${req.method()} ${path}`
+    // 完全一致を優先し、ワイルドカードは最も長い（具体的な）キーを選ぶ。登録した順番に左右されないようにする（#2163 のレビュー）
     const handler =
       all[key] ??
-      Object.entries(all).find(([k]) => k.endsWith('*') && key.startsWith(k.slice(0, -1)))?.[1]
+      Object.entries(all)
+        .filter(([k]) => k.endsWith('*') && key.startsWith(k.slice(0, -1)))
+        .sort(([a], [b]) => b.length - a.length)[0]?.[1]
     if (!handler) {
       unexpected.push(key)
       await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"unmocked"}' })
