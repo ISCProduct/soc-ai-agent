@@ -689,7 +689,10 @@ module "backend" {
   # 中身が必ず1件以上あることは静的に分かっているので、ここで真偽値を渡す。
   create_secrets_policy = true
   environment = merge({
-    APP_ENV                     = "production"
+    APP_ENV = "production"
+    # 工程ごとのモデルの二層化（#1526）。空なら工程ごとの既定のまま
+    AI_MODEL_PREMIUM            = var.ai_model_premium
+    AI_MODEL_LIGHT              = var.ai_model_light
     PROMPT_VERSION              = var.prompt_version
     AWS_REGION                  = var.region
     AWS_S3_BUCKET               = module.s3.bucket_id
@@ -835,6 +838,9 @@ module "rag_review" {
     }
   ]
   environment = {
+    # 工程ごとのモデルの二層化（#1526）。空なら工程ごとの既定のまま
+    AI_MODEL_PREMIUM         = var.ai_model_premium
+    AI_MODEL_LIGHT           = var.ai_model_light
     OPENAI_EMBEDDING_MODEL   = "text-embedding-3-small"
     OPENAI_HINTS_MODEL       = "gpt-4o-mini"
     OPENAI_HINTS_PARSE_MODEL = "gpt-4o-mini"

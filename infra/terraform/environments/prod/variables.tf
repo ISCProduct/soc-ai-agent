@@ -260,3 +260,25 @@ variable "sentry_dsn" {
   default     = ""
   sensitive   = true
 }
+
+variable "ai_model_premium" {
+  type        = string
+  description = "学生に見える判断（採点・面接応答・面接レポート・マッチング理由・ES添削・履歴書レビュー）の上位の層のモデル。空なら工程ごとの既定のまま（#1526）"
+  default     = ""
+
+  validation {
+    condition     = var.ai_model_premium == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$", var.ai_model_premium))
+    error_message = "ai_model_premium はモデル名（英数字・.・_・:・-）か空文字にしてください。"
+  }
+}
+
+variable "ai_model_light" {
+  type        = string
+  description = "内部の定型処理（企業情報の抽出・parse・要約）の軽量の層のモデル。空なら工程ごとの既定のまま（#1526）"
+  default     = ""
+
+  validation {
+    condition     = var.ai_model_light == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$", var.ai_model_light))
+    error_message = "ai_model_light はモデル名（英数字・.・_・:・-）か空文字にしてください。"
+  }
+}

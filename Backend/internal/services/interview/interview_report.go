@@ -1,6 +1,7 @@
 package interview
 
 import (
+	"Backend/internal/aimodel"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/safego"
@@ -228,7 +229,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	transcript := BuildTranscript(utterances)
 	systemPrompt, userPrompt := BuildReportPrompts(lang, transcript)
 
-	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
+	model := aimodel.For(aimodel.StageInterviewReport)
 	// 受験者の発話は候補ごとに作り直さない（#1527）
 	spoken := SpokenContent(utterances)
 

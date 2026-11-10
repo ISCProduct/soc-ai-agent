@@ -468,6 +468,8 @@ resource "aws_launch_template" "app" {
     s3_bucket               = module.s3.bucket_id
     gbizinfo_base_url       = var.gbizinfo_base_url
     openai_model            = var.openai_model
+    ai_model_premium        = var.ai_model_premium
+    ai_model_light          = var.ai_model_light
     prompt_version          = var.prompt_version
     prompt_versions         = var.prompt_versions
     google_client_id        = var.google_client_id

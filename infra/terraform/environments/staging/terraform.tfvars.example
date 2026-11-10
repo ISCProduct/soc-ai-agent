@@ -10,6 +10,10 @@ domain_name = "shukatsu-ai.jp"
 # 全工程共通のラベル。本文の更新時に同じリリースで変更する。
 # prompt_version  = "v2"
 # prompt_versions = { question_generation = "v2" }
+
+# 工程ごとのモデルの二層化（#1526）。空なら今までの既定。切り替える前に aibench で品質とコストを測る。
+# ai_model_premium = "gpt-4o"
+# ai_model_light   = "gpt-4o-mini"
 # 既定: stg.shukatsu-ai.jp（FE） / api-stg.shukatsu-ai.jp（BE）
 # staging_subdomain     = "stg"
 # staging_api_subdomain = "api-stg"

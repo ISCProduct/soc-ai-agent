@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"Backend/internal/aimodel"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -139,10 +140,8 @@ func (cli *Client) ChatInterview(ctx context.Context, systemPrompt string, histo
 		Temperature float32   `json:"temperature"`
 	}
 
-	model := os.Getenv("OPENAI_INTERVIEW_MODEL")
-	if model == "" {
-		model = "gpt-4o-mini"
-	}
+	// 面接の応答は学生に見える判断（上位の層）。OPENAI_INTERVIEW_MODEL → AI_MODEL_PREMIUM → gpt-4o-mini（#1526）
+	model := aimodel.For(aimodel.StageInterviewResponse)
 
 	msgs := []message{{Role: "system", Content: systemPrompt}}
 	for _, h := range history {

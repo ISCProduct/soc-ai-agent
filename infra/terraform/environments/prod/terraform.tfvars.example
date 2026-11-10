@@ -11,6 +11,10 @@ domain_name = "shukatsu-ai.jp"
 # prompt_version  = "v2"
 # prompt_versions = { question_generation = "v2" }
 
+# 工程ごとのモデルの二層化（#1526）。空なら今までの既定。切り替える前に aibench で品質とコストを測る。
+# ai_model_premium = "gpt-4o"
+# ai_model_light   = "gpt-4o-mini"
+
 # 既存 ECR のイメージ（本番タグを指定）
 backend_image  = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-backend:latest"
 frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:latest"
