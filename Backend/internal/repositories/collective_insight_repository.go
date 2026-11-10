@@ -113,16 +113,6 @@ func (r *CollectiveInsightRepository) UpsertBehaviorSummary(summary *models.Anon
 	return r.db.Save(summary).Error
 }
 
-// GetBehaviorSummary 企業の行動サマリーを取得する
-func (r *CollectiveInsightRepository) GetBehaviorSummary(companyID uint) (*models.AnonymizedBehaviorSummary, error) {
-	var s models.AnonymizedBehaviorSummary
-	err := r.db.Where("company_id = ?", companyID).First(&s).Error
-	if err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
-
 // GetTopPassRateCompanies 通過率上位の企業サマリーを返す
 func (r *CollectiveInsightRepository) GetTopPassRateCompanies(limit int) ([]models.AnonymizedBehaviorSummary, error) {
 	var summaries []models.AnonymizedBehaviorSummary
@@ -130,13 +120,6 @@ func (r *CollectiveInsightRepository) GetTopPassRateCompanies(limit int) ([]mode
 		Order("pass_rate DESC").
 		Limit(limit).
 		Find(&summaries).Error
-	return summaries, err
-}
-
-// GetAllBehaviorSummaries バッチ集計用: 全企業サマリーを取得
-func (r *CollectiveInsightRepository) GetAllBehaviorSummaries() ([]models.AnonymizedBehaviorSummary, error) {
-	var summaries []models.AnonymizedBehaviorSummary
-	err := r.db.Find(&summaries).Error
 	return summaries, err
 }
 

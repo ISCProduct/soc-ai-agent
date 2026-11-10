@@ -28,11 +28,6 @@ func (m *CompanyRepositoryMock) FindAllActiveNames(q string) ([]models.CompanyNa
 	return nil, args.Error(1)
 }
 
-func (m *CompanyRepositoryMock) CountActive() (int64, error) {
-	args := m.Called()
-	return args.Get(0).(int64), args.Error(1)
-}
-
 func (m *CompanyRepositoryMock) ListActiveFiltered(limit, offset int, name, status, industry, readiness, orderBy string, schoolID *uint) ([]models.Company, int64, error) {
 	args := m.Called(limit, offset, name, status, industry, readiness, orderBy, schoolID)
 	if v := args.Get(0); v != nil {

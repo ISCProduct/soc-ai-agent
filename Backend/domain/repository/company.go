@@ -21,7 +21,6 @@ type CompanyRelationQueryRepository interface {
 type CompanyRepository interface {
 	FindAllActive(limit, offset int) ([]models.Company, error)
 	FindAllActiveNames(q string) ([]models.CompanyName, error)
-	CountActive() (int64, error)
 	// ListActiveFiltered は名前・公開ステータス・業界・情報充足で絞り込んだアクティブ企業一覧と総件数を返す。
 	// industry が "__unset__" のときは業界未設定のみ。readiness は "ready" / "missing" / ""。
 	// orderBy は "industry" のとき業界順、それ以外は id desc。

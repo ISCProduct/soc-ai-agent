@@ -23,10 +23,6 @@ func (m *jobCategoryRepoMock) FindByName(name string) ([]models.JobCategory, err
 	return nil, nil
 }
 
-func (m *jobCategoryRepoMock) FindByIndustry(industryID uint) ([]models.JobCategory, error) {
-	return nil, nil
-}
-
 func (m *jobCategoryRepoMock) GetTopCategories() ([]models.JobCategory, error) {
 	if m.topCategoriesErr != nil {
 		return nil, m.topCategoriesErr
