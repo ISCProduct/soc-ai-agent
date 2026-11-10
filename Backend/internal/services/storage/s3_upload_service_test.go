@@ -20,8 +20,13 @@ import (
 // 署名付き URL（手元で計算するだけ）と、ローカルのテスト用サーバーへのアップロードを確かめる。
 
 // isolateAWSEnv は、手元の AWS 設定や EC2 のメタデータに触れないようにする。
+// LocalStack などのカスタムエンドポイント（AWS_ENDPOINT_URL*）も無視させる。設定された環境では
+// 署名付き URL の宛先が変わり、AWS のホストを前提にした検証が落ちる（#2148 のレビュー）。
 func isolateAWSEnv(t *testing.T) {
 	t.Helper()
+	t.Setenv("AWS_ENDPOINT_URL", "")
+	t.Setenv("AWS_ENDPOINT_URL_S3", "")
+	t.Setenv("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", "true")
 	t.Setenv("AWS_CONFIG_FILE", t.TempDir()+"/none")
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", t.TempDir()+"/none")
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
