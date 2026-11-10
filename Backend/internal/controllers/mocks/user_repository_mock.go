@@ -32,14 +32,6 @@ func (m *UserRepositoryMock) GetUserByID(id uint) (*entity.User, error) {
 	return nil, args.Error(1)
 }
 
-func (m *UserRepositoryMock) ListUsers() ([]entity.User, error) {
-	args := m.Called()
-	if v := args.Get(0); v != nil {
-		return v.([]entity.User), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
 func (m *UserRepositoryMock) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
 	args := m.Called(limit, offset, query, schoolID)
 	if v := args.Get(0); v != nil {

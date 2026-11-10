@@ -36,18 +36,6 @@ func (r *JobCategoryRepository) FindByName(name string) ([]models.JobCategory, e
 	return categories, err
 }
 
-// FindByIndustry 業界に関連する職種を取得
-func (r *JobCategoryRepository) FindByIndustry(industryID uint) ([]models.JobCategory, error) {
-	var categories []models.JobCategory
-	err := r.db.Raw(`
-		SELECT jc.* FROM job_categories jc
-		INNER JOIN industry_job_categories ijc ON jc.id = ijc.job_category_id
-		WHERE ijc.industry_id = ? AND jc.is_active = true
-		ORDER BY ijc.display_order ASC
-	`, industryID).Scan(&categories).Error
-	return categories, err
-}
-
 // GetTopCategories 主要な職種カテゴリを取得（Level 0）
 func (r *JobCategoryRepository) GetTopCategories() ([]models.JobCategory, error) {
 	var categories []models.JobCategory
