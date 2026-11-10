@@ -496,7 +496,7 @@ export function useInterviewSession({
 
       startTimer()
       await doStartTurn(created.id, user.user_id)
-    } catch (error: any) {
+    } catch (error: unknown) {
       setStatus('error')
       setErrorMessage(parseMediaError(error))
       cleanupConnection()
