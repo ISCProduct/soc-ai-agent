@@ -37,7 +37,7 @@ go run ./cmd/aibench -diff /tmp/resume-prev.json,/tmp/resume-4o.json
 
 | フラグ | 意味 |
 |---|---|
-| `-target` | `es` / `resume` / `interview-report` / `chat-answer` |
+| `-target` | `es` / `resume` / `interview-report` / `chat-answer` / `company-extract` / `matching-reason` |
 | `-manifest` | ゴールデンセットの jsonl |
 | `-n` | 同一入力の実行回数（再現性の測定用。**既定 2**。`-n 1` はσが常に0になり比較の根拠に使えない） |
 | `-model` | モデル名。未指定なら本番と同じ既定値 |
@@ -45,6 +45,7 @@ go run ./cmd/aibench -diff /tmp/resume-prev.json,/tmp/resume-4o.json
 | `-yes` | 概算コストの確認を省略 |
 | `-dry-run` | APIを呼ばず、マニフェスト検証と概算コストだけ出す |
 | `-out` | 結果JSONの出力先（**リポジトリ外**を指定すること） |
+| `-max-cost-usd` | 概算コストの上限（USD）。超えたら API を呼ばずに終了コード4（CI 用、#1782） |
 
 終了コード: `0` 正常 / `1` エラーまたは劣化検知 / `2` 引数不正 /
 `3` APIキー未設定 / `4` 設定の問題で実行中止 / `130` 確認で中止。
@@ -73,12 +74,29 @@ go run ./cmd/aibench -diff /tmp/resume-prev.json,/tmp/resume-4o.json
 
 ### 安全弁
 
-- **CIでは実行しない**。課金と実行時間のため、手動バッチとして運用する。
+- **CI では既定で実行しない**。課金と実行時間のため、下の「CI での実行」の条件（手動実行・ラベル付きPR）でだけ走る。
 - 実行前に「件数 × 回数」から概算コストを表示し、`-yes` が無ければ確認を求める。
 - 結果には必ず**モデル名・実行日時・マニフェストのSHA256**を残す。
   OpenAI 側のモデル更新で同じモデル名でも数字が変わるため、
   いつ・どのモデルで・どの入力で測ったかが無い結果は比較に使えない。
 - 結果JSONには LLM の出力本文が入る。リポジトリ外へ置くこと（ターミナルには本文を出さない）。
+
+### CI での実行（#1782）
+
+`.github/workflows/aibench.yml`（スクリプトは `automation/aibench/ci-run.sh`）。
+
+| 起動 | 条件 | 比べる相手 |
+|---|---|---|
+| 手動実行（workflow_dispatch） | いつでも。評価対象・回数・上限・base を入力で変えられる | 入力の `base_ref`（既定 `origin/develop`） |
+| PR | **`aibench` ラベルが付いていて**、プロンプト・評価に関わるファイル（`services/prompts`・`answer_evaluator.go`・`company_info_*.go`・`matching_service.go`・`services/resume`・`interview_report*.go`・aibench・固定セット）を変えたとき | PR の base ブランチ |
+
+- **費用の上限**: 実行前に全評価対象の概算（上限見積もり）を足し、`AIBENCH_MAX_COST_USD`（既定 **$1.00**）を超えたら API を呼ばずに失敗する。
+  既定の5つ（ES 以外）を base と head の両方で測ると概算 $0.74、実測はその約3分の1（$0.25 前後）
+- **ES 添削は CI で測らない**（RAG の起動が要るため）。手元で測る
+- **結果**: ジョブサマリーに head の結果と base との差分を出し、劣化を検知したらジョブを失敗させる。結果JSONとログはアーティファクト（14日）に残る
+- **base に無い評価対象**（新しく足したもの）は差分を取らず、head だけ測る
+- **シークレット**: `AIBENCH_OPENAI_API_KEY`。未設定やフォークの PR では、案内だけ出して成功で終わる
+- **所要時間**: 既定の5つを base と head で測ると 40〜60 分程度（逐次実行。`resume` が長い）
 
 ---
 
@@ -426,6 +444,8 @@ role_fit / completeness / readability、各0〜5）の加重和から本番と�
 | `resume.jsonl` | **46** | good 16 / mid 14 / bad 16（#1593 で16件追加） |
 | `interview-report.jsonl` | **42** | good 16 / mid 10 / bad 16（#1635 で12件追加） |
 | `chat-answer.jsonl` | **30** | good 10 / mid 10 / bad 10（SOCAIAGENT-450 で新設） |
+| `company-extract.jsonl` | **12** | ラベルなし（#1782 で新設。正解の項目との一致で点を付ける） |
+| `matching-reason.jsonl` | **12** | ラベルなし（#1782 で新設。指示の遵守で点を付ける。企業情報が業種だけのケース4件を含む） |
 
 **全て合成データ。個人情報を含む実データは入っていない**（`docs/wiki/data-privacy.md` の方針）。
 氏名は「学生A」、企業・学校名は「株式会社サンプル○○」「サンプル○○専門学校」のような
@@ -722,6 +742,23 @@ go run ./cmd/aibench -target chat-answer -manifest ../docs/research/ai-eval/chat
 
 ---
 
+### 企業情報の抽出（`company-extract`）とマッチング理由（`matching-reason`）（#1782）
+
+この2つは LLM が点を付ける処理ではなく、出力を作る処理なので、**良/中/悪のラベルを付けない**。
+点は決まった計算で出す（弁別力・交絡の指標は計算されない）。破損率・再現性・指示遵守率は他と同じに読める。
+
+| target | 本番の経路 | 点（0〜1） |
+|---|---|---|
+| `company-extract` | `company_info_fetcher.go` の `acquireCheapExtract`。本番と同じプロンプト・Structured Outputs のスキーマ（strict）・温度 0.2・上限 600 で呼び、本番と同じ `ParseCompanyInfoResult` で読む | 正解の項目（`expected`）と一致した割合。業種は完全一致、所在地・事業・技術は部分一致、設立年・従業員数は完全一致。`absent` の項目（事実テキストに無い）に値を入れたら外れ |
+| `matching-reason` | `matching_service.go` の `GenerateMatchReason`。本番と同じプロンプト・温度 0.4・`/responses` の上限 100（上限到達なら 200 で1回呼び直す） | 5項目を満たした割合: 120〜220字、2〜3文、企業側の事実に触れる（`must_mention_any`）、強みの軸に触れる（`strength_any`）、見出し・箇条書き・JSON を使わない |
+
+`matching-reason` は**入力に無い企業の事実を作っていないか（根拠のない記述）は判定していない**。機械的に判定できないため。
+
+```bash
+go run ./cmd/aibench -target company-extract -manifest ../docs/research/ai-eval/company-extract.jsonl -out /tmp/company-extract.json
+go run ./cmd/aibench -target matching-reason -manifest ../docs/research/ai-eval/matching-reason.jsonl -out /tmp/matching-reason.json
+```
+
 ## 指示違反の一覧
 
 指示遵守率の分子になる「違反なし」の判定に使っている項目。
@@ -742,6 +779,24 @@ go run ./cmd/aibench -target chat-answer -manifest ../docs/research/ai-eval/chat
 |---|---|
 | `json_not_bare` | 「JSONのみ」の指示に反し、コードフェンスや散文で包まれていた |
 | `summary_empty` | 要約が空 |
+
+**企業情報の抽出（`company-extract`）**
+
+| 違反名 | 内容 |
+|---|---|
+| `field_mismatch:<項目>` | 正解の項目と一致しない |
+| `fabricated:<項目>` | 事実テキストに無い項目に値を入れた（根拠の無い値） |
+
+**マッチング理由（`matching-reason`）**
+
+| 違反名 | 内容 |
+|---|---|
+| `length_out_of_range` | 120字未満または220字超（プロンプトは「120〜220文字程度」） |
+| `sentence_count` | 2〜3文でない |
+| `no_company_fact` | 企業側の情報に触れていない |
+| `no_strength_axis` | 強みの軸に触れていない |
+| `format_violation` | 見出し・箇条書き・JSON を使った |
+| `retried_max_output_tokens` | 上限100で切れ、本番と同じく200で呼び直した（点には入れない。頻発するなら本番の上限が足りない） |
 
 **チャット診断の回答評価（`chat-answer`）**
 

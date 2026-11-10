@@ -699,13 +699,12 @@ func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyNam
 		return nil, fmt.Errorf("openai client is nil")
 	}
 
-	systemPrompt := `あなたは企業情報の構造化アシスタントです。与えられた事実テキストに書かれている内容のみをJSON化してください。テキストに無い項目は空文字または0。推測禁止。`
-	userPrompt := buildCompanyInfoExtractUser(companyName, websiteURL, factsText)
+	systemPrompt, userPrompt := CompanyInfoExtractPrompts(companyName, websiteURL, factsText)
 	if strings.TrimSpace(factsText) == "" {
 		return f.acquireViaAISearch(ctx, companyName, websiteURL)
 	}
 
-	raw, model, err := f.llm.ExtractJSONWithSchema(ctx, systemPrompt, userPrompt, 600, companyInfoResponseSchema())
+	raw, model, err := f.llm.ExtractJSONWithSchema(ctx, systemPrompt, userPrompt, CompanyInfoExtractMaxTokens, companyInfoResponseSchema())
 	if err != nil {
 		return nil, fmt.Errorf("企業情報の取得失敗: %w", err)
 	}
