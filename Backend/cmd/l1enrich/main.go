@@ -31,6 +31,12 @@ var industries = []string{"情報サービス・SI", "ソフトウェア", "イ�
 // 使用量の合計。費用の見積りに使う。
 var inTok, outTok, searches atomic.Int64
 
+// costUSD は Haiku 4.5 の単価（入力 $1/100万、出力 $5/100万、Web 検索 $10/1000回）での推定費用。
+// 他のモデルでは単価が違うので目安にとどまる。
+func costUSD() float64 {
+	return float64(inTok.Load())*1e-6 + float64(outTok.Load())*5e-6 + float64(searches.Load())*0.01
+}
+
 type result struct {
 	Name        string `json:"name"`
 	Industry    string `json:"industry"`
@@ -45,6 +51,7 @@ func main() {
 	model := flag.String("model", "claude-haiku-4-5", "使うモデル。質を上げるなら claude-sonnet-5-5 など")
 	limit := flag.Int("limit", 0, "未処理のうち先頭から N 社だけ処理する（0 は全件）")
 	workers := flag.Int("workers", 8, "並列数")
+	maxUSD := flag.Float64("max-usd", 0, "推定費用がこの金額（ドル）に達したら止める（0 は無制限）。Haiku 4.5 の単価で概算")
 	keepNonIT := flag.Bool("keep-non-it", false, "IT 企業でないと判定された社名も残す")
 	flag.Parse()
 
@@ -95,6 +102,10 @@ func main() {
 		}()
 	}
 	for _, n := range todo {
+		if *maxUSD > 0 && costUSD() >= *maxUSD {
+			log.Printf("予算 $%.2f に達したので止めます（推定 $%.2f）。再実行すれば続きから処理します", *maxUSD, costUSD())
+			break
+		}
 		jobs <- n
 	}
 	close(jobs)
@@ -103,7 +114,7 @@ func main() {
 	out, dropped := apply(rows, cache, *keepNonIT)
 	writeCSV(*in, out)
 	log.Printf("CSV を更新: %d 社（IT 企業でないため除外 %d 社）", len(out)-1, dropped)
-	log.Printf("使用量: 入力 %d トークン / 出力 %d トークン / Web 検索 %d 回", inTok.Load(), outTok.Load(), searches.Load())
+	log.Printf("使用量: 入力 %d トークン / 出力 %d トークン / Web 検索 %d 回（推定 $%.2f）", inTok.Load(), outTok.Load(), searches.Load(), costUSD())
 }
 
 // enrich は 1 社分を Claude の Web 検索で調べる。
