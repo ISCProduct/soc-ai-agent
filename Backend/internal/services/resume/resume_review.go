@@ -418,7 +418,12 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 	doc.NormalizedPath = normalizedStored
 	doc.Status = "normalized"
-	_ = s.repo.UpdateDocument(doc)
+	// 途中の印なので、保存できなくてもレビューは続ける。最後の finalizeDocument が同じドキュメントを
+	// まるごと保存し直し、そこでの失敗はユーザーに伝える。ここで止めると、待っている学生のレビューが
+	// 途中の印のためだけに失敗する。失敗はログで分かるようにする（#2002）
+	if err := s.repo.UpdateDocument(doc); err != nil {
+		log.Printf("resume_review_stream: UpdateDocument(normalized) failed document_id=%d err=%v", doc.ID, err)
+	}
 
 	if err := validatePathInDir(pdfPath, workDir); err != nil {
 		log.Printf("resume_review_stream: pdf path outside workDir pdf=%q workDir=%q err=%v", pdfPath, workDir, err)

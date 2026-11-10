@@ -421,7 +421,13 @@ func (f *CompanyInfoFetcher) acquireFromGBizCompany(ctx context.Context, company
 			company.EmployeeCount = hit.EmployeeNumber
 			company.EmployeeCountBasis = models.EmployeeCountBasisStandalone
 		}
-		_ = f.repo.Update(company)
+		// 名前検索で見つけた法人番号などの保存。失敗しても続ける。SyncCompany は DB から読み直すので、
+		// 保存できていなければ国税庁 API で法人番号を引き直す（引けなければ AI 検索に回る）。
+		// ここでエラーを返すと、引き直せる場合でも AI 検索に回り、費用が増える。
+		// AI で取得した結果の保存（FetchAndSave など）は、もともとエラーを返している（#2002）
+		if err := f.repo.Update(company); err != nil {
+			log.Printf("gbizinfo search hit save failed company_id=%d: %v (continuing; sync will look it up again)", company.ID, err)
+		}
 	}
 
 	if _, err := f.gbiz.SyncCompany(ctx, company.ID); err != nil {
