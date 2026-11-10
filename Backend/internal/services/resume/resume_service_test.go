@@ -83,12 +83,6 @@ func (r *resumeRepoStub) UpdateDocument(doc *models.ResumeDocument) error {
 	r.doc = doc
 	return nil
 }
-func (r *resumeRepoStub) FindDocumentByID(id uint) (*models.ResumeDocument, error) {
-	if r.doc == nil || r.doc.ID != id {
-		return nil, errors.New("not found")
-	}
-	return r.doc, nil
-}
 
 // FindDocumentByIDForUser は user_id でスコープした取得（#1156）。
 // 所有者が違えば gorm.ErrRecordNotFound を返す（実装と同じ挙動）。
@@ -101,15 +95,9 @@ func (r *resumeRepoStub) FindDocumentByIDForUser(id, userID uint) (*models.Resum
 func (r *resumeRepoStub) ReplaceTextBlocks(documentID uint, blocks []models.ResumeTextBlock) error {
 	return nil
 }
-func (r *resumeRepoStub) FindTextBlocks(documentID uint) ([]models.ResumeTextBlock, error) {
-	return nil, nil
-}
 func (r *resumeRepoStub) CreateReview(review *models.ResumeReview) error { return nil }
 func (r *resumeRepoStub) ReplaceReviewItems(reviewID uint, items []models.ResumeReviewItem) error {
 	return nil
-}
-func (r *resumeRepoStub) FindReviewItems(reviewID uint) ([]models.ResumeReviewItem, error) {
-	return nil, nil
 }
 
 // TestNewSeekableReader_NormalFile は通常サイズのファイルが正常に読み込まれることを検証する
