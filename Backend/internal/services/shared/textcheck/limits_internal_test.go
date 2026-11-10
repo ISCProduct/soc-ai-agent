@@ -1,39 +1,62 @@
 package textcheck
 
 import (
+	"encoding/json"
 	"os"
-	"regexp"
-	"strconv"
-	"strings"
 	"testing"
 )
 
-// RAG（rag/services/es_review.py）の字数の定義と食い違っていないことを固定する。
-// RAG 側だけを変えると、改善文の「収まっています」と原文の「字数超過」が
-// 同じ画面で食い違う。ここが落ちたら CharLimit / CountChars も合わせること。
-func TestCharLimit_MatchesRAGDefinition(t *testing.T) {
-	src, err := os.ReadFile("../../../../../rag/services/es_review.py")
+// 字数の入力と期待値は rag/testdata/char_limit_cases.json に置く。
+// Go と RAG の pytest が同じファイルを読む。どちらかの数え方や許容範囲だけが変わると、
+// こちらが落ちる（#1957）。RAG のソースを正規表現で読むと、コメントや改行で落ちる。
+func TestCharLimit_MatchesSharedGolden(t *testing.T) {
+	raw, err := os.ReadFile("../../../../../rag/testdata/char_limit_cases.json")
 	if err != nil {
-		t.Fatalf("RAG のソースが読めない（rag/ が無いと字数定義の食い違いを検出できない）: %v", err)
+		t.Fatalf("共有ゴールデンが読めない: %v", err)
 	}
-	s := string(src)
-
-	const wantCount = `return len(text.replace("\r", "").replace("\n", "").strip())`
-	if !strings.Contains(s, wantCount) {
-		t.Errorf("count_es_chars の数え方が変わった可能性がある。CountChars を見直すこと（想定: %s）", wantCount)
+	var doc struct {
+		Cases []struct {
+			Text    string `json:"text"`
+			Limit   int    `json:"limit"`
+			Mode    string `json:"mode"`
+			Chars   int    `json:"chars"`
+			Low     int    `json:"low"`
+			High    int    `json:"high"`
+			Verdict string `json:"verdict"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("ゴールデンの JSON が壊れている: %v", err)
+	}
+	if len(doc.Cases) == 0 {
+		t.Fatal("ゴールデンにケースが無い")
 	}
 
-	re := regexp.MustCompile(`"(within|around)":\s*\(([0-9.]+),\s*([0-9.]+)\)`)
-	found := 0
-	for _, m := range re.FindAllStringSubmatch(s, -1) {
-		low, _ := strconv.ParseFloat(m[2], 64)
-		high, _ := strconv.ParseFloat(m[3], 64)
-		if got := charLimitRange[m[1]]; got != [2]float64{low, high} {
-			t.Errorf("%s の許容範囲: Go %v / RAG (%v, %v)", m[1], got, low, high)
+	for i, c := range doc.Cases {
+		if got := CountChars(c.Text); got != c.Chars {
+			t.Errorf("case %d CountChars = %d, want %d", i, got, c.Chars)
 		}
-		found++
-	}
-	if found != len(charLimitRange) {
-		t.Errorf("RAG の _CHAR_LIMIT_RANGE から %d 件しか読めない（Go は %d 件）", found, len(charLimitRange))
+		rule := CharLimit{Limit: c.Limit, Mode: c.Mode}
+		low, high := rule.bounds()
+		if c.Limit > 0 && (low != c.Low || high != c.High) {
+			t.Errorf("case %d bounds = (%d, %d), want (%d, %d)", i, low, high, c.Low, c.High)
+		}
+		findings := rule.Check(c.Text)
+		switch c.Verdict {
+		case "ok", "unchecked":
+			if len(findings) != 0 {
+				t.Errorf("case %d verdict %s, got %+v", i, c.Verdict, findings)
+			}
+		case "too_short":
+			if len(findings) != 1 || findings[0].Severity != SeverityWarning {
+				t.Errorf("case %d want too_short warning, got %+v", i, findings)
+			}
+		case "too_long":
+			if len(findings) != 1 || findings[0].Severity != SeverityCritical {
+				t.Errorf("case %d want too_long critical, got %+v", i, findings)
+			}
+		default:
+			t.Errorf("case %d unknown verdict %q", i, c.Verdict)
+		}
 	}
 }
