@@ -18,19 +18,23 @@ import (
 )
 
 // モデル別単価テーブル (USD per 1M tokens)
+//
+// 公式の料金表（https://developers.openai.com/api/docs/pricing、標準ティア）で 2026-11-10 に確認した値は
+// 「公式」と注記している。注記が無い行は、現行の料金表に載っておらず確認できていない旧価格。
+// 改定されうるので、実請求額と突き合わせること。
 var modelPricing = map[string][2]float64{
 	// input, output per 1M tokens
-	"gpt-4o":                 {2.50, 10.00},
-	"gpt-4o-mini":            {0.15, 0.60},
+	"gpt-4o":                 {2.50, 10.00}, // 公式
+	"gpt-4o-mini":            {0.15, 0.60},  // 公式
 	"gpt-4-turbo":            {10.00, 30.00},
 	"gpt-4":                  {30.00, 60.00},
 	"gpt-3.5-turbo":          {0.50, 1.50},
-	"gpt-5.2":                {2.50, 10.00}, // treated as gpt-4o class
+	"gpt-5.2":                {1.75, 14.00}, // 公式
 	"o1":                     {15.00, 60.00},
 	"o1-mini":                {3.00, 12.00},
-	"o3":                     {10.00, 40.00},
-	"text-embedding-3-small": {0.02, 0.02},
-	"text-embedding-3-large": {0.13, 0.13},
+	"o3":                     {2.00, 8.00}, // 公式
+	"text-embedding-3-small": {0.02, 0.02}, // 公式
+	"text-embedding-3-large": {0.13, 0.13}, // 公式
 	// Web検索系。検索結果が固定トークンとして課金されるため入力トークンが
 	// 桁違いに大きい（実測で1コール平均3万トークン）。
 	// gpt-4o-mini-search-preview は最長一致が無いと gpt-4o 単価に当たり得るので
