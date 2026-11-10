@@ -37,12 +37,20 @@ describe('createTranslator', () => {
     expect(t('menu.open', { unused: 1 })).toBe(ja.nav.menu.open)
   })
 
-  it('辞書に無いキーは空文字ではなくキーを返す（型で防いでいるが念のため）', () => {
-    const t = createTranslator('nav') as unknown as (k: string) => string
-    expect(t('sidebar.doesNotExist')).toBe('nav.sidebar.doesNotExist')
+  it('辞書に無いキーは空文字ではなくキーを返し、開発中はエラーを出す（型で防いでいるが念のため）', () => {
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const t = createTranslator('nav') as unknown as (k: string) => string
+      expect(t('sidebar.doesNotExist')).toBe('nav.sidebar.doesNotExist')
+      expect(spy).toHaveBeenCalledWith(expect.stringContaining('辞書に無いキー: nav.sidebar.doesNotExist'))
+    } finally {
+      spy.mockRestore()
+    }
   })
 
-  it('辞書に無いキーは型エラーになる', () => {
+  // jest（SWC）は型を見ないので、このテスト自体は常に通る。型エラーの検出は、CI の E2E ジョブの
+  // next build（型チェックあり）と、手元の tsc --noEmit で効く（#2162 のレビュー）。
+  it('辞書に無いキーは型エラーになる（next build / tsc で検出）', () => {
     const t = createTranslator('nav')
     // @ts-expect-error 辞書に無いキー（tsc がこの行で落ちることを確かめる）
     t('sidebar.doesNotExist')
@@ -70,6 +78,19 @@ describe('{name} の差し込み', () => {
   })
 })
 
+describe('{name} の差し込みとプロトタイプ', () => {
+  it('values に無いプレースホルダは、プロトタイプのプロパティ名でも差し込まない', () => {
+    const original = MESSAGES.ja.nav.menu.current
+    try {
+      ;(MESSAGES.ja.nav.menu as { current: string }).current = '{constructor}と{toString}'
+      const t = createTranslator('nav')
+      expect(t('menu.current', { count: 1 })).toBe('{constructor}と{toString}')
+    } finally {
+      ;(MESSAGES.ja.nav.menu as { current: string }).current = original
+    }
+  })
+})
+
 describe('辞書', () => {
   it('既定の言語は日本語で、<html lang> と OGP の locale が決まる', () => {
     expect(DEFAULT_LOCALE).toBe('ja')
@@ -77,10 +98,27 @@ describe('辞書', () => {
     expect(ogLocale()).toBe('ja_JP')
   })
 
-  it('対応しているすべての言語の辞書が、ja.json と同じ構造を持つ', () => {
+  // messages/ にある辞書を全部読む。言語の JSON を足したのに登録し忘れた、構造がずれた、を検出する（#2162 のセルフレビュー）
+  it('messages/ のすべての辞書が登録されていて、ja.json と同じ構造を持つ', () => {
+    const dir = path.join(process.cwd(), 'messages')
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'))
     const expected = leafKeys(ja).sort()
+    expect(files.map((f) => f.replace(/\.json$/, '')).sort()).toEqual([...SUPPORTED_LOCALES].sort())
+    for (const file of files) {
+      const dict: unknown = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'))
+      expect(leafKeys(dict).sort()).toEqual(expected)
+    }
+  })
+
+  // 差し込みは {name} だけの簡易版。next-intl の ICU 形式（{n, plural, …}、' のエスケープ）を辞書に書くと、
+  // next-intl へ移ったときに表示が変わるので書かない（#2162 のセルフレビュー）
+  it("辞書に ICU 構文と ' を書いていない", () => {
     for (const locale of SUPPORTED_LOCALES) {
-      expect(leafKeys(MESSAGES[locale]).sort()).toEqual(expected)
+      for (const value of leafValues(MESSAGES[locale])) {
+        const text = String(value)
+        expect(text).not.toMatch(/\{[^}]*,/)
+        expect(text).not.toContain("'")
+      }
     }
   })
 
@@ -107,12 +145,26 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 }
 
-const JAPANESE = /[぀-ヿ㐀-鿿！-｠]/
+// ひらがな・カタカナ・漢字・全角英数記号に加えて、日本語の句読点（、。「」）と半角カナも対象（#2162 のセルフレビュー）
+const JAPANESE = /[　-〿぀-ヿ㐀-鿿！-｠｡-ﾟ]/
 
 describe('辞書化したファイル', () => {
   it.each(DICTIONARY_ONLY_FILES)('%s に日本語の文言がベタ書きされていない', (file) => {
     const code = stripComments(fs.readFileSync(path.join(process.cwd(), file), 'utf8'))
     const offending = code.split('\n').filter((line) => JAPANESE.test(line))
     expect(offending).toEqual([])
+  })
+})
+
+// ナビの文言を表示する部品に、辞書と同じ文言を直書きしない。ほかの日本語（ゲスト向けの案内など）が残っていて
+// ファイルごとはチェックできない部品でも、ナビの項目名だけは辞書から引く（#2162 のセルフレビュー）。
+const NAV_CONSUMER_FILES = ['components/AnalysisSidebar.tsx']
+
+describe('ナビの文言を表示する部品', () => {
+  const navLabels = leafValues(ja.nav).map(String)
+  it.each(NAV_CONSUMER_FILES)('%s にナビの文言が直書きされていない', (file) => {
+    const code = stripComments(fs.readFileSync(path.join(process.cwd(), file), 'utf8'))
+    const hardcoded = navLabels.filter((label) => code.includes(`"${label}"`) || code.includes(`'${label}'`))
+    expect(hardcoded).toEqual([])
   })
 })

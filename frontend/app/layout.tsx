@@ -10,7 +10,8 @@ import { SentryClientInit } from '@/components/SentryClientInit'
 import { DEFAULT_LOCALE, createTranslator, htmlLang, ogLocale } from '@/lib/i18n'
 
 // 文言は辞書（messages/ja.json の metadata）が正本。言語は lib/i18n の既定値から決める（SOCAIAGENT-595）。
-const t = createTranslator('metadata', DEFAULT_LOCALE)
+const locale = DEFAULT_LOCALE
+const t = createTranslator('metadata', locale)
 const TITLE = t('title')
 const DESCRIPTION = t('description')
 
@@ -21,7 +22,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: TITLE,
     description: DESCRIPTION,
-    locale: ogLocale(DEFAULT_LOCALE),
+    locale: ogLocale(locale),
     type: 'website',
     siteName: t('siteName'),
   },
@@ -38,7 +39,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang={htmlLang(DEFAULT_LOCALE)} suppressHydrationWarning>
+    <html lang={htmlLang(locale)} suppressHydrationWarning>
       <head>
         <meta charSet="UTF-8" />
       </head>
