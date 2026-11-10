@@ -31,6 +31,9 @@ var industries = []string{"情報サービス・SI", "ソフトウェア", "イ�
 // 使用量の合計。費用の見積りに使う。
 var inTok, outTok, searches atomic.Int64
 
+// hints は社名 → 所在地。同名の別会社との取り違えを防ぐため、プロンプトに添える（-hints で読む）。
+var hints = map[string]string{}
+
 // costUSD は Haiku 4.5 の単価（入力 $1/100万、出力 $5/100万、Web 検索 $10/1000回）での推定費用。
 // 他のモデルでは単価が違うので目安にとどまる。
 func costUSD() float64 {
@@ -53,7 +56,14 @@ func main() {
 	workers := flag.Int("workers", 8, "並列数")
 	maxUSD := flag.Float64("max-usd", 0, "推定費用がこの金額（ドル）に達したら止める（0 は無制限）。Haiku 4.5 の単価で概算")
 	keepNonIT := flag.Bool("keep-non-it", false, "IT 企業でないと判定された社名も残す")
+	hintsPath := flag.String("hints", "", "社名 → 所在地の JSON ファイル。同名の別会社を避けるため検索に添える")
 	flag.Parse()
+	if *hintsPath != "" {
+		b, err := os.ReadFile(*hintsPath)
+		if err != nil || json.Unmarshal(b, &hints) != nil {
+			log.Fatalf("-hints を読めません: %v", err)
+		}
+	}
 
 	key := os.Getenv("ANTHROPIC_API_KEY")
 	if key == "" {
@@ -117,6 +127,13 @@ func main() {
 	log.Printf("使用量: 入力 %d トークン / 出力 %d トークン / Web 検索 %d 回（推定 $%.2f）", inTok.Load(), outTok.Load(), searches.Load(), costUSD())
 }
 
+func hintLine(name string) string {
+	if loc := hints[name]; loc != "" {
+		return fmt.Sprintf("対象は所在地が「%s」の法人。同名でも所在地が違う別会社のサイトは不可。", loc)
+	}
+	return ""
+}
+
 // enrich は 1 社分を Claude の Web 検索で調べる。
 func enrich(ctx context.Context, client anthropic.Client, model, name string) (result, error) {
 	prompt := fmt.Sprintf(`日本の企業「%s」について Web 検索で調べ、次の JSON オブジェクトだけを返してください（前後に説明やコードフェンスを付けない）。
@@ -124,8 +141,8 @@ func enrich(ctx context.Context, client anthropic.Client, model, name string) (r
 - is_it_company: 主な事業が IT（システム開発・ソフトウェア・IT サービス）なら true
 - website_url: 公式サイトの URL。確認できなければ空文字
 - description: 事業内容を日本語で60字以内。確認できなければ空文字
-推測で埋めず、確認できないものは空文字か false にすること。
-{"industry":"","is_it_company":false,"website_url":"","description":""}`, name, strings.Join(industries, " / "))
+推測で埋めず、確認できないものは空文字か false にすること。%s
+{"industry":"","is_it_company":false,"website_url":"","description":""}`, name, strings.Join(industries, " / "), hintLine(name))
 
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(model),
