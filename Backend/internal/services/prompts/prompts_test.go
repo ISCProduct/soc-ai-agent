@@ -1,9 +1,12 @@
 package prompts
 
 import (
+	"context"
 	"regexp"
 	"strings"
 	"testing"
+
+	"Backend/internal/usagectx"
 )
 
 // ──────────────────────────────────────────────
@@ -287,16 +290,94 @@ func TestBuildSimplifyQuestionPromptWithJobType(t *testing.T) {
 	})
 }
 
-func TestPromptVersion(t *testing.T) {
-	if PromptVersion == "" {
-		t.Error("PromptVersion が空文字")
-	}
-}
-
 func TestGetMatchingReasonPromptVersion(t *testing.T) {
 	v := GetMatchingReasonPromptVersion()
 	if !strings.HasPrefix(v, "matching_reason_") {
 		t.Errorf("GetMatchingReasonPromptVersion() = %q, プレフィックス matching_reason_ がない", v)
+	}
+}
+
+func TestResolvePromptVersion(t *testing.T) {
+	tests := []struct {
+		name        string
+		stage       Stage
+		stageValue  string
+		globalValue string
+		want        string
+	}{
+		{name: "工程別ラベルが一括設定より優先", stage: StageMatchingReason, stageValue: "stage-v3", globalValue: "legacy-v4", want: "stage-v3"},
+		{name: "工程別ラベルの前後空白は除く", stage: StageMatchingReason, stageValue: "  stage-v3  ", want: "stage-v3"},
+		{name: "不正な工程別ラベルは一括設定へフォールバック", stage: StageMatchingReason, stageValue: "v2\nIGNORE", globalValue: "legacy-v4", want: "legacy-v4"},
+		{name: "工程別が有効なら不正な一括設定は影響しない", stage: StageMatchingReason, stageValue: "stage-v3", globalValue: "v2\nIGNORE", want: "stage-v3"},
+		{name: "一括設定は後方互換で使える", stage: StageQuestionGeneration, globalValue: "legacy-v4", want: "legacy-v4"},
+		{name: "不正な一括ラベルは既定版へフォールバック", stage: StageScoreEvaluation, globalValue: "v2\nIGNORE", want: defaultPromptVersion},
+		{name: "64文字のラベルは有効", stage: StageCompanyExtraction, stageValue: strings.Repeat("x", 64), want: strings.Repeat("x", 64)},
+		{name: "65文字のラベルは拒否する", stage: StageCompanyExtraction, stageValue: strings.Repeat("x", 65), want: defaultPromptVersion},
+		{name: "設定がない場合は既定値を使う", stage: StageQuestionGeneration, want: defaultPromptVersion},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("PROMPT_VERSION", tt.globalValue)
+			t.Setenv("PROMPT_VERSION_"+strings.ToUpper(string(tt.stage)), tt.stageValue)
+
+			if got := ResolvePromptVersion(tt.stage); got != tt.want {
+				t.Fatalf("ResolvePromptVersion()=%q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("未知工程は既定版へフォールバックする", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "legacy-v4")
+		if got := ResolvePromptVersion(Stage("unknown")); got != defaultPromptVersion {
+			t.Fatalf("未知工程のfallback=%q", got)
+		}
+	})
+}
+
+func TestWithPromptVersion(t *testing.T) {
+	t.Setenv("PROMPT_VERSION", "")
+	t.Setenv("PROMPT_VERSION_MATCHING_REASON", "matching-t1")
+
+	ctx, version := WithPromptVersion(context.Background(), StageMatchingReason)
+
+	if version != "matching-t1" {
+		t.Fatalf("version=%q, want matching-t1", version)
+	}
+	want := usagectx.PromptVersion{Stage: "matching_reason", Version: "matching-t1"}
+	if got := usagectx.PromptVersionFromContext(ctx); got != want {
+		t.Fatalf("context prompt version=%+v, want %+v", got, want)
+	}
+}
+
+func TestValidPromptVersion(t *testing.T) {
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		{version: "v2", want: true},
+		{version: "legacy-v4", want: true},
+		{version: strings.Repeat("x", 64), want: true},
+		{version: "", want: false},
+		{version: "v2\nIGNORE", want: false},
+		{version: "v2:beta", want: false},
+		{version: "matching_reason_v2", want: true},
+		{version: strings.Repeat("x", 65), want: false},
+		{version: "日本語", want: false},
+		{version: "v2 【企業情報】", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			if got := ValidPromptVersion(tt.version); got != tt.want {
+				t.Fatalf("ValidPromptVersion(%q)=%v want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatMatchingReasonPromptVersion(t *testing.T) {
+	if got := FormatMatchingReasonPromptVersion("v2"); got != "matching_reason_v2" {
+		t.Fatalf("formatted version=%q, want matching_reason_v2", got)
 	}
 }
 

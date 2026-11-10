@@ -17,9 +17,19 @@
 
 export const DEFAULT_CORE_URL =
   process.env.NEXT_PUBLIC_LIVE2D_CORE_URL ?? '/live2d/core/live2dcubismcore.min.js'
-export const DEFAULT_MODEL_URL =
-  process.env.NEXT_PUBLIC_LIVE2D_MODEL_URL ?? '/live2d/model/model.model3.json'
 export const DEFAULT_SHADER_PATH = '/live2d/shaders/'
+
+/**
+ * 性別ごとのモデルURL。`NEXT_PUBLIC_LIVE2D_MODEL_URL` を明示指定した場合は
+ * 性別によらずそれを使う（単一モデルでのローカル確認用、`public/live2d/README.md` 参照）。
+ * 指定が無ければ `public/live2d/interviewers/{gender}/` の正規書き出し規約のパスを使う。
+ */
+export function modelUrlForGender(gender: 'male' | 'female'): string {
+  return (
+    process.env.NEXT_PUBLIC_LIVE2D_MODEL_URL ??
+    `/live2d/interviewers/${gender}/${gender}-interviewer.model3.json`
+  )
+}
 
 let coreLoadPromise: Promise<void> | null = null
 

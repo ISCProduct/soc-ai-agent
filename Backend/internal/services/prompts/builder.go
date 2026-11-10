@@ -3,19 +3,8 @@ package prompts
 import (
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 )
-
-// PromptVersion はプロンプトバージョンを管理する。
-// 環境変数 PROMPT_VERSION で上書き可能（デフォルト: "v2"）。
-// v2: 会話履歴・回答など外部テキストを信頼境界で包んだ（#1636）。
-var PromptVersion = func() string {
-	if v := os.Getenv("PROMPT_VERSION"); v != "" {
-		return v
-	}
-	return "v2"
-}()
 
 // JobType は職種タイプを表す。
 type JobType string
@@ -98,7 +87,7 @@ func GetJobTypeConfig(jobCategoryName string) JobTypeConfig {
 	}
 	slog.Info("プロンプト設定取得",
 		"job_type", string(jt),
-		"prompt_version", PromptVersion,
+		"prompt_version", ResolvePromptVersion(StageQuestionGeneration),
 	)
 	return cfg
 }
@@ -114,6 +103,6 @@ func BuildJobTypeToneGuidance(jobCategoryName string) string {
 func LogPromptVersion(context string) {
 	slog.Info("プロンプトバージョン使用",
 		"context", context,
-		"version", PromptVersion,
+		"version", ResolvePromptVersion(StageQuestionGeneration),
 	)
 }
