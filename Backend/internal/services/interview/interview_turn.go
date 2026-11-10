@@ -118,12 +118,14 @@ func (s *InterviewService) Turn(
 	hintName, hintReading := s.sttHintCompany(companyID, companyName)
 	sttHints := BuildSTTHints(hintName, hintReading, companyInfo)
 	sttStart := time.Now()
-	userText, err := s.openaiClient.TranscribeWithHints(ctx, audioData, audioFormat.AudioFilename(), sttHints)
+	userText, sttLocal, err := s.transcribe(ctx, audioData, audioFormat.AudioFilename(), sttHints)
 	obs := ObserveTranscribe(sessionID, turnCount, len(audioData), audioFormat.MIME, sttStart, userText, err)
 
 	// 問題が疑われる結果だけ高精度モデルへ再送する（音声R&D Task 5）。
 	// 通常の発話は再送しない。再送率がそのまま追加費用になる。
-	if reason := NeedsSTTFallback(userText, err != nil, obs.AudioSeconds); reason != FallbackNone && !FallbackIsRedundant() {
+	// ローカルへ縮退した（OpenAI が障害中の）ターンは、OpenAI の高精度モデルへの再送をしない。
+	// 同じ障害で失敗するまで待つことになり、面接のターンが止まるため（#1833）。
+	if reason := NeedsSTTFallback(userText, err != nil, obs.AudioSeconds); reason != FallbackNone && !FallbackIsRedundant() && !sttLocal {
 		// 費用は「再送したか」で決まるので、採用可否ではなくここで記録する
 		obs.FellBack = true
 		// 再送は「取れれば良い」もの。既定の60秒を待つと、そのターンの応答が
@@ -147,7 +149,9 @@ func (s *InterviewService) Turn(
 	// 利用量として記録する（#1294）。STT のレスポンスにはトークンが入らないため、
 	// 既に計測している音声秒数とレイテンシをそのまま渡す。
 	// 再送が発生した場合は2回課金されるので、その分も記録する。
-	recordSTTUsage(ctx, s.openaiClient, obs)
+	if !sttLocal {
+		recordSTTUsage(ctx, s.openaiClient, obs)
+	}
 
 	if err != nil {
 		log.Printf("[Interview] transcribe error: %v", err)
@@ -220,7 +224,7 @@ func (s *InterviewService) Turn(
 		systemPrompt = nameCtx + "\n" + systemPrompt
 	}
 	// Chat失敗時も面接官としての言い換え応答にフォールバックし、ターンを中断させない（#910）
-	aiText, err := s.openaiClient.ChatInterview(ctx, systemPrompt, history)
+	aiText, llmLocal, err := s.chatInterview(ctx, systemPrompt, history)
 	if err != nil {
 		log.Printf("[Interview] chat error: %v", err)
 		aiText = interviewFallbackReplyText
@@ -231,9 +235,12 @@ func (s *InterviewService) Turn(
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
 	ttsText := applyCompanyReadingForTTS(aiText, companyName, companyReading)
 	ttsStart := time.Now()
-	audio, err := s.openaiClient.TTS(ctx, ttsText, voice)
+	audio, ttsLocal, err := s.speak(ctx, ttsText, voice)
 	// 失敗しても課金されている可能性があるため、成否に関わらず記録する（#1294）。
-	recordTTSUsage(ctx, s.openaiClient, ttsText, time.Since(ttsStart))
+	// ローカルで読み上げたときは OpenAI の利用量ではないので記録しない（#1833）。
+	if !ttsLocal {
+		recordTTSUsage(ctx, s.openaiClient, ttsText, time.Since(ttsStart))
+	}
 	if err != nil {
 		log.Printf("[Interview] tts error: %v", err)
 		audio = nil
@@ -247,6 +254,7 @@ func (s *InterviewService) Turn(
 		CompanyReadingResolved: companyReadingResolved,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
+		AIFallback:             fallbackStages(sttLocal, llmLocal, ttsLocal),
 	}
 	if directive != nil {
 		result.QuestionSource = directive.Source
@@ -333,7 +341,7 @@ func (s *InterviewService) StartTurn(
 		systemPromptStart = nameCtx + "\n" + systemPromptStart
 	}
 	// Chat失敗時も面接開始を中断させず、定型の冒頭挨拶にフォールバックする（#910）
-	aiText, err := s.openaiClient.ChatInterview(ctx, systemPromptStart, []map[string]string{
+	aiText, llmLocal, err := s.chatInterview(ctx, systemPromptStart, []map[string]string{
 		{"role": "user", "content": "面接を開始してください。最初の自己紹介・志望動機の質問からお願いします。"},
 	})
 	if err != nil {
@@ -346,9 +354,12 @@ func (s *InterviewService) StartTurn(
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
 	ttsText := applyCompanyReadingForTTS(aiText, companyName, companyReading)
 	ttsStart := time.Now()
-	audio, err := s.openaiClient.TTS(ctx, ttsText, voice)
+	audio, ttsLocal, err := s.speak(ctx, ttsText, voice)
 	// 失敗しても課金されている可能性があるため、成否に関わらず記録する（#1294）。
-	recordTTSUsage(ctx, s.openaiClient, ttsText, time.Since(ttsStart))
+	// ローカルで読み上げたときは OpenAI の利用量ではないので記録しない（#1833）。
+	if !ttsLocal {
+		recordTTSUsage(ctx, s.openaiClient, ttsText, time.Since(ttsStart))
+	}
 	if err != nil {
 		log.Printf("[Interview] tts error: %v", err)
 		audio = nil
@@ -361,6 +372,7 @@ func (s *InterviewService) StartTurn(
 		CompanyReadingResolved: companyReadingResolved,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
+		AIFallback:             fallbackStages(false, llmLocal, ttsLocal),
 	}
 	if directive != nil {
 		result.QuestionSource = directive.Source

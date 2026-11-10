@@ -2,6 +2,7 @@ package interview
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/aifailover"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/costs"
@@ -21,12 +22,15 @@ import (
 const jobChBufferSize = 100
 
 type InterviewService struct {
-	sessionRepo          repository.InterviewSessionRepository
-	utterRepo            repository.InterviewUtteranceRepository
-	reportRepo           repository.InterviewReportRepository
-	userRepo             repository.UserRepository
-	emailService         *email.EmailService
-	openaiClient         *openai.Client
+	sessionRepo  repository.InterviewSessionRepository
+	utterRepo    repository.InterviewUtteranceRepository
+	reportRepo   repository.InterviewReportRepository
+	userRepo     repository.UserRepository
+	emailService *email.EmailService
+	openaiClient *openai.Client
+	// speech は OpenAI の障害時に STT / LLM / TTS をローカルへ縮退させる（#1833）。
+	// ローカルの接続先が未設定なら OpenAI だけを使う（今までと同じ）。
+	speech               *aifailover.Speech
 	budgetGuard          interviewBudgetGuard
 	realtimeUsageService *costs.RealtimeUsageService
 	crossFeature         *flywheel.CrossFeatureIntegrationService
@@ -68,6 +72,7 @@ func NewInterviewService(
 		userRepo:             userRepo,
 		emailService:         emailService,
 		openaiClient:         openaiClient,
+		speech:               newSpeechFailover(openaiClient),
 		realtimeUsageService: realtimeUsageService,
 		jobCh:                make(chan uint, jobChBufferSize),
 		inFlightJobs:         map[uint]struct{}{},
@@ -239,6 +244,8 @@ type TurnResult struct {
 	TotalQuestions         int
 	ResolvedCompanyID      uint
 	CustomQuestionsEnabled bool
+	// AIFallback はローカルへ縮退した工程（stt / llm / tts）。OpenAI だけで済んだら空（#1833）。
+	AIFallback []string
 }
 
 func (s *InterviewService) estimateCost(start, end *time.Time) float64 {

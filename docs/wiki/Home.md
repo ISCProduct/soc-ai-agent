@@ -16,6 +16,7 @@
 | [AIフライホイール設計](./flywheel.md) | 開発者 | 5機能のデータ連携設計・フロー |
 | [API リファレンス](./api-reference.md) | 開発者 | 認証方式・テーマ別解説。OpenAPI と全エンドポイント一覧への入口 |
 | [RAG サービス詳細](./rag-service.md) | 開発者 | ChromaDB・Web Search・Deep Research の仕組み |
+| [OpenAI 障害時の音声面接の縮退](./ai-failover.md) | 開発者・運用担当 | STT・LLM・TTS を工程ごとにローカルへ切り替える条件、Circuit Breaker、設定 |
 | [スコアリング・マッチング](./scoring.md) | 開発者 | 10カテゴリスコア定義・マッチングアルゴリズム |
 | [データプライバシー設計](./data-privacy.md) | 開発者・法務 | 匿名化・同意管理の設計方針 |
 | [料金プラン × 機能](./plan-entitlements.md) | 開発者 | プラン別エンタイトルメント（#810） |

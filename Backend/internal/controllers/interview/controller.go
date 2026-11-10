@@ -2,6 +2,7 @@ package interview
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/aifailover"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
 	"Backend/internal/safego"
@@ -355,11 +356,12 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		"total_questions":          result.TotalQuestions,
 		"resolved_company_id":      result.ResolvedCompanyID,
 		"custom_questions_enabled": result.CustomQuestionsEnabled,
+		"ai_fallback":              result.AIFallback,
 		"company_reading":          result.CompanyReading,
 		"company_reading_resolved": result.CompanyReadingResolved,
 	})
 
-	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
+	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {audioContentType(result.Audio)}})
 	audioPart.Write(result.Audio)
 	mw.Close()
 	return nil
@@ -434,11 +436,12 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		"total_questions":          result.TotalQuestions,
 		"resolved_company_id":      result.ResolvedCompanyID,
 		"custom_questions_enabled": result.CustomQuestionsEnabled,
+		"ai_fallback":              result.AIFallback,
 		"company_reading":          result.CompanyReading,
 		"company_reading_resolved": result.CompanyReadingResolved,
 	})
 
-	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
+	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {audioContentType(result.Audio)}})
 	audioPart.Write(result.Audio)
 	mw.Close()
 	return nil
@@ -639,4 +642,14 @@ func parseFormInt(r interface{ FormValue(string) string }, key string, def int) 
 		return def
 	}
 	return n
+}
+
+// audioContentType は音声の中身から Content-Type を決める（#1833）。
+// OpenAI の TTS は mp3、OpenAI 障害時のローカル（VOICEVOX）は WAV を返す。
+// ブラウザはどちらもそのまま再生できるが、Content-Type が中身と違うと再生に失敗する環境がある。
+func audioContentType(audio []byte) string {
+	if aifailover.IsWAV(audio) {
+		return "audio/wav"
+	}
+	return "audio/mpeg"
 }
