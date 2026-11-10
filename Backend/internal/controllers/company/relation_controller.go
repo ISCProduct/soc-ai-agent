@@ -199,16 +199,17 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 	}
 
 	if ctrl.validator != nil {
-		results, err := ctrl.validator.SearchCandidates(ctx.Request().Context(), query, true)
+		// フロントの45秒より手前で切る。切らないと応答前にブラウザが諦め、
+		// 課金済みの web_search だけが残る。
+		searchCtx, cancel := context.WithTimeout(ctx.Request().Context(), 40*time.Second)
+		defer cancel()
+		results, err := ctrl.validator.SearchCandidates(searchCtx, query, true)
 		if err != nil {
 			var ve *shared.ValidationError
 			if errors.As(err, &ve) {
 				return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
 			}
-			if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
-				return echo.NewHTTPError(http.StatusTooManyRequests, "検索の回数が多すぎます。少し時間を置いてからお試しください。")
-			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "企業検索に失敗しました")
+			return httpapi.InternalError(err)
 		}
 		out := make([]map[string]any, 0, len(results))
 		for _, r := range results {
@@ -249,13 +250,15 @@ func (ctrl *CompanyRelationController) ValidateCompany(ctx echo.Context) error {
 	if err := ctx.Bind(&payload); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
-	result, err := ctrl.validator.Validate(ctx.Request().Context(), payload.Query)
+	searchCtx, cancel := context.WithTimeout(ctx.Request().Context(), 40*time.Second)
+	defer cancel()
+	result, err := ctrl.validator.Validate(searchCtx, payload.Query)
 	if err != nil {
 		var ve *shared.ValidationError
 		if errors.As(err, &ve) {
 			return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, result)
 }

@@ -14,7 +14,8 @@ import { GUEST_REGISTER_PATH } from '@/lib/guest-limits'
 import { POSITIONS } from './constants'
 import type { InterviewCompany, Position, InterviewStatus } from './types'
 import { resolveCompanyByName } from './utils'
-import { fetchAndReadWithTimeout, fetchWithTimeout } from '@/lib/fetch-timeout'
+import { FetchTimeoutError, fetchWithTimeout } from '@/lib/fetch-timeout'
+import { fetchWebSearchCompanies, WebSearchError } from '@/lib/interview/web-search'
 import {
   clearInterviewLobbyDraft,
   loadInterviewLobbyDraft,
@@ -190,35 +191,20 @@ function InterviewContent() {
     if (loading || companySourceTab !== 'web') return
     if (!companySearch.trim()) { setWebSearchResults([]); setWebSearchError(null); return }
     let cancelled = false
+    const ac = new AbortController()
     const timer = setTimeout(async () => {
       setWebSearchLoading(true)
       setWebSearchError(null)
       try {
-        const data = await fetchAndReadWithTimeout(
-          `/api/companies/web-search?q=${encodeURIComponent(companySearch.trim())}`,
-          { cache: 'no-store' },
-          45_000,
-          async (r) => {
-            if (!r.ok) {
-              // 学生向けの画面なのでステータスコードは出さない。
-              // 待てば直る 429 だけは次の行動が変わるので文言を分ける。
-              throw new Error(
-                r.status === 429
-                  ? '検索の回数が多すぎます。少し時間を置いてからお試しください。'
-                  : '検索できませんでした。しばらくしてからもう一度お試しください。',
-              )
-            }
-            return r.json() as Promise<{ results?: { name: string; description: string }[] }>
-          },
-        )
+        const results = await fetchWebSearchCompanies(companySearch.trim(), ac.signal)
         // JSON パース中に検索語が変わってクリーンアップが走ったら、
         // この結果は古い。setState 直前で再確認して上書きを防ぐ(#1464)。
         if (cancelled) return
-        setWebSearchResults(Array.isArray(data?.results) ? data.results : [])
+        setWebSearchResults(results)
       } catch (e) {
-        if (cancelled) return
+        if (cancelled || ac.signal.aborted) return
         setWebSearchError(
-          e instanceof Error && e.message
+          e instanceof WebSearchError || e instanceof FetchTimeoutError
             ? e.message
             : '検索できませんでした。しばらくしてからもう一度お試しください。',
         )
@@ -227,7 +213,7 @@ function InterviewContent() {
         if (!cancelled) setWebSearchLoading(false)
       }
     }, 500)
-    return () => { cancelled = true; clearTimeout(timer) }
+    return () => { cancelled = true; ac.abort(); clearTimeout(timer) }
   }, [loading, companySearch, companySourceTab, webSearchRefreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleBackToSelection = useCallback(() => {
