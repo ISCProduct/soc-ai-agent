@@ -52,7 +52,8 @@ func (e *AnswerEvaluator) llmEvaluateWithPromptVersion(ctx context.Context, ques
 	ctx, promptVersion := prompts.WithPromptVersion(ctx, prompts.StageScoreEvaluation)
 	userPrompt := prompts.BuildAnswerQualityUserPrompt(question, answer)
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureChatAnswerEval)
-	raw, err := e.llmClient.ChatCompletionJSON(ctx, prompts.AnswerQualitySystemPrompt, userPrompt, 0.2, 256)
+	systemPrompt := prompts.Body(prompts.StageScoreEvaluation, promptVersion, prompts.BodyAnswerQuality, prompts.AnswerQualitySystemPrompt)
+	raw, err := e.llmClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, 256)
 	if err != nil {
 		log.Printf("[AnswerEvaluator] LLM評価エラー: %v", err)
 		return nil, ""

@@ -14,18 +14,22 @@ func TestAPICallLogFromUsage_PromptVersion(t *testing.T) {
 		name        string
 		stage       string
 		version     string
+		group       string
 		wantStage   string
 		wantVersion string
+		wantGroup   string
 	}{
 		{name: "工程と版をそのまま記録する", stage: "score_evaluation", version: "score-t1", wantStage: "score_evaluation", wantVersion: "score-t1"},
+		// A/B で割り当てた版は群として残す（#1976）
+		{name: "A/Bの群を記録する", stage: "score_evaluation", version: "v3", group: "v3", wantStage: "score_evaluation", wantVersion: "v3", wantGroup: "v3"},
 		{name: "工程が空ならunknown", wantStage: "unknown"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := apiCallLogFromUsage(openaiPkg.Usage{PromptStage: tt.stage, PromptVersion: tt.version}, time.Now())
+			got := apiCallLogFromUsage(openaiPkg.Usage{PromptStage: tt.stage, PromptVersion: tt.version, PromptABGroup: tt.group}, time.Now())
 
-			if got.PromptStage != tt.wantStage || got.PromptVersion != tt.wantVersion {
-				t.Fatalf("got=(%q,%q), want (%q,%q)", got.PromptStage, got.PromptVersion, tt.wantStage, tt.wantVersion)
+			if got.PromptStage != tt.wantStage || got.PromptVersion != tt.wantVersion || got.PromptABGroup != tt.wantGroup {
+				t.Fatalf("got=(%q,%q,%q), want (%q,%q,%q)", got.PromptStage, got.PromptVersion, got.PromptABGroup, tt.wantStage, tt.wantVersion, tt.wantGroup)
 			}
 		})
 	}
