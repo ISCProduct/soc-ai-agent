@@ -35,7 +35,7 @@ services:
   app:
     container_name: soc-ai-agent-backend-test
     ports: !override
-      - "${TEST_BACKEND_PORT:-18080}:8080"
+      - "127.0.0.1:${TEST_BACKEND_PORT:-18080}:8080"
     env_file: !override
       - ./Backend/.env.test
     environment:
@@ -49,7 +49,7 @@ services:
   frontend:
     container_name: soc-ai-agent-frontend-test
     ports: !override
-      - "${TEST_FRONTEND_PORT:-13000}:3000"
+      - "127.0.0.1:${TEST_FRONTEND_PORT:-13000}:3000"
     environment:
       - NEXT_PUBLIC_BACKEND_URL=http://localhost:${TEST_BACKEND_PORT:-18080}
       - BACKEND_URL=http://app:8080

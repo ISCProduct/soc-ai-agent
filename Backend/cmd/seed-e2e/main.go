@@ -7,11 +7,14 @@ package main
 import (
 	"Backend/internal/config"
 	"Backend/internal/models"
+	"errors"
 	"log"
+	"os"
 	"time"
 
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // E2ETestStudentEmail / E2ETestStudentPassword はローカル統合テストの
@@ -24,8 +27,14 @@ const (
 )
 
 func main() {
-	if err := godotenv.Load(".env.test"); err != nil {
-		log.Printf("warning: .env.test を読み込めませんでした（%v）。既存の環境変数のみ使用します", err)
+	// 固定パスワードのユーザーを書き込むため、接続先は必ずテスト用DBに固定する。
+	// Load は既存の環境変数を上書きしない（個人devの DB_* がexport済みだと誤接続する）ので
+	// Overload を使う。読めなければ個人の Backend/.env へフォールバックさせず終了する。
+	if err := godotenv.Overload(".env.test"); err != nil {
+		log.Fatalf(".env.test を読み込めません（%v）。'cp Backend/.env.test.example Backend/.env.test' を実行してください", err)
+	}
+	if host := os.Getenv("DB_HOST"); host != "127.0.0.1" && host != "localhost" {
+		log.Fatalf("DB_HOST=%q はローカルではありません。テスト用DB以外へは書き込みません", host)
 	}
 
 	cfg, err := config.LoadConfig()
@@ -46,7 +55,10 @@ func main() {
 
 	var user models.User
 	result := db.Where("email = ?", E2ETestStudentEmail).First(&user)
-	if result.Error != nil {
+	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		log.Fatalf("Failed to look up e2e student user: %v", result.Error)
+	}
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		user = models.User{
 			OrganizationID:  1,
 			Email:           E2ETestStudentEmail,
