@@ -394,3 +394,35 @@ variable "sentry_dsn" {
   sensitive   = true
   default     = ""
 }
+
+# OpenAI 障害時の音声面接の縮退（#1833）。空なら縮退しない（今まで通り OpenAI だけ）。
+# ローカルの推論先は #1832 で用意する。詳細は docs/wiki/ai-failover.md
+variable "ai_failover_local_stt_url" {
+  type        = string
+  description = "Whisper.cpp の server の URL（例 http://10.0.0.5:8080）。空なら STT は縮退しない"
+  default     = ""
+}
+
+variable "ai_failover_local_llm_url" {
+  type        = string
+  description = "OpenAI 互換の LLM（Ollama）の URL（例 http://10.0.0.5:11434/v1）。空なら LLM は縮退しない"
+  default     = ""
+}
+
+variable "ai_failover_local_llm_model" {
+  type        = string
+  description = "ローカルの LLM のモデル。空ならアプリの既定（qwen3:1.7b）"
+  default     = ""
+}
+
+variable "ai_failover_local_tts_url" {
+  type        = string
+  description = "VOICEVOX エンジンの URL（例 http://10.0.0.5:50021）。空なら TTS は縮退しない"
+  default     = ""
+}
+
+variable "ai_failover_local_tts_speaker" {
+  type        = string
+  description = "VOICEVOX の話者 ID。空ならアプリの既定（1）"
+  default     = ""
+}
