@@ -185,12 +185,17 @@ func (s *InterviewService) Turn(
 	// クライアントの history は件数・長さ・role のどれも信頼できない。
 	// 取得に失敗しても面接は止めず、今回の発話だけで続ける。
 	var utterances []models.InterviewUtterance
+	utterancesLoaded := false
 	if s.utterRepo != nil {
 		if utterances, err = s.utterRepo.FindBySessionID(sessionID); err != nil {
 			log.Printf("[Interview] load utterances for history error: %v", err)
 			utterances = nil
+		} else {
+			utterancesLoaded = true
 		}
 	}
+	// 同じターンが応答の前にもう一度走っても、発話の ID が同じになるようにする（二重保存の防止）
+	turnKey := turnUtteranceKey("turn", len(utterances), utterancesLoaded)
 	history := historyFromUtterances(utterances)
 	history = append(history, map[string]string{"role": "user", "content": userText})
 
@@ -247,7 +252,7 @@ func (s *InterviewService) Turn(
 		return nil, err
 	}
 	utteranceSaveFailed := false
-	if err := s.saveTurnUtterances(sessionID,
+	if err := s.saveTurnUtterances(sessionID, turnKey,
 		turnUtterance{role: "user", text: userText},
 		turnUtterance{role: "ai", text: aiText},
 	); err != nil {
@@ -300,6 +305,17 @@ func (s *InterviewService) StartTurn(
 	if session.Status == "finished" {
 		return nil, shared.ErrSessionFinished
 	}
+
+	// 冒頭の質問の発話 ID を決める。同じ /start-turn が応答の前にもう一度走っても二重に保存しない
+	startSaved, startLoaded := 0, false
+	if s.utterRepo != nil {
+		if existing, err := s.utterRepo.FindBySessionID(sessionID); err != nil {
+			log.Printf("[Interview] load utterances for start-turn error: %v", err)
+		} else {
+			startSaved, startLoaded = len(existing), true
+		}
+	}
+	turnKey := turnUtteranceKey("start", startSaved, startLoaded)
 
 	// WEB検索・手入力で company_id=0 でも、企業名が DB 登録と一致すれば解決する (#567)
 	companyID = s.resolveCompanyID(companyID, companyName)
@@ -376,7 +392,7 @@ func (s *InterviewService) StartTurn(
 		return nil, err
 	}
 	utteranceSaveFailed := false
-	if err := s.saveTurnUtterances(sessionID, turnUtterance{role: "ai", text: aiText}); err != nil {
+	if err := s.saveTurnUtterances(sessionID, turnKey, turnUtterance{role: "ai", text: aiText}); err != nil {
 		log.Printf("[Interview] save start-turn utterance session=%d: %v", sessionID, err)
 		utteranceSaveFailed = true
 	}

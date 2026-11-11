@@ -6,6 +6,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"errors"
+	"fmt"
 	"github.com/google/uuid"
 	"strings"
 	"time"
@@ -214,10 +215,11 @@ type turnUtterance struct {
 }
 
 // serverUtteranceIDPrefix はサーバーが保存した発話の client_utterance_id の接頭辞（#1969）。
-// 再試行を冪等にするために発話ごとに ID を振る。クライアントの ID（UUID）とは重ならない。
+// 再試行と同じターンの再実行を冪等にするために、ターンと順番から ID を決める。
+// クライアントの ID（UUID）とは重ならない。
 const serverUtteranceIDPrefix = "srv-"
 
-// turnUtteranceSaveAttempts は発話1件を保存する最大回数。
+// turnUtteranceSaveAttempts は1ターンの発話を保存する最大回数。
 const turnUtteranceSaveAttempts = 3
 
 // turnUtteranceRetryWait は再試行までの待ち時間の単位。2回目はこの1倍、3回目は2倍待つ。
@@ -229,12 +231,16 @@ var turnUtteranceRetryWait = 200 * time.Millisecond
 // クライアントが応答を受け取ってからユーザーの発話を保存すると、サーバーが先に保存した
 // 面接官の発話より後ろに並び、書き起こしの順番が入れ替わる。
 //
-// 一時的な DB の失敗で発話が欠けないよう、1件ずつ再試行する。発話ごとに振った ID の一意制約で、
-// 結果が不明な失敗の後に再試行しても二重には保存されない（以前のクライアントの再試行と同じ扱い）。
+// 1ターンの発話は1つのトランザクションで保存し、一時的な DB の失敗はまとめて再試行する。
+// user だけ残って ai が欠けると、次のターンの履歴から直前の質問が消えるため。
+//
+// 発話の ID は turnKey（ターンを始めたときの保存済み件数から決める）と順番で決める。同じターンが
+// 応答の前にもう一度走っても同じ ID になり、一意制約で二重に保存されない。結果が不明な失敗の後の
+// 再試行も同じ扱いになる（以前のクライアントの再試行と同じ）。
 //
 // 長さと件数の上限は SaveUtterance と揃える。長すぎる発話は切り詰め、上限に達したら
 // ErrTooManyUtterances を返す。空の発話は保存しない。
-func (s *InterviewService) saveTurnUtterances(sessionID uint, utterances ...turnUtterance) error {
+func (s *InterviewService) saveTurnUtterances(sessionID uint, turnKey string, utterances ...turnUtterance) error {
 	if s.utterRepo == nil {
 		return errors.New("utterance repository is not configured")
 	}
@@ -243,7 +249,8 @@ func (s *InterviewService) saveTurnUtterances(sessionID uint, utterances ...turn
 		return err
 	}
 	count := len(existing)
-	for _, u := range utterances {
+	rows := make([]models.InterviewUtterance, 0, len(utterances))
+	for i, u := range utterances {
 		text := strings.TrimSpace(u.text)
 		if text == "" {
 			continue
@@ -254,32 +261,68 @@ func (s *InterviewService) saveTurnUtterances(sessionID uint, utterances ...turn
 		if runes := []rune(text); len(runes) > maxUtteranceRunes {
 			text = string(runes[:maxUtteranceRunes])
 		}
-		id := serverUtteranceIDPrefix + uuid.NewString()
-		if err := s.createUtteranceWithRetry(models.InterviewUtterance{
+		id := fmt.Sprintf("%s%s-%d", serverUtteranceIDPrefix, turnKey, i)
+		rows = append(rows, models.InterviewUtterance{
 			SessionID: sessionID, Role: u.role, Text: text, ClientUtteranceID: &id,
-		}); err != nil {
-			return err
-		}
+		})
 		count++
 	}
-	return nil
+	if len(rows) == 0 {
+		return nil
+	}
+	return s.createUtterancesWithRetry(rows)
 }
 
-// createUtteranceWithRetry は発話1件を最大 turnUtteranceSaveAttempts 回保存する。
-// 途中で接続が切れても、保存を始めた発話は最後まで試す（user だけ残って ai が欠けるのを避ける）。
-func (s *InterviewService) createUtteranceWithRetry(utter models.InterviewUtterance) error {
+// utteranceBatchCreator は1ターンの発話を1つのトランザクションで保存できるリポジトリ
+// （repositories.InterviewUtteranceRepository が満たす）。
+type utteranceBatchCreator interface {
+	CreateAll(utterances []*models.InterviewUtterance) error
+}
+
+// createUtterancesWithRetry は1ターンの発話を最大 turnUtteranceSaveAttempts 回保存する。
+// 途中で接続が切れても、保存を始めた発話は最後まで試す。
+func (s *InterviewService) createUtterancesWithRetry(rows []models.InterviewUtterance) error {
 	var err error
 	for attempt := 1; attempt <= turnUtteranceSaveAttempts; attempt++ {
-		row := utter
-		if err = s.utterRepo.Create(&row); err == nil {
+		if err = s.createUtterances(rows); err == nil {
 			return nil
 		}
 		if attempt < turnUtteranceSaveAttempts {
-			log.Printf("[Interview] save utterance retry session=%d role=%s attempt=%d: %v", utter.SessionID, utter.Role, attempt, err)
+			log.Printf("[Interview] save turn utterances retry session=%d attempt=%d: %v", rows[0].SessionID, attempt, err)
 			time.Sleep(time.Duration(attempt) * turnUtteranceRetryWait)
 		}
 	}
 	return err
+}
+
+// createUtterances は rows を保存する。リポジトリがトランザクションでの保存に対応していれば
+// それを使い、全件か0件のどちらかにする。
+func (s *InterviewService) createUtterances(rows []models.InterviewUtterance) error {
+	ptrs := make([]*models.InterviewUtterance, len(rows))
+	for i := range rows {
+		row := rows[i]
+		ptrs[i] = &row
+	}
+	if batch, ok := s.utterRepo.(utteranceBatchCreator); ok {
+		return batch.CreateAll(ptrs)
+	}
+	for _, row := range ptrs {
+		if err := s.utterRepo.Create(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// turnUtteranceKey は、ターンの発話の ID に使うキーを返す。kind は "start"（冒頭の質問）か
+// "turn"（回答と次の質問）、savedCount はターンを始めたときの保存済みの発話の件数。
+// 同じターンの再実行は同じキーになる。保存済みの件数を読めなかったときは、二重保存の防止より
+// 保存を優先して毎回別のキーにする。
+func turnUtteranceKey(kind string, savedCount int, loaded bool) string {
+	if !loaded {
+		return kind + "-" + uuid.NewString()
+	}
+	return fmt.Sprintf("%s-%d", kind, savedCount)
 }
 
 // duplicatesServerSavedUserUtterance は、最後のユーザー発話がサーバーの保存したもので、

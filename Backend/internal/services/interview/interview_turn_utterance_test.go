@@ -126,7 +126,7 @@ func TestSaveTurnUtterances_一時的な失敗は再試行する(t *testing.T) {
 	t.Run("2回失敗しても3回目で保存する", func(t *testing.T) {
 		repo := &flakyUtterRepo{failures: 2}
 		svc := NewInterviewService(nil, repo, nil, nil, nil, nil, nil)
-		if err := svc.saveTurnUtterances(1, turnUtterance{role: "user", text: "回答"}); err != nil {
+		if err := svc.saveTurnUtterances(1, "turn-0", turnUtterance{role: "user", text: "回答"}); err != nil {
 			t.Fatalf("err = %v", err)
 		}
 		if len(repo.utterances) != 1 || repo.calls != 3 {
@@ -136,7 +136,7 @@ func TestSaveTurnUtterances_一時的な失敗は再試行する(t *testing.T) {
 	t.Run("3回とも失敗したらエラーを返す", func(t *testing.T) {
 		repo := &flakyUtterRepo{failures: 3}
 		svc := NewInterviewService(nil, repo, nil, nil, nil, nil, nil)
-		if err := svc.saveTurnUtterances(1, turnUtterance{role: "user", text: "回答"}); err == nil {
+		if err := svc.saveTurnUtterances(1, "turn-0", turnUtterance{role: "user", text: "回答"}); err == nil {
 			t.Fatal("エラーにならない")
 		}
 		if repo.calls != turnUtteranceSaveAttempts {
@@ -150,7 +150,7 @@ func TestSaveTurnUtterances(t *testing.T) {
 		utters := &utterRepoStub{}
 		svc := NewInterviewService(nil, utters, nil, nil, nil, nil, nil)
 		long := strings.Repeat("あ", maxUtteranceRunes+10)
-		err := svc.saveTurnUtterances(1,
+		err := svc.saveTurnUtterances(1, "turn-0",
 			turnUtterance{role: "user", text: " 回答です "},
 			turnUtterance{role: "ai", text: ""},
 			turnUtterance{role: "ai", text: long},
@@ -161,7 +161,7 @@ func TestSaveTurnUtterances(t *testing.T) {
 		if len(utters.utterances) != 2 {
 			t.Fatalf("件数 = %d, want 2", len(utters.utterances))
 		}
-		// 再試行を冪等にするため、サーバーが振った ID を付けて保存する
+		// 再試行と同じターンの再実行を冪等にするため、サーバーが決めた ID を付けて保存する
 		if u := utters.utterances[0]; u.Role != "user" || u.Text != "回答です" || u.SessionID != 1 ||
 			u.ClientUtteranceID == nil || !strings.HasPrefix(*u.ClientUtteranceID, serverUtteranceIDPrefix) {
 			t.Fatalf("1件目 = %+v", u)
@@ -174,15 +174,101 @@ func TestSaveTurnUtterances(t *testing.T) {
 		}
 	})
 
-	t.Run("件数の上限に達したら保存しない", func(t *testing.T) {
+	t.Run("件数の上限に達するターンは、回答だけを残さずに丸ごと保存しない", func(t *testing.T) {
 		utters := &utterRepoStub{utterances: make([]models.InterviewUtterance, maxUtterancesPerSession-1)}
 		svc := NewInterviewService(nil, utters, nil, nil, nil, nil, nil)
-		err := svc.saveTurnUtterances(1, turnUtterance{role: "user", text: "回答"}, turnUtterance{role: "ai", text: "質問"})
+		err := svc.saveTurnUtterances(1, "turn-0", turnUtterance{role: "user", text: "回答"}, turnUtterance{role: "ai", text: "質問"})
 		if !errors.Is(err, ErrTooManyUtterances) {
 			t.Fatalf("err = %v, want ErrTooManyUtterances", err)
 		}
-		if len(utters.utterances) != maxUtterancesPerSession {
-			t.Fatalf("件数 = %d, want %d", len(utters.utterances), maxUtterancesPerSession)
+		if len(utters.utterances) != maxUtterancesPerSession-1 {
+			t.Fatalf("件数 = %d, want %d", len(utters.utterances), maxUtterancesPerSession-1)
+		}
+	})
+}
+
+// 同じターンが応答の前にもう一度走っても、発話の ID が同じになり一意制約で二重に保存されない。
+// 別のターンは別の ID になる。
+func TestSaveTurnUtterances_IDsAreStablePerTurn(t *testing.T) {
+	ids := func(key string) []string {
+		utters := &utterRepoStub{}
+		svc := NewInterviewService(nil, utters, nil, nil, nil, nil, nil)
+		if err := svc.saveTurnUtterances(1, key, turnUtterance{role: "user", text: "回答"}, turnUtterance{role: "ai", text: "質問"}); err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		out := make([]string, 0, len(utters.utterances))
+		for _, u := range utters.utterances {
+			out = append(out, *u.ClientUtteranceID)
+		}
+		return out
+	}
+	first, again, next := ids(turnUtteranceKey("turn", 3, true)), ids(turnUtteranceKey("turn", 3, true)), ids(turnUtteranceKey("turn", 5, true))
+	if strings.Join(first, ",") != strings.Join(again, ",") {
+		t.Fatalf("同じターンの再実行で ID が変わった: %v / %v", first, again)
+	}
+	if first[0] == first[1] {
+		t.Fatalf("同じターンの user と ai は別の ID にすること: %v", first)
+	}
+	if first[0] == next[0] || first[1] == next[1] {
+		t.Fatalf("別のターンは別の ID にすること: %v / %v", first, next)
+	}
+	if turnUtteranceKey("start", 3, true) == turnUtteranceKey("turn", 3, true) {
+		t.Fatal("冒頭の質問とターンのキーは分けること")
+	}
+	if turnUtteranceKey("turn", 0, false) == turnUtteranceKey("turn", 0, false) {
+		t.Fatal("保存済みの件数を読めなかったときは毎回別のキーにすること")
+	}
+}
+
+// batchUtterRepo はトランザクションでの保存（CreateAll）を持つリポジトリ。
+// failures 回目までは全件を保存せずに失敗する（トランザクションの巻き戻し）。
+type batchUtterRepo struct {
+	utterRepoStub
+	failures   int
+	batchCalls int
+	sizes      []int
+}
+
+func (r *batchUtterRepo) CreateAll(utterances []*models.InterviewUtterance) error {
+	r.batchCalls++
+	r.sizes = append(r.sizes, len(utterances))
+	if r.batchCalls <= r.failures {
+		return errors.New("deadlock")
+	}
+	for _, u := range utterances {
+		r.utterances = append(r.utterances, *u)
+	}
+	return nil
+}
+
+// 1ターンの user と ai はまとめて1回で保存し、失敗したら両方とも残さずに再試行する。
+// user だけ残ると、次のターンの履歴から直前の質問が消える。
+func TestSaveTurnUtterances_SavesTurnAtomically(t *testing.T) {
+	prev := turnUtteranceRetryWait
+	turnUtteranceRetryWait = 0
+	t.Cleanup(func() { turnUtteranceRetryWait = prev })
+
+	t.Run("失敗したら両方とも再試行して保存する", func(t *testing.T) {
+		repo := &batchUtterRepo{failures: 1}
+		svc := NewInterviewService(nil, repo, nil, nil, nil, nil, nil)
+		if err := svc.saveTurnUtterances(1, "turn-0", turnUtterance{role: "user", text: "回答"}, turnUtterance{role: "ai", text: "質問"}); err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if repo.batchCalls != 2 || repo.sizes[0] != 2 || repo.sizes[1] != 2 {
+			t.Fatalf("CreateAll 呼び出し=%d 件数=%v", repo.batchCalls, repo.sizes)
+		}
+		if got := utteranceLines(repo.utterances); strings.Join(got, "|") != "user:回答|ai:質問" {
+			t.Fatalf("保存された発話 = %v", got)
+		}
+	})
+	t.Run("3回とも失敗したら何も残さない", func(t *testing.T) {
+		repo := &batchUtterRepo{failures: turnUtteranceSaveAttempts}
+		svc := NewInterviewService(nil, repo, nil, nil, nil, nil, nil)
+		if err := svc.saveTurnUtterances(1, "turn-0", turnUtterance{role: "user", text: "回答"}, turnUtterance{role: "ai", text: "質問"}); err == nil {
+			t.Fatal("エラーにならない")
+		}
+		if len(repo.utterances) != 0 {
+			t.Fatalf("回答だけが残っている: %v", utteranceLines(repo.utterances))
 		}
 	})
 }
