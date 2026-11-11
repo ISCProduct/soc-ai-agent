@@ -693,14 +693,20 @@ module "backend" {
     # 工程ごとのモデルの二層化（#1526）。空なら工程ごとの既定のまま
     AI_MODEL_PREMIUM            = var.ai_model_premium
     AI_MODEL_LIGHT              = var.ai_model_light
-    PROMPT_VERSION              = var.prompt_version
-    AWS_REGION                  = var.region
-    AWS_S3_BUCKET               = module.s3.bucket_id
-    EMAIL_PROVIDER              = "resend"
-    EMAIL_FROM                  = "noreply@shukatsu-ai.jp"
-    OPENAI_WEB_SEARCH_MODEL     = "gpt-4o-mini"
-    OPENAI_COMPANY_SEARCH_MODEL = "gpt-4o-mini"
-    OPENAI_HINTS_MODEL          = "gpt-4o-mini"
+    # OpenAI 障害時の音声面接の縮退（#1833）。空なら縮退しない
+    AI_FAILOVER_LOCAL_STT_URL     = var.ai_failover_local_stt_url
+    AI_FAILOVER_LOCAL_LLM_URL     = var.ai_failover_local_llm_url
+    AI_FAILOVER_LOCAL_LLM_MODEL   = var.ai_failover_local_llm_model
+    AI_FAILOVER_LOCAL_TTS_URL     = var.ai_failover_local_tts_url
+    AI_FAILOVER_LOCAL_TTS_SPEAKER = var.ai_failover_local_tts_speaker
+    PROMPT_VERSION                = var.prompt_version
+    AWS_REGION                    = var.region
+    AWS_S3_BUCKET                 = module.s3.bucket_id
+    EMAIL_PROVIDER                = "resend"
+    EMAIL_FROM                    = "noreply@shukatsu-ai.jp"
+    OPENAI_WEB_SEARCH_MODEL       = "gpt-4o-mini"
+    OPENAI_COMPANY_SEARCH_MODEL   = "gpt-4o-mini"
+    OPENAI_HINTS_MODEL            = "gpt-4o-mini"
     # 企業検索の web_search のコスト調整ノブ (#1124)。
     # 検索結果が固定トークンとして課金されるため、1コールの重さがそのままコストに効く。
     # 品質が落ちたら "high" に戻す（apply とサービス更新が必要）。

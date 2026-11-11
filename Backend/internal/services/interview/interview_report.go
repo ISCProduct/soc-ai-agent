@@ -217,6 +217,9 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	if err != nil {
 		return err
 	}
+	// ワーカーには認証ミドルウェアの actor が届かない。載せないとレポートの費用が
+	// 誰の予算にも入らない。
+	ctx = usagectx.WithActor(ctx, session.UserID, session.OrganizationID)
 	lang := normalizeLanguage(session.Language)
 
 	utterances, err := s.utterRepo.FindBySessionID(sessionID)
@@ -405,7 +408,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		} else if s.matchingRunner != nil && !repositories.IsInterviewSnapshotSession(targetSession) {
 			userID, sessionID := session.UserID, targetSession
 			safego.Go(func() {
-				if err := s.matchingRunner.CalculateMatching(context.Background(), userID, sessionID); err != nil {
+				if err := s.matchingRunner.CalculateMatching(s.rematchContext(userID, session.OrganizationID), userID, sessionID); err != nil {
 					log.Printf("[CrossFeature] rematch after interview failed user=%d session=%s: %v\n", userID, sessionID, err)
 				}
 			})

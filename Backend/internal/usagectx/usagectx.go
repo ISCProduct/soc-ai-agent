@@ -8,11 +8,19 @@
 // openai → middleware → repositories → companyfetch → openai で循環する。
 package usagectx
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // FeatureUnknown は機能名が渡されなかった呼び出しの既定値。
 // この件数が「まだ計測できていない経路」の指標になる（DesignDoc §8）。
 const FeatureUnknown = "unknown"
+
+var (
+	ErrAIBudgetExceeded    = errors.New("AI budget exceeded")
+	ErrAIBudgetUnavailable = errors.New("AI budget check unavailable")
+)
 
 // 機能名の定数。api_call_logs.feature に入り、機能別のコスト集計軸になる。
 // LLM に分類させず、呼び出し元が定数で渡す（DesignDoc §3.5）。
@@ -46,6 +54,9 @@ const (
 type featureKey struct{}
 type promptVersionKey struct{}
 type actorKey struct{}
+type budgetCheckKey struct{}
+
+type budgetCheck func(context.Context) error
 
 // PromptVersion は工程と版を表す利用量記録用メタデータ。
 // Group は A/B で割り当てた版。A/B の対象外なら空（#1976）。
@@ -142,4 +153,25 @@ func Actor(ctx context.Context) (userID, organizationID *uint) {
 		return nil, nil
 	}
 	return a.UserID, a.OrganizationID
+}
+
+// WithAIBudgetCheck は AI を呼ぶ直前に実行する予算判定を載せる。
+func WithAIBudgetCheck(ctx context.Context, check func(context.Context) error) context.Context {
+	if ctx == nil || check == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, budgetCheckKey{}, budgetCheck(check))
+}
+
+// CheckAIBudget は載っている予算判定を実行する。載っていなければ何もしない
+// （未ログインの利用者やバッチは予算の対象ではない）。
+func CheckAIBudget(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	check, ok := ctx.Value(budgetCheckKey{}).(budgetCheck)
+	if !ok {
+		return nil
+	}
+	return check(ctx)
 }

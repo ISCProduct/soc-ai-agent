@@ -194,6 +194,11 @@ func (s *MatchingService) applyAIReasonsToTopMatches(
 	if !matchingReasonUseAI() || s.aiClient == nil {
 		return
 	}
+	// 予算の上限ならテンプレートの理由のままにする。マッチング自体は費用がかからないので止めない。
+	if err := usagectx.CheckAIBudget(ctx); err != nil {
+		log.Printf("[CalculateMatching] AI reasons skipped: %v\n", err)
+		return
+	}
 
 	top := topMatchesByScore(pending, config.MatchingReasonAITopN())
 	log.Printf("[CalculateMatching] Generating AI reasons for top %d of %d matches\n", len(top), len(pending))

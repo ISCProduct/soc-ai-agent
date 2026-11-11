@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -55,7 +54,7 @@ func (cli *Client) Transcribe(ctx context.Context, audio []byte, filename string
 		return "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("whisper error %d: %s", resp.StatusCode, string(body))
+		return "", &StatusError{Format: "whisper error %d: %s", StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	var result struct {
@@ -117,7 +116,7 @@ func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) 
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("tts error %d: %s", resp.StatusCode, string(errBody))
+		return nil, &StatusError{Format: "tts error %d: %s", StatusCode: resp.StatusCode, Body: string(errBody)}
 	}
 
 	return io.ReadAll(resp.Body)
@@ -186,7 +185,7 @@ func (cli *Client) ChatInterview(ctx context.Context, systemPrompt string, histo
 		return "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("chat error %d: %s", resp.StatusCode, string(respBody))
+		return "", &StatusError{Format: "chat error %d: %s", StatusCode: resp.StatusCode, Body: string(respBody)}
 	}
 
 	var result struct {

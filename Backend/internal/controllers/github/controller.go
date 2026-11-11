@@ -4,6 +4,7 @@ import (
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/github"
 	ifaces "Backend/internal/services/interfaces"
+	"Backend/internal/usagectx"
 	"context"
 	"errors"
 	"net/http"
@@ -163,6 +164,12 @@ func (c *GitHubController) SummarizeRepo(ctx echo.Context) error {
 
 	summary, err := c.githubService.SummarizeRepo(ctx.Request().Context(), userID, body.FullName, body.ForceRefresh, body.TargetRole)
 	if err != nil {
+		if errors.Is(err, usagectx.ErrAIBudgetUnavailable) {
+			return httpapi.AIBudgetUnavailable()
+		}
+		if errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+			return httpapi.AIBudgetExceeded(ctx)
+		}
 		// full_name の形が正しくないのは利用者の入力の誤りなので 400 にする（#2176）
 		if errors.Is(err, github.ErrInvalidRepoFullName) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
