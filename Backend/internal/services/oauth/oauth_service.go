@@ -81,6 +81,7 @@ type GitHubEmail struct {
 
 // maxDiscardBodyBytes は、2xx 以外の応答で本文を読み捨てるときの上限。
 // 読み切ると接続を再利用できるが、プロバイダが巨大な本文を返しても読み続けないよう上限を設ける。
+// 上限を超える本文は読み切らないので、その応答の接続は再利用されない（失敗時だけなので許容する）。
 const maxDiscardBodyBytes = 64 << 10
 
 // checkProviderStatus は、プロバイダの応答が 2xx でなければ本文を読み捨ててエラーを返す (#2154)。
