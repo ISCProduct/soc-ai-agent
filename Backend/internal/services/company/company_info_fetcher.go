@@ -368,7 +368,8 @@ func (f *CompanyInfoFetcher) recentlyFailedProvision(key string) bool {
 
 // Acquire は企業名から基本情報をプレビュー取得する（DB 非更新）。
 func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteURL string) (*CompanyInfoResult, error) {
-	ctx = f.withCompanyExtractionVersion(ctx)
+	// 企業名だけのプレビューは企業 ID が無いので、A/B の対象にしない（#1976）。
+	ctx = f.withCompanyExtractionVersion(ctx, 0)
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
@@ -382,7 +383,7 @@ func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteUR
 }
 
 func (f *CompanyInfoFetcher) acquireForCompany(ctx context.Context, company *models.Company) (*CompanyInfoResult, error) {
-	ctx = f.withCompanyExtractionVersion(ctx)
+	ctx = f.withCompanyExtractionVersion(ctx, company.ID)
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
@@ -395,8 +396,11 @@ func (f *CompanyInfoFetcher) acquireForCompany(ctx context.Context, company *mod
 	return f.acquireViaAISearch(ctx, company.Name, company.WebsiteURL)
 }
 
-func (f *CompanyInfoFetcher) withCompanyExtractionVersion(ctx context.Context) context.Context {
-	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageCompanyExtraction)
+// withCompanyExtractionVersion は企業情報の抽出の版を決める。利用者を持たない経路なので、
+// A/B は企業を単位に割り当てる（#1976）。context の実行主体（操作した管理者）は使わない。
+// companyID が 0 なら A/B の対象にしない。
+func (f *CompanyInfoFetcher) withCompanyExtractionVersion(ctx context.Context, companyID uint) context.Context {
+	ctx, _ = prompts.WithPromptVersionFor(ctx, prompts.StageCompanyExtraction, prompts.CompanySubject(companyID))
 	return ctx
 }
 
@@ -421,7 +425,13 @@ func (f *CompanyInfoFetcher) acquireFromGBizCompany(ctx context.Context, company
 			company.EmployeeCount = hit.EmployeeNumber
 			company.EmployeeCountBasis = models.EmployeeCountBasisStandalone
 		}
-		_ = f.repo.Update(company)
+		// 名前検索で見つけた法人番号などの保存。失敗しても続ける。SyncCompany は DB から読み直すので、
+		// 保存できていなければ国税庁 API で法人番号を引き直す（引けなければ AI 検索に回る）。
+		// ここでエラーを返すと、引き直せる場合でも AI 検索に回り、費用が増える。
+		// AI で取得した結果の保存（FetchAndSave など）は、もともとエラーを返している（#2002）
+		if err := f.repo.Update(company); err != nil {
+			log.Printf("gbizinfo search hit save failed company_id=%d: %v (continuing; sync will look it up again)", company.ID, err)
+		}
 	}
 
 	if _, err := f.gbiz.SyncCompany(ctx, company.ID); err != nil {
@@ -577,7 +587,7 @@ func (f *CompanyInfoFetcher) acquireViaAISearch(ctx context.Context, companyName
 		return nil, fmt.Errorf("openai client is nil")
 	}
 
-	systemPrompt := `あなたは企業情報の構造化アシスタントです。検索結果に明示された事実のみをJSON化してください。検索結果に無い項目は空文字または0。モデルの事前知識や推測で埋めてはいけません。従業員数は連結と単体を混ぜず、employee_count_basis に定義を必ず入れる。`
+	systemPrompt := prompts.Body(prompts.StageCompanyExtraction, promptVersionFromContext(ctx), prompts.BodyCompanyExtractSearch, companyExtractSearchSystemPrompt)
 	searchPrompt, parseUser := buildCompanyInfoSearchPrompts(companyName, websiteURL)
 	// 検索は企業ごとに1回に寄せる。relations / tech も同じ結果を使うため、
 	// web_search の固定課金(8,000トークン/call)が1社1回で済む(#1124)。
@@ -699,13 +709,13 @@ func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyNam
 		return nil, fmt.Errorf("openai client is nil")
 	}
 
-	systemPrompt := `あなたは企業情報の構造化アシスタントです。与えられた事実テキストに書かれている内容のみをJSON化してください。テキストに無い項目は空文字または0。推測禁止。`
+	systemPrompt := prompts.Body(prompts.StageCompanyExtraction, promptVersionFromContext(ctx), prompts.BodyCompanyExtractFacts, companyExtractFactsSystemPrompt)
 	userPrompt := buildCompanyInfoExtractUser(companyName, websiteURL, factsText)
 	if strings.TrimSpace(factsText) == "" {
 		return f.acquireViaAISearch(ctx, companyName, websiteURL)
 	}
 
-	raw, model, err := f.llm.ExtractJSONWithSchema(ctx, systemPrompt, userPrompt, 600, companyInfoResponseSchema())
+	raw, model, err := f.llm.ExtractJSONWithSchema(ctx, systemPrompt, userPrompt, CompanyInfoExtractMaxTokens, companyInfoResponseSchema())
 	if err != nil {
 		return nil, fmt.Errorf("企業情報の取得失敗: %w", err)
 	}
@@ -719,6 +729,10 @@ func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyNam
 	result.PromptVersion = promptVersionFromContext(ctx)
 	return result, nil
 }
+
+// 企業情報の抽出の今の本文。候補の本文は prompts.RegisterCandidateBodies で登録する（#1976）。
+// 事実テキスト側の本文は company_info_extract_prompt.go にある（aibench が参照する）。
+const companyExtractSearchSystemPrompt = `あなたは企業情報の構造化アシスタントです。検索結果に明示された事実のみをJSON化してください。検索結果に無い項目は空文字または0。モデルの事前知識や推測で埋めてはいけません。従業員数は連結と単体を混ぜず、employee_count_basis に定義を必ず入れる。`
 
 func promptVersionFromContext(ctx context.Context) string {
 	assignment := usagectx.PromptVersionFromContext(ctx)

@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
       'X-Admin-Token': request.headers.get('x-admin-token') || '' },
   })
   const raw = await response.text()
-  let data: any = {}
+  let data: unknown = {}
   if (raw) {
     try {
       data = JSON.parse(raw)
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     body,
   })
   const raw = await response.text()
-  let data: any = {}
+  let data: unknown = {}
   if (raw) {
     try {
       data = JSON.parse(raw)

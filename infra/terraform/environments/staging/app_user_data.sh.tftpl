@@ -78,6 +78,9 @@ PROMPT_VERSION=${prompt_version}
 %{ for stage, version in prompt_versions }
 PROMPT_VERSION_${upper(stage)}=${version}
 %{ endfor }
+%{ for stage, arms in prompt_ab }
+PROMPT_AB_${upper(stage)}=${arms}
+%{ endfor }
 GBIZINFO_BASE_URL=${gbizinfo_base_url}
 OPENAI_MODEL=${openai_model}
 AI_MODEL_PREMIUM=${ai_model_premium}

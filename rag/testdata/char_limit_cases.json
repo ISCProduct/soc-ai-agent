@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {"text": "", "limit": 400, "mode": "within", "chars": 0, "low": 340, "high": 400, "verdict": "too_short"},
+    {"text": "あいうえお", "limit": 5, "mode": "within", "chars": 5, "low": 4, "high": 5, "verdict": "ok"},
+    {"text": "あいう\nえお", "limit": 400, "mode": "within", "chars": 5, "low": 340, "high": 400, "verdict": "too_short"},
+    {"text": "あいう\r\nえお", "limit": 400, "mode": "around", "chars": 5, "low": 360, "high": 440, "verdict": "too_short"},
+    {"text": "  あいうえお  ", "limit": 5, "mode": "within", "chars": 5, "low": 4, "high": 5, "verdict": "ok"},
+    {"text": "\n\nあいうえお\n", "limit": 5, "mode": "around", "chars": 5, "low": 4, "high": 5, "verdict": "ok"},
+    {"text": "あい うえお", "limit": 5, "mode": "within", "chars": 6, "low": 4, "high": 5, "verdict": "too_long"},
+    {"text": "abc123", "limit": 6, "mode": "within", "chars": 6, "low": 5, "high": 6, "verdict": "ok"},
+    {"text": "あ、い。", "limit": 4, "mode": "around", "chars": 4, "low": 3, "high": 4, "verdict": "ok"},
+    {"text": "   ", "limit": 400, "mode": "within", "chars": 0, "low": 340, "high": 400, "verdict": "too_short"},
+    {"text": "あいうえお", "limit": 400, "mode": "within", "chars": 5, "low": 340, "high": 400, "verdict": "too_short"},
+    {"text": "あいうえお", "limit": 400, "mode": "around", "chars": 5, "low": 360, "high": 440, "verdict": "too_short"},
+    {"text": "あいうえお", "limit": 800, "mode": "within", "chars": 5, "low": 680, "high": 800, "verdict": "too_short"},
+    {"text": "あいうえお", "limit": 800, "mode": "around", "chars": 5, "low": 720, "high": 880, "verdict": "too_short"},
+    {"text": "あいうえお", "limit": 400, "mode": "unknown", "chars": 5, "low": 340, "high": 400, "verdict": "too_short"},
+    {"text": "あいうえお", "limit": 0, "mode": "within", "chars": 5, "low": 0, "high": 0, "verdict": "unchecked"},
+    {"text": "\tあいうえお\t", "limit": 5, "mode": "within", "chars": 5, "low": 4, "high": 5, "verdict": "ok"},
+    {"text": "\u00a0あいうえお\u00a0", "limit": 5, "mode": "around", "chars": 5, "low": 4, "high": 5, "verdict": "ok"},
+    {"text": "\u3000あいうえお\u3000", "limit": 5, "mode": "within", "chars": 5, "low": 4, "high": 5, "verdict": "ok"},
+    {"text": "あい\tうえお", "limit": 5, "mode": "within", "chars": 6, "low": 4, "high": 5, "verdict": "too_long"},
+    {"text": "あいうえお", "limit": 1000, "mode": "within", "chars": 5, "low": 850, "high": 1000, "verdict": "too_short"},
+    {"text": "あいうえお", "limit": 1000, "mode": "around", "chars": 5, "low": 900, "high": 1100, "verdict": "too_short"}
+  ]
+}

@@ -114,6 +114,13 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 			return err
 		}
 
+		// 元のメールアドレスの仮登録（本登録が完了する前に作られた行）を消す。
+		// 下でメールをスクランブルすると、パージ時には元のアドレスが分からず消せなくなる（#2140 のレビュー）。
+		// 消せなければ退会全体を巻き戻す（個人情報を残したまま退会済みにしない）。0件は正常。
+		if err := tx.Where("email = ?", email).Delete(&models.PendingRegistration{}).Error; err != nil {
+			return fmt.Errorf("delete pending registrations: %w", err)
+		}
+
 		// メール再利用を許し、ログイン不能にする
 		user.WithdrawnAt = &now
 		user.Email = fmt.Sprintf("withdrawn+%d@deleted.invalid", userID)
@@ -270,9 +277,14 @@ func (s *UserDeletionService) purgeOne(w models.WithdrawnUser) error {
 
 	s3Errs := s.deleteObjectsBestEffort(keys)
 	now := time.Now().UTC()
-	_ = s.db.Model(&models.WithdrawnUser{}).Where("id = ?", w.ID).Updates(map[string]any{
+	// 物理削除はもうコミット済みなので、記録に失敗しても成功として扱う（エラーを返すと「削除失敗」と記録され実態とずれる）。
+	// purged_at が残らないと次回のパージでもう一度対象になるが、消えたデータを消し直すだけなので害は無い。
+	// 失敗はログで分かるようにする（#2001）。
+	if err := s.db.Model(&models.WithdrawnUser{}).Where("id = ?", w.ID).Updates(map[string]any{
 		"purged_at": now,
-	}).Error
+	}).Error; err != nil {
+		log.Printf("[UserDeletion] purged but failed to record purged_at withdrawn_user_id=%d user_id=%d: %v", w.ID, w.UserID, err)
+	}
 
 	if s.audit != nil {
 		meta := map[string]any{
@@ -398,8 +410,12 @@ func hardDeleteUserData(tx *gorm.DB, userID uint) error {
 	if err := tx.Where("anonymous_user_id = ?", collectiveAnonymousHash(userID)).Delete(&models.CollectiveInsightLog{}).Error; err != nil {
 		return err
 	}
-	// 退会時にスクランブル済みメールだが、念のため元パターンでも消す
-	_ = tx.Where("email = ? OR email LIKE ?", user.Email, fmt.Sprintf("withdrawn+%d@%%", userID)).Delete(&models.PendingRegistration{})
+	// 退会時にスクランブル済みメールだが、念のため元パターンでも消す。
+	// 仮登録にはメールアドレスが入っているので、消せなければ全体を巻き戻し、次回のパージで再試行する。
+	// 握りつぶすとコミットされ、物理削除したのに仮登録だけが残る（#2001）。0件は正常（Delete はエラーにならない）。
+	if err := tx.Where("email = ? OR email LIKE ?", user.Email, fmt.Sprintf("withdrawn+%d@%%", userID)).Delete(&models.PendingRegistration{}).Error; err != nil {
+		return fmt.Errorf("delete pending registrations: %w", err)
+	}
 	return tx.Delete(&models.User{}, userID).Error
 }
 
@@ -480,6 +496,11 @@ func hashEmail(email string) string {
 	normalized := strings.ToLower(strings.TrimSpace(email))
 	h := sha256.Sum256([]byte(normalized))
 	return hex.EncodeToString(h[:])
+}
+
+// MaskEmail はログ向けにローカル部を伏せる。登録前でユーザーIDが無いときに使う。
+func MaskEmail(email string) string {
+	return maskEmail(email)
 }
 
 func maskEmail(email string) string {

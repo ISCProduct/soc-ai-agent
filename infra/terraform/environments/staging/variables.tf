@@ -330,6 +330,22 @@ variable "github_dispatch_repo" {
   default     = "ISCProduct/soc-ai-agent"
 }
 
+variable "prompt_ab" {
+  type        = map(string)
+  description = "工程別のプロンプト A/B 割当（例: { score_evaluation = \"v2:50,v3:50\" }）。候補の本文を登録した版だけが有効（#1976）"
+  default     = {}
+
+  # キーの誤字は環境変数名がずれて黙って無視されるので、A/B に対応した3工程に限定する。
+  validation {
+    condition = alltrue([
+      for stage, arms in var.prompt_ab :
+      contains(["score_evaluation", "matching_reason", "company_extraction"], stage)
+      && can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}:[0-9]{1,5}(,[A-Za-z0-9][A-Za-z0-9._-]{0,63}:[0-9]{1,5})+$", replace(arms, " ", "")))
+    ])
+    error_message = "prompt_ab のキーは score_evaluation / matching_reason / company_extraction のいずれかで、値は「版:比率」を2つ以上カンマでつないだ形式にしてください。"
+  }
+}
+
 variable "google_client_id" {
   type        = string
   description = "Google OAuthクライアントID。コールバックURL https://<api_domain>/api/auth/google/callback をGoogle Cloud Console側で許可しておくこと"

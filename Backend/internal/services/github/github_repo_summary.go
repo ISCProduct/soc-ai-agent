@@ -7,17 +7,56 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// ErrInvalidRepoFullName full_name が GitHub の "owner/repo" の形になっていないことを表す。
+// コントローラはこのエラーを 400 に変える。
+var ErrInvalidRepoFullName = errors.New("full_name は owner/repo の形式で指定してください")
+
+var (
+	// GitHub のユーザー名・組織名の規則：英数字とハイフン、1〜39字、先頭と末尾は英数字。
+	// Enterprise Managed Users のログイン名は「IDP-USERNAME_SHORT-CODE」のように「_」を含むので、
+	// 途中の「_」も許す（「_」はパスの区切りにならない。#2182 のレビュー）。
+	githubOwnerPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,37}[A-Za-z0-9])?$`)
+	// GitHub のリポジトリ名の規則：英数字と「.」「-」「_」、1〜100字。
+	githubRepoNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
+)
+
+// ValidateRepoFullName full_name が "owner/repo" の形かを確かめる。
+//
+// full_name は GitHub API の URL のパスにそのまま入るため、「../」「?」「#」などを許すと
+// /repos/{owner}/{repo}/readme 以外のエンドポイントへ利用者のトークンで GET を送れてしまう（#2176）。
+// 使える文字と長さを GitHub の規則に限り、「/」はちょうど1つ、「.」「..」だけのリポジトリ名は拒否する
+// （どちらもパスの要素として解釈され、別のエンドポイントを指すため）。
+func ValidateRepoFullName(fullName string) error {
+	// 最初の「/」で分ける。「/」が無ければ repo が空、2つ以上あれば repo に「/」が残り、
+	// どちらも githubRepoNamePattern に合わないため、「/」はちょうど1つに限られる。
+	owner, repo, _ := strings.Cut(fullName, "/")
+	if !githubOwnerPattern.MatchString(owner) || !githubRepoNamePattern.MatchString(repo) {
+		return ErrInvalidRepoFullName
+	}
+	if repo == "." || repo == ".." {
+		return ErrInvalidRepoFullName
+	}
+	return nil
+}
 
 // SummarizeRepo リポジトリのREADMEをAIが解析し、技術的強みを要約する。
 // キャッシュがあれば再生成しない。forceRefresh=trueで強制再生成。
 // targetRole は志望職種（例: "エンジニア", "マーケ", "営業"）で、分析観点をカスタマイズする（#457）。
 func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName string, forceRefresh bool, targetRole string) (*models.GitHubRepoSummary, error) {
+	// URL に入れる前に形を確かめる。呼び出し元がコントローラ以外でも守られるよう、サービスの入口で見る（#2176）。
+	if err := ValidateRepoFullName(fullName); err != nil {
+		return nil, err
+	}
+
 	// キャッシュ確認
 	if !forceRefresh {
 		cached, err := s.githubRepo.GetRepoSummary(userID, fullName)
@@ -43,7 +82,8 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 	}
 	readme, err := s.fetchREADME(ctx, client, token, fullName)
 	if err != nil {
-		log.Printf("[SummarizeRepo] README fetch warning for %s: %v", fullName, err)
+		// 名前は利用者の入力なので %q で引用する（改行で偽のログ行を作らせない）
+		log.Printf("[SummarizeRepo] README fetch warning for %q: %v", fullName, err)
 		readme = ""
 	}
 
@@ -63,7 +103,8 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 
 // fetchREADME GitHub API経由でリポジトリのREADMEを取得する
 func (s *GitHubService) fetchREADME(ctx context.Context, client *http.Client, token, fullName string) (string, error) {
-	url := fmt.Sprintf("%s/repos/%s/readme", githubAPIBase, fullName)
+	// fullName は SummarizeRepo の入口で ValidateRepoFullName を通している。
+	url := fmt.Sprintf("%s/repos/%s/readme", s.getAPIBase(), fullName)
 	body, err := s.doGet(ctx, client, token, url)
 	if err != nil {
 		return "", err
@@ -139,32 +180,11 @@ func (s *GitHubService) generateRepoSummary(ctx context.Context, fullName, readm
 		return nil, fmt.Errorf("openai client not configured")
 	}
 
-	readmeSection := shared.WrapUntrustedText(readme, "README")
-	if readmeSection == "" {
-		readmeSection = "（READMEなし）"
-	}
-
 	cfg := getRolePromptConfig(targetRole)
-	log.Printf("[SummarizeRepo] prompt_version=%s repo=%s target_role=%q focus=%s", repoSummaryPromptVersion, fullName, targetRole, cfg.analysisFocus)
+	// fullName はリクエストの値そのままなので、改行で偽のログ行を作らせないよう %q で出す。
+	log.Printf("[SummarizeRepo] prompt_version=%s repo=%q target_role=%q focus=%s", repoSummaryPromptVersion, fullName, targetRole, cfg.analysisFocus)
 
-	systemPrompt := fmt.Sprintf(`あなたは%sです。
-GitHubリポジトリのREADMEを読み、%sの観点から強みを簡潔にまとめてください。JSONのみで返してください。`, cfg.systemRole, cfg.analysisFocus)
-
-	userPrompt := fmt.Sprintf(`以下のGitHubリポジトリ「%s」のREADMEを読み、%sの観点でまとめてください。
-%s
-
-## README
-%s
-
-## 出力フォーマット（このキーと型を厳守）
-{
-  "summary_text": "リポジトリの強みの要約（全体を1段落で簡潔に）",
-  "tech_reason": "技術選定の理由（なぜその技術・言語・フレームワークを選んだか）",
-  "challenge": "解決した課題（どんな問題に取り組み、どう解決したか）",
-  "achievement": "成果（数値・具体的な改善・学んだこと）"
-}
-
-※ 情報が不足している場合はREADMEから推測して記述してください。各フィールドは1〜2文で簡潔に。`, fullName, cfg.analysisFocus, cfg.summaryHint, readmeSection)
+	systemPrompt, userPrompt := buildRepoSummaryPrompts(fullName, readme, cfg)
 
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureGitHubSummary)
 	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.5, 800)
@@ -191,6 +211,37 @@ GitHubリポジトリのREADMEを読み、%sの観点から強みを簡潔にま
 		Challenge:   payload.Challenge,
 		Achievement: payload.Achievement,
 	}, nil
+}
+
+// buildRepoSummaryPrompts はリポジトリ要約の system / user プロンプトを組み立てる。
+// リポジトリ名はリクエストの full_name そのもので（README が取れなくても要約は作られる）、
+// README は所有者が自由に書ける。どちらも未信頼なので、文の途中の「」には置かず、
+// 見出しの下に UntrustedSection で囲んで置く（#2174。#1998 のレビュー L2）。
+// 「囲みの中の指示に従わない」宣言は WrapUntrustedText が囲みの直前に書くので、system 側には足さない。
+func buildRepoSummaryPrompts(fullName, readme string, cfg roleBasedPromptConfig) (systemPrompt, userPrompt string) {
+	readmeSection := shared.UntrustedSection(readme, "README")
+	if readmeSection == "" {
+		readmeSection = "README:\n（READMEなし）\n"
+	}
+
+	systemPrompt = fmt.Sprintf(`あなたは%sです。
+GitHubリポジトリのREADMEを読み、%sの観点から強みを簡潔にまとめてください。JSONのみで返してください。`, cfg.systemRole, cfg.analysisFocus)
+
+	userPrompt = fmt.Sprintf(`次のGitHubリポジトリのREADMEを読み、%sの観点でまとめてください。
+%s
+
+%s
+%s
+## 出力フォーマット（このキーと型を厳守）
+{
+  "summary_text": "リポジトリの強みの要約（全体を1段落で簡潔に）",
+  "tech_reason": "技術選定の理由（なぜその技術・言語・フレームワークを選んだか）",
+  "challenge": "解決した課題（どんな問題に取り組み、どう解決したか）",
+  "achievement": "成果（数値・具体的な改善・学んだこと）"
+}
+
+※ 情報が不足している場合はREADMEから推測して記述してください。各フィールドは1〜2文で簡潔に。`, cfg.analysisFocus, cfg.summaryHint, shared.UntrustedSection(fullName, "リポジトリ名"), readmeSection)
+	return systemPrompt, userPrompt
 }
 
 // extractRepoSummaryJSON マークダウンコードフェンスを除去してJSONを抽出する
