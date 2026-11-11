@@ -19,7 +19,6 @@ type InterviewSessionRepository interface {
 	ListFinishedByUser(userID uint, limit int) ([]models.InterviewSession, error)
 	CountByUser(userID uint) (int64, error)
 	CountAll(schoolID *uint, companyID *uint) (int64, error)
-	CountByUserAndDay(userID uint, day time.Time) (int64, error)
 }
 
 // InterviewUtteranceRepository は面接発話ログの永続化インターフェース。

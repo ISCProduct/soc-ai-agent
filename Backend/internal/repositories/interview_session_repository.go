@@ -156,13 +156,3 @@ func (r *InterviewSessionRepository) ListFinishedSessionIDsByUser(userID uint) (
 	}
 	return ids, nil
 }
-
-func (r *InterviewSessionRepository) CountByUserAndDay(userID uint, day time.Time) (int64, error) {
-	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
-	end := start.Add(24 * time.Hour)
-	var count int64
-	err := r.db.Model(&models.InterviewSession{}).
-		Where("user_id = ? AND created_at >= ? AND created_at < ?", userID, start, end).
-		Count(&count).Error
-	return count, err
-}

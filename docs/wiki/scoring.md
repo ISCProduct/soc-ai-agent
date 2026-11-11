@@ -423,6 +423,42 @@ func scoredMatch(userScores map[string]float64, category string, companyWeight f
 飛ばさないと、案内の直後の回答が案内文を質問として採点する。案内文は軸を持たないため
 本文からの推測になり、既定の技術志向へ落ちて無関係な軸に点が入る。
 
+### 軸ごとの出題回数（SOCAIAGENT-473）
+
+フェーズは有効回答の回数で完了する。次の質問が「未評価リストの先頭」のままだと、その軸のスコアが 0 のあいだ同じ軸を繰り返し、フェーズの後ろに並んだ軸は診断完了後も一度も聞かれない。
+
+2026-11-10 にローカルの MySQL（`mysql_data`。本番ではない）を読んだ結果は次のとおり。診断品質レポートは 0 件。4フェーズ完了は 2 セッション、スコア行があるのは 4 セッション。`chat_messages.weight_category` はすべて空で、出題回数はスコア行の有無で見た。
+
+```sql
+SELECT weight_category, COUNT(DISTINCT session_id) AS sessions
+FROM user_weight_scores
+GROUP BY weight_category;
+
+SELECT COUNT(*) AS fully_completed_sessions FROM (
+  SELECT session_id FROM user_analysis_progress
+  WHERE is_completed = 1
+  GROUP BY session_id
+  HAVING COUNT(*) = 4
+) t;
+```
+
+| 軸 | スコアのあるセッション数（4件中） |
+|---|---|
+| 技術志向 | 4 |
+| コミュニケーション力 | 3 |
+| チームワーク志向 | 3 |
+| 創造性志向 | 2 |
+| 安定志向 | 2 |
+| 成長志向 | 2 |
+| チャレンジ志向 | 1 |
+| リーダーシップ志向 | 1 |
+| 細部志向 | 1 |
+| ワークライフバランス | 0 |
+
+件数は少ないが、仮説（出題が前の軸に偏る）と向きは一致する。完了 2 セッションは 5 軸と 6 軸しかスコアを持たず、ワークライフバランスはどちらの完了セッションにも無かった。信頼度の分布はレポートが 0 件のため測れていない。
+
+見直しは質問文とマッチング式を変えず、フェーズ内の次の軸を「これまで出題した回数が少ない順」にすることにした。同数なら未評価、その次にフェーズ内の並び順。各フェーズの最低質問数（4, 4, 4, 3）をこの順で消化すると、スコアが一度も付かなくても正典 10 軸は 1 回以上出題される。
+
 ### 診断妥当性と暫定表示
 
 診断完了後の品質ジョブはスコアを**自動補正せず**、`diagnosis_quality_reports` に confidence / flags を保存する。

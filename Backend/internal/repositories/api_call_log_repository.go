@@ -40,6 +40,15 @@ type ModelCostRow struct {
 	TotalCostUSD float64
 	TotalTokens  int64
 	CallCount    int64
+	// RecordedPriceBasis は、期間内の行に記録した単価の根拠のうち、一番注意が必要なもの
+	// （unknown > inherited > estimated > listed, #2004）。記録が1件も無ければ空文字。
+	RecordedPriceBasis string
+	// UnrecordedCalls は、トークン単価で計算したはずなのに根拠の記録が無い行（price_basis の列を足す前の行）の数。
+	// 音声・ローカル推論・トークン0（Web 検索のツール料だけ）の行は、トークン単価を使っていないので数えない
+	// （#2166 の Codex のレビュー）。数えると、トークン単価を使っていないモデルに今の単価表の根拠が付き、
+	// 同じモデルの記録済みの根拠も、将来の単価表の変更で上書きされる。
+	// provider の比較は、列の照合順序（utf8mb4 の _ci）で大文字・小文字を区別しない。
+	UnrecordedCalls int64
 }
 
 // DailyCosts は過去 nDays 日間の日次集計を返す
@@ -144,7 +153,23 @@ func (r *APICallLogRepository) ModelBreakdown(since time.Time) ([]ModelCostRow, 
 		SELECT model,
 		       SUM(cost_usd) AS total_cost_usd,
 		       SUM(total_tokens) AS total_tokens,
-		       COUNT(*) AS call_count
+		       COUNT(*) AS call_count,
+		       CASE MAX(CASE price_basis
+		                    WHEN 'unknown' THEN 3
+		                    WHEN 'inherited' THEN 2
+		                    WHEN 'estimated' THEN 1
+		                    WHEN 'listed' THEN 0
+		                    ELSE -1 END)
+		            WHEN 3 THEN 'unknown'
+		            WHEN 2 THEN 'inherited'
+		            WHEN 1 THEN 'estimated'
+		            WHEN 0 THEN 'listed'
+		            ELSE '' END AS recorded_price_basis,
+		       SUM(CASE WHEN price_basis = ''
+		                 AND prompt_tokens + completion_tokens > 0
+		                 AND audio_seconds = 0 AND characters = 0
+		                 AND provider IN ('', 'openai')
+		                THEN 1 ELSE 0 END) AS unrecorded_calls
 		FROM api_call_logs
 		WHERE called_at >= ?
 		GROUP BY model

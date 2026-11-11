@@ -30,7 +30,6 @@ type UserAnalysisProgressRepository interface {
 	FindByUserAndSession(userID uint, sessionID string) ([]entity.UserAnalysisProgress, error)
 	FindOrCreate(userID uint, sessionID string, phaseID uint) (*entity.UserAnalysisProgress, error)
 	Update(progress *entity.UserAnalysisProgress) error
-	GetCurrentPhase(userID uint, sessionID string) (*entity.UserAnalysisProgress, error)
 }
 
 // UserCompanyMatchRepository はユーザーと企業のマッチング結果の永続化インターフェース。
@@ -43,6 +42,5 @@ type UserCompanyMatchRepository interface {
 	MarkAsViewed(matchID uint) error
 	ToggleFavorite(matchID uint) error
 	MarkAsApplied(matchID uint) error
-	FindFavoritesByUser(userID uint, sessionID string) ([]*entity.UserCompanyMatch, error)
 	GetMatchStatistics(userID uint, sessionID string) (map[string]any, error)
 }
