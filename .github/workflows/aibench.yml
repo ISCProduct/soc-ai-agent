@@ -41,12 +41,6 @@ on:
 permissions:
   contents: read
 
-# PR は同じ PR の古い実行を止める（push が続いたときに二重に課金しない）。
-# 手動実行は実行ごとに別のグループにし、同じブランチで2回実行しても先の実行を止めない。
-concurrency:
-  group: aibench-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: true
-
 jobs:
   aibench:
     name: AI Bench
@@ -59,6 +53,13 @@ jobs:
       (github.event_name == 'workflow_dispatch' ||
         (github.event.action == 'labeled' && github.event.label.name == 'aibench') ||
         (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'aibench')))
+    # PR は同じ PR の古い実行を止める（push が続いたときに二重に課金しない）。
+    # 手動実行は実行ごとに別のグループにし、同じブランチで2回実行しても先の実行を止めない。
+    # ワークフローではなくジョブに置く。ワークフローに置くと、上の if で skipped になる実行
+    # （無関係なラベルの付与など）も同じグループに入り、走っている測定を止めてしまう。
+    concurrency:
+      group: aibench-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
