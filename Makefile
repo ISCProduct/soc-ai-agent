@@ -1,5 +1,10 @@
 # SOC AI Agent — ローカル開発用ショートカット (#589)
-.PHONY: help rag-up rag-down rag-smoke rag-rebuild core-up api-docs api-docs-down api-catalog prod-status prod-logs prod-logs-follow prod-logs-errors
+.PHONY: help rag-up rag-down rag-smoke rag-rebuild core-up api-docs api-docs-down api-catalog prod-status prod-logs prod-logs-follow prod-logs-errors test-e2e-up test-e2e-seed test-e2e test-e2e-down
+
+# ローカル統合テスト環境（個人の dev スタックと分離・同時起動可。compose.test.yml）
+TEST_COMPOSE := docker compose -p soc-ai-agent-test -f compose.yml -f compose.test.yml
+TEST_BACKEND_PORT ?= 18080
+TEST_FRONTEND_PORT ?= 13000
 
 help:
 	@echo "Targets:"
@@ -19,6 +24,31 @@ help:
 	@echo "  make prod-logs          # 直近ログ (SVC=backend|frontend|rag|chroma|all, SINCE=1h)"
 	@echo "  make prod-logs-follow   # ライブ追尾"
 	@echo "  make prod-logs-errors   # エラー行のみ抽出"
+	@echo ""
+	@echo "ローカル統合テスト環境 (個人のdevスタックと同時起動可。docs/wiki/getting-started.md):"
+	@echo "  make test-e2e-up    # db/redis/app/frontend を分離した専用スタックで起動"
+	@echo "  make test-e2e-seed  # 固定の学生ユーザーを冪等にシード"
+	@echo "  make test-e2e       # up -> seed -> smoke E2E を一括実行"
+	@echo "  make test-e2e-down  # 専用スタックを停止（ボリュームは残す）"
+
+test-e2e-up:
+	@test -f Backend/.env.test || (echo "Backend/.env.test が無い。'cp Backend/.env.test.example Backend/.env.test' を実行してください" && exit 1)
+	$(TEST_COMPOSE) up -d --build db redis app frontend
+	@printf "Backend起動待ち"; \
+	for i in $$(seq 1 60); do \
+		curl -sf http://127.0.0.1:$(TEST_BACKEND_PORT)/healthz >/dev/null 2>&1 && echo " OK" && exit 0; \
+		printf "."; sleep 2; \
+	done; \
+	echo " タイムアウト。'docker compose -p soc-ai-agent-test logs app' を確認してください" && exit 1
+
+test-e2e-seed:
+	cd Backend && go run ./cmd/seed-e2e
+
+test-e2e: test-e2e-up test-e2e-seed
+	cd frontend && E2E_LOCAL_INTEGRATION=true PLAYWRIGHT_BASE_URL=http://localhost:$(TEST_FRONTEND_PORT) PLAYWRIGHT_API_BASE_URL=http://localhost:$(TEST_BACKEND_PORT) npx playwright test --config=playwright.smoke.config.ts
+
+test-e2e-down:
+	$(TEST_COMPOSE) down
 
 core-up:
 	docker compose up -d --build db app frontend
