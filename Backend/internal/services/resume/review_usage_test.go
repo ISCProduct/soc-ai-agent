@@ -2,9 +2,13 @@ package resume
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"Backend/internal/openai"
 	"Backend/internal/usagectx"
@@ -43,9 +47,10 @@ func TestRequestReviewJSON_実行主体と機能名が届く(t *testing.T) {
 
 // クライアントが切断したら AI 呼び出しも止まる（#1779 の残り）。
 func TestRequestReviewJSON_切断したら呼ばない(t *testing.T) {
-	called := false
+	// ハンドラは別の goroutine で動くので、atomic で読み書きする
+	var called atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
+		called.Store(true)
 		_, _ = w.Write([]byte(`{"output_text":"{}"}`))
 	}))
 	defer server.Close()
@@ -56,7 +61,58 @@ func TestRequestReviewJSON_切断したら呼ばない(t *testing.T) {
 	if _, err := s.requestReviewJSON(ctx, "system", "user", ""); err == nil {
 		t.Fatal("切断済みの ctx でもエラーにならない")
 	}
-	if called {
+	if called.Load() {
 		t.Fatal("切断済みなのに AI を呼んだ")
+	}
+}
+
+// 通信が始まったあとにクライアントが切断しても、進行中の AI 呼び出しが同じ ctx で止まる（#1779 の残り）。
+// 上のテストは「最初から切断済みなら呼ばない」だけを見ているので、こちらで途中の切断を確かめる。
+func TestRequestReviewJSON_通信中に切断したら止まる(t *testing.T) {
+	received := make(chan struct{})
+	serverSawCancel := make(chan struct{})
+	var receivedOnce, cancelOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 本文を読み切らないと、サーバーは接続の切断を検知せず r.Context() が終わらない
+		_, _ = io.Copy(io.Discard, r.Body)
+		receivedOnce.Do(func() { close(received) })
+		// 応答を返さずに待ち、クライアント側の切断がリクエストの ctx に届くのを確かめる。
+		// 届かなかったときにテスト全体が止まらないよう、上限を置く
+		select {
+		case <-r.Context().Done():
+			cancelOnce.Do(func() { close(serverSawCancel) })
+		case <-time.After(10 * time.Second):
+		}
+	}))
+	defer server.Close()
+	s := &ResumeService{aiClient: openai.NewWithBaseURL(server.URL, "gpt-4o-mini")}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		_, err := s.requestReviewJSON(ctx, "system", "user", "")
+		errc <- err
+	}()
+
+	select {
+	case <-received:
+	case <-time.After(5 * time.Second):
+		t.Fatal("AI の呼び出しが始まらない")
+	}
+	cancel()
+
+	select {
+	case err := <-errc:
+		if err == nil {
+			t.Fatal("通信中に切断してもエラーにならない")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("通信中に切断しても AI の呼び出しが止まらない")
+	}
+	select {
+	case <-serverSawCancel:
+	case <-time.After(5 * time.Second):
+		t.Fatal("切断がリクエストに届いていない")
 	}
 }

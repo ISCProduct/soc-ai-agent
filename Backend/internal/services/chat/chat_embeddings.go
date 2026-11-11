@@ -70,7 +70,8 @@ func (s *ChatService) ensureUserEmbedding(ctx context.Context, userID uint, sess
 		return nil
 	}
 
-	ctxReq, cancel := context.WithTimeout(usagectx.WithFeature(ctx, usagectx.FeatureEmbedding), 45*time.Second)
+	embedCtx := usagectx.WithFeature(ctx, usagectx.FeatureEmbedding)
+	ctxReq, cancel := context.WithTimeout(embedCtx, 45*time.Second)
 	defer cancel()
 
 	vector, err := s.aiClient.Embedding(ctxReq, text)
@@ -112,7 +113,8 @@ func (s *ChatService) ensureJobCategoryEmbedding(ctx context.Context, jobCategor
 		return nil
 	}
 
-	ctxReq, cancel := context.WithTimeout(usagectx.WithFeature(ctx, usagectx.FeatureEmbedding), 45*time.Second)
+	embedCtx := usagectx.WithFeature(ctx, usagectx.FeatureEmbedding)
+	ctxReq, cancel := context.WithTimeout(embedCtx, 45*time.Second)
 	defer cancel()
 
 	vector, err := s.aiClient.Embedding(ctxReq, text)

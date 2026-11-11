@@ -43,23 +43,30 @@ func newUsageRecordingClient(t *testing.T) (*openai.Client, func() []openai.Usag
 	}
 }
 
-func TestAICallWithRetries_既定は質問生成で呼び出し元の機能名は残す(t *testing.T) {
+func TestQuestionAICall_質問生成で呼び出し元の機能名は残す(t *testing.T) {
 	client, usages := newUsageRecordingClient(t)
 	s := &ChatService{aiClient: client}
 
 	ctx := usagectx.WithActor(context.Background(), 7, 3)
-	if _, err := s.aiCallWithRetries(ctx, "質問を作ってください"); err != nil {
-		t.Fatalf("aiCallWithRetries: %v", err)
+	if _, err := s.questionAICall(ctx, "質問を作ってください"); err != nil {
+		t.Fatalf("questionAICall: %v", err)
 	}
-	if _, err := s.aiCallWithRetries(usagectx.WithFeature(ctx, usagectx.FeatureChatAnswerEval), "採点してください"); err != nil {
+	if _, err := s.questionAICall(usagectx.WithFeature(ctx, usagectx.FeatureChatAnswerEval), "採点してください"); err != nil {
+		t.Fatalf("questionAICall: %v", err)
+	}
+	// 共通の呼び出しは既定の機能名を付けない。付け忘れた用途は chat_question に紛れずに unknown 側へ出る
+	if _, err := s.aiCallWithRetries(ctx, "機能名を付け忘れた呼び出し"); err != nil {
 		t.Fatalf("aiCallWithRetries: %v", err)
 	}
 	got := usages()
-	if len(got) != 2 {
-		t.Fatalf("利用量の記録 = %d件, want 2", len(got))
+	if len(got) != 3 {
+		t.Fatalf("利用量の記録 = %d件, want 3", len(got))
 	}
 	if got[0].Feature != usagectx.FeatureChatQuestion || got[1].Feature != usagectx.FeatureChatAnswerEval {
 		t.Fatalf("feature = %q, %q", got[0].Feature, got[1].Feature)
+	}
+	if got[2].Feature == usagectx.FeatureChatQuestion {
+		t.Fatalf("機能名の無い呼び出しが chat_question に計上された")
 	}
 	if got[0].UserID == nil || *got[0].UserID != 7 {
 		t.Fatalf("実行主体が届いていない: %+v", got[0].UserID)
