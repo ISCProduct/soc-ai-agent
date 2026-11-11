@@ -5,6 +5,7 @@ import (
 	"Backend/domain/mapper"
 	"Backend/domain/repository"
 	"Backend/domain/valueobject"
+	"Backend/internal/aimodel"
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -418,6 +419,7 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 		prompts.Body(prompts.StageMatchingReason, promptVersion, prompts.BodyMatchingReasonSystem, prompts.MatchingReasonSystemPrompt),
 		userPrompt,
 		MatchingReasonTemperature,
+		aimodel.For(aimodel.StageMatchingReason),
 	)
 	if err != nil {
 		log.Printf("[GenerateMatchReason] AI failed, fallback to template: %v", err)

@@ -277,6 +277,28 @@ variable "sentry_dsn" {
   sensitive   = true
 }
 
+variable "ai_model_premium" {
+  type        = string
+  description = "学生に見える判断（採点・面接応答・面接レポート・マッチング理由・ES添削・履歴書レビュー）の上位の層のモデル。空なら工程ごとの既定のまま（#1526）"
+  default     = ""
+
+  validation {
+    condition     = var.ai_model_premium == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$", var.ai_model_premium))
+    error_message = "ai_model_premium はモデル名（英数字・.・_・:・-）か空文字にしてください。"
+  }
+}
+
+variable "ai_model_light" {
+  type        = string
+  description = "内部の定型処理（企業情報の抽出・parse・要約）の軽量の層のモデル。空なら工程ごとの既定のまま（#1526）"
+  default     = ""
+
+  validation {
+    condition     = var.ai_model_light == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$", var.ai_model_light))
+    error_message = "ai_model_light はモデル名（英数字・.・_・:・-）か空文字にしてください。"
+  }
+}
+
 # OpenAI 障害時の音声面接の縮退（#1833）。空なら縮退しない（今まで通り OpenAI だけ）。
 # ローカルの推論先は #1832 で用意する。詳細は docs/wiki/ai-failover.md
 variable "ai_failover_local_stt_url" {

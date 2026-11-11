@@ -1,6 +1,7 @@
 """履歴書レビューエンドポイント。"""
 from __future__ import annotations
 
+from services.model_tiers import resume_review_model
 import json
 import logging
 import os
@@ -45,7 +46,7 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
                 json.dumps({"type": "error", "message": "OPENAI_API_KEY not set"}, ensure_ascii=False))
             return
 
-        model = os.getenv("OPENAI_REVIEW_MODEL", "gpt-4o-mini")
+        model = resume_review_model()
         # 企業情報は Backend brief / キャッシュ / Deep Research / Web Search 由来で、
         # 外部サイトの文章がそのまま入りうる。履歴書本文と同じく非信頼データとして
         # 囲む（#1591）。囲むのはここ＝プロンプト組み立て時で、キャッシュへは
