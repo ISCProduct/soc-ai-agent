@@ -17,26 +17,43 @@ import (
 	"time"
 )
 
-// モデル別単価テーブル (USD per 1M tokens)
+// モデル別単価テーブル (USD per 1M tokens)。
+//
+// 値は OpenAI の公式の価格ページ（https://developers.openai.com/api/docs/pricing）と
+// 各モデルのページ（/api/docs/models/<model>）の標準料金（Batch・Flex ではない）で、2026-11-11 に確認した（#2004）。
+// 提供終了（Shut down）のモデルも、過去の記録や設定の残りを正しく計算できるよう、モデルのページの単価で残している。
+// 価格改定のときは、ここを直すか AI_MODEL_PRICING_JSON で上書きする。
 var modelPricing = map[string][2]float64{
 	// input, output per 1M tokens
+	"gpt-5":                  {1.25, 10.00},
+	"gpt-5.2":                {1.75, 14.00},
+	"gpt-4.1":                {2.00, 8.00},
+	"gpt-4.1-mini":           {0.40, 1.60},
 	"gpt-4o":                 {2.50, 10.00},
 	"gpt-4o-mini":            {0.15, 0.60},
-	"gpt-4-turbo":            {10.00, 30.00},
-	"gpt-4":                  {30.00, 60.00},
-	"gpt-3.5-turbo":          {0.50, 1.50},
-	"o1":                     {15.00, 60.00},
-	"o1-mini":                {3.00, 12.00},
-	"o3":                     {10.00, 40.00},
+	"gpt-4-turbo":            {10.00, 30.00}, // 提供終了
+	"gpt-4":                  {30.00, 60.00}, // 提供終了
+	"gpt-3.5-turbo":          {0.50, 1.50},   // 提供終了
+	"o1":                     {15.00, 60.00}, // 提供終了
+	"o1-mini":                {1.10, 4.40},   // 提供終了
+	"o3":                     {2.00, 8.00},
+	"o3-mini":                {1.10, 4.40}, // 提供終了
 	"text-embedding-3-small": {0.02, 0.02},
 	"text-embedding-3-large": {0.13, 0.13},
+	// 音声系のトークン単価。STT は通常、分単位（STT_COST_PER_MINUTE_USD）で計算するので、
+	// ここはトークンで記録された場合のためのもの。
+	"gpt-4o-transcribe":      {2.50, 10.00},
+	"gpt-4o-mini-transcribe": {1.25, 5.00},
+	// Realtime はテキストのトークン単価（音声は $40 / $80 で別）。音声面接の費用は
+	// realtime_usage_service が音声の単価で別に計算している。提供終了。
+	"gpt-4o-realtime-preview": {5.00, 20.00},
 	// Web検索系。検索結果が固定トークンとして課金されるため入力トークンが
 	// 桁違いに大きい（実測で1コール平均3万トークン）。
 	// gpt-4o-mini-search-preview は最長一致が無いと gpt-4o 単価に当たり得るので
-	// 明示が必要。残り2つは既定と同値だが、単価の根拠を残すために書いておく。
+	// 明示が必要。search-preview の2つは提供終了。gpt-5-search-api は gpt-5 と同じ単価。
 	"gpt-4o-search-preview":      {2.50, 10.00},
 	"gpt-4o-mini-search-preview": {0.15, 0.60},
-	"gpt-5-search-api":           {2.50, 10.00},
+	"gpt-5-search-api":           {1.25, 10.00},
 }
 
 // 単価の根拠（#2004）。見た目では推定値か実価格かが区別できなかったので、表を分けて持つ。
@@ -47,7 +64,8 @@ const (
 	// PriceBasisEstimated は estimatedPricing の単価（実価格を確認していない推定値）。
 	PriceBasisEstimated = "estimated"
 	// PriceBasisInherited は、単価表に無いモデルが前方一致で別モデルの単価に当たったもの
-	// （例: o3-mini → o3、gpt-4o-realtime-preview → gpt-4o）。モデル自身の単価ではない（#2151 のレビュー）。
+	// （例: o3-pro → o3、gpt-4o-mini-tts → gpt-4o-mini）。モデル自身の単価ではない（#2151 のレビュー）。
+	// 上位版（o3-pro など）は、当たった先のモデルより高いことがあり、少なく見積もりうる。バッジと警告で気づけるようにしている。
 	PriceBasisInherited = "inherited"
 	// PriceBasisUnknown は単価表に無いモデル。少なく見積もらないよう gpt-4o の単価で計算している。
 	PriceBasisUnknown = "unknown"
@@ -57,7 +75,11 @@ const (
 // 実価格を確認したら modelPricing へ移す。運用で先に直すなら AI_MODEL_PRICING_JSON で上書きする
 // （上書きしたモデルは運用側が確認した単価として listed 扱いになり、ここから外れる）。
 var estimatedPricing = map[string][2]float64{
-	"gpt-5.2": {2.50, 10.00}, // gpt-4o クラスとして推定
+	// gpt-4-turbo のプレビュー版（3つとも）。公式の価格ページ・モデルのページに記載が無いので、gpt-4-turbo の単価で推定する。
+	// isSameModel の「- と4桁の数字」の規則では gpt-4 の版（$30 / $60）に当たってしまうため、明示して区別する。
+	"gpt-4-1106-preview":        {10.00, 30.00},
+	"gpt-4-0125-preview":        {10.00, 30.00},
+	"gpt-4-1106-vision-preview": {10.00, 30.00},
 }
 
 // unknownFallbackModel は単価表に無いモデルに使う単価のモデル（過小評価しない）。
@@ -86,7 +108,7 @@ type pricingMatch struct {
 // $26.32 として記録されており、正しい mini 単価なら $1.79 だった。
 // コスト削減の判断材料が15倍近く狂っていたことになる。
 //
-// 単価の選び方は前方一致のまま変えないが、一致したのが別モデル（o3-mini → o3 など）なら、
+// 単価の選び方は前方一致のまま変えないが、一致したのが別モデル（o3-pro → o3 など）なら、
 // 根拠を inherited にして、公開価格と区別する。
 func lookupPricing(model string) pricingMatch {
 	lower := strings.ToLower(strings.TrimSpace(model))
@@ -108,7 +130,7 @@ func lookupPricing(model string) pricingMatch {
 		}
 	}
 	// 公開価格・推定値のどちらでも、一致したのが別モデルなら inherited にする（推定値の表の
-	// gpt-5.2 に gpt-5.2-mini が当たる場合も、モデル自身の単価ではない。#2151 のレビュー）
+	// gpt-4-1106-preview に gpt-4-1106-preview-vision が当たる場合も、モデル自身の単価ではない。#2151 のレビュー）
 	if m.basis != PriceBasisUnknown && !isSameModel(lower, m.key) {
 		m.basis = PriceBasisInherited
 	}
@@ -272,15 +294,22 @@ func applyModelPricingOverride(raw string) {
 // かつローカルのモデル名（gpt-oss-20b 等）は単価表に無いため
 // 未知モデルの既定（gpt-4o 単価）が架空のコストとして記録されてしまう（#1293）。
 func calculateCost(provider, model string, promptTokens, completionTokens int) float64 {
+	cost, _ := tokenCost(provider, model, promptTokens, completionTokens)
+	return cost
+}
+
+// tokenCost は、トークン単価での料金と、使った単価の根拠を同じ計算で返す（#2004）。
+// 単価表を使わなかったとき（ローカル推論）は、根拠は空。
+func tokenCost(provider, model string, promptTokens, completionTokens int) (float64, string) {
 	if provider != "" && !strings.EqualFold(provider, "openai") {
-		return 0
+		return 0, ""
 	}
 	m := lookupPricing(model)
 	warnPricingOnce(model, m)
 
 	inputCost := float64(promptTokens) * m.prices[0] / 1_000_000
 	outputCost := float64(completionTokens) * m.prices[1] / 1_000_000
-	return inputCost + outputCost
+	return inputCost + outputCost, m.basis
 }
 
 // EstimateCostUSD は単価表を使ってトークン数から料金を見積もる。
@@ -321,20 +350,31 @@ func NewAPICostService(repo *repositories.APICallLogRepository) *APICostService 
 // トークン・音声・ツール料の3つを1か所にまとめる。以前はトークンだけを見ており、
 // web_search のツール料が丸ごと抜けていた。
 func usageCostUSD(u openaiPkg.Usage) float64 {
+	cost, _ := usageCostAndBasis(u)
+	return cost
+}
+
+// usageCostAndBasis は、1コールぶんの課金額と、トークン単価の根拠を同じ計算で返す（#2004）。
+// 根拠は記録する時点の単価表で決まり、api_call_logs.price_basis に残す。トークン単価表を使ったときだけ付け、
+// 音声の単価で計算した行・ローカル推論の行・トークンが0の行（web_search のツール料だけの行）は空にする。
+// 料金の計算と根拠の判定を別々に書くと、片方だけ変わったときに根拠が料金の計算方法と食い違うので、まとめている。
+func usageCostAndBasis(u openaiPkg.Usage) (float64, string) {
 	// 音声経路（STT/TTS）はトークンが返らない。秒数・文字数から計算する。
 	// 音声ではトークン単価表を引かない（引くと「単価表に無い」という実際と違う警告が出る。#2151 のレビュー）
 	var cost float64
-	if u.AudioSeconds > 0 || u.Characters > 0 {
+	basis := ""
+	switch {
+	case u.AudioSeconds > 0 || u.Characters > 0:
 		cost = calculateAudioCost(u.Provider, u.AudioSeconds, u.Characters)
-	} else {
-		cost = calculateCost(u.Provider, u.Model, u.PromptTokens, u.CompletionTokens)
+	case u.PromptTokens+u.CompletionTokens > 0:
+		cost, basis = tokenCost(u.Provider, u.Model, u.PromptTokens, u.CompletionTokens)
 	}
 	// web_search はトークンとは別に1コール単位で課金される。
 	// ローカル推論(provider != openai)には存在しないので加算しない。
 	if u.WebSearchCalls > 0 && (u.Provider == "" || strings.EqualFold(u.Provider, "openai")) {
 		cost += float64(u.WebSearchCalls) * webSearchCostPerCallUSD()
 	}
-	return cost
+	return cost, basis
 }
 
 // LogUsage は非同期でAPIコールログをDBに記録する。
@@ -355,12 +395,13 @@ func (s *APICostService) LogUsage(u openaiPkg.Usage) {
 
 // apiCallLogFromUsage は使用量を api_call_logs の1行へ変換する。
 func apiCallLogFromUsage(u openaiPkg.Usage, calledAt time.Time) *models.APICallLog {
+	cost, basis := usageCostAndBasis(u)
 	return &models.APICallLog{
 		Model:            u.Model,
 		PromptTokens:     u.PromptTokens,
 		CompletionTokens: u.CompletionTokens,
 		TotalTokens:      u.PromptTokens + u.CompletionTokens,
-		CostUSD:          usageCostUSD(u),
+		CostUSD:          cost,
 		Provider:         u.Provider,
 		ViaFallback:      u.ViaFallback,
 		CalledAt:         calledAt,
@@ -374,6 +415,7 @@ func apiCallLogFromUsage(u openaiPkg.Usage, calledAt time.Time) *models.APICallL
 		AudioSeconds:   u.AudioSeconds,
 		Characters:     u.Characters,
 		WebSearchCalls: u.WebSearchCalls,
+		PriceBasis:     basis,
 		LatencyMs:      u.LatencyMs,
 		CacheHit:       u.CacheHit,
 	}
@@ -557,7 +599,7 @@ func (s *APICostService) GetModelBreakdown(since time.Time) ([]ModelCostSummary,
 			TotalTokens:  r.TotalTokens,
 			CallCount:    r.CallCount,
 		}
-		result[i].PriceBasis = summaryPriceBasis(r.Model, r.TotalCostUSD)
+		result[i].PriceBasis = summaryPriceBasis(r.Model, r.TotalCostUSD, r.RecordedPriceBasis, r.UnrecordedCalls > 0)
 	}
 	return result, nil
 }
@@ -566,14 +608,37 @@ func (s *APICostService) GetModelBreakdown(since time.Time) ([]ModelCostSummary,
 // 単価を使っていない行）は空にする。単価表に無いローカルのモデル名が「単価未登録」と出ないようにするため。
 // 音声の単価（分・文字数）で課金するモデルも、トークン単価表を使っていないので空にする（#2151 のレビュー）。
 //
-// 根拠は記録した時点ではなく、集計した時点の単価表で決まる。AI_MODEL_PRICING_JSON を変えて再起動すると、
-// 過去の期間の行も新しい根拠で表示される。記録時の根拠を残すには api_call_logs に列が要るので、
-// 単価表を確定させる後続の対応（Issue #2004 の残り）で扱う。
-func summaryPriceBasis(model string, totalCostUSD float64) string {
+// 根拠は、記録した時点の値（api_call_logs.price_basis）を使う（#2004）。recorded は、期間内の行のうち
+// 一番注意が必要な根拠（unknown > inherited > estimated > listed）。記録の無い行（price_basis の列を足す前の
+// 行など）もあるときは、それらは今の単価表で判定し、注意が必要なほうを出す。デプロイ直後の、古い行と新しい行が
+// 混ざる期間に、新しい行だけで「公開価格」と表示して古い行の状態を隠さないため。
+func summaryPriceBasis(model string, totalCostUSD float64, recorded string, hasUnrecorded bool) string {
 	if totalCostUSD <= 0 || isAudioPricedModel(model) {
 		return ""
 	}
-	return PriceBasis(model)
+	if recorded == "" {
+		return PriceBasis(model)
+	}
+	if hasUnrecorded {
+		return worsePriceBasis(recorded, PriceBasis(model))
+	}
+	return recorded
+}
+
+// priceBasisAttention は、注意が必要な順（大きいほど注意が必要）。
+var priceBasisAttention = map[string]int{
+	PriceBasisListed:    0,
+	PriceBasisEstimated: 1,
+	PriceBasisInherited: 2,
+	PriceBasisUnknown:   3,
+}
+
+// worsePriceBasis は、2つの根拠のうち注意が必要なほうを返す。
+func worsePriceBasis(a, b string) string {
+	if priceBasisAttention[b] > priceBasisAttention[a] {
+		return b
+	}
+	return a
 }
 
 // UsageBreakdownSummary は軸ごとの利用量集計（#1294）。

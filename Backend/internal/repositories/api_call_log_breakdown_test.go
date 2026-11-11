@@ -109,3 +109,41 @@ func TestUsageBreakdown_RejectsUnknownDimension(t *testing.T) {
 		})
 	}
 }
+
+// TestModelBreakdown_ReturnsRecordedPriceBasis は、モデル別内訳が、記録した単価の根拠のうち
+// 一番注意が必要なものを返すことを検証する（#2004）。
+func TestModelBreakdown_ReturnsRecordedPriceBasis(t *testing.T) {
+	since := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	repo, mock, captured := newMockRepo(t)
+	mock.ExpectQuery("FROM api_call_logs").
+		WithArgs(since).
+		WillReturnRows(sqlmock.NewRows([]string{"model", "total_cost_usd", "total_tokens", "call_count", "recorded_price_basis", "unrecorded_calls"}).
+			AddRow("gpt-4-1106-preview", 2.5, 1000, 3, "estimated", 0).
+			AddRow("gpt-4o-mini", 0.5, 2000, 5, "", 5).
+			AddRow("o3-pro", 0.25, 100, 1, "inherited", 2))
+
+	rows, err := repo.ModelBreakdown(since)
+	if err != nil {
+		t.Fatalf("予期しないエラー: %v", err)
+	}
+	if len(rows) != 3 || rows[0].RecordedPriceBasis != "estimated" || rows[1].RecordedPriceBasis != "" || rows[2].RecordedPriceBasis != "inherited" ||
+		rows[0].UnrecordedCalls != 0 || rows[1].UnrecordedCalls != 5 || rows[2].UnrecordedCalls != 2 {
+		t.Fatalf("rows = %+v", rows)
+	}
+
+	sql := *captured
+	// 一番注意が必要な根拠を選ぶ順番（unknown > inherited > estimated > listed）と、記録なし（空文字）の扱い
+	for _, want := range []string{
+		"WHEN 'unknown' THEN 3", "WHEN 'inherited' THEN 2", "WHEN 'estimated' THEN 1", "WHEN 'listed' THEN 0",
+		"ELSE -1 END", "AS recorded_price_basis", "GROUP BY model",
+		// 記録の無い行の数（古い行と新しい行が混ざる期間の判定に使う）
+		"SUM(CASE WHEN price_basis = '' THEN 1 ELSE 0 END) AS unrecorded_calls",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("SQL に %q が無い:\n%s", want, sql)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
