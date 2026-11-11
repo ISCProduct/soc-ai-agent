@@ -133,6 +133,40 @@ def test_company_research_never_returns_other_companies():
         assert {by_id[doc_id].company_identity for doc_id in row["ranked"]} == {query.company_identity}
 
 
+def test_company_research_counts_unknown_documents_as_foreign(monkeypatch):
+    """データセットに無い本文が返ったら、飛ばさずに foreign_documents に数える（不変条件で落とす）。"""
+    from evaluation.search_quality import runner
+
+    original = runner.vector_store.get_cached_documents
+
+    def with_unknown(*args, **kwargs):
+        return original(*args, **kwargs)[:4] + ["データセットに無い文書"]
+
+    monkeypatch.setattr(runner.vector_store, "get_cached_documents", with_unknown)
+    dataset = load_dataset(default_dataset_path("company_research"))
+    summary = evaluate_company_research(dataset, hash_embedder(), MemoryClient())
+    assert summary["foreign_documents"] == len(dataset.queries)
+
+
+def test_company_research_counts_other_company_text_as_foreign(monkeypatch):
+    """他社の本文が返ったら foreign_documents に数える。"""
+    from evaluation.search_quality import runner
+
+    dataset = load_dataset(default_dataset_path("company_research"))
+    other = next(doc for doc in dataset.documents if doc.company_identity != dataset.queries[0].company_identity)
+    original = runner.vector_store.get_cached_documents
+    calls = {"n": 0}
+
+    def with_other(*args, **kwargs):
+        calls["n"] += 1
+        texts = original(*args, **kwargs)
+        return texts + [other.text] if calls["n"] == 1 else texts
+
+    monkeypatch.setattr(runner.vector_store, "get_cached_documents", with_other)
+    summary = evaluate_company_research(dataset, hash_embedder(), MemoryClient())
+    assert summary["foreign_documents"] == 1
+
+
 def test_company_research_separates_companies_with_colliding_names():
     """表記違いで同じ名前にサニタイズされる2社を、本番と同じ企業ハッシュ付きのキーで分ける（#938）。"""
     dataset = load_dataset(default_dataset_path("company_research"))

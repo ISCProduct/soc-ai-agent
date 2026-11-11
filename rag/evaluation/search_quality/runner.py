@@ -97,11 +97,16 @@ def _mark_stale(client: Any, cache_key: str, docs: List, embeddings: List[List[f
 def evaluate_company_research(dataset: Dataset, embed: Embedder, client: Any, ks: Sequence[int] = COMPANY_KS) -> Dict[str, Any]:
     """企業リサーチ。企業・職種ごとにキャッシュへ保存し、本番と同じ絞り込み（企業［＋企業ハッシュ］・職種、
     職種が無ければ同じ企業）・鮮度・件数で取る。次の3つは0件でなければならない:
-      - foreign_documents: 他社（企業名またはサニタイズ前の企業名が違う）の文書が混ざった件数
+      - foreign_documents: 他社（企業名またはサニタイズ前の企業名が違う）の文書、または
+        データセットに無い文書が混ざった件数
       - stale_documents: 期限切れの文書が返った件数
       - over_limit_queries: 上限（5件）を超えて返ったクエリの数
     """
-    by_text = {doc.text: doc for doc in dataset.documents}
+    # キャッシュは本文しか返さないので本文で照合する。別企業に同じ本文があっても上書きしないよう、
+    # 本文ごとに全候補を持ち、問い合わせた企業の文書を優先して当てる。
+    by_text: Dict[str, List] = {}
+    for doc in dataset.documents:
+        by_text.setdefault(doc.text, []).append(doc)
     groups: Dict[tuple, List] = {}
     for doc in dataset.documents:
         groups.setdefault((doc.company, doc.role, doc.company_original), []).append(doc)
@@ -121,11 +126,12 @@ def evaluate_company_research(dataset: Dataset, embed: Embedder, client: Any, ks
                 over_limit += 1
             ranked = []
             for text in texts:
-                doc = by_text.get(text)
+                candidates = by_text.get(text, [])
+                doc = next((d for d in candidates if d.company_identity == query.company_identity), None)
                 if doc is None:
-                    continue
-                if doc.company_identity != query.company_identity:
+                    # データセットに無い本文、または他社にしか無い本文。どちらも混ざってはいけない文書
                     foreign += 1
+                    continue
                 if doc.stale:
                     stale += 1
                 ranked.append(doc.id)
