@@ -67,6 +67,9 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 			return cached, nil
 		}
 	}
+	if err := usagectx.CheckAIBudget(ctx); err != nil {
+		return nil, err
+	}
 
 	profile, err := s.githubRepo.GetProfile(userID)
 	if err != nil || profile == nil {

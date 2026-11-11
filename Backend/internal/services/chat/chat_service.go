@@ -185,7 +185,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	currentPhase, err := s.getCurrentOrNextPhase(ctx, req.UserID, req.SessionID)
 	if err != nil {
 		if err.Error() == "all phases completed" {
-			return s.handleAllPhasesCompletedFromPhaseError(req, history)
+			return s.handleAllPhasesCompletedFromPhaseError(ctx, req, history)
 		}
 		return nil, fmt.Errorf("failed to get current phase: %w", err)
 	}
@@ -199,7 +199,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	for i := range allPhases {
 		phaseByID[allPhases[i].ID] = &allPhases[i]
 	}
-	if resp, handled := s.handleAllPhasesCompletedFromCount(req, history, allPhases, completedProgresses, phaseByID); handled {
+	if resp, handled := s.handleAllPhasesCompletedFromCount(ctx, req, history, allPhases, completedProgresses, phaseByID); handled {
 		return resp, nil
 	}
 

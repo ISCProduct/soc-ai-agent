@@ -21,6 +21,7 @@ import {
 } from '@/lib/teacher-guidance'
 import { NextActionsBar } from '@/components/home/NextActionsBar'
 import { NoticeStack, type Notice } from '@/components/home/NoticeStack'
+import { AIBudgetNotice } from '@/components/home/AIBudgetNotice'
 import styles from './page.module.css'
 
 export default function PageContent() {
@@ -238,6 +239,7 @@ export default function PageContent() {
           </Toolbar>
         </AppBar>
         <NextActionsBar />
+        <AIBudgetNotice />
         <NoticeStack notices={notices} />
         <div className={styles.chatWrapper}>
           <MuiChat />
