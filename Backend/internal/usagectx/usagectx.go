@@ -59,9 +59,11 @@ type budgetCheckKey struct{}
 type budgetCheck func(context.Context) error
 
 // PromptVersion は工程と版を表す利用量記録用メタデータ。
+// Group は A/B で割り当てた版。A/B の対象外なら空（#1976）。
 type PromptVersion struct {
 	Stage   string
 	Version string
+	Group   string
 }
 
 // actor は実行主体と配賦先。どちらも解決できないことがあるためポインタで持つ。
@@ -80,6 +82,15 @@ func WithFeature(ctx context.Context, feature string) context.Context {
 	return context.WithValue(ctx, featureKey{}, feature)
 }
 
+// WithDefaultFeature は機能名が未設定のときだけ載せる。共通の下位関数（リトライ付きの呼び出しなど）が
+// 既定の機能名を付けるのに使う。呼び出し元が付けた機能名は上書きしない（#1993）。
+func WithDefaultFeature(ctx context.Context, feature string) context.Context {
+	if Feature(ctx) != FeatureUnknown {
+		return ctx
+	}
+	return WithFeature(ctx, feature)
+}
+
 // Feature は機能名を取り出す。未設定なら FeatureUnknown。
 func Feature(ctx context.Context) string {
 	if ctx == nil {
@@ -93,10 +104,15 @@ func Feature(ctx context.Context) string {
 
 // WithPromptVersion はAI呼び出しの工程別プロンプト版を記録用contextに載せる。
 func WithPromptVersion(ctx context.Context, stage, version string) context.Context {
+	return WithPromptAssignment(ctx, stage, version, "")
+}
+
+// WithPromptAssignment は版と A/B の群を記録用 context に載せる。group は A/B の対象外なら空。
+func WithPromptAssignment(ctx context.Context, stage, version, group string) context.Context {
 	if ctx == nil || stage == "" || version == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, promptVersionKey{}, PromptVersion{Stage: stage, Version: version})
+	return context.WithValue(ctx, promptVersionKey{}, PromptVersion{Stage: stage, Version: version, Group: group})
 }
 
 // PromptVersionFromContext は工程別プロンプト版を取り出す。未設定ならゼロ値を返す。

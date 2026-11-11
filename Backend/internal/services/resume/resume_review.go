@@ -2,6 +2,7 @@ package resume
 
 import (
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"bufio"
 	"bytes"
 	"context"
@@ -156,7 +157,11 @@ var errReviewOutputTruncated error = &shared.ValidationError{
 // 「解析に失敗しました」になって原因が上限だと分からない**ため。
 // items を最後以外へ動かすと途中までが読めてしまう余地も残るので、
 // スキーマ変更に対する保険も兼ねている。
+//
+// ctx はリクエストの ctx を渡す（#1993）。context.Background() から始めると、機能名・実行主体
+// （利用者単位の予算ブレーカー #1776 が数える）・クライアント切断時のキャンセルがすべて届かない。
 func (s *ResumeService) requestReviewJSON(ctx context.Context, systemPrompt, userPrompt, model string) (string, error) {
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureResumeReview)
 	// 同じ枠・同じ温度でやり直しても同じ位置で切れるので、枠を倍にする方だけ試す。
 	for _, maxTokens := range []int{ReviewMaxOutputTokens, ReviewMaxOutputTokens * 2} {
 		// 上限到達を検知するためフラグ付きのコンテキストで呼ぶ（#1529）。

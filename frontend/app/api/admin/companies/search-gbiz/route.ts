@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     },
   )
   const raw = await response.text()
-  let data: any = {}
+  let data: unknown = {}
   if (raw) {
     try { data = JSON.parse(raw) } catch { data = { error: raw } }
   }

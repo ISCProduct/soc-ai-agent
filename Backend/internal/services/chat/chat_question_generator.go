@@ -272,7 +272,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		jobCategoryName, industryID, jobCategoryID,
 	)
 
-	questionText, err := s.aiCallWithRetries(ctx, prompt)
+	questionText, err := s.questionAICall(ctx, prompt)
 	if err != nil {
 		return "", 0, "", err
 	}
@@ -303,7 +303,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 
 質問文は1つのみ。説明は不要です。質問文の後に選択肢を列挙してください。`, questionText)
 
-			regenerated, err := s.aiCallWithRetries(ctx, choicePrompt)
+			regenerated, err := s.questionAICall(ctx, choicePrompt)
 			if err != nil {
 				break
 			}
@@ -371,7 +371,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 			}(),
 			targetCategory)
 
-		questionText, err = s.aiCallWithRetries(ctx, retryPrompt)
+		questionText, err = s.questionAICall(ctx, retryPrompt)
 		if err != nil {
 			return "", 0, "", err
 		}

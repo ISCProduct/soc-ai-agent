@@ -349,6 +349,7 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 	json.NewEncoder(metaPart).Encode(map[string]any{
 		"user_text":                result.UserText,
 		"ai_text":                  result.AIText,
+		"utterance_save_failed":    result.UtteranceSaveFailed,
 		"question_source":          result.QuestionSource,
 		"question_category":        result.QuestionCategory,
 		"is_deepening":             result.IsDeepening,
@@ -428,6 +429,7 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
 	json.NewEncoder(metaPart).Encode(map[string]any{
 		"ai_text":                  result.AIText,
+		"utterance_save_failed":    result.UtteranceSaveFailed,
 		"question_source":          result.QuestionSource,
 		"question_category":        result.QuestionCategory,
 		"is_deepening":             result.IsDeepening,

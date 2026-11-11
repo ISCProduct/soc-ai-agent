@@ -18,6 +18,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"Backend/domain/entity"
 )
 
 // ゴールドラベル。良/中/悪の3値のみ。
@@ -39,11 +41,25 @@ const (
 	TargetResume          = "resume"
 	TargetInterviewReport = "interview-report"
 	TargetChatAnswer      = "chat-answer"
+	// TargetCompanyExtract は事実テキストからの企業情報の抽出（#1782）。
+	TargetCompanyExtract = "company-extract"
+	// TargetMatchingReason はマッチング理由の生成（#1782）。
+	TargetMatchingReason = "matching-reason"
 )
+
+// labelOptionalTargets は良/中/悪のラベルを付けない評価対象（#1782）。
+//
+// 他の target は LLM が付けた点がラベルの順に並ぶか（弁別力）を測る。この2つは
+// LLM が点を付けるのではなく出力を作る処理なので、正解の項目との一致と指示の遵守から
+// 決まった計算で点を出す。ラベルが無いケースは集計の弁別力・交絡の計算から外れる。
+var labelOptionalTargets = []string{TargetCompanyExtract, TargetMatchingReason}
+
+// LabelOptional は良/中/悪のラベルを付けない評価対象かを返す。
+func LabelOptional(target string) bool { return slices.Contains(labelOptionalTargets, target) }
 
 // ValidTargets は対応している評価対象。
 func ValidTargets() []string {
-	return []string{TargetES, TargetResume, TargetInterviewReport, TargetChatAnswer}
+	return []string{TargetES, TargetResume, TargetInterviewReport, TargetChatAnswer, TargetCompanyExtract, TargetMatchingReason}
 }
 
 // Case はマニフェスト（jsonl）1行。
@@ -79,6 +95,42 @@ type Input struct {
 	// チャット診断の回答評価
 	Question string `json:"question,omitempty"`
 	Answer   string `json:"answer,omitempty"`
+	// 企業情報の抽出（CompanyName も使う）
+	FactsText  string                  `json:"facts_text,omitempty"`
+	WebsiteURL string                  `json:"website_url,omitempty"`
+	Expected   *CompanyExtractExpected `json:"expected,omitempty"`
+	// マッチング理由の生成。Match と UserScores は本番の型のまま受ける（フィールド名は Go の名前）。
+	Match      *entity.UserCompanyMatch `json:"match,omitempty"`
+	UserScores []entity.UserWeightScore `json:"user_scores,omitempty"`
+	// MustMentionAny は企業側の事実の語。理由にいずれか1つ以上が入っていること
+	// （プロンプトの「企業側の情報を1つ以上反映」）。
+	MustMentionAny []string `json:"must_mention_any,omitempty"`
+	// StrengthAny は利用者の強みの軸。理由にいずれか1つ以上が入っていること
+	// （プロンプトの「一致している強み軸を言及」）。
+	StrengthAny []string `json:"strength_any,omitempty"`
+}
+
+// CompanyExtractExpected は企業情報の抽出の正解（#1782）。
+// 事実テキストに書かれている値だけを置き、書かれていない項目は Absent に並べる。
+type CompanyExtractExpected struct {
+	// Industry は業種の選択肢のいずれか（完全一致）。
+	Industry string `json:"industry,omitempty"`
+	// Location / MainBusiness / TechStack は、出力に含まれているべき語（部分一致）。
+	Location     string `json:"location,omitempty"`
+	MainBusiness string `json:"main_business,omitempty"`
+	TechStack    string `json:"tech_stack,omitempty"`
+	// FoundedYear / EmployeeCount は完全一致。
+	FoundedYear   int `json:"founded_year,omitempty"`
+	EmployeeCount int `json:"employee_count,omitempty"`
+	// EmployeeCountBasis は consolidated / standalone（完全一致。連結と単体で意味が変わる）。
+	EmployeeCountBasis string `json:"employee_count_basis,omitempty"`
+	// WorkStyle は本番の正規化後の値（リモート / ハイブリッド / オフィス）で完全一致。
+	WorkStyle string `json:"work_style,omitempty"`
+	// WelfareDetails は出力に含まれているべき語（部分一致）。
+	WelfareDetails string `json:"welfare_details,omitempty"`
+	// Absent は事実テキストに無いので空（0）でなければならない項目（JSON のキー名）。
+	// 値が入っていれば、根拠の無い値を作った（fabricated）として数える。
+	Absent []string `json:"absent,omitempty"`
 }
 
 // LoadManifest は jsonl を読む。
@@ -130,7 +182,7 @@ func validateCase(c Case) error {
 	if strings.TrimSpace(c.ID) == "" {
 		return fmt.Errorf("id は必須")
 	}
-	if _, ok := labelRank[c.Label]; !ok {
+	if _, ok := labelRank[c.Label]; !ok && !(c.Label == "" && slices.Contains(labelOptionalTargets, c.Target)) {
 		return fmt.Errorf("label は %s / %s / %s のいずれか（実際: %q）", LabelGood, LabelMid, LabelBad, c.Label)
 	}
 	if !slices.Contains(ValidTargets(), c.Target) {
@@ -152,6 +204,25 @@ func validateCase(c Case) error {
 	case TargetChatAnswer:
 		if strings.TrimSpace(c.Input.Question) == "" || strings.TrimSpace(c.Input.Answer) == "" {
 			return fmt.Errorf("input.question と input.answer は必須")
+		}
+	case TargetCompanyExtract:
+		if strings.TrimSpace(c.Input.CompanyName) == "" || strings.TrimSpace(c.Input.FactsText) == "" || c.Input.Expected == nil {
+			return fmt.Errorf("input.company_name と input.facts_text と input.expected は必須")
+		}
+		if companyExtractCheckCount(*c.Input.Expected) == 0 {
+			return fmt.Errorf("input.expected に確かめる項目が1つも無い")
+		}
+		for _, field := range c.Input.Expected.Absent {
+			if !slices.Contains(companyExtractFields, field) {
+				return fmt.Errorf("input.expected.absent の %q は企業情報の項目ではない", field)
+			}
+		}
+	case TargetMatchingReason:
+		if c.Input.Match == nil || c.Input.Match.Company == nil || strings.TrimSpace(c.Input.Match.Company.Name) == "" {
+			return fmt.Errorf("input.match.Company.Name は必須")
+		}
+		if len(c.Input.MustMentionAny) == 0 || len(c.Input.StrengthAny) == 0 {
+			return fmt.Errorf("input.must_mention_any と input.strength_any は必須")
 		}
 	}
 	return nil
@@ -212,6 +283,13 @@ func (c Case) InputText() string {
 	case TargetChatAnswer:
 		// 質問は全ラベルで共通にできるので、長さの交絡は回答側だけを見る。
 		return c.Input.Answer
+	case TargetCompanyExtract:
+		return c.Input.FactsText
+	case TargetMatchingReason:
+		if c.Input.Match != nil && c.Input.Match.Company != nil {
+			company := c.Input.Match.Company
+			return company.Industry + company.MainBusiness + company.Culture + company.WorkStyle
+		}
 	}
 	return ""
 }
