@@ -41,8 +41,9 @@ var invalidRepoFullNames = []struct {
 	{"リポジトリが101字", "owner/" + strings.Repeat("r", 101)},
 	{"オーナーの先頭がハイフン", "-owner/repo"},
 	{"オーナーの末尾がハイフン", "owner-/repo"},
+	{"オーナーの先頭がアンダースコア", "_owner/repo"},
+	{"オーナーの末尾がアンダースコア", "owner_/repo"},
 	{"オーナーにドット", "own.er/repo"},
-	{"オーナーにアンダースコア", "own_er/repo"},
 	{"パーセントエンコード", "owner/repo%2F..%2F..%2Fuser"},
 	{"空白", "owner/re po"},
 	{"改行", "owner/repo\n"},
@@ -60,6 +61,8 @@ var validRepoFullNames = []struct {
 	{"オーナーにハイフン", "my-org/repo"},
 	// 今は作れないが、古いアカウントには連続したハイフンのユーザー名が残っているため通す
 	{"オーナーに連続したハイフン", "a--b/repo"},
+	// Enterprise Managed Users のログイン名（#2182 のレビュー）
+	{"オーナーにアンダースコア（EMU）", "mona_octo/private-repo"},
 	{"リポジトリにドット・ハイフン・アンダースコア", "owner/my.repo-name_2"},
 	{"リポジトリがドットで始まる", "owner/.github"},
 	{"リポジトリが「...」", "owner/..."},

@@ -21,8 +21,10 @@ import (
 var ErrInvalidRepoFullName = errors.New("full_name は owner/repo の形式で指定してください")
 
 var (
-	// GitHub のユーザー名・組織名の規則：英数字とハイフン、1〜39字、先頭と末尾はハイフン不可。
-	githubOwnerPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$`)
+	// GitHub のユーザー名・組織名の規則：英数字とハイフン、1〜39字、先頭と末尾は英数字。
+	// Enterprise Managed Users のログイン名は「IDP-USERNAME_SHORT-CODE」のように「_」を含むので、
+	// 途中の「_」も許す（「_」はパスの区切りにならない。#2182 のレビュー）。
+	githubOwnerPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,37}[A-Za-z0-9])?$`)
 	// GitHub のリポジトリ名の規則：英数字と「.」「-」「_」、1〜100字。
 	githubRepoNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 )

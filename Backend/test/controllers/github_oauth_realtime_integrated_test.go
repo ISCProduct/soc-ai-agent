@@ -237,7 +237,9 @@ func TestGitHubController_SummarizeRepo_InvalidFullName(t *testing.T) {
 		strings.Repeat("a", 40) + "/repo",
 		"owner/" + strings.Repeat("r", 101),
 	}
-	ctrl := githubcontrollers.NewGitHubController(githubservice.NewGitHubService(nil, nil, nil), nil)
+	// サービスはモック（期待なし）。ハンドラが入口で弾かずにサービスを呼ぶと、モックが失敗する
+	gh := &mocks.GitHubServiceMock{}
+	ctrl := newGitHubController(gh, nil)
 	for _, fullName := range cases {
 		t.Run(fullName, func(t *testing.T) {
 			body, _ := json.Marshal(map[string]any{"full_name": fullName})
@@ -248,6 +250,7 @@ func TestGitHubController_SummarizeRepo_InvalidFullName(t *testing.T) {
 			testsupport.AssertStatus(t, ctrl.SummarizeRepo, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 		})
 	}
+	gh.AssertNotCalled(t, "SummarizeRepo", tmock.Anything, tmock.Anything, tmock.Anything, tmock.Anything, tmock.Anything)
 }
 
 // サービスが ErrInvalidRepoFullName を包んで返しても 400 にする（500 にしない）。
