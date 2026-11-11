@@ -77,7 +77,56 @@ var phaseCategories = map[string][]string{
 	"future_analysis":   {"安定志向", "成長志向", "ワークライフバランス", "チャレンジ志向"},
 }
 
-func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, targetLevel string, currentPhase *entity.UserAnalysisProgress) (string, uint, string, error) {
+func allowedCategoriesForPhase(phaseName string, all []string) []string {
+	if phaseAllowed, ok := phaseCategories[phaseName]; ok && len(phaseAllowed) > 0 {
+		return phaseAllowed
+	}
+	return all
+}
+
+func askedCategoryCounts(history []models.ChatMessage) map[string]int {
+	counts := map[string]int{}
+	for _, msg := range history {
+		if msg.Role != "assistant" {
+			continue
+		}
+		cat := strings.TrimSpace(msg.WeightCategory)
+		if cat == "" {
+			continue
+		}
+		counts[cat]++
+	}
+	return counts
+}
+
+// pickPhaseTarget は、フェーズの質問枠を先頭の軸が使い切らないように次の軸を選ぶ。
+// 出題回数が少ない軸を優先し、同数なら未評価（スコア無しまたは0）、その次に並び順。
+// 先頭の未評価をスコアが付くまで繰り返すと、後ろの軸は診断が完了しても一度も聞かれない（SOCAIAGENT-473）。
+func pickPhaseTarget(allowed []string, scoreMap map[string]int, asked map[string]int) (string, string) {
+	if len(allowed) == 0 {
+		return "", ""
+	}
+	bestIdx := 0
+	bestAsked := int(^uint(0) >> 1)
+	bestUnevaluated := false
+	for i, cat := range allowed {
+		n := asked[cat]
+		score, ok := scoreMap[cat]
+		unevaluated := !ok || score == 0
+		if n < bestAsked || (n == bestAsked && unevaluated && !bestUnevaluated) {
+			bestIdx = i
+			bestAsked = n
+			bestUnevaluated = unevaluated
+		}
+	}
+	cat := allowed[bestIdx]
+	if bestUnevaluated {
+		return cat, fmt.Sprintf("まだ評価できていない「%s」を評価するため", cat)
+	}
+	return cat, fmt.Sprintf("「%s」を他の軸と同じ回数まで確認するため", cat)
+}
+
+func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, targetLevel string, currentPhase *entity.UserAnalysisProgress, asked map[string]int) (string, uint, string, error) {
 	ctx, resolvedVersion := prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration)
 
 	// 狙った軸は呼び出し元に返す。ここはフェーズで絞った allowedCategories から
@@ -103,27 +152,20 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		askedQuestionsText += fmt.Sprintf("\n**上記%d個の質問と類似・重複する質問は絶対に生成しないでください**\n", questionCount)
 	}
 
-	allowedCategories := allCategories
 	phaseName := ""
 	if currentPhase != nil && currentPhase.Phase != nil {
 		phaseName = currentPhase.Phase.PhaseName
-		if phaseAllowed, ok := phaseCategories[phaseName]; ok && len(phaseAllowed) > 0 {
-			allowedCategories = phaseAllowed
-		}
 	}
+	allowedCategories := allowedCategoriesForPhase(phaseName, allCategories)
 
 	// スコア状況の分析（フェーズ対象カテゴリのみ）
 	scoreAnalysis := "## 現在の評価状況\n"
-	evaluatedCategories := []string{}
-	unevaluatedCategories := []string{}
-
 	for _, cat := range allowedCategories {
 		score, exists := scoreMap[cat]
 		if exists && score != 0 {
 			scoreAnalysis += fmt.Sprintf("- %s: %d点\n", cat, score)
-			evaluatedCategories = append(evaluatedCategories, cat)
 		} else {
-			unevaluatedCategories = append(unevaluatedCategories, cat)
+			scoreAnalysis += fmt.Sprintf("- %s: 未評価\n", cat)
 		}
 	}
 
@@ -135,39 +177,12 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		}
 	}
 
-	// 企業選定に必要な情報を特定
-	var targetCategory string
-	var questionPurpose string
-
-	if len(unevaluatedCategories) > 0 {
-		// 未評価カテゴリがあれば優先
-		targetCategory = unevaluatedCategories[0]
-		questionPurpose = fmt.Sprintf("まだ評価できていない「%s」を評価するため", targetCategory)
-	} else {
-		// 全カテゴリ評価済みなら、スコアが中途半端なものを深掘り
-		targetCategory = ""
-		for _, cat := range allowedCategories {
-			score := scoreMap[cat]
-			if score > -3 && score < 3 {
-				targetCategory = cat
-				questionPurpose = fmt.Sprintf("評価が曖昧な「%s」をより明確に判定するため", cat)
-				break
-			}
-		}
-
-		if targetCategory == "" {
-			// 最もスコアが高いカテゴリを深掘り
-			highestScore := -100
-			for _, cat := range allowedCategories {
-				score := scoreMap[cat]
-				if score > highestScore {
-					highestScore = score
-					targetCategory = cat
-				}
-			}
-			questionPurpose = fmt.Sprintf("強みである「%s」をさらに深く評価し、最適な企業を絞り込むため", targetCategory)
-		}
+	// 出題回数はセッション全体で数える。プロンプト用の history は直近だけなので、
+	// ここで数えると前のフェーズの出題が消えて同じ軸に戻る。
+	if asked == nil {
+		asked = askedCategoryCounts(history)
 	}
+	targetCategory, questionPurpose := pickPhaseTarget(allowedCategories, scoreMap, asked)
 
 	categoryDescriptions := map[string]string{
 		"技術志向":       "技術やデジタル活用への興味、学習経験（授業、趣味、独学）→ 技術主導企業か事業主導企業か",
@@ -257,7 +272,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		jobCategoryName, industryID, jobCategoryID,
 	)
 
-	questionText, err := s.aiCallWithRetries(ctx, prompt)
+	questionText, err := s.questionAICall(ctx, prompt)
 	if err != nil {
 		return "", 0, "", err
 	}
@@ -288,7 +303,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 
 質問文は1つのみ。説明は不要です。質問文の後に選択肢を列挙してください。`, questionText)
 
-			regenerated, err := s.aiCallWithRetries(ctx, choicePrompt)
+			regenerated, err := s.questionAICall(ctx, choicePrompt)
 			if err != nil {
 				break
 			}
@@ -356,7 +371,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 			}(),
 			targetCategory)
 
-		questionText, err = s.aiCallWithRetries(ctx, retryPrompt)
+		questionText, err = s.questionAICall(ctx, retryPrompt)
 		if err != nil {
 			return "", 0, "", err
 		}

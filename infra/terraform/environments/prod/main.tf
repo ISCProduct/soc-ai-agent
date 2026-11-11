@@ -731,6 +731,9 @@ module "backend" {
     }, {
     for stage, version in var.prompt_versions :
     "PROMPT_VERSION_${upper(stage)}" => version
+    }, {
+    for stage, arms in var.prompt_ab :
+    "PROMPT_AB_${upper(stage)}" => arms
   })
   extra_container_definitions = [
     {

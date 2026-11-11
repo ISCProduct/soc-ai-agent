@@ -308,8 +308,8 @@ func (s *CompanyEntryService) sendInviteEmail(submission *models.CompanyEntrySub
 			s.markEmailFailed(submission.ID, err.Error())
 			return false
 		}
-		submission.InviteToken = &inviteToken
-		_ = s.db.Model(submission).Update("invite_token", inviteToken).Error
+		// 検証に使うのは pending_registrations のトークンだけ。
+		// submissions に平文を残すと、読む箇所が無くても DB と将来の JSON に残る（#1990）。
 	}
 
 	if err := s.email.SendCompanyEntryThankYouAndInvite(submission.ContactEmail, companyName, inviteToken); err != nil {

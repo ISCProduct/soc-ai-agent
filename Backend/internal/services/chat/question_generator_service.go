@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -63,7 +64,7 @@ func (s *QuestionGeneratorService) GenerateAndSaveQuestions(ctx context.Context,
   ...
 ]`, req.Count, req.Category, req.Category)
 
-	response, err := s.aiClient.Responses(ctx, prompt)
+	response, err := s.aiClient.Responses(usagectx.WithFeature(ctx, usagectx.FeatureChatQuestion), prompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate questions: %w", err)
 	}

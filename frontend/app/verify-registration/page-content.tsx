@@ -68,8 +68,8 @@ function VerifyRegistrationContent() {
       )
       await authService.saveAuth(response)
       router.push('/')
-    } catch (err: any) {
-      setSubmitError(err.message)
+    } catch (err: unknown) {
+      setSubmitError(err instanceof Error ? err.message : String(err))
     } finally {
       setSubmitting(false)
     }

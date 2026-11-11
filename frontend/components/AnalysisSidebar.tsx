@@ -55,6 +55,7 @@ import {
   shouldShowResultsCta,
 } from '@/lib/sidebar-navigation'
 import { SIDEBAR_ADMIN_NAV } from '@/lib/sidebar-nav'
+import { useTranslations } from '@/lib/i18n'
 import { computeProgressTotals } from './mui-chat/utils'
 
 const DRAWER_WIDTH = 280
@@ -101,6 +102,8 @@ interface AnalysisSidebarProps {
 
 export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClose}: AnalysisSidebarProps) {
     const router = useRouter()
+    // ナビの表示名は辞書（messages/ja.json の nav）が正本（SOCAIAGENT-595。#2162 のセルフレビュー）
+    const t = useTranslations('nav')
     const [messageCount, setMessageCount] = useState(0)
     const [questionCount, setQuestionCount] = useState(0)
     const [totalQuestions, setTotalQuestions] = useState(15)
@@ -117,7 +120,20 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 const fresh = await authService.getUser()
                 if (fresh?.is_admin) {
                     setIsAdmin(true)
-                    await authService.saveAuth({ ...fresh, user_id: fresh.user_id, is_guest: fresh.is_guest } as any)
+                    await authService.saveAuth({
+                        user_id: fresh.user_id,
+                        email: fresh.email,
+                        name: fresh.name,
+                        is_guest: fresh.is_guest,
+                        target_level: fresh.target_level,
+                        school_name: fresh.school_name,
+                        is_admin: fresh.is_admin,
+                        is_staff: fresh.is_staff,
+                        certifications_acquired: fresh.certifications_acquired,
+                        certifications_in_progress: fresh.certifications_in_progress,
+                        oauth_provider: fresh.oauth_provider,
+                        avatar_url: fresh.avatar_url,
+                    })
                 }
             } catch {
                 // ignore
@@ -403,7 +419,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             <Business color="primary"/>
                         </ListItemIcon>
                         <ListItemText
-                            primary="マッチング結果"
+                            primary={t('home.results')}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
@@ -428,7 +444,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                                 <Assignment color="primary"/>
                             </ListItemIcon>
                             <ListItemText
-                                primary="選考管理"
+                                primary={t('sidebar.applications')}
                                 secondary={user.is_guest ? 'ログインが必要です' : undefined}
                                 primaryTypographyProps={{
                                     fontSize: '0.875rem',
@@ -453,7 +469,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             <BorderAll color="primary"/>
                         </ListItemIcon>
                         <ListItemText
-                            primary="企業相関図"
+                            primary={t('sidebar.correlationDiagram')}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
@@ -475,7 +491,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             <History color="primary"/>
                         </ListItemIcon>
                         <ListItemText
-                            primary="チャット履歴"
+                            primary={t('sidebar.chatHistory')}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
@@ -495,7 +511,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             <Description color="primary"/>
                         </ListItemIcon>
                         <ListItemText
-                            primary="履歴書レビュー"
+                            primary={t('sidebar.resume')}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
@@ -515,7 +531,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             <Quiz color="primary"/>
                         </ListItemIcon>
                         <ListItemText
-                            primary="適性検査（性格）"
+                            primary={t('sidebar.personalityAssessment')}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
@@ -535,7 +551,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             <Quiz color="primary"/>
                         </ListItemIcon>
                         <ListItemText
-                            primary="適性検査（能力）"
+                            primary={t('sidebar.abilityAssessment')}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
@@ -555,7 +571,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             <RecordVoiceOver color="primary"/>
                         </ListItemIcon>
                         <ListItemText
-                            primary="面接練習"
+                            primary={t('sidebar.interview')}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
@@ -575,7 +591,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             <Assessment color="primary"/>
                         </ListItemIcon>
                         <ListItemText
-                            primary="面接履歴"
+                            primary={t('sidebar.interviewHistory')}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
@@ -595,7 +611,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             <EditNote color="primary"/>
                         </ListItemIcon>
                         <ListItemText
-                            primary="ESリライト・添削"
+                            primary={t('sidebar.esRewrite')}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
@@ -615,7 +631,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             <CalendarMonth color="primary"/>
                         </ListItemIcon>
                         <ListItemText
-                            primary="選考スケジュール"
+                            primary={t('sidebar.schedule')}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
@@ -635,7 +651,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             <MailOutline color="primary"/>
                         </ListItemIcon>
                         <ListItemText
-                            primary="スカウト"
+                            primary={t('sidebar.scout')}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
@@ -655,7 +671,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             <ManageAccounts color="primary"/>
                         </ListItemIcon>
                         <ListItemText
-                            primary="プロフィール設定"
+                            primary={t('sidebar.profile')}
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
