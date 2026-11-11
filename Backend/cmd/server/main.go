@@ -740,9 +740,6 @@ func main() {
 	safego.Go(crawlService.EnsureL1WarmCrawlSource)
 	safego.Every(1*time.Minute, false, crawlService.RunDueSources)
 
-	// 期限切れの仮登録・リフレッシュトークンの物理削除（#2153）。退会ユーザーのパージと同じ日次ジョブで回す。
-	expiredTokenPurger := maintenance.NewExpiredTokenPurger(pendingRegistrationRepo, refreshTokenRepo, slog.Default())
-
 	// 退会ユーザーの猶予期間経過後の物理削除（1日1回）
 	safego.Every(24*time.Hour, true, func() {
 		// 退会時のベクトル削除はRAG障害でも退会を失敗させないためエラーを飲む。
@@ -757,13 +754,20 @@ func main() {
 
 		n, err := userDeletionService.PurgeExpiredWithdrawals(time.Now().UTC())
 		if err != nil {
-			// ここで return すると、後ろの期限切れトークンの削除まで止まるので、ログに出して続ける
 			slog.Error("purge expired withdrawals failed", "error", err)
-		} else if n > 0 {
+			return
+		}
+		if n > 0 {
 			slog.Info("purged expired withdrawals", "count", n)
 		}
+	})
 
-		// 件数と失敗は Run の中でログに出す
+	// 期限切れの仮登録・リフレッシュトークンの物理削除（1日1回、#2153）。
+	// 退会ユーザーの処理とは別の周期にする。あちらは RAG への HTTP を退会者ごとに待つので、
+	// 障害時に何時間も塞がり、DB だけで済むこの削除まで止まってしまうため（#2179 のレビュー）。
+	// 件数と失敗は Run の中でログに出す。
+	expiredTokenPurger := maintenance.NewExpiredTokenPurger(pendingRegistrationRepo, refreshTokenRepo, slog.Default())
+	safego.Every(24*time.Hour, true, func() {
 		expiredTokenPurger.Run(time.Now().UTC())
 	})
 
