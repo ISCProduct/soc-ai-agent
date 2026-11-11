@@ -409,7 +409,7 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 		ctx,
 		prompts.MatchingReasonSystemPrompt,
 		userPrompt,
-		0.4,
+		MatchingReasonTemperature,
 	)
 	if err != nil {
 		log.Printf("[GenerateMatchReason] AI failed, fallback to template: %v", err)
@@ -422,6 +422,15 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 	}
 	match.MatchReasonPromptVersion = promptVersion
 	return reason, nil
+}
+
+// MatchingReasonTemperature は AI 理由の生成の温度（GenerateMatchReason と同じ）。
+const MatchingReasonTemperature = 0.4
+
+// MatchingReasonPrompts は GenerateMatchReason が LLM へ渡すシステム・ユーザープロンプトを返す。
+// aibench（#1782）が本番と同じプロンプトで測るために公開する。
+func MatchingReasonPrompts(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) (system, user string) {
+	return prompts.MatchingReasonSystemPrompt, buildMatchingReasonUserPrompt(match, userScores)
 }
 
 func matchingReasonUseAI() bool {
