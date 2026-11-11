@@ -3332,6 +3332,48 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/admin/dashboard/funnel:
+    get:
+      tags: [admin-analytics]
+      summary: 機能横断のコンバージョンファネル（診断→面接→ES→応募→内定）
+      description: |
+        段階ごとの到達人数・対象の学生に対する割合・前の段階からの継続率を返す（#2039）。
+        担当校スコープが掛かる。担当校を持つ管理者は `school_id` が必須で、担当校以外は 403。
+        担当校を持たないシステム管理者だけが `school_id` なし（全体）で見られる。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - { in: query, name: school_id, schema: { type: integer } }
+        - { in: query, name: from, description: 期間の開始日（含む、YYYY-MM-DD、日本時間）, schema: { type: string, format: date } }
+        - { in: query, name: to, description: 期間の終了日（含む、YYYY-MM-DD、日本時間）, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  school_id: { type: integer, nullable: true }
+                  from: { type: string }
+                  to: { type: string }
+                  funnel:
+                    type: object
+                    properties:
+                      students: { type: integer }
+                      stages:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            stage: { type: string, enum: [diagnosis, interview, es, applied, offered] }
+                            reached: { type: integer }
+                            rate_of_students: { type: number }
+                            continued_from_previous: { type: integer }
+                            continuation_rate: { type: number }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   /api/admin/teacher/students/tendency-analysis:
     get:
       tags: [admin-analytics]
