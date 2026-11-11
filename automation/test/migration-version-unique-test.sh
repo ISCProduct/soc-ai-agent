@@ -96,6 +96,7 @@ if [ -n "$BASE_REF" ]; then
   if [ "$fail" -ne 0 ]; then
     next=$(echo "$base_list" | awk '{print $1}' | sort -n | tail -1)
     echo "::error::${BASE_REF} の最新は ${next} です。$(printf '%06d' $((10#$next + 1))) 以降へ採番し直してください"
+    echo "::error::    ./automation/migration-renumber.sh ${BASE_REF}  で自動で振り直せます（先に ${BASE_REF} を取り込むこと）"
     exit 1
   fi
 fi
