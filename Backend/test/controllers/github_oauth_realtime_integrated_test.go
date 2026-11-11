@@ -8,8 +8,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	authcontrollers "Backend/internal/controllers/auth"
@@ -20,6 +22,7 @@ import (
 	usercontrollers "Backend/internal/controllers/user"
 	"Backend/internal/models"
 	"Backend/internal/services/flywheel"
+	githubservice "Backend/internal/services/github"
 	"Backend/internal/services/shared"
 
 	"github.com/stretchr/testify/assert"
@@ -215,6 +218,50 @@ func TestGitHubController_SummarizeRepo_Success(t *testing.T) {
 	gh.On("SummarizeRepo", tmock.Anything, uint(1), "owner/repo", false, "").
 		Return(&models.GitHubRepoSummary{FullName: "owner/repo"}, nil)
 	testsupport.AssertStatus(t, newGitHubController(gh, nil).SummarizeRepo, testsupport.NewCtx(req, rec), http.StatusOK)
+	gh.AssertExpectations(t)
+}
+
+// #2176: 形が正しくない full_name は、本物のサービスの入口の検証で弾かれて 400 になる。
+// サービスの依存（DB・トークン・OpenAI）を nil で作っているので、検証より先へ進めば panic で落ちる
+// ＝ GitHub API へのリクエストまで届かない。
+func TestGitHubController_SummarizeRepo_InvalidFullName(t *testing.T) {
+	cases := []string{
+		"../users/x",
+		"owner/repo/../../x",
+		"owner/repo?x=1",
+		"owner/repo#x",
+		"ownerrepo",
+		"owner/repo/x",
+		"owner/..",
+		"owner/.",
+		strings.Repeat("a", 40) + "/repo",
+		"owner/" + strings.Repeat("r", 101),
+	}
+	ctrl := githubcontrollers.NewGitHubController(githubservice.NewGitHubService(nil, nil, nil), nil)
+	for _, fullName := range cases {
+		t.Run(fullName, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{"full_name": fullName})
+			req := httptest.NewRequest(http.MethodPost, "/api/github/repo/summarize", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			req = testsupport.WithUserID(req, 1)
+			rec := httptest.NewRecorder()
+			testsupport.AssertStatus(t, ctrl.SummarizeRepo, testsupport.NewCtx(req, rec), http.StatusBadRequest)
+		})
+	}
+}
+
+// サービスが ErrInvalidRepoFullName を包んで返しても 400 にする（500 にしない）。
+func TestGitHubController_SummarizeRepo_InvalidFullNameFromService(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{"full_name": "owner/repo"})
+	req := httptest.NewRequest(http.MethodPost, "/api/github/repo/summarize", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+
+	gh := &mocks.GitHubServiceMock{}
+	gh.On("SummarizeRepo", tmock.Anything, uint(1), "owner/repo", false, "").
+		Return(nil, fmt.Errorf("wrap: %w", githubservice.ErrInvalidRepoFullName))
+	testsupport.AssertStatus(t, newGitHubController(gh, nil).SummarizeRepo, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 	gh.AssertExpectations(t)
 }
 

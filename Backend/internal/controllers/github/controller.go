@@ -159,6 +159,10 @@ func (c *GitHubController) SummarizeRepo(ctx echo.Context) error {
 
 	summary, err := c.githubService.SummarizeRepo(ctx.Request().Context(), userID, body.FullName, body.ForceRefresh, body.TargetRole)
 	if err != nil {
+		// full_name の形が正しくないのは利用者の入力の誤りなので 400 にする（#2176）
+		if errors.Is(err, github.ErrInvalidRepoFullName) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		var reauthErr *github.GitHubReauthRequiredError
 		if errors.As(err, &reauthErr) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
