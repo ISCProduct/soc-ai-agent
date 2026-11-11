@@ -7,17 +7,56 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// ErrInvalidRepoFullName full_name が GitHub の "owner/repo" の形になっていないことを表す。
+// コントローラはこのエラーを 400 に変える。
+var ErrInvalidRepoFullName = errors.New("full_name は owner/repo の形式で指定してください")
+
+var (
+	// GitHub のユーザー名・組織名の規則：英数字とハイフン、1〜39字、先頭と末尾は英数字。
+	// Enterprise Managed Users のログイン名は「IDP-USERNAME_SHORT-CODE」のように「_」を含むので、
+	// 途中の「_」も許す（「_」はパスの区切りにならない。#2182 のレビュー）。
+	githubOwnerPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,37}[A-Za-z0-9])?$`)
+	// GitHub のリポジトリ名の規則：英数字と「.」「-」「_」、1〜100字。
+	githubRepoNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
+)
+
+// ValidateRepoFullName full_name が "owner/repo" の形かを確かめる。
+//
+// full_name は GitHub API の URL のパスにそのまま入るため、「../」「?」「#」などを許すと
+// /repos/{owner}/{repo}/readme 以外のエンドポイントへ利用者のトークンで GET を送れてしまう（#2176）。
+// 使える文字と長さを GitHub の規則に限り、「/」はちょうど1つ、「.」「..」だけのリポジトリ名は拒否する
+// （どちらもパスの要素として解釈され、別のエンドポイントを指すため）。
+func ValidateRepoFullName(fullName string) error {
+	// 最初の「/」で分ける。「/」が無ければ repo が空、2つ以上あれば repo に「/」が残り、
+	// どちらも githubRepoNamePattern に合わないため、「/」はちょうど1つに限られる。
+	owner, repo, _ := strings.Cut(fullName, "/")
+	if !githubOwnerPattern.MatchString(owner) || !githubRepoNamePattern.MatchString(repo) {
+		return ErrInvalidRepoFullName
+	}
+	if repo == "." || repo == ".." {
+		return ErrInvalidRepoFullName
+	}
+	return nil
+}
 
 // SummarizeRepo リポジトリのREADMEをAIが解析し、技術的強みを要約する。
 // キャッシュがあれば再生成しない。forceRefresh=trueで強制再生成。
 // targetRole は志望職種（例: "エンジニア", "マーケ", "営業"）で、分析観点をカスタマイズする（#457）。
 func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName string, forceRefresh bool, targetRole string) (*models.GitHubRepoSummary, error) {
+	// URL に入れる前に形を確かめる。呼び出し元がコントローラ以外でも守られるよう、サービスの入口で見る（#2176）。
+	if err := ValidateRepoFullName(fullName); err != nil {
+		return nil, err
+	}
+
 	// キャッシュ確認
 	if !forceRefresh {
 		cached, err := s.githubRepo.GetRepoSummary(userID, fullName)
@@ -64,7 +103,8 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 
 // fetchREADME GitHub API経由でリポジトリのREADMEを取得する
 func (s *GitHubService) fetchREADME(ctx context.Context, client *http.Client, token, fullName string) (string, error) {
-	url := fmt.Sprintf("%s/repos/%s/readme", githubAPIBase, fullName)
+	// fullName は SummarizeRepo の入口で ValidateRepoFullName を通している。
+	url := fmt.Sprintf("%s/repos/%s/readme", s.getAPIBase(), fullName)
 	body, err := s.doGet(ctx, client, token, url)
 	if err != nil {
 		return "", err

@@ -156,9 +156,17 @@ func (c *GitHubController) SummarizeRepo(ctx echo.Context) error {
 	if err := ctx.Bind(&body); err != nil || body.FullName == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "full_name is required")
 	}
+	// 入口でも検証する。サービス側の検証は多層防御として残す（差し替えやラッパーで抜けても下流に届かないように。#2182 のレビュー）
+	if err := github.ValidateRepoFullName(body.FullName); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 
 	summary, err := c.githubService.SummarizeRepo(ctx.Request().Context(), userID, body.FullName, body.ForceRefresh, body.TargetRole)
 	if err != nil {
+		// full_name の形が正しくないのは利用者の入力の誤りなので 400 にする（#2176）
+		if errors.Is(err, github.ErrInvalidRepoFullName) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		var reauthErr *github.GitHubReauthRequiredError
 		if errors.As(err, &reauthErr) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
