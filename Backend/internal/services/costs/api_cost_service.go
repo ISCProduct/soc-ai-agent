@@ -609,14 +609,19 @@ func (s *APICostService) GetModelBreakdown(since time.Time) ([]ModelCostSummary,
 // 音声の単価（分・文字数）で課金するモデルも、トークン単価表を使っていないので空にする（#2151 のレビュー）。
 //
 // 根拠は、記録した時点の値（api_call_logs.price_basis）を使う（#2004）。recorded は、期間内の行のうち
-// 一番注意が必要な根拠（unknown > inherited > estimated > listed）。記録の無い行（price_basis の列を足す前の
-// 行など）もあるときは、それらは今の単価表で判定し、注意が必要なほうを出す。デプロイ直後の、古い行と新しい行が
+// 一番注意が必要な根拠（unknown > inherited > estimated > listed）。hasUnrecorded は、トークン単価で計算したのに
+// 記録の無い行（price_basis の列を足す前の行）があるか。あるときは、それらを今の単価表で判定し、注意が必要なほうを出す。
+// どちらも無ければ、トークン単価を使った行が無いので空にする。デプロイ直後の、古い行と新しい行が
 // 混ざる期間に、新しい行だけで「公開価格」と表示して古い行の状態を隠さないため。
 func summaryPriceBasis(model string, totalCostUSD float64, recorded string, hasUnrecorded bool) string {
 	if totalCostUSD <= 0 || isAudioPricedModel(model) {
 		return ""
 	}
 	if recorded == "" {
+		// 記録が無く、記録の無いトークンの行も無い ＝ トークン単価を使った行が無い（Web 検索のツール料だけなど）
+		if !hasUnrecorded {
+			return ""
+		}
 		return PriceBasis(model)
 	}
 	if hasUnrecorded {

@@ -289,6 +289,8 @@ func TestSummaryPriceBasis_PrefersRecorded(t *testing.T) {
 		{"記録時の推定値を優先", "gpt-4o-mini", 1.0, PriceBasisEstimated, false, PriceBasisEstimated},
 		{"記録時の公開価格を優先", "totally-new-model", 1.0, PriceBasisListed, false, PriceBasisListed},
 		{"記録が無ければ今の単価表", "totally-new-model", 1.0, "", true, PriceBasisUnknown},
+		// トークン単価を使った行が無い（Web 検索のツール料だけ）なら、今の単価表の根拠も付けない（#2166 の Codex のレビュー）
+		{"トークン単価を使った行が無ければ付けない", "totally-new-model", 1.0, "", false, ""},
 		// 古い行と新しい行が混ざる期間は、注意が必要なほうを出す
 		{"混在: 今の単価表のほうが注意が必要", "totally-new-model", 1.0, PriceBasisListed, true, PriceBasisUnknown},
 		{"混在: 記録のほうが注意が必要", "gpt-4o-mini", 1.0, PriceBasisInherited, true, PriceBasisInherited},

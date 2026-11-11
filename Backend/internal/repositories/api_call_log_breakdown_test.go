@@ -137,7 +137,10 @@ func TestModelBreakdown_ReturnsRecordedPriceBasis(t *testing.T) {
 		"WHEN 'unknown' THEN 3", "WHEN 'inherited' THEN 2", "WHEN 'estimated' THEN 1", "WHEN 'listed' THEN 0",
 		"ELSE -1 END", "AS recorded_price_basis", "GROUP BY model",
 		// 記録の無い行の数（古い行と新しい行が混ざる期間の判定に使う）
-		"SUM(CASE WHEN price_basis = '' THEN 1 ELSE 0 END) AS unrecorded_calls",
+		// トークン単価を使ったはずの行だけを数える（音声・ローカル推論・トークン0は除く。#2166 の Codex のレビュー）
+		"WHEN price_basis = ''", "AND prompt_tokens + completion_tokens > 0",
+		"AND audio_seconds = 0 AND characters = 0", "AND provider IN ('', 'openai')",
+		"AS unrecorded_calls",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("SQL に %q が無い:\n%s", want, sql)

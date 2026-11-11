@@ -34,13 +34,15 @@ func TestGetModelBreakdown_UsesRecordedBasisAndUnrecordedRows(t *testing.T) {
 			// 新しい行は公開価格として記録、古い行は記録なし。今の単価表では未登録 → 未登録を出す
 			AddRow("totally-new-model", 1.0, 100, 3, "listed", 2).
 			// すべて記録あり → 記録の値のまま
-			AddRow("totally-new-model-2", 1.0, 100, 3, "listed", 0))
+			AddRow("totally-new-model-2", 1.0, 100, 3, "listed", 0).
+			// Web 検索のツール料だけ（記録なし・記録の無いトークンの行も無し）→ 根拠を付けない
+			AddRow("totally-new-model-3", 0.01, 0, 1, "", 0))
 
 	got, err := NewAPICostService(repositories.NewAPICallLogRepository(db)).GetModelBreakdown(since)
 	if err != nil {
 		t.Fatalf("予期しないエラー: %v", err)
 	}
-	if len(got) != 2 || got[0].PriceBasis != PriceBasisUnknown || got[1].PriceBasis != PriceBasisListed {
+	if len(got) != 3 || got[0].PriceBasis != PriceBasisUnknown || got[1].PriceBasis != PriceBasisListed || got[2].PriceBasis != "" {
 		t.Fatalf("got = %+v", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
