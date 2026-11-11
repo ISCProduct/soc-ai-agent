@@ -41,18 +41,24 @@ on:
 permissions:
   contents: read
 
+# PR は同じ PR の古い実行を止める（push が続いたときに二重に課金しない）。
+# 手動実行は実行ごとに別のグループにし、同じブランチで2回実行しても先の実行を止めない。
 concurrency:
-  group: aibench-${{ github.event.pull_request.number || github.ref }}
+  group: aibench-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
   aibench:
     name: AI Bench
     # PR はラベルが付いているときだけ。付け外しで費用が発生するので、ラベルの付与で明示的に走らせる。
+    # labeled は aibench 以外のラベルを付けたときも届くので、付けたラベルが aibench のときだけ走らせる
+    # （aibench が付いた PR に無関係なラベルを足すたびに、測り直して課金しない）。
     # Dependabot の PR にはシークレットが渡らないので除外する（automation/test/dependabot-workflow-test.sh）。
     if: >-
       github.actor != 'dependabot[bot]' &&
-      (github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'aibench'))
+      (github.event_name == 'workflow_dispatch' ||
+        (github.event.action == 'labeled' && github.event.label.name == 'aibench') ||
+        (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'aibench')))
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:

@@ -26,7 +26,9 @@ summary() { printf '%s\n' "$@" >>"$SUMMARY"; }
 
 summary "## AI Bench（aibench）"
 if [ -z "${OPENAI_API_KEY:-}" ] && [ -z "$DRY" ]; then
-  summary "" "OPENAI_API_KEY（\`secrets.AIBENCH_OPENAI_API_KEY\`）が未設定のため、実行しませんでした。" \
+  # 成功で終わるので、「測って問題なし」と見分けられるよう警告の注釈も出す
+  echo "::warning title=AI Bench は未計測です::AIBENCH_OPENAI_API_KEY が未設定のため測っていません（成功扱いですが、品質は確認されていません）"
+  summary "" "**未計測**: OPENAI_API_KEY（\`secrets.AIBENCH_OPENAI_API_KEY\`）が未設定のため、実行しませんでした。" \
     "フォークからの PR ではシークレットが渡らないので、メンテナーが手動実行（workflow_dispatch）で測ってください。"
   exit 0
 fi
@@ -63,7 +65,7 @@ for side in "${sides[@]}"; do
         continue
       fi
       # head の失敗は評価コードや固定セットの破損なので、飛ばさずに止める
-      summary "" "head / $t の事前検証（-dry-run）に失敗しました。評価コードか固定セットが壊れています:" '```' "$(printf '%s\n' "$est_out" | tail -20)" '```'
+      summary "" "head / $t の事前検証（-dry-run）に失敗しました。評価コードか固定セットが壊れています:" '````' "$(printf '%s\n' "$est_out" | tail -20)" '````'
       exit 1
     fi
     est="$(printf '%s\n' "$est_out" | sed -n 's/.*概算コスト \$\([0-9.]*\).*/\1/p' | head -1)"
@@ -111,20 +113,23 @@ for t in "${targets[@]}"; do
     summary "（dry-run）"
     continue
   fi
-  summary "<details><summary>head の結果</summary>" "" '```' "$(sed -n '\# / model=#,$p' "$OUT/head-$t.log" | head -80)" '```' "</details>"
+  summary "<details><summary>head の結果</summary>" "" '````' "$(sed -n '\# / model=#,$p' "$OUT/head-$t.log" | head -80)" '````' "</details>"
   if [ "${#sides[@]}" -eq 2 ] && [ -f "$OUT/base-$t.json" ] && [ -f "$OUT/head-$t.json" ]; then
     base_manifest="${src[base]}/docs/research/ai-eval/$t.jsonl"
     head_manifest="$ROOT/docs/research/ai-eval/$t.jsonl"
     if "$OUT/aibench-head" -diff "$OUT/base-$t.json,$OUT/head-$t.json" >"$OUT/diff-$t.txt" 2>&1; then
       summary "base との差分: 劣化なし"
     elif ! cmp -s "$base_manifest" "$head_manifest"; then
-      # 固定セットが変わると入力が違うので、差はモデルやプロンプトの劣化とは言えない。参考として出すだけにする
-      summary "base との差分: 固定セットが変わったため参考値です（劣化の判定に使いません）"
+      # 固定セットが変わると入力が違うので、差はモデルやプロンプトの劣化とは言えない。参考として出すだけにする。
+      # ただし、プロンプトの変更と同じ PR だと劣化を見逃すので、注釈とサマリーで目立たせる
+      echo "::warning title=AI Bench: $t は劣化の判定をしていません::固定セットが変わったため参考値です。プロンプトの変更と同じ PR なら、レビューで差分を確認してください"
+      summary "base との差分: **固定セットが変わったため参考値です（劣化の判定に使いません）**" \
+        "> ⚠️ 差分は劣化を示していますが、ジョブは失敗させていません。プロンプトやモデルの変更と同じ PR では、この差分をレビューで確認してください。固定セットの変更は別の PR に分けると判定が効きます。"
     else
       summary "base との差分: **劣化を検知しました**"
       regressed=1
     fi
-    summary '```' "$(head -60 "$OUT/diff-$t.txt")" '```'
+    summary '````' "$(head -60 "$OUT/diff-$t.txt")" '````'
   elif [ "${#sides[@]}" -eq 2 ]; then
     summary "base にこの評価対象が無いため、差分はありません（head のみ）。"
   fi

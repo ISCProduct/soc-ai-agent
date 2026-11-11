@@ -11,7 +11,6 @@
 package aibench
 
 import (
-	"Backend/domain/entity"
 	"bufio"
 	"encoding/json"
 	"fmt"
@@ -19,6 +18,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"Backend/domain/entity"
 )
 
 // ゴールドラベル。良/中/悪の3値のみ。
