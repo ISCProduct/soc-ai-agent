@@ -99,3 +99,15 @@ func assertPtr(t *testing.T, label string, got, want *uint) {
 		t.Errorf("%s: got=%d, want=%d", label, *got, *want)
 	}
 }
+
+// 呼び出し元が付けた機能名は上書きしない（#1993）。
+func TestWithDefaultFeature(t *testing.T) {
+	ctx := WithDefaultFeature(context.Background(), FeatureChatQuestion)
+	if got := Feature(ctx); got != FeatureChatQuestion {
+		t.Fatalf("未設定なら既定を載せる: %q", got)
+	}
+	ctx = WithDefaultFeature(WithFeature(context.Background(), FeatureChatAnswerEval), FeatureChatQuestion)
+	if got := Feature(ctx); got != FeatureChatAnswerEval {
+		t.Fatalf("設定済みの機能名を上書きした: %q", got)
+	}
+}

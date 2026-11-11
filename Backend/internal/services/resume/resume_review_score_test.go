@@ -1,6 +1,7 @@
 package resume
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -176,7 +177,7 @@ func TestBuildReviewScoreItems_ScoreComputedServerSide(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			svc, stub := newReviewService(t, responsesBody(t, reviewJSON(t, tt.scores), ""))
 
-			review, items, err := svc.buildReviewScoreItems(reviewBlocks(), "", "エンジニア", tt.candidateType, "")
+			review, items, err := svc.buildReviewScoreItems(context.Background(), reviewBlocks(), "", "エンジニア", tt.candidateType, "")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -228,7 +229,7 @@ func TestBuildReviewScoreItems_RubricViolationHasNoScore(t *testing.T) {
 			body := responsesBody(t, reviewJSON(t, tt.scores), "")
 			svc, stub := newReviewService(t, body, body)
 
-			review, items, err := svc.buildReviewScoreItems(reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
+			review, items, err := svc.buildReviewScoreItems(context.Background(), reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -259,7 +260,7 @@ func TestBuildReviewScoreItems_RetryFixesScore(t *testing.T) {
 		responsesBody(t, reviewJSON(t, rubricScores(3, 3, 3, 3, 3)), ""),      // やり直しは正常
 	)
 
-	review, _, err := svc.buildReviewScoreItems(reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
+	review, _, err := svc.buildReviewScoreItems(context.Background(), reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -284,7 +285,7 @@ func TestBuildReviewScoreItems_RetryKeepsInitialItems(t *testing.T) {
 		responsesBody(t, reviewJSONItems(t, rubricScores(3, 3, 3, 3, 3), "やり直しの指摘", blockTexts), ""),
 	)
 
-	review, items, err := svc.buildReviewScoreItems(reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
+	review, items, err := svc.buildReviewScoreItems(context.Background(), reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -316,7 +317,7 @@ func TestBuildReviewScoreItems_RetryFillsMissingItems(t *testing.T) {
 		responsesBody(t, reviewJSONItems(t, rubricScores(3, 3, 3, 3, 3), "やり直しの指摘", blockTexts), ""),
 	)
 
-	_, items, err := svc.buildReviewScoreItems(reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
+	_, items, err := svc.buildReviewScoreItems(context.Background(), reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -339,7 +340,7 @@ func TestBuildReviewScoreItems_TruncatedOutputRetriesWithDoubleBudget(t *testing
 		responsesBody(t, reviewJSON(t, rubricScores(3, 3, 3, 3, 3)), ""), // 2回目: 4800 で収まる
 	)
 
-	review, items, err := svc.buildReviewScoreItems(reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
+	review, items, err := svc.buildReviewScoreItems(context.Background(), reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
 	if err != nil {
 		t.Fatalf("枠を倍にしたやり直しで成功するべき: %v", err)
 	}
@@ -367,7 +368,7 @@ func TestBuildReviewScoreItems_TruncatedOutputFails(t *testing.T) {
 	body := responsesBody(t, truncatedReviewJSON, "max_output_tokens")
 	svc, stub := newReviewService(t, body, body)
 
-	review, items, err := svc.buildReviewScoreItems(reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
+	review, items, err := svc.buildReviewScoreItems(context.Background(), reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
 	if err == nil {
 		t.Fatalf("エラーが返るべき（review=%+v items=%d）", review, len(items))
 	}

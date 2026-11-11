@@ -239,6 +239,9 @@ type TurnResult struct {
 	TotalQuestions         int
 	ResolvedCompanyID      uint
 	CustomQuestionsEnabled bool
+	// UtteranceSaveFailed はターンの発話を書き起こしへ保存できなかったことを示す（#1969）。
+	// 面接は止めず、画面に「記録できていない」ことを出すために返す（#1476 と同じ扱い）。
+	UtteranceSaveFailed bool
 }
 
 func (s *InterviewService) estimateCost(start, end *time.Time) float64 {

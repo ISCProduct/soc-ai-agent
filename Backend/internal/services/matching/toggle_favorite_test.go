@@ -33,9 +33,6 @@ func (s *stubToggleFavoriteMatchRepo) ToggleFavorite(uint) error {
 	return nil
 }
 func (s *stubToggleFavoriteMatchRepo) MarkAsApplied(uint) error { return nil }
-func (s *stubToggleFavoriteMatchRepo) FindFavoritesByUser(uint, string) ([]*entity.UserCompanyMatch, error) {
-	return nil, nil
-}
 func (s *stubToggleFavoriteMatchRepo) GetMatchStatistics(uint, string) (map[string]any, error) {
 	return nil, nil
 }

@@ -185,12 +185,17 @@ func (s *InterviewService) Turn(
 	// クライアントの history は件数・長さ・role のどれも信頼できない。
 	// 取得に失敗しても面接は止めず、今回の発話だけで続ける。
 	var utterances []models.InterviewUtterance
+	utterancesLoaded := false
 	if s.utterRepo != nil {
 		if utterances, err = s.utterRepo.FindBySessionID(sessionID); err != nil {
 			log.Printf("[Interview] load utterances for history error: %v", err)
 			utterances = nil
+		} else {
+			utterancesLoaded = true
 		}
 	}
+	// 同じターンが応答の前にもう一度走っても、発話の ID が同じになるようにする（二重保存の防止）
+	turnKey := turnUtteranceKey("turn", len(utterances), utterancesLoaded)
 	history := historyFromUtterances(utterances)
 	history = append(history, map[string]string{"role": "user", "content": userText})
 
@@ -239,6 +244,22 @@ func (s *InterviewService) Turn(
 		audio = nil
 	}
 
+	// 書き起こしはサーバーが保存する（#1969）。ユーザー → 面接官の順に並べる。
+	// 応答を返す直前に保存し、クライアントが切断・タイムアウトした（context が終わった）ターンは
+	// 保存しない。届かなかった質問を書き起こしと次の履歴に残すと、会話とレポートが利用者の
+	// 体験とずれる。以前のクライアント保存（応答を受け取ったターンだけ保存）と同じ扱いにする。
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	utteranceSaveFailed := false
+	if err := s.saveTurnUtterances(sessionID, turnKey,
+		turnUtterance{role: "user", text: userText},
+		turnUtterance{role: "ai", text: aiText},
+	); err != nil {
+		log.Printf("[Interview] save turn utterances session=%d: %v", sessionID, err)
+		utteranceSaveFailed = true
+	}
+
 	result := &TurnResult{
 		UserText:               userText,
 		AIText:                 aiText,
@@ -247,6 +268,7 @@ func (s *InterviewService) Turn(
 		CompanyReadingResolved: companyReadingResolved,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
+		UtteranceSaveFailed:    utteranceSaveFailed,
 	}
 	if directive != nil {
 		result.QuestionSource = directive.Source
@@ -283,6 +305,17 @@ func (s *InterviewService) StartTurn(
 	if session.Status == "finished" {
 		return nil, shared.ErrSessionFinished
 	}
+
+	// 冒頭の質問の発話 ID を決める。同じ /start-turn が応答の前にもう一度走っても二重に保存しない
+	startSaved, startLoaded := 0, false
+	if s.utterRepo != nil {
+		if existing, err := s.utterRepo.FindBySessionID(sessionID); err != nil {
+			log.Printf("[Interview] load utterances for start-turn error: %v", err)
+		} else {
+			startSaved, startLoaded = len(existing), true
+		}
+	}
+	turnKey := turnUtteranceKey("start", startSaved, startLoaded)
 
 	// WEB検索・手入力で company_id=0 でも、企業名が DB 登録と一致すれば解決する (#567)
 	companyID = s.resolveCompanyID(companyID, companyName)
@@ -354,6 +387,16 @@ func (s *InterviewService) StartTurn(
 		audio = nil
 	}
 
+	// 冒頭の質問もサーバーが書き起こしへ保存する（#1969）。届かなかった質問は保存しない。
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	utteranceSaveFailed := false
+	if err := s.saveTurnUtterances(sessionID, turnKey, turnUtterance{role: "ai", text: aiText}); err != nil {
+		log.Printf("[Interview] save start-turn utterance session=%d: %v", sessionID, err)
+		utteranceSaveFailed = true
+	}
+
 	result := &TurnResult{
 		AIText:                 aiText,
 		Audio:                  audio,
@@ -361,6 +404,7 @@ func (s *InterviewService) StartTurn(
 		CompanyReadingResolved: companyReadingResolved,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
+		UtteranceSaveFailed:    utteranceSaveFailed,
 	}
 	if directive != nil {
 		result.QuestionSource = directive.Source
