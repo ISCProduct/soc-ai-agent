@@ -158,6 +158,29 @@ frontend の不具合に見えるため、まず backend のログを確認し�
 > feature ブランチ同士の衝突は、先にマージされた側が develop に入った時点で
 > もう一方の CI が落ちる形で検知されます。
 
+### 版番号を振り直す
+
+衝突したら `automation/migration-renumber.sh` で振り直せます。
+このブランチが追加したマイグレーションを、`BASE_REF` の次の空き番号へ昇順のまま詰めます。
+up と down の両方を動かし、最後に重複検査と連番検査まで実行します。
+
+```bash
+git merge origin/develop                              # 先に取り込む（必須）
+./automation/migration-renumber.sh --dry-run          # 何が動くか確認
+./automation/migration-renumber.sh                    # 実行（BASE_REF の既定は origin/develop）
+```
+
+**`BASE_REF` を取り込んでいないブランチでは実行できません**（ツールが拒否します）。
+取り込まずに振り直すと、`BASE_REF` 側にしか無い版番号がこのツリーで欠番になり、
+連番検査が落ちます。
+
+版番号への参照（`migrations/000065` のようなコメント）が見つかった場合は、
+**警告するだけで書き換えません。** 番号だけでは、同じ番号を使う別のマイグレーションを
+指している可能性を区別できないためです。警告が出たら中身を見て判断してください。
+
+振り直した番号は **`BASE_REF` のその時点の値に対してのみ有効**です。
+他のマイグレーション PR が先にマージされたら、もう一度実行してください。
+
 ## 既存DB（AutoMigrate時代）の移行
 
 `schema_migrations` テーブルが存在せず、かつ `users` テーブルが存在するDBは、
