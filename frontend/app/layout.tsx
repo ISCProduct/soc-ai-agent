@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { MuiProvider } from '@/components/MuiProvider'
 import { StudentBottomNav } from '@/components/StudentBottomNav'
 import { GlobalNavMenu } from '@/components/GlobalNavMenu'
+import { NotificationBell } from '@/components/NotificationBell'
 import { Analytics } from '@vercel/analytics/react'
 // Vercelでホスティングされるまで実データは収集されない(AWS ECSデプロイのため現状は未計測)
 import { SpeedInsights } from '@vercel/speed-insights/next'
@@ -47,6 +48,7 @@ export default function RootLayout({
         <SentryClientInit />
         <MuiProvider>
           {children}
+          <NotificationBell />
           <GlobalNavMenu />
           <StudentBottomNav />
         </MuiProvider>

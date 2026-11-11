@@ -1,6 +1,7 @@
 package teacher
 
 import (
+	"Backend/internal/services/notification"
 	"errors"
 	"strings"
 	"testing"
@@ -130,5 +131,22 @@ func TestGuidanceService_CreateWithoutIndustriesStoresNull(t *testing.T) {
 	}
 	if got := store.created[0].SuggestedIndustries; got != nil {
 		t.Fatalf("SuggestedIndustries = %q, want nil (JSON カラムに空文字は書けない)", *got)
+	}
+}
+
+type recordingNotifier struct{ got []notification.Notice }
+
+func (r *recordingNotifier) Notify(n notification.Notice) { r.got = append(r.got, n) }
+
+// #2033: 先生の案内を出したら、学生へアプリ内通知も届く。
+func TestGuidanceService_CreateNotifiesStudent(t *testing.T) {
+	n := &recordingNotifier{}
+	svc := NewGuidanceService(&stubGuidanceStore{}, &stubStudentByID{})
+	svc.SetNotifier(n)
+	if _, err := svc.Create(CreateGuidanceInput{TeacherUserID: 9, StudentUserID: 3, Kind: models.GuidanceKindLowMatch, Message: "面談しましょう"}); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(n.got) != 1 || n.got[0].UserID != 3 || n.got[0].Kind != models.NotificationKindGuidance || n.got[0].Body != "面談しましょう" {
+		t.Fatalf("通知 = %+v", n.got)
 	}
 }

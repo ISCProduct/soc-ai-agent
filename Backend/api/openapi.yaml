@@ -69,6 +69,8 @@ tags:
     description: エントリーシートの添削とリライト（未ログインでも使える）
   - name: schedule
     description: 選考スケジュール
+  - name: notifications
+    description: アプリ内通知（締切・選考結果・スカウト・先生の案内）
   - name: google-calendar
     description: Google カレンダー連携
   - name: admin-companies
@@ -1751,6 +1753,78 @@ paths:
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   # ── schedule ───────────────────────────────────────
+  /api/notifications:
+    get:
+      tags: [notifications]
+      summary: 自分の通知の一覧（新しい順）
+      description: "宛先は `X-User-Token` から決まり、user_id は受け取らない（#2033）。"
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: limit, schema: { type: integer, maximum: 50 } }
+        - { in: query, name: before_id, description: この ID より古い通知だけ返す（続きの読み込み）, schema: { type: integer } }
+      responses:
+        "200":
+          description: 一覧と未読の件数
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unread_count: { type: integer }
+                  notifications:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        kind: { type: string, enum: [application, scout, guidance, deadline] }
+                        title: { type: string }
+                        body: { type: string }
+                        link: { type: string }
+                        read_at: { type: string, format: date-time, nullable: true }
+                        created_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/notifications/unread-count:
+    get:
+      tags: [notifications]
+      summary: 自分の未読の件数（ヘッダのバッジ用）
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 未読の件数
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unread_count: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/notifications/read-all:
+    post:
+      tags: [notifications]
+      summary: 自分の未読をすべて既読にする
+      security: [{ userToken: [] }]
+      responses:
+        "204": { description: 既読にした }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/notifications/{id}/read:
+    post:
+      tags: [notifications]
+      summary: 自分の通知1件を既読にする
+      description: 他人の通知や存在しない通知は 404（存在を区別させない）。既読済みでも 204。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: 既読にした }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 通知が見つからない }
+
   /api/schedule:
     get:
       tags: [schedule]

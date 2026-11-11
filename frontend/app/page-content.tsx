@@ -21,6 +21,7 @@ import {
 } from '@/lib/teacher-guidance'
 import { NextActionsBar } from '@/components/home/NextActionsBar'
 import { NoticeStack, type Notice } from '@/components/home/NoticeStack'
+import { fetchNotifications, markNotificationRead, safeNotificationLink, type AppNotification } from '@/lib/notifications'
 import styles from './page.module.css'
 
 export default function PageContent() {
@@ -36,6 +37,8 @@ export default function PageContent() {
   const [guidanceLoadFailed, setGuidanceLoadFailed] = useState(false)
   // 閉じる処理中のID。連打すると同じ案内へ何度もPOSTが飛ぶ(教員側は disabled で防いでいる)
   const [dismissingIds, setDismissingIds] = useState<Set<number>>(() => new Set())
+  // 未読のアプリ内通知（#2033）。先生の案内は上の案内として出しているので除く
+  const [appNotices, setAppNotices] = useState<AppNotification[]>([])
 
   // 教員案内の取得失敗はホームを壊さないが、「案内なし」とは見せない（#1691）。
   // 失敗を黙ると、教員が送った指導が届いていないことに学生が気づけない。
@@ -74,7 +77,19 @@ export default function PageContent() {
         // 履歴書状態の取得失敗はホーム画面を壊さない（バナーを出さない）
       })
     loadGuidances()
+    fetchNotifications(10)
+      .then(({ notifications }) => setAppNotices(notifications.filter((n) => !n.read_at && n.kind !== 'guidance')))
+      .catch(() => {
+        // 通知はヘッダのベルからも見られるので、取得失敗でホームを壊さない
+      })
   }, [router, loadGuidances])
+
+  const dismissAppNotice = (id: number) => {
+    setAppNotices((prev) => prev.filter((n) => n.id !== id))
+    markNotificationRead(id).catch(() => {
+      // 既読にできなくても次回また出るだけなので、画面は止めない
+    })
+  }
 
   const dismissWhatsNewBanner = () => {
     markWhatsNewAsSeen(whatsNewEntries)
@@ -170,6 +185,28 @@ export default function PageContent() {
           >
             履歴書を確認する
           </MuiLink>
+        </Alert>
+      ),
+    })
+  }
+  for (const n of appNotices) {
+    const link = safeNotificationLink(n.link)
+    notices.push({
+      key: `notification-${n.id}`,
+      node: (
+        <Alert
+          severity={n.kind === 'deadline' ? 'warning' : 'info'}
+          onClose={() => dismissAppNotice(n.id)}
+          sx={{ borderRadius: 0 }}
+          action={
+            link ? (
+              <Button color="inherit" size="small" component={NextLink} href={link} onClick={() => dismissAppNotice(n.id)}>
+                確認する
+              </Button>
+            ) : undefined
+          }
+        >
+          {n.title}
         </Alert>
       ),
     })
