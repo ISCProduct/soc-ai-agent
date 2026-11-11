@@ -27,7 +27,7 @@ test('debug session ID initialization', async ({ page }) => {
   // LocalStorageの状態を確認
   const storageState = await page.evaluate(() => {
     const allKeys = Object.keys(localStorage);
-    const result: Record<string, any> = {};
+    const result: Record<string, unknown> = {};
     allKeys.forEach(key => {
       result[key] = localStorage.getItem(key);
     });
