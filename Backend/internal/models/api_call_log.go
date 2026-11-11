@@ -44,6 +44,10 @@ type APICallLog struct {
 	// これが無いと、同じ gpt-4o-mini でも通常のチャットと web_search を
 	// 区別できず、検索コストの85%を占めるツール料が記録から抜ける。
 	WebSearchCalls int `gorm:"not null;default:0" json:"web_search_calls"`
+	// PriceBasis は、記録した時点のトークン単価の根拠（listed / estimated / inherited / unknown, #2004）。
+	// 集計時に今の単価表から判定すると、単価表を上書きしたときに過去の行まで表示が変わるため、記録時に残す。
+	// 空文字は記録なし（音声の単価で計算した行・ローカル推論の行・この列を足す前の行）。migrations/000062。
+	PriceBasis string `gorm:"size:16;not null;default:''" json:"price_basis,omitempty"`
 	// 複合インデックス (called_at, provider) と (organization_id, called_at) は
 	// migrations/000031 で定義する。AutoMigrate は使わない方針のためタグには書かない。
 }
