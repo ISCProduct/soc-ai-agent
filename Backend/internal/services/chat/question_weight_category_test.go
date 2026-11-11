@@ -80,16 +80,12 @@ type stubPredefinedRepo struct {
 func (r *stubPredefinedRepo) FindActiveQuestions(string, *uint, *uint, string) ([]*models.PredefinedQuestion, error) {
 	return r.questions, nil
 }
-func (r *stubPredefinedRepo) FindByCategory(string, string) ([]*models.PredefinedQuestion, error) {
-	return nil, nil
-}
 func (r *stubPredefinedRepo) FindByID(uint) (*models.PredefinedQuestion, error) { return nil, nil }
 func (r *stubPredefinedRepo) Create(*models.PredefinedQuestion) error           { return nil }
 func (r *stubPredefinedRepo) Update(*models.PredefinedQuestion) error           { return nil }
 func (r *stubPredefinedRepo) GetNextQuestion([]uint, string, *uint, *uint, string, string) (*models.PredefinedQuestion, error) {
 	return nil, nil
 }
-func (r *stubPredefinedRepo) CountByCategory(string) (int64, error) { return 0, nil }
 
 func uintPtr(v uint) *uint { return &v }
 

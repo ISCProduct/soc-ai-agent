@@ -98,16 +98,3 @@ func (r *UserAnalysisProgressRepository) Update(progress *entity.UserAnalysisPro
 	m := mapper.UserAnalysisProgressFromEntity(progress)
 	return r.db.Save(m).Error
 }
-
-// GetCurrentPhase 現在進行中のフェーズを取得
-func (r *UserAnalysisProgressRepository) GetCurrentPhase(userID uint, sessionID string) (*entity.UserAnalysisProgress, error) {
-	var m models.UserAnalysisProgress
-	err := r.db.Preload("Phase").
-		Where("user_id = ? AND session_id = ? AND is_completed = ?", userID, sessionID, false).
-		Order("phase_id ASC").
-		First(&m).Error
-	if err != nil {
-		return nil, err
-	}
-	return mapper.UserAnalysisProgressToEntity(&m), nil
-}

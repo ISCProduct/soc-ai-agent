@@ -29,7 +29,6 @@ func (s *warmRepoStub) FindAllActive(int, int) ([]models.Company, error) { retur
 func (s *warmRepoStub) FindAllActiveNames(string) ([]models.CompanyName, error) {
 	return nil, nil
 }
-func (s *warmRepoStub) CountActive() (int64, error) { return 0, nil }
 func (s *warmRepoStub) ListActiveFiltered(int, int, string, string, string, string, string, *uint) ([]models.Company, int64, error) {
 	return nil, 0, nil
 }

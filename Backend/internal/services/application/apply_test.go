@@ -36,9 +36,6 @@ func (s *stubApplyMatchRepo) FindByID(uint) (*entity.UserCompanyMatch, error) {
 func (s *stubApplyMatchRepo) MarkAsViewed(uint) error   { return nil }
 func (s *stubApplyMatchRepo) ToggleFavorite(uint) error { return nil }
 func (s *stubApplyMatchRepo) MarkAsApplied(uint) error  { return nil }
-func (s *stubApplyMatchRepo) FindFavoritesByUser(uint, string) ([]*entity.UserCompanyMatch, error) {
-	return nil, nil
-}
 func (s *stubApplyMatchRepo) GetMatchStatistics(uint, string) (map[string]any, error) {
 	return nil, nil
 }

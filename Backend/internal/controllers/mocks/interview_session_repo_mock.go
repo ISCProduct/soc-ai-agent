@@ -2,7 +2,6 @@ package mocks
 
 import (
 	"Backend/internal/models"
-	"time"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -59,10 +58,5 @@ func (m *InterviewSessionRepositoryMock) CountByUser(userID uint) (int64, error)
 
 func (m *InterviewSessionRepositoryMock) CountAll(schoolID *uint, companyID *uint) (int64, error) {
 	args := m.Called(schoolID, companyID)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *InterviewSessionRepositoryMock) CountByUserAndDay(userID uint, day time.Time) (int64, error) {
-	args := m.Called(userID, day)
 	return args.Get(0).(int64), args.Error(1)
 }

@@ -35,6 +35,7 @@ import {
 } from '@/lib/sidebar-nav'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { useInterviewSessionActive } from '@/app/interview/sessionChrome'
+import { useTranslations } from '@/lib/i18n'
 
 type NavHref = (typeof SIDEBAR_NAV_ITEMS)[number]['href'] | (typeof GLOBAL_NAV_HOME_ITEMS)[number]['href']
 
@@ -65,6 +66,7 @@ export function GlobalNavMenu() {
   const [open, setOpen] = useState(false)
   // AI面接のセッション画面表示中はFabが操作ボタンに重なるため隠す（StudentBottomNavと同じ理由、#1569）
   const interviewSessionActive = useInterviewSessionActive()
+  const t = useTranslations('nav')
 
   if (pathname === '/' || !shouldShowStudentBottomNav(pathname)) return null
   if (interviewSessionActive) return null
@@ -74,7 +76,7 @@ export function GlobalNavMenu() {
       <Fab
         size="medium"
         color="primary"
-        aria-label="メニューを開く"
+        aria-label={t('menu.open')}
         onClick={() => setOpen(true)}
         sx={{
           position: 'fixed',
@@ -87,7 +89,7 @@ export function GlobalNavMenu() {
       </Fab>
       <Drawer anchor="right" open={open} onClose={() => setOpen(false)}>
         <Box sx={{ width: 280 }} role="presentation">
-          <List component="nav" aria-label="画面の切り替え">
+          <List component="nav" aria-label={t('menu.label')}>
             {[...GLOBAL_NAV_HOME_ITEMS, ...SIDEBAR_NAV_ITEMS].map((item) => {
               // /interview と /interview/history のように前方一致が重なるときは、より長い方だけを現在地にする
               const current = isCurrentNavExclusive(pathname, item.href, SIDEBAR_NAV_ITEMS.map((o) => o.href))
@@ -105,7 +107,7 @@ export function GlobalNavMenu() {
                     <ListItemIcon sx={{ minWidth: 36 }}>{NAV_ICONS[item.href]}</ListItemIcon>
                     <ListItemText
                       primary={item.label}
-                      secondary={current ? '表示中' : undefined}
+                      secondary={current ? t('menu.current') : undefined}
                       primaryTypographyProps={{ fontWeight: current ? 700 : 400 }}
                     />
                   </ListItemButton>

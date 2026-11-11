@@ -17,6 +17,7 @@ import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { cn } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { PriceBasisBadge, type PriceBasis } from './price-basis-badge'
 import { Progress } from '@/components/ui/progress'
 import {
   Table,
@@ -46,6 +47,8 @@ type ModelRow = {
   total_cost_usd: number
   total_tokens: number
   call_count: number
+  /** 単価の根拠（#2004）。金額が0の行には付かない */
+  price_basis?: PriceBasis
 }
 
 // #1294: 機能別・プロバイダ別・モデル別・組織別の内訳
@@ -612,6 +615,7 @@ export default function PageContent() {
                 <div key={row.model}>
                   <div className="flex items-center gap-2 mb-1">
                     <Badge variant="outline">{row.model}</Badge>
+                    <PriceBasisBadge basis={row.price_basis} />
                     <span className="text-xs text-muted-foreground">
                       {row.call_count.toLocaleString()} calls / {row.total_tokens.toLocaleString()} tokens
                     </span>

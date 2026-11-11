@@ -26,14 +26,14 @@ func TestCalculateCost_LongestPrefixWins(t *testing.T) {
 		{name: "gpt-4o は 4o 単価", model: "gpt-4o", want: 2.50 + 10.00},
 		{name: "gpt-4-turbo は turbo 単価", model: "gpt-4-turbo", want: 10.00 + 30.00},
 		{name: "gpt-4 は gpt-4 単価", model: "gpt-4", want: 30.00 + 60.00},
-		{name: "o1-mini は o1-mini 単価", model: "o1-mini", want: 3.00 + 12.00},
+		{name: "o1-mini は o1-mini 単価", model: "o1-mini", want: 1.10 + 4.40},
 		{name: "o1 は o1 単価", model: "o1", want: 15.00 + 60.00},
 		// バージョン付き・日付付きも最長一致
 		{name: "日付付き mini", model: "gpt-4o-mini-2024-07-18", want: 0.15 + 0.60},
 		{name: "日付付き 4o", model: "gpt-4o-2024-08-06", want: 2.50 + 10.00},
 		{name: "検索プレビュー mini", model: "gpt-4o-mini-search-preview", want: 0.15 + 0.60},
 		{name: "検索プレビュー 4o", model: "gpt-4o-search-preview", want: 2.50 + 10.00},
-		{name: "gpt-5-search-api", model: "gpt-5-search-api", want: 2.50 + 10.00},
+		{name: "gpt-5-search-api", model: "gpt-5-search-api", want: 1.25 + 10.00},
 		// 大文字・空白
 		{name: "大文字は正規化される", model: "  GPT-4O-MINI  ", want: 0.15 + 0.60},
 		// 未知モデルは過小評価しない

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"Backend/domain/entity"
 	"Backend/internal/models"
@@ -44,9 +43,6 @@ func (m *mockInterviewSessionRepo) CountByUser(userID uint) (int64, error) { ret
 func (m *mockInterviewSessionRepo) CountAll(schoolID *uint, companyID *uint) (int64, error) {
 	return 0, nil
 }
-func (m *mockInterviewSessionRepo) CountByUserAndDay(userID uint, day time.Time) (int64, error) {
-	return 0, nil
-}
 
 type mockInterviewUtterRepo struct {
 	utterances []models.InterviewUtterance
@@ -67,7 +63,6 @@ type mockUserRepo2 struct {
 func (m *mockUserRepo2) GetUserByID(id uint) (*entity.User, error)         { return m.user, m.err }
 func (m *mockUserRepo2) CreateUser(u *entity.User) error                   { return nil }
 func (m *mockUserRepo2) GetUserByEmail(email string) (*entity.User, error) { return nil, nil }
-func (m *mockUserRepo2) ListUsers() ([]entity.User, error)                 { return nil, nil }
 func (m *mockUserRepo2) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
 	return nil, 0, nil
 }

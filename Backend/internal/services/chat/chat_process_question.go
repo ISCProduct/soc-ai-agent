@@ -71,42 +71,17 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	// 全カテゴリ（職種に応じて並び順を調整）
 	allCategories := s.getCategoryOrder(jobCategoryID)
 
-	// 未評価カテゴリを優先的に選択
-	var targetCategory string
-	unevaluatedCategories := []string{}
-	weaklyEvaluatedCategories := []string{}
-
-	for _, cat := range allCategories {
-		score, exists := scoreMap[cat]
-		if !exists || score == 0 {
-			unevaluatedCategories = append(unevaluatedCategories, cat)
-		} else if score > -3 && score < 3 {
-			// スコアが-3〜3の範囲は評価が曖昧
-			weaklyEvaluatedCategories = append(weaklyEvaluatedCategories, cat)
-		}
+	// フェーズの質問枠を、先頭の未評価軸が使い切らないように配る（SOCAIAGENT-473）。
+	phaseNameForPick := ""
+	if currentPhase != nil && currentPhase.Phase != nil {
+		phaseNameForPick = currentPhase.Phase.PhaseName
 	}
-
-	if len(unevaluatedCategories) > 0 {
-		targetCategory = unevaluatedCategories[0]
-		log.Printf("Targeting unevaluated category: %s\n", targetCategory)
-	} else if len(weaklyEvaluatedCategories) > 0 {
-		targetCategory = weaklyEvaluatedCategories[0]
-		log.Printf("Targeting weakly evaluated category: %s (score: %d)\n", targetCategory, scoreMap[targetCategory])
-	} else {
-		// 全カテゴリ評価済みなら、最もスコアが極端なものを深掘り
-		maxAbsScore := 0
-		for cat, score := range scoreMap {
-			absScore := score
-			if absScore < 0 {
-				absScore = -absScore
-			}
-			if absScore > maxAbsScore {
-				maxAbsScore = absScore
-				targetCategory = cat
-			}
-		}
-		log.Printf("All categories evaluated, deepening strongest: %s (score: %d)\n", targetCategory, scoreMap[targetCategory])
-	}
+	targetCategory, _ := pickPhaseTarget(
+		allowedCategoriesForPhase(phaseNameForPick, allCategories),
+		scoreMap,
+		askedCategoryCounts(history),
+	)
+	log.Printf("Targeting category: %s\n", targetCategory)
 
 	// 常にまずルールベース質問を試し、なければAIで生成
 	var questionWeightID uint
@@ -141,7 +116,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		// targetCategory とは一致しないことがある。実際に狙った軸を受け取って
 		// 質問メッセージに残す(#1333)。
 		var usedCategory string
-		aiResponse, _, usedCategory, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, jobCategoryID, targetLevel, currentPhase)
+		aiResponse, _, usedCategory, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, jobCategoryID, targetLevel, currentPhase, askedCategoryCounts(history))
 		if usedCategory != "" {
 			targetCategory = usedCategory
 		}

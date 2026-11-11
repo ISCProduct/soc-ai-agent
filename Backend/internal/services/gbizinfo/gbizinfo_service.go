@@ -235,7 +235,11 @@ func (s *GBizInfoService) syncFailed(company *models.Company, message string) (*
 	company.GBizLastSyncedAt = &now
 	company.GBizSyncStatus = "failed"
 	company.GBizSyncMessage = message
-	_ = s.companyRepo.Update(company)
+	// 同期の失敗はこのあと返す。記録できないと画面に前回の状態が出たままになるので、
+	// 記録の失敗もログで分かるようにする（#2002）
+	if err := s.companyRepo.Update(company); err != nil {
+		log.Printf("[GBizInfo] failed to record sync failure company_id=%d (sync error: %s): %v", company.ID, message, err)
+	}
 	return &GBizSyncResult{
 		CompanyID:       company.ID,
 		CorporateNumber: company.CorporateNumber,
