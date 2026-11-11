@@ -31,6 +31,8 @@ export default defineConfig({
     'responsive-layout.spec.ts',
     'profile-layout.spec.ts',
     'tap-targets.spec.ts',
+    // 企業ポータルの業務フロー（求人・応募・スカウト・学生検索。SOCAIAGENT-591）
+    'company-portal-flows.spec.ts',
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

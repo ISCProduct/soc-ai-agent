@@ -1,34 +1,39 @@
+import { createTranslator } from '@/lib/i18n'
+
+// 表示名は辞書（messages/ja.json の nav）が正本（SOCAIAGENT-595）。
+const t = createTranslator('nav')
+
 /**
  * 分析サイドバーの固定ナビ項目。
  * next/link で prefetch するため href を一元管理する。
  */
 export const SIDEBAR_NAV_ITEMS = [
-  { href: '/correlation-diagram', label: '企業相関図' },
-  { href: '/chat-history', label: 'チャット履歴' },
-  { href: '/resume', label: '履歴書レビュー' },
-  { href: '/assessments', label: '適性検査（性格）' },
-  { href: '/ability-assessments', label: '適性検査（能力）' },
-  { href: '/interview', label: '面接練習' },
-  { href: '/interview/history', label: '面接履歴' },
-  { href: '/es-rewrite', label: 'ESリライト・添削' },
-  { href: '/schedule', label: '選考スケジュール' },
-  { href: '/applications', label: '選考管理' },
-  { href: '/scout', label: 'スカウト' },
-  { href: '/profile', label: 'プロフィール設定' },
+  { href: '/correlation-diagram', label: t('sidebar.correlationDiagram') },
+  { href: '/chat-history', label: t('sidebar.chatHistory') },
+  { href: '/resume', label: t('sidebar.resume') },
+  { href: '/assessments', label: t('sidebar.personalityAssessment') },
+  { href: '/ability-assessments', label: t('sidebar.abilityAssessment') },
+  { href: '/interview', label: t('sidebar.interview') },
+  { href: '/interview/history', label: t('sidebar.interviewHistory') },
+  { href: '/es-rewrite', label: t('sidebar.esRewrite') },
+  { href: '/schedule', label: t('sidebar.schedule') },
+  { href: '/applications', label: t('sidebar.applications') },
+  { href: '/scout', label: t('sidebar.scout') },
+  { href: '/profile', label: t('sidebar.profile') },
 ] as const
 
 export const SIDEBAR_ADMIN_NAV = {
   href: '/admin',
-  label: '管理者機能',
+  label: t('admin'),
 } as const
 
 export const STUDENT_BOTTOM_NAV_ITEMS = [
-  { href: '/', label: '診断' },
-  { href: '/results', label: '結果' },
-  { href: '/interview', label: '面接' },
-  { href: '/resume', label: '履歴書' },
+  { href: '/', label: t('bottom.diagnosis') },
+  { href: '/results', label: t('bottom.results') },
+  { href: '/interview', label: t('bottom.interview') },
+  { href: '/resume', label: t('bottom.resume') },
   // 行き先の見出し（プロフィール）と名前を揃える（#1576）。
-  { href: '/profile', label: 'プロフィール' },
+  { href: '/profile', label: t('bottom.profile') },
 ] as const
 
 /**
@@ -37,8 +42,8 @@ export const STUDENT_BOTTOM_NAV_ITEMS = [
  * そのままだと PC で /schedule などからホームにもマッチング結果にも戻れなかった。
  */
 export const GLOBAL_NAV_HOME_ITEMS = [
-  { href: '/', label: 'ホーム（AI相談）' },
-  { href: '/results', label: 'マッチング結果' },
+  { href: '/', label: t('home.home') },
+  { href: '/results', label: t('home.results') },
 ] as const
 
 /** 今いる画面がナビ項目に当たるか。/ は完全一致、それ以外は配下も含める。 */

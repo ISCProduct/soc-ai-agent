@@ -32,15 +32,6 @@ func (r *CompanyRepository) FindAllActive(limit, offset int) ([]models.Company, 
 	return companies, err
 }
 
-// CountActive アクティブ企業数を取得
-func (r *CompanyRepository) CountActive() (int64, error) {
-	var count int64
-	err := r.db.Model(&models.Company{}).
-		Where("is_active = ?", true).
-		Count(&count).Error
-	return count, err
-}
-
 // companyListSelectColumns は管理画面一覧向けの軽量カラム（text 過取得を避ける）。
 // description / tech_stack は不足判定に必要なため残す。
 const companyListSelectColumns = "id, name, industry, location, source_type, is_provisional, data_status, " +

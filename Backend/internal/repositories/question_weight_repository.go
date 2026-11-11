@@ -56,16 +56,6 @@ func (r *QuestionWeightRepository) FindActiveByCategory(category string) ([]mode
 	return questions, err
 }
 
-// FindActiveByIndustryAndJob 業界と職種に関連する質問を取得
-func (r *QuestionWeightRepository) FindActiveByIndustryAndJob(industryID, jobCategoryID uint) ([]models.QuestionWeight, error) {
-	var questions []models.QuestionWeight
-	err := r.db.Where("(industry_id = ? OR industry_id = 0 OR industry_id IS NULL) AND "+
-		"(job_category_id = ? OR job_category_id = 0 OR job_category_id IS NULL) AND "+
-		"is_active = ?", industryID, jobCategoryID, true).
-		Find(&questions).Error
-	return questions, err
-}
-
 // GetRandomQuestion ランダムに質問を1つ取得
 func (r *QuestionWeightRepository) GetRandomQuestion(industryID, jobCategoryID uint) (*models.QuestionWeight, error) {
 	var qw models.QuestionWeight
