@@ -1,0 +1,114 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import {
+  Alert,
+  Box,
+  Card,
+  CardContent,
+  CircularProgress,
+  FormControlLabel,
+  Switch,
+  Typography,
+} from '@mui/material'
+import { authService } from '@/lib/auth'
+import { BACKEND_URL } from '@/lib/config'
+
+const ENDPOINT = `${BACKEND_URL}/api/user/training-consent`
+
+/**
+ * 面接データを採点モデルの学習に使うことへの同意（#2167）。
+ *
+ * 初期値はオフ（opt-in）。スイッチを切り替えた時点で保存する。希望条件のフォーム（ScoutPreferencesCard）に
+ * 混ぜないのは、同意は希望条件と無関係で、「保存」を押し忘れて同意したつもり・取り消したつもりになるのを防ぐため。
+ * 保存に失敗したら、スイッチを元の状態に戻してエラーを出す（保存できていない状態を「オン」に見せない）。
+ */
+export function TrainingConsentCard() {
+  const [allow, setAllow] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    fetch(ENDPOINT, { headers: authService.getUserFetchHeaders() })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))
+      .then((data: { allow_training_use?: boolean }) => setAllow(data.allow_training_use === true))
+      .catch(() => setLoadFailed(true))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const change = async (next: boolean) => {
+    const previous = allow
+    setAllow(next)
+    setSaving(true)
+    setError('')
+    setSaved(false)
+    try {
+      const res = await fetch(ENDPOINT, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
+        body: JSON.stringify({ allow_training_use: next }),
+      })
+      if (!res.ok) throw new Error('failed')
+      const data: { allow_training_use?: boolean } = await res.json()
+      setAllow(data.allow_training_use === true)
+      setSaved(true)
+    } catch {
+      setAllow(previous)
+      setError('保存に失敗しました。時間をおいてもう一度お試しください。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+      <CardContent>
+        <Typography variant="h6" component="h2" gutterBottom>
+          AI 面接の改善への協力
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+          あなたの AI 面接の記録（発話とスコア）を、面接の採点モデルを改善するための学習に使ってよいかの設定です。
+        </Typography>
+        <Box component="ul" sx={{ m: 0, mb: 2, pl: 2.5, color: 'text.secondary', typography: 'body2' }}>
+          <li>氏名・メールアドレス・学校名・企業名などは、学習に使う前に別の記号に置き換えます。</li>
+          <li>学習以外の目的には使いません。企業や先生に公開されることもありません。</li>
+          <li>いつでもオフにできます。オフにすると、すでに学習用に書き出したあなたのデータも削除します。</li>
+        </Box>
+
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
+            <CircularProgress size={24} aria-label="読み込み中" />
+          </Box>
+        ) : loadFailed ? (
+          <Alert severity="error">設定の取得に失敗しました。ページを再読み込みしてください。</Alert>
+        ) : (
+          <>
+            {error && (
+              <Alert severity="error" sx={{ mb: 1 }}>
+                {error}
+              </Alert>
+            )}
+            {saved && (
+              <Alert severity="success" sx={{ mb: 1 }}>
+                {allow ? '学習への利用に同意しました' : '学習への利用をオフにしました'}
+              </Alert>
+            )}
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={allow}
+                  disabled={saving}
+                  onChange={(e) => void change(e.target.checked)}
+                />
+              }
+              label="面接の記録を、採点モデルの学習に使うことに同意する"
+            />
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}

@@ -4179,6 +4179,29 @@ paths:
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/user/training-consent:
+    get:
+      tags: [user]
+      summary: 学習利用の同意を取得
+      description: |
+        面接データを採点モデルの学習に使うことへの同意（#2167）。初期値 false の opt-in。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 成功（`allow_training_use`）
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [user]
+      summary: 学習利用の同意を更新
+      description: |
+        `allow_training_use`（boolean）は必須。希望条件（`/api/user/preferences`）とは別に保存する。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 成功（更新後の `allow_training_use`）
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /api/user/industries:
     get:
       tags: [user]
