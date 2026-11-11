@@ -498,6 +498,11 @@ func hashEmail(email string) string {
 	return hex.EncodeToString(h[:])
 }
 
+// MaskEmail はログ向けにローカル部を伏せる。登録前でユーザーIDが無いときに使う。
+func MaskEmail(email string) string {
+	return maskEmail(email)
+}
+
 func maskEmail(email string) string {
 	email = strings.TrimSpace(email)
 	at := strings.Index(email, "@")
