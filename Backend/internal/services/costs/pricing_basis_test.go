@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log"
 	"maps"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -159,14 +160,43 @@ func TestWarnPricingOnce_InheritedNamesTheSourceModel(t *testing.T) {
 }
 
 // 音声の利用ではトークン単価表を引かず、トークン単価の警告も出さない（#2151 のレビュー）。
+// gpt-transcribe はトークン単価表に無いが、分単価の表にはあるので、どちらの警告も出ない。
 func TestUsageCostUSD_AudioDoesNotWarnTokenPricing(t *testing.T) {
+	fixAudioRateEnv(t)
 	buf := captureCostLog(t)
-	cost := usageCostUSD(openaiPkg.Usage{Provider: "openai", Model: "gpt-transcribe-audio-test", AudioSeconds: 60})
-	if cost != calculateAudioCost("openai", 60, 0) {
+	cost := usageCostUSD(openaiPkg.Usage{Provider: "openai", Model: "gpt-transcribe", AudioSeconds: 60})
+	if cost != calculateAudioCost("openai", "gpt-transcribe", 60, 0) {
 		t.Errorf("音声の単価で計算されていない: %v", cost)
 	}
 	if buf.Len() != 0 {
 		t.Errorf("音声の利用でトークン単価の警告が出た: %q", buf.String())
+	}
+}
+
+// 記録する料金は、使ったモデルの分単価で計算する（#2173 の受け入れ条件）。
+func TestUsageCostUSD_STTUsesModelRate(t *testing.T) {
+	fixAudioRateEnv(t)
+	cases := []struct {
+		name string
+		u    openaiPkg.Usage
+		want float64
+	}{
+		{"gpt-transcribe で1分 = $0.0045", openaiPkg.Usage{Provider: "openai", Model: "gpt-transcribe", AudioSeconds: 60}, 0.0045},
+		{"gpt-4o-mini-transcribe で1分 = $0.003", openaiPkg.Usage{Provider: "openai", Model: "gpt-4o-mini-transcribe", AudioSeconds: 60}, 0.003},
+		{"表に無いモデルで1分 = $0.006", openaiPkg.Usage{Provider: "openai", Model: "stt-usage-unknown-model", AudioSeconds: 60}, 0.006},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := apiCallLogFromUsage(tc.u, time.Now()).CostUSD; math.Abs(got-tc.want) > 1e-12 {
+				t.Errorf("CostUSD = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	// STT_COST_PER_MINUTE_USD を設定していれば、その値で記録する
+	t.Setenv(sttCostOverrideEnv, "0.01")
+	if got := usageCostUSD(openaiPkg.Usage{Provider: "openai", Model: "gpt-transcribe", AudioSeconds: 60}); got != 0.01 {
+		t.Errorf("env を設定したときの料金 = %v, want 0.01", got)
 	}
 }
 
