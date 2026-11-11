@@ -12,6 +12,7 @@ package aifailover
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 
@@ -20,7 +21,7 @@ import (
 
 // Degradable は、ローカルへ縮退してよい失敗かを返す。
 //
-// 縮退する: 429・5xx、タイムアウト、接続できない（名前解決・接続拒否など）
+// 縮退する: 408・429・5xx、タイムアウト、接続できない（名前解決・接続拒否など）
 // 縮退しない: 認証・権限（401/403）、入力不正（400/404/413/422 など）、呼び出し元の ctx が
 // 終わった（クライアントが切断した。ローカルで続けても受け取る相手がいない）
 func Degradable(ctx context.Context, err error) bool {
@@ -32,7 +33,9 @@ func Degradable(ctx context.Context, err error) bool {
 	}
 	var statusErr *openai.StatusError
 	if errors.As(err, &statusErr) {
-		return statusErr.StatusCode == http.StatusTooManyRequests || statusErr.StatusCode >= 500
+		return statusErr.StatusCode == http.StatusRequestTimeout ||
+			statusErr.StatusCode == http.StatusTooManyRequests ||
+			statusErr.StatusCode >= 500
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		// 呼び出し元の ctx は生きているので、内側のタイムアウト（API の応答待ち）
@@ -48,4 +51,26 @@ func Degradable(ctx context.Context, err error) bool {
 	}
 	var dnsErr *net.DNSError
 	return errors.As(err, &dnsErr)
+}
+
+// failureKind は、ログに出すための失敗の種類を返す（状態コード・タイムアウト・接続失敗など）。
+//
+// エラーの文面（StatusError の本文など）は出さない。音声認識やチャットのエラー応答には
+// 学生の発話の一部が含まれることがあり、障害中は工程ごとに繰り返しログに残るため。
+func failureKind(err error) string {
+	var statusErr *openai.StatusError
+	if errors.As(err, &statusErr) {
+		return fmt.Sprintf("status=%d", statusErr.StatusCode)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return "network error"
+	}
+	return fmt.Sprintf("error %T", err)
 }

@@ -181,7 +181,7 @@ func run[T any](ctx context.Context, s *Speech, stage string, breaker *Breaker, 
 			return v, out, err
 		}
 		breaker.Failure()
-		log.Printf("[AIFailover] %s: OpenAI の一時的な障害のためローカルへ縮退します: %v", stage, err)
+		log.Printf("[AIFailover] %s: OpenAI の一時的な障害（%s）のためローカルへ縮退します", stage, failureKind(err))
 	} else {
 		log.Printf("[AIFailover] %s: Circuit Breaker が開いているため OpenAI を呼ばずにローカルを使います", stage)
 	}

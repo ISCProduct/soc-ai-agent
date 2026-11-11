@@ -28,6 +28,7 @@ func TestDegradable(t *testing.T) {
 		err  error
 		want bool
 	}{
+		{name: "408（タイムアウト）", err: &openai.StatusError{Format: "chat error %d: %s", StatusCode: 408}, want: true},
 		{name: "429", err: &openai.StatusError{Format: "chat error %d: %s", StatusCode: 429}, want: true},
 		{name: "500", err: &openai.StatusError{Format: "chat error %d: %s", StatusCode: 500}, want: true},
 		{name: "503 を包んだもの", err: fmt.Errorf("wrap: %w", &openai.StatusError{Format: "tts error %d: %s", StatusCode: 503}), want: true},
@@ -49,6 +50,30 @@ func TestDegradable(t *testing.T) {
 			}
 			if got := Degradable(ctx, tt.err); got != tt.want {
 				t.Fatalf("Degradable = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// 縮退のログには状態コードなどの種類だけを出し、エラー応答の本文（学生の発話が入りうる）は出さない
+func TestFailureKindOmitsBody(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "状態コード", err: fmt.Errorf("wrap: %w", &openai.StatusError{Format: "chat error %d: %s", StatusCode: 503, Body: "学生の発話"}), want: "status=503"},
+		{name: "タイムアウト", err: context.DeadlineExceeded, want: "timeout"},
+		{name: "接続できない", err: &net.OpError{Op: "dial", Err: errors.New("connection refused")}, want: "network error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := failureKind(tt.err)
+			if got != tt.want {
+				t.Fatalf("failureKind = %q, want %q", got, tt.want)
+			}
+			if strings.Contains(got, "学生の発話") {
+				t.Fatalf("本文がログに出ています: %q", got)
 			}
 		})
 	}
