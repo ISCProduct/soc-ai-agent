@@ -31,7 +31,7 @@ func (s *AuthService) RequestRegistration(email string) error {
 
 	// 以前の仮登録を削除
 	if err := s.pendingRepo.DeleteByEmail(email); err != nil {
-		log.Printf("[AuthService] failed to delete previous pending registration for %s: %v", email, err)
+		log.Printf("[AuthService] failed to delete previous pending registration for %s: %v", maskEmail(email), err)
 	}
 
 	// トークン生成
@@ -105,7 +105,7 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 		claimSubmissionID = pending.SubmissionID
 		// 使用済みトークンを削除
 		if err := s.pendingRepo.DeleteByEmail(req.Email); err != nil {
-			log.Printf("[AuthService] failed to delete used registration token for %s: %v", req.Email, err)
+			log.Printf("[AuthService] failed to delete used registration token for %s: %v", maskEmail(req.Email), err)
 		}
 	}
 	if req.TargetLevel == "" {
@@ -210,14 +210,14 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 			log.Printf("[AuthService] enqueue verification email failed, fallback goroutine: %v", err)
 			safego.Go(func() {
 				if err := s.emailService.SendVerificationEmail(user, user.EmailVerificationToken, appURL); err != nil {
-					log.Printf("[AuthService] failed to send verification email to %s: %v", user.Email, err)
+					log.Printf("[AuthService] failed to send verification email to %s: %v", guestPromotionLogLabel(user.ID), err)
 				}
 			})
 		}
 	} else {
 		safego.Go(func() {
 			if err := s.emailService.SendVerificationEmail(user, user.EmailVerificationToken, appURL); err != nil {
-				log.Printf("[AuthService] failed to send verification email to %s: %v", user.Email, err)
+				log.Printf("[AuthService] failed to send verification email to %s: %v", guestPromotionLogLabel(user.ID), err)
 			}
 		})
 	}

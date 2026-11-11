@@ -10,6 +10,8 @@ import (
 )
 
 func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, industryID, jobCategoryID uint) (string, uint, error) {
+	ctx, promptVersion := prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration)
+
 	// 会話履歴を構築
 	historyText := ""
 	hasLowConfidenceAnswer := false
@@ -94,7 +96,7 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 		prompt = prompts.BuildDeepeningQuestionPrompt(historyText, highestCategory, highestScore, industryID, jobCategoryID)
 	}
 
-	questionText, err := s.aiCallWithRetries(ctx, prompt)
+	questionText, err := s.questionAICall(ctx, prompt)
 	if err != nil {
 		return "", 0, err
 	}
@@ -105,12 +107,13 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 
 	// AI生成質問をデータベースに保存
 	aiGenQuestion := &models.AIGeneratedQuestion{
-		UserID:       userID,
-		SessionID:    sessionID,
-		TemplateID:   nil, // AI生成の場合はNULL
-		QuestionText: questionText,
-		Weight:       5, // デフォルト重み
-		IsAnswered:   false,
+		UserID:        userID,
+		SessionID:     sessionID,
+		TemplateID:    nil, // AI生成の場合はNULL
+		QuestionText:  questionText,
+		Weight:        5, // デフォルト重み
+		IsAnswered:    false,
+		PromptVersion: promptVersion,
 	}
 
 	if err := s.aiGeneratedQuestionRepo.Create(aiGenQuestion); err != nil {
@@ -121,6 +124,7 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 }
 
 func (s *ChatService) simplifyQuestionWithAI(ctx context.Context, question string) (string, error) {
+	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration)
 	prompt := prompts.BuildSimplifyQuestionPrompt(question)
-	return s.aiCallWithRetries(ctx, prompt)
+	return s.questionAICall(ctx, prompt)
 }

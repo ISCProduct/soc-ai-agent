@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -47,10 +46,6 @@ func (m *mockSessionRepo) CountByUser(userID uint) (int64, error) {
 }
 func (m *mockSessionRepo) CountAll(schoolID *uint, companyID *uint) (int64, error) {
 	args := m.Called(schoolID, companyID)
-	return args.Get(0).(int64), args.Error(1)
-}
-func (m *mockSessionRepo) CountByUserAndDay(userID uint, day time.Time) (int64, error) {
-	args := m.Called(userID, day)
 	return args.Get(0).(int64), args.Error(1)
 }
 
@@ -93,10 +88,6 @@ func (m *mockUserRepo) GetUserByID(id uint) (*entity.User, error) {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*entity.User), args.Error(1)
-}
-func (m *mockUserRepo) ListUsers() ([]entity.User, error) {
-	args := m.Called()
-	return args.Get(0).([]entity.User), args.Error(1)
 }
 func (m *mockUserRepo) ListUsersPaged(l, o int, q string, schoolID *uint) ([]entity.User, int64, error) {
 	args := m.Called(l, o, q, schoolID)

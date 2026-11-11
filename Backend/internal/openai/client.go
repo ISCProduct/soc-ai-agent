@@ -56,8 +56,11 @@ type Usage struct {
 	// Feature は context から取るため、呼び出し元が usagectx.WithFeature を
 	// 通していない経路は "unknown" になる（その件数が計測漏れの指標）。
 	Feature        string
-	UserID         *uint // 実行主体。バッチ経路は nil
-	OrganizationID *uint // 配賦先の学校/企業。解決できなければ nil
+	PromptStage    string
+	PromptVersion  string
+	PromptABGroup  string // A/B で割り当てた版。対象外なら空（#1976）
+	UserID         *uint  // 実行主体。バッチ経路は nil
+	OrganizationID *uint  // 配賦先の学校/企業。解決できなければ nil
 	AudioSeconds   float64
 	Characters     int // TTS の入力文字数(rune)。トークン課金でない経路の課金単位
 	LatencyMs      int
@@ -89,10 +92,14 @@ func (cli *Client) ReportAudioUsage(ctx context.Context, u AudioUsage) {
 		return
 	}
 	userID, orgID := usagectx.Actor(ctx)
+	promptVersion := usagectx.PromptVersionFromContext(ctx)
 	cli.OnUsage(Usage{
 		Model:          u.Model,
 		Provider:       cli.audioProvider,
 		Feature:        usagectx.Feature(ctx),
+		PromptStage:    promptVersion.Stage,
+		PromptVersion:  promptVersion.Version,
+		PromptABGroup:  promptVersion.Group,
 		UserID:         userID,
 		OrganizationID: orgID,
 		AudioSeconds:   u.AudioSeconds,
@@ -122,10 +129,14 @@ func (cli *Client) ReportProxyUsage(ctx context.Context, u ProxyUsage) {
 		return
 	}
 	userID, orgID := usagectx.Actor(ctx)
+	promptVersion := usagectx.PromptVersionFromContext(ctx)
 	cli.OnUsage(Usage{
 		Model:            u.Model,
 		Provider:         providerOpenAI,
 		Feature:          usagectx.Feature(ctx),
+		PromptStage:      promptVersion.Stage,
+		PromptVersion:    promptVersion.Version,
+		PromptABGroup:    promptVersion.Group,
 		UserID:           userID,
 		OrganizationID:   orgID,
 		PromptTokens:     u.PromptTokens,
@@ -202,6 +213,7 @@ func (cli *Client) reportUsage(ctx context.Context, r usageReport) {
 		provider = providerOpenAI
 	}
 	userID, orgID := usagectx.Actor(ctx)
+	promptVersion := usagectx.PromptVersionFromContext(ctx)
 	cli.OnUsage(Usage{
 		Model:            r.model,
 		PromptTokens:     r.promptTokens,
@@ -209,6 +221,9 @@ func (cli *Client) reportUsage(ctx context.Context, r usageReport) {
 		Provider:         provider,
 		ViaFallback:      viaFallback,
 		Feature:          usagectx.Feature(ctx),
+		PromptStage:      promptVersion.Stage,
+		PromptVersion:    promptVersion.Version,
+		PromptABGroup:    promptVersion.Group,
 		UserID:           userID,
 		OrganizationID:   orgID,
 		AudioSeconds:     r.audioSeconds,

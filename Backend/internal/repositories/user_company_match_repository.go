@@ -34,6 +34,9 @@ var upsertAssignments = clause.AssignmentColumns([]string{
 	"communication_match",
 	"matched_axis_count",
 	"match_reason",
+	// 理由と一緒に更新する。AI理由を作らない再計算では空になり、
+	// 存在しないAI理由を古い版が生成したことにならない。
+	"match_reason_prompt_version",
 	"updated_at",
 })
 
@@ -154,24 +157,6 @@ func (r *UserCompanyMatchRepository) MarkAsApplied(matchID uint) error {
 	return r.db.Model(&models.UserCompanyMatch{}).
 		Where("id = ?", matchID).
 		Update("is_applied", true).Error
-}
-
-// FindFavoritesByUser ユーザーのお気に入り企業を取得
-func (r *UserCompanyMatchRepository) FindFavoritesByUser(userID uint, sessionID string) ([]*entity.UserCompanyMatch, error) {
-	var ms []*models.UserCompanyMatch
-	err := r.db.Where("user_id = ? AND session_id = ? AND is_favorited = ?", userID, sessionID, true).
-		Order("match_score DESC").
-		Preload("Company").
-		Preload("JobPosition").
-		Find(&ms).Error
-	if err != nil {
-		return nil, err
-	}
-	result := make([]*entity.UserCompanyMatch, len(ms))
-	for i, m := range ms {
-		result[i] = mapper.UserCompanyMatchToEntity(m)
-	}
-	return result, nil
 }
 
 // GetMatchStatistics マッチング統計情報を取得

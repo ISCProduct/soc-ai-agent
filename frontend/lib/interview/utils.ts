@@ -110,7 +110,11 @@ export async function parseMultipartResponse(
   const closingBoundary = enc.encode(boundary + '--')
   const closingBoundaryPos = findPattern(closingBoundary, part2HeaderEnd + 4)
   const audioEnd = closingBoundaryPos !== -1 ? closingBoundaryPos - 2 : bytes.length
-  const audio = new Blob([bytes.slice(part2HeaderEnd + 4, audioEnd)], { type: 'audio/mpeg' })
+  // 音声の形式はパートの Content-Type に従う（#1833）。OpenAI の TTS は mp3、OpenAI 障害時の
+  // ローカル（VOICEVOX）は WAV を返す。決め打ちで audio/mpeg に包むと、WAV を再生できない環境がある。
+  const part2Headers = new TextDecoder().decode(bytes.slice(part2Start + boundaryBytes.length, part2HeaderEnd))
+  const audioType = /content-type:\s*([^\r\n;]+)/i.exec(part2Headers)?.[1]?.trim() || 'audio/mpeg'
+  const audio = new Blob([bytes.slice(part2HeaderEnd + 4, audioEnd)], { type: audioType })
 
   return { meta, audio }
 }

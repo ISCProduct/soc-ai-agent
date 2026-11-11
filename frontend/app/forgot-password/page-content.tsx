@@ -26,8 +26,9 @@ export default function PageContent() {
     try {
       await authService.requestPasswordReset(email)
       setSent(true)
-    } catch (err: any) {
-      setError(err.message || 'エラーが発生しました')
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setError(message || 'エラーが発生しました')
     } finally {
       setLoading(false)
     }

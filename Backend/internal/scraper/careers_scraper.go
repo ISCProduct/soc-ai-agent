@@ -3,6 +3,7 @@ package scraper
 import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/openai"
+	"Backend/internal/services/shared"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -76,23 +77,30 @@ func (s *CareersScraper) FetchJobs(ctx context.Context, companyName, websiteURL 
 	defer cancel()
 
 	systemPrompt := `あなたは採用情報の構造化アシスタントです。検索結果に明示された公開求人のみをJSON化してください。求人を推測で作ってはいけません。無ければ {"jobs": []} を返してください。`
-	siteHint := websiteURL
-	if siteHint == "" {
-		siteHint = "不明"
-	}
-	searchPrompt := fmt.Sprintf(
-		`日本の企業「%s」の現在公開中の求人・採用職種を調べてください。公式サイト: %s。職種名・勤務地・雇用形態・求人URLが公開情報として確認できるものだけを列挙し、根拠URLを含めてください。非上場企業も含め、確認できない求人は含めないでください。`,
-		companyName, siteHint,
-	)
-	parseUser := fmt.Sprintf(
-		"企業「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。推測の求人は入れないでください。\n%s",
-		companyName, jobsJSONSchema,
-	)
+	searchPrompt, parseUser := buildJobsPrompts(companyName, websiteURL)
 	raw, _, err := s.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 1500)
 	if err != nil {
 		return nil, fmt.Errorf("求人情報の取得失敗: %w", err)
 	}
 	return parseJobsJSON(raw, companyfetch.SourceWebSearch, "")
+}
+
+// buildJobsPrompts は求人の検索プロンプトと抽出プロンプトを組み立てる。
+// 検索プロンプトはそのまま検索クエリになるので企業名を整え、抽出プロンプトでは囲む（#1970 のレビュー）。
+func buildJobsPrompts(companyName, websiteURL string) (searchPrompt, parseUser string) {
+	siteHint := websiteURL
+	if siteHint == "" {
+		siteHint = "不明"
+	}
+	searchPrompt = fmt.Sprintf(
+		`日本の企業「%s」の現在公開中の求人・採用職種を調べてください。公式サイト: %s。職種名・勤務地・雇用形態・求人URLが公開情報として確認できるものだけを列挙し、根拠URLを含めてください。非上場企業も含め、確認できない求人は含めないでください。`,
+		shared.InlinePromptName(companyName), siteHint,
+	)
+	parseUser = fmt.Sprintf(
+		"次の企業について、検索結果の事実のみに基づき次のJSON形式で回答してください。推測の求人は入れないでください。\n%s%s",
+		shared.UntrustedSection(companyName, "企業名"), jobsJSONSchema,
+	)
+	return searchPrompt, parseUser
 }
 
 func parseJobsJSON(text, source, defaultURL string) ([]JobPostingResult, error) {

@@ -13,7 +13,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     },
   })
   const raw = await response.text()
-  let data: any = {}
+  let data: unknown = {}
   if (raw) {
     try { data = JSON.parse(raw) } catch { data = { error: raw } }
   }
@@ -33,7 +33,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     body,
   })
   const raw = await response.text()
-  let data: any = {}
+  let data: unknown = {}
   if (raw) {
     try { data = JSON.parse(raw) } catch { data = response.ok ? { message: raw } : { error: raw } }
   }

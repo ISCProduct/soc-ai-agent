@@ -688,15 +688,25 @@ module "backend" {
   # リスト長が unknown になり、モジュール側の count が plan 時に評価できない。
   # 中身が必ず1件以上あることは静的に分かっているので、ここで真偽値を渡す。
   create_secrets_policy = true
-  environment = {
-    APP_ENV                     = "production"
-    AWS_REGION                  = var.region
-    AWS_S3_BUCKET               = module.s3.bucket_id
-    EMAIL_PROVIDER              = "resend"
-    EMAIL_FROM                  = "noreply@shukatsu-ai.jp"
-    OPENAI_WEB_SEARCH_MODEL     = "gpt-4o-mini"
-    OPENAI_COMPANY_SEARCH_MODEL = "gpt-4o-mini"
-    OPENAI_HINTS_MODEL          = "gpt-4o-mini"
+  environment = merge({
+    APP_ENV = "production"
+    # 工程ごとのモデルの二層化（#1526）。空なら工程ごとの既定のまま
+    AI_MODEL_PREMIUM = var.ai_model_premium
+    AI_MODEL_LIGHT   = var.ai_model_light
+    # OpenAI 障害時の音声面接の縮退（#1833）。空なら縮退しない
+    AI_FAILOVER_LOCAL_STT_URL     = var.ai_failover_local_stt_url
+    AI_FAILOVER_LOCAL_LLM_URL     = var.ai_failover_local_llm_url
+    AI_FAILOVER_LOCAL_LLM_MODEL   = var.ai_failover_local_llm_model
+    AI_FAILOVER_LOCAL_TTS_URL     = var.ai_failover_local_tts_url
+    AI_FAILOVER_LOCAL_TTS_SPEAKER = var.ai_failover_local_tts_speaker
+    PROMPT_VERSION                = var.prompt_version
+    AWS_REGION                    = var.region
+    AWS_S3_BUCKET                 = module.s3.bucket_id
+    EMAIL_PROVIDER                = "resend"
+    EMAIL_FROM                    = "noreply@shukatsu-ai.jp"
+    OPENAI_WEB_SEARCH_MODEL       = "gpt-4o-mini"
+    OPENAI_COMPANY_SEARCH_MODEL   = "gpt-4o-mini"
+    OPENAI_HINTS_MODEL            = "gpt-4o-mini"
     # 企業検索の web_search のコスト調整ノブ (#1124)。
     # 検索結果が固定トークンとして課金されるため、1コールの重さがそのままコストに効く。
     # 品質が落ちたら "high" に戻す（apply とサービス更新が必要）。
@@ -721,7 +731,13 @@ module "backend" {
     SENTRY_ENVIRONMENT = "production"
     # Cloud Map(Service Discovery)経由でrag-reviewタスクへ到達する
     RAG_REVIEW_URL = "http://rag-review.${aws_service_discovery_private_dns_namespace.internal.name}:9000"
-  }
+    }, {
+    for stage, version in var.prompt_versions :
+    "PROMPT_VERSION_${upper(stage)}" => version
+    }, {
+    for stage, arms in var.prompt_ab :
+    "PROMPT_AB_${upper(stage)}" => arms
+  })
   extra_container_definitions = [
     {
       name      = "redis"
@@ -831,6 +847,9 @@ module "rag_review" {
     }
   ]
   environment = {
+    # 工程ごとのモデルの二層化（#1526）。空なら工程ごとの既定のまま
+    AI_MODEL_PREMIUM         = var.ai_model_premium
+    AI_MODEL_LIGHT           = var.ai_model_light
     OPENAI_EMBEDDING_MODEL   = "text-embedding-3-small"
     OPENAI_HINTS_MODEL       = "gpt-4o-mini"
     OPENAI_HINTS_PARSE_MODEL = "gpt-4o-mini"

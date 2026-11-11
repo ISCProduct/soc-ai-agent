@@ -28,6 +28,11 @@ import (
 	"Backend/internal/sttbench"
 )
 
+// exitCodeNoEvaluation は全ケースが API エラーで終わったモデルがあるときの終了コード。
+// 設定エラーの 2、キー未配布の 3 と分ける。go run 経由では 1 になるので、
+// 終了コードで判定するときはビルドしたバイナリを実行する。
+const exitCodeNoEvaluation = 4
+
 // parseHintsContext は `会社名|読み|職種|企業情報` を分解する。
 // 足りない要素は空文字。多すぎる場合、余りは企業情報へ寄せる
 // （企業情報は自由記述で、区切り文字が現れうるため）。
@@ -141,5 +146,12 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("\n結果を %s に書き出しました（リポジトリ外に置くこと）\n", *out)
+	}
+
+	// 全件 API エラーのモデルがある run を、スクリプトから成功と読まれないようにする。
+	// 調査できるように、結果を書き出してから終了する。
+	if unevaluated := sttbench.UnevaluatedModels(report); len(unevaluated) > 0 {
+		fmt.Fprintf(os.Stderr, "\n1件も評価できなかったモデル: %s\n", strings.Join(unevaluated, ", "))
+		os.Exit(exitCodeNoEvaluation)
 	}
 }

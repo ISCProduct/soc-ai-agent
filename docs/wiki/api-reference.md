@@ -197,7 +197,7 @@ Referer に user_id が残るだけです。
 | POST | `/api/interviews/{id}/start` | 開始（チャットスコアをAIプロンプトに注入） |
 | POST | `/api/interviews/{id}/turn` | 1ターン実行（音声→テキスト→AI→音声） |
 | POST | `/api/interviews/{id}/finish` | 終了・レポート生成キュー |
-| POST | `/api/interviews/{id}/utterances` | 発話保存。`client_utterance_id` を付けると再送が冪等になる（#1476） |
+| POST | `/api/interviews/{id}/utterances` | 学生の発話保存（保存するのは `role=user` のみ。`role=ai` は保存せず 204）。面接官の発話は `/start-turn`・`/turn` の中でサーバーが保存する（#1969）。`client_utterance_id` を付けると再送が冪等になる（#1476） |
 | GET | `/api/interviews/{id}/report` | レポート取得 |
 | POST | `/api/interviews/{id}/report/regenerate` | 未生成レポートの生成ジョブ再投入（#1476, `docs/wiki/redis-jobs.md`） |
 | POST | `/api/interviews/{id}/upload-video` | 動画S3アップロード |
@@ -547,6 +547,9 @@ rejected         → 不合格
 | GET | `/api/admin/interviews` | 面接セッション一覧 |
 | GET | `/api/admin/dashboard/users` | ユーザーダッシュボード |
 | GET | `/api/admin/dashboard/export/csv` | データCSVエクスポート |
+| GET | `/api/admin/ai-budgets` | AI利用予算の一覧 |
+| PUT | `/api/admin/ai-budgets` | AI利用予算の設定 |
+| DELETE | `/api/admin/ai-budgets/:scope/:scope_id` | AI利用予算の削除 |
 | GET | `/api/admin/costs/summary` | APIコストサマリー |
 | GET | `/api/admin/costs/daily` | 日別コスト |
 | GET | `/api/admin/costs/monthly` | 月別コスト |

@@ -15,19 +15,6 @@ func NewPredefinedQuestionRepository(db *gorm.DB) *PredefinedQuestionRepository 
 	return &PredefinedQuestionRepository{db: db}
 }
 
-// FindByCategory カテゴリで質問を検索
-func (r *PredefinedQuestionRepository) FindByCategory(category string, targetLevel string) ([]*models.PredefinedQuestion, error) {
-	var questions []*models.PredefinedQuestion
-	query := r.db.Where("category = ? AND is_active = ?", category, true)
-
-	if targetLevel != "" {
-		query = query.Where("target_level IN (?)", []string{targetLevel, "両方"})
-	}
-
-	err := query.Order("priority DESC").Find(&questions).Error
-	return questions, err
-}
-
 // helper: allowedForPhase checks AllowedPhases JSON; if empty -> allowed
 func allowedForPhase(raw string, currentPhase string) bool {
 	if strings.TrimSpace(raw) == "" {
@@ -157,13 +144,4 @@ func (r *PredefinedQuestionRepository) GetNextQuestion(
 	}
 
 	return &question, nil
-}
-
-// CountByCategory カテゴリごとの質問数を取得
-func (r *PredefinedQuestionRepository) CountByCategory(category string) (int64, error) {
-	var count int64
-	err := r.db.Model(&models.PredefinedQuestion{}).
-		Where("category = ? AND is_active = ?", category, true).
-		Count(&count).Error
-	return count, err
 }

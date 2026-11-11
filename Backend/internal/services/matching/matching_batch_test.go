@@ -44,7 +44,6 @@ func (s *matchingCompanyRepo) FindAllActive(int, int) ([]models.Company, error) 
 func (s *matchingCompanyRepo) FindAllActiveNames(string) ([]models.CompanyName, error) {
 	return nil, nil
 }
-func (s *matchingCompanyRepo) CountActive() (int64, error) { return 0, nil }
 func (s *matchingCompanyRepo) ListActiveFiltered(int, int, string, string, string, string, string, *uint) ([]models.Company, int64, error) {
 	return nil, 0, nil
 }
@@ -111,6 +110,12 @@ type matchingScoreRepo struct {
 
 func (s *matchingScoreRepo) SetScore(uint, string, string, int) error { return nil }
 func (s *matchingScoreRepo) AddScore(uint, string, string, int) error { return nil }
+func (s *matchingScoreRepo) SetScoreWithPromptVersion(uint, string, string, int, string) error {
+	return nil
+}
+func (s *matchingScoreRepo) AddScoreWithPromptVersion(uint, string, string, int, string) error {
+	return nil
+}
 func (s *matchingScoreRepo) FindByUserAndSession(uint, string) ([]entity.UserWeightScore, error) {
 	return s.scores, nil
 }
@@ -145,9 +150,6 @@ func (s *matchingMatchRepo) FindByID(uint) (*entity.UserCompanyMatch, error) { r
 func (s *matchingMatchRepo) MarkAsViewed(uint) error                         { return nil }
 func (s *matchingMatchRepo) ToggleFavorite(uint) error                       { return nil }
 func (s *matchingMatchRepo) MarkAsApplied(uint) error                        { return nil }
-func (s *matchingMatchRepo) FindFavoritesByUser(uint, string) ([]*entity.UserCompanyMatch, error) {
-	return nil, nil
-}
 func (s *matchingMatchRepo) GetMatchStatistics(uint, string) (map[string]any, error) {
 	return nil, nil
 }

@@ -10,6 +10,7 @@ import (
 	"Backend/internal/scraper"
 	"Backend/internal/services/company"
 	ifaces "Backend/internal/services/interfaces"
+	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"bytes"
 	"context"
@@ -518,7 +519,7 @@ func (c *AdminCompanyGraphController) fetchRelationsWithLLM(ctx context.Context,
 	userPrompt := fmt.Sprintf(
 		`「%s」の企業関係情報について知っているものを答えてください。子会社・グループ会社・資本提携先・主要取引先を、実在する企業名のみで以下のJSON形式のみで返してください。余分な説明は不要です。
 {"subsidiaries":["子会社・グループ会社名"],"affiliates":["資本提携・関連会社名"],"business_partners":["主要取引先名"]}`,
-		companyName,
+		shared.InlinePromptName(companyName), // 企業名は DB 由来。「」の中に置くので整える（#1970 のレビュー）
 	)
 
 	ctxTimeout, cancel := context.WithTimeout(ctx, 60*time.Second)

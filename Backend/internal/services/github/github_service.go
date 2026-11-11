@@ -15,8 +15,8 @@ const (
 	syncCacheDuration = time.Hour
 	// レート制限リトライ: 最大2回
 	maxRetries = 2
-	// プロンプトバージョン（#457）
-	repoSummaryPromptVersion = "v3"
+	// プロンプトバージョン（#457）。v4: リポジトリ名と README を囲みの見出しの下に移した（#2174）
+	repoSummaryPromptVersion = "v4"
 )
 
 // GitHubService GitHub API連携サービス

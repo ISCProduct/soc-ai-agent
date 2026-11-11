@@ -56,6 +56,10 @@ func TestUserDeletionService_SoftWithdrawDoesNotDeleteS3(t *testing.T) {
 			AddRow(2, "s3://bucket/resumes/9/doc.pdf", "", ""))
 	mock.ExpectExec("INSERT INTO `withdrawn_users`").
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	// 元のメールアドレスの仮登録を、スクランブルする前に消す（#2140 のレビュー）
+	mock.ExpectExec("DELETE FROM `pending_registrations` WHERE email = \\?").
+		WithArgs("del@example.com").
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("UPDATE `users` SET").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	// リフレッシュトークンの全端末失効（#616）
