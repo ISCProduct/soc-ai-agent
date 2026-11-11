@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,7 +41,7 @@ var modelPricing = map[string][2]float64{
 	"o3-mini":                {1.10, 4.40}, // 提供終了
 	"text-embedding-3-small": {0.02, 0.02},
 	"text-embedding-3-large": {0.13, 0.13},
-	// 音声系のトークン単価。STT は通常、分単位（STT_COST_PER_MINUTE_USD）で計算するので、
+	// 音声系のトークン単価。STT は通常、分単位（sttPricingPerMinute）で計算するので、
 	// ここはトークンで記録された場合のためのもの。
 	"gpt-4o-transcribe":      {2.50, 10.00},
 	"gpt-4o-mini-transcribe": {1.25, 5.00},
@@ -207,12 +208,62 @@ func isAudioPricedModel(model string) bool {
 //
 // STT は分単位、TTS は文字単位で課金され、トークン単価の表では表せない。
 //
-// 既定値は 2026-05 時点で確認した公開価格に基づく。価格改定が入っている可能性があるため、
-// 実請求額との突き合わせで必ず確認すること（#1193 では旧価格が3年ぶん残っていた）。
+// TTS の既定値は 2026-05 時点、STT の表は 2026-11-11 に確認した公開価格に基づく。価格改定が入っている
+// 可能性があるため、実請求額との突き合わせで必ず確認すること（#1193 では旧価格が3年ぶん残っていた）。
 // 生の使用量（audio_seconds / characters）を保存しているので、単価が違っていても
 // 後から再計算できる。
-func sttCostPerMinuteUSD() float64 {
-	return shared.GetFloatEnv("STT_COST_PER_MINUTE_USD", 0.006)
+
+// sttPricingPerMinute は STT のモデル別の分単価（USD per minute）。
+//
+// 以前はモデルに関係なく $0.006/分で計算していたが、既定のモデル gpt-transcribe は $0.0045/分、
+// gpt-4o-mini-transcribe は $0.003/分で、文字起こしの料金を多めに記録していた（#2173）。
+// 値は OpenAI の公式の価格ページ（https://developers.openai.com/api/docs/pricing）の標準料金で、
+// 2026-11-11 に確認した。whisper-1・gpt-4o-transcribe・gpt-4o-mini-transcribe は 2027-02-26 に
+// 提供終了の予定だが、過去の記録や設定の残りを正しく計算できるよう残す。
+// 価格改定のときは、ここを直すか STT_COST_PER_MINUTE_USD で上書きする（上書きは全モデル一律の単価になる）。
+var sttPricingPerMinute = map[string]float64{
+	"gpt-transcribe":         0.0045,
+	"gpt-4o-transcribe":      0.006,
+	"gpt-4o-mini-transcribe": 0.003,
+	"whisper-1":              0.006,
+}
+
+// sttFallbackCostPerMinuteUSD は、表に無い STT モデルに使う分単価。
+// 表の中で最も高い単価（以前の一律の既定値と同じ）にして、少なく見積もらないようにする。
+const sttFallbackCostPerMinuteUSD = 0.006
+
+// sttCostOverrideEnv は、STT の分単価をモデルに関係なく上書きする env。
+// 以前からある設定なので、設定されていれば今までどおり表より優先する。
+const sttCostOverrideEnv = "STT_COST_PER_MINUTE_USD"
+
+// sttPricingWarned は、表に無い STT モデルで計算したことを、モデルごとに1回だけログに出すための記録。
+var sttPricingWarned sync.Map
+
+// sttCostPerMinuteUSD は、STT のモデル名から分単価を返す。
+//
+// モデル名の照合はトークン単価表と同じく isSameModel を使い、日付付きの版名
+// （gpt-4o-mini-transcribe-2025-12-15 など）も同じモデルとみなす。前方一致にしないのは、
+// gpt-4o-transcribe-diarize のような別モデルに、別のモデルの単価を黙って当てないため。
+func sttCostPerMinuteUSD(model string) float64 {
+	// 解釈できない値は、以前（shared.GetFloatEnv）と同じく無視する
+	if raw := strings.TrimSpace(os.Getenv(sttCostOverrideEnv)); raw != "" {
+		if v, err := strconv.ParseFloat(raw, 64); err == nil {
+			return v
+		}
+	}
+	lower := strings.ToLower(strings.TrimSpace(model))
+	for k, p := range sttPricingPerMinute {
+		// キー同士は isSameModel で互いに一致しないので、一致するキーは高々1つ（反復順に依存しない）
+		if isSameModel(lower, k) {
+			return p
+		}
+	}
+	// 表の検索と同じく小文字にそろえる（大文字・小文字の違いで2回出さない）
+	if _, loaded := sttPricingWarned.LoadOrStore(lower, struct{}{}); !loaded {
+		log.Printf("[APICost] 音声認識のモデル %q は分単価の表に無いため $%g/分で計算しています（%s で上書きするか、表に単価を登録してください）",
+			lower, sttFallbackCostPerMinuteUSD, sttCostOverrideEnv)
+	}
+	return sttFallbackCostPerMinuteUSD
 }
 
 func ttsCostPer1MCharsUSD() float64 {
@@ -236,13 +287,14 @@ func webSearchCostPerCallUSD() float64 {
 }
 
 // calculateAudioCost は音声経路のコストを返す。ローカル推論は 0。
-func calculateAudioCost(provider string, audioSeconds float64, characters int) float64 {
+// STT の分単価は model で引く（#2173）。TTS の文字単価はモデルに関係なく同じ。
+func calculateAudioCost(provider, model string, audioSeconds float64, characters int) float64 {
 	if provider != "" && !strings.EqualFold(provider, "openai") {
 		return 0
 	}
 	cost := 0.0
 	if audioSeconds > 0 {
-		cost += audioSeconds / 60.0 * sttCostPerMinuteUSD()
+		cost += audioSeconds / 60.0 * sttCostPerMinuteUSD(model)
 	}
 	if characters > 0 {
 		cost += float64(characters) / 1_000_000.0 * ttsCostPer1MCharsUSD()
@@ -365,7 +417,7 @@ func usageCostAndBasis(u openaiPkg.Usage) (float64, string) {
 	basis := ""
 	switch {
 	case u.AudioSeconds > 0 || u.Characters > 0:
-		cost = calculateAudioCost(u.Provider, u.AudioSeconds, u.Characters)
+		cost = calculateAudioCost(u.Provider, u.Model, u.AudioSeconds, u.Characters)
 	case u.PromptTokens+u.CompletionTokens > 0:
 		cost, basis = tokenCost(u.Provider, u.Model, u.PromptTokens, u.CompletionTokens)
 	}

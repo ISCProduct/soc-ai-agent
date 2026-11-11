@@ -715,7 +715,7 @@ func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyNam
 		return f.acquireViaAISearch(ctx, companyName, websiteURL)
 	}
 
-	raw, model, err := f.llm.ExtractJSONWithSchema(ctx, systemPrompt, userPrompt, 600, companyInfoResponseSchema())
+	raw, model, err := f.llm.ExtractJSONWithSchema(ctx, systemPrompt, userPrompt, CompanyInfoExtractMaxTokens, companyInfoResponseSchema())
 	if err != nil {
 		return nil, fmt.Errorf("企業情報の取得失敗: %w", err)
 	}
@@ -731,10 +731,8 @@ func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyNam
 }
 
 // 企業情報の抽出の今の本文。候補の本文は prompts.RegisterCandidateBodies で登録する（#1976）。
-const (
-	companyExtractSearchSystemPrompt = `あなたは企業情報の構造化アシスタントです。検索結果に明示された事実のみをJSON化してください。検索結果に無い項目は空文字または0。モデルの事前知識や推測で埋めてはいけません。従業員数は連結と単体を混ぜず、employee_count_basis に定義を必ず入れる。`
-	companyExtractFactsSystemPrompt  = `あなたは企業情報の構造化アシスタントです。与えられた事実テキストに書かれている内容のみをJSON化してください。テキストに無い項目は空文字または0。推測禁止。`
-)
+// 事実テキスト側の本文は company_info_extract_prompt.go にある（aibench が参照する）。
+const companyExtractSearchSystemPrompt = `あなたは企業情報の構造化アシスタントです。検索結果に明示された事実のみをJSON化してください。検索結果に無い項目は空文字または0。モデルの事前知識や推測で埋めてはいけません。従業員数は連結と単体を混ぜず、employee_count_basis に定義を必ず入れる。`
 
 func promptVersionFromContext(ctx context.Context) string {
 	assignment := usagectx.PromptVersionFromContext(ctx)

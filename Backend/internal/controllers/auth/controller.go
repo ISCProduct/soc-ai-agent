@@ -76,7 +76,8 @@ func (c *AuthController) Register(ctx echo.Context) error {
 		}
 		if err.Error() == "email already exists" {
 			if isProduction() {
-				log.Printf("[Register] email already exists: %s", req.Email)
+				// 経路の区別だけで足りる。メールアドレスは出さない（#1999）。
+				log.Printf("[Register] email already exists")
 				return httpapi.NewAPIError(http.StatusConflict, httpapi.ErrCodeDuplicateEmail, "Registration failed")
 			}
 			return httpapi.NewAPIError(http.StatusConflict, httpapi.ErrCodeDuplicateEmail, err.Error())
@@ -155,7 +156,7 @@ func (c *AuthController) RequestRegistration(ctx echo.Context) error {
 
 	if err := c.authService.RequestRegistration(body.Email); err != nil {
 		if isProduction() {
-			log.Printf("[RequestRegistration] error for %s: %v", body.Email, err)
+			log.Printf("[RequestRegistration] error for %s: %v", auth.MaskEmail(body.Email), err)
 			return ctx.JSON(http.StatusOK, map[string]string{"message": "confirmation email sent"})
 		}
 		if err.Error() == "email already exists" {

@@ -18,7 +18,6 @@ import {
 } from '../reportPolling'
 import { resolveFinishOutcomeMessage } from '../finishOutcome'
 import { applyCompanyReadingResponse } from '../companyReadingContext'
-import { saveUtteranceWithRetry, newClientUtteranceId, flushThenFinish } from '../utteranceSave'
 import { nextQuestionIndex } from '../questionEvents'
 import { fetchAndReadWithTimeout } from '@/lib/fetch-timeout'
 import type { Utterance, InterviewCompany, Position, InterviewStatus } from '../types'
@@ -106,16 +105,11 @@ export function useInterviewSession({
   const [scoresAfter, setScoresAfter] = useState<WeightScore[] | null>(null)
   /** 面接終了API(finishSession)が失敗したかどうか。true の間はレポート画面に再試行UIを出す(#1015) */
   const [finishFailed, setFinishFailed] = useState(false)
-  /** 発話保存が再試行しても失敗したか。true の間は面接画面・レポート画面に警告を出す(#1476) */
-  const [utteranceSaveFailed, setUtteranceSaveFailed] = useState(false)
-
   /**
-   * 発話保存を直列につなぐチェーン(#1476)。
-   * 再試行込みの保存をターン処理の中で待つと、失敗時に音声再生が数秒止まる。
-   * かといって投げっぱなしにすると user/ai の保存順が入れ替わり、レポートの書き起こしが崩れる。
-   * 1本のチェーンに積むことで、順序を保ったままターン処理をブロックしない。
+   * 発話を書き起こしへ保存できなかったか。true の間は面接画面・レポート画面に警告を出す(#1476)。
+   * 発話はサーバーが /start-turn・/turn の中で保存し、失敗を応答の utterance_save_failed で返す(#1969)。
    */
-  const utteranceSaveChainRef = useRef<Promise<void>>(Promise.resolve())
+  const [utteranceSaveFailed, setUtteranceSaveFailed] = useState(false)
   /**
    * 応答待ちのターン(#1476)。
    * 「完了する」は turnPending 中でも押せるし、時間切れの強制終了も割り込む。
@@ -126,6 +120,12 @@ export function useInterviewSession({
    * （終了時は cleanupConnection が再生を止めるため、再生まで待つと解決しない）。
    */
   const inFlightTurnRef = useRef<Promise<void>>(Promise.resolve())
+  /**
+   * /start-turn の応答(#1969)。サーバーは冒頭の質問を応答の直前に保存するので、/turn はこれを
+   * 待ってから送る。先に送ると、回答と次の質問が冒頭の質問より前に保存され、面接官の履歴からも
+   * 冒頭の質問が抜ける。/start-turn はタイムアウト付きなので、待ちは必ず終わる。
+   */
+  const startTurnSettledRef = useRef<Promise<void>>(Promise.resolve())
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recorderFormatRef = useRef<RecorderFormat>({ mimeType: '', ext: 'webm' })
   // 発話が確定しなかった録音を送らずに捨てるためのフラグ。
@@ -339,30 +339,6 @@ export function useInterviewSession({
   }
 
   /**
-   * 発話保存をチェーンに積む(#1476)。
-   * 再試行しても保存できなければ utteranceSaveFailed を立て、UIに「記録できていない」ことを出す。
-   * 面接自体は止めない（止めてもユーザーにできることが無い）。
-   */
-  const queueUtteranceSave = (sessionId: number, userId: number, role: 'user' | 'ai', text: string) => {
-    // IDはチェーンに積む時点で1つだけ発行する。再試行の中で作り直すと、
-    // 結果不明の失敗（応答ロスト・タイムアウト）の再送が別の発話として保存される(#1476)。
-    const clientUtteranceId = newClientUtteranceId()
-    utteranceSaveChainRef.current = utteranceSaveChainRef.current
-      .then(async () => {
-        const saved = await saveUtteranceWithRetry(
-          () => interviewApi.saveUtterance(sessionId, userId, role, text, clientUtteranceId),
-        )
-        if (!saved) setUtteranceSaveFailed(true)
-      })
-      // チェーンが reject のまま残ると、面接終了時にこれを待つ処理ごと落ちて
-      // レポート生成が始まらなくなる。必ず解決する鎖にしておく(#1476)。
-      .catch(e => {
-        console.error('[utterance save chain error]', e)
-        setUtteranceSaveFailed(true)
-      })
-  }
-
-  /**
    * ターンの応答処理（発話を保存チェーンへ積み終えるまで）を「実行中のターン」として記録する(#1476)。
    * handleStop はこれを待ってから保存チェーンを読む。
    * 失敗しても終了処理を止めないよう、記録する側の Promise は必ず解決させる。
@@ -433,14 +409,17 @@ export function useInterviewSession({
       }
       setIsDeepeningQuestion(Boolean(meta.is_deepening))
       setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
+      // 書き起こしはサーバーが保存済み(#1969)。ここでは表示だけを更新する。
+      if (String(meta.utterance_save_failed) === 'true') setUtteranceSaveFailed(true)
       if (aiText) {
         historyRef.current.push({ role: 'assistant', content: aiText })
         setUtterances(p => [...p, { role: 'ai', text: aiText }])
-        queueUtteranceSave(sessionId, userId, 'ai', aiText)
       }
       return audio
     }
-    await playTurnAudio(receive())
+    const receiving = receive()
+    startTurnSettledRef.current = receiving.then(() => {}, () => {})
+    await playTurnAudio(receiving)
   }
 
   const handleJoinWithConsent = () => {
@@ -465,9 +444,9 @@ export function useInterviewSession({
     setQuestionElapsedSeconds(0)
     setSessionWarningShown(false)
     setUtteranceSaveFailed(false)
-    utteranceSaveChainRef.current = Promise.resolve()
     // 前回の面接でハングしたターンを次の終了処理が待ち続けないよう、参加時に捨てる
     inFlightTurnRef.current = Promise.resolve()
+    startTurnSettledRef.current = Promise.resolve()
     media.setMicEnabled(true); media.setCameraEnabled(true)
     historyRef.current = []
     companyContextRef.current = { reading: '', readingResolved: false }
@@ -496,7 +475,7 @@ export function useInterviewSession({
 
       startTimer()
       await doStartTurn(created.id, user.user_id)
-    } catch (error: any) {
+    } catch (error: unknown) {
       setStatus('error')
       setErrorMessage(parseMediaError(error))
       cleanupConnection()
@@ -563,17 +542,14 @@ export function useInterviewSession({
         .catch(() => setVideoUploadStatus('error'))
     }
 
-    // 積み残した発話保存を「全部」片付けてから終了APIを呼ぶ(#1476)。
+    // 応答待ちのターンが終わってから終了APIを呼ぶ(#1476)。
     // 画面は既に finished へ進めてあるので、ここで待ってもユーザーは止まらない。
     try {
-      // 応答待ちのターンが発話を積み終えるのを先に待つ。ここを飛ばすと、
-      // 「完了する」の後に届いた /turn の発話が finishSession の後に保存され、
+      // 発話はサーバーがターンの中で保存する(#1969)。応答待ちのターンを飛ばして終了すると、
+      // 「完了する」の後に返った /turn の発話が finishSession の後に保存され、
       // レポートが最後のやり取り抜きで生成される(#1476)。
       await inFlightTurnRef.current
-      await flushThenFinish(
-        utteranceSaveChainRef.current,
-        () => interviewApi.finishSession(currentSession.id, currentUser.user_id),
-      )
+      await interviewApi.finishSession(currentSession.id, currentUser.user_id)
     } catch {
       // 終了APIの失敗を握りつぶさず、レポート画面にエラーと再試行手段を出す(#1015)
       setFinishFailed(true)
@@ -789,9 +765,10 @@ export function useInterviewSession({
     )
     const companyContextGeneration = companyContextGenerationRef.current
     const receive = async (): Promise<Blob> => {
-      // Backend は保存済みの発話から履歴を組み直す（#1636）。前ターンの保存が終わる前に送ると
-      // 直前のやり取りが履歴から抜けて、面接官が同じ質問を繰り返す。チェーンは必ず解決する。
-      await utteranceSaveChainRef.current
+      // Backend は保存済みの発話から履歴を組み直す（#1636）。発話はサーバーがターンの中で
+      // 保存し終えてから応答する。冒頭の質問より先に回答が保存されないよう、/start-turn の
+      // 応答を待ってから送る(#1969)。
+      await startTurnSettledRef.current
       await authService.ensureFreshUserToken()
       const { meta, audio } = await fetchAndReadWithTimeout(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
         method: 'POST',
@@ -822,15 +799,15 @@ export function useInterviewSession({
       }
       setIsDeepeningQuestion(Boolean(meta.is_deepening))
       setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
+      // 書き起こしはサーバーが user → ai の順に保存済み(#1969)。ここでは表示だけを更新する。
+      if (String(meta.utterance_save_failed) === 'true') setUtteranceSaveFailed(true)
       if (userText) {
         historyRef.current.push({ role: 'user', content: userText })
         setUtterances(p => [...p, { role: 'user', text: userText }])
-        queueUtteranceSave(session.id, user.user_id, 'user', userText)
       }
       if (aiText) {
         historyRef.current.push({ role: 'assistant', content: aiText })
         setUtterances(p => [...p, { role: 'ai', text: aiText }])
-        queueUtteranceSave(session.id, user.user_id, 'ai', aiText)
       }
       return audio
     }

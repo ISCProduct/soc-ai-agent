@@ -71,6 +71,15 @@ func WithFeature(ctx context.Context, feature string) context.Context {
 	return context.WithValue(ctx, featureKey{}, feature)
 }
 
+// WithDefaultFeature は機能名が未設定のときだけ載せる。共通の下位関数（リトライ付きの呼び出しなど）が
+// 既定の機能名を付けるのに使う。呼び出し元が付けた機能名は上書きしない（#1993）。
+func WithDefaultFeature(ctx context.Context, feature string) context.Context {
+	if Feature(ctx) != FeatureUnknown {
+		return ctx
+	}
+	return WithFeature(ctx, feature)
+}
+
 // Feature は機能名を取り出す。未設定なら FeatureUnknown。
 func Feature(ctx context.Context) string {
 	if ctx == nil {

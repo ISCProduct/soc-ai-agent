@@ -120,7 +120,20 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 const fresh = await authService.getUser()
                 if (fresh?.is_admin) {
                     setIsAdmin(true)
-                    await authService.saveAuth({ ...fresh, user_id: fresh.user_id, is_guest: fresh.is_guest } as any)
+                    await authService.saveAuth({
+                        user_id: fresh.user_id,
+                        email: fresh.email,
+                        name: fresh.name,
+                        is_guest: fresh.is_guest,
+                        target_level: fresh.target_level,
+                        school_name: fresh.school_name,
+                        is_admin: fresh.is_admin,
+                        is_staff: fresh.is_staff,
+                        certifications_acquired: fresh.certifications_acquired,
+                        certifications_in_progress: fresh.certifications_in_progress,
+                        oauth_provider: fresh.oauth_provider,
+                        avatar_url: fresh.avatar_url,
+                    })
                 }
             } catch {
                 // ignore

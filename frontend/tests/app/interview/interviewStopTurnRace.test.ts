@@ -45,7 +45,7 @@ const jsonResponse = (body: unknown): FakeResponse => ({
 })
 
 /** 面接ターンの応答（multipart/mixed: JSONメタ + 音声）を実際の形で組み立てる */
-const turnResponse = (meta: Record<string, string>): FakeResponse => {
+const turnResponse = (meta: Record<string, string | boolean>): FakeResponse => {
   const boundary = 'turnboundary'
   const body =
     `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(meta)}\r\n` +
@@ -159,9 +159,6 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
   let hangTurnBody: boolean
   /** true の間は /api/auth/session が応答せず固まる（middleware のトークン更新が半開き） */
   let hangAuthSession: boolean
-  /** true の間は発話保存（/utterances）の応答を保留する */
-  let holdUtterances: boolean
-  let releaseUtterances: (() => void)[]
 
   beforeEach(() => {
     calls = []
@@ -170,8 +167,6 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     releaseStartTurn = null
     hangTurnBody = false
     hangAuthSession = false
-    holdUtterances = false
-    releaseUtterances = []
     // 面接中は有効なトークンが入っている状態から始める
     storeUserToken(tokenExpiringIn(3600))
     pendingRecorderStops.length = 0
@@ -193,9 +188,6 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
       if (url.includes('/api/auth/session')) {
         if (hangAuthSession) return neverResolves<FakeResponse>(init?.signal)
         return jsonResponse({ user_token: tokenExpiringIn(3600) })
-      }
-      if (url.includes('/utterances') && holdUtterances) {
-        return new Promise<FakeResponse>(resolve => { releaseUtterances.push(() => resolve(jsonResponse({}))) })
       }
       if (url.includes('/start-turn')) {
         if (!holdStartTurn) return turnResponse({ ai_text: '自己紹介をお願いします' })
@@ -231,10 +223,11 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     }))
 
   /**
-   * Backend は保存済みの発話から履歴を組み直す（#1636）。前ターンの保存が終わる前に次の /turn を
-   * 送ると、直前のやり取りが履歴から抜け、面接官が同じ質問を繰り返す。
+   * 発話はサーバーが /start-turn・/turn の中で保存する(#1969)。クライアントから
+   * /utterances を呼ぶと、サーバーの保存と二重になる。role=ai はサーバーが保存せずに成功を返す
+   * （デプロイ前から開いている画面に警告を出し続けないため。400 にはしない）。
    */
-  it('前ターンの発話保存が終わるまで、次の /turn を送らない', async () => {
+  it('ターンの発話をクライアントから保存しない', async () => {
     const media = fakeMedia()
     const { result, unmount } = renderSession(media)
     const turnCalls = () => calls.filter(u => u.includes('/turn') && !u.includes('/start-turn')).length
@@ -244,35 +237,42 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     act(() => { result.current.stopRecording() })
     act(() => { deliverRecorderStops() })
     await flush()
-
-    // 1ターン目の応答は返るが、その発話保存はまだ終わらない
-    holdUtterances = true
     await act(async () => {
       releaseTurn?.(turnResponse({ user_text: '1つ目の回答', ai_text: '次の質問です' }))
       await new Promise(resolve => setTimeout(resolve, 0))
     })
-    expect(turnCalls()).toBe(1)
 
-    // 2ターン目を録音して送る。保存待ちの間は /turn を出さない
+    // 2ターン目は、発話の保存を待たずに送れる
     act(() => { result.current.startRecording() })
     act(() => { result.current.stopRecording() })
     act(() => { deliverRecorderStops() })
     await flush()
-    expect(turnCalls()).toBe(1)
-
-    // 保存が終わったら送る
-    await act(async () => {
-      holdUtterances = false
-      releaseUtterances.splice(0).forEach(r => r())
-      await new Promise(resolve => setTimeout(resolve, 0))
-    })
-    await flush()
     expect(turnCalls()).toBe(2)
+    expect(calls.filter(u => u.includes('/utterances'))).toHaveLength(0)
+    expect(result.current.utteranceSaveFailed).toBe(false)
 
     unmount()
   })
 
-  it('handleStop の後に届いたターンの発話も、finishSession より先に保存する', async () => {
+  it('サーバーが発話を保存できなかったと返したら、記録できていないことを出す', async () => {
+    const media = fakeMedia()
+    const { result, unmount } = renderSession(media)
+
+    await act(async () => { await result.current.handleJoin() })
+    act(() => { result.current.startRecording() })
+    act(() => { result.current.stopRecording() })
+    act(() => { deliverRecorderStops() })
+    await flush()
+    await act(async () => {
+      releaseTurn?.(turnResponse({ user_text: '回答', ai_text: '次の質問です', utterance_save_failed: true }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    expect(result.current.utteranceSaveFailed).toBe(true)
+
+    unmount()
+  })
+
+  it('handleStop の後に届いたターンも、応答を待ってから finishSession を呼ぶ', async () => {
     const media = fakeMedia()
     const { result, unmount } = renderSession(media)
 
@@ -287,31 +287,30 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     await act(async () => {
       const stopping = result.current.handleStop()
       await new Promise(resolve => setTimeout(resolve, 0))
-      // ターンの応答前に終了APIを呼んでしまうと、この発話はレポートに載らない
+      // サーバーはこのターンの中で発話を保存する。応答前に終了APIを呼ぶと、その発話はレポートに載らない
       expect(calls.some(u => u.includes('/finish'))).toBe(false)
 
       releaseTurn?.(turnResponse({ user_text: '最後の回答です', ai_text: 'ありがとうございました' }))
       await stopping
     })
 
-    const saveIndexes = calls.map((u, i) => ({ u, i })).filter(c => c.u.includes('/utterances')).map(c => c.i)
-    const finishIndex = calls.findIndex(u => u.includes('/finish'))
-    expect(saveIndexes).toHaveLength(3) // start-turn の AI 発話 + 最後の user/ai
-    expect(finishIndex).toBeGreaterThan(Math.max(...saveIndexes))
+    expect(calls.some(u => u.includes('/finish'))).toBe(true)
+    expect(calls.filter(u => u.includes('/utterances'))).toHaveLength(0)
 
     unmount()
   })
 
   /**
    * handleJoin は /start-turn の完了前に状態を connected にするため、その応答待ち中でも
-   * 録音ボタンが押せて /turn を始められる。実行中のターンを1つしか覚えない実装だと、
-   * handleStop は後から始まった /turn しか待たず、遅れて返った /start-turn の質問が
-   * finishSession の後に保存される。質問を欠いた書き起こしでレポートが確定してしまう。
+   * 録音ボタンが押せる。サーバーは冒頭の質問を /start-turn の応答直前に保存するので(#1969)、
+   * その前に /turn を送ると回答と次の質問が冒頭の質問より先に保存され、面接官の履歴からも
+   * 冒頭の質問が抜ける。/turn は /start-turn の応答を待ってから送る。
    */
-  it('/start-turn の応答待ち中に始めたターンがあっても、両方の発話を finishSession より先に保存する', async () => {
+  it('/start-turn の応答待ち中に録音した回答は、/start-turn が返ってから送る', async () => {
     holdStartTurn = true
     const media = fakeMedia()
     const { result, unmount } = renderSession(media)
+    const turnCalls = () => calls.filter(u => u.includes('/turn') && !u.includes('/start-turn')).length
 
     await act(async () => {
       void result.current.handleJoin()
@@ -324,28 +323,30 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     act(() => { result.current.stopRecording() })
     act(() => { deliverRecorderStops() })
     await flush()
-    expect(releaseTurn).not.toBeNull()
+    expect(turnCalls()).toBe(0)
 
-    // 後から始めた /turn だけ先に返る
-    await act(async () => {
-      releaseTurn?.(turnResponse({ user_text: '最後の回答です', ai_text: 'ありがとうございました' }))
-      await new Promise(resolve => setTimeout(resolve, 0))
-    })
-
+    // 「完了する」を押しても、両方の応答を待ってから終了APIを呼ぶ
     await act(async () => {
       const stopping = result.current.handleStop()
       await new Promise(resolve => setTimeout(resolve, 0))
-      // /start-turn がまだ応答待ちなので、ここで終了APIを呼ぶと質問が書き起こしから欠ける
       expect(calls.some(u => u.includes('/finish'))).toBe(false)
 
       releaseStartTurn?.(turnResponse({ ai_text: '自己紹介をお願いします' }))
+      for (let i = 0; i < 20 && !releaseTurn; i++) await new Promise(resolve => setTimeout(resolve, 0))
+      // /start-turn が返ってから /turn を送る
+      expect(turnCalls()).toBe(1)
+      expect(calls.some(u => u.includes('/finish'))).toBe(false)
+
+      releaseTurn?.(turnResponse({ user_text: '最後の回答です', ai_text: 'ありがとうございました' }))
       await stopping
     })
 
-    const saveIndexes = calls.map((u, i) => ({ u, i })).filter(c => c.u.includes('/utterances')).map(c => c.i)
+    const startTurnIndex = calls.findIndex(u => u.includes('/start-turn'))
+    const turnIndex = calls.findIndex(u => u.includes('/turn') && !u.includes('/start-turn'))
     const finishIndex = calls.findIndex(u => u.includes('/finish'))
-    expect(saveIndexes).toHaveLength(3) // /turn の user/ai + 遅れて返った /start-turn の質問
-    expect(finishIndex).toBeGreaterThan(Math.max(...saveIndexes))
+    expect(startTurnIndex).toBeLessThan(turnIndex)
+    expect(turnIndex).toBeLessThan(finishIndex)
+    expect(calls.filter(u => u.includes('/utterances'))).toHaveLength(0)
 
     unmount()
   })
@@ -369,12 +370,11 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     })
     expect(releaseStartTurn).not.toBeNull()
 
-    // /start-turn の応答待ち中に、ユーザーが録音して回答を送る
+    // /start-turn の応答待ち中に、ユーザーが録音して回答を送る（/turn は /start-turn の後に出る）
     act(() => { result.current.startRecording() })
     act(() => { result.current.stopRecording() })
     act(() => { deliverRecorderStops() })
     await flush()
-    expect(releaseTurn).not.toBeNull()
     // どちらも応答待ちなので、まだ再生は始まっていない
     expect(play).not.toHaveBeenCalled()
 
@@ -382,14 +382,15 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     await act(async () => {
       const stopping = result.current.handleStop()
       await new Promise(resolve => setTimeout(resolve, 0))
-      releaseTurn?.(turnResponse({ user_text: '最後の回答です', ai_text: 'ありがとうございました' }))
       releaseStartTurn?.(turnResponse({ ai_text: '自己紹介をお願いします' }))
+      for (let i = 0; i < 20 && !releaseTurn; i++) await new Promise(resolve => setTimeout(resolve, 0))
+      expect(releaseTurn).not.toBeNull()
+      releaseTurn?.(turnResponse({ user_text: '最後の回答です', ai_text: 'ありがとうございました' }))
       await stopping
     })
     await flush()
 
-    // 発話はレポートのために保存されるが、音声は鳴らさない
-    expect(calls.filter(u => u.includes('/utterances'))).toHaveLength(3)
+    // 発話はサーバーがターンの中で保存する。音声は鳴らさない
     expect(play).not.toHaveBeenCalled()
 
     unmount()

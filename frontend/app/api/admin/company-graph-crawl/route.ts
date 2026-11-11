@@ -19,9 +19,10 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(310_000), // 5 min + buffer
     })
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
     return NextResponse.json(
-      { ok: false, error: `バックエンドサービスに接続できません: ${err?.message ?? err}` },
+      { ok: false, error: `バックエンドサービスに接続できません: ${message}` },
       { status: 503 },
     )
   }
