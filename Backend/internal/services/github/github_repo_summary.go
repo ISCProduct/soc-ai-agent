@@ -43,7 +43,8 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 	}
 	readme, err := s.fetchREADME(ctx, client, token, fullName)
 	if err != nil {
-		log.Printf("[SummarizeRepo] README fetch warning for %s: %v", fullName, err)
+		// 名前は利用者の入力なので %q で引用する（改行で偽のログ行を作らせない）
+		log.Printf("[SummarizeRepo] README fetch warning for %q: %v", fullName, err)
 		readme = ""
 	}
 
