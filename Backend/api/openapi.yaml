@@ -4196,6 +4196,15 @@ paths:
       description: |
         `allow_training_use`（boolean）は必須。希望条件（`/api/user/preferences`）とは別に保存する。
       security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [allow_training_use]
+              properties:
+                allow_training_use: { type: boolean }
       responses:
         "200":
           description: 成功（更新後の `allow_training_use`）

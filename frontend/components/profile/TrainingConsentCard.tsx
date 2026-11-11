@@ -16,12 +16,20 @@ import { BACKEND_URL } from '@/lib/config'
 
 const ENDPOINT = `${BACKEND_URL}/api/user/training-consent`
 
+async function fetchConsent(): Promise<boolean> {
+  const r = await fetch(ENDPOINT, { headers: authService.getUserFetchHeaders() })
+  if (!r.ok) throw new Error('failed')
+  const data: { allow_training_use?: boolean } = await r.json()
+  return data.allow_training_use === true
+}
+
 /**
  * 面接データを採点モデルの学習に使うことへの同意（#2167）。
  *
  * 初期値はオフ（opt-in）。スイッチを切り替えた時点で保存する。希望条件のフォーム（ScoutPreferencesCard）に
  * 混ぜないのは、同意は希望条件と無関係で、「保存」を押し忘れて同意したつもり・取り消したつもりになるのを防ぐため。
- * 保存に失敗したら、スイッチを元の状態に戻してエラーを出す（保存できていない状態を「オン」に見せない）。
+ * 保存の応答が失敗したら、今の値を取り直して表示する（応答だけ失われて実際は保存されている場合に、
+ * 保存前の値を決め打ちで見せない）。取り直せなければスイッチを出さない（#2180 のレビュー）。
  */
 export function TrainingConsentCard() {
   const [allow, setAllow] = useState(false)
@@ -32,9 +40,8 @@ export function TrainingConsentCard() {
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    fetch(ENDPOINT, { headers: authService.getUserFetchHeaders() })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))
-      .then((data: { allow_training_use?: boolean }) => setAllow(data.allow_training_use === true))
+    fetchConsent()
+      .then(setAllow)
       .catch(() => setLoadFailed(true))
       .finally(() => setLoading(false))
   }, [])
@@ -56,8 +63,15 @@ export function TrainingConsentCard() {
       setAllow(data.allow_training_use === true)
       setSaved(true)
     } catch {
-      setAllow(previous)
-      setError('保存に失敗しました。時間をおいてもう一度お試しください。')
+      // 応答だけ失われて、実際には保存されている場合がある。元の値を決め打ちで表示せず、今の値を取り直す。
+      // 取り直せなければ、分からない状態を「オン」「オフ」のどちらにも見せないよう、スイッチを出さない。
+      setError('保存できたか確認できませんでした。表示している状態が今の設定です。')
+      try {
+        setAllow(await fetchConsent())
+      } catch {
+        setAllow(previous)
+        setLoadFailed(true)
+      }
     } finally {
       setSaving(false)
     }

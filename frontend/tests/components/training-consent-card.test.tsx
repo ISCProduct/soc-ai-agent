@@ -67,14 +67,36 @@ describe('TrainingConsentCard', () => {
     expect(await consentSwitch()).not.toBeChecked()
   })
 
-  it('保存に失敗したら、スイッチを元に戻してエラーを出す（保存できていないのにオンに見せない）', async () => {
+  it('保存に失敗したら、今の値を取り直して表示する（保存されていなければオフのまま）', async () => {
     putReply = { ok: false }
     render(<TrainingConsentCard />)
     fireEvent.click(await consentSwitch())
 
-    await screen.findByText(/保存に失敗しました/)
+    await screen.findByText(/保存できたか確認できませんでした/)
     expect(await consentSwitch()).not.toBeChecked()
     expect(screen.queryByText('学習への利用に同意しました')).not.toBeInTheDocument()
+  })
+
+  it('保存の応答が失敗しても、実際は保存されていたらオンで表示する（保存前の値を決め打ちしない）', async () => {
+    putReply = { ok: false }
+    render(<TrainingConsentCard />)
+    const sw = await consentSwitch()
+    getReply = { ok: true, body: { allow_training_use: true } }
+    fireEvent.click(sw)
+
+    await screen.findByText(/保存できたか確認できませんでした/)
+    expect(await consentSwitch()).toBeChecked()
+  })
+
+  it('保存も取り直しも失敗したら、スイッチを出さない（分からない状態を見せない）', async () => {
+    putReply = { ok: false }
+    render(<TrainingConsentCard />)
+    const sw = await consentSwitch()
+    getReply = { ok: false }
+    fireEvent.click(sw)
+
+    await screen.findByText(/設定の取得に失敗しました/)
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
   })
 
   it('取得に失敗したら、スイッチを出さずにエラーを出す（不明な状態をオフに見せない）', async () => {

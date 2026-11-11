@@ -28,25 +28,23 @@ type User struct {
 	IsAdmin        bool   `gorm:"default:false" json:"is_admin"`                     // 管理者フラグ
 	// AdminTokenNotBefore はこれより前に発行された管理者トークンを失効させる(#1155)。NULLは失効なし。
 	AdminTokenNotBefore      *time.Time `gorm:"column:admin_token_not_before" json:"-"`
-	OAuthProvider            string     `gorm:"size:50;column:oauth_provider"`                // OAuth提供者 (google, github, など)
-	OAuthID                  string     `gorm:"size:255;index;column:oauth_id"`               // OAuth提供者のユーザーID
-	AvatarURL                string     `gorm:"size:500;column:avatar_url"`                   // プロフィール画像URL
-	CertificationsAcquired   string     `gorm:"type:text;column:certifications_acquired"`     // 取得資格
-	CertificationsInProgress string     `gorm:"type:text;column:certifications_in_progress"`  // 勉強中の資格
-	EmailVerifiedAt          *time.Time `gorm:"column:email_verified_at"`                     // メール認証日時
-	EmailVerificationToken   string     `gorm:"size:255;column:email_verification_token"`     // メール認証トークン
-	EmailVerificationExpires *time.Time `gorm:"column:email_verification_expires"`            // メール認証トークン有効期限（#330）
-	LastLoginAt              *time.Time `gorm:"column:last_login_at"`                         // 最終ログイン日時
-	PasswordResetToken       string     `gorm:"size:255;column:password_reset_token"`         // パスワードリセットトークン
-	PasswordResetExpiresAt   *time.Time `gorm:"column:password_reset_expires_at"`             // パスワードリセットトークン有効期限
-	AllowCollectiveInsight   bool       `gorm:"default:true;column:allow_collective_insight"` // 集合知レコメンドへの参加同意
-	AllowScoutVisibility     bool       `gorm:"default:false;column:allow_scout_visibility"`  // 企業スカウト向け分析データ公開同意（#1096）
-	// AllowTrainingUse は面接データを採点モデルの学習に使うことへの同意（#2167）。初期値 false の opt-in。
-	// 学習データの書き出し（#2168）は、これが true の人の面接だけを対象にする。migrations/000063。
-	AllowTrainingUse bool       `gorm:"not null;default:false;column:allow_training_use"`
-	WithdrawnAt      *time.Time `gorm:"index;column:withdrawn_at" json:"withdrawn_at,omitempty"` // 退会日時（論理削除）
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	OAuthProvider            string     `gorm:"size:50;column:oauth_provider"`                           // OAuth提供者 (google, github, など)
+	OAuthID                  string     `gorm:"size:255;index;column:oauth_id"`                          // OAuth提供者のユーザーID
+	AvatarURL                string     `gorm:"size:500;column:avatar_url"`                              // プロフィール画像URL
+	CertificationsAcquired   string     `gorm:"type:text;column:certifications_acquired"`                // 取得資格
+	CertificationsInProgress string     `gorm:"type:text;column:certifications_in_progress"`             // 勉強中の資格
+	EmailVerifiedAt          *time.Time `gorm:"column:email_verified_at"`                                // メール認証日時
+	EmailVerificationToken   string     `gorm:"size:255;column:email_verification_token"`                // メール認証トークン
+	EmailVerificationExpires *time.Time `gorm:"column:email_verification_expires"`                       // メール認証トークン有効期限（#330）
+	LastLoginAt              *time.Time `gorm:"column:last_login_at"`                                    // 最終ログイン日時
+	PasswordResetToken       string     `gorm:"size:255;column:password_reset_token"`                    // パスワードリセットトークン
+	PasswordResetExpiresAt   *time.Time `gorm:"column:password_reset_expires_at"`                        // パスワードリセットトークン有効期限
+	AllowCollectiveInsight   bool       `gorm:"default:true;column:allow_collective_insight"`            // 集合知レコメンドへの参加同意
+	AllowScoutVisibility     bool       `gorm:"default:false;column:allow_scout_visibility"`             // 企業スカウト向け分析データ公開同意（#1096）
+	AllowTrainingUse         bool       `gorm:"default:false;column:allow_training_use"`                 // 面接データを採点モデルの学習に使う同意（#2167、opt-in、000063）
+	WithdrawnAt              *time.Time `gorm:"index;column:withdrawn_at" json:"withdrawn_at,omitempty"` // 退会日時（論理削除）
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
 // HasStaffRole は職員ロールを持つか。
