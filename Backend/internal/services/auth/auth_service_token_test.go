@@ -55,7 +55,9 @@ func (r *pendingRepoAuthStub) FindByToken(token string) (*entity.PendingRegistra
 	return nil, nil
 }
 func (r *pendingRepoAuthStub) DeleteByEmail(email string) error { return nil }
-func (r *pendingRepoAuthStub) DeleteExpired() error             { return nil }
+func (r *pendingRepoAuthStub) DeleteExpired(now time.Time, limit int) (int64, error) {
+	return 0, nil
+}
 
 func TestAuthServiceLoginUsesUserSecretForUserToken(t *testing.T) {
 	t.Setenv("ADMIN_SECRET", "admin-secret")
