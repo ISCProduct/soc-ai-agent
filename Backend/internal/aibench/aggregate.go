@@ -151,6 +151,9 @@ type Summary struct {
 	PairwiseAgreement  float64            `json:"pairwise_agreement"`
 	PairwiseComparable int                `json:"pairwise_comparable"`
 	MeanScoreByLabel   map[string]float64 `json:"mean_score_by_label"`
+	// MeanScore は全ケースの平均スコア（ケースごとの平均の平均）。ラベルなしの target（#1782）では
+	// 正解との一致・指示の遵守の割合そのもので、劣化判定に使う。
+	MeanScore float64 `json:"mean_score"`
 
 	// 交絡: 入力の文字数とスコアの順位相関。**弁別力と必ず並べて読む。**
 	// ラベルとの相関が高くてもこれが同じくらい高ければ、その測定は
@@ -282,6 +285,7 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	scored := make([]CaseSummary, 0, len(byCase))
 	stddevs := make([]float64, 0, len(byCase))
 	scoresByLabel := map[string][]float64{}
+	caseMeans := make([]float64, 0, len(byCase))
 	for _, id := range caseOrder {
 		runs := byCase[id]
 		scores := make([]float64, 0, len(runs))
@@ -299,6 +303,7 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 			InputChars: runs[0].InputChars}
 		if len(scores) > 0 {
 			cs.MeanScore = Mean(scores)
+			caseMeans = append(caseMeans, cs.MeanScore)
 			cs.ScoreStdDev = StdDev(scores)
 			stddevs = append(stddevs, cs.ScoreStdDev)
 			if cs.ScoreStdDev > UnstableStdDevThreshold {
@@ -314,6 +319,7 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 		}
 		s.CaseDetails = append(s.CaseDetails, cs)
 	}
+	s.MeanScore = Mean(caseMeans)
 	s.MeanScoreStdDev = Mean(stddevs)
 	for _, d := range stddevs {
 		if d > s.MaxScoreStdDev {

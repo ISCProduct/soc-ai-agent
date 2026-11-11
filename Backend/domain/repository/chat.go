@@ -22,20 +22,16 @@ type AIGeneratedQuestionRepository interface {
 	Create(q *models.AIGeneratedQuestion) error
 	FindBySessionID(sessionID string) ([]models.AIGeneratedQuestion, error)
 	FindByUserAndSession(userID uint, sessionID string) ([]models.AIGeneratedQuestion, error)
-	GetAskedQuestionIDs(userID uint, sessionID string) ([]uint, error)
 	UpdateAnswer(id uint, answerText string, answerScore int) error
-	FindUnansweredBySession(sessionID string) (*models.AIGeneratedQuestion, error)
 }
 
 // PredefinedQuestionRepository は事前定義質問の永続化インターフェース。
 type PredefinedQuestionRepository interface {
-	FindByCategory(category string, targetLevel string) ([]*models.PredefinedQuestion, error)
 	FindActiveQuestions(targetLevel string, industryID *uint, jobCategoryID *uint, currentPhase string) ([]*models.PredefinedQuestion, error)
 	FindByID(id uint) (*models.PredefinedQuestion, error)
 	Create(question *models.PredefinedQuestion) error
 	Update(question *models.PredefinedQuestion) error
 	GetNextQuestion(askedQuestionIDs []uint, targetLevel string, industryID *uint, jobCategoryID *uint, prioritizeCategory string, currentPhase string) (*models.PredefinedQuestion, error)
-	CountByCategory(category string) (int64, error)
 }
 
 // QuestionWeightRepository は質問重み設定の永続化インターフェース。
@@ -44,7 +40,6 @@ type QuestionWeightRepository interface {
 	Create(qw *models.QuestionWeight) error
 	FindByID(id uint) (*models.QuestionWeight, error)
 	FindActiveByCategory(category string) ([]models.QuestionWeight, error)
-	FindActiveByIndustryAndJob(industryID, jobCategoryID uint) ([]models.QuestionWeight, error)
 	GetRandomQuestion(industryID, jobCategoryID uint) (*models.QuestionWeight, error)
 	GetRandomQuestionExcluding(industryID, jobCategoryID uint, excludeIDs []uint) (*models.QuestionWeight, error)
 	GetRandomQuestionByCategory(category string, excludeIDs []uint) (*models.QuestionWeight, error)

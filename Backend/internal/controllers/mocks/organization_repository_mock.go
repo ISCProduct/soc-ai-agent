@@ -44,16 +44,8 @@ func (m *OrganizationRepositoryMock) List(limit, offset int) ([]models.Organizat
 	return nil, 0, args.Error(2)
 }
 
-func (m *OrganizationRepositoryMock) CreateMembership(mem *models.OrganizationMembership) error {
-	return m.Called(mem).Error(0)
-}
-
 func (m *OrganizationRepositoryMock) UpdateMembership(mem *models.OrganizationMembership) error {
 	return m.Called(mem).Error(0)
-}
-
-func (m *OrganizationRepositoryMock) DeleteMembership(organizationID, userID uint) error {
-	return m.Called(organizationID, userID).Error(0)
 }
 
 func (m *OrganizationRepositoryMock) FindMembership(organizationID, userID uint) (*models.OrganizationMembership, error) {

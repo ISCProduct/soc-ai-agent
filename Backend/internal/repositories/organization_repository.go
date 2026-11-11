@@ -61,17 +61,8 @@ func (r *OrganizationRepository) List(limit, offset int) ([]models.Organization,
 	return orgs, total, nil
 }
 
-func (r *OrganizationRepository) CreateMembership(m *models.OrganizationMembership) error {
-	return r.db.Create(m).Error
-}
-
 func (r *OrganizationRepository) UpdateMembership(m *models.OrganizationMembership) error {
 	return r.db.Save(m).Error
-}
-
-func (r *OrganizationRepository) DeleteMembership(organizationID, userID uint) error {
-	return r.db.Where("organization_id = ? AND user_id = ?", organizationID, userID).
-		Delete(&models.OrganizationMembership{}).Error
 }
 
 func (r *OrganizationRepository) FindMembership(organizationID, userID uint) (*models.OrganizationMembership, error) {

@@ -3,6 +3,7 @@ package interview
 import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
 	"fmt"
@@ -64,7 +65,8 @@ func (s *InterviewService) fetchStudentName(userID uint) string {
 // 取得に失敗した場合はエラーを返し、不明な場合は空文字とnilを返します。
 func (s *InterviewService) lookupCompanyReading(ctx context.Context, companyName string) (string, error) {
 	systemPrompt := "あなたは日本企業の名称に詳しいアシスタントです。確実に知っている場合のみ答え、不明なら空文字を返してください。"
-	query := fmt.Sprintf("「%s」の正しい日本語読み（ふりがな）をカタカナで1行だけ答えてください。", companyName)
+	// 企業名は企業行（自動収集・ゲスト投稿）由来。「」の中に置くので整える（#1970 のレビュー）
+	query := fmt.Sprintf("「%s」の正しい日本語読み（ふりがな）をカタカナで1行だけ答えてください。", shared.InlinePromptName(companyName))
 	ctxTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	ctxTimeout = usagectx.WithFeature(ctxTimeout, usagectx.FeatureInterviewTurn)

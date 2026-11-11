@@ -27,6 +27,9 @@ func (r *RealtimeUsageRepository) FindActiveBySessionID(sessionID uint) (*models
 }
 
 func (r *RealtimeUsageRepository) Create(log *models.RealtimeUsageLog) error {
+	if log.SchoolID == nil {
+		log.SchoolID = schoolIDForLog(r.db, log.UserID)
+	}
 	return r.db.Create(log).Error
 }
 

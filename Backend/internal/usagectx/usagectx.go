@@ -8,11 +8,19 @@
 // openai → middleware → repositories → companyfetch → openai で循環する。
 package usagectx
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // FeatureUnknown は機能名が渡されなかった呼び出しの既定値。
 // この件数が「まだ計測できていない経路」の指標になる（DesignDoc §8）。
 const FeatureUnknown = "unknown"
+
+var (
+	ErrAIBudgetExceeded    = errors.New("AI budget exceeded")
+	ErrAIBudgetUnavailable = errors.New("AI budget check unavailable")
+)
 
 // 機能名の定数。api_call_logs.feature に入り、機能別のコスト集計軸になる。
 // LLM に分類させず、呼び出し元が定数で渡す（DesignDoc §3.5）。
@@ -44,7 +52,19 @@ const (
 )
 
 type featureKey struct{}
+type promptVersionKey struct{}
 type actorKey struct{}
+type budgetCheckKey struct{}
+
+type budgetCheck func(context.Context) error
+
+// PromptVersion は工程と版を表す利用量記録用メタデータ。
+// Group は A/B で割り当てた版。A/B の対象外なら空（#1976）。
+type PromptVersion struct {
+	Stage   string
+	Version string
+	Group   string
+}
 
 // actor は実行主体と配賦先。どちらも解決できないことがあるためポインタで持つ。
 type actor struct {
@@ -62,6 +82,15 @@ func WithFeature(ctx context.Context, feature string) context.Context {
 	return context.WithValue(ctx, featureKey{}, feature)
 }
 
+// WithDefaultFeature は機能名が未設定のときだけ載せる。共通の下位関数（リトライ付きの呼び出しなど）が
+// 既定の機能名を付けるのに使う。呼び出し元が付けた機能名は上書きしない（#1993）。
+func WithDefaultFeature(ctx context.Context, feature string) context.Context {
+	if Feature(ctx) != FeatureUnknown {
+		return ctx
+	}
+	return WithFeature(ctx, feature)
+}
+
 // Feature は機能名を取り出す。未設定なら FeatureUnknown。
 func Feature(ctx context.Context) string {
 	if ctx == nil {
@@ -71,6 +100,28 @@ func Feature(ctx context.Context) string {
 		return f
 	}
 	return FeatureUnknown
+}
+
+// WithPromptVersion はAI呼び出しの工程別プロンプト版を記録用contextに載せる。
+func WithPromptVersion(ctx context.Context, stage, version string) context.Context {
+	return WithPromptAssignment(ctx, stage, version, "")
+}
+
+// WithPromptAssignment は版と A/B の群を記録用 context に載せる。group は A/B の対象外なら空。
+func WithPromptAssignment(ctx context.Context, stage, version, group string) context.Context {
+	if ctx == nil || stage == "" || version == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, promptVersionKey{}, PromptVersion{Stage: stage, Version: version, Group: group})
+}
+
+// PromptVersionFromContext は工程別プロンプト版を取り出す。未設定ならゼロ値を返す。
+func PromptVersionFromContext(ctx context.Context) PromptVersion {
+	if ctx == nil {
+		return PromptVersion{}
+	}
+	version, _ := ctx.Value(promptVersionKey{}).(PromptVersion)
+	return version
 }
 
 // WithActor は実行主体と配賦先を載せる。HTTP 経路では認証ミドルウェアが一度だけ呼ぶ。
@@ -102,4 +153,25 @@ func Actor(ctx context.Context) (userID, organizationID *uint) {
 		return nil, nil
 	}
 	return a.UserID, a.OrganizationID
+}
+
+// WithAIBudgetCheck は AI を呼ぶ直前に実行する予算判定を載せる。
+func WithAIBudgetCheck(ctx context.Context, check func(context.Context) error) context.Context {
+	if ctx == nil || check == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, budgetCheckKey{}, budgetCheck(check))
+}
+
+// CheckAIBudget は載っている予算判定を実行する。載っていなければ何もしない
+// （未ログインの利用者やバッチは予算の対象ではない）。
+func CheckAIBudget(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	check, ok := ctx.Value(budgetCheckKey{}).(budgetCheck)
+	if !ok {
+		return nil
+	}
+	return check(ctx)
 }

@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"Backend/internal/aimodel"
 	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
@@ -52,7 +53,7 @@ func (s *ChatService) buildAndSaveSessionSummary(ctx context.Context, userID uin
 	userPrompt := "解析情報: " + string(contextBytes) + "\n\n直近のユーザーメッセージ:\n" + userContext
 
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureChatSummary)
-	raw, err := s.aiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, 400)
+	raw, err := s.aiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, 400, aimodel.For(aimodel.StageChatSummary))
 	if err != nil {
 		log.Printf("LLM session summary generation failed: %v", err)
 		return nil, err

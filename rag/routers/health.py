@@ -1,6 +1,7 @@
 """ヘルスチェックエンドポイント。"""
 from __future__ import annotations
 
+from services.model_tiers import es_review_model
 import os
 
 from fastapi import APIRouter
@@ -19,7 +20,8 @@ def _chat_model() -> str:
     推測すると結果に残るモデル名が嘘になる。OpenAI 側のモデル更新で同じ名前でも
     出力が変わるため、どのモデルで測ったかが分からない結果は比較に使えない。
     """
-    return os.getenv("OPENAI_CHAT_MODEL", "gpt-4o")
+    # ES添削のモデルの決め方（services/model_tiers.es_review_model）と同じものを返す（#1526）
+    return es_review_model()
 
 
 @router.get("/health")

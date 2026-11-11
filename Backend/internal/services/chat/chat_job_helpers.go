@@ -2,6 +2,7 @@ package chat
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -147,7 +148,8 @@ func (s *ChatService) evaluateJobFitScoreWithAI(ctx context.Context, jobCategory
 		strings.Join(relatedKeywords, ", "),
 	)
 
-	response, err := s.aiCallWithRetries(ctx, prompt)
+	// 職種キーワードによる回答の採点。質問の生成（aiCallWithRetries の既定）と分けて数える（#1993）
+	response, err := s.aiCallWithRetries(usagectx.WithFeature(ctx, usagectx.FeatureChatAnswerEval), prompt)
 	if err != nil {
 		return nil, err
 	}

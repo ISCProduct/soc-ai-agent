@@ -54,8 +54,8 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
       const response = await authService.login(email, password)
       await authService.saveAuth(response)
       onAuthSuccess(response)
-    } catch (err: any) {
-      const msg = err.message || ''
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
       if (msg === 'email_not_verified') {
         setError('メールアドレスが未確認です。登録時に送信された確認メールをご確認ください。')
       } else if (msg === 're_verification_required') {
@@ -75,8 +75,8 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
     try {
       await authService.requestRegistration(email)
       setRegistrationEmailSent(true)
-    } catch (err: any) {
-      setError(err.message)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
@@ -89,8 +89,8 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
       const response = await authService.createGuest()
       await authService.saveAuth(response)
       onAuthSuccess(response)
-    } catch (err: any) {
-      setError(err.message)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }

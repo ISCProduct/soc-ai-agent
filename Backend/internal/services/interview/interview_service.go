@@ -2,12 +2,14 @@ package interview
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/aifailover"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/email"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"log"
 	"sync"
@@ -21,16 +23,20 @@ import (
 const jobChBufferSize = 100
 
 type InterviewService struct {
-	sessionRepo          repository.InterviewSessionRepository
-	utterRepo            repository.InterviewUtteranceRepository
-	reportRepo           repository.InterviewReportRepository
-	userRepo             repository.UserRepository
-	emailService         *email.EmailService
-	openaiClient         *openai.Client
+	sessionRepo  repository.InterviewSessionRepository
+	utterRepo    repository.InterviewUtteranceRepository
+	reportRepo   repository.InterviewReportRepository
+	userRepo     repository.UserRepository
+	emailService *email.EmailService
+	openaiClient *openai.Client
+	// speech は OpenAI の障害時に STT / LLM / TTS をローカルへ縮退させる（#1833）。
+	// ローカルの接続先が未設定なら OpenAI だけを使う（今までと同じ）。
+	speech               *aifailover.Speech
 	budgetGuard          interviewBudgetGuard
 	realtimeUsageService *costs.RealtimeUsageService
 	crossFeature         *flywheel.CrossFeatureIntegrationService
 	matchingRunner       MatchingRunner
+	aiBudget             costs.AIBudgetStatusProvider
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
 	questionStateRepo    repository.InterviewQuestionStateRepository
 	skillScoreRepo       SkillScoreReader
@@ -68,6 +74,7 @@ func NewInterviewService(
 		userRepo:             userRepo,
 		emailService:         emailService,
 		openaiClient:         openaiClient,
+		speech:               newSpeechFailover(openaiClient),
 		realtimeUsageService: realtimeUsageService,
 		jobCh:                make(chan uint, jobChBufferSize),
 		inFlightJobs:         map[uint]struct{}{},
@@ -107,6 +114,18 @@ func (s *InterviewService) SetCrossFeatureService(cf *flywheel.CrossFeatureInteg
 // SetMatchingRunner は面接→スコア反映後の再マッチングを注入する（オプション）。
 func (s *InterviewService) SetMatchingRunner(m MatchingRunner) {
 	s.matchingRunner = m
+}
+
+// SetAIBudget は面接後の再マッチングで AI 理由を作る前の予算判定を設定する（#1776）。
+func (s *InterviewService) SetAIBudget(p costs.AIBudgetStatusProvider) {
+	s.aiBudget = p
+}
+
+// rematchContext は面接後の再マッチング用の context を作る。レポートのワーカーから
+// 切り離して走るので、費用の配賦先（actor）と予算判定をここで載せる。
+func (s *InterviewService) rematchContext(userID, organizationID uint) context.Context {
+	ctx := usagectx.WithActor(context.Background(), userID, organizationID)
+	return costs.WithUserAIBudgetCheck(ctx, s.aiBudget, userID)
 }
 
 // SetJobEnqueuer は面接レポート等の永続キュー投入先を設定する（#617）。
@@ -239,6 +258,11 @@ type TurnResult struct {
 	TotalQuestions         int
 	ResolvedCompanyID      uint
 	CustomQuestionsEnabled bool
+	// AIFallback はローカルへ縮退した工程（stt / llm / tts）。OpenAI だけで済んだら空（#1833）。
+	AIFallback []string
+	// UtteranceSaveFailed はターンの発話を書き起こしへ保存できなかったことを示す（#1969）。
+	// 面接は止めず、画面に「記録できていない」ことを出すために返す（#1476 と同じ扱い）。
+	UtteranceSaveFailed bool
 }
 
 func (s *InterviewService) estimateCost(start, end *time.Time) float64 {

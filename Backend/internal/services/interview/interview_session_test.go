@@ -65,9 +65,6 @@ func (r *sessionRepoStub) CountAll(schoolID *uint, companyID *uint) (int64, erro
 	r.lastCompanyID = companyID
 	return 0, nil
 }
-func (r *sessionRepoStub) CountByUserAndDay(userID uint, day time.Time) (int64, error) {
-	return 0, nil
-}
 
 func newTestInterviewService(repo *sessionRepoStub) *InterviewService {
 	svc := NewInterviewService(repo, nil, nil, nil, nil, nil, nil)

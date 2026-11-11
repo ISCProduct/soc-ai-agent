@@ -7,7 +7,6 @@ type JobCategoryRepository interface {
 	FindAll() ([]models.JobCategory, error)
 	FindByID(id uint) (*models.JobCategory, error)
 	FindByName(name string) ([]models.JobCategory, error)
-	FindByIndustry(industryID uint) ([]models.JobCategory, error)
 	GetTopCategories() ([]models.JobCategory, error)
 }
 
