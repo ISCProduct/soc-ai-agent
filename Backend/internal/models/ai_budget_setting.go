@@ -8,7 +8,7 @@ const (
 )
 
 // AIBudgetSetting は利用者または学校に設定されたAI利用上限を表す。
-// 一意制約は migrations/000063 で定義する。AutoMigrate は使わない方針のためタグには書かない。
+// 一意制約は migrations/000065 で定義する。AutoMigrate は使わない方針のためタグには書かない。
 type AIBudgetSetting struct {
 	ID              uint      `gorm:"primaryKey" json:"id"`
 	Scope           string    `gorm:"size:16;not null" json:"scope"`
