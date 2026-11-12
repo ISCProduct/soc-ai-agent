@@ -334,7 +334,19 @@ ORDER BY prompt_stage, prompt_version;
 質問・評価・企業情報・マッチング理由の生成結果に記録されたラベルは、それぞれ
 `ai_generated_questions.prompt_version`、`user_weight_scores.prompt_version`、
 `companies.info_prompt_version`、`user_company_matches.match_reason_prompt_version` で確認する。
-A/B振り分けは未対応である。
+A/B 割当（`PROMPT_AB_<STAGE>`）を設定した工程は、割り当てた群ごとに比べる。群が空の呼び出しは A/B の対象外:
+
+```sql
+SELECT prompt_stage, prompt_ab_group, COUNT(*) AS calls, SUM(cost_usd) AS cost_usd
+FROM api_call_logs
+WHERE called_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY AND prompt_ab_group <> ''
+GROUP BY prompt_stage, prompt_ab_group
+ORDER BY prompt_stage, prompt_ab_group;
+```
+
+設定は Terraform 変数 `prompt_ab`（例: `{ score_evaluation = "v2:50,v3:50" }`）で渡す。prod は `terraform apply` でタスク定義へ入る。
+staging は `prompt_versions` と同じく新規インスタンスの user_data にしか届かないので、稼働中のインスタンスは `/opt/app/.env` も手で更新する。
+設定が無効（候補の本文が未登録など）なら、起動後の最初の呼び出しで `プロンプトの A/B 設定を無視します` の警告が出る。
 `prompt_stage='unknown'` は工程メタデータが付与されていない呼び出しを表す。
 
 prod のデプロイはイメージを差し替えるだけなので、`PROMPT_VERSION` と工程別ラベルをタスク定義へ入れるには `terraform apply` が必要。
@@ -358,6 +370,19 @@ GET /api/admin/costs/monthly   # 月別コスト
   - 同一月は1回のみ通知
 - Realtime: `REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200` を超えるとメール/Slack
   - `REALTIME_ALERT_EMAILS` / `REALTIME_ALERT_SLACK_WEBHOOK_URL`
+
+
+### AI利用予算（利用者・学校単位）
+
+利用者と学校ごとに日次・月次の上限を設定できる（`/api/admin/ai-budgets`、管理画面のコスト画面）。上限は既定で未設定で、0 は「上限なし」を表す。
+
+- **判定:** AI を実行するルートで、認証の後に過去の利用額を読む。超過なら 429 と `code: ai_budget_exceeded`、判定できなければ 503（fail-closed）を返す
+- **超過の許容:** ロックも予約もしない。同時に走ったリクエストのぶんだけ上限を少し超えることがある。ロックを持つと AI の応答待ちの間 DB 接続を占有し、同じ学校の利用者を直列化するため
+- **窓:** 日次は毎日 0:00、月次は毎月 1 日 0:00（いずれも日本時間）に切り替わる。既存のコスト集計は UTC 基準なので、月末月初の数字は一致しない
+- **集計対象:** `api_call_logs` と `realtime_usage_logs`。終了していないリアルタイム音声は経過時間から見積もる。日次には当日 0:00 以降の経過だけを足すので、日付をまたいで続く通話も新しい日の上限に入る。月次は開始月に入る。開始時刻が現在より後の行は 0 として数える。学校は記録時点の所属で帰属する。導入前のログには `school_id` がないので、導入した月の学校の月次は実態より小さく出る。記録時に所属校を引けなかった（DB の失敗）呼び出しは学校の利用額に入らず、ログに `[AIBudget] school lookup failed` が出る
+- **対象外:** 開始後の面接（turn / utterances / finish）と保存済みレポートのメール送信は止めない。未ログインの利用者はレート制限で保護する。面接レポートと診断後のマッチングはワーカーで動くので止めず、利用額は利用者に帰属させる。ワーカーのマッチングでも AI 理由の生成の前には利用者の予算を判定し、上限ならテンプレートの理由のままにする
+- **DB 接続:** `DB_MAX_OPEN_CONNS`（既定30）と `DB_MAX_IDLE_CONNS`（既定10）でタスクごとの接続数を制限する。prod には接続数のアラーム（`rds_connections`）がある
+- **既存のブレーキとの違い:** `OpenAIFallbackGuard` はフォールバックの課金だけを見る別の財布で、DB 障害時は fail-open。`OPENAI_COST_ALERT_THRESHOLD_USD` は通知だけで止めない
 
 ### govulncheck の例外
 

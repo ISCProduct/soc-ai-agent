@@ -7,6 +7,17 @@ export interface ProxyErrorBody {
   error: string
   status: number
   detail?: string
+  code?: string
+}
+
+// バックエンドが AI の利用上限で止めたときの code。文言もそのまま利用者へ見せる。
+export const AI_BUDGET_EXCEEDED_CODE = 'ai_budget_exceeded'
+
+/** AI の利用上限で止められた応答なら、利用者向けの文言を返す。 */
+export function aiBudgetExceededMessage(data: unknown): string | undefined {
+  if (typeof data !== 'object' || data === null) return undefined
+  const { code, error } = data as { code?: unknown; error?: unknown }
+  return code === AI_BUDGET_EXCEEDED_CODE && typeof error === 'string' ? error : undefined
 }
 
 function getString(value: unknown): string | undefined {
@@ -127,6 +138,12 @@ export async function buildProxyJsonResponse(response: Response): Promise<NextRe
 
   if (response.ok) {
     return NextResponse.json(data, { status: response.status })
+  }
+
+  const budgetMessage = aiBudgetExceededMessage(data)
+  if (budgetMessage) {
+    const body: ProxyErrorBody = { error: budgetMessage, status: response.status, code: AI_BUDGET_EXCEEDED_CODE }
+    return NextResponse.json(body, { status: response.status })
   }
 
   const rawForUser = looksLikeHtml(raw) ? '' : raw

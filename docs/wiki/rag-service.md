@@ -499,6 +499,7 @@ python3 -m pytest tests/ -v
 ## 関連ドキュメント
 
 - [システム概要](./overview.md) — 全体アーキテクチャ
+- [検索品質の固定セット評価](./rag-search-quality.md) — 学生検索・企業リサーチの品質を設定変更の前後で比べる（#1773）
 - [API リファレンス](./api-reference.md) — バックエンド API 一覧
 - [Getting Started](./getting-started.md) — 環境構築手順
 

@@ -141,6 +141,14 @@ func postJSON(ctx context.Context, url string, payload any, header map[string]st
 //     README にその違いを書いてある。
 //  3. 再現性の測定で、クライアント側のキャッシュ・フォールバックの影響を避けたい。
 func CallChatCompletions(ctx context.Context, model, systemPrompt, userPrompt string, temperature float64, maxTokens int, jsonMode bool) CallResult {
+	var responseFormat any
+	if jsonMode {
+		responseFormat = map[string]string{"type": "json_object"}
+	}
+	return callChatCompletions(ctx, model, systemPrompt, userPrompt, temperature, maxTokens, responseFormat)
+}
+
+func callChatCompletions(ctx context.Context, model, systemPrompt, userPrompt string, temperature float64, maxTokens int, responseFormat any) CallResult {
 	key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if key == "" {
 		return CallResult{Err: ErrNoAPIKey, Fatal: true}
@@ -154,8 +162,8 @@ func CallChatCompletions(ctx context.Context, model, systemPrompt, userPrompt st
 		"temperature":           temperature,
 		"max_completion_tokens": maxTokens,
 	}
-	if jsonMode {
-		payload["response_format"] = map[string]string{"type": "json_object"}
+	if responseFormat != nil {
+		payload["response_format"] = responseFormat
 	}
 
 	start := time.Now()
@@ -197,6 +205,22 @@ func CallChatCompletions(ctx context.Context, model, systemPrompt, userPrompt st
 		LatencyMS:        latency,
 		Truncated:        parsed.Choices[0].FinishReason == "length",
 	}
+}
+
+// CallChatCompletionsWithSchema は Structured Outputs（response_format: json_schema, strict）で
+// /chat/completions を1回だけ叩く（企業情報の抽出の本番経路、#1782）。
+// スキーマ以外は CallChatCompletions と同じ。本番（openai.Client.ChatCompletionWithSchema）と
+// 同じスキーマを渡すこと。JSON mode で測ると、スキーマが守らせている型・列挙値の違反まで
+// 破損に数え、本番より悪く見える。
+func CallChatCompletionsWithSchema(ctx context.Context, model, systemPrompt, userPrompt string, temperature float64, maxTokens int, schemaName string, schema json.RawMessage) CallResult {
+	return callChatCompletions(ctx, model, systemPrompt, userPrompt, temperature, maxTokens, map[string]any{
+		"type": "json_schema",
+		"json_schema": map[string]any{
+			"name":   schemaName,
+			"schema": schema,
+			"strict": true,
+		},
+	})
 }
 
 // CallResponses は /responses を1回だけ叩く（履歴書レビューの本番経路）。

@@ -1,6 +1,7 @@
 package companyfetch
 
 import (
+	"Backend/internal/aimodel"
 	"os"
 	"strings"
 )
@@ -16,7 +17,8 @@ const (
 
 // ExtractModel はスクレイプ/Search結果からの JSON 抽出モデル。
 func ExtractModel() string {
-	return envOr("OPENAI_COMPANY_EXTRACT_MODEL", defaultExtractModel)
+	// 抽出は内部の定型処理（軽量の層）。OPENAI_COMPANY_EXTRACT_MODEL → AI_MODEL_LIGHT → gpt-4o-mini（#1526）
+	return aimodel.For(aimodel.StageCompanyExtract)
 }
 
 // SearchModel は軽量 Web 検索モデル。
@@ -31,7 +33,8 @@ func DeepSearchModel() string {
 
 // ParseModel は Search 結果の構造化モデル。
 func ParseModel() string {
-	return envOr("OPENAI_COMPANY_PARSE_MODEL", defaultParseModel)
+	// parse は内部の定型処理（軽量の層）。OPENAI_COMPANY_PARSE_MODEL → AI_MODEL_LIGHT → gpt-4o-mini（#1526）
+	return aimodel.For(aimodel.StageCompanyParse)
 }
 
 // ParseModelAdvanced は長文向け高精度 Parse モデル。

@@ -18,7 +18,7 @@ export default [
       'react-hooks': reactHooksPlugin,
     },
     rules: {
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
       // 早期 return より後ろのフックは「Rendered more hooks than during the previous render」で
       // 画面ごと落ちる。プラグインは入っていたのにルール未設定で素通りしていた
       'react-hooks/rules-of-hooks': 'error',
