@@ -30,7 +30,6 @@ func (r *userRepoAuthStub) GetUserByID(id uint) (*entity.User, error) {
 	}
 	return nil, nil
 }
-func (r *userRepoAuthStub) ListUsers() ([]entity.User, error) { return nil, nil }
 func (r *userRepoAuthStub) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
 	return nil, 0, nil
 }
@@ -56,7 +55,9 @@ func (r *pendingRepoAuthStub) FindByToken(token string) (*entity.PendingRegistra
 	return nil, nil
 }
 func (r *pendingRepoAuthStub) DeleteByEmail(email string) error { return nil }
-func (r *pendingRepoAuthStub) DeleteExpired() error             { return nil }
+func (r *pendingRepoAuthStub) DeleteExpired(now time.Time, limit int) (int64, error) {
+	return 0, nil
+}
 
 func TestAuthServiceLoginUsesUserSecretForUserToken(t *testing.T) {
 	t.Setenv("ADMIN_SECRET", "admin-secret")

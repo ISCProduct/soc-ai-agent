@@ -26,8 +26,12 @@ type APICallLog struct {
 	// PromptStage / PromptVersion は工程別の品質比較に使う。
 	PromptStage   string `gorm:"size:64;not null;default:'unknown'" json:"prompt_stage"`
 	PromptVersion string `gorm:"size:64;not null;default:''" json:"prompt_version,omitempty"`
+	// PromptABGroup は A/B で割り当てた版（#1976）。A/B の対象外の呼び出しは空。
+	PromptABGroup string `gorm:"column:prompt_ab_group;size:64;not null;default:''" json:"prompt_ab_group,omitempty"`
 	// 実行主体。バッチ経路は主体を持たないため nil。
 	UserID *uint `json:"user_id,omitempty"`
+	// 呼び出し時点の学校所属。users.school_id の後日変更で過去実績を移動させない。
+	SchoolID *uint `json:"school_id,omitempty"`
 	// 配賦先の学校/企業。解決できない場合は nil。
 	OrganizationID *uint `json:"organization_id,omitempty"`
 	// STT/TTS はトークンではなく音声の長さが課金単位になる。
@@ -44,6 +48,10 @@ type APICallLog struct {
 	// これが無いと、同じ gpt-4o-mini でも通常のチャットと web_search を
 	// 区別できず、検索コストの85%を占めるツール料が記録から抜ける。
 	WebSearchCalls int `gorm:"not null;default:0" json:"web_search_calls"`
+	// PriceBasis は、記録した時点のトークン単価の根拠（listed / estimated / inherited / unknown, #2004）。
+	// 集計時に今の単価表から判定すると、単価表を上書きしたときに過去の行まで表示が変わるため、記録時に残す。
+	// 空文字は記録なし（音声の単価で計算した行・ローカル推論の行・この列を足す前の行）。migrations/000062。
+	PriceBasis string `gorm:"size:16;not null;default:''" json:"price_basis,omitempty"`
 	// 複合インデックス (called_at, provider) と (organization_id, called_at) は
 	// migrations/000031 で定義する。AutoMigrate は使わない方針のためタグには書かない。
 }

@@ -1,6 +1,7 @@
 """面接ヒントの Web Search と構造化パース。"""
 from __future__ import annotations
 
+from services.model_tiers import hints_parse_model, summary_model
 import asyncio
 import logging
 import os
@@ -91,7 +92,7 @@ async def _run_hints_web_search_pipeline(
              )
     try:
         resp = client.chat.completions.create(
-            model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
+            model=summary_model(),
             messages=[
                 {
                     "role": "system",
@@ -125,7 +126,7 @@ def _parse_hints_from_text(company_name: str, position: str, research_text: str)
         return CompanyHintsResponse(style_tags=[], top_questions=[])
     client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     # 構造化JSON抽出には通常の chat モデルを使用（search-preview は json_object 非対応）
-    model = os.getenv("OPENAI_HINTS_PARSE_MODEL", "gpt-4o-mini")
+    model = hints_parse_model()
     role_text = position or "一般職"
     system_prompt = (
         "あなたは就活生向けの面接アドバイザーです。"

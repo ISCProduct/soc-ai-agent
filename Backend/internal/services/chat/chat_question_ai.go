@@ -96,7 +96,7 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 		prompt = prompts.BuildDeepeningQuestionPrompt(historyText, highestCategory, highestScore, industryID, jobCategoryID)
 	}
 
-	questionText, err := s.aiCallWithRetries(ctx, prompt)
+	questionText, err := s.questionAICall(ctx, prompt)
 	if err != nil {
 		return "", 0, err
 	}
@@ -126,5 +126,5 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 func (s *ChatService) simplifyQuestionWithAI(ctx context.Context, question string) (string, error) {
 	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration)
 	prompt := prompts.BuildSimplifyQuestionPrompt(question)
-	return s.aiCallWithRetries(ctx, prompt)
+	return s.questionAICall(ctx, prompt)
 }

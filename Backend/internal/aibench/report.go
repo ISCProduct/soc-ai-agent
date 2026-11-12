@@ -35,6 +35,9 @@ func PrintSummary(w io.Writer, s *Summary) {
 
 	fmt.Fprintf(w, "\n%-16s %s\n", "指標", "値")
 	fmt.Fprintf(w, "%-16s %.1f%%%s\n", "破損率", s.BrokenRate*100, formatCounts(s.BrokenByReason))
+	if LabelOptional(s.Target) {
+		fmt.Fprintf(w, "%-16s %.3f（正解との一致・指示の遵守の割合の平均）\n", "平均スコア", s.MeanScore)
+	}
 	if s.UnmeasuredRuns > 0 {
 		fmt.Fprintf(w, "%-16s %d回（通信エラー等。破損率とレイテンシからは除外）\n", "計測できず", s.UnmeasuredRuns)
 	}
@@ -165,6 +168,7 @@ const (
 	brokenRateWorseBy   = 0.05 // 破損率が5ポイント以上増えた
 	complianceWorseBy   = 0.05 // 指示遵守率が5ポイント以上減った
 	correlationWorseBy  = 0.10 // 順位相関が0.1以上下がった
+	meanScoreWorseBy    = 0.05 // ラベルなしの target の平均スコアが0.05以上下がった（#1782）
 	stddevWorseBy       = 0.05 // 再現性のσが0.05以上増えた
 	latencyWorseByRatio = 1.20 // p95 が1.2倍以上になった
 )
@@ -212,6 +216,11 @@ func Diff(prev, cur *Summary) (regs []Regression, warnings []string) {
 	add("破損率", prev.BrokenRate, cur.BrokenRate, brokenRateWorseBy, true)
 	add("指示遵守率", prev.ComplianceRate, cur.ComplianceRate, complianceWorseBy, false)
 	add("弁別力(順位相関)", prev.LabelRankCorrelation, cur.LabelRankCorrelation, correlationWorseBy, false)
+	// ラベルなしの target（#1782）は弁別力が計算されないので、正解との一致・指示の遵守の平均で見る。
+	// 旧 JSON や計測0件の側は 0 でデコードされるので、両方で計測できたときだけ比べる。
+	if LabelOptional(cur.Target) && prev.MeasuredRuns > 0 && cur.MeasuredRuns > 0 {
+		add("平均スコア", prev.MeanScore, cur.MeanScore, meanScoreWorseBy, false)
+	}
 	// ペア一致率は両方で比べる組があるときだけ。旧 JSON はこの項目が無く 0 でデコードされるので、
 	// 組数が0の側があれば比べない（0 から上がって「改善」に見えるのを防ぐ）。
 	if prev.PairwiseComparable > 0 && cur.PairwiseComparable > 0 {

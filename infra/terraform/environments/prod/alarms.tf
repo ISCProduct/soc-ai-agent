@@ -85,6 +85,23 @@ resource "aws_cloudwatch_metric_alarm" "rds_storage" {
   tags                = local.tags
 }
 
+# 接続が枯渇すると AI 以外の機能も止まる。db.t4g.micro の max_connections は約85。
+resource "aws_cloudwatch_metric_alarm" "rds_connections" {
+  alarm_name          = "${var.project_name}-rds-connections"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "DatabaseConnections"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Maximum"
+  threshold           = 68
+  dimensions          = { DBInstanceIdentifier = "${var.project_name}-mysql" }
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "RDSの接続数が上限の8割を超えた"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  tags                = local.tags
+}
+
 # db.t4g.micro は小さく、CPUが張り付くと一気に詰まる。
 resource "aws_cloudwatch_metric_alarm" "rds_cpu" {
   alarm_name          = "${var.project_name}-rds-cpu"
