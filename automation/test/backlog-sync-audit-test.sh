@@ -15,7 +15,11 @@ python3 - <<'PY'
 import sys
 
 sys.path.insert(0, ".github/scripts")
-from backlog_sync_audit import build_message, find_mismatches, linked_pr_numbers, rank
+import backlog_sync_audit as A
+from backlog_sync_audit import (
+    all_done, apply_fixes, build_fix_message, build_message, find_mismatches,
+    linked_pr_numbers, rank, rollup_candidates,
+)
 
 REPO = "ISCProduct/soc-ai-agent"
 
@@ -195,8 +199,57 @@ msg = build_message(many, "ISCProduct/soc-ai-agent")
 check("長い報告でも2000文字に収まる", len(msg) < 2000, True)
 check("切り捨てた件数を残す", "ほか" in msg, True)
 
+# --- 自動更新 ---
+
+# 検知3のズレは、進めるべきステータスが fixes に入る。
+fx = {}
+find_mismatches(
+    [issue("SOCAIAGENT-10", "ステージング環境反映", 100), issue("SOCAIAGENT-11", "処理中", 100)],
+    [pr(100, state="closed", base="main", merged="2026-11-12T00:00:00Z")], REPO, fx)
+check("main マージ済みなら完了へ進める", fx, {"SOCAIAGENT-10": "完了", "SOCAIAGENT-11": "完了"})
+fx = {}
+find_mismatches([issue("SOCAIAGENT-12", "完了", 101)],
+    [pr(101, state="closed", base="main", merged="2026-11-12T00:00:00Z")], REPO, fx)
+check("既に完了なら何もしない", fx, {})
+
+def st(name): return {"name": name}
+def bi(id_, key, status, parent=None):
+    return {"id": id_, "issueKey": key, "status": st(status), "parentIssueId": parent}
+
+parent = bi(1, "SOCAIAGENT-1", "ステージング環境反映")
+check("子が完了の親は候補", [i["issueKey"] for i in rollup_candidates([parent, bi(2, "SOCAIAGENT-2", "完了", 1)])], ["SOCAIAGENT-1"])
+check("子が完了でなければ候補にしない", rollup_candidates([parent, bi(2, "SOCAIAGENT-2", "処理中", 1)]), [])
+check("親が完了済みなら候補にしない", rollup_candidates([bi(1, "SOCAIAGENT-1", "完了"), bi(2, "SOCAIAGENT-2", "完了", 1)]), [])
+check("全部完了", all_done([{"status": st("完了")}, {"status": st("完了")}]), True)
+check("1件でも未完了なら全部完了でない", all_done([{"status": st("完了")}, {"status": st("処理中")}]), False)
+check("子が0件は全部完了としない", all_done([]), False)
+
+# apply_fixes: API は差し替える。PATCH した先と、親の扱いを確かめる。
+patched = []
+children = {}
+def fake_req(base, key, method, path, data=None, **k):
+    return children.get(data["parentIssueId[]"][0], []) if path == "/issues" else None
+def fake_adv(base, key, issue_key, sid, name, request=None):
+    patched.append((issue_key, name)); return "updated"
+A.bl_request, A.advance_issue_status = fake_req, fake_adv
+A.resolve_status_id = lambda base, key, proj, name, **k: {"完了": 4}.get(name)
+
+issues = [bi(1, "SOCAIAGENT-1", "ステージング環境反映"), bi(2, "SOCAIAGENT-2", "ステージング環境反映", 1),
+          bi(3, "SOCAIAGENT-3", "完了", 1)]
+children[1] = [bi(2, "SOCAIAGENT-2", "完了", 1), bi(3, "SOCAIAGENT-3", "完了", 1)]
+out = apply_fixes("b", "k", "SOCAIAGENT", issues, {"SOCAIAGENT-2": "完了"})
+check("子を直してから親も完了にする", patched, [("SOCAIAGENT-2", "完了"), ("SOCAIAGENT-1", "完了")])
+check("報告に親の理由を残す", out[-1].endswith("（子課題がすべて完了）"), True)
+
+patched.clear()
+issues = [bi(1, "SOCAIAGENT-1", "ステージング環境反映"), bi(3, "SOCAIAGENT-3", "完了", 1)]
+children[1] = [bi(3, "SOCAIAGENT-3", "完了", 1), bi(4, "SOCAIAGENT-4", "未対応", 1)]
+apply_fixes("b", "k", "SOCAIAGENT", issues, {})
+check("未完了の子がいる親は動かさない", patched, [])
+check("直した分が無ければ報告は空", build_fix_message([]), "")
+
 if failures:
     print(f"FAIL: {failures} 件")
     sys.exit(1)
-print("PASS (ズレ判定 21 ケース)")
+print("PASS (ズレ判定と自動更新)")
 PY

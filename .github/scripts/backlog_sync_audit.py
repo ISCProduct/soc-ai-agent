@@ -24,7 +24,13 @@ import time
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from backlog_client import bl_request, load_backlog_env, resolve_bl_base  # noqa: E402
+from backlog_client import (  # noqa: E402
+    advance_issue_status,
+    bl_request,
+    load_backlog_env,
+    resolve_bl_base,
+    resolve_status_id,
+)
 from resolve_deployed_issues import extract_pr_numbers  # noqa: E402
 
 # ステータスの前後。pr-to-backlog.yml の MERGE_STATUS_ORDER と同じ並びにする。
@@ -87,13 +93,17 @@ def linked_pr_numbers(description: str, repo: str) -> list[int]:
     return nums
 
 
-def find_mismatches(issues: list[dict], prs: list[dict], repo: str) -> list[str]:
+def find_mismatches(
+    issues: list[dict], prs: list[dict], repo: str, fixes: dict[str, str] | None = None
+) -> list[str]:
     """ズレの一覧を人が読む1行ずつにして返す。ズレが無ければ空。
 
     issues: Backlog の課題（issueKey / status.name / description）
     prs:    GitHub の PR（number / draft / state / base / mergedAt / title /
             プロモーションPRなら commitSubjects）
     どちらも API の形をそのまま受ける。テストから素の dict を渡せるようにしている。
+    fixes を渡すと、検知3(マージ済みなのに課題が進んでいない)について
+    「課題キー → 進めるべきステータス名」を詰める。同じ課題が複数PRに出たら先のほうを採る。
     """
     by_pr: dict[int, list[dict]] = {}
     for issue in issues:
@@ -144,6 +154,8 @@ def find_mismatches(issues: list[dict], prs: list[dict], repo: str) -> list[str]
                 name = (issue.get("status") or {}).get("name", "")
                 cur = rank(name)
                 if want and 0 <= cur < rank(want):
+                    if fixes is not None and (key not in fixes or rank(want) > rank(fixes[key])):
+                        fixes[key] = want
                     lines.append(
                         f"- {key} は「{name}」ですが #{num} は {pr['base']} にマージ済みです"
                         f"（「{want}」以降のはず）"
@@ -173,6 +185,39 @@ def find_mismatches(issues: list[dict], prs: list[dict], repo: str) -> list[str]
             seen.add(line)
             uniq.append(line)
     return uniq
+
+
+def rollup_candidates(issues: list[dict]) -> list[dict]:
+    """子課題が1件以上「完了」で、自分はまだ「完了」でない親課題。
+
+    ここは候補を挙げるだけ。全部の子が完了かは、呼び出し側が子を全件取って確かめる
+    （issues は対象ステータスだけの一覧なので、ここの情報では「全部」と言えない）。
+    """
+    by_id = {i["id"]: i for i in issues if i.get("id") is not None}
+    parents: list[dict] = []
+    for i in issues:
+        pid = i.get("parentIssueId")
+        parent = by_id.get(pid) if pid else None
+        if not parent or parent in parents:
+            continue
+        if (i.get("status") or {}).get("name") != "完了":
+            continue
+        pname = (parent.get("status") or {}).get("name", "")
+        if pname != "完了" and rank(pname) >= 0:
+            parents.append(parent)
+    return parents
+
+
+def all_done(children: list[dict]) -> bool:
+    """子が1件以上あり、すべて「完了」。"""
+    return bool(children) and all((c.get("status") or {}).get("name") == "完了" for c in children)
+
+
+def build_fix_message(fixed: list[str]) -> str:
+    """自動で直した課題の報告。直した事実を黙って済ませない。"""
+    if not fixed:
+        return ""
+    return f"🔧 **Backlog を自動で更新 {len(fixed)} 件**\n" + "\n".join(fixed)
 
 
 def build_message(lines: list[str], repo: str) -> str:
@@ -302,6 +347,42 @@ def gh_commit_subjects(repo: str, token: str, number: int) -> list[str]:
     return [(c.get("commit", {}).get("message") or "").split("\n", 1)[0] for c in commits]
 
 
+def apply_fixes(
+    base: str, api_key: str, project_key: str, issues: list[dict], fixes: dict[str, str]
+) -> list[str]:
+    """検知3のズレと、子が全部完了の親を、Backlog の API で直す。
+
+    後退はさせない(advance_issue_status)。更新できた課題だけ issues の状態も書き換え、
+    報告の取り直しと親の判定に使う。直した内容は報告用の行で返す。
+    """
+    fixed: list[str] = []
+    by_key = {i["issueKey"]: i for i in issues}
+
+    def move(key: str, name: str) -> None:
+        sid = resolve_status_id(base, api_key, project_key, name)
+        if sid is None:
+            return
+        before = ((by_key[key].get("status") or {}).get("name")) or "?"
+        if advance_issue_status(base, api_key, key, sid, name) == "updated":
+            by_key[key]["status"] = {"id": sid, "name": name}
+            fixed.append(f"- {key} 「{before}」→「{name}」")
+
+    for key, want in sorted(fixes.items()):
+        if key in by_key:
+            move(key, want)
+
+    for parent in rollup_candidates(issues):
+        children = bl_request(
+            base, api_key, "GET", "/issues",
+            {"parentIssueId[]": [parent["id"]], "count": 100}, fatal=False,
+        ) or []
+        if all_done(children):
+            move(parent["issueKey"], "完了")
+            if fixed and fixed[-1].startswith(f"- {parent['issueKey']} "):
+                fixed[-1] += "（子課題がすべて完了）"
+    return fixed
+
+
 def main(argv: list[str]) -> int:
     # 通知本文は引数で渡されたファイルへ書く。backlog_client が標準出力へ
     # 接続情報を出すので、本文を混ぜないため分けている。
@@ -321,12 +402,22 @@ def main(argv: list[str]) -> int:
     for pr in prs:
         if pr.get("mergedAt") and pr.get("base") in ("release", "main"):
             pr["commitSubjects"] = gh_commit_subjects(repo, token, pr["number"])
-    lines = find_mismatches(issues, prs, repo)
-    print(f"課題 {len(issues)} 件 / PR {len(prs)} 件を突き合わせ: ズレ {len(lines)} 件")
-    for line in lines:
+    fixes: dict[str, str] = {}
+    lines = find_mismatches(issues, prs, repo, fixes)
+    fixed: list[str] = []
+    if os.environ.get("AUTO_FIX") == "true":
+        fixed = apply_fixes(base, api_key, project_key, issues, fixes)
+        # 直した課題はもうズレではない。報告から外すため、状態を直して取り直す。
+        lines = find_mismatches(issues, prs, repo)
+    else:
+        for key, want in sorted(fixes.items()):
+            print(f"[dry-run] {key} を「{want}」へ進められます")
+    print(f"課題 {len(issues)} 件 / PR {len(prs)} 件を突き合わせ: ズレ {len(lines)} 件 / 自動更新 {len(fixed)} 件")
+    for line in lines + fixed:
         print(line)
-    # ズレが無ければ空ファイル。呼び出し側は空なら投稿しない。
-    message = build_message(lines, repo) if lines else ""
+    # 直した分もズレも無ければ空ファイル。呼び出し側は空なら投稿しない。
+    parts = [build_fix_message(fixed), build_message(lines, repo) if lines else ""]
+    message = "\n\n".join(p for p in parts if p)
     if out_path:
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(message)
