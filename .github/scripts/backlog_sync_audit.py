@@ -25,8 +25,8 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backlog_client import (  # noqa: E402
-    advance_issue_status,
     bl_request,
+    is_status_advance,
     load_backlog_env,
     resolve_bl_base,
     resolve_status_id,
@@ -70,6 +70,8 @@ def pr_url_re(repo: str) -> re.Pattern[str]:
 
 # Discord の 1 通は 2000 文字。余裕を見て切る。
 MESSAGE_CHARS = 1700
+# 自動更新の報告に使う文字数。残りをズレの報告に回し、合計で Discord の 2000 文字に収める。
+FIX_CHARS = 900
 
 # PR 一覧の1ページの件数。100 だと1ページ 2MB を超え、読み落としが起きやすい。
 PR_PAGE_SIZE = 50
@@ -112,6 +114,14 @@ def find_mismatches(
 
     pr_by_number = {int(p["number"]): p for p in prs}
     lines: list[str] = []
+    # 開いている PR(追いPR・再開した作業)が紐づく課題は、過去のマージだけで完了にしない。
+    # pr-to-backlog.yml は、そのPRに対する明示的な操作での後退を意図して許している。
+    in_flight = {
+        issue["issueKey"]
+        for n, p in pr_by_number.items()
+        if p.get("state") == "open"
+        for issue in by_pr.get(n, [])
+    }
 
     for num in sorted(pr_by_number, reverse=True):
         pr = pr_by_number[num]
@@ -154,7 +164,11 @@ def find_mismatches(
                 name = (issue.get("status") or {}).get("name", "")
                 cur = rank(name)
                 if want and 0 <= cur < rank(want):
-                    if fixes is not None and (key not in fixes or rank(want) > rank(fixes[key])):
+                    if (
+                        fixes is not None
+                        and key not in in_flight
+                        and (key not in fixes or rank(want) > rank(fixes[key]))
+                    ):
                         fixes[key] = want
                     lines.append(
                         f"- {key} は「{name}」ですが #{num} は {pr['base']} にマージ済みです"
@@ -213,14 +227,24 @@ def all_done(children: list[dict]) -> bool:
     return bool(children) and all((c.get("status") or {}).get("name") == "完了" for c in children)
 
 
-def build_fix_message(fixed: list[str]) -> str:
-    """自動で直した課題の報告。直した事実を黙って済ませない。"""
+def build_fix_message(fixed: list[str], limit: int = FIX_CHARS) -> str:
+    """自動で直した課題の報告。直した事実を黙って済ませない。長いときは件数を残して切る。"""
     if not fixed:
         return ""
-    return f"🔧 **Backlog を自動で更新 {len(fixed)} 件**\n" + "\n".join(fixed)
+    head = f"🔧 **Backlog を自動で更新 {len(fixed)} 件**\n"
+    body = ""
+    shown = 0
+    for line in fixed:
+        if len(head) + len(body) + len(line) + 1 > limit:
+            break
+        body += line + "\n"
+        shown += 1
+    if shown < len(fixed):
+        body += f"- ほか {len(fixed) - shown} 件\n"
+    return (head + body).rstrip()
 
 
-def build_message(lines: list[str], repo: str) -> str:
+def build_message(lines: list[str], repo: str, limit: int = MESSAGE_CHARS) -> str:
     """Discord へ投げる本文。長すぎるときは件数を残して切る。"""
     head = (
         f"⚠️ **Backlog と GitHub のズレ {len(lines)} 件**\n"
@@ -229,7 +253,7 @@ def build_message(lines: list[str], repo: str) -> str:
     body = ""
     shown = 0
     for line in lines:
-        if len(head) + len(body) + len(line) + 1 > MESSAGE_CHARS:
+        if len(head) + len(body) + len(line) + 1 > limit:
             break
         body += line + "\n"
         shown += 1
@@ -347,39 +371,60 @@ def gh_commit_subjects(repo: str, token: str, number: int) -> list[str]:
     return [(c.get("commit", {}).get("message") or "").split("\n", 1)[0] for c in commits]
 
 
+def fetch_children(base: str, api_key: str, parent_id: int) -> list[dict] | None:
+    """親課題の子を全ページ取る。1ページでも取れなければ None（空扱いにしない）。"""
+    children: list[dict] = []
+    offset = 0
+    while True:
+        page = bl_request(
+            base, api_key, "GET", "/issues",
+            {"parentIssueId[]": [parent_id], "count": 100, "offset": offset}, fatal=False,
+        )
+        if page is None:
+            return None
+        children += page
+        if len(page) < 100:
+            return children
+        offset += 100
+
+
 def apply_fixes(
     base: str, api_key: str, project_key: str, issues: list[dict], fixes: dict[str, str]
 ) -> list[str]:
-    """検知3のズレと、子が全部完了の親を、Backlog の API で直す。
+    """検知3のズレと、子が全部完了の親課題を、Backlog の API で直す。
 
-    後退はさせない(advance_issue_status)。更新できた課題だけ issues の状態も書き換え、
-    報告の取り直しと親の判定に使う。直した内容は報告用の行で返す。
+    - 更新直前に課題を取り直し、取れなければ更新しない（古い一覧のまま戻さないため）。
+    - 後退はさせない。
+    - 「完了」にする課題に子があるなら、全ページ取った子がすべて完了のときだけ。
+      マージ由来の更新でも同じ。親は子が1件以上あり全部完了のときだけ（rollup）。
+    更新できた課題だけ issues の状態も書き換え、報告の取り直しと親の判定に使う。
     """
     fixed: list[str] = []
     by_key = {i["issueKey"]: i for i in issues}
 
-    def move(key: str, name: str) -> None:
+    def move(key: str, name: str, *, is_rollup: bool = False) -> None:
         sid = resolve_status_id(base, api_key, project_key, name)
         if sid is None:
             return
-        before = ((by_key[key].get("status") or {}).get("name")) or "?"
-        if advance_issue_status(base, api_key, key, sid, name) == "updated":
-            by_key[key]["status"] = {"id": sid, "name": name}
-            fixed.append(f"- {key} 「{before}」→「{name}」")
+        issue = by_key[key]
+        if name == "完了":
+            children = fetch_children(base, api_key, issue["id"])
+            if children is None or (children or is_rollup) and not all_done(children):
+                return
+        now = bl_request(base, api_key, "GET", f"/issues/{key}", fatal=False)
+        current = ((now or {}).get("status") or {}).get("name")
+        if not current or not is_status_advance(current, name) or current == name:
+            return
+        if bl_request(base, api_key, "PATCH", f"/issues/{key}", {"statusId": sid}, fatal=False) is None:
+            return
+        issue["status"] = {"id": sid, "name": name}
+        fixed.append(f"- {key} 「{current}」→「{name}」" + ("（子課題がすべて完了）" if is_rollup else ""))
 
     for key, want in sorted(fixes.items()):
         if key in by_key:
             move(key, want)
-
     for parent in rollup_candidates(issues):
-        children = bl_request(
-            base, api_key, "GET", "/issues",
-            {"parentIssueId[]": [parent["id"]], "count": 100}, fatal=False,
-        ) or []
-        if all_done(children):
-            move(parent["issueKey"], "完了")
-            if fixed and fixed[-1].startswith(f"- {parent['issueKey']} "):
-                fixed[-1] += "（子課題がすべて完了）"
+        move(parent["issueKey"], "完了", is_rollup=True)
     return fixed
 
 
@@ -416,8 +461,11 @@ def main(argv: list[str]) -> int:
     for line in lines + fixed:
         print(line)
     # 直した分もズレも無ければ空ファイル。呼び出し側は空なら投稿しない。
-    parts = [build_fix_message(fixed), build_message(lines, repo) if lines else ""]
-    message = "\n\n".join(p for p in parts if p)
+    fix_part = build_fix_message(fixed)
+    # 区切りの空行2文字ぶんも差し引く。合計が 2000 文字を超えると通知が丸ごと失敗する。
+    gap = 2 if fix_part else 0
+    lines_part = build_message(lines, repo, MESSAGE_CHARS - len(fix_part) - gap) if lines else ""
+    message = "\n\n".join(p for p in (fix_part, lines_part) if p)
     if out_path:
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(message)
