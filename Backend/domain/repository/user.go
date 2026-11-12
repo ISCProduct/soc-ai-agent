@@ -2,14 +2,17 @@
 // Concrete implementations live in internal/repositories/.
 package repository
 
-import "Backend/domain/entity"
+import (
+	"time"
+
+	"Backend/domain/entity"
+)
 
 // UserRepository はユーザー永続化の抽象インターフェース。
 type UserRepository interface {
 	CreateUser(user *entity.User) error
 	GetUserByEmail(email string) (*entity.User, error)
 	GetUserByID(id uint) (*entity.User, error)
-	ListUsers() ([]entity.User, error)
 	// schoolID が非nilの場合は個別校で絞り込む。
 	ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error)
 	UpdateUser(user *entity.User) error
@@ -24,5 +27,6 @@ type PendingRegistrationRepository interface {
 	Create(p *entity.PendingRegistration) error
 	FindByToken(token string) (*entity.PendingRegistration, error)
 	DeleteByEmail(email string) error
-	DeleteExpired() error
+	// DeleteExpired は期限切れ（expires_at <= now）の仮登録を最大 limit 件だけ消し、消した件数を返す。
+	DeleteExpired(now time.Time, limit int) (int64, error)
 }

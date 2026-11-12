@@ -6,6 +6,7 @@ Backend の `/api/es/review`（ES添削タブ）と `/api/es/rewrite`（ESリラ
 """
 from __future__ import annotations
 
+from services.model_tiers import es_review_model
 import json
 import logging
 import math
@@ -485,7 +486,7 @@ def _run_es_review(
         timeout=m.OPENAI_TIMEOUT_SEC,
         max_retries=_OPENAI_MAX_RETRIES,
     )
-    model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o")
+    model = es_review_model()
     tally = _UsageTally(model)
     # 呼び出し元(routers/es.py)で既にサニタイズ済みだが、本関数単体でも安全性を
     # 保証するため防御的にもう一度サニタイズする(呼び出し元の実装変更に依存しない)。

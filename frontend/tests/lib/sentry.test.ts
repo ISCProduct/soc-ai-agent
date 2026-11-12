@@ -1,4 +1,4 @@
-import { scrubSentryBreadcrumb, scrubSentryEvent } from '@/lib/sentry'
+import { scrubSentryBreadcrumb, scrubSentryEvent, sentrySharedOptions } from '@/lib/sentry'
 import type { Breadcrumb, ErrorEvent } from '@sentry/nextjs'
 
 describe('scrubSentryEvent', () => {
@@ -91,5 +91,35 @@ describe('scrubSentryBreadcrumb', () => {
 
   it('console のパンくずは丸ごと捨てる（何が載るか読めない）', () => {
     expect(scrubSentryBreadcrumb({ category: 'console', message: '秘密' } as Breadcrumb)).toBeNull()
+  })
+})
+
+describe('sentrySharedOptions の収集範囲', () => {
+  const original = process.env.SENTRY_DSN
+  afterEach(() => {
+    if (original === undefined) delete process.env.SENTRY_DSN
+    else process.env.SENTRY_DSN = original
+  })
+
+  it('DSN が無ければ null（初期化しない）', () => {
+    delete process.env.SENTRY_DSN
+    delete process.env.NEXT_PUBLIC_SENTRY_DSN
+    expect(sentrySharedOptions()).toBeNull()
+  })
+
+  // v11 は dataCollection を省くとユーザー情報・Cookie・リクエスト本文・IP・DBクエリまで集める。
+  // 学生の個人情報を扱うため、v10 の既定（収集しない）に明示で固定する。
+  it('v10 相当の最小収集に固定する（dataCollection を省かない）', () => {
+    process.env.SENTRY_DSN = 'https://key@o0.ingest.sentry.io/0'
+    const opts = sentrySharedOptions() as unknown as Record<string, unknown>
+    expect(opts).not.toHaveProperty('sendDefaultPii')
+    expect(opts.dataCollection).toMatchObject({
+      userInfo: false,
+      cookies: false,
+      httpBodies: [],
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+    })
   })
 })

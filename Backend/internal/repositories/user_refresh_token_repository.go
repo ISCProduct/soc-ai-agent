@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -50,8 +51,20 @@ func (r *UserRefreshTokenRepository) RevokeAllByUser(userID uint, at time.Time) 
 		Update("revoked_at", at).Error
 }
 
-// DeleteExpired は期限切れトークンを物理削除する（定期クリーンアップ用）
-func (r *UserRefreshTokenRepository) DeleteExpired(before time.Time) error {
-	return r.db.Where("expires_at < ?", before).
-		Delete(&models.UserRefreshToken{}).Error
+// DeleteExpired は expires_at が before より前のトークンを、期限の古い順に最大 limit 件だけ物理削除し、
+// 削除した件数を返す（定期クリーンアップ用、#2153）。
+//
+// 1文で消す件数を limit で抑え、行ロックを持つ時間を短くする。残りは呼び出し側が次のバッチで消す。
+// expires_at にはインデックス（idx_user_refresh_tokens_expires_at）があるので、
+// ロックが掛かるのは消す範囲の行だけで済む。
+func (r *UserRefreshTokenRepository) DeleteExpired(before time.Time, limit int) (int64, error) {
+	// GORM は Limit(-1) を「上限なし」と解釈するので、0 以下はここで弾く。
+	if limit <= 0 {
+		return 0, fmt.Errorf("limit は 1 以上を指定してください: %d", limit)
+	}
+	res := r.db.Where("expires_at < ?", before).
+		Order("expires_at").
+		Limit(limit).
+		Delete(&models.UserRefreshToken{})
+	return res.RowsAffected, res.Error
 }

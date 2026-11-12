@@ -346,11 +346,18 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 		model = "gpt-4o-mini"
 	}
 
+	callCtx, cancelCall := context.WithTimeout(ctx, responsesCallTimeout)
+	defer cancelCall()
+
 	var lastErr error
 	// attempts を 5 回に増やし、各リクエストにタイムアウトを設定
 	const maxAttempts = 5
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		ctxReq, cancel := context.WithTimeout(ctx, 60*time.Second)
+		attemptTimeout, err := callAttemptTimeout(callCtx, responsesAttemptCap)
+		if err != nil {
+			return "", wrapCallTimeout(err)
+		}
+		ctxReq, cancel := context.WithTimeout(callCtx, attemptTimeout)
 		messageInput := []map[string]any{
 			{
 				"role": "user",
@@ -387,7 +394,10 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 			println("OpenAI API error (attempt", attempt, "):", err.Error())
 		}
 
-		if stop := waitBeforeRetry(ctx, lastErr, attempt, maxAttempts); stop {
+		if stop := waitBeforeRetry(callCtx, lastErr, attempt, maxAttempts); stop {
+			if callCtx.Err() != nil {
+				return "", wrapCallTimeout(callCtx.Err())
+			}
 			return "", lastErr
 		}
 	}
@@ -410,10 +420,17 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 		model = "gpt-4o-mini"
 	}
 
+	callCtx, cancelCall := context.WithTimeout(ctx, responsesCallTimeout)
+	defer cancelCall()
+
 	var lastErr error
 	const maxAttempts = 5
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		ctxReq, cancel := context.WithTimeout(ctx, 60*time.Second)
+		attemptTimeout, err := callAttemptTimeout(callCtx, responsesAttemptCap)
+		if err != nil {
+			return "", wrapCallTimeout(err)
+		}
+		ctxReq, cancel := context.WithTimeout(callCtx, attemptTimeout)
 		messageInput := []map[string]any{
 			{
 				"role": "system",
@@ -459,7 +476,10 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 			println("OpenAI API error (attempt", attempt, "):", err.Error())
 		}
 
-		if stop := waitBeforeRetry(ctx, lastErr, attempt, maxAttempts); stop {
+		if stop := waitBeforeRetry(callCtx, lastErr, attempt, maxAttempts); stop {
+			if callCtx.Err() != nil {
+				return "", wrapCallTimeout(callCtx.Err())
+			}
 			return "", lastErr
 		}
 	}
@@ -574,10 +594,17 @@ func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, use
 		format = textFormatJSON
 	}
 
+	callCtx, cancelCall := context.WithTimeout(ctx, responsesMaxTokensCallTimeout)
+	defer cancelCall()
+
 	const maxAttempts = 5
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		ctxReq, cancel := context.WithTimeout(ctx, 90*time.Second)
+		attemptTimeout, aerr := callAttemptTimeout(callCtx, responsesMaxTokensAttemptCap)
+		if aerr != nil {
+			return "", wrapCallTimeout(aerr)
+		}
+		ctxReq, cancel := context.WithTimeout(callCtx, attemptTimeout)
 		messageInput := []map[string]any{
 			{
 				"role": "system",
@@ -645,11 +672,10 @@ func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, use
 		if attempt == maxAttempts {
 			break
 		}
-		// 待っている間に呼び出し側が諦めたら即座に返す（WebSearchJSON と同じ形）。
-		// 返すのは ctx.Err() ではなく直前のエラーで、原因が分かるようにする。
+		// 論理コールの締切か呼び出し側のキャンセルで、バックオフを打ち切る（#1994）。
 		select {
-		case <-ctx.Done():
-			return "", lastErr
+		case <-callCtx.Done():
+			return "", wrapCallTimeout(callCtx.Err())
 		case <-time.After(responsesBackoff(attempt)):
 		}
 	}

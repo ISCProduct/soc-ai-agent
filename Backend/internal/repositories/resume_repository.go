@@ -27,14 +27,6 @@ func (r *ResumeRepository) UpdateDocument(doc *models.ResumeDocument) error {
 	return r.db.Save(doc).Error
 }
 
-func (r *ResumeRepository) FindDocumentByID(id uint) (*models.ResumeDocument, error) {
-	var doc models.ResumeDocument
-	if err := r.db.First(&doc, id).Error; err != nil {
-		return nil, err
-	}
-	return &doc, nil
-}
-
 // FindDocumentByIDForUser は所有者の職務経歴書だけを返す（#1156）。
 //
 // FindDocumentByID は主キーだけで引くため、他ユーザーの document_id を渡されたときに
@@ -55,16 +47,6 @@ func (r *ResumeRepository) ReplaceTextBlocks(documentID uint, blocks []models.Re
 		return nil
 	}
 	return r.db.Create(&blocks).Error
-}
-
-func (r *ResumeRepository) FindTextBlocks(documentID uint) ([]models.ResumeTextBlock, error) {
-	var blocks []models.ResumeTextBlock
-	if err := r.db.Where("document_id = ?", documentID).
-		Order("page_number ASC, block_index ASC").
-		Find(&blocks).Error; err != nil {
-		return nil, err
-	}
-	return blocks, nil
 }
 
 func (r *ResumeRepository) CreateReview(review *models.ResumeReview) error {
@@ -174,14 +156,4 @@ WHERE d.rn = 1`
 		result[x.UserID] = fact
 	}
 	return result, nil
-}
-
-func (r *ResumeRepository) FindReviewItems(reviewID uint) ([]models.ResumeReviewItem, error) {
-	var items []models.ResumeReviewItem
-	if err := r.db.Where("review_id = ?", reviewID).
-		Order("page_number ASC, id ASC").
-		Find(&items).Error; err != nil {
-		return nil, err
-	}
-	return items, nil
 }

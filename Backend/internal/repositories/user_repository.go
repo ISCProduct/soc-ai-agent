@@ -68,21 +68,6 @@ func (r *UserRepository) GetUserByID(id uint) (*entity.User, error) {
 	return mapper.UserToEntity(&m), nil
 }
 
-// ListUsers ユーザー一覧を取得
-func (r *UserRepository) ListUsers() ([]entity.User, error) {
-	var ms []models.User
-	err := r.db.Order("created_at desc").Find(&ms).Error
-	if err != nil {
-		return nil, err
-	}
-	result := make([]entity.User, len(ms))
-	for i, m := range ms {
-		e := mapper.UserToEntity(&m)
-		result[i] = *e
-	}
-	return result, nil
-}
-
 // scopeUsersBySchool は「担当校の在籍者」の絞り込みを1箇所にまとめる（#1675）。
 //
 // 学校だけで絞ると他学園の学生が混ざる。users.school_id はプロフィールの学校名

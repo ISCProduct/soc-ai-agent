@@ -190,9 +190,41 @@ AI面接の音声基盤について、**Realtime API 実装を有効化するか
 | STT モデル | **2026-10-11 に `gpt-transcribe` へ変更。** 実際の面接音声13発話（動画の音声トラック、正解は復元）で誤り率は mini 23% / `gpt-transcribe` 18%。再送先だった `gpt-4o-transcribe` は語の羅列の prompt をそのまま返し誤り率 83% だったため再送先から外した。以下は変更前の判断記録。`gpt-4o-mini-transcribe` を既定値として採用 | 単価は半額。**合成音声で検証済み**（`docs/research/interview-audio-eval/RESULTS_stt_hints.md`）で、CER・固有名詞正解率に差は出なかった。ただし **mini は「御社」を8/8で「本社」と誤認する**ため、この語を検知して高精度モデルへ再送するフォールバックを併用する。実発話の精度と再送率は未測定で、問題が出たら `OPENAI_WHISPER_MODEL=gpt-4o-transcribe` に戻す。戻すときは `terraform.tfvars` の `openai_whisper_model` を変更して apply する |
 | 既存 Realtime 実装の扱い | A 採用時、削除するか凍結して残すか | 本書は削除を推奨 |
 
-## 10. 参照
+## 10. 2026-11 追記: OpenAI モデル廃止による再検討（SOCAIAGENT-625）
+
+本Issueは「Realtime は追わない、Turn 経路を正とする」で決定・クローズ済みだが、Turn 経路が使っているモデルに廃止スケジュールが出たため、対応が必要になった。
+
+### 10.1 廃止スケジュール
+
+| 役割 | 現行モデル | 状況 |
+| --- | --- | --- |
+| 文字起こし | `gpt-transcribe` | 終了予定なし |
+| 応答生成 | `gpt-4o-mini` | **2027-01-14 終了**。移行先 `gpt-6-luna` |
+| 読み上げ | `tts-1` | **2027-01-06 終了**。読み上げ用APIごと終了。移行先は Realtime の `gpt-realtime-2.1-mini` |
+
+`tts-1` は API 自体が終了するため、**Turn 方式を維持する場合でも読み上げだけは Realtime 系モデルを呼ぶ形に変わる**。6章で比較した案A「Turn に一本化」は、TTS 部分に限り成立しなくなる。
+
+### 10.2 コスト比較（15分面接1回、$1=150円、学生9分・AI6分発話想定）
+
+| 案 | 内容 | コスト |
+| --- | --- | --- |
+| A 現状維持 | — | 約$0.07（約11円）※1月まで |
+| B Turn方式維持＋モデル差替 | 応答→`gpt-6-luna`、読み上げ→`gpt-realtime-2.1-mini` | 約$0.19（約29円） |
+| C Realtimeへ完全移行 | `gpt-realtime-2.1-mini` が聞く・考える・話すを一括 | 約$0.2〜0.3（約30〜45円） |
+| D Realtime上位版 | `gpt-realtime-2.1` | 約$0.7〜1（約100〜150円） |
+
+### 10.3 推奨
+
+まず **B** で期限（2027-01-06）に間に合わせ、**C** は実際に動かしてトークン数を実測してから判断する。6.3 で推奨していた「B（旧案、現行 Realtime API への移行）」とは別物なので注意（旧6.3のBはこの10.3のCに相当する）。
+
+### 10.4 影響範囲はAI面接だけではない
+
+`gpt-4o-mini` はアプリ全体の既定モデル（企業情報抽出・履歴書レビュー・RAGのチャット/検索等。いずれも環境変数で上書き可能な設計）。1月までに全体の切替が必要。追跡は SOCAIAGENT-625。
+
+## 11. 参照
 
 - Design Doc: `docs/design/interview-voice-architecture.md`
 - 既存の面接設計: `docs/design/interview-question-deepening.md`
 - OpenAI 価格: https://developers.openai.com/api/docs/pricing
 - OpenAI 廃止一覧: https://developers.openai.com/api/docs/deprecations
+- 追加対応: SOCAIAGENT-625

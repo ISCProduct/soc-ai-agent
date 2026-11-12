@@ -35,14 +35,6 @@ func (m *JobCategoryRepositoryMock) FindByName(name string) ([]models.JobCategor
 	return nil, args.Error(1)
 }
 
-func (m *JobCategoryRepositoryMock) FindByIndustry(industryID uint) ([]models.JobCategory, error) {
-	args := m.Called(industryID)
-	if v := args.Get(0); v != nil {
-		return v.([]models.JobCategory), args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
 func (m *JobCategoryRepositoryMock) GetTopCategories() ([]models.JobCategory, error) {
 	args := m.Called()
 	if v := args.Get(0); v != nil {

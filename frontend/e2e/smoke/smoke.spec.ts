@@ -36,3 +36,59 @@ test.describe('反映後スモーク', () => {
     expect(response.ok()).toBeTruthy()
   })
 })
+
+// ローカル統合テスト環境（compose.test.yml、SOCAIAGENT-local-e2e-infra）専用。
+// 他の e2e/*.spec.ts はほぼ全て page.route() で API をモックしており
+// Backend の実際の状態を検証しない。このケースだけは route モックを使わず、
+// Backend/cmd/seed-e2e が作る実ユーザーで実際に /api/auth/login を通す。
+// 認証情報は Backend/cmd/seed-e2e/main.go の定数と合わせている（変更時は両方）。
+//
+// このspecはdeploy-smoke.ymlで staging/production にも向けて実行される。
+// シードした e2e-student@example.com はローカル統合テスト環境にしか存在しないため、
+// E2E_LOCAL_INTEGRATION=true が無い実行では必ずskipする（本番ログインで落とさない）。
+test.describe('実Backend結合（ローカル統合テスト環境専用）', () => {
+  test.skip(
+    process.env.E2E_LOCAL_INTEGRATION !== 'true',
+    'ローカル統合テスト環境専用（make test-e2e が E2E_LOCAL_INTEGRATION=true を渡す）',
+  )
+
+  test('シードした実ユーザーで実ログインできる', async ({ page }) => {
+    await page.goto('/login')
+    await page.waitForLoadState('networkidle')
+    await page.locator('input[type="email"]').fill('e2e-student@example.com')
+    await page.locator('input[type="password"]').fill('e2e-test-password-local-only')
+    await page.getByRole('button', { name: 'ログイン', exact: true }).click()
+
+    await expect(page).not.toHaveURL(/\/login/, { timeout: 10000 })
+  })
+
+  // 認証だけでなく、実際のDB書き込み→別リクエストでの読み戻しまで検証する。
+  // lib/auth/index.ts の実装どおり、トークンは localStorage/sessionStorage に
+  // 保存され、Backend呼び出しは X-User-Token ヘッダーで行う（Cookieではない）。
+  test('プロフィール更新が実DBへ書き込まれ、別リクエストで読み戻せる', async ({ page }) => {
+    await page.goto('/login')
+    await page.waitForLoadState('networkidle')
+    await page.locator('input[type="email"]').fill('e2e-student@example.com')
+    await page.locator('input[type="password"]').fill('e2e-test-password-local-only')
+    await page.getByRole('button', { name: 'ログイン', exact: true }).click()
+    await expect(page).not.toHaveURL(/\/login/, { timeout: 10000 })
+
+    const token = await page.evaluate(() => window.localStorage.getItem('user_token'))
+    expect(token).toBeTruthy()
+
+    const newName = `E2E更新 ${Date.now()}`
+    const putResponse = await page.request.put(`${apiBaseURL}/api/auth/profile`, {
+      headers: { 'X-User-Token': token ?? '' },
+      data: { name: newName },
+    })
+    expect(putResponse.ok()).toBeTruthy()
+
+    // 書き込みを行ったリクエストとは別に、新規GETで読み戻す（キャッシュ・エコー応答ではないことを確認）
+    const getResponse = await page.request.get(`${apiBaseURL}/api/auth/user`, {
+      headers: { 'X-User-Token': token ?? '' },
+    })
+    expect(getResponse.ok()).toBeTruthy()
+    const body = await getResponse.json()
+    expect(body.name).toBe(newName)
+  })
+})

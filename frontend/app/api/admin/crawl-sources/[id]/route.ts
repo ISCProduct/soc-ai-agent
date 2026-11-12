@@ -17,7 +17,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     body,
   })
   const raw = await response.text()
-  let data: any = {}
+  let data: unknown = {}
   if (raw) {
     try {
       data = JSON.parse(raw)

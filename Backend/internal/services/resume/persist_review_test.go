@@ -54,19 +54,10 @@ func (r *fakeResumeRepo) UpdateDocument(doc *models.ResumeDocument) error {
 
 // 以下は persistReview から呼ばれない。
 func (r *fakeResumeRepo) CreateDocument(*models.ResumeDocument) error { return nil }
-func (r *fakeResumeRepo) FindDocumentByID(uint) (*models.ResumeDocument, error) {
-	return nil, nil
-}
 func (r *fakeResumeRepo) FindDocumentByIDForUser(uint, uint) (*models.ResumeDocument, error) {
 	return nil, nil
 }
 func (r *fakeResumeRepo) ReplaceTextBlocks(uint, []models.ResumeTextBlock) error { return nil }
-func (r *fakeResumeRepo) FindTextBlocks(uint) ([]models.ResumeTextBlock, error) {
-	return nil, nil
-}
-func (r *fakeResumeRepo) FindReviewItems(uint) ([]models.ResumeReviewItem, error) {
-	return nil, nil
-}
 func (r *fakeResumeRepo) FindLatestDocumentWithReview(uint) (*models.ResumeDocument, *models.ResumeReview, error) {
 	return nil, nil, nil
 }
