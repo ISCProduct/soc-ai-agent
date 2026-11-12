@@ -44,7 +44,7 @@ func (r *PendingRegistrationRepository) DeleteByEmail(email string) error {
 //
 // 期限ちょうどの行も消す。FindByToken が expires_at > now だけを有効とするので、その時点で使えない。
 // 1文で消す件数を limit で抑え、行ロックを持つ時間を短くする。残りは呼び出し側が次のバッチで消す。
-// expires_at のインデックス（migrations/000063）で、ロックが掛かるのは消す範囲の行だけで済む。
+// expires_at のインデックス（migrations/000067）で、ロックが掛かるのは消す範囲の行だけで済む。
 // 消す行はトークンで指定せず条件で選ぶので、GORM が SQL をログに出してもトークンは出ない。
 // 複数台で同時に走っても、後の文は先の文がロックを放すのを待ってから残りの行を消すだけで、壊れない。
 func (r *PendingRegistrationRepository) DeleteExpired(now time.Time, limit int) (int64, error) {
