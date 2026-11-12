@@ -10,7 +10,7 @@ const (
 	NotificationKindDeadline    = "deadline"    // 予定（締切・面接など）の前日
 )
 
-// Notification は個人宛のアプリ内通知（#2033）。テーブルは migrations/000067。
+// Notification は個人宛のアプリ内通知（#2033）。テーブルは migrations/000068。
 type Notification struct {
 	ID        uint       `gorm:"primaryKey" json:"id"`
 	UserID    uint       `gorm:"not null;index" json:"-"`
