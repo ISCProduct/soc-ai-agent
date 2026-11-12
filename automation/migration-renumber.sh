@@ -11,7 +11,8 @@
 #   既定の BASE_REF は origin/develop
 #
 # 複数本を追加しているブランチでは、現在の版番号の昇順を保ったまま詰めて振り直す。
-# up / down の両方と、ファイル名を参照している箇所（コメント等）も直す。
+# 動かすのは up / down のファイルだけ。版番号を参照しているコメント等は
+# 警告するだけで書き換えない（どれが対象かは番号だけでは判断できないため）。
 set -euo pipefail
 
 DRY_RUN=0
@@ -94,14 +95,17 @@ while read -r version name; do
   # 番号だけで照合すると、同じ番号を使う別のマイグレーションを指すコメントまで
   # 巻き込む（migrations/000065 が別PRの 000065_ai_budget_settings を指していても、
   # こちらの 000065 の改番で書き換わってしまう）。どれが対象かは人が判断する。
-  refs=$(grep -rln "migrations/${version}" --include='*.go' --include='*.md' . 2>/dev/null || true)
+  # migrations/000063 のような書き方だけでなく、素の版番号（「#2167、opt-in、000063」など）も拾う。
+  # 前者だけを見ていたため、#2180 の models/user.go に残った 000063 を見逃した。
+  # 行ごと出して、どの 000063 なのかを人が読んで判断できるようにする。
+  refs=$(grep -rnE "(^|[^0-9])${version}([^0-9]|$)" \
+           --include='*.go' --include='*.md' \
+           --exclude-dir=node_modules --exclude-dir=.git \
+           . 2>/dev/null | grep -v "^\./${MIGRATIONS_DIR}/" || true)
   if [ -n "$refs" ]; then
-    while IFS= read -r f; do
-      [ -z "$f" ] && continue
-      echo "     !! ${f} が migrations/${version} を参照しています"
-      echo "        その ${version} が ${name} を指すなら ${new} へ手で直してください"
-      echo "        別のマイグレーションを指すなら、触らないでください"
-    done <<< "$refs"
+    echo "     !! ${version} を参照している箇所があります。${name} を指すものだけ ${new} へ手で直してください"
+    echo "        （別のマイグレーションを指しているなら触らないでください）"
+    echo "$refs" | sed 's/^/        /'
   fi
   moved=$((moved + 1))
 done <<< "$added"
