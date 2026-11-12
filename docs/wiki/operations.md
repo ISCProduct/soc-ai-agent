@@ -747,7 +747,8 @@ null を返し、`Backend/internal/observability/sentry.go` も DSN 空なら初
 - リクエストボディ（履歴書・チャット本文の混入防止）
 - パンくずの URL、および console のパンくずは丸ごと破棄
 
-`sendDefaultPii: false` / `tracesSampleRate: 0`（トレースは送らない＝Sentry の枠を消費しない）。
+`dataCollection`（ユーザー情報・Cookie・リクエスト本文・DBクエリ等を収集しない設定）/ `tracesSampleRate: 0`（トレースは送らない＝Sentry の枠を消費しない）。
+`@sentry/nextjs` v11 で `sendDefaultPii` が廃止され、`dataCollection` を省くと既定でこれらを収集する。`lib/sentry.ts` で v10 の既定（収集しない）に明示固定しているので、消さないこと（`tests/lib/sentry.test.ts` が検出する）。
 
 ---
 
