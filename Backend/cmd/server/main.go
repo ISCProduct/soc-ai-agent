@@ -48,6 +48,7 @@ import (
 	"Backend/internal/services/houjinbangou"
 	"Backend/internal/services/hr"
 	"Backend/internal/services/interview"
+	"Backend/internal/services/maintenance"
 	"Backend/internal/services/matching"
 	"Backend/internal/services/oauth"
 	"Backend/internal/services/organization"
@@ -766,6 +767,15 @@ func main() {
 		if n > 0 {
 			slog.Info("purged expired withdrawals", "count", n)
 		}
+	})
+
+	// 期限切れの仮登録・リフレッシュトークンの物理削除（1日1回、#2153）。
+	// 退会ユーザーの処理とは別の周期にする。あちらは RAG への HTTP を退会者ごとに待つので、
+	// 障害時に何時間も塞がり、DB だけで済むこの削除まで止まってしまうため（#2179 のレビュー）。
+	// 件数と失敗は Run の中でログに出す。
+	expiredTokenPurger := maintenance.NewExpiredTokenPurger(pendingRegistrationRepo, refreshTokenRepo, slog.Default())
+	safego.Every(24*time.Hour, true, func() {
+		expiredTokenPurger.Run(time.Now().UTC())
 	})
 
 	// サーバー起動
