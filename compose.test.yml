@@ -1,0 +1,55 @@
+# ============================================================
+# ローカル統合テスト用 override（SOCAIAGENT-local-e2e-infra）
+#
+# 個人の開発スタック（compose.yml だけでの `docker compose up -d`）と同時に
+# 起動できる、分離されたテスト専用スタックを作る。db/app/frontend だけを
+# 対象にする（RAG/Chroma は対象の smoke テストが使わないため含めない）。
+#
+# 使い方: docs/wiki/getting-started.md 「ローカル統合テスト環境」節、または
+#   make test-e2e-up / test-e2e-seed / test-e2e / test-e2e-down
+#
+# 分離の仕組み:
+# - COMPOSE_PROJECT_NAME を変えるとボリューム・ネットワーク名は自動で
+#   project 名を接頭辞にして分かれる（compose.yml の volumes は name: を
+#   固定していないため）。
+# - container_name と ports は compose.yml が固定値を持つため、ここで
+#   明示的に別の値へ上書きする（自動の project 接頭辞が効かない）。
+# - ports と env_file は Compose の既定だと複数 -f ファイル間で「連結」される
+#   （置き換えではない）。!override を付けないと、個人devのポート(8080/3306/3000)
+#   が公開され続けた上、個人の Backend/.env の MYSQL_ROOT_PASSWORD 等まで
+#   このテスト用DBコンテナに混入する（実機検証で両方確認済み。後者は特に、
+#   個人devの MYSQL_USER/MYSQL_PASSWORD で初期化されてしまい、.env.test の
+#   DB_USER/DB_PASSWORD でアプリ側が繋げなくなる形で発覚した）。
+# ============================================================
+services:
+  redis:
+    container_name: soc-ai-redis-test
+
+  db:
+    container_name: soc-ai-db-test
+    ports: !override
+      - "${TEST_DB_HOST_BIND:-127.0.0.1}:${TEST_DB_HOST_PORT:-13306}:3306"
+    env_file: !override
+      - ./Backend/.env.test
+
+  app:
+    container_name: soc-ai-agent-backend-test
+    ports: !override
+      - "127.0.0.1:${TEST_BACKEND_PORT:-18080}:8080"
+    env_file: !override
+      - ./Backend/.env.test
+    environment:
+      # コンテナ内から見た db はサービス名で解決する。ホスト側から
+      # go run ./cmd/seed-e2e 等で繋ぐときは .env.test の DB_HOST/DB_PORT
+      # （127.0.0.1 / TEST_DB_HOST_PORT）を使う。ここは compose の
+      # environment: が env_file より優先されるため、.env.test の値を上書きする。
+      - DB_HOST=db
+      - DB_PORT=3306
+
+  frontend:
+    container_name: soc-ai-agent-frontend-test
+    ports: !override
+      - "127.0.0.1:${TEST_FRONTEND_PORT:-13000}:3000"
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:${TEST_BACKEND_PORT:-18080}
+      - BACKEND_URL=http://app:8080
