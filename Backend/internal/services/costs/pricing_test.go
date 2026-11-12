@@ -1,7 +1,10 @@
 package costs
 
 import (
+	"maps"
 	"math"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -108,30 +111,145 @@ func TestRealtimeAudioRateDefaults(t *testing.T) {
 	}
 }
 
+// fixAudioRateEnv は、音声の単価を上書きする env を未設定に固定する。手元や CI の設定に左右されないようにする。
+func fixAudioRateEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv(sttCostOverrideEnv, "")
+	t.Setenv("TTS_COST_PER_1M_CHARS_USD", "")
+}
+
 // TestCalculateAudioCost は音声経路（秒・文字）の単価計算を検証する（#1294）。
-// トークン課金ではないため、単価表とは別の計算になる。
+// トークン課金ではないため、単価表とは別の計算になる。STT はモデルの分単価で計算する（#2173）。
 func TestCalculateAudioCost(t *testing.T) {
+	fixAudioRateEnv(t)
 	tests := []struct {
 		name       string
 		provider   string
+		model      string
 		seconds    float64
 		characters int
 		want       float64
 	}{
-		{"STT 60秒 = 1分ぶん", "openai", 60, 0, 0.006},
-		{"STT 30秒 = 半分", "openai", 30, 0, 0.003},
-		{"TTS 100万文字", "openai", 0, 1_000_000, 15.0},
-		{"STTとTTSの合算", "openai", 60, 1_000_000, 15.006},
-		{"ローカル推論は0", "local", 60, 1_000_000, 0},
-		{"使用量0なら0", "openai", 0, 0, 0},
+		{"STT 60秒 = 1分ぶん（gpt-transcribe）", "openai", "gpt-transcribe", 60, 0, 0.0045},
+		{"STT 30秒 = 半分（gpt-4o-mini-transcribe）", "openai", "gpt-4o-mini-transcribe", 30, 0, 0.0015},
+		{"STT 60秒（gpt-4o-transcribe）", "openai", "gpt-4o-transcribe", 60, 0, 0.006},
+		{"TTS 100万文字", "openai", "tts-1", 0, 1_000_000, 15.0},
+		// TTS の文字単価は、モデル名が STT の表のどれでも変わらない
+		{"TTS はモデル名で単価が変わらない", "openai", "gpt-4o-mini-transcribe", 0, 1_000_000, 15.0},
+		{"STTとTTSの合算", "openai", "gpt-transcribe", 60, 1_000_000, 15.0045},
+		{"ローカル推論は0", "local", "gpt-transcribe", 60, 1_000_000, 0},
+		{"provider未設定はopenai扱い", "", "gpt-transcribe", 60, 0, 0.0045},
+		{"使用量0なら0", "openai", "gpt-transcribe", 0, 0, 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := calculateAudioCost(tt.provider, tt.seconds, tt.characters)
+			got := calculateAudioCost(tt.provider, tt.model, tt.seconds, tt.characters)
 			if math.Abs(got-tt.want) > 1e-9 {
 				t.Errorf("calculateAudioCost()=%.6f, 期待=%.6f", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestSTTCostPerMinuteUSD は、STT の分単価をモデル名で引けることを検証する（#2173）。
+// 日付付きの版名は同じモデル、名前の似た別モデルは取り違えない。
+func TestSTTCostPerMinuteUSD(t *testing.T) {
+	fixAudioRateEnv(t)
+	tests := []struct {
+		name  string
+		model string
+		want  float64
+	}{
+		{"gpt-transcribe", "gpt-transcribe", 0.0045},
+		{"gpt-4o-transcribe", "gpt-4o-transcribe", 0.006},
+		{"gpt-4o-mini-transcribe", "gpt-4o-mini-transcribe", 0.003},
+		{"whisper-1", "whisper-1", 0.006},
+		{"大文字・前後の空白はそろえる", " GPT-Transcribe ", 0.0045},
+		// 日付付きの版名は同じモデル
+		{"日付付きの版名（mini）", "gpt-4o-mini-transcribe-2025-12-15", 0.003},
+		{"日付付きの版名（4o）", "gpt-4o-transcribe-2025-03-20", 0.006},
+		{"日付付きの版名（gpt-transcribe）", "gpt-transcribe-2026-03-01", 0.0045},
+		{"派生名（:）", "gpt-4o-mini-transcribe:ft-test", 0.003},
+		// 名前の似た別モデルを取り違えない（前方一致・部分一致で別の単価に当てない）
+		{"表に無い派生モデルは既定値", "gpt-4o-transcribe-diarize", 0.006},
+		{"表に無い上位版は gpt-transcribe の単価にしない", "gpt-transcribe-pro", 0.006},
+		{"表に無いモデルは既定値", "stt-cost-table-test-unknown", 0.006},
+		{"空のモデル名は既定値", "", 0.006},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sttCostPerMinuteUSD(tt.model); math.Abs(got-tt.want) > 1e-12 {
+				t.Errorf("sttCostPerMinuteUSD(%q)=%v, 期待=%v", tt.model, got, tt.want)
+			}
+		})
+	}
+}
+
+// STT_COST_PER_MINUTE_USD を設定していれば、モデルに関係なくその値で計算する（今までどおり。#2173）。
+func TestSTTCostPerMinuteUSD_EnvOverridesTable(t *testing.T) {
+	buf := captureCostLog(t)
+	t.Setenv(sttCostOverrideEnv, " 0.01 ")
+	for _, model := range []string{"gpt-transcribe", "gpt-4o-mini-transcribe", "whisper-1", "stt-env-override-unknown"} {
+		if got := sttCostPerMinuteUSD(model); got != 0.01 {
+			t.Errorf("sttCostPerMinuteUSD(%q)=%v, 期待=0.01（env を優先）", model, got)
+		}
+	}
+	// 上書きした単価で計算したので、表に無いモデルでも「既定値で計算した」というログは出さない
+	if buf.Len() != 0 {
+		t.Errorf("env で上書きしたのに表に無いモデルのログが出た: %q", buf.String())
+	}
+
+	// 解釈できない値は無視して、表の単価で計算する
+	t.Setenv(sttCostOverrideEnv, "not-a-number")
+	if got := sttCostPerMinuteUSD("gpt-transcribe"); got != 0.0045 {
+		t.Errorf("解釈できない env で sttCostPerMinuteUSD=%v, 期待=0.0045（表の単価）", got)
+	}
+}
+
+// 表に無い STT モデルは、モデルごとに1回だけログに出す。大文字・小文字の違いで2回出さない（#2173）。
+func TestSTTCostPerMinuteUSD_UnknownLogsOncePerModel(t *testing.T) {
+	fixAudioRateEnv(t)
+	buf := captureCostLog(t)
+	for range 3 {
+		sttCostPerMinuteUSD("STT-Warn-Once-Model")
+		sttCostPerMinuteUSD("stt-warn-once-model")
+		sttCostPerMinuteUSD("other-stt-warn-model")
+		sttCostPerMinuteUSD("gpt-transcribe")
+		sttCostPerMinuteUSD("gpt-4o-mini-transcribe-2025-12-15")
+	}
+	got := strings.ToLower(buf.String())
+	if n := strings.Count(got, `"stt-warn-once-model"`); n != 1 {
+		t.Errorf("表に無いモデルのログが %d 回（1回のはず）: %q", n, buf.String())
+	}
+	// 1回だけなのはモデルごと。別のモデルはそれぞれ出す
+	if n := strings.Count(got, `"other-stt-warn-model"`); n != 1 {
+		t.Errorf("別の表に無いモデルのログが %d 回（1回のはず）: %q", n, buf.String())
+	}
+	if !strings.Contains(got, "分単価の表に無い") || !strings.Contains(got, "$0.006/分") {
+		t.Errorf("表に無いことと、使った単価がログで分からない: %q", buf.String())
+	}
+	if strings.Contains(got, "transcribe") {
+		t.Errorf("表にあるモデルでログを出した: %q", buf.String())
+	}
+}
+
+// 公式の価格ページ（2026-11-11 確認）の分単価になっていること。値を変えたら、確認日とあわせてここも直す（#2173）。
+func TestSTTPricing_MatchesOfficialPrices(t *testing.T) {
+	if os.Getenv(sttCostOverrideEnv) != "" {
+		t.Skip("STT_COST_PER_MINUTE_USD で分単価を上書きしているため、公式の単価との比較はしない")
+	}
+	want := map[string]float64{
+		"gpt-transcribe":         0.0045,
+		"gpt-4o-transcribe":      0.006,
+		"gpt-4o-mini-transcribe": 0.003,
+		"whisper-1":              0.006,
+	}
+	if !maps.Equal(sttPricingPerMinute, want) {
+		t.Errorf("sttPricingPerMinute = %v, want %v", sttPricingPerMinute, want)
+	}
+	// 表に無いモデルは、以前の一律の既定値（表の最高値）で計算する
+	if sttFallbackCostPerMinuteUSD != 0.006 {
+		t.Errorf("sttFallbackCostPerMinuteUSD = %v, want 0.006", sttFallbackCostPerMinuteUSD)
 	}
 }

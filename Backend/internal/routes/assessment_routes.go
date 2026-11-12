@@ -10,13 +10,14 @@ import (
 )
 
 // SetupAssessmentRoutes は学生の適性検査（#1678）。全て本人認証の下に置く。
-func SetupAssessmentRoutes(api *echo.Group, c *assessmentcontrollers.Controller, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver) {
+func SetupAssessmentRoutes(api *echo.Group, c *assessmentcontrollers.Controller, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver, budget AIBudgetGuards) {
 	g := api.Group("/assessments", EchoUserAuth(userSecret, access, orgs))
 	g.GET("", c.List)
 	g.POST("/:templateId/sessions", c.Start)
 	g.GET("/sessions/:sessionId", c.Get)
 	g.PUT("/sessions/:sessionId/answers/:questionId", c.SaveAnswer)
-	g.POST("/sessions/:sessionId/submit", c.Submit)
+	// 提出そのものは無料。再マッチングで AI 理由を作る直前に判定する。
+	g.POST("/sessions/:sessionId/submit", c.Submit, budget.Deferred)
 	g.GET("/sessions/:sessionId/result", c.Result)
 }
 

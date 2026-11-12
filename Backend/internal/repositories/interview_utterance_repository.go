@@ -22,7 +22,25 @@ func NewInterviewUtteranceRepository(db *gorm.DB) *InterviewUtteranceRepository 
 // clause.OnConflict{DoNothing:true} は MySQL では INSERT IGNORE になり、
 // 一意制約以外のエラー（型不一致・切り詰め等）まで警告へ落として無言で壊れた行を作るため使わない。
 func (r *InterviewUtteranceRepository) Create(utterance *models.InterviewUtterance) error {
-	return r.db.Clauses(clause.OnConflict{
+	return createUtteranceIdempotent(r.db, utterance)
+}
+
+// CreateAll は1ターンの発話（ユーザー → 面接官）を1つのトランザクションで保存する（#1969）。
+// 途中で失敗したら全件を戻し、回答だけが残って直前の質問が欠けた書き起こしにならないようにする。
+// 1件ずつの再送の no-op（Create と同じ一意制約の扱い）はそのまま効く。
+func (r *InterviewUtteranceRepository) CreateAll(utterances []*models.InterviewUtterance) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for _, u := range utterances {
+			if err := createUtteranceIdempotent(tx, u); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func createUtteranceIdempotent(db *gorm.DB, utterance *models.InterviewUtterance) error {
+	return db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "session_id"}, {Name: "client_utterance_id"}},
 		DoUpdates: clause.Assignments(map[string]any{"id": gorm.Expr("id")}),
 	}).Create(utterance).Error
@@ -30,6 +48,8 @@ func (r *InterviewUtteranceRepository) Create(utterance *models.InterviewUtteran
 
 func (r *InterviewUtteranceRepository) FindBySessionID(sessionID uint) ([]models.InterviewUtterance, error) {
 	var utterances []models.InterviewUtterance
-	err := r.db.Where("session_id = ?", sessionID).Order("created_at ASC").Find(&utterances).Error
+	// サーバーは1ターンの user と ai を続けて保存するので、created_at が同じミリ秒になりうる。
+	// 同値の順序は SQL では決まらないため、id で並びを固定する（#1969）。
+	err := r.db.Where("session_id = ?", sessionID).Order("created_at ASC, id ASC").Find(&utterances).Error
 	return utterances, err
 }

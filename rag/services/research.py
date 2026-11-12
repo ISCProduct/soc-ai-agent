@@ -5,6 +5,7 @@ patch("main.OpenAI") / patch("main._run_async") 等との互換のため、
 """
 from __future__ import annotations
 
+from services.model_tiers import summary_model
 import asyncio
 import datetime
 import hashlib
@@ -310,7 +311,7 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
                 role=_wrap_untrusted_text(role_text, "職種"),
             )
             resp = client.chat.completions.create(
-                model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
+                model=summary_model(),
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=300,
@@ -403,7 +404,7 @@ def _summarize_for_hiring(company_name: str, job_title: str, raw_texts: List[str
              )
     try:
         resp = client.chat.completions.create(
-            model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
+            model=summary_model(),
             messages=[
                 {
                     "role": "system",

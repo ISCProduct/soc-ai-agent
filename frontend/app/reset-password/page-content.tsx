@@ -51,8 +51,9 @@ function ResetPasswordForm() {
       setTimeout(() => {
         router.push('/login')
       }, 3000)
-    } catch (err: any) {
-      setError(err.message || 'パスワードのリセットに失敗しました。')
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setError(message || 'パスワードのリセットに失敗しました。')
     } finally {
       setLoading(false)
     }

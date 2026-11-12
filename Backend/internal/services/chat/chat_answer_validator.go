@@ -238,12 +238,14 @@ func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, ans
 			if qText == "" {
 				qText = question
 			}
-			qEmb, err := s.aiClient.Embedding(ctx, qText)
+			// 埋め込みは回答チェック（chat_answer_check）と別に数える（#1993）
+			embCtx := usagectx.WithFeature(ctx, usagectx.FeatureEmbedding)
+			qEmb, err := s.aiClient.Embedding(embCtx, qText)
 			if err != nil {
 				log.Printf("[Validation] Embedding error for question: %v\n", err)
 				return isLikelyAnswer(answer, question), nil
 			}
-			aEmb, err := s.aiClient.Embedding(ctx, answer)
+			aEmb, err := s.aiClient.Embedding(embCtx, answer)
 			if err != nil {
 				log.Printf("[Validation] Embedding error for answer: %v\n", err)
 				return isLikelyAnswer(answer, question), nil
