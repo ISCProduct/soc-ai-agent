@@ -14,7 +14,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     },
   })
   const raw = await response.text()
-  let data: any = {}
+  let data: unknown = {}
   if (raw) {
     try {
       data = JSON.parse(raw)

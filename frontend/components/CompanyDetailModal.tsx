@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type SyntheticEvent } from "react"
 import {
   Dialog,
   DialogTitle,
@@ -34,7 +34,7 @@ type Props = {
 export default function CompanyDetailModal({ open, onCloseAction, data }: Props) {
   const [tab, setTab] = useState(0)
 
-  const handleTabChange = (_: any, newValue: number) => {
+  const handleTabChange = (_: SyntheticEvent, newValue: number) => {
     setTab(newValue)
   }
 

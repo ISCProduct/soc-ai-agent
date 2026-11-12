@@ -36,10 +36,15 @@ func ResolvePromptVersion(stage Stage) string {
 	return promptVersionForStage(stage)
 }
 
-// WithPromptVersion は解決した版を利用量記録用 context に載せる。
+// WithPromptVersion は版を決めて利用量記録用 context に載せる。
+// context に実行主体（利用者）があれば、その利用者を単位に A/B を割り当てる（#1976）。
+// 利用者を持たない経路は WithPromptVersionFor で単位を渡す。
 func WithPromptVersion(ctx context.Context, stage Stage) (context.Context, string) {
-	version := ResolvePromptVersion(stage)
-	return usagectx.WithPromptVersion(ctx, string(stage), version), version
+	var subject Subject
+	if userID, _ := usagectx.Actor(ctx); userID != nil {
+		subject = UserSubject(*userID)
+	}
+	return WithPromptVersionFor(ctx, stage, subject)
 }
 
 func promptVersionForStage(stage Stage) string {

@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"encoding/json"
+	"log"
 )
 
 type AuditLogService struct {
@@ -20,17 +21,23 @@ func (s *AuditLogService) Record(actorEmail, action, targetType string, targetID
 	}
 	meta := ""
 	if metadata != nil {
-		if raw, err := json.Marshal(metadata); err == nil {
+		raw, err := json.Marshal(metadata)
+		if err != nil {
+			// 操作自体は残す。metadata が空なのは失敗としてログに出す（#1991）。
+			log.Printf("[AuditLog] metadata marshal failed action=%s target_type=%s target_id=%d: %v", action, targetType, targetID, err)
+		} else {
 			meta = string(raw)
 		}
 	}
-	_ = s.repo.Create(&models.AuditLog{
+	if err := s.repo.Create(&models.AuditLog{
 		ActorEmail: actorEmail,
 		Action:     action,
 		TargetType: targetType,
 		TargetID:   targetID,
 		Metadata:   meta,
-	})
+	}); err != nil {
+		log.Printf("[AuditLog] write failed action=%s target_type=%s target_id=%d: %v", action, targetType, targetID, err)
+	}
 }
 
 func (s *AuditLogService) List(limit int) ([]models.AuditLog, error) {

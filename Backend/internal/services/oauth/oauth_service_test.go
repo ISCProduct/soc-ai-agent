@@ -35,9 +35,46 @@ type fakeResponse struct {
 }
 
 // fakeProvider は URL ごとに決めた応答を返す RoundTripper。未登録の URL は外部へ出さずに失敗させる。
+// 返した本文は bodies に残し、閉じられたか・読み切られたかをあとで確かめる。
 type fakeProvider struct {
 	t         *testing.T
 	responses map[string]fakeResponse
+	bodies    []*trackedBody
+}
+
+// trackedBody は、最後まで読まれたか（EOF に達したか）と、閉じられたかを記録する応答本文。
+type trackedBody struct {
+	url    string
+	status int
+	r      *strings.Reader
+	eof    bool
+	closed bool
+}
+
+func (b *trackedBody) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if err == io.EOF {
+		b.eof = true
+	}
+	return n, err
+}
+
+func (b *trackedBody) Close() error {
+	b.closed = true
+	return nil
+}
+
+// checkBodies は、返したすべての応答本文が閉じられ、2xx 以外の本文は読み捨てられた（接続を再利用できる）ことを確かめる。
+func (f *fakeProvider) checkBodies(t *testing.T) {
+	t.Helper()
+	for _, b := range f.bodies {
+		if !b.closed {
+			t.Errorf("%s (%d) の応答本文を閉じていない", b.url, b.status)
+		}
+		if (b.status < 200 || b.status > 299) && !b.eof {
+			t.Errorf("%s (%d) の応答本文を読み捨てていない", b.url, b.status)
+		}
+	}
 }
 
 func (f *fakeProvider) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -47,10 +84,12 @@ func (f *fakeProvider) RoundTrip(req *http.Request) (*http.Response, error) {
 		f.t.Errorf("想定外の外部リクエスト: %s", u)
 		return nil, errors.New("unexpected request: " + u)
 	}
+	body := &trackedBody{url: u, status: r.status, r: strings.NewReader(r.body)}
+	f.bodies = append(f.bodies, body)
 	return &http.Response{
 		StatusCode: r.status,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(r.body)),
+		Body:       body,
 		Request:    req,
 	}, nil
 }
@@ -60,6 +99,9 @@ func (f *fakeProvider) ctx() context.Context {
 }
 
 var okToken = fakeResponse{200, `{"access_token":"fake-access-token","token_type":"bearer"}`}
+
+// bodySecret は、エラー応答の本文に混ぜる秘密の値。エラーメッセージ（サーバーログに出る）に本文が入っていないことを確かめる。
+const bodySecret = "secret-in-error-body"
 
 type oauthUserRepoStub struct {
 	repository.UserRepository
@@ -150,6 +192,8 @@ func checkLogin(t *testing.T, provider string, userToken, adminToken string, got
 
 func TestHandleGoogleCallback(t *testing.T) {
 	const verified = `{"id":"g-1","email":"new@example.com","verified_email":true,"name":"新規","picture":"https://img/p.png"}`
+	// 確認済みユーザーの形で、エラーメッセージに出てはいけない値を含む本文（2xx 以外の応答に使う）
+	const verifiedWithSecret = `{"id":"g-1","email":"new@example.com","verified_email":true,"name":"新規","access_token":"` + bodySecret + `"}`
 	cases := []struct {
 		name      string
 		responses map[string]fakeResponse
@@ -256,12 +300,55 @@ func TestHandleGoogleCallback(t *testing.T) {
 			wantErr:   "failed to unmarshal user info",
 		},
 		{
-			// 本体は HTTP ステータスを見ていない（#2154 で対応予定）。今は、エラー応答の JSON に
-			// verified_email が無いので「未確認」として拒否されている、という現状の動きを固定している。
-			name:      "401 のエラー応答は verified_email を持たないので未確認として拒否される（ステータスでは拒否していない）",
-			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {401, `{"error":{"code":401,"message":"Invalid Credentials"}}`}},
+			name:      "200 でも verified_email が無ければ未確認として拒否する",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, `{"id":"g-1","email":"new@example.com"}`}},
 			repo:      &oauthUserRepoStub{},
 			wantErr:   "email not verified",
+		},
+		// #2154: 2xx 以外の応答は、本文の内容にかかわらず JSON を読む前に拒否する。
+		{
+			name:      "500 は、本文が確認済みユーザーの形でも拒否し、ユーザーを作らない",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {500, verifiedWithSecret}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "failed to get user info: unexpected status 500",
+		},
+		{
+			name:      "500 は、メールが一致する既存ユーザーがいても紐付け（更新）しない",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {500, verifiedWithSecret}},
+			repo:      &oauthUserRepoStub{byEmail: map[string]*entity.User{"new@example.com": {ID: 5, Email: "new@example.com"}}},
+			wantErr:   "failed to get user info: unexpected status 500",
+		},
+		{
+			name:      "401 のエラー応答はステータスで拒否する",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {401, `{"error":{"code":401,"message":"Invalid Credentials"}}`}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "failed to get user info: unexpected status 401",
+		},
+		{
+			name:      "境界：199（2xx の直前）は拒否する",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {199, verifiedWithSecret}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "failed to get user info: unexpected status 199",
+		},
+		{
+			name:      "境界：300（2xx の直後）は拒否する",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {300, verifiedWithSecret}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "failed to get user info: unexpected status 300",
+		},
+		{
+			name:      "境界：299（2xx の上端）はステータスでは拒否せず、ログインできる",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {299, verified}},
+			repo:      &oauthUserRepoStub{},
+			want: wantLogin{userID: 100, email: "new@example.com", created: &entity.User{
+				Email: "new@example.com", Name: "新規", OAuthProvider: "google", OAuthID: "g-1", AvatarURL: "https://img/p.png",
+			}},
+		},
+		{
+			name:      "204（本文なし）はステータスでは拒否しないが、本文が JSON でないので拒否する",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {204, ``}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "failed to unmarshal user info",
 		},
 	}
 	for _, tc := range cases {
@@ -271,10 +358,14 @@ func TestHandleGoogleCallback(t *testing.T) {
 			fake := &fakeProvider{t: t, responses: tc.responses}
 
 			resp, err := newOAuthTestService(tc.repo).HandleGoogleCallback(fake.ctx(), "code", tc.tenant)
+			fake.checkBodies(t)
 
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				if strings.Contains(err.Error(), bodySecret) {
+					t.Errorf("エラーメッセージに応答本文が入っている: %v", err)
 				}
 				if len(tc.repo.created) != 0 || len(tc.repo.updated) != 0 {
 					t.Errorf("失敗したのにユーザーを作成・更新した: created=%d updated=%d", len(tc.repo.created), len(tc.repo.updated))
@@ -291,6 +382,9 @@ func TestHandleGoogleCallback(t *testing.T) {
 
 func TestHandleGitHubCallback(t *testing.T) {
 	const publicEmail = `{"id":42,"login":"octo","name":"","email":"octo@example.com","avatar_url":"https://img/octo.png"}`
+	// ユーザー・確認済みメールの形で、エラーメッセージに出てはいけない値を含む本文（2xx 以外の応答に使う）
+	const publicEmailWithSecret = `{"id":42,"login":"octo","email":"octo@example.com","access_token":"` + bodySecret + `"}`
+	const verifiedEmailsWithSecret = `[{"email":"main@example.com","primary":true,"verified":true,"token":"` + bodySecret + `"}]`
 	cases := []struct {
 		name      string
 		responses map[string]fakeResponse
@@ -387,16 +481,99 @@ func TestHandleGitHubCallback(t *testing.T) {
 			wantErr: "no verified email found",
 		},
 		{
-			// 本体は HTTP ステータスを見ていない（#2154 で対応予定）。今は、エラー応答の JSON が
-			// 配列ではないので型の不一致で拒否されている、という現状の動きを固定している。
-			name: "メール一覧の 401 応答は配列ではないので型の不一致で拒否される（ステータスでは拒否していない）",
+			name: "メール一覧が 200 でも配列でなければ拒否する",
+			responses: map[string]fakeResponse{
+				fakeTokenURL:    okToken,
+				githubUserURL:   {200, `{"id":42,"login":"octo"}`},
+				githubEmailsURL: {200, `{"message":"not an array"}`},
+			},
+			repo:    &oauthUserRepoStub{},
+			wantErr: "failed to get email",
+		},
+		// #2154: /user と /user/emails の 2xx 以外の応答は、本文の内容にかかわらず JSON を読む前に拒否する。
+		{
+			name:      "/user の 500 は、本文がユーザーの形でも拒否し、ユーザーを作らない",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {500, publicEmailWithSecret}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "failed to get user info: unexpected status 500",
+		},
+		{
+			name:      "/user の 500 は、メールが一致する既存ユーザーがいても紐付け（更新）しない",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {500, publicEmailWithSecret}},
+			repo:      &oauthUserRepoStub{byEmail: map[string]*entity.User{"octo@example.com": {ID: 5, Email: "octo@example.com"}}},
+			wantErr:   "failed to get user info: unexpected status 500",
+		},
+		{
+			name:      "境界：/user の 199 は拒否する",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {199, publicEmailWithSecret}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "failed to get user info: unexpected status 199",
+		},
+		{
+			name:      "境界：/user の 300 は拒否する",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {300, publicEmailWithSecret}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "failed to get user info: unexpected status 300",
+		},
+		{
+			name:      "境界：/user の 299 はステータスでは拒否せず、ログインできる",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {299, publicEmail}},
+			repo:      &oauthUserRepoStub{},
+			want: wantLogin{userID: 100, email: "octo@example.com", created: &entity.User{
+				Email: "octo@example.com", Name: "octo", OAuthProvider: "github", OAuthID: "42", AvatarURL: "https://img/octo.png",
+			}},
+		},
+		{
+			name: "/user/emails の 500 は、本文が確認済みメールの形でも拒否し、ユーザーを作らない",
+			responses: map[string]fakeResponse{
+				fakeTokenURL:    okToken,
+				githubUserURL:   {200, `{"id":42,"login":"octo"}`},
+				githubEmailsURL: {500, verifiedEmailsWithSecret},
+			},
+			repo:    &oauthUserRepoStub{},
+			wantErr: "failed to get email: unexpected status 500",
+		},
+		{
+			name: "/user/emails の 401 はステータスで拒否する",
 			responses: map[string]fakeResponse{
 				fakeTokenURL:    okToken,
 				githubUserURL:   {200, `{"id":42,"login":"octo"}`},
 				githubEmailsURL: {401, `{"message":"Bad credentials"}`},
 			},
 			repo:    &oauthUserRepoStub{},
-			wantErr: "failed to get email",
+			wantErr: "failed to get email: unexpected status 401",
+		},
+		{
+			name: "境界：/user/emails の 199 は拒否する",
+			responses: map[string]fakeResponse{
+				fakeTokenURL:    okToken,
+				githubUserURL:   {200, `{"id":42,"login":"octo"}`},
+				githubEmailsURL: {199, verifiedEmailsWithSecret},
+			},
+			repo:    &oauthUserRepoStub{},
+			wantErr: "failed to get email: unexpected status 199",
+		},
+		{
+			name: "境界：/user/emails の 300 は拒否する",
+			responses: map[string]fakeResponse{
+				fakeTokenURL:    okToken,
+				githubUserURL:   {200, `{"id":42,"login":"octo"}`},
+				githubEmailsURL: {300, verifiedEmailsWithSecret},
+			},
+			repo:    &oauthUserRepoStub{},
+			wantErr: "failed to get email: unexpected status 300",
+		},
+		{
+			name: "境界：/user/emails の 299 はステータスでは拒否せず、確認済みのメールでログインできる",
+			responses: map[string]fakeResponse{
+				fakeTokenURL:    okToken,
+				githubUserURL:   {200, `{"id":42,"login":"octo"}`},
+				githubEmailsURL: {299, `[{"email":"main@example.com","primary":true,"verified":true}]`},
+			},
+			repo: &oauthUserRepoStub{},
+			want: wantLogin{userID: 100, email: "main@example.com", created: &entity.User{
+				Email: "main@example.com", Name: "octo", OAuthProvider: "github", OAuthID: "42",
+			}},
 		},
 		{
 			name:      "トークン交換の失敗はエラー",
@@ -412,10 +589,14 @@ func TestHandleGitHubCallback(t *testing.T) {
 			fake := &fakeProvider{t: t, responses: tc.responses}
 
 			resp, err := newOAuthTestService(tc.repo).HandleGitHubCallback(fake.ctx(), "code", tc.tenant)
+			fake.checkBodies(t)
 
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				if strings.Contains(err.Error(), bodySecret) {
+					t.Errorf("エラーメッセージに応答本文が入っている: %v", err)
 				}
 				if len(tc.repo.created) != 0 || len(tc.repo.updated) != 0 {
 					t.Errorf("失敗したのにユーザーを作成・更新した")

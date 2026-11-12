@@ -38,6 +38,7 @@ func SetupAdminRoutes(
 	userRepo *repositories.UserRepository,
 	schoolService *school.SchoolService,
 	adminSecret string,
+	aiBudgetController *admincontrollers.AIBudgetController,
 ) {
 	admin := api.Group("/admin", EchoAdminAuth(userRepo, adminSecret))
 	schoolScope := EchoAdminSchoolScope(schoolService)
@@ -146,6 +147,11 @@ func SetupAdminRoutes(
 	admin.GET("/costs/breakdown", adminCostsController.Breakdown, platform)
 	admin.GET("/costs/daily", adminCostsController.Daily, platform)
 	admin.GET("/costs/monthly", adminCostsController.Monthly, platform)
+	if aiBudgetController != nil {
+		admin.GET("/ai-budgets", aiBudgetController.List, platform)
+		admin.PUT("/ai-budgets", aiBudgetController.Set, platform)
+		admin.DELETE("/ai-budgets/:scope/:scope_id", aiBudgetController.Delete, platform)
+	}
 
 	admin.POST("/profile-recalculation", profileRecalcController.RecalculateAll, platform)
 	admin.POST("/profile-recalculation/:id", profileRecalcController.RecalculateOne, platform)

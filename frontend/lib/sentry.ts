@@ -92,7 +92,23 @@ export function sentrySharedOptions() {
       process.env.NODE_ENV ||
       'development',
     release: process.env.SENTRY_RELEASE || process.env.NEXT_PUBLIC_SENTRY_RELEASE || undefined,
-    sendDefaultPii: false,
+    // v11 で sendDefaultPii は廃止され、dataCollection を省くと既定で
+    // ユーザー情報・Cookie・リクエスト本文・IP・DBクエリまで集める。
+    // 学生の個人情報を扱うため、v10 の既定（収集しない）に固定する。
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: {
+        request: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+        response: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+      },
+      httpBodies: [],
+      urlQueryParams: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      graphQL: { document: false, variables: false },
+    },
     tracesSampleRate: 0,
     beforeSend: scrubSentryEvent,
     beforeBreadcrumb: scrubSentryBreadcrumb,

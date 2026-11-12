@@ -79,6 +79,22 @@ type GitHubEmail struct {
 	Visibility string `json:"visibility"`
 }
 
+// maxDiscardBodyBytes は、2xx 以外の応答で本文を読み捨てるときの上限。
+// 読み切ると接続を再利用できるが、プロバイダが巨大な本文を返しても読み続けないよう上限を設ける。
+// 上限を超える本文は読み切らないので、その応答の接続は再利用されない（失敗時だけなので許容する）。
+const maxDiscardBodyBytes = 64 << 10
+
+// checkProviderStatus は、プロバイダの応答が 2xx でなければ本文を読み捨ててエラーを返す (#2154)。
+// エラー応答の本文でも、確認済みユーザーの形をしていればユーザーが作られてしまうため、JSON を読む前に拒否する。
+// 本文はトークンなどを含みうるので、エラーメッセージにはステータスコードだけを入れる。
+func checkProviderStatus(resp *http.Response) error {
+	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+		return nil
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDiscardBodyBytes))
+	return fmt.Errorf("unexpected status %d", resp.StatusCode)
+}
+
 // GetGoogleAuthURL Google OAuth認証URLを取得
 func (s *OAuthService) GetGoogleAuthURL(state string) string {
 	return s.oauthConfig.Google.AuthCodeURL(state, oauth2.AccessTypeOffline)
@@ -104,6 +120,9 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 		return nil, fmt.Errorf("failed to get user info: %w", err)
 	}
 	defer resp.Body.Close()
+	if err := checkProviderStatus(resp); err != nil {
+		return nil, fmt.Errorf("failed to get user info: %w", err)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -214,6 +233,9 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, te
 		return nil, fmt.Errorf("failed to get user info: %w", err)
 	}
 	defer resp.Body.Close()
+	if err := checkProviderStatus(resp); err != nil {
+		return nil, fmt.Errorf("failed to get user info: %w", err)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -342,6 +364,9 @@ func (s *OAuthService) getGitHubPrimaryEmail(ctx context.Context, client *http.C
 		return "", err
 	}
 	defer resp.Body.Close()
+	if err := checkProviderStatus(resp); err != nil {
+		return "", err
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

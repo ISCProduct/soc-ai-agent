@@ -456,29 +456,37 @@ resource "aws_launch_template" "app" {
   # 3 にすると通常の2要素XFFでは転送が無効になり、さらにクライアントが先頭へIPを1個足すと
   # その詐称値が3段目として内部トークン付きで署名され、IP単位の制限を回避できてしまう。
   user_data = base64encode(templatefile("${path.module}/app_user_data.sh.tftpl", {
-    aws_region              = var.region
-    log_group_name          = aws_cloudwatch_log_group.app.name
-    backend_image           = local.backend_image
-    frontend_image          = local.frontend_image
-    rag_image               = local.rag_image
-    db_host                 = module.rds.address
-    db_port                 = module.rds.port
-    db_name                 = module.rds.db_name
-    db_user                 = module.rds.master_username
-    s3_bucket               = module.s3.bucket_id
-    gbizinfo_base_url       = var.gbizinfo_base_url
-    openai_model            = var.openai_model
-    prompt_version          = var.prompt_version
-    prompt_versions         = var.prompt_versions
-    google_client_id        = var.google_client_id
-    github_client_id        = var.github_client_id
-    backend_domain          = local.backend_domain
-    frontend_domain         = local.frontend_domain
-    openai_whisper_model    = var.openai_whisper_model
-    discord_public_key      = var.discord_public_key
-    discord_allowed_role_id = var.discord_allowed_role_id
-    github_dispatch_repo    = var.github_dispatch_repo
-    trusted_proxy_hops      = "2"
+    aws_region                    = var.region
+    log_group_name                = aws_cloudwatch_log_group.app.name
+    backend_image                 = local.backend_image
+    frontend_image                = local.frontend_image
+    rag_image                     = local.rag_image
+    db_host                       = module.rds.address
+    db_port                       = module.rds.port
+    db_name                       = module.rds.db_name
+    db_user                       = module.rds.master_username
+    s3_bucket                     = module.s3.bucket_id
+    gbizinfo_base_url             = var.gbizinfo_base_url
+    openai_model                  = var.openai_model
+    ai_model_premium              = var.ai_model_premium
+    ai_model_light                = var.ai_model_light
+    ai_failover_local_stt_url     = var.ai_failover_local_stt_url
+    ai_failover_local_llm_url     = var.ai_failover_local_llm_url
+    ai_failover_local_llm_model   = var.ai_failover_local_llm_model
+    ai_failover_local_tts_url     = var.ai_failover_local_tts_url
+    ai_failover_local_tts_speaker = var.ai_failover_local_tts_speaker
+    prompt_version                = var.prompt_version
+    prompt_versions               = var.prompt_versions
+    prompt_ab                     = var.prompt_ab
+    google_client_id              = var.google_client_id
+    github_client_id              = var.github_client_id
+    backend_domain                = local.backend_domain
+    frontend_domain               = local.frontend_domain
+    openai_whisper_model          = var.openai_whisper_model
+    discord_public_key            = var.discord_public_key
+    discord_allowed_role_id       = var.discord_allowed_role_id
+    github_dispatch_repo          = var.github_dispatch_repo
+    trusted_proxy_hops            = "2"
 
     # シークレットは値ではなく「取得先」だけを渡す(#1158)。
     # ここに値を書くと launch template のバージョンへ平文で残り、

@@ -1,6 +1,7 @@
 package aibench
 
 import (
+	"Backend/internal/aimodel"
 	"context"
 	"encoding/json"
 	"os"
@@ -38,6 +39,10 @@ const (
 func newChatAnswerTarget(modelOverride string) Target {
 	// 本番の既定は openai.Client の DefaultModel（AI_TEXT_MODEL → OPENAI_MODEL → gpt-4o-mini）。
 	m := strings.TrimSpace(modelOverride)
+	if m == "" {
+		// 本番と同じく工程・層の設定を先に見る（#1526）
+		m = aimodel.For(aimodel.StageScoreEvaluation)
+	}
 	if m == "" {
 		m = strings.TrimSpace(os.Getenv("AI_TEXT_MODEL"))
 	}
