@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -71,7 +70,7 @@ func (cli *Client) TranscribeWithModel(ctx context.Context, audio []byte, filena
 	if resp.StatusCode != http.StatusOK {
 		// 補助語には企業名が含まれる。エラー本文をそのまま返すと
 		// リクエスト内容がログへ流れうるため、状態コードだけにする。
-		return "", fmt.Errorf("transcription failed: HTTP %d", resp.StatusCode)
+		return "", &StatusError{Format: "transcription failed: HTTP %d", StatusCode: resp.StatusCode}
 	}
 	var out struct {
 		Text string `json:"text"`

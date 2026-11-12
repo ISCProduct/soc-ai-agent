@@ -1,0 +1,101 @@
+name: AI Bench
+
+# AI 出力の品質評価（Backend/cmd/aibench）を CI で実行する（#1782）。
+#
+# OpenAI の API を呼んで費用がかかるので、既定では走らせない。
+#   - 手動実行（workflow_dispatch）
+#   - 「aibench」ラベルが付いた PR で、プロンプト・評価に関わるファイルを変えたとき
+# 1回の実行の費用は AIBENCH_MAX_COST_USD（既定 $1.00、概算の上限見積もり）で止める。
+# ES 添削は RAG の起動が要るので CI では測らない（docs/research/ai-eval/README.md）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 評価対象（カンマ区切り）
+        default: chat-answer,company-extract,matching-reason,resume,interview-report
+      runs:
+        description: 同一入力の実行回数（1 では再現性が測れない）
+        default: '2'
+      max_cost_usd:
+        description: 1回の実行の上限（USD、概算の上限見積もり）
+        default: '1.00'
+      base_ref:
+        description: 比べる base（例 origin/develop）。空なら比べずに測る
+        default: origin/develop
+  pull_request:
+    types: [labeled, synchronize, reopened]
+    paths:
+      - 'Backend/internal/services/prompts/**'
+      - 'Backend/internal/services/chat/answer_evaluator.go'
+      - 'Backend/internal/services/company/company_info_*.go'
+      - 'Backend/internal/services/matching/matching_service.go'
+      - 'Backend/internal/services/resume/**'
+      - 'Backend/internal/services/interview/interview_report*.go'
+      - 'Backend/internal/aibench/**'
+      - 'Backend/cmd/aibench/**'
+      - 'docs/research/ai-eval/**'
+      - 'automation/aibench/**'
+      - '.github/workflows/aibench.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  aibench:
+    name: AI Bench
+    # PR はラベルが付いているときだけ。付け外しで費用が発生するので、ラベルの付与で明示的に走らせる。
+    # labeled は aibench 以外のラベルを付けたときも届くので、付けたラベルが aibench のときだけ走らせる
+    # （aibench が付いた PR に無関係なラベルを足すたびに、測り直して課金しない）。
+    # Dependabot の PR にはシークレットが渡らないので除外する（automation/test/dependabot-workflow-test.sh）。
+    if: >-
+      github.actor != 'dependabot[bot]' &&
+      (github.event_name == 'workflow_dispatch' ||
+        (github.event.action == 'labeled' && github.event.label.name == 'aibench') ||
+        (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'aibench')))
+    # PR は同じ PR の古い実行を止める（push が続いたときに二重に課金しない）。
+    # 手動実行は実行ごとに別のグループにし、同じブランチで2回実行しても先の実行を止めない。
+    # ワークフローではなくジョブに置く。ワークフローに置くと、上の if で skipped になる実行
+    # （無関係なラベルの付与など）も同じグループに入り、走っている測定を止めてしまう。
+    concurrency:
+      group: aibench-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      AIBENCH_TARGETS: ${{ github.event.inputs.targets || 'chat-answer,company-extract,matching-reason,resume,interview-report' }}
+      AIBENCH_RUNS: ${{ github.event.inputs.runs || '2' }}
+      AIBENCH_MAX_COST_USD: ${{ github.event.inputs.max_cost_usd || '1.00' }}
+      AIBENCH_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.inputs.base_ref }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # base との差分を取るため
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: ./Backend/go.mod
+          cache-dependency-path: ./Backend/go.sum
+
+      - name: aibench を実行して base と比べる
+        env:
+          # API キーは実行するステップだけに渡す（checkout などのアクションへ渡さない）
+          OPENAI_API_KEY: ${{ secrets.AIBENCH_OPENAI_API_KEY }}
+          AIBENCH_OUT_DIR: ${{ runner.temp }}/aibench
+        run: ./automation/aibench/ci-run.sh
+
+      # 結果には LLM の出力本文が入る（固定セットは合成データのみ）。短い期間だけ残す。
+      - name: 結果を保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aibench-results
+          path: |
+            ${{ runner.temp }}/aibench/*.json
+            ${{ runner.temp }}/aibench/*.log
+            ${{ runner.temp }}/aibench/diff-*.txt
+          retention-days: 14
+          if-no-files-found: ignore

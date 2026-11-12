@@ -85,3 +85,9 @@ func TestInterviewUtteranceRepository_CreateIsIdempotent(t *testing.T) {
 		})
 	}
 }
+
+// 面接のターンの発話（ユーザー → 面接官）は CreateAll で1つのトランザクションにまとめて保存する（#1969）。
+// サービスはこのメソッドがあるときだけ全件か0件かの保存にするので、満たしていることを固定する。
+var _ interface {
+	CreateAll(utterances []*models.InterviewUtterance) error
+} = (*InterviewUtteranceRepository)(nil)

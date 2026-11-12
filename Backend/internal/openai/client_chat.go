@@ -30,6 +30,12 @@ var (
 	webSearchCallTimeout      = 90 * time.Second
 	chatCompletionAttemptCap  = 60 * time.Second
 	webSearchAttemptCap       = 45 * time.Second
+	// Responses 経路の論理コール上限。試行ごとの 60秒/90秒だけでは
+	// 5回＋バックオフで数分〜8分まで伸びる（#1994）。
+	responsesCallTimeout          = 2 * time.Minute
+	responsesMaxTokensCallTimeout = 2 * time.Minute
+	responsesAttemptCap           = 60 * time.Second
+	responsesMaxTokensAttemptCap  = 90 * time.Second
 	// llmMinAttemptRemaining 未満の残り時間では、失敗が確実なので試行しない。
 	// 試行すると OpenAIFallbackGuard の分間カウントだけを消費してしまう。
 	llmMinAttemptRemaining = 3 * time.Second

@@ -1,6 +1,7 @@
 package interview
 
 import (
+	"Backend/internal/aimodel"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/shared"
@@ -74,7 +75,7 @@ func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint
 		// interview_report.go の面接ログと同じものなので同じく囲む（#1600）。
 		shared.WrapUntrustedText(transcript, "応募者発言"))
 
-	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
+	model := aimodel.For(aimodel.StageInterviewReport)
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewRealtime)
 	llmCtx, cancel := context.WithTimeout(ctx, interviewPhraseSuggestionsLLMTimeout)
 	defer cancel()

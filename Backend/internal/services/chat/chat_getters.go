@@ -3,6 +3,7 @@ package chat
 import (
 	"Backend/domain/entity"
 	"Backend/internal/models"
+	"Backend/internal/usagectx"
 	"context"
 	"errors"
 	"log"
@@ -42,7 +43,17 @@ func (s *ChatService) GetUserChatSessions(userID uint) ([]models.ChatSession, er
 	return s.chatMessageRepo.GetUserSessions(userID)
 }
 
+// questionAICall は質問の生成・言い換え用の AI 呼び出し（機能名 chat_question）。
+// 呼び出し元が別の機能名を付けていれば、そちらを残す（#1993）。
+func (s *ChatService) questionAICall(ctx context.Context, prompt string) (string, error) {
+	return s.aiCallWithRetries(usagectx.WithDefaultFeature(ctx, usagectx.FeatureChatQuestion), prompt)
+}
+
 // aiCallWithRetries AI呼び出しをリトライして安定化させる（最大3回）
+//
+// 機能名は呼び出し元で付ける（質問の生成・言い換えは questionAICall、職種の採点は chat_answer_eval）。
+// ここで既定を付けると、付け忘れた新しい用途が unknown にならずに別の機能へ計上され、
+// 「unknown の件数＝未計測の経路」という指標が効かなくなる（#1993）。
 func (s *ChatService) aiCallWithRetries(ctx context.Context, prompt string) (string, error) {
 	var resp string
 	var err error
