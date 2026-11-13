@@ -15,6 +15,7 @@ import {
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import { GraduateOutcomeCard } from '@/components/company/GraduateOutcomeCard'
 import BusinessIcon from '@mui/icons-material/Business'
 import PlaceIcon from '@mui/icons-material/Place'
 import PeopleIcon from '@mui/icons-material/People'
@@ -415,6 +416,9 @@ export default function PageContent() {
             </CardContent>
           </Card>
         </Box>
+
+        {/* 自分の学校の先輩の進路実績（#2032）。実績が無ければ出さない */}
+        <GraduateOutcomeCard companyId={String(params.id)} />
 
         {jobPositions.length > 0 && (
           <Card sx={{ mt: 3, borderRadius: 2 }}>

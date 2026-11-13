@@ -11,6 +11,7 @@ import (
 	companycontrollers "Backend/internal/controllers/company"
 	escontrollers "Backend/internal/controllers/es"
 	githubcontrollers "Backend/internal/controllers/github"
+	graduateoutcomecontrollers "Backend/internal/controllers/graduateoutcome"
 	insightcontrollers "Backend/internal/controllers/insight"
 	interviewcontrollers "Backend/internal/controllers/interview"
 	releasecontrollers "Backend/internal/controllers/release"
@@ -45,6 +46,7 @@ import (
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/gbizinfo"
 	"Backend/internal/services/github"
+	graduateoutcomesvc "Backend/internal/services/graduateoutcome"
 	"Backend/internal/services/houjinbangou"
 	"Backend/internal/services/hr"
 	"Backend/internal/services/interview"
@@ -684,6 +686,8 @@ func main() {
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupESRoutes(api, esRewriteController, esReviewController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
+	// 卒業生の進路実績（#2032）。学生の学校の実績を、氏名などを出さず人数で返す
+	routes.SetupGraduateOutcomeRoutes(api, graduateoutcomecontrollers.NewController(graduateoutcomesvc.NewService(repositories.NewGraduateOutcomeRepository(db))), cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)
 	// 企業ポータルのダッシュボードと応募者管理 (#1320)。
