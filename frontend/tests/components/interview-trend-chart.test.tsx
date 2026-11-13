@@ -11,7 +11,7 @@ import path from 'path'
 // recharts の描画結果からドメインを読むのは不安定なので、定義そのものを見る。
 describe('InterviewTrendChart のY軸', () => {
   const src = fs.readFileSync(
-    path.join(process.cwd(), 'components/InterviewTrendChart.tsx'),
+    path.join(process.cwd(), 'components/interview/InterviewTrendChart.tsx'),
     'utf-8',
   )
 
@@ -37,11 +37,11 @@ describe('教員ダッシュボードからの利用', () => {
   )
 
   it('共有コンポーネントを参照している', () => {
-    expect(src).toContain("import('@/components/InterviewTrendChart')")
+    expect(src).toContain("import('@/components/interview/InterviewTrendChart')")
   })
 
   it('recharts を本体バンドルへ入れないため dynamic import している', () => {
-    expect(src).toMatch(/dynamic\(\s*\(\)\s*=>\s*import\('@\/components\/InterviewTrendChart'\)/)
+    expect(src).toMatch(/dynamic\(\s*\(\)\s*=>\s*import\('@\/components\/interview\/InterviewTrendChart'\)/)
   })
 
   it('セッションを古い順に並べ替えてから描画する', () => {
