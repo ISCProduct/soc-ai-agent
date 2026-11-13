@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
@@ -136,8 +137,25 @@ type trainingConsentBody struct {
 	AllowTrainingUse *bool `json:"allow_training_use"`
 }
 
+// trainingConsentResponse は同意の現在値と、本人が最後に変更した日時（#2168）を返す。
+// UpdatedAt は同意の履歴の最後の行の日時で、一度も変更していなければ null。
+// users.updated_at はほかの更新でも上書きされるので、同意の変更日時としては使わない。
 type trainingConsentResponse struct {
-	AllowTrainingUse bool `json:"allow_training_use"`
+	AllowTrainingUse bool       `json:"allow_training_use"`
+	UpdatedAt        *time.Time `json:"updated_at"`
+}
+
+// trainingConsentResponseFor は、同意の現在値と最後に変更した日時を読み、応答を組み立てる。
+func (c *UserPreferenceController) trainingConsentResponseFor(userID uint) (trainingConsentResponse, error) {
+	allow, err := c.repo.GetTrainingUse(userID)
+	if err != nil {
+		return trainingConsentResponse{}, err
+	}
+	updatedAt, err := c.repo.LastTrainingConsentChangeAt(userID)
+	if err != nil {
+		return trainingConsentResponse{}, err
+	}
+	return trainingConsentResponse{AllowTrainingUse: allow, UpdatedAt: updatedAt}, nil
 }
 
 // GetTrainingConsent GET /api/user/training-consent
@@ -150,11 +168,11 @@ func (c *UserPreferenceController) GetTrainingConsent(ctx echo.Context) error {
 	if !ok {
 		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
-	allow, err := c.repo.GetTrainingUse(userID)
+	resp, err := c.trainingConsentResponseFor(userID)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
-	return ctx.JSON(http.StatusOK, trainingConsentResponse{AllowTrainingUse: allow})
+	return ctx.JSON(http.StatusOK, resp)
 }
 
 // PutTrainingConsent PUT /api/user/training-consent
@@ -167,12 +185,14 @@ func (c *UserPreferenceController) PutTrainingConsent(ctx echo.Context) error {
 	if err := ctx.Bind(&body); err != nil || body.AllowTrainingUse == nil {
 		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "allow_training_use を指定してください")
 	}
-	if err := c.repo.SetTrainingUse(userID, *body.AllowTrainingUse); err != nil {
+	// 値の更新と同意の履歴（どの文言の版に対する操作か）を同じトランザクションで保存する（#2168）。
+	// どちらかが失敗すれば両方とも巻き戻るので、500 を返して保存できたように見せない。
+	if err := c.repo.SetTrainingUse(userID, *body.AllowTrainingUse, models.TrainingConsentTextVersion); err != nil {
 		return httpapi.InternalError(err)
 	}
-	allow, err := c.repo.GetTrainingUse(userID)
+	resp, err := c.trainingConsentResponseFor(userID)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
-	return ctx.JSON(http.StatusOK, trainingConsentResponse{AllowTrainingUse: allow})
+	return ctx.JSON(http.StatusOK, resp)
 }

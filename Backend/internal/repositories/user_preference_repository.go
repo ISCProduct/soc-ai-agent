@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"strings"
+	"time"
 
 	"Backend/internal/models"
 
@@ -60,12 +61,45 @@ func (r *UserPreferenceRepository) GetScoutVisibility(userID uint) (bool, error)
 	return allow, err
 }
 
-// SetTrainingUse は、面接データを学習に使うことへの同意フラグだけを更新する（#2167）。
-// SetScoutVisibility と同じ理由で、対象カラムだけを更新する。
-func (r *UserPreferenceRepository) SetTrainingUse(userID uint, allow bool) error {
-	return r.db.Model(&models.User{}).
-		Where("id = ?", userID).
-		Update("allow_training_use", allow).Error
+// SetTrainingUse は、面接データを学習に使うことへの同意フラグだけを更新し（#2167）、
+// その操作を同意の履歴（training_consent_events）に1行残す（#2168）。
+// SetScoutVisibility と同じ理由で、users は対象カラムだけを更新する。
+//
+// 更新と履歴の追加は同じトランザクションで行う。片方だけ成功すると、
+// 「同意したのに記録が無い」「記録はあるのに値が変わっていない」状態になり、後から説明できない。
+// 同じ値への変更も、本人の明示的な操作なので記録する。
+// textVersion は、操作したときに画面に出していた同意の文言の版（models.TrainingConsentTextVersion）。
+func (r *UserPreferenceRepository) SetTrainingUse(userID uint, allow bool, textVersion string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.User{}).
+			Where("id = ?", userID).
+			Update("allow_training_use", allow).Error; err != nil {
+			return err
+		}
+		return tx.Create(&models.TrainingConsentEvent{
+			UserID:             userID,
+			AllowTrainingUse:   allow,
+			ConsentTextVersion: textVersion,
+		}).Error
+	})
+}
+
+// LastTrainingConsentChangeAt は、本人が学習利用の同意を最後に変更した日時を返す（#2168）。
+// 一度も変更していなければ nil, nil（初期値の「同意しない」のまま）。
+// users.updated_at はほかの更新でも上書きされるので使わない。
+func (r *UserPreferenceRepository) LastTrainingConsentChangeAt(userID uint) (*time.Time, error) {
+	var events []models.TrainingConsentEvent
+	err := r.db.Where("user_id = ?", userID).
+		Order("created_at DESC, id DESC").
+		Limit(1).
+		Find(&events).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(events) == 0 {
+		return nil, nil
+	}
+	return &events[0].CreatedAt, nil
 }
 
 // GetTrainingUse は、学生本人が設定した学習利用の同意フラグをそのまま返す（#2167）。

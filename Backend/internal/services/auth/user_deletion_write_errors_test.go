@@ -3,8 +3,10 @@ package auth
 import (
 	"Backend/internal/repositories"
 	"bytes"
+	"database/sql/driver"
 	"errors"
 	"log"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -206,4 +208,58 @@ func TestDeleteUser_PendingRegistrationDeleteFails_RollsBack(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unexpected DB calls: %v", err)
 	}
+}
+
+// #2168: 物理パージで、学習利用の同意の履歴（training_consent_events）も本人の分を消す。
+// 消せなければ全体を巻き戻し、ユーザーも消さない（次回のパージで再試行する）。
+func TestPurgeOne_DeletesTrainingConsentEvents(t *testing.T) {
+	const deleteEvents = "DELETE FROM `training_consent_events` WHERE user_id = ?"
+
+	t.Run("消す", func(t *testing.T) {
+		p := newPurgeTestDB(t)
+		p.mock.ExpectBegin()
+		p.expectUser(9)
+		var deletedFor []driver.Value
+		p.mock.ExpectExec(deleteEvents).WithArgs(recordArg{&deletedFor}).WillReturnResult(sqlmock.NewResult(0, 2))
+		p.mock.ExpectCommit()
+		p.mock.ExpectBegin()
+		p.mock.ExpectCommit()
+		p.allowRest()
+
+		if err := NewUserDeletionService(repositories.NewUserWithdrawalRepository(p.db), nil, nil).purgeOne(purgeTarget); err != nil {
+			t.Fatalf("purgeOne: %v", err)
+		}
+		// allowRest の期待は余るので ExpectationsWereMet では確かめられない。削除の引数を記録して確かめる
+		// sqlmock は照合のたびに Match を呼ぶので、回数ではなく「呼ばれたこと」と値を見る
+		if len(deletedFor) == 0 || slices.ContainsFunc(deletedFor, func(v driver.Value) bool { return v != int64(purgeTarget.UserID) }) {
+			t.Errorf("同意の履歴を本人（user_id=%d）の分を削除するべき: %v", purgeTarget.UserID, deletedFor)
+		}
+	})
+
+	t.Run("消せなければ巻き戻す", func(t *testing.T) {
+		p := newPurgeTestDB(t)
+		p.mock.ExpectBegin()
+		p.expectUser(9)
+		p.mock.ExpectExec(deleteEvents).WillReturnError(errors.New("db down"))
+		p.mock.ExpectRollback()
+		p.allowRest()
+
+		if err := NewUserDeletionService(repositories.NewUserWithdrawalRepository(p.db), nil, nil).purgeOne(purgeTarget); err == nil {
+			t.Fatal("同意の履歴を消せなかったので失敗を返すべき")
+		}
+		if p.executed("DELETE FROM `users`") {
+			t.Error("同意の履歴の削除に失敗した後で、ユーザーを削除した（巻き戻すべき）")
+		}
+		if p.executed("UPDATE `withdrawn_users`") {
+			t.Error("パージに失敗したのに purged_at を記録した（次回の再試行の対象から外れる）")
+		}
+	})
+}
+
+// recordArg は、どの値にも当てはまり、渡された値を記録する（anySQL と同じく、狙った1本の引数を後から確かめる）。
+type recordArg struct{ got *[]driver.Value }
+
+func (a recordArg) Match(v driver.Value) bool {
+	*a.got = append(*a.got, v)
+	return true
 }
