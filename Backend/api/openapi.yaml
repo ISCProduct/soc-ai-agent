@@ -217,7 +217,9 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: 本人が同意を最後に変更した日時。一度も変更していなければ null
+          description: |
+            本人が同意を最後に変更した日時（同意の履歴の最後の行）。一度も変更していなければ null。
+            履歴の記録を始める前（000075 の適用前）から同意していた人は、本人が操作するまでは 000075 の適用時刻になる
 
     CompanyInterviewQuestionInput:
       type: object
@@ -4585,7 +4587,7 @@ paths:
       description: |
         面接データを採点モデルの学習に使うことへの同意（#2167）。初期値 false の opt-in。
         `updated_at` は本人が同意を最後に変更した日時（同意の履歴 `training_consent_events` の最後の行、#2168）。
-        一度も変更していなければ null。
+        一度も変更していなければ null。値と日時は同じスナップショット（1つのクエリ）で読む。
       security: [{ userToken: [] }]
       responses:
         "200":
@@ -4598,7 +4600,10 @@ paths:
       tags: [user]
       summary: 学習利用の同意を更新
       description: |
-        `allow_training_use`（boolean）は必須。希望条件（`/api/user/preferences`）とは別に保存する。
+        `allow_training_use`（boolean）と `consent_text_version`（画面が表示していた同意の文言の版）は必須。
+        希望条件（`/api/user/preferences`）とは別に保存する。
+        `consent_text_version` が今の版と一致しなければ、何も保存せずに 409 を返す（古いタブ・古いフロントで
+        古い文言を見て押した操作を、新しい文言への同意として記録しない）。画面は再読み込みを促す。
         保存のたびに、同意の履歴（日時・値・同意の文言の版）を同じトランザクションで1行残す（同じ値への変更も記録する、#2168）。
       security: [{ userToken: [] }]
       requestBody:
@@ -4607,9 +4612,14 @@ paths:
           application/json:
             schema:
               type: object
-              required: [allow_training_use]
+              required: [allow_training_use, consent_text_version]
               properties:
                 allow_training_use: { type: boolean }
+                consent_text_version:
+                  type: string
+                  minLength: 1
+                  maxLength: 32
+                  description: 画面が表示していた同意の文言の版（frontend の TRAINING_CONSENT_TEXT_VERSION。今の版と一致すること）
       responses:
         "200":
           description: 成功（更新後の値。GET と同じ形）
@@ -4618,6 +4628,11 @@ paths:
               schema: { $ref: "#/components/schemas/TrainingConsent" }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: 同意の文言の版が今の版と一致しない（文言が更新された。何も保存していない）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/user/industries:
     get:

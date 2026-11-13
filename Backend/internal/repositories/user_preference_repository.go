@@ -68,7 +68,11 @@ func (r *UserPreferenceRepository) GetScoutVisibility(userID uint) (bool, error)
 // 更新と履歴の追加は同じトランザクションで行う。片方だけ成功すると、
 // 「同意したのに記録が無い」「記録はあるのに値が変わっていない」状態になり、後から説明できない。
 // 同じ値への変更も、本人の明示的な操作なので記録する。
-// textVersion は、操作したときに画面に出していた同意の文言の版（models.TrainingConsentTextVersion）。
+// textVersion は、操作したときに画面に出していた同意の文言の版（呼び出し側で今の版と一致することを確かめる）。
+//
+// created_at はアプリの時計ではなく DB の時計（NOW(3)）で入れる。API のタスクが複数あると、
+// タスクごとの時計のずれで履歴の日時の並びが操作の順と食い違うため。最後の操作は id で決める
+// （GetTrainingConsent）。
 func (r *UserPreferenceRepository) SetTrainingUse(userID uint, allow bool, textVersion string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&models.User{}).
@@ -76,41 +80,45 @@ func (r *UserPreferenceRepository) SetTrainingUse(userID uint, allow bool, textV
 			Update("allow_training_use", allow).Error; err != nil {
 			return err
 		}
-		return tx.Create(&models.TrainingConsentEvent{
-			UserID:             userID,
-			AllowTrainingUse:   allow,
-			ConsentTextVersion: textVersion,
-		}).Error
+		return tx.Exec(
+			"INSERT INTO `training_consent_events` (`user_id`,`allow_training_use`,`consent_text_version`,`created_at`) VALUES (?,?,?,NOW(3))",
+			userID, allow, textVersion,
+		).Error
 	})
 }
 
-// LastTrainingConsentChangeAt は、本人が学習利用の同意を最後に変更した日時を返す（#2168）。
-// 一度も変更していなければ nil, nil（初期値の「同意しない」のまま）。
-// users.updated_at はほかの更新でも上書きされるので使わない。
-func (r *UserPreferenceRepository) LastTrainingConsentChangeAt(userID uint) (*time.Time, error) {
-	var events []models.TrainingConsentEvent
-	err := r.db.Where("user_id = ?", userID).
-		Order("created_at DESC, id DESC").
-		Limit(1).
-		Find(&events).Error
-	if err != nil {
-		return nil, err
-	}
-	if len(events) == 0 {
-		return nil, nil
-	}
-	return &events[0].CreatedAt, nil
+// TrainingConsentState は、学習利用の同意の現在値と、最後に変更した日時（#2168）。
+// ChangedAt は同意の履歴の最後の行の日時で、行が無ければ nil（一度も変更していない初期値の「同意しない」）。
+// 履歴の記録を始める前から同意していた人は、マイグレーション（000075）で作った行の日時（適用時刻）になる。
+type TrainingConsentState struct {
+	AllowTrainingUse bool
+	ChangedAt        *time.Time
 }
 
-// GetTrainingUse は、学生本人が設定した学習利用の同意フラグをそのまま返す（#2167）。
-// 本人の設定画面へ現在値を返すためのもの。書き出しの対象かどうか（退会していないかなど）は、
-// 書き出し側（#2168）で判定する。
-func (r *UserPreferenceRepository) GetTrainingUse(userID uint) (bool, error) {
-	var allow bool
-	err := r.db.Model(&models.User{}).
-		Where("id = ?", userID).
-		Select("allow_training_use").Scan(&allow).Error
-	return allow, err
+// GetTrainingConsent は、本人の同意の現在値と最後に変更した日時を、1つのクエリで読む（#2168）。
+//
+// 値と履歴を別々のクエリで読むと、その間にほかのタブ・端末の保存が挟まったとき、
+// 「新しい値」と「古い日時」（またはその逆）を組み合わせて返してしまう。1つの文なら同じスナップショットで読める。
+// 最後の行は created_at ではなく id（AUTO_INCREMENT、コミットの順に近い）の最大で決める。
+// users.updated_at はほかの更新でも上書きされるので使わない。
+// ユーザーが無ければ「同意しない」・日時なしを返す（以前の GetTrainingUse と同じ。認証済みの本人なので通常は起きない）。
+// 書き出しの対象かどうか（退会していないかなど）は、書き出し側で判定する。
+func (r *UserPreferenceRepository) GetTrainingConsent(userID uint) (TrainingConsentState, error) {
+	var rows []struct {
+		AllowTrainingUse bool
+		ChangedAt        *time.Time
+	}
+	err := r.db.Raw(
+		"SELECT u.allow_training_use, e.created_at AS changed_at FROM `users` u "+
+			"LEFT JOIN `training_consent_events` e ON e.id = "+
+			"(SELECT MAX(id) FROM `training_consent_events` WHERE user_id = u.id) "+
+			"WHERE u.id = ?",
+		userID,
+	).Scan(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return TrainingConsentState{}, err
+	}
+	return TrainingConsentState{AllowTrainingUse: rows[0].AllowTrainingUse, ChangedAt: rows[0].ChangedAt}, nil
 }
 
 // IsScoutVisible は実際に企業へ公開してよい状態かを返す（#1094）。
