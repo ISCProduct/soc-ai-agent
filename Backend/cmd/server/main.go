@@ -441,7 +441,7 @@ func main() {
 		authService.SetObjectDeleter(s3UploadService)
 		logger.EnableS3ErrorArchive(s3UploadService)
 	}
-	userDeletionService := auth.NewUserDeletionService(db, objectDeleter, auditLogService)
+	userDeletionService := auth.NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), objectDeleter, auditLogService)
 	adminOrganizationController := admincontrollers.NewAdminOrganizationController(organizationService)
 	adminSchoolController := admincontrollers.NewAdminSchoolController(schoolService)
 	// 掲載申請の審査キュー (#1507)。申請テーブルと承認リスト(school_company_approvals)を束ねる。
