@@ -533,7 +533,7 @@ func main() {
 	companyAuthController := companycontrollers.NewCompanyAuthController(companyUserService)
 	companyPortalController := companycontrollers.NewCompanyPortalController(companyUserService)
 	adminCompanyUserController := companycontrollers.NewAdminCompanyUserController(companyUserService)
-	releaseNoteService := release.NewReleaseNoteService(db, aiClient)
+	releaseNoteService := release.NewReleaseNoteService(repositories.NewReleaseNoteRepository(db), aiClient)
 	releaseNoteController := releasecontrollers.NewReleaseNoteController(releaseNoteService, userRepo)
 	githubController := githubcontrollers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := escontrollers.NewESRewriteController(aiClient)
