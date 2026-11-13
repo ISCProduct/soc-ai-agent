@@ -142,6 +142,13 @@ func findLastAssistantQuestion(history []models.ChatMessage) string {
 	return ""
 }
 
+// 履歴に質問が無い初回などは、職種選択を期待する。
+const defaultFirstQuestion = "どのようなIT職種に興味がありますか？"
+
+// 埋め込みの類似度がこの値以上なら、質問に沿った回答とみなす。
+// 閾値は運用で調整。0.30 を採用（緩めに設定して誤検知を抑える）。
+const embeddingSimilarityThreshold = 0.30
+
 // checkAnswerValidity: 直近の assistant メッセージが質問かを判定し、ユーザー入力がその質問に対する有効な回答かを判定する。
 // 無効な場合はアシスタントの「書かれた内容にはお答えできません」メッセージを保存して true を返す。
 // 3回連続で無効な場合はセッションを強制終了する。
@@ -150,8 +157,7 @@ func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.
 	// 警告メッセージを飛ばして実質の質問を特定する（1回ミス後の再回答が別質問扱いになるのを防ぐ）
 	questionText := findLastAssistantQuestion(history)
 	if questionText == "" {
-		// 履歴に質問が無い初回などは職種選択を期待
-		questionText = "どのようなIT職種に興味がありますか？"
+		questionText = defaultFirstQuestion
 	}
 
 	// 「その他（自由記述）」を記号だけで選んだ場合。
@@ -163,30 +169,13 @@ func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.
 	if isEmptyOtherChoiceAnswer(questionText, userMessage) {
 		log.Printf("[Validation] Empty 'other' choice answer: %s\n", userMessage)
 		assistantText := validationOtherNeedsTextMessage()
-		assistantMsg := &models.ChatMessage{
-			SessionID: sessionID,
-			UserID:    userID,
-			Role:      "assistant",
-			Content:   assistantText,
-		}
-		if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+		if err := s.saveAssistantMessage(sessionID, userID, assistantText); err != nil {
 			return true, "", fmt.Errorf("failed to save assistant message for empty other choice: %w", err)
 		}
 		return true, assistantText, nil
 	}
 
-	// ユーザー回答が質問に対する答えかどうか判定
-	isValid, err := s.validateAnswerRelevance(ctx, questionText, userMessage)
-	if err != nil {
-		// AI判定エラー時は基本的な検証のみ
-		log.Printf("[Validation] AI validation failed: %v, using basic validation\n", err)
-		isValid = isLikelyAnswer(userMessage, questionText)
-		log.Printf("[Validation] Basic validation result: %v for message: %s\n", isValid, userMessage)
-	} else {
-		log.Printf("[Validation] AI validation result: %v for message: %s\n", isValid, userMessage)
-	}
-
-	if isValid {
+	if s.isAnswerValid(ctx, questionText, userMessage) {
 		// 有効な回答と判断 -> カウントをリセットして既存の処理に進める
 		log.Printf("[Validation] Valid answer detected, resetting invalid count for session: %s\n", sessionID)
 		if err := s.sessionValidationRepo.ResetInvalidCount(sessionID); err != nil {
@@ -195,7 +184,26 @@ func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.
 		return false, "", nil
 	}
 
-	// 無効な回答と判断 -> カウントをインクリメント
+	return s.rejectInvalidAnswer(sessionID, userID, userMessage)
+}
+
+// isAnswerValid はユーザー入力が質問に対する有効な回答かを判定する。
+// AI 判定が失敗したときは、isLikelyAnswer の基本的な検証に倒す。
+func (s *ChatService) isAnswerValid(ctx context.Context, questionText, userMessage string) bool {
+	isValid, err := s.validateAnswerRelevance(ctx, questionText, userMessage)
+	if err != nil {
+		log.Printf("[Validation] AI validation failed: %v, using basic validation\n", err)
+		isValid = isLikelyAnswer(userMessage, questionText)
+		log.Printf("[Validation] Basic validation result: %v for message: %s\n", isValid, userMessage)
+	} else {
+		log.Printf("[Validation] AI validation result: %v for message: %s\n", isValid, userMessage)
+	}
+	return isValid
+}
+
+// rejectInvalidAnswer は無効な回答を数え、警告か打ち切りの案内を保存する。
+// 3回目の無効回答ではセッションを強制終了する。
+func (s *ChatService) rejectInvalidAnswer(sessionID string, userID uint, userMessage string) (bool, string, error) {
 	log.Printf("[Validation] Invalid answer detected for message: %s\n", userMessage)
 	validation, err := s.sessionValidationRepo.IncrementInvalidCount(sessionID)
 	if err != nil {
@@ -215,90 +223,117 @@ func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.
 		assistantText = validationRetryMessage(validation.InvalidAnswerCount, 3)
 	}
 
-	assistantMsg := &models.ChatMessage{
-		SessionID: sessionID,
-		UserID:    userID,
-		Role:      "assistant",
-		Content:   assistantText,
-	}
-	if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+	if err := s.saveAssistantMessage(sessionID, userID, assistantText); err != nil {
 		return true, "", fmt.Errorf("failed to save assistant message for invalid answer: %w", err)
 	}
 	return true, assistantText, nil
 }
 
+// saveAssistantMessage はアシスタントの案内メッセージを保存する。
+func (s *ChatService) saveAssistantMessage(sessionID string, userID uint, content string) error {
+	return s.chatMessageRepo.Create(&models.ChatMessage{
+		SessionID: sessionID,
+		UserID:    userID,
+		Role:      "assistant",
+		Content:   content,
+	})
+}
+
 // validateAnswerRelevance: 回答が質問に沿っているかを判定（文章系はキーワードベースで柔軟に判定）
 func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, answer string) (bool, error) {
-	// 文章系の質問かどうかを判定
-	isTextQuestion := isTextBasedQuestion(question)
+	if isTextBasedQuestion(question) {
+		return s.validateTextAnswer(ctx, question, answer), nil
+	}
+	if acceptsChoiceAnswerLocally(question, answer) {
+		return true, nil
+	}
+	log.Printf("[Validation] Choice-based question detected, using AI validation\n")
+	return s.askAIAnswerValidity(ctx, question, answer)
+}
 
-	if isTextQuestion {
-		// 文章系の質問: 可能であれば埋め込みベースの意味的類似度で判定
-		if s.aiClient != nil {
-			qText := normalizeQuestionText(question)
-			if qText == "" {
-				qText = question
-			}
-			// 埋め込みは回答チェック（chat_answer_check）と別に数える（#1993）
-			embCtx := usagectx.WithFeature(ctx, usagectx.FeatureEmbedding)
-			qEmb, err := s.aiClient.Embedding(embCtx, qText)
-			if err != nil {
-				log.Printf("[Validation] Embedding error for question: %v\n", err)
-				return isLikelyAnswer(answer, question), nil
-			}
-			aEmb, err := s.aiClient.Embedding(embCtx, answer)
-			if err != nil {
-				log.Printf("[Validation] Embedding error for answer: %v\n", err)
-				return isLikelyAnswer(answer, question), nil
-			}
-
-			// cosine similarity
-			dot := 0.0
-			qNorm := 0.0
-			aNorm := 0.0
-			for i := range qEmb {
-				vq := float64(qEmb[i])
-				va := float64(aEmb[i])
-				dot += vq * va
-				qNorm += vq * vq
-				aNorm += va * va
-			}
-			if qNorm == 0 || aNorm == 0 {
-				return isLikelyAnswer(answer, question), nil
-			}
-			cos := dot / (math.Sqrt(qNorm) * math.Sqrt(aNorm))
-			log.Printf("[Validation] Embedding cosine similarity=%f\n", cos)
-
-			// 閾値は運用で調整。0.30 を採用（緩めに設定して誤検知を抑える）
-			if cos >= 0.30 {
-				return true, nil
-			}
-			// 埋め込み不一致でも実質的な回答なら受理（誤字修正の再送・観点ズレを過剰に落とさない）
-			if isLikelyAnswer(answer, question) {
-				log.Printf("[Validation] Embedding below threshold but fallback accepted\n")
-				return true, nil
-			}
-			return false, nil
-		}
-
-		// AIクライアントが無い場合は既存のキーワードベースフォールバック
+// validateTextAnswer は文章系の質問への回答を判定する。
+// 可能であれば埋め込みベースの意味的類似度で、できなければ isLikelyAnswer で判定する。
+func (s *ChatService) validateTextAnswer(ctx context.Context, question, answer string) bool {
+	// AIクライアントが無い場合は既存のキーワードベースフォールバック
+	if s.aiClient == nil {
 		log.Printf("[Validation] Text-based question detected, using keyword-based validation\n")
-		return isLikelyAnswer(answer, question), nil
+		return isLikelyAnswer(answer, question)
 	}
 
-	// 選択肢型の質問: 記号・ラベル一致、またはその他相当の自由記述はローカルで受理
+	cos, ok := s.answerSimilarity(ctx, question, answer)
+	if !ok {
+		return isLikelyAnswer(answer, question)
+	}
+	if cos >= embeddingSimilarityThreshold {
+		return true
+	}
+	// 埋め込み不一致でも実質的な回答なら受理（誤字修正の再送・観点ズレを過剰に落とさない）
+	if isLikelyAnswer(answer, question) {
+		log.Printf("[Validation] Embedding below threshold but fallback accepted\n")
+		return true
+	}
+	return false
+}
+
+// answerSimilarity は質問と回答の埋め込みのコサイン類似度を返す。
+// 埋め込みを取れない、またはベクトルがゼロのときは ok=false。
+func (s *ChatService) answerSimilarity(ctx context.Context, question, answer string) (cos float64, ok bool) {
+	qText := normalizeQuestionText(question)
+	if qText == "" {
+		qText = question
+	}
+	// 埋め込みは回答チェック（chat_answer_check）と別に数える（#1993）
+	embCtx := usagectx.WithFeature(ctx, usagectx.FeatureEmbedding)
+	qEmb, err := s.aiClient.Embedding(embCtx, qText)
+	if err != nil {
+		log.Printf("[Validation] Embedding error for question: %v\n", err)
+		return 0, false
+	}
+	aEmb, err := s.aiClient.Embedding(embCtx, answer)
+	if err != nil {
+		log.Printf("[Validation] Embedding error for answer: %v\n", err)
+		return 0, false
+	}
+
+	cos, ok = cosineSimilarity(qEmb, aEmb)
+	if ok {
+		log.Printf("[Validation] Embedding cosine similarity=%f\n", cos)
+	}
+	return cos, ok
+}
+
+// cosineSimilarity は a と b のコサイン類似度を返す。どちらかがゼロベクトルなら ok=false。
+func cosineSimilarity(a, b []float32) (float64, bool) {
+	dot, aNorm, bNorm := 0.0, 0.0, 0.0
+	for i := range a {
+		va, vb := float64(a[i]), float64(b[i])
+		dot += va * vb
+		aNorm += va * va
+		bNorm += vb * vb
+	}
+	if aNorm == 0 || bNorm == 0 {
+		return 0, false
+	}
+	return dot / (math.Sqrt(aNorm) * math.Sqrt(bNorm)), true
+}
+
+// acceptsChoiceAnswerLocally は選択肢型の質問で、AI を呼ばずに受理できる回答かを返す。
+// 記号・ラベル一致、またはその他相当の自由記述（2文字以上）が対象。
+func acceptsChoiceAnswerLocally(question, answer string) bool {
 	resolved := ResolveChoiceAnswer(question, answer)
 	if resolved.IsChoice {
 		log.Printf("[Validation] Choice answer matched locally: %s\n", resolved.Letter)
-		return true, nil
+		return true
 	}
 	if len([]rune(strings.TrimSpace(answer))) >= 2 {
 		log.Printf("[Validation] Accepting free-text answer on choice question (その他経路)\n")
-		return true, nil
+		return true
 	}
+	return false
+}
 
-	log.Printf("[Validation] Choice-based question detected, using AI validation\n")
-
+// askAIAnswerValidity は AI に回答の妥当性を判定させる。
+func (s *ChatService) askAIAnswerValidity(ctx context.Context, question, answer string) (bool, error) {
 	systemPrompt := prompts.AnswerValidationSystemPrompt
 	userPrompt := prompts.BuildAnswerValidationUserPrompt(question, answer)
 
@@ -308,27 +343,26 @@ func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, ans
 	if err != nil {
 		return false, fmt.Errorf("AI validation error: %w", err)
 	}
+	return parseAnswerValidity(response), nil
+}
 
-	// コードフェンスを除去してJSON抽出
+// parseAnswerValidity は AI の判定結果（{"valid": bool}）を読む。
+// コードフェンスは除く。JSON として読めなければ無効とみなす。
+func parseAnswerValidity(response string) bool {
 	response = strings.TrimSpace(response)
 	response = strings.TrimPrefix(response, "```json")
 	response = strings.TrimPrefix(response, "```")
 	response = strings.TrimSuffix(response, "```")
 	response = strings.TrimSpace(response)
 
-	// JSON構造体で検証
-	type ValidationResult struct {
+	var result struct {
 		Valid bool `json:"valid"`
 	}
-
-	var result ValidationResult
 	if err := json.Unmarshal([]byte(response), &result); err != nil {
-		// JSONパースに失敗した場合は無効とみなす
 		log.Printf("Warning: Failed to parse AI validation response: %v, response: %s\n", err, response)
-		return false, nil
+		return false
 	}
-
-	return result.Valid, nil
+	return result.Valid
 }
 
 // isQuestion: アシスタントのメッセージが「質問」であるか粗く判定する
