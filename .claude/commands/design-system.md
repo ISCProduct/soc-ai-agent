@@ -69,12 +69,12 @@ error が黒なのは色覚セーフ配色のため。**色だけで状態を伝
 | 1行のエラー | `components/common/ErrorAlert` |
 | 一覧の読み込み | `components/common/ListSkeleton`（表は `TableSkeletonRows`） |
 | ページ全体の読み込み | `components/common/PageLoading` / `RouteLoading`（`loading.tsx` 用） |
-| 接続不能の全画面 | `components/ServiceErrorView` |
-| 下部ナビ（学生） | `components/StudentBottomNav`（項目は `lib/sidebar-nav.ts` の `STUDENT_BOTTOM_NAV_ITEMS`） |
+| 接続不能の全画面 | `components/common/ServiceErrorView` |
+| 下部ナビ（学生） | `components/layout/StudentBottomNav`（項目は `lib/sidebar-nav.ts` の `STUDENT_BOTTOM_NAV_ITEMS`） |
 | 基本部品 | MUI: Button / Stack / Typography / TextField / Chip / Tabs / Dialog / Alert / Skeleton / Tooltip |
 
 - 既存コンポーネントがあれば再利用し、似たものを新規に作らない（SKILL §30）。実装前に `frontend/components` と `frontend/app` を見る
-- アイコンは `@mui/icons-material` が主（面接・ナビなど既存画面の大半）。`lucide-react` は `components/ui/dialog.tsx` など shadcn 系の内部のみ。新規は `@mui/icons-material`
+- アイコンは `@mui/icons-material` が主（面接・ナビなど既存画面の大半）。`lucide-react` は管理画面の一部だけ。新規は `@mui/icons-material`
 - アイコンだけのボタンには `aria-label` と Tooltip を付ける
 - Dialog は削除確認・短い編集・補助情報だけ。長い入力は独立ページ
 - カードを乱用しない。クリック単位・まとまりが必要な時だけ
