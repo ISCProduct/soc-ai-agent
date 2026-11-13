@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"Backend/domain/entity"
+	"Backend/internal/models"
 )
 
 // UserRepository はユーザー永続化の抽象インターフェース。
@@ -24,8 +25,8 @@ type UserRepository interface {
 
 // PendingRegistrationRepository は仮登録の永続化インターフェース。
 type PendingRegistrationRepository interface {
-	Create(p *entity.PendingRegistration) error
-	FindByToken(token string) (*entity.PendingRegistration, error)
+	Create(p *models.PendingRegistration) error
+	FindByToken(token string) (*models.PendingRegistration, error)
 	DeleteByEmail(email string) error
 	// DeleteExpired は期限切れ（expires_at <= now）の仮登録を最大 limit 件だけ消し、消した件数を返す。
 	DeleteExpired(now time.Time, limit int) (int64, error)
