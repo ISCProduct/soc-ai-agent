@@ -33,6 +33,7 @@ import { authService } from '@/lib/auth'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
+import { ConversionFunnelCard } from '@/components/admin/ConversionFunnelCard'
 import { canUseFeature, fetchEntitlements, type Entitlements } from '@/lib/entitlements'
 import dynamic from 'next/dynamic'
 import type { InterviewTrendPoint } from '@/lib/interview'
@@ -272,6 +273,9 @@ export default function PageContent() {
         </TextField>
         <SchoolFilterSelect value={schoolId} onChange={(id) => { setSchoolId(id); setPage(0) }} />
       </Stack>
+
+      {/* 診断→面接→ES→応募→内定のファネル（#2039）。学校の選択は一覧と共通 */}
+      <ConversionFunnelCard adminEmail={adminEmail} schoolId={schoolId} />
 
       {/* Table */}
       <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>

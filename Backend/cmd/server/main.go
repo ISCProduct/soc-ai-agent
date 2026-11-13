@@ -518,6 +518,7 @@ func main() {
 	adminDashboardController := admincontrollers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminDashboardController.SetSchoolService(schoolService)
 	adminDashboardController.SetOrganizationService(organizationService)
+	adminDashboardController.SetFunnelSource(repositories.NewConversionFunnelRepository(db))
 	adminCostsController := admincontrollers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
 	adminAIBudgetController := admincontrollers.NewAIBudgetController(aiBudgetService, auditLogService)
 	userAIBudgetController := usercontrollers.NewAIBudgetController(aiBudgetService)
