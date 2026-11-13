@@ -142,7 +142,7 @@ func (s *StudentAnalysisService) redactNameUnlessRevealed(resp *StudentAnalysisR
 func (s *StudentAnalysisService) buildAnalysis(targetUserID uint) (*StudentAnalysisResponse, error) {
 	student, err := s.userRepo.GetUserByID(targetUserID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrStudentNotVisible
 		}
 		return nil, err

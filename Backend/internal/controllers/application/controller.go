@@ -2,6 +2,7 @@ package application
 
 import (
 	"Backend/domain/entity"
+	"Backend/domain/repository"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/school"
@@ -12,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 )
 
 // ApplicationController 応募・選考ステータス管理コントローラー
@@ -156,7 +156,7 @@ func (c *ApplicationController) AdminUpdateStatus(ctx echo.Context) error {
 
 	// 担当校を持つ管理者(先生)が他校の生徒の選考ステータスを書き換えられないようにする(#1157)
 	ownerSchoolID, err := c.appService.OwnerSchoolID(id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return echo.NewHTTPError(http.StatusNotFound, "応募データが見つかりません")
 	} else if err != nil {
 		// DB障害を404で隠すとログも残らず追跡できない

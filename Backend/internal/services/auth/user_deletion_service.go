@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"context"
@@ -176,7 +177,7 @@ func (s *UserDeletionService) IsUserWithdrawn(userID uint) (bool, error) {
 	}
 	var user models.User
 	if err := s.db.Select("id", "withdrawn_at").First(&user, userID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return true, nil // 完全削除済みも閲覧不可
 		}
 		return false, err
@@ -303,7 +304,7 @@ func (s *UserDeletionService) purgeOne(w models.WithdrawnUser) error {
 func hardDeleteUserData(tx *gorm.DB, userID uint) error {
 	var user models.User
 	if err := tx.First(&user, userID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil
 		}
 		return err
