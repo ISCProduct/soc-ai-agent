@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"Backend/internal/repositories"
 	"context"
 	"sync"
 	"testing"
@@ -40,7 +41,7 @@ func TestUserDeletionService_SoftWithdrawDoesNotDeleteS3(t *testing.T) {
 	}
 
 	obj := &mockObjectDeleter{}
-	svc := NewUserDeletionService(db, obj, nil)
+	svc := NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), obj, nil)
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT \\* FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").
@@ -96,7 +97,7 @@ func TestUserDeletionService_EnsureActiveUser(t *testing.T) {
 		t.Fatalf("gorm: %v", err)
 	}
 
-	svc := NewUserDeletionService(db, nil, nil)
+	svc := NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), nil, nil)
 	now := time.Now().UTC()
 	mock.ExpectQuery("SELECT `id`,`withdrawn_at` FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").
 		WithArgs(uint(3), 1).
@@ -107,5 +108,49 @@ func TestUserDeletionService_EnsureActiveUser(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql: %v", err)
+	}
+}
+
+// 物理削除のあとは users の行が無い。そのユーザーの古いトークンで来ても、閲覧は許さない(fail-closed)。
+func TestUserDeletionService_PurgedUserIsTreatedAsWithdrawn(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}),
+		&gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("gorm: %v", err)
+	}
+	svc := NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), nil, nil)
+
+	mock.ExpectQuery("SELECT `id`,`withdrawn_at` FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").
+		WithArgs(uint(4), 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "withdrawn_at"}))
+
+	withdrawn, err := svc.IsUserWithdrawn(4)
+	if err != nil || !withdrawn {
+		t.Fatalf("withdrawn=%v err=%v, want true,nil", withdrawn, err)
+	}
+}
+
+func TestUserDeletionService_ActiveUserPasses(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}),
+		&gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("gorm: %v", err)
+	}
+	svc := NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), nil, nil)
+
+	mock.ExpectQuery("SELECT `id`,`withdrawn_at` FROM `users`").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "withdrawn_at"}).AddRow(5, nil))
+	if err := svc.EnsureActiveUser(5); err != nil {
+		t.Fatalf("退会していないユーザーは通す: %v", err)
 	}
 }

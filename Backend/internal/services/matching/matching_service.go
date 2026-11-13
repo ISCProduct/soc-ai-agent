@@ -21,8 +21,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-
-	"gorm.io/gorm"
 )
 
 type MatchingService struct {
@@ -350,7 +348,7 @@ func (s *MatchingService) GetTopMatches(ctx context.Context, userID uint, sessio
 func (s *MatchingService) ToggleFavorite(matchID uint, userID uint) error {
 	match, err := s.matchRepo.FindByID(matchID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return shared.ErrNotFound
 		}
 		return err
@@ -432,6 +430,11 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 	}
 	match.MatchReasonPromptVersion = promptVersion
 	return reason, nil
+}
+
+// ReasonUsesAI はマッチング理由を AI で生成する設定かを返す。費用の見積もりに使う。
+func ReasonUsesAI() bool {
+	return matchingReasonUseAI()
 }
 
 // MatchingReasonTemperature は AI 理由の生成の温度（GenerateMatchReason と同じ）。

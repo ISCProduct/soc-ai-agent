@@ -420,6 +420,23 @@ func (cli *Client) setupFallbacks(realKey string) {
 	}
 }
 
+// TextFallbackModel はテキスト系統の再送先モデルを返す。再送しない構成なら false。
+// 互換ゲートウェイ経由でモデル名の指定が無いときは、リクエストのモデル名のまま再送するので
+// DefaultModel を返す。
+func (cli *Client) TextFallbackModel() (string, bool) {
+	if cli == nil {
+		return "", false
+	}
+	transport, ok := cli.fallbacks["text"]
+	if !ok {
+		return "", false
+	}
+	if transport.fallbackModel == "" {
+		return cli.DefaultModel, true
+	}
+	return transport.fallbackModel, true
+}
+
 // firstNonEmptyOr は env 値が空なら既定値を返す。
 func firstNonEmptyOr(value, def string) string {
 	if v := strings.TrimSpace(value); v != "" {
