@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { NotificationBell } from '@/components/NotificationBell'
+import { NotificationBell } from '@/components/layout/NotificationBell'
 import { safeNotificationLink } from '@/lib/notifications'
 
 // #2033: ヘッダのベルと未読バッジ。

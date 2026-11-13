@@ -44,7 +44,7 @@ import { TableSkeletonRows } from '@/components/common/ListSkeleton'
 // 学生の履歴ページと同じ推移グラフ。教員が数値表だけを見て
 // 「伸びているのか停滞しているのか」を読み取れない状態を解消する(#1225)。
 // recharts をダッシュボード本体のバンドルへ入れないため dynamic import する。
-const InterviewTrendChart = dynamic(() => import('@/components/InterviewTrendChart'), {
+const InterviewTrendChart = dynamic(() => import('@/components/interview/InterviewTrendChart'), {
   ssr: false,
   loading: () => <Box textAlign="center" py={4}><CircularProgress size={20} /></Box>,
 })

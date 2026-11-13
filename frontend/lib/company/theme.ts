@@ -1,5 +1,5 @@
 import { createTheme } from '@mui/material/styles'
-import { COMPANY_COLORS, FONT_STACK_PROPORTIONAL } from './design-tokens'
+import { COMPANY_COLORS, FONT_STACK_PROPORTIONAL } from '../design-tokens'
 
 /**
  * 企業ポータルのテーマ。
