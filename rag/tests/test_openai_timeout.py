@@ -38,7 +38,9 @@ def test_run_es_review_passes_timeout(monkeypatch):
         "star_score": 5,
         "length_balance_score": 5,
         "feedback": "ok",
-        "improved_text": "ok",
+        # 元の "hello"(5字)以上にする。短いと #1606 の作り直しが入り、
+        # このテストが見ている呼び出し回数（評価+改善文）がずれる。
+        "improved_text": "hello, improved",
     })))]
     mock_client.chat.completions.create.return_value = resp
 
@@ -48,4 +50,5 @@ def test_run_es_review_passes_timeout(monkeypatch):
     assert mock_openai_cls.call_args.kwargs["timeout"] == OPENAI_TIMEOUT_SEC
     # #1521で評価と改善文の2呼び出しに分割したので、両方が同じクライアント（=同じ
     # タイムアウト）で走っていることも確認する
+    assert mock_openai_cls.call_count == 1
     assert mock_client.chat.completions.create.call_count == 2
