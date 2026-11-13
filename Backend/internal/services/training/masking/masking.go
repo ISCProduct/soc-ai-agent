@@ -199,7 +199,7 @@ func (m *Masker) dictionarySpans(text string) []span {
 				continue
 			}
 			start, end := f[i].start, f[i+n-1].end
-			if !asciiBoundaryOK(text, start, end, t.folded) {
+			if !wordBoundaryOK(text, start, end, t.folded) {
 				continue
 			}
 			spans = append(spans, span{start: start, end: end, rule: t.rule})
@@ -218,25 +218,41 @@ func matchAt(f []foldedRune, i int, want []rune) bool {
 	return true
 }
 
-// asciiBoundaryOK は英数字で始まる・終わる名称が、英単語の途中に一致していないかを見る。
-// 「ABC」が「ABCDEF」の頭に一致して「<COMPANY>DEF」になるのを防ぐ。
+// wordBoundaryOK はラテン文字（英数字・アクセント付きの文字）で始まる・終わる名称が、
+// 単語の途中に一致していないかを見る。「ABC」が「ABCDEF」の頭に一致して「<COMPANY>DEF」に、
+// 「Éric」が「Frédéric」の末尾に一致して「Fréd<NAME>」になるのを防ぐ。
 // 日本語には語の区切りが無いので、日本語の文字に挟まれた位置は区切りとみなす。
-func asciiBoundaryOK(text string, start, end int, folded []rune) bool {
-	if isASCIIWord(folded[0]) {
-		if r, _ := utf8.DecodeLastRuneInString(text[:start]); start > 0 && isASCIIWord(foldOne(r)) {
-			return false
-		}
+func wordBoundaryOK(text string, start, end int, folded []rune) bool {
+	if isLatinWord(folded[0]) && start > 0 && isLatinWord(foldOne(baseRuneBefore(text[:start]))) {
+		return false
 	}
-	if isASCIIWord(folded[len(folded)-1]) {
-		if r, _ := utf8.DecodeRuneInString(text[end:]); end < len(text) && isASCIIWord(foldOne(r)) {
+	if isLatinWord(folded[len(folded)-1]) && end < len(text) {
+		// end は foldText の単位の終わりなので、直後は結合文字でなく基底文字。
+		if r, _ := utf8.DecodeRuneInString(text[end:]); isLatinWord(foldOne(r)) {
 			return false
 		}
 	}
 	return true
 }
 
-func isASCIIWord(r rune) bool {
-	return r < utf8.RuneSelf && (unicode.IsLetter(r) || unicode.IsDigit(r))
+// baseRuneBefore は s の末尾の文字を、結合文字なら遡ってその基底文字を返す。
+// 「Fre」+U+0301 の直後を、結合文字でなく「e」で判定するため。基底文字が無ければ最後に見た文字を返す。
+func baseRuneBefore(s string) rune {
+	r, size := utf8.DecodeLastRuneInString(s)
+	for isCombining(r) && len(s) > size {
+		s = s[:len(s)-size]
+		r, size = utf8.DecodeLastRuneInString(s)
+	}
+	return r
+}
+
+// isLatinWord は単語の内部とみなす文字。ASCII の英数字と、Unicode のラテン文字（é など）。
+// かな・漢字は含めないので、日本語に挟まれた位置は区切りになる。
+func isLatinWord(r rune) bool {
+	if r < utf8.RuneSelf {
+		return unicode.IsLetter(r) || unicode.IsDigit(r)
+	}
+	return unicode.Is(unicode.Latin, r)
 }
 
 // foldedRune は正規化した1文字と、それが由来する元の文字列のバイト位置。
@@ -256,29 +272,38 @@ func isIgnorable(r rune) bool {
 	return false
 }
 
-// foldText は照合用に text を正規化する。1文字ずつ NFKC（全角英数字→半角、半角カナ→全角）と
-// 小文字化をかけ、無視する文字を落とす。半角カナの濁点・半濁点は直前の文字と合成する
-// （「ﾀﾞ」→「ダ」。合成しないと辞書の「ダ」と一致しない）。
+// isCombining は直前の基底文字とまとめて正規化する文字。結合文字（Mn・Mc・Me）と、
+// NFKC で結合用の濁点・半濁点になる半角カナの「ﾞ」「ﾟ」。
+func isCombining(r rune) bool {
+	return r == '\uFF9E' || r == '\uFF9F' || unicode.Is(unicode.M, r)
+}
+
+// foldText は照合用に text を正規化する。基底文字とそれに続く結合文字を1つの単位として
+// NFKC（全角英数字→半角、半角カナ→全角、結合文字の合成）と小文字化をかけ、無視する文字を落とす。
+// 1文字ずつ正規化すると、合成済みの「José」と結合文字を使った「Jose」+U+0301 や、
+// 「ﾀﾞ」と「ダ」のような等価な書き方が一致しないため。
+// 単位から出た文字はすべて単位全体のバイト位置を持つので、置き換えが単位の途中で切れることはない。
 func foldText(s string) []foldedRune {
 	out := make([]foldedRune, 0, len(s))
-	for i, r := range s {
-		// 不正なバイト列では range が1バイトずつ進むので、長さは RuneLen でなく実際のバイト数で取る。
-		_, size := utf8.DecodeRuneInString(s[i:])
-		end := i + size
+	for i := 0; i < len(s); {
+		// 不正なバイト列は DecodeRuneInString が1バイトずつ進むので、長さは実際のバイト数で取る。
+		r, size := utf8.DecodeRuneInString(s[i:])
 		if isIgnorable(r) {
+			i += size
 			continue
 		}
-		for _, fr := range foldRune(r) {
-			if (fr == '\u3099' || fr == '\u309A') && len(out) > 0 {
-				prev := &out[len(out)-1]
-				if c := []rune(norm.NFC.String(string([]rune{prev.r, fr}))); len(c) == 1 {
-					prev.r = c[0]
-					prev.end = end
-					continue
-				}
+		end := i + size
+		for end < len(s) {
+			next, n := utf8.DecodeRuneInString(s[end:])
+			if !isCombining(next) {
+				break
 			}
+			end += n
+		}
+		for _, fr := range foldUnit(s[i:end]) {
 			out = append(out, foldedRune{r: fr, start: i, end: end})
 		}
+		i = end
 	}
 	return out
 }
@@ -292,11 +317,12 @@ func foldTerm(name string) []rune {
 	return out
 }
 
-func foldRune(r rune) []rune {
-	if r < utf8.RuneSelf {
-		return []rune{unicode.ToLower(r)}
+// foldUnit は基底文字と結合文字の1単位（または1文字）を NFKC と小文字化で正規化する。
+func foldUnit(u string) []rune {
+	if len(u) == 1 && u[0] < utf8.RuneSelf {
+		return []rune{unicode.ToLower(rune(u[0]))}
 	}
-	rs := []rune(norm.NFKC.String(string(r)))
+	rs := []rune(norm.NFKC.String(u))
 	for i, x := range rs {
 		rs[i] = unicode.ToLower(x)
 	}
@@ -305,7 +331,7 @@ func foldRune(r rune) []rune {
 
 // foldOne は境界の判定用に1文字を正規化する（全角英字も英字として扱うため）。
 func foldOne(r rune) rune {
-	if rs := foldRune(r); len(rs) == 1 {
+	if rs := foldUnit(string(r)); len(rs) == 1 {
 		return rs[0]
 	}
 	return r

@@ -181,6 +181,13 @@ func TestMask_DictionaryVariants(t *testing.T) {
 		{"全角英字と大文字小文字", Dictionary{KeyName: NameTerms("Taro Yamada")}, "ＴＡＲＯ　ＹＡＭＡＤＡです", "<NAME>です"},
 		{"辞書が全角で本文が半角", Dictionary{KeyCompany: {"ＡＢＣ商事"}}, "abc商事に応募", "<COMPANY>に応募"},
 		{"辞書の前後の空白", Dictionary{KeySchool: {"  東京大学  "}}, "東京大学です", "<SCHOOL>です"},
+		// 正準等価な書き方（合成済みの é と、e + 結合用のアキュート U+0301）を同じ名称として扱う。
+		{"辞書が合成済みで本文が結合文字", Dictionary{KeyName: {"Jos\u00e9"}}, "Jose\u0301です", "<NAME>です"},
+		{"辞書が結合文字で本文が合成済み", Dictionary{KeyName: {"Jose\u0301"}}, "Jos\u00e9です", "<NAME>です"},
+		{"大文字の結合文字も小文字の合成済みと一致する", Dictionary{KeyName: {"\u00c9ric"}}, "E\u0301RICです", "<NAME>です"},
+		{"本文が結合文字の濁点", Dictionary{KeyName: {"ヤマダ"}}, "ヤマタ\u3099です", "<NAME>です"},
+		// 結合文字は基底文字と1つの単位なので、アクセントの無い名称が一致して結合文字だけが残ることはない。
+		{"アクセントの無い名称はアクセント付きの綴りに一致しない", Dictionary{KeyName: {"Jose"}}, "Jose\u0301です", "Jose\u0301です"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -202,6 +209,15 @@ func TestMask_DictionaryBoundaries(t *testing.T) {
 		{"英字の名称は全角英字の途中にも一致しない", Dictionary{KeyCompany: {"ABC"}}, "ＡＢＣＤ社とＸＡＢＣ社", "ＡＢＣＤ社とＸＡＢＣ社"},
 		{"英字の名称は日本語に挟まれていれば一致する", Dictionary{KeyCompany: {"ABC"}}, "株式会社ABCに", "株式会社<COMPANY>に"},
 		{"英字の名称は空白や記号に挟まれていれば一致する", Dictionary{KeyName: NameTerms("Taro Yamada")}, "I'm Yamada, taro.", "I'm <NAME>, <NAME>."},
+		{"ラテン文字の名称はアクセント付きの単語の途中に一致しない", Dictionary{KeyName: {"\u00c9ric"}}, "Fr\u00e9d\u00e9ric", "Fr\u00e9d\u00e9ric"},
+		{"ラテン文字の名称は結合文字で書いた単語の途中にも一致しない", Dictionary{KeyName: {"\u00c9ric"}}, "Fre\u0301de\u0301ric", "Fre\u0301de\u0301ric"},
+		{"英字の名称は結合文字で終わる単語の直後に一致しない", Dictionary{KeyName: {"Eric"}}, "Jose\u0301Eric", "Jose\u0301Eric"},
+		{"英字の名称はアクセント付きの文字の直後に一致しない", Dictionary{KeyCompany: {"ABC"}}, "\u00e9ABC社", "\u00e9ABC社"},
+		{"英字の名称はアクセント付きの文字の直前に一致しない", Dictionary{KeyCompany: {"ABC"}}, "ABC\u00e9社", "ABC\u00e9社"},
+		{"ラテン文字の名称は空白の前で一致する", Dictionary{KeyName: {"\u00c9ric"}}, "\u00c9ric さん", "<NAME> さん"},
+		{"ラテン文字の名称は読点の前で一致する", Dictionary{KeyName: {"\u00c9ric"}}, "\u00c9ric、よろしく", "<NAME>、よろしく"},
+		{"ラテン文字の名称は日本語に挟まれていれば一致する", Dictionary{KeyName: {"\u00c9ric"}}, "私は\u00c9ricです", "私は<NAME>です"},
+		{"ラテン文字の名称は単独の結合文字の直後なら一致する", Dictionary{KeyName: {"\u00c9ric"}}, "\u0301\u00c9ric", "\u0301<NAME>"},
 		{"1文字の名称は照合しない", Dictionary{KeyName: {"林"}}, "林さんと森林を歩いた", "林さんと森林を歩いた"},
 		{"2文字の名称は照合する", Dictionary{KeyName: {"小林"}}, "小林です", "<NAME>です"},
 		{"行をまたぐ名称は一致させない", Dictionary{KeyName: {"山田太郎"}}, "山田\n太郎", "山田\n太郎"},
@@ -246,10 +262,19 @@ func TestMask_Email(t *testing.T) {
 		{"メールはtaro@example.comです", "メールは<EMAIL>です"},
 		{"taro.yamada_01@mail.example.ac.jp", "<EMAIL>"},
 		{"ｔａｒｏ＠ｅｘａｍｐｌｅ．ｊｐです", "<EMAIL>です"},
+		// ローカル部の RFC 5322 の atext の記号も含めて、全体を1つのメールとして置き換える。
+		{"john!doe@example.com", "<EMAIL>"},
+		{"o'brien@example.com", "<EMAIL>"},
+		{"a+b@example.com", "<EMAIL>"},
+		{"a!#$%&'*+/=?^_`{|}~-.z@example.com", "<EMAIL>"},
+		{"連絡は john!doe@example.com まで", "連絡は <EMAIL> まで"},
+		{"メールはo'brien@example.comです", "メールは<EMAIL>です"},
+		{"（a+b@example.com）", "（<EMAIL>）"},
 		// メールでない「@」は残す。
 		{"@で区切ります", "@で区切ります"},
 		{"a@b", "a@b"},
 		{"taro@example", "taro@example"},
+		{"john!doe@ まで", "john!doe@ まで"},
 	}
 	m := mustNew(t, []Rule{ruleByKey(t, KeyEmail)}, nil)
 	for _, tt := range tests {
