@@ -236,13 +236,14 @@ def test_newlines_are_not_counted_against_the_limit(monkeypatch):
 def test_no_char_limit_leaves_satisfied_null(monkeypatch):
     """上限未指定なら char_limit_satisfied は null、字数は数えて返す。"""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    client = _client([250])
+    client = _client([18])
 
     result = _run(client, char_limit=None)
 
     assert result.char_limit_satisfied is None
     assert result.improved_length_satisfied is True
-    assert result.improved_text_length == 250
+    assert result.improved_length_issue is None
+    assert result.improved_text_length == 18
     prompts = _improved_calls(client)
     assert len(prompts) == 1
     # 「学生時代に力を入れたことは、」は14字。目標は切り上げた110〜130%
@@ -285,6 +286,7 @@ def test_long_es_that_shrinks_warns_without_another_call(monkeypatch):
             assert "max_tokens" not in call.kwargs
     assert result.improved_text_length == 360
     assert result.improved_length_satisfied is False
+    assert result.improved_length_issue == "short"
     assert result.char_limit_satisfied is None
 
 
@@ -445,6 +447,25 @@ def test_length_equal_to_floor_is_not_regenerated(monkeypatch):
     assert len(_improved_calls(client)) == 1
     assert result.improved_text_length == 100
     assert result.improved_length_satisfied is True
+    assert result.improved_length_issue is None
+
+
+def test_improved_text_over_target_warns_without_another_call(monkeypatch):
+    """目標上限（130%）を超えた改善文は長いと警告し、作り直さない。
+
+    14字の元に対する上限は19字。40字はハーネスの 1.45 倍も超える。
+    短いときの警告理由とは分け、画面が「短くなりました」と出さない。
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    client = _client([40])
+
+    result = _run(client, es_text="学生時代に力を入れたことは、")
+
+    assert len(_improved_calls(client)) == 1
+    assert result.improved_text_length == 40
+    assert result.improved_length_satisfied is False
+    assert result.improved_length_issue == "long"
+    assert result.char_limit_satisfied is None
 
 
 def test_short_text_retry_stops_at_exact_deadline(monkeypatch):
@@ -512,6 +533,7 @@ def test_char_limit_does_not_use_the_source_length_floor(monkeypatch):
     assert len(_improved_calls(client)) == 1
     assert result.char_limit_satisfied is True
     assert result.improved_length_satisfied is None
+    assert result.improved_length_issue is None
 
 
 # ---- プロンプトへの反映 ----

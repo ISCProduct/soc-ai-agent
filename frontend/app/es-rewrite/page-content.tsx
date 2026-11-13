@@ -87,8 +87,10 @@ type CharLimitResult = {
   improved_text_length?: number
   // 指定字数に収まったか。上限未指定なら null
   char_limit_satisfied?: boolean | null
-  // 改善文が元の文章以上か。指定字数があるときは null
+  // 改善文が目標レンジ（元の100〜130%）に入ったか。指定字数があるときは null
   improved_length_satisfied?: boolean | null
+  // short は元の100%未満、long は130%超え。範囲内と指定字数があるときは null
+  improved_length_issue?: 'short' | 'long' | null
 }
 
 type RewriteResult = CharLimitResult & {
@@ -301,15 +303,18 @@ function formatPreviousDate(iso: string): string {
 function CharCountNote({ result, charLimit }: { result: CharLimitResult; charLimit: number | null }) {
   const length = result.improved_text_length
   const overLimit = result.char_limit_satisfied === false
-  const tooShort = result.improved_length_satisfied === false
+  const tooLong = result.improved_length_issue === 'long'
+  // 理由が無い応答は false を短さとみなす。長い文章に「短くなりました」とは出さない。
+  const tooShort = result.improved_length_issue === 'short'
+    || (result.improved_length_issue == null && result.improved_length_satisfied === false)
   const lengthKnown = typeof length === 'number' && length > 0
   // 字数が0でも「短い」と分かっているときは警告を出す。ここで return すると、
   // 空の改善文が説明なしで画面に残る（#1606）。
-  if (!lengthKnown && !tooShort) return null
+  if (!lengthKnown && !tooShort && !tooLong) return null
   return (
     <Box sx={{ mt: 1.5 }}>
       {lengthKnown && (
-        <Typography sx={{ fontSize: 13, fontWeight: 600, color: overLimit || tooShort ? '#b45309' : UI.inkFaint }}>
+        <Typography sx={{ fontSize: 13, fontWeight: 600, color: overLimit || tooShort || tooLong ? '#b45309' : UI.inkFaint }}>
           {charLimit === null ? `${length} 文字` : `${length} / ${charLimit} 文字`}
           （改行と前後の空白は数えません）
         </Typography>
@@ -322,6 +327,11 @@ function CharCountNote({ result, charLimit }: { result: CharLimitResult; charLim
       {tooShort && (
         <Alert severity="warning" role="status" sx={{ mt: 1, borderRadius: 2, fontSize: 13 }}>
           生成された文章が元の文章より短くなりました。要約になっていて、元の内容が落ちていることがあります。このまま提出せず、元の文章と見比べてください。
+        </Alert>
+      )}
+      {tooLong && (
+        <Alert severity="warning" role="status" sx={{ mt: 1, borderRadius: 2, fontSize: 13 }}>
+          生成された文章が元の文章の130%を超えています。このまま提出せず、残す内容を選んで短くしてください。
         </Alert>
       )}
     </Box>

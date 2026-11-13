@@ -43,8 +43,10 @@ type esRewriteResponse struct {
 	// 字数の結果(#1523)。既存キーは変えず追加だけしている
 	ImprovedTextLength int   `json:"improved_text_length"`
 	CharLimitSatisfied *bool `json:"char_limit_satisfied"`
-	// 改善文が元の文章以上か。char_limit 指定時は null（#1606）
+	// 改善文が目標レンジ（元の100〜130%）に入ったか。char_limit 指定時は null（#1606）
 	ImprovedLengthSatisfied *bool `json:"improved_length_satisfied"`
+	// short は元の100%未満、long は130%超え。範囲内と char_limit 指定時は null
+	ImprovedLengthIssue *string `json:"improved_length_issue"`
 	// 学生の原文に対する形式チェック（#1530）。RAG の応答とは独立に Go 側で検査する
 	FormatFindings []formatFinding `json:"format_findings"`
 }
@@ -100,6 +102,7 @@ func (c *ESRewriteController) Rewrite(ctx echo.Context) error {
 		ImprovedTextLength:      rag.ImprovedTextLength,
 		CharLimitSatisfied:      rag.CharLimitSatisfied,
 		ImprovedLengthSatisfied: rag.ImprovedLengthSatisfied,
+		ImprovedLengthIssue:     rag.ImprovedLengthIssue,
 		FormatFindings:          formatFindings(rawText, req.CharLimit, req.CharLimitMode),
 	})
 }

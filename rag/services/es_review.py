@@ -28,8 +28,8 @@ logger = logging.getLogger("main")
 #   v3 で文字数上限の指示(#1523)とSTAR分解(#1533)を第2呼び出しへ統合した
 #   v4 で評価ごとの原文引用と改善ヒントを追加した(#1532)
 #   v5 でリライト経路では表示しない指摘出力を省いた(#1532)
-#   v6 で改善文の目標字数を数値で明示する。元より短いときは警告し、
-#   効果の無かった作り直しは呼ばない(#1606)
+#   v6 で改善文の目標字数を数値で明示する。元より短いときと目標上限を
+#   超えたときは警告し、効果の無かった作り直しは呼ばない(#1606)
 _PROMPT_VERSION = "es_review_v6"
 
 # 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測レートは素材で大きく散る
@@ -781,18 +781,33 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
                     improved_length, allowed_max, char_limit_mode,
                 )
 
-        # char_limit が無いとき、元より短い改善文は要約になっている（#1606）。
-        # 目標字数はプロンプトに書く。gpt-4o の実測では作り直しが +20字しか動かなかったため、
-        # 追加の呼び出しはせず、短かったことを警告する。
-        length_floor = _improved_length_floor(source_chars) if char_limit is None else 0
+        # char_limit が無いとき、目標レンジ（元の100〜130%）の外は警告する（#1606）。
+        # 短い側の作り直しは gpt-4o の実測で +20字しか動かなかったため呼ばない。
+        # 長い側も作り直さない。画面が「短い」と「長い」を取り違えないよう理由を分ける。
+        length_floor = 0
+        length_ceiling = 0
+        if char_limit is None and source_chars > 0:
+            length_floor = _improved_length_floor(source_chars)
+            _, length_ceiling = _improved_length_bounds(source_chars)
         improved_length_satisfied: Optional[bool] = None
+        improved_length_issue: Optional[str] = None
         if length_floor > 0:
-            improved_length_satisfied = improved_length >= length_floor
-            if not improved_length_satisfied:
+            if improved_length < length_floor:
+                improved_length_satisfied = False
+                improved_length_issue = "short"
                 logger.warning(
                     "es review improved text still short length=%d source=%d floor=%d",
                     improved_length, source_chars, length_floor,
                 )
+            elif improved_length > length_ceiling:
+                improved_length_satisfied = False
+                improved_length_issue = "long"
+                logger.warning(
+                    "es review improved text over target length=%d source=%d ceiling=%d",
+                    improved_length, source_chars, length_ceiling,
+                )
+            else:
+                improved_length_satisfied = True
 
         company_fit = review_data.get("company_fit_score")
         company_strategy = review_data.get("company_strategy")
@@ -824,6 +839,7 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
                 None if allowed_max is None else improved_length <= allowed_max
             ),
             improved_length_satisfied=improved_length_satisfied,
+            improved_length_issue=improved_length_issue,
             usage=tally.to_model(),
         )
     except HTTPException:

@@ -182,7 +182,8 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 
 - プロンプト版は `es_review_v6`。`char_limit` が無いときの字数指示は「110〜130%を目安」ではなく、`count_es_chars` で数えた元の字数と目標レンジ（切り上げた110〜130%）を書く。要約して短くしないことも書く
 - 生成後、改善文が元の文章（100%）を下回っていても**追加の呼び出しはしない**。2026-11-05 の gpt-4o 実測（6,000字・1本）では、作り直しが 349字から 369字までしか伸びず、目標の 6,600〜7,800字に届かなかった。効果の無い呼び出しへ課金しない
-- 短いまま `improved_length_satisfied: false` で返す。FEは「生成された文章が元の文章より短くなりました」と出し、このまま提出せず元の文章と見比べるよう案内する。100%はハーネスの `improved_text_ratio` の下限と同じ。ハーネスの `runeLen` は改行を数えるので、改行のある文章ではここの `count_es_chars` と値は一致しない
+- 短いまま `improved_length_satisfied: false` と `improved_length_issue: short` で返す。FEは「生成された文章が元の文章より短くなりました」と出し、このまま提出せず元の文章と見比べるよう案内する。100%はハーネスの `improved_text_ratio` の下限と同じ。ハーネスの `runeLen` は改行を数えるので、改行のある文章ではここの `count_es_chars` と値は一致しない
+- 目標上限（切り上げた130%）を超えたときも追加の呼び出しはせず、`improved_length_satisfied: false` と `improved_length_issue: long` で返す。FEは「元の文章の130%を超えています」と出し、残す内容を選んで短くするよう案内する。130%はプロンプトの目標上限で、ハーネスの上限 1.45 より手前で警告する。理由を分けているので、長い文章に「短くなりました」とは出さない
 - 上限なしの最初の改善文がモデルの出力上限で切れても 422 にしない。読めた文、または空を短いまま返し、警告を残す
 - `improved_text` が文字列でない応答は空として扱う。`null` を `"None"` として採用しない
 - 2026-11-05 の実測は、評価 5.16秒 / completion 333、改善文 3.98秒 / 349字 / completion 387、作り直し 4.41秒 / 369字 / completion 389。合計 13.6秒。60秒には掛からなかった。作り直しをやめたあとも、モデルが指示どおり長く書いた場合のコスト上限（約2.2倍、月10,000件で +$527）は残る
@@ -193,7 +194,7 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 
 - ESの評価・書き換えの実装は `services/es_review.py` のみ。Backend の `/api/es/review`（ES添削タブ）と `/api/es/rewrite`（ESリライトタブ）はどちらも RAG の `/es/review` を呼ぶ
 - 旧実装では `/api/es/rewrite` が Backend 内の独自プロンプト（gpt-4o-mini・**インジェクション対策なし**・字数指示120〜150%）で生成していたため、同じESでも添削タブと違う書き換え案が返っていた。統合でプロンプト・出力スキーマ・インジェクション対策が1箇所になった
-- `/api/es/rewrite` のレスポンスは従来互換（`rewritten_text` / `star`）。`improved_text` を `rewritten_text` に詰め替えて返し、`improved_text_length` / `char_limit_satisfied` / `improved_length_satisfied` を追加している
+- `/api/es/rewrite` のレスポンスは従来互換（`rewritten_text` / `star`）。`improved_text` を `rewritten_text` に詰め替えて返し、`improved_text_length` / `char_limit_satisfied` / `improved_length_satisfied` / `improved_length_issue` を追加している
 - ESリライトは評価根拠を表示しないため、内部フラグで `feedback_items` の生成を省略し、評価段の出力予算も縮める（#1532）
 - STAR分解（`star`）は改善文と同じ第2呼び出しで生成する。ES添削タブは `star_score`、ESリライトタブは `star` の内訳を同じレスポンスから表示する
 - **デプロイ順は rag-review を backend より先**にする（`.github/workflows/deployment.yml`）。Backend の ES 経路は生成を RAG へ委譲しており、旧 RAG は Pydantic の `extra=ignore` で `char_limit` / `tech_stack` を**黙って捨てる**ため、逆順だとロール中の数分だけ「字数上限を指定しても無視され、画面に手がかりも出ない」窓ができる

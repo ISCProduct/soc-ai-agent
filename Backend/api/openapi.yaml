@@ -485,7 +485,12 @@ components:
         improved_length_satisfied:
           type: boolean
           nullable: true
-          description: "改善文が元の文章以上か。char_limit 指定時は null（#1606）"
+          description: "改善文が目標レンジ（元の100〜130%）に入ったか。char_limit 指定時は null（#1606）"
+        improved_length_issue:
+          type: string
+          nullable: true
+          enum: [short, long]
+          description: "外れた理由。short は元の100%未満、long は130%超え。範囲内と char_limit 指定時は null"
         format_findings:
           type: array
           description: 原文の形式チェック（#1530）。重要度順（同じなら出現位置順）。指摘が無いときは空配列
@@ -514,7 +519,12 @@ components:
         improved_length_satisfied:
           type: boolean
           nullable: true
-          description: "改善文が元の文章以上か。char_limit 指定時は null（#1606）"
+          description: "改善文が目標レンジ（元の100〜130%）に入ったか。char_limit 指定時は null（#1606）"
+        improved_length_issue:
+          type: string
+          nullable: true
+          enum: [short, long]
+          description: "外れた理由。short は元の100%未満、long は130%超え。範囲内と char_limit 指定時は null"
         format_findings:
           type: array
           description: 原文の形式チェック（#1530）。重要度順（同じなら出現位置順）。指摘が無いときは空配列。RAG の応答が想定外の形のときは付かず、RAG の応答をそのまま返す

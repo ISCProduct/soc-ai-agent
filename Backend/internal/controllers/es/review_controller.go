@@ -74,12 +74,14 @@ type esReviewRAGUsage struct {
 
 // esReviewRAGResponse は RAG の /es/review レスポンスのうち Go が読む項目。
 type esReviewRAGResponse struct {
-	ImprovedText            string            `json:"improved_text"`
-	ImprovedTextLength      int               `json:"improved_text_length"`
-	CharLimitSatisfied      *bool             `json:"char_limit_satisfied"`
-	ImprovedLengthSatisfied *bool             `json:"improved_length_satisfied"`
-	Star                    starBreakdown     `json:"star"`
-	Usage                   *esReviewRAGUsage `json:"usage"`
+	ImprovedText            string `json:"improved_text"`
+	ImprovedTextLength      int    `json:"improved_text_length"`
+	CharLimitSatisfied      *bool  `json:"char_limit_satisfied"`
+	ImprovedLengthSatisfied *bool  `json:"improved_length_satisfied"`
+	// short は元の100%未満、long は130%超え。char_limit 指定時と範囲内は null
+	ImprovedLengthIssue *string           `json:"improved_length_issue"`
+	Star                starBreakdown     `json:"star"`
+	Usage               *esReviewRAGUsage `json:"usage"`
 	// 永続化に使う評価項目(#1531)。
 	//
 	// 必須の3項目もポインタで受ける。値型だと項目が欠けた応答で 0 になり、
