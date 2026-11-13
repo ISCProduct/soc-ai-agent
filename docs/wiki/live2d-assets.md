@@ -98,7 +98,7 @@ s3://soc-build-assets-508897596159/live2d-authoring/
 ### 取ってくる
 
 ```bash
-LIVE2D_ASSETS_BUCKET=soc-build-assets-508897596159 ./automation/ops/fetch-live2d-authoring.sh
+make live2d-authoring
 ```
 
 `.gitignore` で除外してあるので、展開しても `git status` は汚れません。
@@ -127,28 +127,42 @@ aws s3 sync ./frontend/public/live2d/interviewers/female/ \
 
 ## ローカルで試す
 
-1. [live2d.com](https://www.live2d.com/) から Cubism SDK for Web を取得して同意し、
-   `Core/live2dcubismcore.min.js` を `frontend/public/live2d/core/` に置く
-2. 資産を S3 から取る（`core/` も含めて同期するので、手順1を済ませていれば上書きされるだけ）
-   ```bash
-   LIVE2D_ASSETS_BUCKET=soc-build-assets-508897596159 ./automation/ops/fetch-live2d-assets.sh
-   ```
-   バケットへの読み取り権限が無い場合はここで失敗します。その場合はモデルを
-   別途受け取って `frontend/public/live2d/interviewers/{male,female}/` に置いてください。
-3. `frontend/.env.local` に `NEXT_PUBLIC_LIVE2D_ENABLED=true` を書く
-4. モデルが面接官の要件を満たすか検査する（`frontend` で実行する。
-   スクリプトは `frontend/package.json` にしかない）
-   ```bash
-   cd frontend
-   npm run check:live2d -- public/live2d/interviewers/male
-   npm run check:live2d -- public/live2d/interviewers/female
-   ```
-   パラメータ構成と LipSync / EyeBlink 登録を見るだけで、動作は保証しません。
-   面接官として使うには `ParamAngleY` か `ParamAngleX` のどちらかが必要です
-   （`live2d-params.ts` の `isUsableAsInterviewer`。両方無いモデルは不適格と
-   判定され Avatar2D に切り替わります）。
+```bash
+make live2d-up
+```
 
-モデルを**描き直す**場合は、上の「制作用の資産」も取ってください。アプリを動かすだけなら要りません。
+これ一つで、資産の取得・`frontend/.env.local` のフラグ・モデルの検査まで済みます。
+あとは**devサーバーを起動し直して** `/interview` を開いてください。`NEXT_PUBLIC_*` は
+ビルド時にバンドルへ焼き込まれるため、起動中の dev サーバーには反映されません。
+
+別のバケットを使うときは `make live2d-up LIVE2D_ASSETS_BUCKET=...`。
+
+### 中で何をしているか
+
+1. `automation/ops/fetch-live2d-assets.sh` で S3 から Core とモデルを取る。
+   **Cubism Core も S3 に入っているので、`live2d.com` から SDK を落とす必要はありません**
+   （バケットへの読み取り権限がある場合）。権限が無ければここで失敗するので、その場合は
+   SDK の `Core/live2dcubismcore.min.js` を `frontend/public/live2d/core/` に、モデルを
+   `frontend/public/live2d/interviewers/{male,female}/` に、それぞれ別途受け取って置きます。
+2. `frontend/.env.local` に `NEXT_PUBLIC_LIVE2D_ENABLED=true` が無ければ追記する（既にあれば触らない）。
+3. 男女のモデルが面接官の要件を満たすか検査する。
+
+```bash
+# 検査だけやり直すとき（frontend で実行する。スクリプトは frontend/package.json にしかない）
+cd frontend
+npm run check:live2d -- public/live2d/interviewers/male
+npm run check:live2d -- public/live2d/interviewers/female
+```
+
+検査はパラメータ構成と LipSync / EyeBlink 登録を見るだけで、動作は保証しません。
+面接官として使うには `ParamAngleY` か `ParamAngleX` のどちらかが必要です
+（`live2d-params.ts` の `isUsableAsInterviewer`。両方無いモデルは不適格と判定され
+Avatar2D に切り替わります）。
+
+取得した資産は `.gitignore` で除外されているので、`git status` は汚れません。
+
+モデルを**描き直す**場合は `make live2d-authoring` で制作用の資産も取ってください。
+アプリを動かすだけなら要りません。
 
 単一モデルで試すときは `NEXT_PUBLIC_LIVE2D_MODEL_URL` を指定すると性別によらずそれを使います。
 ただし**差分ArtMeshの対応は `gender` で選ばれたまま**なので、男性モデルを女性として表示すると
