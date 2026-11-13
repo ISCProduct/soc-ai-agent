@@ -730,7 +730,7 @@ func main() {
 	adminEntry.GET("/companies/:id/company-users", adminCompanyUserController.List)
 	adminEntry.PATCH("/companies/:id/company-users/:userID", adminCompanyUserController.SetDisabled)
 	// 学習データのエクスポート(#268)。候補者の発話と選考結果を含むため管理者のみ。
-	adminTrainingController := admincontrollers.NewAdminTrainingController(training.NewService(db))
+	adminTrainingController := admincontrollers.NewAdminTrainingController(training.NewService(repositories.NewTrainingExportRepository(db)))
 	// stats は件数しか返さない(個人情報を含まない)。運用から機械的に叩けるよう、
 	// whats-new/ingest と同じサービス間認証にする。管理者になりすます形を避ける。
 	api.GET("/admin/training/stats", adminTrainingController.Stats, routes.EchoStaticSecretAuth(cfg.ServiceSecret))
