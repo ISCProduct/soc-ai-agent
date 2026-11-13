@@ -4,7 +4,7 @@
  * これまで学生画面だけが根拠のあるテーマ（`student-theme.ts`: BIZ UDPGothic +
  * Wong 色覚セーフパレット）を持ち、管理画面は `primary: '#1976d2'` のみ、
  * つまり MUI 既定のままだった。企業ポータルは学生の青とも管理画面の藍とも
- * 分ける `COMPANY_COLORS` を持ち、`company-theme.ts` がそれをテーマにする。
+ * 分ける `COMPANY_COLORS` を持ち、`lib/company/theme.ts` がそれをテーマにする。
  *
  * ここはその土台を1か所にまとめる層で、テーマの生成は各 *-theme.ts が行う。
  *
