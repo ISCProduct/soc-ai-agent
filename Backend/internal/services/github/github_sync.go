@@ -108,6 +108,12 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint, force boo
 	return nil
 }
 
+// isGitHubNotFoundError は、GitHub API が 404 を返したかを判定する（doGet のエラーの形に合わせる）。
+// README の取得では、404 は「README が無い」という正常な結果として扱う（#2226）。
+func isGitHubNotFoundError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "github api error: status 404")
+}
+
 func isGitHubAuthError(err error) bool {
 	if err == nil {
 		return false

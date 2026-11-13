@@ -3,7 +3,7 @@
  */
 import { render, screen, within } from '@testing-library/react'
 import { ResumeReviewResults } from '@/app/resume/components/ResumeReviewResults'
-import type { WeightScore } from '@/components/ScoreUpdateBanner'
+import type { WeightScore } from '@/components/feedback/ScoreUpdateBanner'
 import type { ReviewResult } from '@/app/resume/types'
 
 const scores: WeightScore[] = [{ weight_category: '細部志向', score: 60 }]

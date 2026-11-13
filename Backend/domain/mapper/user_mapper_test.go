@@ -27,3 +27,19 @@ func TestAdminTokenNotBefore_SurvivesMapperRoundTrip(t *testing.T) {
 		t.Fatalf("entity -> model で失効時刻が落ちた: %v", back.AdminTokenNotBefore)
 	}
 }
+
+// TestConsentFlags_SurviveMapperRoundTrip は同意のフラグが mapper の往復で落ちないことを検証する（#2180 のレビュー）。
+//
+// UpdateUser は Save によるフルロー更新なので、mapper から落ちると、プロフィールの保存や
+// 再ログインのたびに同意が false に戻る（学習利用の同意を取り消したことになる）。
+func TestConsentFlags_SurviveMapperRoundTrip(t *testing.T) {
+	m := &models.User{ID: 7, Email: "student@example.com", AllowCollectiveInsight: true, AllowScoutVisibility: true, AllowTrainingUse: true}
+
+	back := mapper.UserFromEntity(mapper.UserToEntity(m))
+	if !back.AllowTrainingUse {
+		t.Errorf("往復で学習利用の同意が落ちた")
+	}
+	if !back.AllowScoutVisibility || !back.AllowCollectiveInsight {
+		t.Errorf("往復でほかの同意が落ちた: scout=%v collective=%v", back.AllowScoutVisibility, back.AllowCollectiveInsight)
+	}
+}

@@ -33,6 +33,7 @@ import { authService } from '@/lib/auth'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
+import { ConversionFunnelCard } from '@/components/admin/ConversionFunnelCard'
 import { canUseFeature, fetchEntitlements, type Entitlements } from '@/lib/entitlements'
 import dynamic from 'next/dynamic'
 import type { InterviewTrendPoint } from '@/lib/interview'
@@ -43,7 +44,7 @@ import { TableSkeletonRows } from '@/components/common/ListSkeleton'
 // 学生の履歴ページと同じ推移グラフ。教員が数値表だけを見て
 // 「伸びているのか停滞しているのか」を読み取れない状態を解消する(#1225)。
 // recharts をダッシュボード本体のバンドルへ入れないため dynamic import する。
-const InterviewTrendChart = dynamic(() => import('@/components/InterviewTrendChart'), {
+const InterviewTrendChart = dynamic(() => import('@/components/interview/InterviewTrendChart'), {
   ssr: false,
   loading: () => <Box textAlign="center" py={4}><CircularProgress size={20} /></Box>,
 })
@@ -272,6 +273,9 @@ export default function PageContent() {
         </TextField>
         <SchoolFilterSelect value={schoolId} onChange={(id) => { setSchoolId(id); setPage(0) }} />
       </Stack>
+
+      {/* 診断→面接→ES→応募→内定のファネル（#2039）。学校の選択は一覧と共通 */}
+      <ConversionFunnelCard adminEmail={adminEmail} schoolId={schoolId} />
 
       {/* Table */}
       <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>

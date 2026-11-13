@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -418,116 +419,105 @@ func isTextBasedQuestion(question string) bool {
 	return true
 }
 
+// answerCheck は isLikelyAnswer の各ルールが共通で使う、回答の下ごしらえ。
+type answerCheck struct {
+	text     string // 前後の空白を除いた回答
+	question string
+	length   int    // text の文字数
+	stripped string // 小文字化し、空白と末尾の句読点を除いたもの（完全一致の判定用）
+}
+
+// answerRule は「条件に当てはまれば valid で決まる」1つの判定。
+type answerRule struct {
+	reason string
+	when   func(c answerCheck) bool
+	valid  bool
+}
+
+// 無回答として弾く語（stripped との完全一致）。
+var noAnswerPatterns = []string{
+	"わからない", "分からない", "わかりません", "分かりません",
+	"わからないです", "分からないです",
+}
+
+// 短くても意味のある応答（stripped との完全一致）。
+var shortValidAnswers = []string{
+	"はい", "いいえ", "yes", "no", "好き", "嫌い", "得意", "苦手",
+	"できる", "できない", "ある", "ない", "する", "しない",
+	"うん", "そう", "ええ", "まあ", "そうです", "そうですね",
+	"あります", "ないです", "あった", "なかった",
+}
+
+// answerRules は isLikelyAnswer のルール表。上から順に評価し、最初に当てはまったものが結果を決める。
+// どれにも当てはまらなければ無効（厳格に判断）。
+//
+// 順序が結果を変える。例えば「十分に長い回答」は、その上の無意味判定
+// （同じ文字の連続・ほぼ記号のみ・日本語比率）より後ろに置いてあり、無意味判定が優先される。
+// ルールを足す・動かすときは、chat_answer_validator_test.go の表に例を足すこと。
+var answerRules = []answerRule{
+	// 先に明らかに無意味なパターンを弾く。
+	{"同じ文字の連続", func(c answerCheck) bool { return hasLongRepeatedRune(c.text, 5) }, false},
+	{"ほぼ記号のみ", func(c answerCheck) bool { return isMostlyPunctuation(c.text) }, false},
+	// 日本語文字比率が極端に低く、かつ長さが短い/意味のなさそうな場合は無効。
+	{"日本語比率が低くランダム文字列の疑い", func(c answerCheck) bool {
+		return c.length >= 6 && japaneseCharRatio(c.text) < 0.25 && !containsITKeyword(c.text)
+	}, false},
+
+	// 十分に長い回答（15文字超）は基本的に内容があるとみなす（上の無意味判定は優先）。
+	{"十分に長い回答", func(c answerCheck) bool { return c.length > 15 }, true},
+	// 選択肢の記号（A, B, 1, 2 など）は有効。
+	{"選択肢の記号", func(c answerCheck) bool {
+		return c.length <= 3 && strings.ContainsAny(c.text, "ABCDEabcde12345①②③④⑤")
+	}, true},
+	// 無回答パターンは、短い有効応答より先に判定する。
+	{"無回答", func(c answerCheck) bool { return slices.Contains(noAnswerPatterns, c.stripped) }, false},
+	{"短い有効な応答", func(c answerCheck) bool { return slices.Contains(shortValidAnswers, c.stripped) }, true},
+	// 2文字未満は無効（選択肢記号・短答は上で判定済み）。
+	{"2文字未満", func(c answerCheck) bool { return c.length < 2 }, false},
+	// 挨拶・感謝などの雑談は無効。
+	{"挨拶・雑談", func(c answerCheck) bool { return containsGreeting(c.text) }, false},
+	// 職種選択系の質問は短い回答（単語の列挙）を許容する。
+	{"キーワードの羅列", func(c answerCheck) bool {
+		return !isJobSelectionQuestionText(c.question) && looksLikeKeywordList(c.text)
+	}, false},
+
+	{"IT関連キーワードを含む、または5文字以上", func(c answerCheck) bool {
+		return containsITKeyword(c.text) || c.length >= 5
+	}, true},
+	// 質問文から抽出したキーワードと回答に共通語が1つでもあれば回答とみなす（緩和）。
+	{"質問と共通する語がある", func(c answerCheck) bool {
+		qk := extractKeywords(c.question)
+		for w := range extractKeywords(c.text) {
+			if qk[w] {
+				return true
+			}
+		}
+		return false
+	}, true},
+}
+
 // isLikelyAnswer: ユーザーの入力が質問に対する「回答らしい」かを判定する簡易ロジック（フォールバック用）
-// AI判定が失敗した場合の適度に柔軟なフォールバック
+// AI判定が失敗した場合の適度に柔軟なフォールバック。ルールは answerRules にある。
 func isLikelyAnswer(answer, question string) bool {
 	a := strings.TrimSpace(answer)
 	if a == "" {
 		return false
 	}
 
-	// 先に明らかに無意味なパターンを弾く
-	// 連続同一文字 (例: "あああああ"), ほぼ記号のみ, ランダム文字列の疑い
-	if hasLongRepeatedRune(a, 5) {
-		log.Printf("[Validation] Fallback: Repeated rune detected: %s\n", a)
-		return false
+	lowered := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(a, " ", ""), "　", ""))
+	c := answerCheck{
+		text:     a,
+		question: question,
+		length:   len([]rune(a)),
+		stripped: strings.TrimRight(lowered, "。、！？…,.!?・"),
 	}
-	if isMostlyPunctuation(a) {
-		log.Printf("[Validation] Fallback: Mostly punctuation detected: %s\n", a)
-		return false
-	}
-	// 日本語文字比率が極端に低く、かつ長さが短い/意味のなさそうな場合は無効
-	jr := japaneseCharRatio(a)
-	if jr < 0.25 && len([]rune(a)) >= 6 && !containsITKeyword(a) {
-		log.Printf("[Validation] Fallback: Low japanese ratio (%.2f) and short/random: %s\n", jr, a)
-		return false
-	}
-
-	// 十分に長い回答（15文字超）は基本的に内容があるとみなすが、上の無意味判定は優先
-	if len([]rune(a)) > 15 {
-		log.Printf("[Validation] Fallback: Long answer accepted as valid (%d chars)\n", len([]rune(a)))
-		return true
-	}
-
-	// 職種選択系の質問は短い回答（単語）を許容
-	isJobSelection := isJobSelectionQuestionText(question)
-
-	// 記号のみの回答（A, B, 1, 2など）は有効
-	if len([]rune(a)) <= 3 && strings.ContainsAny(a, "ABCDEabcde12345①②③④⑤") {
-		log.Printf("[Validation] Fallback: Valid choice symbol: %s\n", a)
-		return true
-	}
-
-	answerLower := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(a, " ", ""), "　", ""))
-
-	// 無回答パターンを先に判定
-	answerLowerStripped := strings.TrimRight(answerLower, "。、！？…,.!?・")
-	noAnswerPatterns := []string{
-		"わからない", "分からない", "わかりません", "分かりません",
-		"わからないです", "分からないです",
-	}
-	for _, pattern := range noAnswerPatterns {
-		if answerLowerStripped == pattern {
-			log.Printf("[Validation] Fallback: No-answer pattern detected: %s\n", a)
-			return false
+	for _, r := range answerRules {
+		if r.when(c) {
+			log.Printf("[Validation] Fallback: %s (valid=%v): %s\n", r.reason, r.valid, a)
+			return r.valid
 		}
 	}
-
-	// 短いが意味ある応答（はい/いいえ等）は有効
-	shortValidAnswers := []string{
-		"はい", "いいえ", "yes", "no", "好き", "嫌い", "得意", "苦手",
-		"できる", "できない", "ある", "ない", "する", "しない",
-		"うん", "そう", "ええ", "まあ", "そうです", "そうですね",
-		"あります", "ないです", "あった", "なかった",
-	}
-	for _, valid := range shortValidAnswers {
-		if answerLowerStripped == valid {
-			log.Printf("[Validation] Fallback: Valid short answer: %s\n", a)
-			return true
-		}
-	}
-
-	// 2文字未満は無効（選択肢記号・短答キーワードは上で判定済み）
-	if len([]rune(a)) < 2 {
-		log.Printf("[Validation] Fallback: Too short (< 2 chars): %s\n", a)
-		return false
-	}
-
-	// 挨拶・感謝などの雑談パターンは無効
-	if containsGreeting(a) {
-		log.Printf("[Validation] Fallback: Contains greeting: %s\n", a)
-		return false
-	}
-
-	if !isJobSelection && looksLikeKeywordList(a) {
-		log.Printf("[Validation] Fallback: Keyword-only list detected: %s\n", a)
-		return false
-	}
-
-	// IT関連キーワードを含む、または5文字以上なら有効
-	if containsITKeyword(a) || len([]rune(a)) >= 5 {
-		log.Printf("[Validation] Fallback: Valid answer (IT keyword or >= 5 chars): %s\n", a)
-		return true
-	}
-
-	// 質問文から抽出したキーワードと回答に共通語があるかを確認する（簡易）
-	qk := extractKeywords(question)
-	ak := extractKeywords(a)
-	common := 0
-	for w := range qk {
-		if ak[w] {
-			common++
-		}
-	}
-
-	// 共通キーワードが1つ以上あれば回答とみなす（緩和）
-	if common >= 1 {
-		log.Printf("[Validation] Fallback: Common keywords >= 1: %s\n", a)
-		return true
-	}
-
-	// デフォルトは無効（厳格に判断）
-	log.Printf("[Validation] Fallback: Default INVALID for: %s\n", a)
+	log.Printf("[Validation] Fallback: どのルールにも当てはまらない (valid=false): %s\n", a)
 	return false
 }
 
