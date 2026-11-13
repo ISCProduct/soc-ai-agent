@@ -229,34 +229,47 @@ func isAudioPricedModel(model string) bool {
 // 提供終了の予定だが、過去の記録や設定の残りを正しく計算できるよう残す。
 // 価格改定のときは、ここを直すか STT_COST_PER_MINUTE_USD で上書きする（上書きは全モデル一律の単価になる）。
 // STT の評価ハーネス（internal/sttbench）も PublishedSTTCostPerMinuteUSD でこの表を引く。表を写すと片方だけ古くなるため。
-var sttPricingPerMinute = map[string]float64{
-	"gpt-transcribe":            0.0045,
-	"gpt-4o-transcribe":         0.006,
-	"gpt-4o-transcribe-diarize": 0.006,
-	"gpt-4o-mini-transcribe":    0.003,
-	"whisper-1":                 0.006,
+//
+// estimate は、分単価が公式の概算かどうか。公式の価格ページの文字起こしの表（列は Input・Output・Estimated cost。
+// 2026-11-13 に再確認）で、gpt-4o-transcribe 系の3つは入力・出力のトークン単価が載っているトークン課金で、
+// 分単価は出力のトークン数で実額が変わる概算にすぎない。根拠は listed ではなく estimated にする（#2229 のレビュー）。
+// gpt-transcribe と Whisper はトークン単価が「-」で、分単価だけが載っている（分単価そのものが価格）。
+// 単価と概算かどうかを1つの表で持つのは、モデルを足すときに片方の表だけに書いて食い違わないようにするため（#2229 のレビュー）。
+var sttPricingPerMinute = map[string]sttPrice{
+	"gpt-transcribe":            {perMinute: 0.0045},
+	"gpt-4o-transcribe":         {perMinute: 0.006, estimate: true},
+	"gpt-4o-transcribe-diarize": {perMinute: 0.006, estimate: true},
+	"gpt-4o-mini-transcribe":    {perMinute: 0.003, estimate: true},
+	"whisper-1":                 {perMinute: 0.006},
 }
 
-// sttPerMinuteEstimated は、分単価が公式の価格ページで「目安（est.）」として載っているモデル。
-// これらはトークン課金（入力・出力のトークン単価）で、分単価は公式の概算にすぎない。出力のトークン数で
-// 実額が変わるので、根拠は listed ではなく estimated にする（#2229 のレビュー、2026-11-11 の価格ページで確認）。
-// 分単価そのものが公開価格なのは gpt-transcribe と whisper-1 だけ。
-var sttPerMinuteEstimated = map[string]bool{
-	"gpt-4o-transcribe":         true,
-	"gpt-4o-transcribe-diarize": true,
-	"gpt-4o-mini-transcribe":    true,
+// sttPrice は STT の1モデルの分単価と、それが公式の概算かどうか。
+type sttPrice struct {
+	perMinute float64
+	estimate  bool
 }
 
-// STTPerMinuteIsEstimate は、表の分単価が公式の概算（est.）かを返す。表に無いモデルは false。
-// 評価ハーネス（internal/sttbench）が、見積もりの根拠を「公開単価」と「公開単価の目安」に分けるために使う。
-func STTPerMinuteIsEstimate(model string) bool {
+// lookupSTTPrice は、STT のモデル名で分単価の表を引く。表に無ければ false。
+//
+// モデル名の照合はトークン単価表と同じく isSameModel を使い、日付付きの版名
+// （gpt-4o-mini-transcribe-2025-12-15 など）も同じモデルとみなす。前方一致にしないのは、
+// gpt-transcribe-pro のような表に無い別モデルに、別のモデルの単価を黙って当てないため。
+func lookupSTTPrice(model string) (sttPrice, bool) {
 	lower := strings.ToLower(strings.TrimSpace(model))
-	for k := range sttPerMinuteEstimated {
+	for k, p := range sttPricingPerMinute {
+		// キー同士は isSameModel で互いに一致しないので、一致するキーは高々1つ（反復順に依存しない）
 		if isSameModel(lower, k) {
-			return true
+			return p, true
 		}
 	}
-	return false
+	return sttPrice{}, false
+}
+
+// STTPerMinuteIsEstimate は、表の分単価が公式の概算かを返す。表に無いモデルは false。
+// 評価ハーネス（internal/sttbench）が、見積もりの根拠を「公開単価」と「公開単価の目安」に分けるために使う。
+func STTPerMinuteIsEstimate(model string) bool {
+	p, ok := lookupSTTPrice(model)
+	return ok && p.estimate
 }
 
 // sttFallbackCostPerMinuteUSD は、表に無い STT モデルに使う分単価。
@@ -270,35 +283,26 @@ const sttCostOverrideEnv = "STT_COST_PER_MINUTE_USD"
 // sttPricingWarned は、表に無い STT モデルで計算したことを、モデルごとに1回だけログに出すための記録。
 var sttPricingWarned sync.Map
 
-// PublishedSTTCostPerMinuteUSD は、STT のモデルの公開価格（分単価）を表から返す。表に無ければ false。
+// PublishedSTTCostPerMinuteUSD は、STT のモデルの分単価を表から返す。表に無ければ false。
 // env の上書きは見ない。評価ハーネス（internal/sttbench）が「公開価格での見積もり」を出すために使う。
-//
-// モデル名の照合はトークン単価表と同じく isSameModel を使い、日付付きの版名
-// （gpt-4o-mini-transcribe-2025-12-15 など）も同じモデルとみなす。前方一致にしないのは、
-// gpt-transcribe-pro のような表に無い別モデルに、別のモデルの単価を黙って当てないため。
+// 概算（estimate）かどうかは STTPerMinuteIsEstimate で分かる。
 func PublishedSTTCostPerMinuteUSD(model string) (float64, bool) {
-	lower := strings.ToLower(strings.TrimSpace(model))
-	for k, p := range sttPricingPerMinute {
-		// キー同士は isSameModel で互いに一致しないので、一致するキーは高々1つ（反復順に依存しない）
-		if isSameModel(lower, k) {
-			return p, true
-		}
-	}
-	return 0, false
+	p, ok := lookupSTTPrice(model)
+	return p.perMinute, ok
 }
 
 // sttCostPerMinuteUSD は、STT のモデル名から分単価と、その根拠を返す。
 // STT_COST_PER_MINUTE_USD の上書きと、分単価が公開価格のモデルは listed。分単価が公式の概算のモデル
-// （sttPerMinuteEstimated）と、表に無く既定値で計算したときは estimated（#2224、#2229 のレビュー）。
+// （sttPricingPerMinute の estimate）と、表に無く既定値で計算したときは estimated（#2224、#2229 のレビュー）。
 func sttCostPerMinuteUSD(model string) (float64, string) {
 	if v, ok := audioRateOverride(sttCostOverrideEnv); ok {
 		return v, PriceBasisListed
 	}
-	if p, ok := PublishedSTTCostPerMinuteUSD(model); ok {
-		if STTPerMinuteIsEstimate(model) {
-			return p, PriceBasisEstimated
+	if p, ok := lookupSTTPrice(model); ok {
+		if p.estimate {
+			return p.perMinute, PriceBasisEstimated
 		}
-		return p, PriceBasisListed
+		return p.perMinute, PriceBasisListed
 	}
 	// 表の検索と同じく小文字にそろえる（大文字・小文字の違いで2回出さない）
 	lower := strings.ToLower(strings.TrimSpace(model))

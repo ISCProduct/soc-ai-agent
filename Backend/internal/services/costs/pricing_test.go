@@ -249,12 +249,13 @@ func TestSTTPricing_MatchesOfficialPrices(t *testing.T) {
 	if os.Getenv(sttCostOverrideEnv) != "" {
 		t.Skip("STT_COST_PER_MINUTE_USD で分単価を上書きしているため、公式の単価との比較はしない")
 	}
-	want := map[string]float64{
-		"gpt-transcribe":            0.0045,
-		"gpt-4o-transcribe":         0.006,
-		"gpt-4o-transcribe-diarize": 0.006,
-		"gpt-4o-mini-transcribe":    0.003,
-		"whisper-1":                 0.006,
+	// estimate は、公式の価格ページでトークン単価が載っている（分単価は概算の）モデル。2026-11-13 に再確認
+	want := map[string]sttPrice{
+		"gpt-transcribe":            {perMinute: 0.0045},
+		"gpt-4o-transcribe":         {perMinute: 0.006, estimate: true},
+		"gpt-4o-transcribe-diarize": {perMinute: 0.006, estimate: true},
+		"gpt-4o-mini-transcribe":    {perMinute: 0.003, estimate: true},
+		"whisper-1":                 {perMinute: 0.006},
 	}
 	if !maps.Equal(sttPricingPerMinute, want) {
 		t.Errorf("sttPricingPerMinute = %v, want %v", sttPricingPerMinute, want)
