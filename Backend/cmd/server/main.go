@@ -289,6 +289,7 @@ func main() {
 	refreshTokenRepo := repositories.NewUserRefreshTokenRepository(db)
 	refreshTokenService := refreshtoken.NewRefreshTokenService(refreshTokenRepo)
 	authService.SetRefreshTokenService(refreshTokenService)
+	authService.SetResendLimiter(middleware.VerificationResendEmailRateLimiter)
 	skillScoreService := skillscore.NewSkillScoreService(skillScoreRepo)
 	githubService := github.NewGitHubService(githubRepo, skillScoreService, aiClient)
 	oauthService := oauth.NewOAuthService(userRepo, oauthConfig, githubService)
