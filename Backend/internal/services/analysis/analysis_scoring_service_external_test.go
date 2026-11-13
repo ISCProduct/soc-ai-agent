@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	openaiPkg "Backend/internal/openai"
 	"Backend/internal/services/analysis"
@@ -116,21 +115,21 @@ func (m *mockUserWeightScoreRepo) AddScore(userID uint, sessionID, category stri
 func (m *mockUserWeightScoreRepo) AddScoreWithPromptVersion(userID uint, sessionID, category string, delta int, promptVersion string) error {
 	return nil
 }
-func (m *mockUserWeightScoreRepo) FindByUserAndSession(userID uint, sessionID string) ([]entity.UserWeightScore, error) {
-	return []entity.UserWeightScore{
+func (m *mockUserWeightScoreRepo) FindByUserAndSession(userID uint, sessionID string) ([]models.UserWeightScore, error) {
+	return []models.UserWeightScore{
 		{UserID: userID, SessionID: sessionID, WeightCategory: "技術志向", Score: 80},
 		{UserID: userID, SessionID: sessionID, WeightCategory: "チームワーク志向", Score: 75},
 	}, nil
 }
-func (m *mockUserWeightScoreRepo) FindTopCategories(userID uint, sessionID string, limit int) ([]entity.UserWeightScore, error) {
+func (m *mockUserWeightScoreRepo) FindTopCategories(userID uint, sessionID string, limit int) ([]models.UserWeightScore, error) {
 	scores, err := m.FindByUserAndSession(userID, sessionID)
 	if err != nil || len(scores) <= limit {
 		return scores, err
 	}
 	return scores[:limit], nil
 }
-func (m *mockUserWeightScoreRepo) FindByUserSessionAndCategory(userID uint, sessionID, category string) (*entity.UserWeightScore, error) {
-	return &entity.UserWeightScore{UserID: userID, SessionID: sessionID, WeightCategory: category, Score: 80}, nil
+func (m *mockUserWeightScoreRepo) FindByUserSessionAndCategory(userID uint, sessionID, category string) (*models.UserWeightScore, error) {
+	return &models.UserWeightScore{UserID: userID, SessionID: sessionID, WeightCategory: category, Score: 80}, nil
 }
 func (m *mockUserWeightScoreRepo) CountByUserAndSession(userID uint, sessionID string) (int64, error) {
 	return 2, nil
@@ -297,7 +296,7 @@ func TestBuildScoreComment(t *testing.T) {
 func TestBuildJobSuitabilityComment(t *testing.T) {
 	tests := []struct {
 		name               string
-		scores             []entity.UserWeightScore
+		scores             []models.UserWeightScore
 		wantCommentContain string
 		wantMinRoles       int
 		wantRoleContain    string
@@ -309,7 +308,7 @@ func TestBuildJobSuitabilityComment(t *testing.T) {
 		},
 		{
 			name: "主要スコアがある場合にコメントとロールを返す",
-			scores: []entity.UserWeightScore{
+			scores: []models.UserWeightScore{
 				{WeightCategory: "リーダーシップ志向", Score: 90},
 				{WeightCategory: "成長志向", Score: 85},
 				{WeightCategory: "チャレンジ志向", Score: 80},

@@ -1,6 +1,7 @@
 package chat_test
 
 import (
+	"Backend/internal/models"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -29,7 +30,7 @@ func TestGetRecommendations_ReasonIsBuiltWhenNotStored(t *testing.T) {
 	const sessionID = "s1"
 	const userID = uint(1)
 
-	scores := []entity.UserWeightScore{
+	scores := []models.UserWeightScore{
 		{WeightCategory: "technical_orientation", Score: 80},
 		{WeightCategory: "growth_orientation", Score: 70},
 	}
@@ -104,7 +105,7 @@ func TestGetRecommendations_StoredAIReasonWins(t *testing.T) {
 	const userID = uint(1)
 	const aiReason = "AIが生成した固有の理由文です。"
 
-	scores := []entity.UserWeightScore{{WeightCategory: "technical_orientation", Score: 80}}
+	scores := []models.UserWeightScore{{WeightCategory: "technical_orientation", Score: 80}}
 	matches := []*entity.UserCompanyMatch{{
 		ID:          11,
 		UserID:      userID,

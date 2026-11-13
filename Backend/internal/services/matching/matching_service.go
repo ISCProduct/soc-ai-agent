@@ -187,7 +187,7 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 // BuildMatchReason でテンプレ理由を作るため、利用者から見える結果は変わらない。
 // 既定オフのときは何もしない（その場合 match_reason は全件空になる）。
 func (s *MatchingService) applyAIReasonsToTopMatches(
-	ctx context.Context, pending []*entity.UserCompanyMatch, userScores []entity.UserWeightScore,
+	ctx context.Context, pending []*entity.UserCompanyMatch, userScores []models.UserWeightScore,
 ) {
 	if !matchingReasonUseAI() || s.aiClient == nil {
 		return
@@ -395,7 +395,7 @@ func (s *MatchingService) GetDiagnostics(userID uint, sessionID string) (*Matchi
 
 // GenerateMatchReason はマッチング理由を返す。
 // 既定は DB/テンプレのみ（#588）。AI 生成は MATCHING_REASON_USE_AI=true のときだけ。
-func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) (string, error) {
+func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity.UserCompanyMatch, userScores []models.UserWeightScore) (string, error) {
 	if match == nil {
 		return "", fmt.Errorf("match is nil")
 	}
@@ -442,7 +442,7 @@ const MatchingReasonTemperature = 0.4
 
 // MatchingReasonPrompts は GenerateMatchReason が LLM へ渡すシステム・ユーザープロンプトを返す。
 // aibench（#1782）が本番と同じプロンプトで測るために公開する。
-func MatchingReasonPrompts(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) (system, user string) {
+func MatchingReasonPrompts(match *entity.UserCompanyMatch, userScores []models.UserWeightScore) (system, user string) {
 	return prompts.MatchingReasonSystemPrompt, buildMatchingReasonUserPrompt(match, userScores)
 }
 
@@ -451,13 +451,13 @@ func matchingReasonUseAI() bool {
 	return strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
 }
 
-func buildMatchingReasonUserPrompt(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) string {
+func buildMatchingReasonUserPrompt(match *entity.UserCompanyMatch, userScores []models.UserWeightScore) string {
 	return buildMatchingReasonUserPromptWithVersion(
 		match, userScores, prompts.ResolvePromptVersion(prompts.StageMatchingReason),
 	)
 }
 
-func buildMatchingReasonUserPromptWithVersion(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore, version string) string {
+func buildMatchingReasonUserPromptWithVersion(match *entity.UserCompanyMatch, userScores []models.UserWeightScore, version string) string {
 	company := match.Company
 	companyInfo := fmt.Sprintf(
 		"- 企業名: %s\n- 業界: %s\n- 主事業: %s\n- 文化: %s\n- 働き方: %s\n- 開発スタイル: %s\n- 技術スタック: %s",
@@ -479,12 +479,12 @@ func buildMatchingReasonUserPromptWithVersion(match *entity.UserCompanyMatch, us
 	)
 }
 
-func formatTopUserScores(scores []entity.UserWeightScore) string {
+func formatTopUserScores(scores []models.UserWeightScore) string {
 	if len(scores) == 0 {
 		return "データなし"
 	}
 
-	sorted := append([]entity.UserWeightScore(nil), scores...)
+	sorted := append([]models.UserWeightScore(nil), scores...)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].Score > sorted[j].Score
 	})
@@ -539,7 +539,7 @@ func fallbackValue(value, fallback string) string {
 
 // Exported wrappers for testing from external packages.
 
-func FormatTopUserScores(scores []entity.UserWeightScore) string { return formatTopUserScores(scores) }
+func FormatTopUserScores(scores []models.UserWeightScore) string { return formatTopUserScores(scores) }
 
 // NewMatchingServiceForTest returns a MatchingService with no AI client, suitable for unit tests.
 func NewMatchingServiceForTest() *MatchingService {
@@ -565,7 +565,7 @@ func (s *MatchingService) mergeAssessmentScores(userID uint, chat map[string]flo
 
 // ReasonScores は理由文に出す学生の適性を、マッチ度の計算と同じ合流後の値にする（#1678）。
 // チャットだけの値を出すと「マッチ度60」の根拠に「技術志向40」が並び、数値が食い違う。
-func (s *MatchingService) ReasonScores(userID uint, scores []entity.UserWeightScore) []entity.UserWeightScore {
+func (s *MatchingService) ReasonScores(userID uint, scores []models.UserWeightScore) []models.UserWeightScore {
 	chat := make(map[string]float64, len(scores))
 	for _, sc := range scores {
 		chat[sc.WeightCategory] = float64(sc.Score)
@@ -581,11 +581,11 @@ func (s *MatchingService) ReasonScores(userID uint, scores []entity.UserWeightSc
 	return scoresFromMap(userID, sessionID, merged)
 }
 
-func scoresFromMap(userID uint, sessionID string, m map[string]float64) []entity.UserWeightScore {
-	out := make([]entity.UserWeightScore, 0, len(m))
+func scoresFromMap(userID uint, sessionID string, m map[string]float64) []models.UserWeightScore {
+	out := make([]models.UserWeightScore, 0, len(m))
 	for _, c := range valueobject.AllWeightCategories() {
 		if v, ok := m[string(c)]; ok {
-			out = append(out, entity.UserWeightScore{UserID: userID, SessionID: sessionID, WeightCategory: string(c), Score: int(math.Round(v))})
+			out = append(out, models.UserWeightScore{UserID: userID, SessionID: sessionID, WeightCategory: string(c), Score: int(math.Round(v))})
 		}
 	}
 	return out

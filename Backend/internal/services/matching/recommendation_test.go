@@ -2,6 +2,7 @@ package matching
 
 import (
 	"Backend/domain/entity"
+	"Backend/internal/models"
 	"reflect"
 	"testing"
 )
@@ -60,7 +61,7 @@ func TestIsRecommendationProvisional_EvaluatedCategories(t *testing.T) {
 }
 
 func TestCountEvaluatedCategories(t *testing.T) {
-	scores := []entity.UserWeightScore{{Score: 3}, {Score: 0}, {Score: -1}, {Score: 5}}
+	scores := []models.UserWeightScore{{Score: 3}, {Score: 0}, {Score: -1}, {Score: 5}}
 	if got := CountEvaluatedCategories(scores); got != 3 {
 		t.Fatalf("CountEvaluatedCategories() = %d, want 3（0だけ数えない）", got)
 	}

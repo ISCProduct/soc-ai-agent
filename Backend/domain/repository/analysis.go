@@ -1,6 +1,9 @@
 package repository
 
-import "Backend/domain/entity"
+import (
+	"Backend/domain/entity"
+	"Backend/internal/models"
+)
 
 // UserWeightScoreRepository はユーザースコアの永続化インターフェース。
 type UserWeightScoreRepository interface {
@@ -12,9 +15,9 @@ type UserWeightScoreRepository interface {
 	SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore int, promptVersion string) error
 	// AddScoreWithPromptVersion は AddScore に加えて、評価に使ったプロンプト版を記録する
 	AddScoreWithPromptVersion(userID uint, sessionID, category string, delta int, promptVersion string) error
-	FindByUserAndSession(userID uint, sessionID string) ([]entity.UserWeightScore, error)
-	FindTopCategories(userID uint, sessionID string, limit int) ([]entity.UserWeightScore, error)
-	FindByUserSessionAndCategory(userID uint, sessionID, category string) (*entity.UserWeightScore, error)
+	FindByUserAndSession(userID uint, sessionID string) ([]models.UserWeightScore, error)
+	FindTopCategories(userID uint, sessionID string, limit int) ([]models.UserWeightScore, error)
+	FindByUserSessionAndCategory(userID uint, sessionID, category string) (*models.UserWeightScore, error)
 	CountByUserAndSession(userID uint, sessionID string) (int64, error)
 }
 

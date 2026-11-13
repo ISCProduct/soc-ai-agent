@@ -1,7 +1,7 @@
 package analysis
 
 import (
-	"Backend/domain/entity"
+	"Backend/internal/models"
 	"fmt"
 	"sort"
 	"strings"
@@ -42,7 +42,7 @@ func (s *AnalysisScoringService) buildRecommendations(userID uint, sessionID str
 	return recommendations
 }
 
-func buildJobSuitabilityComment(scores []entity.UserWeightScore) (string, []JobSuitabilityRole) {
+func buildJobSuitabilityComment(scores []models.UserWeightScore) (string, []JobSuitabilityRole) {
 	if len(scores) == 0 {
 		return "", nil
 	}

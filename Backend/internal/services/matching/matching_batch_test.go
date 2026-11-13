@@ -105,7 +105,7 @@ func (s *matchingCompanyRepo) ListActiveMissingFetchCandidates(int, bool) ([]mod
 }
 
 type matchingScoreRepo struct {
-	scores []entity.UserWeightScore
+	scores []models.UserWeightScore
 }
 
 func (s *matchingScoreRepo) SetScore(uint, string, string, int) error { return nil }
@@ -116,13 +116,13 @@ func (s *matchingScoreRepo) SetScoreWithPromptVersion(uint, string, string, int,
 func (s *matchingScoreRepo) AddScoreWithPromptVersion(uint, string, string, int, string) error {
 	return nil
 }
-func (s *matchingScoreRepo) FindByUserAndSession(uint, string) ([]entity.UserWeightScore, error) {
+func (s *matchingScoreRepo) FindByUserAndSession(uint, string) ([]models.UserWeightScore, error) {
 	return s.scores, nil
 }
-func (s *matchingScoreRepo) FindTopCategories(uint, string, int) ([]entity.UserWeightScore, error) {
+func (s *matchingScoreRepo) FindTopCategories(uint, string, int) ([]models.UserWeightScore, error) {
 	return nil, nil
 }
-func (s *matchingScoreRepo) FindByUserSessionAndCategory(uint, string, string) (*entity.UserWeightScore, error) {
+func (s *matchingScoreRepo) FindByUserSessionAndCategory(uint, string, string) (*models.UserWeightScore, error) {
 	return nil, nil
 }
 func (s *matchingScoreRepo) CountByUserAndSession(uint, string) (int64, error) {
@@ -167,7 +167,7 @@ func TestCalculateMatching_UsesBatchProfileAndUpsert(t *testing.T) {
 		},
 	}
 	scoreRepo := &matchingScoreRepo{
-		scores: []entity.UserWeightScore{
+		scores: []models.UserWeightScore{
 			{WeightCategory: "技術志向", Score: 70},
 		},
 	}

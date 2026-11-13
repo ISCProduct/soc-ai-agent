@@ -2,12 +2,13 @@ package matching
 
 import (
 	"Backend/domain/entity"
+	"Backend/internal/models"
 	"strings"
 	"testing"
 )
 
 func TestFormatTopUserScores(t *testing.T) {
-	scores := []entity.UserWeightScore{
+	scores := []models.UserWeightScore{
 		{WeightCategory: "成長志向", Score: 72},
 		{WeightCategory: "技術志向", Score: 90},
 		{WeightCategory: "チームワーク志向", Score: 81},
@@ -39,7 +40,7 @@ func TestGenerateMatchReasonFallbackWhenAIClientNil(t *testing.T) {
 		TeamworkMatch:  90.0,
 		GrowthMatch:    92.0,
 	}
-	userScores := []entity.UserWeightScore{
+	userScores := []models.UserWeightScore{
 		{WeightCategory: "技術志向", Score: 88},
 		{WeightCategory: "成長志向", Score: 84},
 	}

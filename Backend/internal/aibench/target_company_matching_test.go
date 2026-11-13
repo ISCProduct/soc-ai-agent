@@ -1,6 +1,7 @@
 package aibench
 
 import (
+	"Backend/internal/models"
 	"context"
 	"encoding/json"
 	"errors"
@@ -169,7 +170,7 @@ func TestMatchingReasonTarget_Run上限到達で呼び直す(t *testing.T) {
 
 	c := Case{ID: "mr-x", Target: TargetMatchingReason, Input: Input{
 		Match:          &entity.UserCompanyMatch{MatchScore: 80, Company: &entity.Company{Name: "テスト株式会社", Industry: "商社"}},
-		UserScores:     []entity.UserWeightScore{{WeightCategory: "技術志向", Score: 80}},
+		UserScores:     []models.UserWeightScore{{WeightCategory: "技術志向", Score: 80}},
 		MustMentionAny: []string{"商社"}, StrengthAny: []string{"技術"},
 	}}
 	o := newMatchingReasonTarget("model-x").Run(context.Background(), c)
@@ -217,6 +218,30 @@ func TestBundledManifests_CompanyAndMatching(t *testing.T) {
 	// 他の target は今まで通りラベルが必須
 	if err := validateCase(Case{ID: "x", Target: TargetChatAnswer, Input: Input{Question: "q", Answer: "a"}}); err == nil {
 		t.Fatal("chat-answer のラベル無しを通してしまう")
+	}
+}
+
+// 同梱のマッチング理由の固定セットは、user_scores を models.UserWeightScore の json タグ
+// （category / score）で書く。キーが合わないと Go はエラーにせず空の値で読むので、
+// 読み込んだ値が欠けていないことを確かめる。
+func TestBundledMatchingReason_UserScoresが欠けずに読める(t *testing.T) {
+	cases, err := LoadManifest("../../../docs/research/ai-eval/matching-reason.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	matching := FilterByTarget(cases, TargetMatchingReason)
+	for _, c := range matching {
+		if len(c.Input.UserScores) == 0 {
+			t.Errorf("%s: user_scores が空", c.ID)
+		}
+		for i, s := range c.Input.UserScores {
+			if s.WeightCategory == "" || s.Score <= 0 {
+				t.Errorf("%s: user_scores[%d] の値が欠けている: %+v", c.ID, i, s)
+			}
+		}
+	}
+	if len(matching) < 10 {
+		t.Fatalf("件数が少ない: %d", len(matching))
 	}
 }
 

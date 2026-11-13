@@ -61,7 +61,7 @@ type RecommendationResponse struct {
 }
 
 // CountEvaluatedCategories はスコアが0でないカテゴリの数を返す。
-func CountEvaluatedCategories(scores []entity.UserWeightScore) int {
+func CountEvaluatedCategories(scores []models.UserWeightScore) int {
 	count := 0
 	for _, score := range scores {
 		if score.Score != 0 {
@@ -134,7 +134,7 @@ func DisplayableMatches(matches []*entity.UserCompanyMatch) []*entity.UserCompan
 // BuildRecommendations は表示対象の match を推薦一覧に整形する。
 // 理由文はマッチ度と同じ合流後の適性(reasonScores)で書く。
 // 0件のときは nil を返す(JSON では null)。既存の挙動を保つため。
-func BuildRecommendations(displayed []*entity.UserCompanyMatch, reasonScores []entity.UserWeightScore) []Recommendation {
+func BuildRecommendations(displayed []*entity.UserCompanyMatch, reasonScores []models.UserWeightScore) []Recommendation {
 	var items []Recommendation
 	for _, match := range displayed {
 		employeeCount := "未定"

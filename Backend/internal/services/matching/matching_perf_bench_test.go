@@ -52,15 +52,15 @@ func benchCompanies(n int) ([]models.Company, map[uint]*models.CompanyWeightProf
 	return companies, profiles
 }
 
-func benchUserScores() []entity.UserWeightScore {
+func benchUserScores() []models.UserWeightScore {
 	cats := []string{
 		"technical_orientation", "teamwork_orientation", "leadership_orientation",
 		"creativity_orientation", "stability_orientation", "growth_orientation",
 		"work_life_balance", "challenge_seeking", "detail_orientation", "communication_skill",
 	}
-	out := make([]entity.UserWeightScore, len(cats))
+	out := make([]models.UserWeightScore, len(cats))
 	for i, c := range cats {
-		out[i] = entity.UserWeightScore{WeightCategory: c, Score: 50 + i*3}
+		out[i] = models.UserWeightScore{WeightCategory: c, Score: 50 + i*3}
 	}
 	return out
 }

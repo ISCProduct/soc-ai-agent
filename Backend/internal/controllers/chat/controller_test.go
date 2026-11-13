@@ -219,7 +219,7 @@ func TestChatController_GetScores_ServiceError(t *testing.T) {
 
 func TestChatController_GetScores_Success(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
-	scores := []entity.UserWeightScore{{UserID: 1}}
+	scores := []models.UserWeightScore{{UserID: 1}}
 	chatSvc.On("GetUserScores", uint(1), "s1").Return(scores, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/scores?session_id=s1", nil)
@@ -227,6 +227,33 @@ func TestChatController_GetScores_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 	testsupport.AssertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).GetScores, testsupport.NewCtx(req, rec), http.StatusOK)
 	chatSvc.AssertExpectations(t)
+}
+
+// 応答のキーは従来どおり Go のフィールド名（api/openapi.yaml の UserWeightScore）。
+// models.UserWeightScore の json タグ（id / category …）や Source を出してはいけない。
+func TestChatController_GetScores_応答のキーは従来のまま(t *testing.T) {
+	chatSvc := &mocks.ChatServiceMock{}
+	chatSvc.On("GetUserScores", uint(1), "s1").Return([]models.UserWeightScore{
+		{ID: 5, UserID: 1, SessionID: "s1", Source: models.ScoreSourceAssessment, WeightCategory: "技術志向", Score: 70},
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/scores?session_id=s1", nil)
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).GetScores, testsupport.NewCtx(req, rec), http.StatusOK)
+
+	var rows []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0]["WeightCategory"] != "技術志向" || rows[0]["Score"] != float64(70) {
+		t.Fatalf("応答が従来の形ではない: %s", rec.Body.String())
+	}
+	for _, k := range []string{"category", "id", "Source", "OrganizationID", "source", "organization_id"} {
+		if _, ok := rows[0][k]; ok {
+			t.Errorf("出してはいけないキー %s がある: %s", k, rec.Body.String())
+		}
+	}
 }
 
 // ===== ToggleFavorite =====
@@ -435,7 +462,7 @@ func TestChatController_SendReport_Success(t *testing.T) {
 	userRepo.On("GetUserByID", uint(1)).Return(user, nil)
 	analysisSvc.On("BuildAnalysisSummary", mock.Anything, uint(1), "s1").Return(summary, nil)
 	matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 5).Return([]*entity.UserCompanyMatch{}, nil)
-	chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
+	chatSvc.On("GetUserScores", uint(1), "s1").Return([]models.UserWeightScore{}, nil)
 	emailSvc.On("SendAnalysisReport", user, summary, mock.Anything, "s1").Return(nil)
 
 	body, _ := json.Marshal(map[string]string{"session_id": "s1"})
@@ -499,7 +526,7 @@ func TestChatController_GetRecommendations_NoMatches_ReturnEmpty(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
 	matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 10).Return(nil, nil)
 	matchSvc.On("GetDiagnostics", uint(1), "s1").Return(nil, nil)
-	chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
+	chatSvc.On("GetUserScores", uint(1), "s1").Return([]models.UserWeightScore{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1", nil)
 	req = testsupport.WithUserID(req, 1)
@@ -552,7 +579,7 @@ func TestChatController_GetRecommendations_EmptyReason(t *testing.T) {
 			chatSvc := &mocks.ChatServiceMock{}
 			matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 10).Return(nil, nil)
 			matchSvc.On("GetDiagnostics", uint(1), "s1").Return(tt.diag, nil)
-			chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
+			chatSvc.On("GetUserScores", uint(1), "s1").Return([]models.UserWeightScore{}, nil)
 
 			req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1", nil)
 			req = testsupport.WithUserID(req, 1)
@@ -581,7 +608,7 @@ func TestChatController_GetRecommendations_WithMatches_Success(t *testing.T) {
 		{MatchScore: 85.0, Company: &entity.Company{ID: 1, Name: "Test Corp"}},
 	}
 	matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 10).Return(matches, nil)
-	chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
+	chatSvc.On("GetUserScores", uint(1), "s1").Return([]models.UserWeightScore{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1", nil)
 	req = testsupport.WithUserID(req, 1)
@@ -618,7 +645,7 @@ func TestChatController_GetRecommendations_LimitCap(t *testing.T) {
 				{MatchScore: 85.0, Company: &entity.Company{ID: 1, Name: "Test Corp"}},
 			}
 			matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", tt.wantLimit).Return(matches, nil)
-			chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
+			chatSvc.On("GetUserScores", uint(1), "s1").Return([]models.UserWeightScore{}, nil)
 
 			req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1"+tt.query, nil)
 			req = testsupport.WithUserID(req, 1)

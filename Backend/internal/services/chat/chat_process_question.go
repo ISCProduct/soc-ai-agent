@@ -238,7 +238,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	return &ChatResponse{
 		Response:            aiResponse,
 		QuestionWeightID:    questionWeightID,
-		CurrentScores:       finalScores,
+		CurrentScores:       models.NewUserWeightScoreResponses(finalScores),
 		CurrentPhase:        currentPhaseInfo,
 		AllPhases:           allPhasesInfo,
 		IsComplete:          isComplete,

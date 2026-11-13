@@ -4,6 +4,7 @@ package chat
 // 実行: cd Backend && go test ./internal/controllers/... -run TestRunBackgroundMatching -v
 
 import (
+	"Backend/internal/models"
 	"context"
 	"errors"
 	"sync"
@@ -52,7 +53,7 @@ func (s *stubMatchingService) GetDiagnostics(uint, string) (*matching.MatchingDi
 	return nil, nil
 }
 
-func (s *stubMatchingService) ReasonScores(_ uint, scores []entity.UserWeightScore) []entity.UserWeightScore {
+func (s *stubMatchingService) ReasonScores(_ uint, scores []models.UserWeightScore) []models.UserWeightScore {
 	return scores
 }
 

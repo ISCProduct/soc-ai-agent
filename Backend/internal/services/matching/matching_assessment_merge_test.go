@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"Backend/domain/entity"
 	"Backend/internal/models"
 )
 
@@ -21,7 +20,7 @@ func (s stubAssessmentScores) LatestStandardScores(uint) (map[string]float64, er
 // 合流（#1678）: チャットと検査を 0.5:0.5、片側だけのカテゴリは片側の値、フラグで切れる。
 func TestCalculateMatching_MergesAssessmentScores(t *testing.T) {
 	profile := &models.CompanyWeightProfile{CompanyID: 1, TechnicalOrientation: 100, StabilityOrientation: 100, GrowthOrientation: 100}
-	chat := []entity.UserWeightScore{{WeightCategory: "技術志向", Score: 40}, {WeightCategory: "安定志向", Score: 60}}
+	chat := []models.UserWeightScore{{WeightCategory: "技術志向", Score: 40}, {WeightCategory: "安定志向", Score: 60}}
 
 	tests := []struct {
 		name     string
@@ -72,13 +71,13 @@ func TestCalculateMatching_MergesAssessmentScores(t *testing.T) {
 
 // 理由文の適性もマッチ度と同じ合流後の値にする（チャット40・検査80 → 60 と書く）。
 func TestReasonScores_UsesMergedScores(t *testing.T) {
-	chat := []entity.UserWeightScore{{SessionID: "sess-chat", WeightCategory: "安定志向", Score: 60}, {SessionID: "sess-chat", WeightCategory: "技術志向", Score: 40}}
+	chat := []models.UserWeightScore{{SessionID: "sess-chat", WeightCategory: "安定志向", Score: 60}, {SessionID: "sess-chat", WeightCategory: "技術志向", Score: 40}}
 	svc := NewMatchingService(nil, nil, nil, nil)
 	svc.SetAssessmentScoreReader(stubAssessmentScores{scores: map[string]float64{"技術志向": 80, "成長志向": 90}})
 
 	t.Setenv("ASSESSMENT_SCORE_MERGE", "")
 	got := svc.ReasonScores(1, chat)
-	want := []entity.UserWeightScore{
+	want := []models.UserWeightScore{
 		{UserID: 1, SessionID: "sess-chat", WeightCategory: "技術志向", Score: 60},
 		{UserID: 1, SessionID: "sess-chat", WeightCategory: "安定志向", Score: 60},
 		{UserID: 1, SessionID: "sess-chat", WeightCategory: "成長志向", Score: 90},
