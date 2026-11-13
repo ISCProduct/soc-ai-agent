@@ -31,6 +31,7 @@ import { authService, User } from '@/lib/auth'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
 import { ScoutPreferencesCard } from '@/components/profile/ScoutPreferencesCard'
+import { TrainingConsentCard } from '@/components/profile/TrainingConsentCard'
 import { PageLoading } from '@/components/common/PageLoading'
 import { StudentThemeToggle } from '@/components/StudentThemeToggle'
 
@@ -465,6 +466,11 @@ function ProfilePageContent() {
       {!isGuest && (
         <Container maxWidth="lg" sx={{ mb: 4 }}>
           <ScoutPreferencesCard />
+        </Container>
+      )}
+      {!isGuest && (
+        <Container maxWidth="lg" sx={{ mb: 4 }}>
+          <TrainingConsentCard />
         </Container>
       )}
 
