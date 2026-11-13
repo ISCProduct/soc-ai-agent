@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"Backend/internal/repositories"
 	"testing"
 	"time"
 
@@ -37,8 +38,8 @@ func TestDeleteAccount_DBNotConfigured(t *testing.T) {
 
 func TestDeleteAccount_SoftWithdraw(t *testing.T) {
 	db, mock := newAuthServiceTestDB(t)
-	svc := &AuthService{db: db}
-	svc.rebuildDeletionService()
+	svc := &AuthService{}
+	svc.SetDeletionService(NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), nil, nil))
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT \\* FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").
@@ -72,8 +73,8 @@ func TestDeleteAccount_SoftWithdraw(t *testing.T) {
 
 func TestDeleteAccount_AlreadyWithdrawn(t *testing.T) {
 	db, mock := newAuthServiceTestDB(t)
-	svc := &AuthService{db: db}
-	svc.rebuildDeletionService()
+	svc := &AuthService{}
+	svc.SetDeletionService(NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), nil, nil))
 
 	now := time.Now().UTC()
 	mock.ExpectBegin()

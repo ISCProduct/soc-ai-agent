@@ -3,8 +3,8 @@ package repositories
 import (
 	"time"
 
+	"Backend/domain/funnel"
 	"Backend/internal/models"
-	"Backend/internal/services/funnel"
 
 	"gorm.io/gorm"
 )

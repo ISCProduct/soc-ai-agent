@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"Backend/domain/repository"
 	"Backend/domain/valueobject"
 	"Backend/internal/models"
 	"context"
@@ -9,8 +10,6 @@ import (
 	"log"
 	"math"
 	"strings"
-
-	"gorm.io/gorm"
 )
 
 // scoreAnswer は回答を選択肢と文章に振り分けて採点し、スコアを更新する。
@@ -209,7 +208,7 @@ func (s *ChatService) inferCategoryFromQuestion(question string) string {
 func (s *ChatService) updateCategoryScore(userID uint, sessionID, category string, score int, promptVersion string) error {
 	// 既存のスコアを取得
 	existingScore, err := s.userWeightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, category)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return fmt.Errorf("failed to get existing score: %w", err)
 	}
 
