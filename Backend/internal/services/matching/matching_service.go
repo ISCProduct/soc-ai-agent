@@ -21,8 +21,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-
-	"gorm.io/gorm"
 )
 
 type MatchingService struct {
@@ -350,7 +348,7 @@ func (s *MatchingService) GetTopMatches(ctx context.Context, userID uint, sessio
 func (s *MatchingService) ToggleFavorite(matchID uint, userID uint) error {
 	match, err := s.matchRepo.FindByID(matchID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return shared.ErrNotFound
 		}
 		return err

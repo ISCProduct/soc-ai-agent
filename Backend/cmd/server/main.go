@@ -294,6 +294,8 @@ func main() {
 	skillScoreRepo := repositories.NewSkillScoreRepository(db)
 	// 応募・選考ステータス
 	appStatusRepo := repositories.NewUserApplicationStatusRepository(db)
+	// 管理者・企業所有者の判定(応募管理・学生分析・面接の企業ブリーフが使う)
+	companyAccessRepo := repositories.NewCompanyAccessRepository(db)
 	// APIコストモニタリング
 	apiCallLogRepo := repositories.NewAPICallLogRepository(db)
 	aiBudgetRepo := repositories.NewAIBudgetRepository(db)
@@ -424,7 +426,7 @@ func main() {
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
 	interviewService.SetCompanyRepo(companyPublicRepo)
 	interviewService.SetCompanyOwnerChecker(func(userID, companyID uint) (bool, error) {
-		return shared.UserOwnsCompany(db, userID, companyID)
+		return shared.UserOwnsCompany(companyAccessRepo, userID, companyID)
 	})
 	resumeService.SetCrossFeatureService(crossFeatureService)
 
@@ -561,12 +563,12 @@ func main() {
 	esReviewController.SetReviewService(esreview.NewService(esReviewRepo, crossFeatureService))
 	// アプリ内通知（#2033）。応募・スカウト・先生の案内・予定の前日に、学生へ知らせる
 	notificationService := notificationsvc.NewService(repositories.NewNotificationRepository(db))
-	appService := application.NewApplicationService(appStatusRepo, matchRepo, db)
+	appService := application.NewApplicationService(appStatusRepo, matchRepo, db, companyAccessRepo)
 	appService.SetNotifier(notificationService)
 	appController := applicationcontrollers.NewApplicationController(appService)
 	appController.SetSchoolAccess(schoolService)
 	hrStudentAnalysisService := hr.NewStudentAnalysisService(
-		db,
+		companyAccessRepo,
 		userRepo,
 		crossFeatureService,
 		userWeightScoreRepo,

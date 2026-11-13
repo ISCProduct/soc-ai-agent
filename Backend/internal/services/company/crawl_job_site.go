@@ -1,6 +1,7 @@
 package company
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
@@ -10,8 +11,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type jobSiteCompanyExtraction struct {
@@ -52,11 +51,11 @@ func (s *CrawlService) executeJobSiteCompanyCrawl(source *models.CrawlSource) er
 
 	now := time.Now()
 	company, err := s.companyRepo.FindByName(extracted.Name)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return err
 	}
 
-	if company == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+	if company == nil || errors.Is(err, repository.ErrNotFound) {
 		newCompany := &models.Company{
 			Name:            extracted.Name,
 			Description:     extracted.Description,
