@@ -85,16 +85,19 @@ func TestMigrationPairs(t *testing.T) {
 	}
 }
 
-// TestMigrationVersionsAreContiguous はマイグレーション番号に穴が無いことを検証する（#929）。
+// TestMigrationVersionsAreUnique はマイグレーション番号の重複と up/down の欠落を検証する（#929）。
 //
-// golang-migrate の Up() は現在バージョンから Next() で前進するだけなので、
-// 適用済みバージョンより小さい番号のマイグレーションが後から追加されても
-// 一度も実行されず ErrNoChange で正常終了する。エラーもログも出ない。
+// 採番は連番からUTCタイムスタンプへ移行した（並行ブランチが番号を取り合わないため）。
+// 既存の6桁連番(000001〜)はそのまま残し、新規はタイムスタンプを使う。番号は飛ぶのが
+// 正常なので、かつての「連番の欠番検査」は廃止した。
 //
-// 実際に、別ブランチが 000019 を使っている状態で 000020 を先にマージすると
-// 000019 が本番へ永久に適用されない、という事故が起きかけた。
-// 番号が飛んだ時点でCIを落として気づけるようにする。
-func TestMigrationVersionsAreContiguous(t *testing.T) {
+// 連番時代に欠番検査が守っていた“穴”（golang-migrate の Up() は現在バージョンより小さい
+// 番号を二度と適用しないため、適用済みより小さい番号を後から足すと永久に未適用になる）は、
+// いまは CI の automation/test/migration-version-unique-test.sh が
+// 「新規マイグレーションは base の最大版より大きいこと」を検査して防ぐ（Atlas の
+// non-linear lint も多重防御として効く）。このテスト（go test、gitのbaseが無い）では
+// base比較ができないため、ここでは重複と up/down ペアだけを見る。
+func TestMigrationVersionsAreUnique(t *testing.T) {
 	entries, err := migrationFiles.ReadDir(".")
 	if err != nil {
 		t.Fatalf("マイグレーションディレクトリを読めない: %v", err)
@@ -133,7 +136,7 @@ func TestMigrationVersionsAreContiguous(t *testing.T) {
 				dup = append(dup, n)
 			}
 			sort.Strings(dup)
-			t.Errorf("マイグレーション %06d が重複している: %v。"+
+			t.Errorf("マイグレーション番号 %d が重複している: %v。"+
 				"別ブランチが同じ番号を使っている。どちらかを採番し直すこと", v, dup)
 		}
 	}
@@ -141,26 +144,12 @@ func TestMigrationVersionsAreContiguous(t *testing.T) {
 		t.Fatal("マイグレーションが1つも見つからない")
 	}
 
-	max := 0
-	for v := range versions {
-		if v > max {
-			max = v
-		}
-	}
-	// 1 から最大値まで、欠番が無いこと。
-	for v := 1; v <= max; v++ {
-		if _, ok := versions[v]; !ok {
-			t.Errorf("マイグレーション %06d が欠番。golang-migrate は適用済みより小さい番号を"+
-				"二度と実行しないため、後から埋めても本番へ適用されない", v)
-		}
-	}
-
 	// up と down が対になっていること。
 	for v, name := range versions {
 		base := strings.TrimSuffix(strings.TrimSuffix(name, ".up.sql"), ".down.sql")
 		for _, suffix := range []string{".up.sql", ".down.sql"} {
 			if _, err := migrationFiles.ReadFile(base + suffix); err != nil {
-				t.Errorf("%06d: %s が無い", v, base+suffix)
+				t.Errorf("version %d: %s が無い", v, base+suffix)
 			}
 		}
 	}

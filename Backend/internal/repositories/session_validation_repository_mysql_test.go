@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/services/shared"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	gormMySQL "gorm.io/driver/mysql"
@@ -51,7 +51,7 @@ func TestClaimSessionOwnershipMySQL(t *testing.T) {
 				switch {
 				case result.err == nil:
 					successes++
-				case errors.Is(result.err, shared.ErrForbidden):
+				case errors.Is(result.err, repository.ErrForbidden):
 					forbidden++
 				default:
 					t.Fatalf("iteration %d: ClaimSessionOwnership(%q, %d) error = %v, want nil or ErrForbidden",

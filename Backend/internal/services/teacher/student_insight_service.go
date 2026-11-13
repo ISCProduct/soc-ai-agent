@@ -68,7 +68,7 @@ const LowMatchThreshold = 40.0
 
 // MinMatchedAxesForLowMatch はマッチ度を信用するのに最低限必要な軸の数（#1124）。
 // 学生側の frontend/lib/low-match.ts の MIN_MATCHED_AXES_FOR_LOW_MATCH と揃える。
-// 値は chat_controller.go の minEvaluatedCategoriesForFinal（暫定評価の判定）と同じ 4。
+// 値は services/matching の MinEvaluatedCategoriesForFinal（暫定評価の判定）と同じ 4。
 // 「この件数を下回るとスコアを確定扱いにしない」という既存の基準に合わせている。
 //
 // マッチ度は「計測できた軸だけ」の平均なので、軸が少ない学生は実力ではなく

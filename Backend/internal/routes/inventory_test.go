@@ -18,9 +18,10 @@ import (
 var updateCatalog = flag.Bool("update", false, "api/routes.txt を実装に合わせて更新する")
 
 const (
-	catalogPath = "../../api/routes.txt"
-	openapiPath = "../../api/openapi.yaml"
-	mainGoPath  = "../../cmd/server/main.go"
+	catalogPath  = "../../api/routes.txt"
+	openapiPath  = "../../api/openapi.yaml"
+	mainGoPath   = "../../cmd/server/main.go"
+	serverGoPath = "../../cmd/server/server.go" // main() から切り出した Echo 設定(/health・/metrics)
 )
 
 func formatCatalog(rs []Route) string {
@@ -148,9 +149,13 @@ func TestOpenAPIPathsExistInImplementation(t *testing.T) {
 // 1 本足して mainGoRoutes に書き忘れると、spec からも静かに漏れる。
 // 本数だけでも固定しておけば、増えたときにここで気づける。
 func TestMainGoDirectRoutesAreListed(t *testing.T) {
-	raw, err := os.ReadFile(mainGoPath)
-	if err != nil {
-		t.Fatalf("%s が読めない: %v", mainGoPath, err)
+	var raw []byte
+	for _, path := range []string{mainGoPath, serverGoPath} {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%s が読めない: %v", path, err)
+		}
+		raw = append(raw, b...)
 	}
 	// 変数名・メソッド・パスを取る。変数名はグループの prefix 解決に使う。
 	re := regexp.MustCompile(`(?m)^\s*([a-zA-Z][a-zA-Z0-9]*)\.(GET|POST|PUT|PATCH|DELETE|Any)\("([^"]*)"`)
