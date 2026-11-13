@@ -5,50 +5,57 @@ import (
 	"testing"
 
 	"Backend/internal/services/shared"
-
-	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
-func expectIsAdmin(mock sqlmock.Sqlmock, userID uint, isAdmin bool) {
-	mock.ExpectQuery("SELECT .*is_admin.* FROM `users` WHERE id = \\?").
-		WithArgs(userID).
-		WillReturnRows(sqlmock.NewRows([]string{"is_admin"}).AddRow(isAdmin))
+// stubAccess は shared.CompanyAccessReader の偽物。問い合わせの回数も数える。
+type stubAccess struct {
+	isAdmin     bool
+	owns        bool
+	adminCalls  int
+	ownsCalls   int
+	lastOwnsFor [2]uint // (userID, companyID)
 }
 
-func expectOwnsCompany(mock sqlmock.Sqlmock, userID, companyID uint, n int64) {
-	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `company_ownerships` WHERE user_id = \\? AND company_id = \\?").
-		WithArgs(userID, companyID).
-		WillReturnRows(sqlmock.NewRows([]string{"count(*)"}).AddRow(n))
+func (a *stubAccess) IsAdmin(uint) (bool, error) { a.adminCalls++; return a.isAdmin, nil }
+func (a *stubAccess) OwnsCompany(user, company uint) (bool, error) {
+	a.ownsCalls++
+	a.lastOwnsFor = [2]uint{user, company}
+	return a.owns, nil
 }
 
 func TestGetCorrelation_NonAdminOmitCompanyIDForbidden(t *testing.T) {
-	db, mock := newSQLMockDB(t)
-	expectIsAdmin(mock, 1, false)
-	s := &ApplicationService{db: db}
+	access := &stubAccess{}
+	s := &ApplicationService{access: access}
 	_, err := s.GetCorrelation(1, 0)
 	if !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("got %v want ErrForbidden", err)
 	}
+	if access.adminCalls != 1 {
+		t.Fatalf("管理者かどうかを1回確かめるはず: %d", access.adminCalls)
+	}
 }
 
 func TestGetCorrelation_OtherCompanyForbidden(t *testing.T) {
-	db, mock := newSQLMockDB(t)
-	expectIsAdmin(mock, 1, false)
-	expectOwnsCompany(mock, 1, 99, 0)
-	s := &ApplicationService{db: db}
+	access := &stubAccess{}
+	s := &ApplicationService{access: access}
 	_, err := s.GetCorrelation(1, 99)
 	if !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("got %v want ErrForbidden", err)
 	}
+	if access.ownsCalls != 1 || access.lastOwnsFor != [2]uint{1, 99} {
+		t.Fatalf("所有者の確認 = %d回 %v, want 1回 [1 99]", access.ownsCalls, access.lastOwnsFor)
+	}
 }
 
 func TestListForOwner_OtherCompanyForbidden(t *testing.T) {
-	db, mock := newSQLMockDB(t)
-	expectOwnsCompany(mock, 1, 99, 0)
-	s := &ApplicationService{db: db}
+	access := &stubAccess{}
+	s := &ApplicationService{access: access}
 	_, err := s.ListForOwner(1, 99, "")
 	if !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("got %v want ErrForbidden", err)
+	}
+	if access.ownsCalls != 1 || access.lastOwnsFor != [2]uint{1, 99} {
+		t.Fatalf("所有者の確認 = %d回 %v, want 1回 [1 99]", access.ownsCalls, access.lastOwnsFor)
 	}
 }
 
@@ -61,10 +68,16 @@ func TestListForOwner_MissingCompanyIDForbidden(t *testing.T) {
 }
 
 func TestRequireCompanyOwner_OwnerOK(t *testing.T) {
-	db, mock := newSQLMockDB(t)
-	expectOwnsCompany(mock, 1, 10, 1)
-	s := &ApplicationService{db: db}
+	s := &ApplicationService{access: &stubAccess{owns: true}}
 	if err := s.requireCompanyOwner(1, 10); err != nil {
 		t.Fatalf("got %v want nil", err)
+	}
+}
+
+// access が無いときは、所有者でも管理者でもないものとして拒否する(fail-closed)。
+func TestRequireCompanyOwner_NoAccessReaderIsForbidden(t *testing.T) {
+	s := &ApplicationService{}
+	if err := s.requireCompanyOwner(1, 10); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("got %v want ErrForbidden", err)
 	}
 }

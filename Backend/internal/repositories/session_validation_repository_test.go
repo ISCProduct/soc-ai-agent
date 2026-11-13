@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"Backend/internal/services/shared"
+	"Backend/domain/repository"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	mysqlDriver "github.com/go-sql-driver/mysql"
@@ -68,8 +68,8 @@ func TestClaimSessionOwnership_UnsetOwnerWithOtherUserMessageIsForbidden(t *test
 	mock.ExpectRollback()
 
 	err := repo.ClaimSessionOwnership(sessionID, requestingUserID)
-	if !errors.Is(err, shared.ErrForbidden) {
-		t.Fatalf("ClaimSessionOwnership() error = %v, want %v", err, shared.ErrForbidden)
+	if !errors.Is(err, repository.ErrForbidden) {
+		t.Fatalf("ClaimSessionOwnership() error = %v, want %v", err, repository.ErrForbidden)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("未充足の SQL 期待: %v", err)
@@ -90,8 +90,8 @@ func TestClaimSessionOwnership_MissingValidationWithOtherUserMessageIsForbidden(
 	mock.ExpectRollback()
 
 	err := repo.ClaimSessionOwnership(sessionID, requestingUserID)
-	if !errors.Is(err, shared.ErrForbidden) {
-		t.Fatalf("ClaimSessionOwnership() error = %v, want %v", err, shared.ErrForbidden)
+	if !errors.Is(err, repository.ErrForbidden) {
+		t.Fatalf("ClaimSessionOwnership() error = %v, want %v", err, repository.ErrForbidden)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("未充足の SQL 期待: %v", err)
@@ -136,8 +136,8 @@ func TestClaimSessionOwnership_OtherUserCannotClaimOwnedSession(t *testing.T) {
 	mock.ExpectRollback()
 
 	err := repo.ClaimSessionOwnership(sessionID, requestingUserID)
-	if !errors.Is(err, shared.ErrForbidden) {
-		t.Fatalf("ClaimSessionOwnership() error = %v, want %v", err, shared.ErrForbidden)
+	if !errors.Is(err, repository.ErrForbidden) {
+		t.Fatalf("ClaimSessionOwnership() error = %v, want %v", err, repository.ErrForbidden)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("未充足の SQL 期待: %v", err)
@@ -201,7 +201,7 @@ func TestClaimSessionOwnership_DuplicateInsertReloadsOwner(t *testing.T) {
 		{
 			name:       "別ユーザーが先に所有者になった場合はForbidden",
 			existingID: otherUserID,
-			wantErr:    shared.ErrForbidden,
+			wantErr:    repository.ErrForbidden,
 		},
 		{
 			name:       "同じユーザーが先に所有者になった場合は成功",
