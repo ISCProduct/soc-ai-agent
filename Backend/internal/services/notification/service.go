@@ -39,6 +39,7 @@ type Notifier interface {
 type Store interface {
 	Create(n *models.Notification) error
 	ListForUser(userID uint, limit int, beforeID uint) ([]models.Notification, error)
+	ListUnreadForUser(userID uint, limit int, excludeKinds []string) ([]models.Notification, error)
 	UnreadCount(userID uint) (int64, error)
 	MarkRead(userID, id uint, at time.Time) (int64, error)
 	MarkAllRead(userID uint, at time.Time) error
@@ -99,6 +100,14 @@ func (s *Service) List(userID uint, limit int, beforeID uint) ([]models.Notifica
 	return s.store.ListForUser(userID, limit, beforeID)
 }
 
+// ListUnread は本人の未読だけを新しい順に返す。excludeKinds の種類は除く。
+func (s *Service) ListUnread(userID uint, limit int, excludeKinds []string) ([]models.Notification, error) {
+	if limit <= 0 || limit > MaxListLimit {
+		limit = MaxListLimit
+	}
+	return s.store.ListUnreadForUser(userID, limit, excludeKinds)
+}
+
 // UnreadCount は本人の未読の件数を返す。
 func (s *Service) UnreadCount(userID uint) (int64, error) {
 	return s.store.UnreadCount(userID)
@@ -138,10 +147,7 @@ func (s *Service) NotifyUpcomingSchedules() {
 		return
 	}
 	for _, ev := range events {
-		title := strings.TrimSpace(ev.Title)
-		if title == "" {
-			title = "予定"
-		}
+		title := scheduleLabel(ev)
 		s.Notify(Notice{
 			UserID:    ev.UserID,
 			Kind:      models.NotificationKindDeadline,
@@ -151,6 +157,25 @@ func (s *Service) NotifyUpcomingSchedules() {
 			DedupeKey: fmt.Sprintf("schedule:%d:%d", ev.ID, ev.ScheduledAt.Unix()),
 		})
 	}
+}
+
+// scheduleLabel は予定の見出し。タイトルは任意入力なので、空なら会社名と選考段階で補う
+// （ICS 出力と同じ考え方。同じ日に複数の予定があっても区別できるように）。
+func scheduleLabel(ev models.ScheduleEvent) string {
+	if t := strings.TrimSpace(ev.Title); t != "" {
+		return t
+	}
+	parts := make([]string, 0, 2)
+	if c := strings.TrimSpace(ev.CompanyName); c != "" {
+		parts = append(parts, c)
+	}
+	if st := strings.TrimSpace(string(ev.Stage)); st != "" {
+		parts = append(parts, st)
+	}
+	if len(parts) == 0 {
+		return "予定"
+	}
+	return strings.Join(parts, " ")
 }
 
 var jst = func() *time.Location {

@@ -21,7 +21,14 @@ import {
 } from '@/lib/teacher-guidance'
 import { NextActionsBar } from '@/components/home/NextActionsBar'
 import { NoticeStack, type Notice } from '@/components/home/NoticeStack'
-import { fetchNotifications, markNotificationRead, safeNotificationLink, type AppNotification } from '@/lib/notifications'
+import {
+  NOTIFICATIONS_CHANGED_EVENT,
+  emitNotificationsChanged,
+  fetchUnreadNotifications,
+  markNotificationRead,
+  safeNotificationLink,
+  type AppNotification,
+} from '@/lib/notifications'
 import { AIBudgetNotice } from '@/components/home/AIBudgetNotice'
 import styles from './page.module.css'
 
@@ -40,6 +47,23 @@ export default function PageContent() {
   const [dismissingIds, setDismissingIds] = useState<Set<number>>(() => new Set())
   // 未読のアプリ内通知（#2033）。先生の案内は上の案内として出しているので除く
   const [appNotices, setAppNotices] = useState<AppNotification[]>([])
+  const [appNoticesLoadFailed, setAppNoticesLoadFailed] = useState(false)
+  const [appNoticeError, setAppNoticeError] = useState('')
+
+  // 未読の通知を取る。取得に失敗したら「通知なし」とは見せず、再読み込みできるようにする（先生の案内と同じ扱い）
+  const loadAppNotices = useCallback(() => {
+    setAppNoticesLoadFailed(false)
+    fetchUnreadNotifications(10, ['guidance'])
+      .then((rows) => setAppNotices(rows))
+      .catch(() => setAppNoticesLoadFailed(true))
+  }, [])
+
+  // ヘッダのベルで既読にしたら、ホームのお知らせも取り直す
+  useEffect(() => {
+    const onChanged = () => loadAppNotices()
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onChanged)
+    return () => window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onChanged)
+  }, [loadAppNotices])
 
   // 教員案内の取得失敗はホームを壊さないが、「案内なし」とは見せない（#1691）。
   // 失敗を黙ると、教員が送った指導が届いていないことに学生が気づけない。
@@ -78,18 +102,20 @@ export default function PageContent() {
         // 履歴書状態の取得失敗はホーム画面を壊さない（バナーを出さない）
       })
     loadGuidances()
-    fetchNotifications(10)
-      .then(({ notifications }) => setAppNotices(notifications.filter((n) => !n.read_at && n.kind !== 'guidance')))
-      .catch(() => {
-        // 通知はヘッダのベルからも見られるので、取得失敗でホームを壊さない
-      })
-  }, [router, loadGuidances])
+    loadAppNotices()
+  }, [router, loadGuidances, loadAppNotices])
 
+  // 既読にできなかったら、消した通知を戻して知らせる（成功したように見せない）
   const dismissAppNotice = (id: number) => {
+    const target = appNotices.find((n) => n.id === id)
     setAppNotices((prev) => prev.filter((n) => n.id !== id))
-    markNotificationRead(id).catch(() => {
-      // 既読にできなくても次回また出るだけなので、画面は止めない
-    })
+    setAppNoticeError('')
+    markNotificationRead(id)
+      .then(() => emitNotificationsChanged())
+      .catch(() => {
+        if (target) setAppNotices((prev) => (prev.some((n) => n.id === id) ? prev : [target, ...prev]))
+        setAppNoticeError('お知らせを既読にできませんでした。通信状況を確認して、もう一度お試しください')
+      })
   }
 
   const dismissWhatsNewBanner = () => {
@@ -186,6 +212,30 @@ export default function PageContent() {
           >
             履歴書を確認する
           </MuiLink>
+        </Alert>
+      ),
+    })
+  }
+  if (appNoticesLoadFailed) {
+    notices.push({
+      key: 'notifications-load-failed',
+      node: (
+        <Alert
+          severity="error"
+          sx={{ borderRadius: 0 }}
+          action={<Button color="inherit" size="small" onClick={loadAppNotices}>再読み込み</Button>}
+        >
+          お知らせ（選考・スカウト・予定）を読み込めませんでした。通信状況を確認して再読み込みしてください
+        </Alert>
+      ),
+    })
+  }
+  if (appNoticeError) {
+    notices.push({
+      key: 'notifications-error',
+      node: (
+        <Alert severity="error" onClose={() => setAppNoticeError('')} sx={{ borderRadius: 0 }}>
+          {appNoticeError}
         </Alert>
       ),
     })

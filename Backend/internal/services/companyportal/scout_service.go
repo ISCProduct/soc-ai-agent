@@ -288,16 +288,7 @@ func (s *ScoutService) Send(companyID, companyUserID uint, in SendScoutInput) (*
 		return &SendScoutResult{RemainingMs: remaining.Milliseconds()}, ErrScoutCooldown
 	}
 
-	if s.mailer != nil && student.Email != "" && !student.IsGuest {
-		appURL := s.appURL
-		if appURL == "" {
-			appURL = "http://localhost:3000"
-		}
-		if err := s.mailer.SendScoutOfferEmail(student.Email, student.Name, company.Name, message, appURL); err != nil {
-			log.Printf("[ScoutService] メール送信失敗 scout_id=%d: %v", scout.ID, err)
-		}
-	}
-
+	// アプリ内通知はメールより先に作る。メール送信（SMTP）が応答しないと、通知まで届かなくなるため（#2033）
 	if s.notifier != nil {
 		s.notifier.Notify(notification.Notice{
 			UserID:    in.UserID,
@@ -307,6 +298,16 @@ func (s *ScoutService) Send(companyID, companyUserID uint, in SendScoutInput) (*
 			Link:      "/scout",
 			DedupeKey: fmt.Sprintf("scout:%d", scout.ID),
 		})
+	}
+
+	if s.mailer != nil && student.Email != "" && !student.IsGuest {
+		appURL := s.appURL
+		if appURL == "" {
+			appURL = "http://localhost:3000"
+		}
+		if err := s.mailer.SendScoutOfferEmail(student.Email, student.Name, company.Name, message, appURL); err != nil {
+			log.Printf("[ScoutService] メール送信失敗 scout_id=%d: %v", scout.ID, err)
+		}
 	}
 
 	return &SendScoutResult{Scout: scout}, nil

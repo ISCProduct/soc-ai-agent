@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
@@ -20,6 +21,7 @@ import (
 // Service はコントローラが使う通知の操作（notificationsvc.Service が満たす）。
 type Service interface {
 	List(userID uint, limit int, beforeID uint) ([]models.Notification, error)
+	ListUnread(userID uint, limit int, excludeKinds []string) ([]models.Notification, error)
 	UnreadCount(userID uint) (int64, error)
 	MarkRead(userID, id uint) error
 	MarkAllRead(userID uint) error
@@ -41,7 +43,8 @@ func currentUser(ctx echo.Context) (uint, error) {
 	return id, nil
 }
 
-// List は本人の通知を新しい順に返す。GET /api/notifications?limit=&before_id=
+// List は本人の通知を新しい順に返す。GET /api/notifications?limit=&before_id=&unread=1&exclude_kind=guidance
+// unread=1 のときは未読だけを返す（exclude_kind で種類を除ける。ホームのお知らせ用）。
 func (c *Controller) List(ctx echo.Context) error {
 	userID, err := currentUser(ctx)
 	if err != nil {
@@ -56,7 +59,18 @@ func (c *Controller) List(ctx echo.Context) error {
 		}
 		beforeID = uint(v)
 	}
-	rows, err := c.svc.List(userID, limit, beforeID)
+	var rows []models.Notification
+	if ctx.QueryParam("unread") == "1" {
+		var exclude []string
+		for _, k := range ctx.QueryParams()["exclude_kind"] {
+			if k = strings.TrimSpace(k); k != "" {
+				exclude = append(exclude, k)
+			}
+		}
+		rows, err = c.svc.ListUnread(userID, limit, exclude)
+	} else {
+		rows, err = c.svc.List(userID, limit, beforeID)
+	}
 	if err != nil {
 		return httpapi.InternalError(err)
 	}

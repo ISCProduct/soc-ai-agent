@@ -23,7 +23,9 @@ import { authService } from '@/lib/auth'
 import { shouldShowStudentBottomNav } from '@/lib/sidebar-nav'
 import { useInterviewSessionActive } from '@/app/interview/sessionChrome'
 import {
+  NOTIFICATIONS_CHANGED_EVENT,
   NOTIFICATION_KIND_LABELS,
+  emitNotificationsChanged,
   fetchNotifications,
   fetchUnreadCount,
   markAllNotificationsRead,
@@ -34,6 +36,8 @@ import {
 
 /** 未読の件数を見直す間隔。ページを開いたまま新しい通知に気づけるようにする。 */
 const POLL_INTERVAL_MS = 60_000
+/** 一覧で一度に読む件数。 */
+const PAGE_SIZE = 20
 
 function formatTime(iso: string): string {
   const d = new Date(iso)
@@ -55,6 +59,8 @@ export function NotificationBell() {
   const [items, setItems] = useState<AppNotification[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   const visible = loggedIn && !interviewSessionActive && (pathname === '/' || shouldShowStudentBottomNav(pathname))
 
@@ -89,8 +95,9 @@ export function NotificationBell() {
     setLoading(true)
     setError('')
     try {
-      const data = await fetchNotifications()
+      const data = await fetchNotifications(PAGE_SIZE)
       setItems(data.notifications)
+      setHasMore(data.notifications.length === PAGE_SIZE)
       setUnread(data.unread_count)
     } catch {
       setError('通知を読み込めませんでした')
@@ -98,6 +105,35 @@ export function NotificationBell() {
       setLoading(false)
     }
   }, [])
+
+  // 21件目より古い通知も確認できるようにする（新しい分だけ既読にしても、古い未読に届くように）
+  const loadMore = async () => {
+    const last = items[items.length - 1]
+    if (!last) return
+    setLoadingMore(true)
+    setError('')
+    try {
+      const data = await fetchNotifications(PAGE_SIZE, last.id)
+      setItems((prev) => [...prev, ...data.notifications.filter((n) => !prev.some((p) => p.id === n.id))])
+      setHasMore(data.notifications.length === PAGE_SIZE)
+      setUnread(data.unread_count)
+    } catch {
+      setError('通知を読み込めませんでした')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  // ホームのお知らせで既読にしたら、バッジ（と開いている一覧）も取り直す
+  useEffect(() => {
+    if (!visible) return
+    const onChanged = () => {
+      void refreshCount()
+      if (anchor) void loadList()
+    }
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onChanged)
+    return () => window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onChanged)
+  }, [visible, anchor, refreshCount, loadList])
 
   const open = (e: MouseEvent<HTMLElement>) => {
     setAnchor(e.currentTarget)
@@ -108,7 +144,9 @@ export function NotificationBell() {
     if (!n.read_at) {
       setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)))
       setUnread((u) => Math.max(0, u - 1))
-      markNotificationRead(n.id).catch(() => void refreshCount())
+      markNotificationRead(n.id)
+        .then(() => emitNotificationsChanged())
+        .catch(() => void refreshCount())
     }
     const link = safeNotificationLink(n.link)
     if (link) {
@@ -122,6 +160,7 @@ export function NotificationBell() {
       await markAllNotificationsRead()
       setItems((prev) => prev.map((x) => (x.read_at ? x : { ...x, read_at: new Date().toISOString() })))
       setUnread(0)
+      emitNotificationsChanged()
     } catch {
       setError('既読にできませんでした。もう一度お試しください')
     }
@@ -208,6 +247,13 @@ export function NotificationBell() {
               </ListItemButton>
             ))}
           </List>
+        )}
+        {items.length > 0 && hasMore && (
+          <Box sx={{ textAlign: 'center', py: 1 }}>
+            <Button size="small" onClick={() => void loadMore()} disabled={loadingMore}>
+              {loadingMore ? '読み込み中…' : 'さらに読み込む'}
+            </Button>
+          </Box>
         )}
       </Popover>
     </>

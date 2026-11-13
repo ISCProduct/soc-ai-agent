@@ -10,9 +10,12 @@ export async function GET(request: NextRequest) {
   try {
     const qs = new URL(request.url).searchParams
     const params = new URLSearchParams()
-    for (const key of ['limit', 'before_id']) {
+    for (const key of ['limit', 'before_id', 'unread']) {
       const v = qs.get(key)
       if (v) params.set(key, v)
+    }
+    for (const kind of qs.getAll('exclude_kind')) {
+      if (kind) params.append('exclude_kind', kind)
     }
     const res = await fetch(`${BACKEND_URL}/api/notifications${params.size ? `?${params}` : ''}`, {
       headers: { ...extractUserAuthHeaders(request) },

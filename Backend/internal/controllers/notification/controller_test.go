@@ -21,10 +21,17 @@ type fakeService struct {
 	readUser uint
 	readID   uint
 	readErr  error
+
+	unreadExclude []string
 }
 
 func (f *fakeService) List(userID uint, limit int, beforeID uint) ([]models.Notification, error) {
 	f.listUser = userID
+	return nil, nil
+}
+func (f *fakeService) ListUnread(userID uint, limit int, excludeKinds []string) ([]models.Notification, error) {
+	f.listUser = userID
+	f.unreadExclude = excludeKinds
 	return nil, nil
 }
 func (f *fakeService) UnreadCount(userID uint) (int64, error) { return 3, nil }
@@ -86,5 +93,16 @@ func TestMarkRead(t *testing.T) {
 	var he *echo.HTTPError
 	if err := NewController(svc).MarkRead(ctx); !errors.As(err, &he) || he.Code != http.StatusNotFound {
 		t.Fatalf("err = %v, want 404", err)
+	}
+}
+
+func TestList_未読だけを種類を除いて返す(t *testing.T) {
+	svc := &fakeService{}
+	ctx, _ := newCtx(http.MethodGet, "/api/notifications?unread=1&exclude_kind=guidance", 7)
+	if err := NewController(svc).List(ctx); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if svc.listUser != 7 || len(svc.unreadExclude) != 1 || svc.unreadExclude[0] != "guidance" {
+		t.Fatalf("user=%d exclude=%v", svc.listUser, svc.unreadExclude)
 	}
 }

@@ -45,6 +45,26 @@ func (m *memStore) ListForUser(userID uint, limit int, beforeID uint) ([]models.
 	return out, nil
 }
 
+func (m *memStore) ListUnreadForUser(userID uint, limit int, excludeKinds []string) ([]models.Notification, error) {
+	var out []models.Notification
+	for i := len(m.rows) - 1; i >= 0 && len(out) < limit; i-- {
+		r := m.rows[i]
+		if r.UserID != userID || r.ReadAt != nil {
+			continue
+		}
+		skip := false
+		for _, k := range excludeKinds {
+			if r.Kind == k {
+				skip = true
+			}
+		}
+		if !skip {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
 func (m *memStore) UnreadCount(userID uint) (int64, error) {
 	var n int64
 	for _, r := range m.rows {
@@ -169,5 +189,41 @@ func TestApplicationStatusNotice(t *testing.T) {
 		if _, ok := ApplicationStatusNotice(3, 10, st, ""); ok {
 			t.Fatalf("%s は学生自身の操作なので知らせない", st)
 		}
+	}
+}
+
+// 予定のタイトルは任意入力。空なら会社名と選考段階で補い、同じ日の予定を区別できるようにする。
+func TestScheduleLabel(t *testing.T) {
+	tests := []struct {
+		ev   models.ScheduleEvent
+		want string
+	}{
+		{models.ScheduleEvent{Title: " A社 説明会 ", CompanyName: "A社"}, "A社 説明会"},
+		{models.ScheduleEvent{CompanyName: "B社", Stage: models.StageFirst}, "B社 1次面接"},
+		{models.ScheduleEvent{CompanyName: "C社"}, "C社"},
+		{models.ScheduleEvent{}, "予定"},
+	}
+	for _, tt := range tests {
+		if got := scheduleLabel(tt.ev); got != tt.want {
+			t.Errorf("scheduleLabel(%+v) = %q, want %q", tt.ev, got, tt.want)
+		}
+	}
+}
+
+// ホームのお知らせ用に、未読だけを（種類を除いて）取れる。新しい既読が多くても、古い未読を取りこぼさない。
+func TestListUnread(t *testing.T) {
+	store := &memStore{}
+	s := NewService(store)
+	s.Notify(Notice{UserID: 1, Kind: models.NotificationKindApplication, Title: "古い未読の選考結果"})
+	for i := 0; i < 12; i++ {
+		s.Notify(Notice{UserID: 1, Kind: models.NotificationKindGuidance, Title: "先生の案内"})
+	}
+	_ = s.MarkAllRead(2)
+	got, err := s.ListUnread(1, 10, []string{models.NotificationKindGuidance})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(got) != 1 || got[0].Title != "古い未読の選考結果" {
+		t.Fatalf("未読 = %+v", got)
 	}
 }

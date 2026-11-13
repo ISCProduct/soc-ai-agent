@@ -31,15 +31,18 @@ const LIST = {
 }
 
 let calls: { url: string; method: string }[] = []
+let allRead = false
 beforeEach(() => {
   storedUser = { is_admin: false }
   calls = []
+  allRead = false
   push.mockReset()
   global.fetch = jest.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url)
     calls.push({ url: u, method: init?.method ?? 'GET' })
-    if (u.includes('unread-count')) return { ok: true, status: 200, json: async () => ({ unread_count: 2 }) }
-    if (u.startsWith('/api/notifications?')) return { ok: true, status: 200, json: async () => LIST }
+    if (u.includes('read-all')) allRead = true
+    if (u.includes('unread-count')) return { ok: true, status: 200, json: async () => ({ unread_count: allRead ? 0 : 2 }) }
+    if (u.startsWith('/api/notifications?')) return { ok: true, status: 200, json: async () => (allRead ? { ...LIST, unread_count: 0 } : LIST) }
     return { ok: true, status: 204, json: async () => ({}) }
   }) as unknown as typeof fetch
 })
@@ -86,4 +89,26 @@ test('管理者には出さない', () => {
   storedUser = { is_admin: true }
   render(<NotificationBell />)
   expect(screen.queryByRole('button', { name: /通知/ })).not.toBeInTheDocument()
+})
+
+test('20件を超える通知は「さらに読み込む」で古い分を続けて読む', async () => {
+  const page = (from: number) => Array.from({ length: 20 }, (_, i) => ({
+    id: from - i, kind: 'deadline', title: `予定${from - i}`, body: '', link: '/schedule', read_at: null, created_at: '2026-11-11T03:00:00Z',
+  }))
+  global.fetch = jest.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(url)
+    calls.push({ url: u, method: init?.method ?? 'GET' })
+    if (u.includes('unread-count')) return { ok: true, status: 200, json: async () => ({ unread_count: 25 }) }
+    if (u.includes('before_id=21')) return { ok: true, status: 200, json: async () => ({ unread_count: 25, notifications: page(20).slice(0, 5) }) }
+    return { ok: true, status: 200, json: async () => ({ unread_count: 25, notifications: page(40) }) }
+  }) as unknown as typeof fetch
+
+  render(<NotificationBell />)
+  fireEvent.click(await screen.findByRole('button', { name: '通知（未読 25 件）' }))
+  await screen.findByText('予定21')
+  fireEvent.click(screen.getByRole('button', { name: 'さらに読み込む' }))
+  expect(await screen.findByText('予定16')).toBeInTheDocument()
+  expect(calls.some((c) => c.url.includes('before_id=21'))).toBe(true)
+  // 最後のページ（20件未満）を読んだら、ボタンを出さない
+  expect(screen.queryByRole('button', { name: 'さらに読み込む' })).not.toBeInTheDocument()
 })

@@ -33,7 +33,19 @@ func (r *NotificationRepository) Create(n *models.Notification) error {
 
 // ListForUser は新しい順に最大 limit 件を返す。beforeID が0より大きければ、それより古いものだけ（続きの読み込み）。
 func (r *NotificationRepository) ListForUser(userID uint, limit int, beforeID uint) ([]models.Notification, error) {
-	q := r.db.Where("user_id = ?", userID)
+	return r.list(r.db.Where("user_id = ?", userID), limit, beforeID)
+}
+
+// ListUnreadForUser は未読だけを新しい順に最大 limit 件返す。excludeKinds の種類は除く（ホームのお知らせ用）。
+func (r *NotificationRepository) ListUnreadForUser(userID uint, limit int, excludeKinds []string) ([]models.Notification, error) {
+	q := r.db.Where("user_id = ? AND read_at IS NULL", userID)
+	if len(excludeKinds) > 0 {
+		q = q.Where("kind NOT IN ?", excludeKinds)
+	}
+	return r.list(q, limit, 0)
+}
+
+func (r *NotificationRepository) list(q *gorm.DB, limit int, beforeID uint) ([]models.Notification, error) {
 	if beforeID > 0 {
 		q = q.Where("id < ?", beforeID)
 	}

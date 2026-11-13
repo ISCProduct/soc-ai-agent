@@ -1764,6 +1764,8 @@ paths:
       parameters:
         - { in: query, name: limit, schema: { type: integer, maximum: 50 } }
         - { in: query, name: before_id, description: この ID より古い通知だけ返す（続きの読み込み）, schema: { type: integer } }
+        - { in: query, name: unread, description: 1 なら未読だけを返す（ホームのお知らせ用。before_id は使わない）, schema: { type: string, enum: ["1"] } }
+        - { in: query, name: exclude_kind, description: unread=1 のとき、除く種類（複数可）, schema: { type: array, items: { type: string } }, style: form, explode: true }
       responses:
         "200":
           description: 一覧と未読の件数
