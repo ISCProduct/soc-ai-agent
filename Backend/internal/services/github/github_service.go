@@ -16,6 +16,7 @@ const (
 	// レート制限リトライ: 最大2回
 	maxRetries = 2
 	// プロンプトバージョン（#457）。v4: リポジトリ名と README を囲みの見出しの下に移した（#2174）
+	// 要約のキャッシュの行に保存し、この値と違う行は作り直す（#2185）。プロンプトを変えたら上げること。
 	repoSummaryPromptVersion = "v4"
 )
 
@@ -70,7 +71,7 @@ func (s *GitHubService) GetLanguageStats(userID uint) ([]models.GitHubLanguageSt
 	return s.githubRepo.GetLanguageStats(userID)
 }
 
-// ListRepoSummaries DBからAI要約一覧を取得する
+// ListRepoSummaries DBからAI要約一覧を取得する。今のプロンプトの版で作られたものだけを返す（#2185）。
 func (s *GitHubService) ListRepoSummaries(userID uint) ([]models.GitHubRepoSummary, error) {
-	return s.githubRepo.ListRepoSummaries(userID)
+	return s.githubRepo.ListRepoSummaries(userID, repoSummaryPromptVersion)
 }

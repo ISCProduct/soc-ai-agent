@@ -53,6 +53,9 @@ type GitHubRepoSummary struct {
 	TechReason  string `gorm:"type:text"`                                   // 技術選定の理由
 	Challenge   string `gorm:"type:text"`                                   // 解決した課題
 	Achievement string `gorm:"type:text"`                                   // 成果
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// 要約を作ったプロンプトの版（#2185）。今の版と違えばキャッシュとして使わない。
+	// 空文字は版を記録する前（000069 より前）に作られた行。
+	PromptVersion string `gorm:"size:32;not null;default:''"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
