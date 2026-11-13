@@ -86,6 +86,53 @@ func TestStudentAnalysisService_GetAnalysis_NotVisibleWithoutConsent(t *testing.
 	assert.ErrorIs(t, err, ErrStudentNotVisible)
 }
 
+type stubIdentity struct {
+	revealed bool
+	err      error
+}
+
+func (s stubIdentity) IdentityRevealed(uint, uint) (bool, error) {
+	return s.revealed, s.err
+}
+
+func TestStudentAnalysisService_GetAnalysis_承諾前は氏名を返さない(t *testing.T) {
+	db, mock := newMockDB(t)
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `company_ownerships`").
+		WithArgs(uint(2), uint(10)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	svc := NewStudentAnalysisService(
+		db,
+		&stubUserRepo{user: &entity.User{ID: 5, Name: "山田太郎", AllowScoutVisibility: true, Role: "student"}},
+		&stubCrossFeature{profile: &flywheel.UserIntegratedProfile{UserID: 5}},
+		nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
+	)
+	svc.SetIdentityRevealer(stubIdentity{revealed: false})
+
+	resp, err := svc.GetAnalysis(2, 10, 5)
+	require.NoError(t, err)
+	assert.Empty(t, resp.Name)
+}
+
+func TestStudentAnalysisService_GetAnalysis_承諾後は氏名を返す(t *testing.T) {
+	db, mock := newMockDB(t)
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `company_ownerships`").
+		WithArgs(uint(2), uint(10)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	svc := NewStudentAnalysisService(
+		db,
+		&stubUserRepo{user: &entity.User{ID: 5, Name: "山田太郎", AllowScoutVisibility: true, Role: "student"}},
+		&stubCrossFeature{profile: &flywheel.UserIntegratedProfile{UserID: 5}},
+		nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
+	)
+	svc.SetIdentityRevealer(stubIdentity{revealed: true})
+
+	resp, err := svc.GetAnalysis(2, 10, 5)
+	require.NoError(t, err)
+	assert.Equal(t, "山田太郎", resp.Name)
+}
+
 func TestStudentAnalysisService_GetAnalysis_Success(t *testing.T) {
 	db, mock := newMockDB(t)
 	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `company_ownerships`").
@@ -211,7 +258,8 @@ func TestStudentAnalysisService_GetAnalysisForVisibleStudent_AppliesFullGuard(t 
 				&stubCrossFeature{profile: &flywheel.UserIntegratedProfile{UserID: 5}},
 				nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
 			)
-			resp, err := svc.GetAnalysisForVisibleStudent(5)
+			svc.SetIdentityRevealer(stubIdentity{revealed: true})
+			resp, err := svc.GetAnalysisForVisibleStudent(10, 5)
 			if tt.wantErr {
 				assert.ErrorIs(t, err, ErrStudentNotVisible)
 				assert.Nil(t, resp)
@@ -219,7 +267,7 @@ func TestStudentAnalysisService_GetAnalysisForVisibleStudent_AppliesFullGuard(t 
 			}
 			require.NoError(t, err)
 			assert.Equal(t, uint(5), resp.UserID)
-			assert.Equal(t, "山田太郎", resp.Name, "企業の学生詳細で氏名を出せるようにする")
+			assert.Equal(t, "山田太郎", resp.Name, "承諾済みなら企業の学生詳細で氏名を出す")
 		})
 	}
 }
