@@ -126,8 +126,12 @@ LIVE2D_ASSETS_BUCKET ?= soc-build-assets-508897596159
 
 live2d-up:
 	LIVE2D_ASSETS_BUCKET=$(LIVE2D_ASSETS_BUCKET) ./automation/ops/fetch-live2d-assets.sh
-	@grep -qs '^NEXT_PUBLIC_LIVE2D_ENABLED=' frontend/.env.local \
-		|| printf '\n# Live2D面接官を有効にする（make live2d-up が追記）\nNEXT_PUBLIC_LIVE2D_ENABLED=true\n' >> frontend/.env.local
+	@# 既存行が false でも true に直す。無いときだけ追記すると、一度無効にした .env.local では面接官が Avatar2D のままになる。
+	@if [ -f frontend/.env.local ] && grep -qs '^NEXT_PUBLIC_LIVE2D_ENABLED=' frontend/.env.local; then \
+		sed -i.bak 's/^NEXT_PUBLIC_LIVE2D_ENABLED=.*/NEXT_PUBLIC_LIVE2D_ENABLED=true/' frontend/.env.local && rm -f frontend/.env.local.bak; \
+	else \
+		printf '\n# Live2D面接官を有効にする（make live2d-up が追記）\nNEXT_PUBLIC_LIVE2D_ENABLED=true\n' >> frontend/.env.local; \
+	fi
 	@grep -n '^NEXT_PUBLIC_LIVE2D_ENABLED=' frontend/.env.local
 	cd frontend && npm run check:live2d -- public/live2d/interviewers/male
 	cd frontend && npm run check:live2d -- public/live2d/interviewers/female

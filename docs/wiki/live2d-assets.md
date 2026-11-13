@@ -93,7 +93,8 @@ s3://soc-build-assets-508897596159/live2d-authoring/
   frontend/public/live2d/interviewers/cubism-input/{male,female}/...
 ```
 
-キーはリポジトリ相対のパスです。ルートへ sync すれば各ファイルが本来の場所へ戻ります。
+キーはリポジトリ相対のパスです。取得スクリプトはルート全体ではなく、上記3ディレクトリ
+だけを同期します（想定外のキーで追跡ファイルを上書きしないため）。
 
 ### 取ってくる
 
@@ -105,17 +106,22 @@ make live2d-authoring
 
 ### 描き直したあと
 
-Cubism プロジェクトと、そこから書き出した実行時モデルは、置き場所が違います。
-**両方を上げてください。**
+Cubism プロジェクト・元絵・取り込み用 PNG と、そこから書き出した実行時モデルは
+置き場所が違います。**制作用も実行時も上げてください。**
 
 ```bash
-# 1. プロジェクトと元絵（制作用）
+# 1. 制作用（プロジェクト / 元絵 / 取り込み用 PNG）
 aws s3 sync ./docs/avatar/live2d-interviewers/cubism-wip/ \
   s3://soc-build-assets-508897596159/live2d-authoring/docs/avatar/live2d-interviewers/cubism-wip/
+aws s3 sync ./frontend/public/live2d/interviewers/source/ \
+  s3://soc-build-assets-508897596159/live2d-authoring/frontend/public/live2d/interviewers/source/
+aws s3 sync ./frontend/public/live2d/interviewers/cubism-input/ \
+  s3://soc-build-assets-508897596159/live2d-authoring/frontend/public/live2d/interviewers/cubism-input/
 
 # 2. 書き出した実行時モデル（これが本番で配られる）
 aws s3 sync ./frontend/public/live2d/interviewers/female/ \
   s3://soc-build-assets-508897596159/live2d/interviewers/female/
+# 男性を直したときも同様に interviewers/male/ を上げる
 ```
 
 バケットはバージョニング有効なので、上書きしても前の版は残ります。
@@ -144,7 +150,7 @@ make live2d-up
    （バケットへの読み取り権限がある場合）。権限が無ければここで失敗するので、その場合は
    SDK の `Core/live2dcubismcore.min.js` を `frontend/public/live2d/core/` に、モデルを
    `frontend/public/live2d/interviewers/{male,female}/` に、それぞれ別途受け取って置きます。
-2. `frontend/.env.local` に `NEXT_PUBLIC_LIVE2D_ENABLED=true` が無ければ追記する（既にあれば触らない）。
+2. `frontend/.env.local` の `NEXT_PUBLIC_LIVE2D_ENABLED` を `true` にする（無ければ追記、既存が `false` でも書き換える）。
 3. 男女のモデルが面接官の要件を満たすか検査する。
 
 ```bash

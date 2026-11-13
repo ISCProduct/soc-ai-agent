@@ -12,8 +12,9 @@
 #   そのため制作用は live2d-authoring/ に分けてある。
 #
 # 使い方: ./automation/ops/fetch-live2d-authoring.sh
-#   リポジトリのルートで実行する。S3 にはリポジトリ相対のパスで入っているので、
-#   ルートへ sync すれば各ファイルが本来の場所へ戻る。
+#   リポジトリのルートで実行する。S3 のキーはリポジトリ相対だが、ルート全体へ
+#   sync すると想定外のキーで追跡ファイルを上書きしうるので、既知の3ディレクトリ
+#   だけを同期する。
 #   バケットは LIVE2D_ASSETS_BUCKET（未指定ならエラー）
 set -euo pipefail
 
@@ -27,8 +28,18 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-# --delete は付けない。宛先は作業コピーのルートで、消すと無関係なファイルまで巻き込む。
-aws s3 sync "s3://$BUCKET/live2d-authoring/" . --only-show-errors
+# 既知の制作用ディレクトリだけを同期する。ルート全体 sync だと、
+# live2d-authoring/Makefile などが入っていたときに作業コピーを上書きする。
+# --delete は付けない。ローカルだけの作業ファイルまで消さないため。
+pairs=(
+  "docs/avatar/live2d-interviewers/cubism-wip"
+  "frontend/public/live2d/interviewers/source"
+  "frontend/public/live2d/interviewers/cubism-input"
+)
+for rel in "${pairs[@]}"; do
+  mkdir -p "$rel"
+  aws s3 sync "s3://$BUCKET/live2d-authoring/$rel/" "$rel/" --only-show-errors
+done
 
 required=(
   "docs/avatar/live2d-interviewers/cubism-wip/male-interviewer.cmo3"
