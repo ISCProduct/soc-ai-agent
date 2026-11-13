@@ -90,25 +90,25 @@ error が黒なのは色覚セーフ配色のため。**色だけで状態を伝
 ### 5.1 チャット（診断）— `/`（`app/page-content.tsx` → `components/mui-chat/`）
 - 構成: ChatHeader / ChatMessageList（`role="log"`・`aria-live="polite"`）/ ChatInputBar（選択肢は `role="group"`、送信は `aria-label` 付き、入力と音声ボタンは 44px）
 - Loading: メッセージ領域の Skeleton。エージェント入力中は TypingIndicator（`role="status"`）
-- Empty: 初回は挨拶と、次に答えやすい候補チップ（`EmptyState` の action 枠）
+- Empty: 初回は `EmptyState`（`dense`）で「まだ回答がありません」+ 次に何が起きるかの説明 + 候補チップ（action 枠）。挨拶は Empty には出さず、履歴0件の取得時にメッセージ（ログ）として入る（`hooks/useMuiChat.ts`・`utils.ts`）
 - Error: 履歴の読み込み失敗は `historyLoadError` で入力を無効化する。文言は次の操作つきにし、ログは消さない
-- モバイル: 入力バーと `StudentBottomNav` を重ねない。下余白は `components/common/BottomNavSpacer`（結果・履歴などで使用。チャットでの使用は未確認）
+- モバイル: 入力バーと `StudentBottomNav` を重ねない。下余白は、チャットは `BottomNavSpacer` を使わず `app/page.module.css` の `.mainContent` の `padding-bottom: 56px`（`min-width: 900px` で 0）で確保する。他の画面（結果・履歴など）は `components/common/BottomNavSpacer`
 
 ### 5.2 面接 — `/interview`（`app/interview/page-content.tsx`）
 - 状態遷移（`InterviewStatus`）: `selection` → `lobby` → `connecting` → `connected` → `finished`（途中 `error`）
 - 画面: SelectionScreen（企業・形式を選ぶ）/ LobbyScreen（カメラ・マイク確認）/ SessionScreen（面接中。暗い面 `night*`）/ ReportScreen（レポート）
 - 面接中は暗い面（`UI.night*`）。主操作の色は `UI.mark`。面接中は `StudentBottomNav` を隠す
-- Loading: `loading.tsx`（RouteLoading）。レポート生成中は文言付きの進捗（「レポートを生成中です…」）
+- Loading: `loading.tsx`（RouteLoading）。レポート生成中は文言付きの進捗（「レポートを生成中です...」。`ReportScreen`）
 - Empty: 面接履歴（`/interview/history`）が空の時は `EmptyState`（次の操作 = 面接を始める）
-- Error: 権限拒否・接続失敗は原因と次の操作（ブラウザ許可の手順 / 再接続）。`role="alert"`
+- Error: 権限拒否は LobbyScreen にブラウザ許可の手順つきで出す（`lobbyPermissionError`）。保存失敗は SessionScreen、レポート失敗は ReportScreen で `role="alert"`。原因と次の操作を添える
 - 注意: 1応答に 5〜7 秒かかる（運用メモ）。待ち時間は進行表示で埋め、無反応に見せない
 
 ### 5.3 結果（おすすめ企業）— `/results`（`app/results/`）
 - 構成: ヘッダー帯（見出し・件数）→ 企業の並び（順位・企業名・適合度・理由の先頭2文）→ 企業詳細
-- 適合度は単独の大きな数字にしない。候補全体の幅の中の位置で見せる（`scaleBand` / `positionInBand`）。理由文は `leadSentences`
-- Loading: `ResultsLoadingView`（`ListSkeleton` で確定後と同じ形を先に出す）
-- Empty: `ResultsEmptyView`（診断を進める導線 + 更新）。**「データがありません」で終わらせない**
-- Error: `ResultsErrorView`。何が起きたか + 再試行
+- 適合度は各行に数字（`matchScore`）で出す。候補全体の幅は `scaleBand` で求め、幅が15以下に収まるときだけ「順位の差はわずか」の注記を出す（`positionInBand` は定義のみで一覧では未使用）。理由文は `leadSentences`
+- Loading（現状）: `ResultsLoadingView`。`maxWidth: 960` の列に `ListSkeleton`（4行。各行は細い3本の線）を出す。確定後の一覧は `maxWidth: 1200`（`CONTENT_MAX_WIDTH`）で、行は罫線区切り（順位・企業名・適合度・理由・技術タグ・ボタン）のため、**確定後と同じ形ではない**（幅も行の構成もずれる）。標準形は「確定後と同じ幅・行構成の Skeleton」。モックでは標準形で描き、現状とのずれは「食い違い」に書く
+- Empty（現状の経路）: 0件のとき `useResultsData` が `error` に理由文（`buildEmptyRecommendationsMessage`）を入れるため、`page-content.tsx` では **`ResultsErrorView`** が出る（文言・再試行・チャットに戻る・やり直す）。`ResultsNoMatchView`（「適合する企業が見つかりませんでした」）は企業0件かつ error 無しの稀な経路だけ。`ResultsEmptyView` は `page-content.tsx` から使われておらず（テストのみ）、現状は画面に出ない。標準形は「診断を進める導線 + 更新」で、**「データがありません」で終わらせない**
+- Error: `ResultsErrorView`。何が起きたか + 再試行（ページ更新）・チャットに戻る・最初からやり直す
 - モバイル: 余白・文字サイズ・ボタン幅を `xs` / `sm` で切り替える（`ResultsListView`）。表は使わず縦に並べる。下余白は `BottomNavSpacer`
 
 ## 6. 状態・レスポンシブ・アクセシビリティの最低線
