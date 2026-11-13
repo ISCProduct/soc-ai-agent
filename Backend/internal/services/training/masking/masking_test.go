@@ -186,6 +186,10 @@ func TestMask_DictionaryVariants(t *testing.T) {
 		{"辞書が結合文字で本文が合成済み", Dictionary{KeyName: {"Jose\u0301"}}, "Jos\u00e9です", "<NAME>です"},
 		{"大文字の結合文字も小文字の合成済みと一致する", Dictionary{KeyName: {"\u00c9ric"}}, "E\u0301RICです", "<NAME>です"},
 		{"本文が結合文字の濁点", Dictionary{KeyName: {"ヤマダ"}}, "ヤマタ\u3099です", "<NAME>です"},
+		// #2232 のレビュー：ゼロ幅の文字が紛れても照合を切らない
+		{"ゼロ幅スペース", nameDict, "山\u200b田太郎です", "<NAME>です"},
+		{"ゼロ幅接合子", nameDict, "山田\u200d太郎です", "<NAME>です"},
+		{"BOM", nameDict, "\ufeff山田太郎です", "\ufeff<NAME>です"},
 		// 結合文字は基底文字と1つの単位なので、アクセントの無い名称が一致して結合文字だけが残ることはない。
 		{"アクセントの無い名称はアクセント付きの綴りに一致しない", Dictionary{KeyName: {"Jose"}}, "Jose\u0301です", "Jose\u0301です"},
 	}
@@ -306,6 +310,19 @@ func TestMask_Phone(t *testing.T) {
 		{"国番号付き・括弧の0", "+81(0)90-1234-5678", "<PHONE>"},
 		{"前後が日本語", "電話は09012345678まで", "電話は<PHONE>まで"},
 		{"番号のあとの空白と数字は取り込まない", "03-1234-5678 2名", "<PHONE> 2名"},
+		// #2232 のレビュー：ドット区切りと空白区切り（音声認識の結果で現実に出る）
+		{"固定・ドット区切り", "03.1234.5678です", "<PHONE>です"},
+		{"携帯・ドット区切り", "090.1234.5678", "<PHONE>"},
+		{"携帯・空白区切り", "電話は090 1234 5678です", "電話は<PHONE>です"},
+		{"固定・空白区切り", "03 1234 5678", "<PHONE>"},
+		{"携帯・全角空白区切り", "090　1234　5678", "<PHONE>"},
+		{"空白区切りのあとの空白と数字は取り込まない", "090 1234 5678 2名", "<PHONE> 2名"},
+		{"空白区切りで桁が足りないものは拾わない", "0 12 3456", "0 12 3456"},
+		{"空白区切りで加入者番号が4桁でないものは拾わない", "03 1234 567", "03 1234 567"},
+		{"空白区切りで最後が3桁なら、合計が10桁でも拾わない", "090 1234 567", "090 1234 567"},
+		{"空白区切りで合計が10桁に足りないものは拾わない", "01 2 3456", "01 2 3456"},
+		{"空白区切りで合計が11桁を超えるものは拾わない", "0123 4567 8901", "0123 4567 8901"},
+		{"小数は拾わない", "0.5倍", "0.5倍"},
 		// 誤検出しないもの。
 		{"郵便番号", "〒100-0001", "〒100-0001"},
 		{"郵便番号・記号なし", "1000001", "1000001"},
@@ -341,6 +358,12 @@ func TestMask_Address(t *testing.T) {
 		{"全角数字の番地", "京都府京都市左京区吉田本町３６です", "<ADDRESS>です"},
 		{"東京都と府中市を取り違えない", "東京都府中市", "<ADDRESS>"},
 		{"市区町村のあとの語は数字が無ければ残す", "東京都千代田区出身です", "<ADDRESS>出身です"},
+		// #2232 のレビュー：漢数字を含む町名の途中で切らない（町名を壊して一部を残さない）
+		{"漢数字を含む町名と建物名は残す", "東京都港区六本木ヒルズ森タワー", "<ADDRESS>六本木ヒルズ森タワー"},
+		{"漢数字を含む町名と番地", "東京都港区六本木6-10-1です", "<ADDRESS>です"},
+		{"漢数字を含む町名と漢数字の丁目", "東京都世田谷区三軒茶屋二丁目です", "<ADDRESS>です"},
+		{"四谷", "東京都新宿区四谷1-1", "<ADDRESS>"},
+		{"漢数字の番地", "大阪府大阪市北区梅田三丁目一番地です", "<ADDRESS>です"},
 		// 誤検出しないもの。
 		{"都道府県だけ", "東京都の大学に通っています", "東京都の大学に通っています"},
 		{"都道府県＋出身", "福岡県出身です", "福岡県出身です"},
@@ -415,6 +438,22 @@ func TestNew_CustomRule(t *testing.T) {
 	digits := mustNew(t, []Rule{{Key: "digits", Token: "<N>", Method: MethodPattern, Pattern: regexp.MustCompile(`[0-9]*`)}}, nil)
 	if got, want := digits.Mask("a1b"), "a<N>b"; got != want {
 		t.Errorf("Mask() = %q, want %q", got, want)
+	}
+	// 先に採った一致の途中から始まり、その先まで続く一致のはみ出した部分も隠す（#2232 のレビュー）。
+	overlap := mustNew(t, []Rule{
+		{Key: "a", Token: "<A>", Method: MethodPattern, Pattern: regexp.MustCompile(`abcd`)},
+		{Key: "b", Token: "<B>", Method: MethodPattern, Pattern: regexp.MustCompile(`cdef`)},
+	}, nil)
+	if got, want := overlap.Mask("xabcdefy"), "x<A>y"; got != want {
+		t.Errorf("重なった一致のはみ出し: Mask() = %q, want %q", got, want)
+	}
+	// 中に含まれる一致（はみ出さない）は、先の記号だけになる
+	inner := mustNew(t, []Rule{
+		{Key: "a", Token: "<A>", Method: MethodPattern, Pattern: regexp.MustCompile(`abcdef`)},
+		{Key: "b", Token: "<B>", Method: MethodPattern, Pattern: regexp.MustCompile(`cd`)},
+	}, nil)
+	if got, want := inner.Mask("xabcdefy"), "x<A>y"; got != want {
+		t.Errorf("中に含まれる一致: Mask() = %q, want %q", got, want)
 	}
 	// DefaultRules は呼び出すたびに新しいスライスなので、append の影響を受けない。
 	if n := len(DefaultRules()); n != 6 {

@@ -159,6 +159,7 @@ func (m *Masker) Mask(text string) string {
 	}
 
 	// 重なった一致は、先に始まるもの → 長いもの → 定義で先の項目、の順で採る。
+	// 採った一致と重なり、その先まで続く一致は、はみ出した部分も採った記号に含めて隠す（下の cursor の更新）。
 	slices.SortFunc(spans, func(a, b span) int {
 		if c := cmp.Compare(a.start, b.start); c != 0 {
 			return c
@@ -174,6 +175,9 @@ func (m *Masker) Mask(text string) string {
 	cursor := 0
 	for _, s := range spans {
 		if s.start < cursor {
+			// 先に採った一致の途中から始まり、その先まで続く一致を捨てると、はみ出した部分が
+			// そのまま残って漏れる。はみ出した部分も先の記号に含める（#2232 のレビュー）。
+			cursor = max(cursor, s.end)
 			continue
 		}
 		b.WriteString(text[cursor:s.start])
@@ -267,6 +271,10 @@ type foldedRune struct {
 func isIgnorable(r rune) bool {
 	switch r {
 	case ' ', '\t', '\u00A0', '\u3000', '・', '･':
+		return true
+	// ゼロ幅の文字（ZWSP・ZWNJ・ZWJ・WORD JOINER・BOM）。見えないので、名称の途中に紛れても
+	// 照合を切らないよう無視する（「山\u200b田太郎」で姓が漏れないように。#2232 のレビュー）
+	case '\u200B', '\u200C', '\u200D', '\u2060', '\uFEFF':
 		return true
 	}
 	return false
