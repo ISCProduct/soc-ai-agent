@@ -66,14 +66,3 @@ type UserWeightScore struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
-
-// SessionValidation セッションバリデーション状態エンティティ
-type SessionValidation struct {
-	ID                    uint
-	SessionID             string
-	InvalidAnswerCount    int
-	IsTerminated          bool
-	LastInvalidAnswerTime *time.Time
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-}
