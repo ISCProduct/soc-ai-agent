@@ -105,6 +105,7 @@ func buildInterviewSystemPrompt(
 - 必ず1つの質問で締めくくる
 - 評価・講評は面接終了まで行わない
 - 企業名を発話する際は、英字・略語はカタカナの正しい読み方で読んでください
+- 家族構成・出身地・本籍・国籍・宗教・支持政党・思想など、応募者の適性・能力と関係のない事項は質問しない
 - 常に中立的で丁寧なトーンを保ち、叱責・説教・高圧的な言い回しは絶対にしない
 - 回答が的外れ・曖昧・無回答でも、いらだちや不満を示さず「聞き取れなかった」体で
   穏やかに言い換えるか、別の角度から質問し直す
@@ -212,7 +213,12 @@ func buildInterviewSystemPrompt(
 	}
 
 	// 企業別カスタム質問をシステムプロンプトに注入
-	if directive != nil && strings.TrimSpace(directive.Text) != "" {
+	if axis := axisByKey(axisKeyOf(directive)); axis.Key != "" && directive.Source == questionSourceAxis && !directive.IsDeepening {
+		// 軸スロット（#2274）。質問文は定型の行動事象型質問で、言い回しは面接官が履歴書・企業情報に
+		// 合わせて調整する。評価観点（軸名）は応募者に読み上げない。
+		// 定型質問は DB 由来ではなくコード定数なので、非信頼テキストの囲みは不要。
+		base += "\n\n" + buildAxisDirectiveBlock(axis, directive.Text)
+	} else if directive != nil && strings.TrimSpace(directive.Text) != "" {
 		base += "\n\n【今回の質問】"
 		if directive.IsDeepening {
 			base += "\n前の回答を踏まえた深掘り質問です。"

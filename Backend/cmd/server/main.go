@@ -421,6 +421,7 @@ func main() {
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
 	interviewService.SetCompanyRepo(companyPublicRepo)
+	interviewService.SetResumeTextReader(resumeRepo)
 	interviewService.SetCompanyOwnerChecker(func(userID, companyID uint) (bool, error) {
 		return shared.UserOwnsCompany(db, userID, companyID)
 	})

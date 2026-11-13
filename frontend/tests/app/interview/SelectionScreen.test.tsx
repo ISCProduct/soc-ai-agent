@@ -64,6 +64,17 @@ describe('SelectionScreen', () => {
     expect(screen.getAllByText(POSITIONS[0].title).length).toBeGreaterThan(0)
   })
 
+  it('履歴書が登録済みのときだけ、質問づくりに参照する旨を表示する', () => {
+    renderScreen({ hasResume: true })
+    expect(screen.getByTestId('resume-reference-notice')).toHaveTextContent('登録済みの履歴書を質問づくりに参照します')
+  })
+
+  it('履歴書が未登録（または未指定）なら参照の表示を出さない', () => {
+    renderScreen()
+    expect(screen.queryByTestId('resume-reference-notice')).not.toBeInTheDocument()
+    expect(screen.queryByText(/質問づくりに参照します/)).not.toBeInTheDocument()
+  })
+
   it('面接傾向の取得失敗を表示して再試行できる', () => {
     const retry = jest.fn()
     renderScreen({

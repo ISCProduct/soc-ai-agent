@@ -41,6 +41,7 @@ type InterviewService struct {
 	questionStateRepo    repository.InterviewQuestionStateRepository
 	skillScoreRepo       SkillScoreReader
 	companyRepo          shared.CompanyBriefReader
+	resumeReader         ResumeTextReader
 	jobCh                chan uint
 	// inFlightJobs はフォールバック channel 経路の重複排除（Redis 経路の TaskID 相当、#1476）。
 	// 投入時に登録し、worker が処理し終えるまで保持する。

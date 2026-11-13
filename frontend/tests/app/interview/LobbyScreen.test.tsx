@@ -38,6 +38,16 @@ describe('LobbyScreen', () => {
     expect(screen.getByRole('button', { name: '面接に参加' })).toBeInTheDocument()
   })
 
+  it('履歴書が登録済みのときだけ、質問づくりに参照する旨を表示する', () => {
+    renderScreen({ hasResume: true })
+    expect(screen.getByTestId('resume-reference-notice')).toHaveTextContent('登録済みの履歴書を質問づくりに参照します')
+  })
+
+  it('履歴書が未登録なら参照の表示を出さない', () => {
+    renderScreen()
+    expect(screen.queryByTestId('resume-reference-notice')).not.toBeInTheDocument()
+  })
+
   it('許可エラー時も video 要素を残し再試行ボタンを表示する', () => {
     const { container } = render(
       <LobbyScreen

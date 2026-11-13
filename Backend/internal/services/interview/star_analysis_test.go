@@ -170,7 +170,7 @@ func TestSTARMissing_AsksActionBeforeResult(t *testing.T) {
 func TestBuildFollowUpUserPrompt_NamesMissingElement(t *testing.T) {
 	// 成果(R)だけが無い回答
 	answer := "大学のチーム開発で進捗の遅れという課題があり、タスク管理の仕組みを提案して導入しました。"
-	got := buildFollowUpUserPrompt("学生時代に力を入れたことは？", answer)
+	got := buildFollowUpUserPrompt("学生時代に力を入れたことは？", answer, "", "")
 
 	if !strings.Contains(got, answer) {
 		t.Error("回答本文がプロンプトに含まれていない")
@@ -188,7 +188,7 @@ func TestBuildFollowUpUserPrompt_NamesMissingElement(t *testing.T) {
 // STAR が揃った回答には余計な指定をしない。
 func TestBuildFollowUpUserPrompt_CompleteAnswerHasNoDirective(t *testing.T) {
 	answer := "大学のゼミで集計が遅いという課題があり、自動化を実装して作業時間を5時間短縮しました。"
-	got := buildFollowUpUserPrompt("学生時代に力を入れたことは？", answer)
+	got := buildFollowUpUserPrompt("学生時代に力を入れたことは？", answer, "", "")
 	if strings.Contains(got, "含まれていません") {
 		t.Errorf("STARが揃っているのに欠落を指定した: %s", got)
 	}
