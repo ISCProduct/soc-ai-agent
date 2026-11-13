@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 
+	"Backend/internal/companyfetch"
 	"Backend/internal/logger"
 	"Backend/internal/middleware"
 	"Backend/internal/openai"
@@ -76,6 +77,11 @@ func InternalError(err error) error {
 	if errors.Is(err, openai.ErrAIUnavailable) {
 		return NewAPIError(http.StatusServiceUnavailable, ErrCodeServiceUnavail,
 			"現在AI機能を利用できません。しばらくしてから再度お試しください。")
+	}
+	// 予算超過の英語センチネルを本文に出さない。429 なので待てばよいと分かる。
+	if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
+		return NewAPIError(http.StatusTooManyRequests, ErrCodeTooManyRequests,
+			"検索の回数が多すぎます。少し時間を置いてからお試しください。")
 	}
 	return NewAPIError(http.StatusInternalServerError, ErrCodeInternalError, InternalServerErrorMessage)
 }
