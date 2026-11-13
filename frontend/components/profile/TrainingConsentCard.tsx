@@ -30,6 +30,11 @@ async function fetchConsent(): Promise<boolean> {
  * 混ぜないのは、同意は希望条件と無関係で、「保存」を押し忘れて同意したつもり・取り消したつもりになるのを防ぐため。
  * 保存の応答が失敗したら、今の値を取り直して表示する（応答だけ失われて実際は保存されている場合に、
  * 保存前の値を決め打ちで見せない）。取り直せなければスイッチを出さない（#2180 のレビュー）。
+ *
+ * 同意の文言（下の説明文・箇条書き・スイッチの文言）を変えたら、バックエンドの
+ * `TrainingConsentTextVersion`（Backend/internal/models/training_consent_event.go）の版を上げること。
+ * 同意の履歴には、操作したときの文言の版が記録される（#2168）。上げ忘れると、変更前の文言に
+ * 同意した人も新しい文言に同意したように記録される。
  */
 export function TrainingConsentCard() {
   const [allow, setAllow] = useState(false)

@@ -208,6 +208,8 @@ func hardDeleteUserData(tx *gorm.DB, userID uint, collectiveAnonymousID string) 
 		&models.ESReview{},
 		// アプリ内通知（#2033）。先生の案内文や企業名を含むので、退会後に残さない（users への FK は無い）。
 		&models.Notification{},
+		// 学習利用の同意の履歴（#2168）。users への FK CASCADE でも落ちるが、依存を暗黙にしない。
+		&models.TrainingConsentEvent{},
 	}
 	for _, m := range deletes {
 		if err := tx.Where("user_id = ?", userID).Delete(m).Error; err != nil {
