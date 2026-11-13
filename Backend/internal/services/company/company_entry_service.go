@@ -13,8 +13,6 @@ import (
 	"net/mail"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 var (
@@ -102,20 +100,20 @@ type CompanyEntryResult struct {
 
 // CompanyEntryService は企業ゲスト投稿と招待メールを扱う。
 type CompanyEntryService struct {
-	db          *gorm.DB
+	entryRepo   repository.CompanyEntryRepository
 	userRepo    repository.UserRepository
 	pendingRepo repository.PendingRegistrationRepository
 	email       *email.EmailService
 }
 
 func NewCompanyEntryService(
-	db *gorm.DB,
+	entryRepo repository.CompanyEntryRepository,
 	userRepo repository.UserRepository,
 	pendingRepo repository.PendingRegistrationRepository,
 	email *email.EmailService,
 ) *CompanyEntryService {
 	return &CompanyEntryService{
-		db:          db,
+		entryRepo:   entryRepo,
 		userRepo:    userRepo,
 		pendingRepo: pendingRepo,
 		email:       email,
@@ -187,82 +185,57 @@ func (s *CompanyEntryService) Submit(in CompanyEntryInput) (*CompanyEntryResult,
 		EmailStatus:      "pending",
 	}
 
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(company).Error; err != nil {
-			return fmt.Errorf("create company: %w", err)
+	draft := repository.CompanyEntryDraft{Company: company, Submission: submission}
+	for _, jp := range in.JobPositions {
+		if strings.TrimSpace(jp.Title) == "" {
+			continue
 		}
-		submission.CompanyID = company.ID
-
-		for _, jp := range in.JobPositions {
-			if strings.TrimSpace(jp.Title) == "" {
-				continue
-			}
-			position := &models.CompanyJobPosition{
-				CompanyID:       company.ID,
-				Title:           strings.TrimSpace(jp.Title),
-				Description:     jp.Description,
-				JobCategoryID:   jp.JobCategoryID,
-				MinSalary:       jp.MinSalary,
-				MaxSalary:       jp.MaxSalary,
-				EmploymentType:  jp.EmploymentType,
-				WorkLocation:    jp.WorkLocation,
-				RemoteOption:    jp.RemoteOption,
-				RequiredSkills:  jp.RequiredSkills,
-				PreferredSkills: jp.PreferredSkills,
-				IsActive:        true,
-				DataStatus:      "draft",
-			}
-			if err := tx.Create(position).Error; err != nil {
-				return fmt.Errorf("create job position: %w", err)
-			}
+		draft.JobPositions = append(draft.JobPositions, &models.CompanyJobPosition{
+			Title:           strings.TrimSpace(jp.Title),
+			Description:     jp.Description,
+			JobCategoryID:   jp.JobCategoryID,
+			MinSalary:       jp.MinSalary,
+			MaxSalary:       jp.MaxSalary,
+			EmploymentType:  jp.EmploymentType,
+			WorkLocation:    jp.WorkLocation,
+			RemoteOption:    jp.RemoteOption,
+			RequiredSkills:  jp.RequiredSkills,
+			PreferredSkills: jp.PreferredSkills,
+			IsActive:        true,
+			DataStatus:      "draft",
+		})
+	}
+	if in.WeightProfile != nil {
+		draft.WeightProfile = &models.CompanyWeightProfile{
+			TechnicalOrientation:  in.WeightProfile.TechnicalOrientation,
+			TeamworkOrientation:   in.WeightProfile.TeamworkOrientation,
+			LeadershipOrientation: in.WeightProfile.LeadershipOrientation,
+			CreativityOrientation: in.WeightProfile.CreativityOrientation,
+			StabilityOrientation:  in.WeightProfile.StabilityOrientation,
+			GrowthOrientation:     in.WeightProfile.GrowthOrientation,
+			WorkLifeBalance:       in.WeightProfile.WorkLifeBalance,
+			ChallengeSeeking:      in.WeightProfile.ChallengeSeeking,
+			DetailOrientation:     in.WeightProfile.DetailOrientation,
+			CommunicationSkill:    in.WeightProfile.CommunicationSkill,
 		}
-
-		if in.WeightProfile != nil {
-			profile := &models.CompanyWeightProfile{
-				CompanyID:             company.ID,
-				TechnicalOrientation:  in.WeightProfile.TechnicalOrientation,
-				TeamworkOrientation:   in.WeightProfile.TeamworkOrientation,
-				LeadershipOrientation: in.WeightProfile.LeadershipOrientation,
-				CreativityOrientation: in.WeightProfile.CreativityOrientation,
-				StabilityOrientation:  in.WeightProfile.StabilityOrientation,
-				GrowthOrientation:     in.WeightProfile.GrowthOrientation,
-				WorkLifeBalance:       in.WeightProfile.WorkLifeBalance,
-				ChallengeSeeking:      in.WeightProfile.ChallengeSeeking,
-				DetailOrientation:     in.WeightProfile.DetailOrientation,
-				CommunicationSkill:    in.WeightProfile.CommunicationSkill,
-			}
-			if err := tx.Save(profile).Error; err != nil {
-				return fmt.Errorf("create weight profile: %w", err)
+	}
+	for _, g := range in.Graduates {
+		var hiredAt *time.Time
+		if strings.TrimSpace(g.HiredAt) != "" {
+			if parsed, parseErr := time.Parse("2006-01-02", g.HiredAt); parseErr == nil {
+				hiredAt = &parsed
 			}
 		}
-
-		for _, g := range in.Graduates {
-			var hiredAt *time.Time
-			if strings.TrimSpace(g.HiredAt) != "" {
-				if parsed, parseErr := time.Parse("2006-01-02", g.HiredAt); parseErr == nil {
-					hiredAt = &parsed
-				}
-			}
-			entry := &models.GraduateEmployment{
-				CompanyID:      company.ID,
-				GraduateName:   strings.TrimSpace(g.GraduateName),
-				GraduationYear: g.GraduationYear,
-				SchoolName:     strings.TrimSpace(g.SchoolName),
-				Department:     strings.TrimSpace(g.Department),
-				HiredAt:        hiredAt,
-				Note:           strings.TrimSpace(g.Note),
-			}
-			if err := tx.Create(entry).Error; err != nil {
-				return fmt.Errorf("create graduate employment: %w", err)
-			}
-		}
-
-		if err := tx.Create(submission).Error; err != nil {
-			return fmt.Errorf("create submission: %w", err)
-		}
-		return nil
-	})
-	if err != nil {
+		draft.Graduates = append(draft.Graduates, &models.GraduateEmployment{
+			GraduateName:   strings.TrimSpace(g.GraduateName),
+			GraduationYear: g.GraduationYear,
+			SchoolName:     strings.TrimSpace(g.SchoolName),
+			Department:     strings.TrimSpace(g.Department),
+			HiredAt:        hiredAt,
+			Note:           strings.TrimSpace(g.Note),
+		})
+	}
+	if err := s.entryRepo.CreateDraft(draft); err != nil {
 		return nil, err
 	}
 
@@ -318,12 +291,7 @@ func (s *CompanyEntryService) sendInviteEmail(submission *models.CompanyEntrySub
 	now := time.Now()
 	// メールはもう出ているので、記録に失敗しても送信は成功として返す。
 	// ただし email_status が pending のまま残り、管理画面が「未送信」と表示するので、ログで分かるようにする（#2000）
-	if err := s.db.Model(&models.CompanyEntrySubmission{}).Where("id = ?", submission.ID).Updates(map[string]any{
-		"email_status":     "sent",
-		"email_sent_at":    now,
-		"email_last_error": "",
-		"email_attempts":   gorm.Expr("email_attempts + 1"),
-	}).Error; err != nil {
+	if err := s.entryRepo.MarkInviteEmailSent(submission.ID, now); err != nil {
 		log.Printf("[CompanyEntry] invite email sent but failed to record status submission=%d: %v", submission.ID, err)
 	}
 	return true
@@ -332,29 +300,25 @@ func (s *CompanyEntryService) sendInviteEmail(submission *models.CompanyEntrySub
 func (s *CompanyEntryService) markEmailFailed(submissionID uint, msg string) {
 	// 送信の失敗を記録できないと email_last_error が空のまま残るので、記録の失敗もログに出す（#2000）。
 	// msg はログに出さない。仮登録の Create の一意制約違反などでは、メールアドレスや招待トークンが入る（#2136 のレビュー）
-	if err := s.db.Model(&models.CompanyEntrySubmission{}).Where("id = ?", submissionID).Updates(map[string]any{
-		"email_status":     "failed",
-		"email_last_error": msg,
-		"email_attempts":   gorm.Expr("email_attempts + 1"),
-	}).Error; err != nil {
+	if err := s.entryRepo.MarkInviteEmailFailed(submissionID, msg); err != nil {
 		log.Printf("[CompanyEntry] failed to record invite email failure submission=%d: %v", submissionID, err)
 	}
 }
 
 // ResendEmail は管理者による招待メール再送。
 func (s *CompanyEntryService) ResendEmail(submissionID uint) error {
-	var submission models.CompanyEntrySubmission
-	if err := s.db.First(&submission, submissionID).Error; err != nil {
+	submission, err := s.entryRepo.FindSubmission(submissionID)
+	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return ErrCompanyEntrySubmissionNotFound
 		}
 		return err
 	}
-	var company models.Company
-	if err := s.db.Select("id", "name").First(&company, submission.CompanyID).Error; err != nil {
+	company, err := s.entryRepo.FindCompanyName(submission.CompanyID)
+	if err != nil {
 		return err
 	}
-	if !s.sendInviteEmail(&submission, company.Name) {
+	if !s.sendInviteEmail(submission, company.Name) {
 		return ErrCompanyEntryEmailSendFailed
 	}
 	return nil
@@ -365,12 +329,8 @@ func (s *CompanyEntryService) ClaimOwnershipOnRegister(userID uint, companyID, s
 	if companyID == nil || *companyID == 0 {
 		return
 	}
-	ownership := &models.CompanyOwnership{
-		CompanyID: *companyID,
-		UserID:    userID,
-		Role:      "owner",
-	}
-	if err := s.db.Where("company_id = ?", *companyID).FirstOrCreate(ownership).Error; err != nil {
+	ownership, err := s.entryRepo.ClaimOwnership(*companyID, userID)
+	if err != nil {
 		log.Printf("[CompanyEntry] claim ownership failed company=%d user=%d: %v", *companyID, userID, err)
 		return
 	}
@@ -385,7 +345,7 @@ func (s *CompanyEntryService) ClaimOwnershipOnRegister(userID uint, companyID, s
 	if submissionID != nil && *submissionID != 0 {
 		// 所有権はもう付与済みなので続ける。claimed にできないと submitted のまま残り、
 		// 管理者が二重に扱うので、ログで分かるようにする（#2000）
-		if err := s.db.Model(&models.CompanyEntrySubmission{}).Where("id = ?", *submissionID).Update("status", "claimed").Error; err != nil {
+		if err := s.entryRepo.MarkSubmissionClaimed(*submissionID); err != nil {
 			log.Printf("[CompanyEntry] ownership claimed but failed to mark submission=%d as claimed company=%d user=%d: %v", *submissionID, *companyID, userID, err)
 		}
 	}

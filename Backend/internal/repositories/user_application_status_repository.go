@@ -1,9 +1,13 @@
 package repositories
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
+	"errors"
+	"fmt"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -320,4 +324,61 @@ func (r *UserApplicationStatusRepository) CountGroupedByStatus(companyID uint) (
 		out[row.Status] = row.Count
 	}
 	return out, nil
+}
+
+// CreateActive は、進行中の応募が無いときだけ応募(status=applied)を作り、
+// 紐づくマッチの is_applied を立てる。1トランザクションで行い、片方が失敗したら両方を巻き戻す。
+//
+// 進行中とは、terminalStatuses 以外のステータス。既にあれば ErrDuplicateActiveApplication。
+// 並行リクエストによる競合は、DB の一意制約(active_dedup_key)が最終防御になり、
+// その違反も ErrDuplicateActiveApplication で返す。
+func (r *UserApplicationStatusRepository) CreateActive(userID, companyID, matchID uint, terminalStatuses []string) (*models.UserApplicationStatus, error) {
+	var created *models.UserApplicationStatus
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		// 進行中（終了状態でない）の応募が既にあるか確認
+		var existing models.UserApplicationStatus
+		findErr := tx.Where("user_id = ? AND company_id = ? AND status NOT IN ?", userID, companyID, terminalStatuses).
+			First(&existing).Error
+		switch {
+		case findErr == nil:
+			return repository.ErrDuplicateActiveApplication
+		case errors.Is(findErr, repository.ErrNotFound):
+			// 進行中の応募なし。続行
+		default:
+			return fmt.Errorf("重複チェックエラー: %w", findErr)
+		}
+
+		now := time.Now()
+		m := &models.UserApplicationStatus{
+			UserID:    userID,
+			CompanyID: companyID,
+			MatchID:   matchID,
+			Status:    "applied",
+			AppliedAt: &now,
+		}
+		if createErr := tx.Create(m).Error; createErr != nil {
+			if isDuplicateEntryErr(createErr) {
+				return repository.ErrDuplicateActiveApplication
+			}
+			return fmt.Errorf("応募登録エラー: %w", createErr)
+		}
+
+		// UserCompanyMatch の IsApplied フラグも更新。失敗時は Create ごとロールバックする
+		if markErr := tx.Model(&models.UserCompanyMatch{}).Where("id = ?", matchID).Update("is_applied", true).Error; markErr != nil {
+			return fmt.Errorf("マッチのis_applied更新エラー: %w", markErr)
+		}
+
+		created = m
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// isDuplicateEntryErr はMySQLの一意制約違反(Error 1062)かどうかを判定する。
+func isDuplicateEntryErr(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }

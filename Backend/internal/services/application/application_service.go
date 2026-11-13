@@ -9,17 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"time"
-
-	"github.com/go-sql-driver/mysql"
-	"gorm.io/gorm"
 )
 
 // ApplicationService 応募・選考ステータス管理サービス
 type ApplicationService struct {
 	appRepo   *repositories.UserApplicationStatusRepository
 	matchRepo repository.UserCompanyMatchRepository
-	db        *gorm.DB
 	access    shared.CompanyAccessReader
 	notifier  notification.Notifier
 }
@@ -32,10 +27,9 @@ func (s *ApplicationService) SetNotifier(n notification.Notifier) {
 func NewApplicationService(
 	appRepo *repositories.UserApplicationStatusRepository,
 	matchRepo repository.UserCompanyMatchRepository,
-	db *gorm.DB,
 	access shared.CompanyAccessReader,
 ) *ApplicationService {
-	return &ApplicationService{appRepo: appRepo, matchRepo: matchRepo, db: db, access: access}
+	return &ApplicationService{appRepo: appRepo, matchRepo: matchRepo, access: access}
 }
 
 // ValidStatuses 有効な選考ステータス一覧（docs/requirements/application-status-transition.md §6）
@@ -111,8 +105,7 @@ func CanTransition(current, next string, isAdmin bool) bool {
 
 // Apply 企業への応募を登録する（#1017）
 // match の所有権・企業一致を検証し、進行中の応募が既にある場合のみ重複エラーとする。
-// 応募作成とマッチの is_applied 更新は同一トランザクションで行い、
-// 片方が失敗した場合は両方ロールバックする。
+// 応募作成とマッチの is_applied 更新は、Repository が同一トランザクションで行う。
 func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*models.UserApplicationStatus, error) {
 	// match の所有権・企業一致チェック（ToggleFavorite と同じパターン: #924）
 	match, err := s.matchRepo.FindByID(matchID)
@@ -129,57 +122,14 @@ func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*models.Use
 		return nil, fmt.Errorf("match_id と company_id が一致しません")
 	}
 
-	var app *models.UserApplicationStatus
-	err = s.db.Transaction(func(tx *gorm.DB) error {
-		// 進行中（終了状態でない）の応募が既にあるか確認
-		var existing models.UserApplicationStatus
-		findErr := tx.Where("user_id = ? AND company_id = ? AND status NOT IN ?", userID, companyID, terminalStatusList).
-			First(&existing).Error
-		switch {
-		case findErr == nil:
-			return shared.ErrDuplicateActiveApplication
-		case errors.Is(findErr, repository.ErrNotFound):
-			// 進行中の応募なし。続行
-		default:
-			return fmt.Errorf("重複チェックエラー: %w", findErr)
-		}
-
-		now := time.Now()
-		m := &models.UserApplicationStatus{
-			UserID:    userID,
-			CompanyID: companyID,
-			MatchID:   matchID,
-			Status:    "applied",
-			AppliedAt: &now,
-		}
-		if createErr := tx.Create(m).Error; createErr != nil {
-			// 並行リクエストによる競合はDBのUNIQUE制約（active_dedup_key）で最終防御される
-			if isDuplicateEntryErr(createErr) {
-				return shared.ErrDuplicateActiveApplication
-			}
-			return fmt.Errorf("応募登録エラー: %w", createErr)
-		}
-
-		// UserCompanyMatch の IsApplied フラグも更新。失敗時は Create ごとロールバックする
-		if markErr := tx.Model(&models.UserCompanyMatch{}).Where("id = ?", matchID).Update("is_applied", true).Error; markErr != nil {
-			return fmt.Errorf("マッチのis_applied更新エラー: %w", markErr)
-		}
-
-		app = m
-		return nil
-	})
+	m, err := s.appRepo.CreateActive(userID, companyID, matchID, terminalStatusList)
 	if err != nil {
+		if errors.Is(err, repository.ErrDuplicateActiveApplication) {
+			return nil, shared.ErrDuplicateActiveApplication
+		}
 		return nil, err
 	}
-
-	return app, nil
-}
-
-// isDuplicateEntryErr はMySQLの一意制約違反(Error 1062)かどうかを判定する。
-// school_service.go の同名関数と同じ判定ロジック。
-func isDuplicateEntryErr(err error) bool {
-	var mysqlErr *mysql.MySQLError
-	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
+	return m, nil
 }
 
 // UpdateStatus 選考ステータスを更新する
