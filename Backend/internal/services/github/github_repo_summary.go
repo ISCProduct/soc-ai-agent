@@ -25,6 +25,17 @@ var ErrInvalidRepoFullName = errors.New("full_name は owner/repo の形式で�
 // このときは保存しないので、次の依頼で作り直される。
 var ErrInvalidRepoSummaryOutput = errors.New("AI の要約の出力が不正です")
 
+// errInvalidREADMEResponse README の取得（HTTP）は成功したが、応答の JSON・base64 を解釈できなかったことを表す。
+// 取得の失敗（5xx・通信エラーなど）とログの文言を分け、原因を切り分けられるようにする（#2231 のレビュー）。
+var errInvalidREADMEResponse = errors.New("README の応答を解釈できません")
+
+const (
+	// reauthMessageTokenInvalid トークンが無効・失効している（401）ときの文言。同期（SyncUserData）と共有する。
+	reauthMessageTokenInvalid = "GitHubアクセストークンが無効です。GitHubアカウントを再連携してください。"
+	// reauthMessageForbidden レート制限以外の 403 のときの文言。
+	reauthMessageForbidden = "このリポジトリを読む権限がありません。組織のSSO（SAML）の承認やリポジトリへのアクセス権を確認してから、GitHubアカウントを再連携してください。"
+)
+
 const (
 	// maxREADMERunes プロンプトに入れる README の上限。単位はルーン（Unicode の文字数）で、バイト数ではない。
 	// バイトで切ると日本語の UTF-8 の途中で切れ、不正な文字列がプロンプトに入るため（#2185）。
@@ -104,9 +115,34 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 	}
 	readme, err := s.fetchREADME(ctx, client, token, fullName)
 	if err != nil {
-		// 名前は利用者の入力なので %q で引用する（改行で偽のログ行を作らせない）
-		log.Printf("[SummarizeRepo] README fetch warning for %q: %v", fullName, err)
-		readme = ""
+		accessErr := githubAccessError(err)
+		switch {
+		case isGitHubNotFoundError(err):
+			// README の 404 は「README が無い」だけでなく、リポジトリが削除・非公開化された、アクセス権を
+			// 失った、存在しない名前、のときも返る（GitHub の仕様上は単に Not Found）。リポジトリ自体に
+			// アクセスできるときだけ「README なし」で要約する（#2231 のレビュー）。
+			if repoErr := s.checkRepoAccessible(ctx, client, token, fullName); repoErr != nil {
+				log.Printf("[SummarizeRepo] repository not accessible for %q: %v", fullName, repoErr)
+				if repoAccessErr := githubAccessError(repoErr); repoAccessErr != nil {
+					return nil, repoAccessErr
+				}
+				return nil, fmt.Errorf("repository not accessible: %w", repoErr)
+			}
+			readme = ""
+		case accessErr != nil:
+			return nil, accessErr
+		case errors.Is(err, errInvalidREADMEResponse):
+			// 取得はできたが中身を解釈できない。README 無しで要約すると README があるのに薄い要約が残るので、
+			// 取得の失敗と同じく要約を作らない。文言だけを分ける。
+			log.Printf("[SummarizeRepo] README parse failed for %q: %v", fullName, err)
+			return nil, fmt.Errorf("failed to parse README: %w", err)
+		default:
+			// 404 以外の失敗（5xx・レート制限など）で README 無しの要約を作ると、薄い要約が
+			// キャッシュに残り、README があるのに無い扱いのままになる。要約を作らずにエラーにする（#2226）。
+			// 名前は利用者の入力なので %q で引用する（改行で偽のログ行を作らせない）
+			log.Printf("[SummarizeRepo] README fetch failed for %q: %v", fullName, err)
+			return nil, fmt.Errorf("failed to fetch README: %w", err)
+		}
 	}
 
 	// AI要約生成
@@ -123,6 +159,33 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 	return summary, nil
 }
 
+// githubAccessError は、GitHub API のエラーが利用者の再連携・権限の付与で直るものなら、
+// 利用者に促す GitHubReauthRequiredError を返す。そうでなければ nil を返す。
+//
+//   - 401：トークンが無効・失効している。同期と同じ文言で再連携を促す。
+//   - 403（レート制限以外）：組織の SAML SSO が未承認、リポジトリの権限が無い、など。
+//     サーバーの不具合ではなく、利用者が SSO の承認・権限の付与をしてから再連携すれば直るので、
+//     500 ではなく再連携のエラー（コントローラで 403）にする（#2231 のレビュー）。
+//     レート制限の 403 は rateLimitError になるのでここには来ず、取得の失敗として扱う。
+func githubAccessError(err error) error {
+	switch {
+	case isGitHubAuthError(err):
+		return &GitHubReauthRequiredError{Reason: reauthMessageTokenInvalid}
+	case isGitHubForbiddenError(err):
+		return &GitHubReauthRequiredError{Reason: reauthMessageForbidden}
+	default:
+		return nil
+	}
+}
+
+// checkRepoAccessible は、リポジトリ自体を利用者のトークンで取得できるかを確かめる（#2231 のレビュー）。
+// README の 404 が「README が無い」ことによるものか、リポジトリにアクセスできないことによるものかを分けるため。
+func (s *GitHubService) checkRepoAccessible(ctx context.Context, client *http.Client, token, fullName string) error {
+	// fullName は SummarizeRepo の入口で ValidateRepoFullName を通している。
+	_, err := s.doGet(ctx, client, token, fmt.Sprintf("%s/repos/%s", s.getAPIBase(), fullName))
+	return err
+}
+
 // fetchREADME GitHub API経由でリポジトリのREADMEを取得する
 func (s *GitHubService) fetchREADME(ctx context.Context, client *http.Client, token, fullName string) (string, error) {
 	// fullName は SummarizeRepo の入口で ValidateRepoFullName を通している。
@@ -136,16 +199,19 @@ func (s *GitHubService) fetchREADME(ctx context.Context, client *http.Client, to
 		Encoding string `json:"encoding"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: json: %w", errInvalidREADMEResponse, err)
 	}
+	content := resp.Content
 	if resp.Encoding == "base64" {
 		decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(resp.Content, "\n", ""))
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("%w: base64: %w", errInvalidREADMEResponse, err)
 		}
-		return truncateRunes(string(decoded), maxREADMERunes), nil
+		content = string(decoded)
 	}
-	return truncateRunes(resp.Content, maxREADMERunes), nil
+	// README はバイナリや Shift_JIS などで書かれていることもあり、デコード後が UTF-8 として正しいとは限らない。
+	// 不正なバイトをそのままプロンプトに入れないよう、切り詰める前に取り除く（#2228 のレビュー）。
+	return truncateRunes(strings.ToValidUTF8(content, ""), maxREADMERunes), nil
 }
 
 // truncateRunes s を先頭から最大 maxRunes 文字（ルーン）に切り詰める。
@@ -230,7 +296,8 @@ func (s *GitHubService) generateRepoSummary(ctx context.Context, fullName, readm
 		Achievement string `json:"achievement"`
 	}
 	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
-		return nil, fmt.Errorf("parse summary json: %w", err)
+		// JSON として読めない出力も、上限超えと同じく「モデルの出力が不正」として扱う（コントローラで 502）。
+		return nil, fmt.Errorf("%w: parse summary json: %w", ErrInvalidRepoSummaryOutput, err)
 	}
 
 	summary := &models.GitHubRepoSummary{

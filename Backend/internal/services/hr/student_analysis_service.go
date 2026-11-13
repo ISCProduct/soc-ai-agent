@@ -9,8 +9,6 @@ import (
 	"Backend/internal/services/shared"
 	"encoding/json"
 	"errors"
-
-	"gorm.io/gorm"
 )
 
 const maxInterviewReports = 5
@@ -51,7 +49,7 @@ type identityRevealer interface {
 
 // StudentAnalysisService 企業向け学生分析データの集約（#1096）
 type StudentAnalysisService struct {
-	db                      *gorm.DB
+	access                  shared.CompanyAccessReader
 	userRepo                studentUserReader
 	crossFeature            interfaces.CrossFeatureIntegrationService
 	weightScoreRepo         *repositories.UserWeightScoreRepository
@@ -63,7 +61,7 @@ type StudentAnalysisService struct {
 }
 
 func NewStudentAnalysisService(
-	db *gorm.DB,
+	access shared.CompanyAccessReader,
 	userRepo studentUserReader,
 	crossFeature interfaces.CrossFeatureIntegrationService,
 	weightScoreRepo *repositories.UserWeightScoreRepository,
@@ -73,7 +71,7 @@ func NewStudentAnalysisService(
 	resumeRepo interfaces.ResumeDocumentFinder,
 ) *StudentAnalysisService {
 	return &StudentAnalysisService{
-		db:                      db,
+		access:                  access,
 		userRepo:                userRepo,
 		crossFeature:            crossFeature,
 		weightScoreRepo:         weightScoreRepo,
@@ -142,7 +140,7 @@ func (s *StudentAnalysisService) redactNameUnlessRevealed(resp *StudentAnalysisR
 func (s *StudentAnalysisService) buildAnalysis(targetUserID uint) (*StudentAnalysisResponse, error) {
 	student, err := s.userRepo.GetUserByID(targetUserID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrStudentNotVisible
 		}
 		return nil, err
@@ -184,7 +182,7 @@ func (s *StudentAnalysisService) requireCompanyOwner(userID, companyID uint) err
 	if companyID == 0 {
 		return shared.ErrForbidden
 	}
-	owns, err := shared.UserOwnsCompany(s.db, userID, companyID)
+	owns, err := shared.UserOwnsCompany(s.access, userID, companyID)
 	if err != nil {
 		return err
 	}
