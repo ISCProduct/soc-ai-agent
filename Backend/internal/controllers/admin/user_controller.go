@@ -1,10 +1,10 @@
 package admin
 
 import (
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
+	"Backend/internal/models"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/school"
@@ -42,7 +42,7 @@ func (c *AdminUserController) SetSchoolService(schools *school.SchoolService) {
 
 // ensureSchoolAccess は、対象ユーザーが呼び出し元admin(担当校制限がある場合)の担当校に
 // 属するかを検証する共通ヘルパーへの薄いラッパー。
-func (c *AdminUserController) ensureSchoolAccess(ctx echo.Context, target *entity.User) error {
+func (c *AdminUserController) ensureSchoolAccess(ctx echo.Context, target *models.User) error {
 	return httpapi.EnsureAdminSchoolAccessForUser(ctx, c.schools, target.OrganizationID, target.SchoolID)
 }
 
@@ -59,7 +59,7 @@ type adminUserResponse struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-func toAdminUserResponse(u *entity.User) adminUserResponse {
+func toAdminUserResponse(u *models.User) adminUserResponse {
 	return adminUserResponse{
 		ID:          u.ID,
 		Email:       u.Email,
@@ -173,9 +173,9 @@ func (c *AdminUserController) Update(ctx echo.Context) error {
 			return err
 		}
 		if *payload.IsStaff {
-			user.Role = entity.UserRoleStaff
+			user.Role = models.UserRoleStaff
 		} else {
-			user.Role = entity.UserRoleStudent
+			user.Role = models.UserRoleStudent
 		}
 	}
 	if payload.Name != nil {

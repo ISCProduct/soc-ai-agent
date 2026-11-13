@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"Backend/domain/entity"
 	"Backend/internal/config"
+	"Backend/internal/models"
 	"Backend/internal/services/shared"
 
 	"golang.org/x/crypto/bcrypt"
@@ -24,7 +24,7 @@ type failNthUpdateUserRepo struct {
 	calls  int
 }
 
-func (r *failNthUpdateUserRepo) UpdateUser(user *entity.User) error {
+func (r *failNthUpdateUserRepo) UpdateUser(user *models.User) error {
 	r.calls++
 	if r.calls == r.failOn {
 		return errors.New("db down")
@@ -56,14 +56,14 @@ func captureAuthLog(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-func loginTestUser(t *testing.T, cost int, lastLogin *time.Time) *entity.User {
+func loginTestUser(t *testing.T, cost int, lastLogin *time.Time) *models.User {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte("password123"), cost)
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}
 	now := time.Now()
-	return &entity.User{
+	return &models.User{
 		ID: 1, Email: "user@example.com", Password: string(hash), Name: "User",
 		TargetLevel: "新卒", EmailVerifiedAt: &now, LastLoginAt: lastLogin,
 	}

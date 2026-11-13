@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"Backend/domain/entity"
+	"Backend/internal/models"
 )
 
 // defaultAdminTokenTTL は管理者トークンの既定の有効期間。
@@ -139,7 +139,7 @@ func isLegacyAdminToken(token string) bool {
 // 戻り値は nil(有効) / ErrAdminTokenExpired / ErrAdminTokenInvalid。
 // 期限切れだけを区別するのは、呼び出し側が「再ログインしてください」と案内できるようにするため
 // （署名が正しい＝正規のトークンを持っていた相手にしか返らない）。
-func ValidateAdminTokenForUser(token string, user *entity.User, secret string) error {
+func ValidateAdminTokenForUser(token string, user *models.User, secret string) error {
 	if user == nil {
 		return ErrAdminTokenInvalid
 	}

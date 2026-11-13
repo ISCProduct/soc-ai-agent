@@ -2,17 +2,15 @@ package companyportal
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/models"
 	"Backend/internal/services/notification"
+	"Backend/internal/services/shared"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"Backend/domain/entity"
-	"Backend/internal/models"
-	"Backend/internal/services/shared"
 )
 
 // 同一企業→同一学生への再送クールダウン（#1095）。
@@ -51,7 +49,7 @@ type scoutVisibility interface {
 }
 
 type scoutUserReader interface {
-	GetUserByID(id uint) (*entity.User, error)
+	GetUserByID(id uint) (*models.User, error)
 }
 
 type scoutCompanyReader interface {

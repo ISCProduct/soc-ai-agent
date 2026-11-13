@@ -1,16 +1,17 @@
 package aibench
 
 import (
+	"Backend/internal/models"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
-	"Backend/domain/entity"
 	"Backend/internal/services/company"
 	"Backend/internal/services/prompts"
 )
@@ -168,8 +169,8 @@ func TestMatchingReasonTarget_Run上限到達で呼び直す(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "テスト用")
 
 	c := Case{ID: "mr-x", Target: TargetMatchingReason, Input: Input{
-		Match:          &entity.UserCompanyMatch{MatchScore: 80, Company: &entity.Company{Name: "テスト株式会社", Industry: "商社"}},
-		UserScores:     []entity.UserWeightScore{{WeightCategory: "技術志向", Score: 80}},
+		Match:          &models.UserCompanyMatch{MatchScore: 80, Company: models.Company{Name: "テスト株式会社", Industry: "商社"}},
+		UserScores:     []models.UserWeightScore{{WeightCategory: "技術志向", Score: 80}},
 		MustMentionAny: []string{"商社"}, StrengthAny: []string{"技術"},
 	}}
 	o := newMatchingReasonTarget("model-x").Run(context.Background(), c)
@@ -217,6 +218,55 @@ func TestBundledManifests_CompanyAndMatching(t *testing.T) {
 	// 他の target は今まで通りラベルが必須
 	if err := validateCase(Case{ID: "x", Target: TargetChatAnswer, Input: Input{Question: "q", Answer: "a"}}); err == nil {
 		t.Fatal("chat-answer のラベル無しを通してしまう")
+	}
+}
+
+// 同梱のマッチング理由の固定セットは、user_scores を models.UserWeightScore の json タグ
+// （category / score）で書く。キーが合わないと Go はエラーにせず空の値で読むので、
+// 読み込んだ値が欠けていないことを確かめる。
+func TestBundledMatchingReason_UserScoresが欠けずに読める(t *testing.T) {
+	cases, err := LoadManifest("../../../docs/research/ai-eval/matching-reason.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	matching := FilterByTarget(cases, TargetMatchingReason)
+	for _, c := range matching {
+		if len(c.Input.UserScores) == 0 {
+			t.Errorf("%s: user_scores が空", c.ID)
+		}
+		for i, s := range c.Input.UserScores {
+			if s.WeightCategory == "" || s.Score <= 0 {
+				t.Errorf("%s: user_scores[%d] の値が欠けている: %+v", c.ID, i, s)
+			}
+		}
+	}
+	if len(matching) < 10 {
+		t.Fatalf("件数が少ない: %d", len(matching))
+	}
+}
+
+// 固定セットの must_mention_any は、企業側の事実から取った語(架空の企業の項目に書いてある)。
+// 読み込み後の Company に、その語がすべて残っていること。
+// 固定セットのキーが Company の型の json タグと食い違うと、値が黙って読み込まれず、ここで落ちる。
+func TestBundledMatchingReason_MustMentionSurvivesDecode(t *testing.T) {
+	cases, err := LoadManifest("../../../docs/research/ai-eval/matching-reason.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range FilterByTarget(cases, TargetMatchingReason) {
+		var facts strings.Builder
+		v := reflect.ValueOf(c.Input.Match.Company)
+		for i := 0; i < v.NumField(); i++ {
+			if v.Field(i).Kind() == reflect.String {
+				facts.WriteString(v.Field(i).String())
+				facts.WriteString("\n")
+			}
+		}
+		for _, word := range c.Input.MustMentionAny {
+			if !strings.Contains(facts.String(), word) {
+				t.Errorf("%s: must_mention_any の %q が、読み込み後の Company のどこにも無い(キーの食い違いの疑い)", c.ID, word)
+			}
+		}
 	}
 }
 

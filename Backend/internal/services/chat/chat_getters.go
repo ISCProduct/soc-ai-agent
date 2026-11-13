@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"Backend/internal/usagectx"
 	"context"
@@ -29,12 +28,12 @@ func (s *ChatService) ClaimSessionOwnership(sessionID string, userID uint) error
 }
 
 // GetUserScores ユーザーのスコアを取得
-func (s *ChatService) GetUserScores(userID uint, sessionID string) ([]entity.UserWeightScore, error) {
+func (s *ChatService) GetUserScores(userID uint, sessionID string) ([]models.UserWeightScore, error) {
 	return s.userWeightScoreRepo.FindByUserAndSession(userID, sessionID)
 }
 
 // GetTopRecommendations トップNの適性カテゴリを取得
-func (s *ChatService) GetTopRecommendations(userID uint, sessionID string, limit int) ([]entity.UserWeightScore, error) {
+func (s *ChatService) GetTopRecommendations(userID uint, sessionID string, limit int) ([]models.UserWeightScore, error) {
 	return s.userWeightScoreRepo.FindTopCategories(userID, sessionID, limit)
 }
 
