@@ -5,7 +5,7 @@ import {
   BODY_FONT_SIZE,
   FONT_STACK_TABULAR,
   TABULAR_NUMS,
-} from './design-tokens'
+} from '../design-tokens'
 
 /**
  * 管理画面のテーマ。

@@ -15,7 +15,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import HistoryIcon from '@mui/icons-material/History'
 import { InterviewReport, InterviewSession } from '@/lib/interview'
 import InterviewSummary from './InterviewSummary'
-import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
+import ScoreUpdateBanner, { WeightScore } from '@/components/feedback/ScoreUpdateBanner'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 
 import { UTTERANCE_SAVE_FAILED_MESSAGE } from '../utteranceSave'

@@ -1,7 +1,7 @@
 'use client'
 
 import { FormControl, FormControlLabel, FormLabel, Radio, RadioGroup } from '@mui/material'
-import { useStudentTheme } from '@/components/MuiProvider'
+import { useStudentTheme } from '@/components/providers/MuiProvider'
 import { STUDENT_THEME_LABELS, type StudentThemeMode } from '@/lib/student-theme'
 
 export function StudentThemeToggle() {
