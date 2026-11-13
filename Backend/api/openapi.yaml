@@ -69,6 +69,8 @@ tags:
     description: エントリーシートの添削とリライト（未ログインでも使える）
   - name: schedule
     description: 選考スケジュール
+  - name: graduate-outcomes
+    description: 卒業生の進路実績（学生向け、自分の学校の実績を人数で）
   - name: google-calendar
     description: Google カレンダー連携
   - name: admin-companies
@@ -1771,6 +1773,34 @@ paths:
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   # ── schedule ───────────────────────────────────────
+  /api/graduate-outcomes:
+    get:
+      tags: [graduate-outcomes]
+      summary: 自分の学校の卒業生の進路実績（企業ごとの人数）
+      description: |
+        学生は `X-User-Token` から決まり、学校もその学生の登録から決まる（#2032）。卒業生の氏名・学科・メモは返さず人数だけ。
+        学校が未登録なら `school_linked: false` で実績は空（他校の実績は返さない）。並びは人数の多い順。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: year, description: 卒業年度で絞る, schema: { type: integer } }
+        - { in: query, name: industry, description: 業界で絞る, schema: { type: string } }
+      responses:
+        "200": { description: 企業ごとの人数と、絞り込みの選択肢（年度・業界） }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/graduate-outcomes/companies/{id}:
+    get:
+      tags: [graduate-outcomes]
+      summary: 自分の学校の卒業生の、1社への進路実績（年度別・職種別の人数）
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: 年度別・職種別の人数 }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /api/schedule:
     get:
       tags: [schedule]
