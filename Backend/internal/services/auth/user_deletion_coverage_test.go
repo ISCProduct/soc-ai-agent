@@ -17,15 +17,18 @@ import (
 // 退会(物理削除)で、ユーザーに紐づく行が取りこぼされないことを検査する。
 //
 // 既存のテストは、テーブルごとに SQL を確認する作りで、「user_id を持つテーブルが
-// 全て削除対象か」は誰も見ていなかった。テーブルを足したときに退会の処理を直し忘れると、
-// ユーザーを物理削除したあとも個人情報が残る(個人情報保護法第28条)。
+// 全て削除対象か」は誰も見ていなかった。テーブルを足したときに退会の処理を直し忘れないよう、
+// ユーザーを指す列を持つテーブルの扱いが決まっていることを検査する。
 //
 // ユーザーを指す列(user_id など)を持つテーブルは、次のどれかでなければならない。
 //  1. hardDeleteUserData が削除する
 //  2. users への外部キーが ON DELETE CASCADE(親テーブルへの CASCADE を介した連鎖でもよい)
-//  3. userRowsKeptAfterPurge に、残す(または未対応の)理由つきで載っている
+//  3. userRowsKeptAfterPurge に、扱いを別に決める理由つきで載っている
 //
 // 実 DB は使わず、ソースとマイグレーションを静的に解析する。
+// 限界: 削除の条件列までは見ない(テーブルが削除対象に含まれていることだけを見る)。
+// ユーザーを指す列は、名前が user_id / student_user_id / teacher_user_id のもの、
+// または users(id) への外部キーを持つ列。外部キーの無い別名の列は検出できない。
 
 // userRowsKeptAfterPurge は、退会時の扱いを、テーブルごとに別に決めているテーブル。
 // 理由を書くこと。ここに足す前に、hardDeleteUserData に追加できないかを先に検討すること。
@@ -34,11 +37,11 @@ var userRowsKeptAfterPurge = map[string]string{
 	// purged_at を付けてパージ済みの印として残す設計。
 	"withdrawn_users": "退会の記録。パージ済みの印として残す",
 
-	// 以下は、退会時の扱いを方針決定中。
-	"admin_school_memberships":  "未対応(方針決定待ち)",
-	"api_call_logs":             "未対応(方針決定待ち)",
-	"company_ownerships":        "未対応(方針決定待ち)",
-	"diagnosis_quality_reports": "未対応(方針決定待ち)",
+	// 以下は、退会時の扱いを別途決める。
+	"admin_school_memberships":  "退会時の扱いは別途決める",
+	"api_call_logs":             "退会時の扱いは別途決める",
+	"company_ownerships":        "退会時の扱いは別途決める",
+	"diagnosis_quality_reports": "退会時の扱いは別途決める",
 }
 
 // ユーザーを指す列。user_id のほかに、教員案内が使う 2 列を数える。
@@ -98,7 +101,11 @@ func TestUserDeletion_EveryUserLinkedTableIsHandled(t *testing.T) {
 	sort.Strings(unhandled)
 	if len(unhandled) > 0 {
 		t.Errorf("退会の物理削除で取りこぼされる可能性があるテーブル(ユーザーを指す列があり、削除対象でも CASCADE でもない):\n  %s\n"+
-			"hardDeleteUserData に追加するか、残す理由を userRowsKeptAfterPurge に書くこと。",
+			"次のどれかで対応すること:\n"+
+			"  1. internal/repositories/user_withdrawal_repository.go の hardDeleteUserData に削除を追加する"+
+			"(あわせて internal/repositories/user_withdrawal_repository_test.go の hardDeleteTargets も更新する)\n"+
+			"  2. users への外部キーに ON DELETE CASCADE を付けるマイグレーションを足す\n"+
+			"  3. 扱いを別に決める場合は、理由を userRowsKeptAfterPurge に書く",
 			strings.Join(unhandled, "\n  "))
 	}
 
@@ -201,11 +208,13 @@ func tableNameOverrides(t *testing.T) map[string]string {
 }
 
 var (
-	reCreateTable = regexp.MustCompile("(?is)CREATE TABLE(?: IF NOT EXISTS)?\\s+`?(\\w+)`?\\s*\\((.*?)\\)\\s*ENGINE")
-	reAlterTable  = regexp.MustCompile("(?is)ALTER TABLE\\s+`?(\\w+)`?(.*?);")
-	reColumnDef   = regexp.MustCompile("(?i)(?:^|ADD COLUMN\\s+|,\\s*)`?(\\w+)`?\\s+(?:BIGINT|INT|VARCHAR|CHAR)\\b")
-	reFKAny       = regexp.MustCompile("(?is)FOREIGN KEY\\s*\\([^)]*\\)\\s*REFERENCES\\s+`?(\\w+)`?\\s*\\([^)]*\\)([^,;)]*)")
-	reFKUsers     = regexp.MustCompile("(?is)FOREIGN KEY\\s*\\(\\s*`?(\\w+)`?\\s*\\)\\s*REFERENCES\\s+`?users`?\\s*\\(\\s*`?id`?\\s*\\)([^,;)]*)")
+	reCreateTable = regexp.MustCompile("(?is)CREATE TABLE(?: IF NOT EXISTS)?\\s+`?(\\w+)`?\\s*\\((.*?)\\)\\s*(?:ENGINE|;)")
+	// 件数の突き合わせ用。解析が拾った数と一致しなければ、テストを失敗させる。
+	reCreateTableWord = regexp.MustCompile("(?i)CREATE TABLE")
+	reAlterTable      = regexp.MustCompile("(?is)ALTER TABLE\\s+`?(\\w+)`?(.*?);")
+	reColumnDef       = regexp.MustCompile("(?i)(?:^|ADD COLUMN\\s+|,\\s*)`?(\\w+)`?\\s+(?:BIGINT|INT|VARCHAR|CHAR)\\b")
+	reFKAny           = regexp.MustCompile("(?is)FOREIGN KEY\\s*\\([^)]*\\)\\s*REFERENCES\\s+`?(\\w+)`?\\s*\\([^)]*\\)([^,;)]*)")
+	reFKUsers         = regexp.MustCompile("(?is)FOREIGN KEY\\s*\\(\\s*`?(\\w+)`?\\s*\\)\\s*REFERENCES\\s+`?users`?\\s*\\(\\s*`?id`?\\s*\\)([^,;)]*)")
 )
 
 // userLinkedTables は、マイグレーションから「ユーザーを指す列を持つテーブル」を集める。
@@ -244,9 +253,6 @@ func userLinkedTables(t *testing.T) (map[string]*userTableInfo, cascadeParents) 
 			}
 		}
 		for _, m := range reFKUsers.FindAllStringSubmatch(body, -1) {
-			if !isRef[m[1]] {
-				continue
-			}
 			info := get(table)
 			info.cols[m[1]] = true
 			if strings.Contains(strings.ToUpper(m[2]), "ON DELETE CASCADE") {
@@ -260,7 +266,11 @@ func userLinkedTables(t *testing.T) (map[string]*userTableInfo, cascadeParents) 
 			t.Fatal(err)
 		}
 		sql := string(raw)
-		for _, m := range reCreateTable.FindAllStringSubmatch(sql, -1) {
+		created := reCreateTable.FindAllStringSubmatch(sql, -1)
+		if want := len(reCreateTableWord.FindAllString(sql, -1)); want != len(created) {
+			t.Fatalf("%s: CREATE TABLE が %d 件あるのに %d 件しか解析できなかった。reCreateTable を直すこと", filepath.Base(path), want, len(created))
+		}
+		for _, m := range created {
 			scan(m[1], m[2])
 		}
 		for _, m := range reAlterTable.FindAllStringSubmatch(sql, -1) {
