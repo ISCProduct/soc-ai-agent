@@ -96,8 +96,9 @@ function OAuthCallbackContent() {
 
         // 職員（教員・キャリア担当）はチャットではなく教員指導画面(/admin)へ。
         router.push(userData.is_staff ? '/admin' : '/')
-      } catch (err: any) {
-        setError('認証データの処理に失敗しました: ' + err.message)
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        setError('認証データの処理に失敗しました: ' + message)
       }
     }
 

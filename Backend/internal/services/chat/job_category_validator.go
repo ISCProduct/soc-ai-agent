@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -144,7 +145,7 @@ D) 調べてまとめる」
 
 JSONのみを返してください。説明は不要です。`, userAnswer, string(categoryJSON))
 
-	responseText, err := v.aiClient.Responses(ctx, prompt)
+	responseText, err := v.aiClient.Responses(usagectx.WithFeature(ctx, usagectx.FeatureChatQuestion), prompt)
 	if err != nil {
 		return nil, fmt.Errorf("AI validation failed: %w", err)
 	}

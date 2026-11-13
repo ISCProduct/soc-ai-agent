@@ -161,6 +161,22 @@ variable "prompt_versions" {
   }
 }
 
+variable "prompt_ab" {
+  type        = map(string)
+  description = "工程別のプロンプト A/B 割当（例: { score_evaluation = \"v2:50,v3:50\" }）。候補の本文を登録した版だけが有効（#1976）"
+  default     = {}
+
+  # キーの誤字は環境変数名がずれて黙って無視されるので、A/B に対応した3工程に限定する。
+  validation {
+    condition = alltrue([
+      for stage, arms in var.prompt_ab :
+      contains(["score_evaluation", "matching_reason", "company_extraction"], stage)
+      && can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}:[0-9]{1,5}(,[A-Za-z0-9][A-Za-z0-9._-]{0,63}:[0-9]{1,5})+$", replace(arms, " ", "")))
+    ])
+    error_message = "prompt_ab のキーは score_evaluation / matching_reason / company_extraction のいずれかで、値は「版:比率」を2つ以上カンマでつないだ形式にしてください。"
+  }
+}
+
 variable "google_client_id" {
   type        = string
   description = "Google OAuthクライアントID。コールバックURL https://api.<domain_name>/api/auth/google/callback をGoogle Cloud Console側で許可しておくこと"
@@ -259,4 +275,58 @@ variable "sentry_dsn" {
   description = "サーバー側(Backend)のSentry DSN。本番だけ未設定でエラーが記録されていなかった。空ならSentryは初期化されない"
   default     = ""
   sensitive   = true
+}
+
+variable "ai_model_premium" {
+  type        = string
+  description = "学生に見える判断（採点・面接応答・面接レポート・マッチング理由・ES添削・履歴書レビュー）の上位の層のモデル。空なら工程ごとの既定のまま（#1526）"
+  default     = ""
+
+  validation {
+    condition     = var.ai_model_premium == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$", var.ai_model_premium))
+    error_message = "ai_model_premium はモデル名（英数字・.・_・:・-）か空文字にしてください。"
+  }
+}
+
+variable "ai_model_light" {
+  type        = string
+  description = "内部の定型処理（企業情報の抽出・parse・要約）の軽量の層のモデル。空なら工程ごとの既定のまま（#1526）"
+  default     = ""
+
+  validation {
+    condition     = var.ai_model_light == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$", var.ai_model_light))
+    error_message = "ai_model_light はモデル名（英数字・.・_・:・-）か空文字にしてください。"
+  }
+}
+
+# OpenAI 障害時の音声面接の縮退（#1833）。空なら縮退しない（今まで通り OpenAI だけ）。
+# ローカルの推論先は #1832 で用意する。詳細は docs/wiki/ai-failover.md
+variable "ai_failover_local_stt_url" {
+  type        = string
+  description = "Whisper.cpp の server の URL（例 http://10.0.0.5:8080）。空なら STT は縮退しない"
+  default     = ""
+}
+
+variable "ai_failover_local_llm_url" {
+  type        = string
+  description = "OpenAI 互換の LLM（Ollama）の URL（例 http://10.0.0.5:11434/v1）。空なら LLM は縮退しない"
+  default     = ""
+}
+
+variable "ai_failover_local_llm_model" {
+  type        = string
+  description = "ローカルの LLM のモデル。空ならアプリの既定（qwen3:1.7b）"
+  default     = ""
+}
+
+variable "ai_failover_local_tts_url" {
+  type        = string
+  description = "VOICEVOX エンジンの URL（例 http://10.0.0.5:50021）。空なら TTS は縮退しない"
+  default     = ""
+}
+
+variable "ai_failover_local_tts_speaker" {
+  type        = string
+  description = "VOICEVOX の話者 ID。空ならアプリの既定（1）"
+  default     = ""
 }

@@ -45,7 +45,7 @@ func (s *ChatService) handleInvalidAnswerFlow(ctx context.Context, req ChatReque
 	return chatResponse, nil
 }
 
-func (s *ChatService) handleAllPhasesCompletedFromPhaseError(req ChatRequest, history []models.ChatMessage) (*ChatResponse, error) {
+func (s *ChatService) handleAllPhasesCompletedFromPhaseError(ctx context.Context, req ChatRequest, history []models.ChatMessage) (*ChatResponse, error) {
 	completionMsg := "分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。"
 
 	assistantMsg := &models.ChatMessage{
@@ -60,7 +60,7 @@ func (s *ChatService) handleAllPhasesCompletedFromPhaseError(req ChatRequest, hi
 
 	allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
 	// ここで要約を生成して保存（failure を許容して応答は続行）
-	summary, _ := s.buildAndSaveSessionSummary(context.Background(), req.UserID, req.SessionID)
+	summary, _ := s.buildAndSaveSessionSummary(ctx, req.UserID, req.SessionID)
 	return &ChatResponse{
 		Response:            completionMsg,
 		IsComplete:          true,
@@ -75,6 +75,7 @@ func (s *ChatService) handleAllPhasesCompletedFromPhaseError(req ChatRequest, hi
 }
 
 func (s *ChatService) handleAllPhasesCompletedFromCount(
+	ctx context.Context,
 	req ChatRequest,
 	history []models.ChatMessage,
 	allPhases []entity.AnalysisPhase,
@@ -128,7 +129,7 @@ func (s *ChatService) handleAllPhasesCompletedFromCount(
 		}
 	}
 	// ここで要約を生成して保存
-	summary, _ := s.buildAndSaveSessionSummary(context.Background(), req.UserID, req.SessionID)
+	summary, _ := s.buildAndSaveSessionSummary(ctx, req.UserID, req.SessionID)
 	return &ChatResponse{
 		Response:            completionMsg,
 		IsComplete:          true,
