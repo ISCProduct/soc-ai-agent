@@ -1,6 +1,7 @@
 package companyportal
 
 import (
+	"Backend/internal/services/notification"
 	"errors"
 	"fmt"
 	"log"
@@ -71,6 +72,12 @@ type ScoutService struct {
 	mailer    scoutMailer
 	now       func() time.Time
 	appURL    string
+	notifier  notification.Notifier
+}
+
+// SetNotifier はスカウトの受信を学生へ知らせる通知を設定する（#2033）。
+func (s *ScoutService) SetNotifier(n notification.Notifier) {
+	s.notifier = n
 }
 
 func NewScoutService(
@@ -297,6 +304,18 @@ func (s *ScoutService) Send(companyID, companyUserID uint, in SendScoutInput) (*
 	}
 	if remaining > 0 {
 		return &SendScoutResult{RemainingMs: remaining.Milliseconds()}, ErrScoutCooldown
+	}
+
+	// アプリ内通知はメールより先に作る。メール送信（SMTP）が応答しないと、通知まで届かなくなるため（#2033）
+	if s.notifier != nil {
+		s.notifier.Notify(notification.Notice{
+			UserID:    in.UserID,
+			Kind:      models.NotificationKindScout,
+			Title:     "企業からスカウトが届きました",
+			Body:      company.Name + " からスカウトが届きました。内容を確認しましょう。",
+			Link:      "/scout",
+			DedupeKey: fmt.Sprintf("scout:%d", scout.ID),
+		})
 	}
 
 	if s.mailer != nil && student.Email != "" && !student.IsGuest {
