@@ -21,6 +21,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"Backend/internal/safego"
+
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
@@ -95,7 +97,7 @@ func main() {
 	var wg sync.WaitGroup
 	for range *workers {
 		wg.Add(1)
-		go func() {
+		safego.Go(func() {
 			defer wg.Done()
 			for name := range jobs {
 				res, err := enrich(context.Background(), client, *model, name)
@@ -109,7 +111,7 @@ func main() {
 				fmt.Fprintln(cf, string(b))
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	for _, n := range todo {
 		if *maxUSD > 0 && costUSD() >= *maxUSD {
