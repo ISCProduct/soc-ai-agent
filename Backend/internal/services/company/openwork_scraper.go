@@ -1,6 +1,7 @@
 package company
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"bytes"
 	"encoding/json"
@@ -17,7 +18,6 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
-	"gorm.io/gorm"
 )
 
 // openworkScores OpenWorkから取得した評価スコアを保持する
@@ -69,7 +69,7 @@ func (s *CrawlService) executeOpenworkCompanyCrawl(source *models.CrawlSource) e
 
 	now := time.Now()
 	company, err := s.companyRepo.FindByName(data.Name)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return err
 	}
 
@@ -77,7 +77,7 @@ func (s *CrawlService) executeOpenworkCompanyCrawl(source *models.CrawlSource) e
 	welfareText := buildOpenworkWelfareText(data.Scores.Welfare)
 	mainBusinessText := buildOpenworkSalaryText(data.AverageSalary)
 
-	if company == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+	if company == nil || errors.Is(err, repository.ErrNotFound) {
 		newCompany := &models.Company{
 			Name:            data.Name,
 			Industry:        data.Industry,

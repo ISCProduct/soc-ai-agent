@@ -1,6 +1,7 @@
 package interview
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/aimodel"
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -12,8 +13,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 const interviewPhraseSuggestionsLLMTimeout = 60 * time.Second
@@ -28,7 +27,7 @@ func (s *InterviewService) GetReport(userID uint, sessionID uint) (*models.Inter
 	}
 	report, err := s.reportRepo.FindBySessionID(sessionID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, nil
 		}
 		return nil, err

@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"Backend/domain/repository"
 	"context"
 	"errors"
 	"net/http"
@@ -10,7 +11,6 @@ import (
 	"Backend/internal/repositories"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 )
 
 // EchoCompanyAuth は X-Company-User-Token JWT を検証し、企業ユーザーIDと company_id をコンテキストへ載せる。
@@ -69,7 +69,7 @@ func EchoRequireVerifiedCompany(companies *repositories.CompanyRepository) echo.
 			}
 			company, err := companies.FindByID(companyID)
 			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
+				if errors.Is(err, repository.ErrNotFound) {
 					return echo.NewHTTPError(http.StatusForbidden, "企業の審査が完了するまで学生情報の閲覧とスカウト送信はできません")
 				}
 				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve company")

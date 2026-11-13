@@ -1,6 +1,7 @@
 package interview
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/aimodel"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
@@ -17,8 +18,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 // interviewReportLLMCallTimeout はレポート生成の LLM 呼び出し1回の締切。
@@ -77,7 +76,7 @@ func (s *InterviewService) RegenerateReport(userID uint, sessionID uint) (queued
 		return false, ErrSessionNotFinished
 	}
 	report, err := s.reportRepo.FindBySessionID(sessionID)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return false, err
 	}
 	if report != nil {
