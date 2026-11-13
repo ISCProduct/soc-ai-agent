@@ -9,6 +9,12 @@ GORM AutoMigrate は廃止済みで、**スキーマ変更は必ず `Backend/mig
 - サーバー起動時に未適用のマイグレーションが自動適用される（MySQLの `GET_LOCK` により複数インスタンスの同時起動でも安全）
 - 適用状態は `schema_migrations` テーブルで管理される
 
+**適用（ランタイム）は golang-migrate のままで、[Atlas](https://atlasgo.io) は「オーサリング補助 + CIゲート」としてのみ使います**（適用経路は一切変更していません）。Atlas は既存の golang-migrate 形式（6桁連番 up/down）を形式変換せずそのまま扱います（設定は `atlas.hcl`）。
+
+- `Backend/migrations/atlas.sum`（整合ハッシュ）… 並行PRで採番が衝突すると `atlas.sum` が食い違い／git コンフリクトになり、**衝突がマージ前に機械的に顕在化**する
+- CIの `atlas migrate lint`（`.github/workflows/test.yml` の `Atlas migrate lint` ジョブ）… このPRが足したマイグレーションに対し **破壊的変更 / データ依存変更 / 後方非互換 / 順序逆転(non-linear)** を検出する。Atlas Cloud 不要・解析用の使い捨てMySQL(docker)だけで完結
+- down の運用・ロールバック・dirty 復旧はすべて従来どおり golang-migrate 側（Atlas は revert を別方式で扱うため使わない）
+
 ## Docker Compose での自動適用
 
 ローカル開発（`compose.yml`）では `app` コンテナ起動時に
@@ -56,6 +62,12 @@ DB_HOST=127.0.0.1 go run ./cmd/migrate force <N>  # バージョンを強制設�
 2. **up/down は必ずペアで作成する**（downがないとロールバックできない）
 3. GORMモデル（`internal/models/`）も同じPRで変更し、スキーマと一致させる
 4. ローカルで `go run ./cmd/migrate` → 動作確認 → `go run ./cmd/migrate down` → 再度 up でロールバック可能性を確認する
+5. **`make migrate-hash` で `atlas.sum` を更新し、同じPRにコミットする**（整合ハッシュ。
+   忘れると CI の `Atlas migrate lint` が checksum mismatch で落ちる）。
+   手元で lint も回すなら `make migrate-lint`（Docker が要る）。
+
+   > `make migrate-hash` / `make migrate-lint` には Atlas CLI が必要です。
+   > 導入: `curl -sSf https://atlasgo.sh | sh`（community 版で十分）。
 
 ### 書き方の注意
 
@@ -146,10 +158,14 @@ frontend の不具合に見えるため、まず backend のログを確認し�
 他ブランチのマイグレーションが実際に適用済みだった場合は、`force` の前に
 そのブランチの down を当てて取り消してください。
 
-> 版番号は**ブランチをまたいで衝突しうる**点に注意してください。
-> CI の重複検知（`automation/test/migration-version-unique-test.sh`）は
-> `BASE_REF=origin/develop` を渡すと develop 側との衝突も見ます（PR の CI は
-> この形で動きます）。手元で確かめる場合も同じように渡してください。
+> 版番号は**ブランチをまたいで衝突しうる**点に注意してください。衝突は2段で検知されます。
+>
+> 1. **Atlas**（`atlas.sum` の不一致 + CI の `atlas migrate lint`）。並行PRが両方
+>    `atlas.sum` を書き換えるため、マージ時に git コンフリクトとして顕在化します。
+>    lint は順序逆転(non-linear)も見ます。
+> 2. **重複検知スクリプト**（`automation/test/migration-version-unique-test.sh`）。
+>    `BASE_REF=origin/develop` を渡すと develop 側との衝突も見ます（PR の CI はこの形で
+>    動きます）。手元で確かめる場合も同じように渡してください。
 >
 > ```bash
 > BASE_REF=origin/develop ./automation/test/migration-version-unique-test.sh

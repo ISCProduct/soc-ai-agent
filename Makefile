@@ -1,5 +1,5 @@
 # SOC AI Agent — ローカル開発用ショートカット (#589)
-.PHONY: help rag-up rag-down rag-smoke rag-rebuild core-up api-docs api-docs-down api-catalog prod-status prod-logs prod-logs-follow prod-logs-errors test-e2e-up test-e2e-seed test-e2e test-e2e-down
+.PHONY: help rag-up rag-down rag-smoke rag-rebuild core-up migrate-hash migrate-lint api-docs api-docs-down api-catalog prod-status prod-logs prod-logs-follow prod-logs-errors test-e2e-up test-e2e-seed test-e2e test-e2e-down
 
 # ローカル統合テスト環境（個人の dev スタックと分離・同時起動可。compose.test.yml）
 TEST_COMPOSE := docker compose -p soc-ai-agent-test -f compose.yml -f compose.test.yml
@@ -56,6 +56,18 @@ test-e2e-down:
 core-up:
 	docker compose up -d --build db app frontend
 	@echo "Migrations run automatically via app entrypoint (see Backend/scripts/docker-entrypoint.dev.sh)"
+
+# マイグレーション整合ハッシュ(atlas.sum)を再計算する。
+# Backend/migrations/ に up/down を追加・変更したら必ず実行し、atlas.sum を同じPRでコミットする。
+# DBは不要（ファイルのチェックサムのみ）。atlas CLI が要る: `curl -sSf https://atlasgo.sh | sh`
+migrate-hash:
+	atlas migrate hash --env migrations
+
+# マイグレーションを lint する（破壊的変更/データ依存/後方非互換/順序逆転を検出）。
+# 解析用の使い捨てMySQLを docker で起動するため Docker が必要。origin/develop との差分を見る。
+migrate-lint:
+	git fetch --quiet origin develop
+	atlas migrate lint --env migrations --git-base origin/develop
 
 api-docs:
 	docker compose --profile docs up -d swagger-ui

@@ -422,3 +422,36 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
           retention-days: 7
+
+  # ── Atlas migrate lint（マイグレーションの衝突/順序逆転/破壊的変更を検出）──────────
+  # 既存の golang-migrate 形式 Backend/migrations（6桁連番 up/down）を、形式変換せずに
+  # そのまま Atlas で lint する。ランタイム適用は従来どおり golang-migrate(embed) のままで、
+  # Atlas はここ（CIゲート）とローカルの atlas.sum 生成でしか使わない（本番適用経路は不変）。
+  #
+  # 何を見るか（automation/test/migration-version-unique-test.sh の上位互換）:
+  #   - atlas.sum の整合: 並行PRで採番が衝突すると atlas.sum が食い違い/コンフリクトして顕在化
+  #   - このPRが追加したマイグレーション差分に対し、破壊的変更 / データ依存変更 /
+  #     後方非互換 / 順序逆転(non-linear) を検出
+  # 解析は Atlas Cloud 不要・使い捨ての MySQL(docker://mysql/8/dev) だけで完結する。
+  atlas-migrate-lint:
+    name: Atlas migrate lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # base との差分に対して lint する。push では比較対象の base が無いためスキップする。
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      # lint 結果をPRに要約コメントとして残すため（検出有無の判定自体には不要）。
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # base との差分（このPRが足したマイグレーション）を特定するため全履歴を取得する。
+          fetch-depth: 0
+      - name: Set up Atlas
+        uses: ariga/setup-atlas@v0
+      - name: Lint migrations
+        uses: ariga/atlas-action/migrate/lint@v1
+        with:
+          config: file://atlas.hcl
+          env: migrations
