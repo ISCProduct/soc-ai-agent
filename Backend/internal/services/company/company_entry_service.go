@@ -1,7 +1,6 @@
 package company
 
 import (
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/config"
 	"Backend/internal/models"
@@ -297,7 +296,7 @@ func (s *CompanyEntryService) sendInviteEmail(submission *models.CompanyEntrySub
 		inviteToken = base64.URLEncoding.EncodeToString(b)
 		companyID := submission.CompanyID
 		submissionID := submission.ID
-		pending := &entity.PendingRegistration{
+		pending := &models.PendingRegistration{
 			Token:        inviteToken,
 			Email:        submission.ContactEmail,
 			CompanyID:    &companyID,

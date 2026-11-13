@@ -1,6 +1,7 @@
 package repositories_test
 
 import (
+	"Backend/internal/models"
 	"errors"
 	"strings"
 	"testing"
@@ -10,7 +11,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"Backend/domain/entity"
 	"Backend/internal/repositories"
 )
 
@@ -86,7 +86,7 @@ func TestCreateOrUpdateBatch_SingleUpsert(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(100, 3))
 	mock.ExpectCommit()
 
-	saved, err := repo.CreateOrUpdateBatch([]*entity.UserCompanyMatch{
+	saved, err := repo.CreateOrUpdateBatch([]*models.UserCompanyMatch{
 		{UserID: 1, SessionID: "s1", CompanyID: 1, MatchScore: 80},
 		{UserID: 1, SessionID: "s1", CompanyID: 2, MatchScore: 90},
 	})
@@ -155,9 +155,9 @@ func TestCreateOrUpdateBatch_SplitsIntoBatches(t *testing.T) {
 	}
 	mock.ExpectCommit()
 
-	matches := make([]*entity.UserCompanyMatch, 0, 250)
+	matches := make([]*models.UserCompanyMatch, 0, 250)
 	for i := range 250 {
-		matches = append(matches, &entity.UserCompanyMatch{
+		matches = append(matches, &models.UserCompanyMatch{
 			UserID: 1, SessionID: "s1", CompanyID: uint(i + 1), MatchScore: float64(i),
 		})
 	}
@@ -186,7 +186,7 @@ func TestCreateOrUpdateBatch_PropagatesError(t *testing.T) {
 		WillReturnError(errors.New("deadlock"))
 	mock.ExpectRollback()
 
-	saved, err := repo.CreateOrUpdateBatch([]*entity.UserCompanyMatch{
+	saved, err := repo.CreateOrUpdateBatch([]*models.UserCompanyMatch{
 		{UserID: 1, SessionID: "s1", CompanyID: 1, MatchScore: 80},
 	})
 	if err == nil {
@@ -209,7 +209,7 @@ func TestCreateOrUpdateBatch_SkipsOtherUserSession(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	saved, err := repo.CreateOrUpdateBatch([]*entity.UserCompanyMatch{
+	saved, err := repo.CreateOrUpdateBatch([]*models.UserCompanyMatch{
 		{UserID: 1, SessionID: "s1", CompanyID: 1, MatchScore: 80},
 		{UserID: 2, SessionID: "s1", CompanyID: 1, MatchScore: 80},
 		nil,
@@ -271,5 +271,32 @@ func TestFindTopMatchesByUserAndSession_ExcludesCompaniesWithoutProfile(t *testi
 	// 行自体は消さない方針（is_favorited / is_applied を守る）
 	if strings.Contains(sql, "DELETE") {
 		t.Errorf("読み出し経路で行を削除している: %s", sql)
+	}
+}
+
+// TestCreateOrUpdateBatch_OnlyWritesMatchRows は、企業を持つマッチを保存しても
+// user_company_matches の行だけが書かれ、企業の行へは触れないことと、
+// 呼び出し元のマッチの主キーを書き換えないことを検証する。
+func TestCreateOrUpdateBatch_OnlyWritesMatchRows(t *testing.T) {
+	repo, mock, _ := newMatchRepoMock(t)
+
+	// 関連の書き込みが起きると、期待していない INSERT が増えて落ちる
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO `user_company_matches` .* ON DUPLICATE KEY UPDATE").
+		WillReturnResult(sqlmock.NewResult(100, 1))
+	mock.ExpectCommit()
+
+	match := &models.UserCompanyMatch{
+		ID: 55, UserID: 1, SessionID: "s1", CompanyID: 7, MatchScore: 80,
+		Company: models.Company{ID: 7, Name: "テスト企業"},
+	}
+	if _, err := repo.CreateOrUpdateBatch([]*models.UserCompanyMatch{match}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if match.ID != 55 {
+		t.Errorf("呼び出し元のマッチの主キーが書き換わった: %d", match.ID)
 	}
 }

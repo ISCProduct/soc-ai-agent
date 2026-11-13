@@ -434,7 +434,7 @@ func TestChatController_SendReport_Success(t *testing.T) {
 	summary := &analysis.AnalysisSummary{}
 	userRepo.On("GetUserByID", uint(1)).Return(user, nil)
 	analysisSvc.On("BuildAnalysisSummary", mock.Anything, uint(1), "s1").Return(summary, nil)
-	matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 5).Return([]*entity.UserCompanyMatch{}, nil)
+	matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 5).Return([]*models.UserCompanyMatch{}, nil)
 	chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
 	emailSvc.On("SendAnalysisReport", user, summary, mock.Anything, "s1").Return(nil)
 
@@ -577,8 +577,8 @@ func TestChatController_GetRecommendations_EmptyReason(t *testing.T) {
 func TestChatController_GetRecommendations_WithMatches_Success(t *testing.T) {
 	matchSvc := &mocks.MatchingServiceMock{}
 	chatSvc := &mocks.ChatServiceMock{}
-	matches := []*entity.UserCompanyMatch{
-		{MatchScore: 85.0, Company: &entity.Company{ID: 1, Name: "Test Corp"}},
+	matches := []*models.UserCompanyMatch{
+		{MatchScore: 85.0, Company: models.Company{ID: 1, Name: "Test Corp"}},
 	}
 	matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 10).Return(matches, nil)
 	chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
@@ -614,8 +614,8 @@ func TestChatController_GetRecommendations_LimitCap(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			matchSvc := &mocks.MatchingServiceMock{}
 			chatSvc := &mocks.ChatServiceMock{}
-			matches := []*entity.UserCompanyMatch{
-				{MatchScore: 85.0, Company: &entity.Company{ID: 1, Name: "Test Corp"}},
+			matches := []*models.UserCompanyMatch{
+				{MatchScore: 85.0, Company: models.Company{ID: 1, Name: "Test Corp"}},
 			}
 			matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", tt.wantLimit).Return(matches, nil)
 			chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
