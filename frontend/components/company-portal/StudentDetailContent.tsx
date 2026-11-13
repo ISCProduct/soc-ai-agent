@@ -23,7 +23,7 @@ import { SendScoutDialog } from '@/components/company-portal/SendScoutDialog'
 /** スカウト公開に同意した学生の表示名。未設定のときはIDの仮名にしない。 */
 export function displayStudentName(name: string | undefined): string {
   const trimmed = name?.trim() ?? ''
-  return trimmed || '氏名未設定'
+  return trimmed || '氏名非公開'
 }
 
 /** 面接レポートのJSON文字列配列を安全にパースする（不正なJSONは無視する） */
