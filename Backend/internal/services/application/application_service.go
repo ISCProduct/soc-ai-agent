@@ -6,6 +6,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
+	"Backend/internal/services/notification"
 	"Backend/internal/services/shared"
 	"errors"
 	"fmt"
@@ -21,6 +22,12 @@ type ApplicationService struct {
 	appRepo   *repositories.UserApplicationStatusRepository
 	matchRepo repository.UserCompanyMatchRepository
 	db        *gorm.DB
+	notifier  notification.Notifier
+}
+
+// SetNotifier は選考ステータスの更新を学生へ知らせる通知を設定する（#2033）。
+func (s *ApplicationService) SetNotifier(n notification.Notifier) {
+	s.notifier = n
 }
 
 func NewApplicationService(
@@ -208,6 +215,16 @@ func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, statu
 	app.Status = status
 	if notes != nil {
 		app.Notes = *notes
+	}
+	// 学校・企業が更新したときだけ学生へ知らせる（学生が自分で変えたときは知らせない）（#2033）
+	if isAdmin && s.notifier != nil {
+		companyName := ""
+		if app.Company != nil {
+			companyName = app.Company.Name
+		}
+		if n, ok := notification.ApplicationStatusNotice(app.UserID, app.ID, status, companyName); ok {
+			s.notifier.Notify(n)
+		}
 	}
 	return app, nil
 }
