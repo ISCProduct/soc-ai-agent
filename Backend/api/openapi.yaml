@@ -69,6 +69,8 @@ tags:
     description: エントリーシートの添削とリライト（未ログインでも使える）
   - name: schedule
     description: 選考スケジュール
+  - name: notifications
+    description: アプリ内通知（締切・選考結果・スカウト・先生の案内）
   - name: google-calendar
     description: Google カレンダー連携
   - name: admin-companies
@@ -86,7 +88,7 @@ tags:
   - name: admin-analytics
     description: 管理画面のダッシュボード・選考・面接・監査
   - name: admin-score
-    description: 管理画面のスコア検証とプロファイル再計算
+    description: 管理画面のスコア検証とスコア再計算
   - name: admin-costs
     description: 管理画面のコスト可視化
   - name: admin-training
@@ -482,6 +484,15 @@ components:
         star: { $ref: "#/components/schemas/StarBreakdown" }
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
+        improved_length_satisfied:
+          type: boolean
+          nullable: true
+          description: "改善文が目標レンジ（元の100〜130%）に入ったか。char_limit 指定時は null（#1606）"
+        improved_length_issue:
+          type: string
+          nullable: true
+          enum: [short, long]
+          description: "外れた理由。short は元の100%未満、long は130%超え。範囲内と char_limit 指定時は null"
         format_findings:
           type: array
           description: 原文の形式チェック（#1530）。重要度順（同じなら出現位置順）。指摘が無いときは空配列
@@ -507,6 +518,15 @@ components:
         improved_text: { type: string }
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
+        improved_length_satisfied:
+          type: boolean
+          nullable: true
+          description: "改善文が目標レンジ（元の100〜130%）に入ったか。char_limit 指定時は null（#1606）"
+        improved_length_issue:
+          type: string
+          nullable: true
+          enum: [short, long]
+          description: "外れた理由。short は元の100%未満、long は130%超え。範囲内と char_limit 指定時は null"
         format_findings:
           type: array
           description: 原文の形式チェック（#1530）。重要度順（同じなら出現位置順）。指摘が無いときは空配列。RAG の応答が想定外の形のときは付かず、RAG の応答をそのまま返す
@@ -1753,6 +1773,80 @@ paths:
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   # ── schedule ───────────────────────────────────────
+  /api/notifications:
+    get:
+      tags: [notifications]
+      summary: 自分の通知の一覧（新しい順）
+      description: "宛先は `X-User-Token` から決まり、user_id は受け取らない（#2033）。"
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: limit, schema: { type: integer, maximum: 50 } }
+        - { in: query, name: before_id, description: この ID より古い通知だけ返す（続きの読み込み）, schema: { type: integer } }
+        - { in: query, name: unread, description: 1 なら未読だけを返す（ホームのお知らせ用。before_id は使わない）, schema: { type: string, enum: ["1"] } }
+        - { in: query, name: exclude_kind, description: unread=1 のとき、除く種類（複数可）, schema: { type: array, items: { type: string } }, style: form, explode: true }
+      responses:
+        "200":
+          description: 一覧と未読の件数
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unread_count: { type: integer }
+                  notifications:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        kind: { type: string, enum: [application, scout, guidance, deadline] }
+                        title: { type: string }
+                        body: { type: string }
+                        link: { type: string }
+                        read_at: { type: string, format: date-time, nullable: true }
+                        created_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/notifications/unread-count:
+    get:
+      tags: [notifications]
+      summary: 自分の未読の件数（ヘッダのバッジ用）
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 未読の件数
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unread_count: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/notifications/read-all:
+    post:
+      tags: [notifications]
+      summary: 自分の未読をすべて既読にする
+      security: [{ userToken: [] }]
+      responses:
+        "204": { description: 既読にした }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/notifications/{id}/read:
+    post:
+      tags: [notifications]
+      summary: 自分の通知1件を既読にする
+      description: 他人の通知や存在しない通知は 404（存在を区別させない）。既読済みでも 204。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: 既読にした }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 通知が見つからない }
+
   /api/schedule:
     get:
       tags: [schedule]
@@ -3334,6 +3428,48 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/admin/dashboard/funnel:
+    get:
+      tags: [admin-analytics]
+      summary: 機能横断のコンバージョンファネル（診断→面接→ES→応募→内定）
+      description: |
+        段階ごとの到達人数・対象の学生に対する割合・前の段階からの継続率を返す（#2039）。
+        担当校スコープが掛かる。担当校を持つ管理者は `school_id` が必須で、担当校以外は 403。
+        担当校を持たないシステム管理者だけが `school_id` なし（全体）で見られる。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - { in: query, name: school_id, schema: { type: integer } }
+        - { in: query, name: from, description: 期間の開始日（含む、YYYY-MM-DD、日本時間）, schema: { type: string, format: date } }
+        - { in: query, name: to, description: 期間の終了日（含む、YYYY-MM-DD、日本時間）, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  school_id: { type: integer, nullable: true }
+                  from: { type: string }
+                  to: { type: string }
+                  funnel:
+                    type: object
+                    properties:
+                      students: { type: integer }
+                      stages:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            stage: { type: string, enum: [diagnosis, interview, es, applied, offered] }
+                            reached: { type: integer }
+                            rate_of_students: { type: number }
+                            continued_from_previous: { type: integer }
+                            continuation_rate: { type: number }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   /api/admin/teacher/students/tendency-analysis:
     get:
       tags: [admin-analytics]
@@ -3777,6 +3913,176 @@ paths:
       responses:
         "200":
           description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/user-score-recalculation/preview:
+    get:
+      tags: [admin-score]
+      summary: ユーザースコア再計算の見積もり
+      description: |
+        旧計算版の件数と、保守的なAI費用概算を返す。
+        実行中または一時停止中のジョブがあれば active_job に入れて返す（無ければ null）。
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 見積もり
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/user-score-recalculation/jobs:
+    post:
+      tags: [admin-score]
+      summary: ユーザースコア再計算ジョブを開始する
+      description: |
+        見積もりを確認した後に呼ぶ。最大10セッションずつ処理し、停止・再開できる。
+      security: [{ adminAuth: [] }]
+      responses:
+        "201":
+          description: ジョブ
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "409":
+          description: 別のジョブが実行中または一時停止中
+
+  /api/admin/user-score-recalculation/jobs/{job_id}:
+    get:
+      tags: [admin-score]
+      summary: ユーザースコア再計算ジョブの進捗
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: ジョブの進捗
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "404":
+          description: ジョブが存在しない
+
+  /api/admin/user-score-recalculation/jobs/{job_id}/run:
+    post:
+      tags: [admin-score]
+      summary: ユーザースコア再計算を最大10件進める
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 更新後の進捗
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "409":
+          description: ジョブが実行中ではない
+
+  /api/admin/user-score-recalculation/jobs/{job_id}/pause:
+    post:
+      tags: [admin-score]
+      summary: ユーザースコア再計算を一時停止する
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 一時停止後のジョブ
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "409":
+          description: ジョブが実行中ではない
+
+  /api/admin/user-score-recalculation/jobs/{job_id}/resume:
+    post:
+      tags: [admin-score]
+      summary: ユーザースコア再計算を再開する
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 再開後のジョブ
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "409":
+          description: ジョブが一時停止中ではない
+
+  /api/admin/user-score-recalculation/jobs/{job_id}/cancel:
+    post:
+      tags: [admin-score]
+      summary: 一時停止中のユーザースコア再計算を中止する
+      description: 再計算済みのセッションは元に戻らない。未処理のセッションは次のジョブの対象になる。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 中止後のジョブ
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "404":
+          description: ジョブが存在しない
+        "409":
+          description: ジョブが一時停止中ではない、または実行中のバッチが残っている
+
+  /api/admin/user-score-recalculation/jobs/{job_id}/rollback:
+    post:
+      tags: [admin-score]
+      summary: 再計算で置き換えたスコアを元に戻す
+      description: |
+        最大20セッションずつ戻す。応答の remaining が 0 になるまで繰り返す。
+        再計算の後に更新があったセッションは戻さず skipped に数える。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 復元の結果（restored / skipped / matching_failed / remaining）
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "404":
+          description: ジョブが存在しない
+        "409":
+          description: 実行中または一時停止中のジョブがある
+
+  /api/admin/user-score-recalculation/dry-run:
+    post:
+      tags: [admin-score]
+      summary: 再計算後の値を保存せずに確認する
+      description: 対象の先頭から最大5セッションを再計算して現在の値と比べる。LLM を呼ぶので費用がかかる。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 3
+            maximum: 5
+      responses:
+        "200":
+          description: セッションごとの比較（sessions）と比較表（text）
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 
@@ -4341,6 +4647,27 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/user/scouts/{id}/accept:
+    post:
+      tags: [user]
+      summary: スカウトを承諾する
+      description: |
+        承諾すると、その企業の学生検索とスカウト一覧に氏名・学校・写真が見えるようになる。
+        辞退済みは承諾できない。
+      security: [{ userToken: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: スカウトが見つからない }
+        "422": { description: 辞退済みのため承諾できない }
 
   /api/user/scouts/{id}/decline:
     post:

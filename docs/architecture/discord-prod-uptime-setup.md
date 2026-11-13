@@ -58,8 +58,8 @@ ECSを起動しても**最大1時間で元に戻される**。「Discordで起�
 ### なぜ Lambda か
 
 本番(prod)は既定停止のため、受け口には常時動いているものが必要になる。当初は staging の
-backend に置いていたが、staging は `deployment.yml` の `staging-auto-stop` によって
-**デプロイから1時間で自動停止する**。停止中は受け口ごと落ちるため /prod が
+backend に置いていたが、staging は（当時）`deployment.yml` の `staging-auto-stop` によって
+**デプロイから1時間で自動停止していた**（現在は廃止し常時起動）。停止中は受け口ごと落ちるため /prod が
 「アプリケーションは時間内に応答しませんでした」になり、しかも復旧手段である
 `/staging state:on` も同じ受け口なので Discord からは何もできなくなっていた。
 

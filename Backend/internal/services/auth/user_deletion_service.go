@@ -375,6 +375,8 @@ func hardDeleteUserData(tx *gorm.DB, userID uint) error {
 		&models.AIGeneratedQuestion{},
 		&models.ConversationContext{},
 		&models.UserWeightScore{},
+		// 再計算の控え（#1770）。scores_json にスコアを丸ごと持つので、退会後に残さない
+		&models.UserScoreRecalculationSnapshot{},
 		&models.UserAnalysisProgress{},
 		&models.UserEmbedding{},
 		&models.VariantAssignment{},
@@ -398,6 +400,8 @@ func hardDeleteUserData(tx *gorm.DB, userID uint) error {
 		// ES添削（#1531）。ES本文・改善文を持つので明示的に消す。
 		// users への FK CASCADE でも落ちるが、依存を暗黙にしない。
 		&models.ESReview{},
+		// アプリ内通知（#2033）。先生の案内文や企業名を含むので、退会後に残さない（users への FK は無い）。
+		&models.Notification{},
 	}
 	for _, m := range deletes {
 		if err := tx.Where("user_id = ?", userID).Delete(m).Error; err != nil {
