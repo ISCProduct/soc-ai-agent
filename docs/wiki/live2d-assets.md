@@ -16,6 +16,7 @@ SVG/CSS描画）へ自動で切り替わります。**面接自体は止まり�
 | Cubism Web Framework (`frontend/vendor/live2d-framework/`) | Live2D Open Software License | 置ける（**コミット済み**） |
 | シェーダ (`frontend/public/live2d/shaders/`) | 同上（Framework付属） | 置ける（**コミット済み**） |
 | 書き出し済みモデル（`.moc3` / `.model3.json` / `.cdi3.json` / テクスチャ） | 自社制作物 | 置かない（配布条件がリポジトリと別） |
+| 制作用の元絵・Cubismプロジェクト（`source/` / `cubism-input/` / `*.cmo3`） | 自社制作物 | 置かない（**容量**。下の「制作用の資産」参照） |
 
 Core はアプリに同梱して配る分は契約の想定内（だからブラウザへ配信してよい）ですが、
 public リポジトリへのコミットは SDK 単体の再配布にあたるため行いません。
@@ -36,6 +37,11 @@ s3://soc-build-assets-508897596159/live2d/
   interviewers/female/female-interviewer.{model3.json,moc3,cdi3.json}
   interviewers/female/female-interviewer.2048/texture_00.png
 ```
+
+**`live2d/` の下には実行時に要るものだけを置いてください。** このプレフィックスは
+まるごと `frontend/public/live2d/` へ同期され、`public/` はブラウザへ配信されます。
+制作用の元絵をここに混ぜると、全ビルドのイメージに入って公開されます。制作用は
+`live2d-authoring/` に分けてあります（次節）。
 
 バケットはパブリックアクセス全ブロック・バージョニング有効。バケット名は
 リポジトリ変数 `LIVE2D_ASSETS_BUCKET` で上書きできます（未設定なら上記が既定）。
@@ -73,6 +79,52 @@ IsVisible 動的フラグを毎フレーム上書きして動かしています�
 IDが変わると口もまばたきも動かなくなります。残っている Cubism 側の作業は
 `frontend/public/live2d/interviewers/CUBISM_STATUS.md` にあります。
 
+## 制作用の資産（モデルを描き直す人だけ）
+
+元絵（`source/`）、Cubism 取り込み用の 2048px PNG（`cubism-input/`）、Cubism Editor の
+プロジェクト（`cubism-wip/*.cmo3`）は、合わせて 25MB あります。アプリを動かすのに
+は要らず、モデルを描き直す人しか開きません。`.cmo3` は書き出すたびに数MBの新しい
+blob が履歴へ積み上がるため、リポジトリから外して S3 へ置いています。
+
+```
+s3://soc-build-assets-508897596159/live2d-authoring/
+  docs/avatar/live2d-interviewers/cubism-wip/{male,female}-interviewer.cmo3
+  frontend/public/live2d/interviewers/source/{male,female}/...
+  frontend/public/live2d/interviewers/cubism-input/{male,female}/...
+```
+
+キーはリポジトリ相対のパスです。ルートへ sync すれば各ファイルが本来の場所へ戻ります。
+
+### 取ってくる
+
+```bash
+LIVE2D_ASSETS_BUCKET=soc-build-assets-508897596159 ./automation/ops/fetch-live2d-authoring.sh
+```
+
+`.gitignore` で除外してあるので、展開しても `git status` は汚れません。
+
+### 描き直したあと
+
+Cubism プロジェクトと、そこから書き出した実行時モデルは、置き場所が違います。
+**両方を上げてください。**
+
+```bash
+# 1. プロジェクトと元絵（制作用）
+aws s3 sync ./docs/avatar/live2d-interviewers/cubism-wip/ \
+  s3://soc-build-assets-508897596159/live2d-authoring/docs/avatar/live2d-interviewers/cubism-wip/
+
+# 2. 書き出した実行時モデル（これが本番で配られる）
+aws s3 sync ./frontend/public/live2d/interviewers/female/ \
+  s3://soc-build-assets-508897596159/live2d/interviewers/female/
+```
+
+バケットはバージョニング有効なので、上書きしても前の版は残ります。
+
+> **注意: `.cmo3` と S3 上の `.moc3` がずれていないか確認してください。** 2026-11-13 に、
+> リポジトリの `female-interviewer.cmo3` が 10-28 の平面1枚版のまま取り残され、S3 の
+> 女性モデル（3 ArtMesh 版）の書き出し元がローカルの作業コピーにしか無い状態に
+> なっていました。書き出したら必ず 1. も上げてください。
+
 ## ローカルで試す
 
 1. [live2d.com](https://www.live2d.com/) から Cubism SDK for Web を取得して同意し、
@@ -95,6 +147,8 @@ IDが変わると口もまばたきも動かなくなります。残っている
    面接官として使うには `ParamAngleY` か `ParamAngleX` のどちらかが必要です
    （`live2d-params.ts` の `isUsableAsInterviewer`。両方無いモデルは不適格と
    判定され Avatar2D に切り替わります）。
+
+モデルを**描き直す**場合は、上の「制作用の資産」も取ってください。アプリを動かすだけなら要りません。
 
 単一モデルで試すときは `NEXT_PUBLIC_LIVE2D_MODEL_URL` を指定すると性別によらずそれを使います。
 ただし**差分ArtMeshの対応は `gender` で選ばれたまま**なので、男性モデルを女性として表示すると

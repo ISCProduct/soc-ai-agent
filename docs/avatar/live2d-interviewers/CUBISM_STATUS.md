@@ -5,13 +5,14 @@ Last checked: 2026-10-28
 ## Male model
 
 - Source project confirmed at `~/Desktop/Untitled Model.cmo3`.
-- A repository copy is available at `cubism-wip/male-interviewer.cmo3`.
+- A copy is kept in S3 at `live2d-authoring/.../cubism-wip/male-interviewer.cmo3`.
 - The Cubism project opens successfully in Cubism Editor 5.3.04 FREE.
 - The standard parameters include `ParamAngleY`, `ParamEyeLOpen`,
   `ParamEyeROpen`, `ParamMouthOpenY`, `ParamAngleX`, and `ParamBreath`.
 - Named part folders exist for the face, eyes, pupils, eyebrows, mouth, nose,
   ears, hair, neck, and body.
-- The editable project is saved at `cubism-wip/male-interviewer.cmo3`.
+- The editable project is saved at `cubism-wip/male-interviewer.cmo3`
+  (fetch it with `automation/ops/fetch-live2d-authoring.sh`; it is no longer in Git).
 - An authentic Cubism runtime export exists at
   `frontend/public/live2d/interviewers/male/`.
 
@@ -30,7 +31,8 @@ seams must be adjusted in Cubism before the model is production-ready.
 ## Female model
 
 - `female-neutral-2048.png` was imported into Cubism Editor.
-- The editable project is saved at `cubism-wip/female-interviewer.cmo3`.
+- The editable project is saved at `cubism-wip/female-interviewer.cmo3`
+  (fetch it with `automation/ops/fetch-live2d-authoring.sh`; it is no longer in Git).
 - An authentic Cubism runtime export exists at
   `frontend/public/live2d/interviewers/female/`.
 - Like the male source, the visible character is a single flat ArtMesh; the
