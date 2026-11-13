@@ -9,6 +9,7 @@ import (
 	authcontrollers "Backend/internal/controllers/auth"
 	chatcontrollers "Backend/internal/controllers/chat"
 	companycontrollers "Backend/internal/controllers/company"
+	consultationcontrollers "Backend/internal/controllers/consultation"
 	escontrollers "Backend/internal/controllers/es"
 	githubcontrollers "Backend/internal/controllers/github"
 	insightcontrollers "Backend/internal/controllers/insight"
@@ -585,6 +586,9 @@ func main() {
 	routes.SetupAssessmentRoutes(api, assessmentcontrollers.NewController(assessmentService), cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 適性検査 第2段（#1675）。学校独自テンプレートはマッチングに合流させない
 	routes.SetupAssessmentSchoolRoutes(api, assessmentcontrollers.NewSchoolController(assessmentsvc.NewSchoolService(assessmentRepo)), userRepo, schoolService, cfg.AdminSecret)
+	// 教員と学生の相談（案内への返信・学生からの質問、#2028）
+	consultationService := teacher.NewConsultationService(repositories.NewGuidanceMessageRepository(db))
+	routes.SetupConsultationRoutes(api, consultationcontrollers.NewController(consultationService, guidanceService, schoolService), cfg.UserSecret, userDeletionService, organizationService, userRepo, schoolService, cfg.AdminSecret)
 
 	// 適性検査 第3段: 能力検査（SOCAIAGENT-433）。言語・非言語の正答数を独立スコアとして持つ。
 	// user_weight_scores へは書かない（10カテゴリへ変換する方法が無い）ので、

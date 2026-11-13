@@ -538,6 +538,18 @@ function ProfilePageContent() {
 
       {/* アカウント管理セクション */}
       <Container maxWidth="lg" sx={{ pb: 6 }}>
+        {/* 先生への相談（#2028） */}
+        {!isGuest && (
+          <Card sx={{ mb: 3, borderRadius: 2 }}>
+            <CardContent sx={{ p: 3, display: 'flex', alignItems: { sm: 'center' }, justifyContent: 'space-between', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
+              <Box>
+                <Typography variant="subtitle1" component="h2" fontWeight="bold">先生への相談</Typography>
+                <Typography variant="body2" color="text.secondary">進路や就職活動のことを、学校の先生に質問できます</Typography>
+              </Box>
+              <Button variant="outlined" onClick={() => router.push('/consultations')} sx={{ flexShrink: 0 }}>相談する</Button>
+            </CardContent>
+          </Card>
+        )}
         <Divider sx={{ my: 4 }} />
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
           <Box>

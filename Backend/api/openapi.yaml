@@ -1773,6 +1773,109 @@ paths:
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   # ── schedule ───────────────────────────────────────
+  /api/user/consultations:
+    post:
+      tags: [schedule]
+      summary: 学生から先生への質問のスレッドを作る
+      description: "#2028。学生は `X-User-Token` から決まる。本文は1000文字まで。"
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [body], properties: { body: { type: string, maxLength: 1000 } } }
+      responses:
+        "201": { description: 作成したスレッド }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/user/consultations/unread:
+    get:
+      tags: [schedule]
+      summary: 自分のスレッドごとの、先生の未読の発言の数
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: スレッドごとの未読の数と合計 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/user/consultations/{id}:
+    get:
+      tags: [schedule]
+      summary: 自分のスレッド（案内または質問）と発言。先生の発言を既読にする
+      description: 他人の案内は 404。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: スレッド }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 相談が見つからない }
+
+  /api/user/consultations/{id}/messages:
+    post:
+      tags: [schedule]
+      summary: 自分のスレッドに返信する
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [body], properties: { body: { type: string, maxLength: 1000 } } }
+      responses:
+        "201": { description: 返信後のスレッド }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 相談が見つからない }
+
+  /api/admin/teacher/consultations:
+    get:
+      tags: [admin-analytics]
+      summary: 先生の受信一覧（学生の発言があるスレッド）
+      description: |
+        担当校スコープが掛かる（#2028）。担当校を持つ管理者・職員は `school_id` が必須で、担当校以外は 403。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - { in: query, name: school_id, schema: { type: integer } }
+      responses:
+        "200": { description: 受信一覧 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/teacher/consultations/{id}:
+    get:
+      tags: [admin-analytics]
+      summary: スレッドを見る（学生の発言を既読にする）
+      description: スレッドの学生の学校が担当校でなければ 403。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: スレッド }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 相談が見つからない }
+
+  /api/admin/teacher/consultations/{id}/messages:
+    post:
+      tags: [admin-analytics]
+      summary: スレッドに先生が返信する
+      description: スレッドの学生の学校が担当校でなければ 403。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [body], properties: { body: { type: string, maxLength: 1000 } } }
+      responses:
+        "201": { description: 返信後のスレッド }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 相談が見つからない }
   /api/notifications:
     get:
       tags: [notifications]
