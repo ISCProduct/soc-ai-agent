@@ -159,6 +159,10 @@ class ESReviewResponse(BaseModel):
     improved_text_length: int = 0
     # 指定字数に収まったか。char_limit 未指定なら null(#1523)
     char_limit_satisfied: Optional[bool] = None
+    # 改善文が目標レンジ（元の100〜130%）に入ったか。char_limit 指定時は null（#1606）
+    improved_length_satisfied: Optional[bool] = None
+    # 外れた理由。short は元の100%未満、long は130%超え。範囲内と char_limit 指定時は null
+    improved_length_issue: Optional[Literal["short", "long"]] = None
     usage: Optional[ESReviewUsage] = None
 
 
