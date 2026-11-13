@@ -135,8 +135,8 @@ describe('辞書', () => {
 // 辞書化を広げたら、ここにファイルを足す。
 const DICTIONARY_ONLY_FILES = [
   'lib/sidebar-nav.ts',
-  'components/GlobalNavMenu.tsx',
-  'components/StudentBottomNav.tsx',
+  'components/layout/GlobalNavMenu.tsx',
+  'components/layout/StudentBottomNav.tsx',
   'app/layout.tsx',
 ]
 
@@ -158,7 +158,7 @@ describe('辞書化したファイル', () => {
 
 // ナビの文言を表示する部品に、辞書と同じ文言を直書きしない。ほかの日本語（ゲスト向けの案内など）が残っていて
 // ファイルごとはチェックできない部品でも、ナビの項目名だけは辞書から引く（#2162 のセルフレビュー）。
-const NAV_CONSUMER_FILES = ['components/AnalysisSidebar.tsx']
+const NAV_CONSUMER_FILES = ['components/home/AnalysisSidebar.tsx']
 
 describe('ナビの文言を表示する部品', () => {
   const navLabels = leafValues(ja.nav).map(String)

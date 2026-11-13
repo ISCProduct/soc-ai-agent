@@ -15,7 +15,7 @@
  *    (.claude/skills/school-career-ui-design/SKILL.md 4.3)
  */
 import { render, screen, act } from '@testing-library/react'
-import { AnalysisSidebar } from '@/components/AnalysisSidebar'
+import { AnalysisSidebar } from '@/components/home/AnalysisSidebar'
 import type { User } from '@/lib/auth'
 
 jest.mock('next/navigation', () => ({

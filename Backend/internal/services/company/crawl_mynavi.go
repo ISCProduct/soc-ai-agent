@@ -1,6 +1,7 @@
 package company
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"bytes"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"gorm.io/gorm"
 )
 
 // executeMynaviCompanyCrawl マイナビ企業ページをgoqueryでパースして企業情報を保存する
@@ -46,11 +46,11 @@ func (s *CrawlService) executeMynaviCompanyCrawl(source *models.CrawlSource) err
 	time.Sleep(1 * time.Second)
 
 	company, err := s.companyRepo.FindByName(extracted.Name)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return err
 	}
 
-	if company == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+	if company == nil || errors.Is(err, repository.ErrNotFound) {
 		newCompany := &models.Company{
 			Name:            extracted.Name,
 			Description:     extracted.Description,
