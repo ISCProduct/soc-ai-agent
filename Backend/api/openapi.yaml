@@ -69,6 +69,8 @@ tags:
     description: エントリーシートの添削とリライト（未ログインでも使える）
   - name: schedule
     description: 選考スケジュール
+  - name: portfolio
+    description: 自己分析ポートフォリオ（診断・面接・ES・適性検査のまとめ）
   - name: google-calendar
     description: Google カレンダー連携
   - name: admin-companies
@@ -1753,6 +1755,24 @@ paths:
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   # ── schedule ───────────────────────────────────────
+  /api/portfolio:
+    get:
+      tags: [portfolio]
+      summary: 自分の自己分析ポートフォリオ
+      description: |
+        診断・面接・ES・適性検査をまとめて返す（#2030）。宛先は `X-User-Token` から決まり、user_id は受け取らない。
+        面接は教員向けの詳細を含めず、学生向けの要約・スコア・強み・改善点だけを返す。`Cache-Control: no-store`。
+      security: [{ userToken: [] }]
+      parameters:
+        - in: query
+          name: sections
+          description: 出力する内容（カンマ区切り）。空なら全部
+          schema: { type: string, example: "diagnosis,interview,es,assessment" }
+      responses:
+        "200": { description: ポートフォリオ }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /api/schedule:
     get:
       tags: [schedule]

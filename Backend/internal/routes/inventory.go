@@ -68,6 +68,7 @@ func Inventory() []Route {
 	SetupGitHubRoutes(api, nil, "", nil, nil, budget)
 	SetupESRoutes(api, nil, nil, "", nil, nil, budget)
 	SetupScheduleRoutes(api, nil, "", nil, nil)
+	SetupPortfolioRoutes(api, nil, "", nil, nil)
 	SetupGoogleCalendarRoutes(api, nil, "", nil, nil)
 	SetupApplicationRoutes(api, nil, nil, "", nil, nil)
 	// company_auth_routes.go と user_routes.go は一部のコントローラを `!= nil` で囲んでいる。
