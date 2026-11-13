@@ -59,11 +59,6 @@ var mapperCases = []mapperCase{
 		fromEntity: func(e any) any { return mapper.UserFromEntity(e.(*entity.User)) },
 	},
 	{
-		name: "PendingRegistration", model: typ[models.PendingRegistration](), entity: typ[entity.PendingRegistration](),
-		toEntity:   func(m any) any { return mapper.PendingRegistrationToEntity(m.(*models.PendingRegistration)) },
-		fromEntity: func(e any) any { return mapper.PendingRegistrationFromEntity(e.(*entity.PendingRegistration)) },
-	},
-	{
 		// ToEntity のみ。企業の書き込みは models.Company を直接使う。
 		name: "Company", model: typ[models.Company](), entity: typ[entity.Company](),
 		toEntity: func(m any) any { return mapper.CompanyToEntity(m.(*models.Company)) },
