@@ -261,6 +261,16 @@ jobs:
                           continue
                       k = extract_bl_key(sub.get('title', ''), sub.get('body') or '')
                       if not k:
+                          # 本文・ブランチ名の番号から Issue を辿る(直接マージ時と同じ経路)。
+                          # キーを書かない PR が昇格時に取りこぼされないようにする。
+                          sub_ref = ''
+                          if 'pull_request' in sub:
+                              try:
+                                  sub_ref = (gh_api(f"/pulls/{num}").get('head') or {}).get('ref', '')
+                              except Exception:
+                                  pass
+                          k = resolve_bl_key_from_gh_issue(sub.get('body') or '', sub.get('title', ''), sub_ref)
+                      if not k:
                           k = resolve_bl_key_from_title(sub.get('title', ''), sub.get('body') or '', '')
                       if k:
                           keys.add(k)
