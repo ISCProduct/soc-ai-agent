@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"Backend/domain/entity"
+	"Backend/internal/models"
 	"Backend/internal/services/analysis"
 )
 
@@ -93,7 +93,7 @@ func TestEmailService_SendSystemAlertEmail_TextBody(t *testing.T) {
 func TestEmailService_SendAnalysisReport_HTML(t *testing.T) {
 	rec := &recordingMailTransport{}
 	svc := &EmailService{provider: "recording", from: "noreply@example.com", transport: rec}
-	user := &entity.User{Name: "太郎", Email: "taro@example.com"}
+	user := &models.User{Name: "太郎", Email: "taro@example.com"}
 	summary := &analysis.AnalysisSummary{
 		Scores:   analysis.AnalysisScores{JobScore: 0.8, InterestScore: 0.7, AptitudeScore: 0.6, FutureScore: 0.5},
 		Progress: analysis.AnalysisProgress{Job: 0.8, Interest: 0.7, Aptitude: 0.6, Future: 0.5},

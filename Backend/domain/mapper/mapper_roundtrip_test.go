@@ -54,11 +54,6 @@ func typ[T any]() reflect.Type { return reflect.TypeOf((*T)(nil)).Elem() }
 
 var mapperCases = []mapperCase{
 	{
-		name: "User", model: typ[models.User](), entity: typ[entity.User](),
-		toEntity:   func(m any) any { return mapper.UserToEntity(m.(*models.User)) },
-		fromEntity: func(e any) any { return mapper.UserFromEntity(e.(*entity.User)) },
-	},
-	{
 		// ToEntity のみ。重みの書き込みは models.UserWeightScore を直接使う。
 		name: "UserWeightScore", model: typ[models.UserWeightScore](), entity: typ[entity.UserWeightScore](),
 		toEntity:  func(m any) any { return mapper.UserWeightScoreToEntity(m.(*models.UserWeightScore)) },

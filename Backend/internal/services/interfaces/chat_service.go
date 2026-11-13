@@ -38,6 +38,6 @@ type AnalysisScoringService interface {
 
 // EmailService メールサービスのインターフェース
 type EmailService interface {
-	SendAnalysisReport(user *entity.User, summary *analysis.AnalysisSummary, companies []email.EmailReportCompany, sessionID string) error
+	SendAnalysisReport(user *models.User, summary *analysis.AnalysisSummary, companies []email.EmailReportCompany, sessionID string) error
 	SendSystemAlertEmail(recipients []string, subject, body string) error
 }
