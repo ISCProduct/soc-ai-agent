@@ -12,11 +12,12 @@ import (
 
 // L1SeedRow はカタログシード CSV の1行。
 type L1SeedRow struct {
-	Name       string
-	Industry   string
-	Segment    string // core | sme_si | extended
-	WebsiteURL string
-	Publish    bool
+	Name        string
+	Industry    string
+	Segment     string // core | sme_si | extended
+	WebsiteURL  string
+	Publish     bool
+	Description string // 任意。事業内容
 }
 
 // L1SeedResult は投入結果。
@@ -28,7 +29,7 @@ type L1SeedResult struct {
 	Errors  []string `json:"errors,omitempty"`
 }
 
-// ParseL1SeedCSV は name,industry,segment,website_url,publish 形式を読む。
+// ParseL1SeedCSV は name,industry,segment,website_url,publish[,description] 形式を読む。
 func ParseL1SeedCSV(r io.Reader) ([]L1SeedRow, error) {
 	cr := csv.NewReader(r)
 	cr.TrimLeadingSpace = true
@@ -78,6 +79,9 @@ func ParseL1SeedCSV(r io.Reader) ([]L1SeedRow, error) {
 		}
 		if idx, ok := header["publish"]; ok && idx < len(rec) {
 			row.Publish = parseBoolish(rec[idx])
+		}
+		if idx, ok := header["description"]; ok && idx < len(rec) {
+			row.Description = strings.TrimSpace(rec[idx])
 		}
 		rows = append(rows, row)
 	}
@@ -135,6 +139,10 @@ func ImportL1Seed(repo repository.CompanyRepository, rows []L1SeedRow) (*L1SeedR
 				existing.WebsiteURL = row.WebsiteURL
 				changed = true
 			}
+			if row.Description != "" && !strings.Contains(existing.Description, row.Description) {
+				existing.Description = strings.TrimSpace(existing.Description + " " + row.Description)
+				changed = true
+			}
 			if row.Publish && existing.DataStatus != "published" {
 				existing.DataStatus = "published"
 				existing.IsActive = true
@@ -171,6 +179,9 @@ func ImportL1Seed(repo repository.CompanyRepository, rows []L1SeedRow) (*L1SeedR
 		}
 		if row.Segment == "core" || row.Segment == "sme_si" {
 			c.Description = "[L1:" + row.Segment + "]"
+		}
+		if row.Description != "" {
+			c.Description = strings.TrimSpace(c.Description + " " + row.Description)
 		}
 		if row.Publish {
 			c.DataStatus = "published"
