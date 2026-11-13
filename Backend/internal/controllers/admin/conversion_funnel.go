@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"time"
 
+	"Backend/domain/funnel"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/repositories"
-	"Backend/internal/services/funnel"
 
 	"github.com/labstack/echo/v4"
 )
