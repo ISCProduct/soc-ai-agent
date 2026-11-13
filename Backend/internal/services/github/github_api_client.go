@@ -448,16 +448,45 @@ func (s *GitHubService) doGet(ctx context.Context, client *http.Client, token, u
 	defer resp.Body.Close()
 
 	if err := CheckRateLimit(resp); err != nil {
+		drainBody(resp.Body)
 		return nil, err
 	}
 
 	if resp.StatusCode >= 400 {
 		// 応答の本文はエラーに入れない。エラーはログにそのまま出るため、GitHub の応答本文（利用者の
 		// リポジトリ名・組織名などを含みうる）がログに残るのを避ける。判定はステータスだけで行う。
+		// 本文は二次レート制限の判別にだけ読み、上限付きで読み切ってから捨てる（下の drainBody）。
+		head, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		drainBody(resp.Body)
+		if resp.StatusCode == http.StatusForbidden && isSecondaryRateLimitBody(head) {
+			return nil, &rateLimitError{resetAt: time.Now().Add(secondaryRateLimitWait)}
+		}
 		return nil, &GitHubAPIError{StatusCode: resp.StatusCode}
 	}
 
 	return io.ReadAll(resp.Body)
+}
+
+// maxErrorBodyBytes は、エラー応答の本文を読み切るときの上限。HTTP/1.x では本文を読み切らずに
+// Close すると接続を再利用できず、README が無いリポジトリでは 404 の直後の確認（checkRepoAccessible）で
+// 毎回新しい TCP/TLS 接続になる（#2266 のレビュー）。巨大な本文を読み続けないよう上限を設ける。
+const maxErrorBodyBytes = 64 << 10
+
+// drainBody は、本文の残りを上限付きで読み捨てる（接続の再利用のため）。Close は呼び出し元の defer で行う。
+func drainBody(body io.Reader) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxErrorBodyBytes))
+}
+
+// secondaryRateLimitWait は、Retry-After の無い二次レート制限で待つ時間。GitHub のドキュメントでは、
+// Retry-After も X-RateLimit-Remaining=0 も無い場合は少なくとも1分待つよう定めている。
+const secondaryRateLimitWait = time.Minute
+
+// isSecondaryRateLimitBody は、403 の本文が二次レート制限の応答かを返す。
+// 二次レート制限は Retry-After を付けずに返ることがあり、ヘッダーだけでは権限不足の 403 と区別できない
+// （#2266 のレビュー）。GitHub は本文の message に "secondary rate limit" を含めて返すので、それで判別する。
+// 本文はこの判別にだけ使い、エラーやログには入れない。
+func isSecondaryRateLimitBody(body []byte) bool {
+	return bytes.Contains(bytes.ToLower(body), []byte("secondary rate limit"))
 }
 
 // GitHubAPIError GitHub API が 4xx・5xx を返したことを表す（レート制限は rateLimitError で別に返す）。

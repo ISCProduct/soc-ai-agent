@@ -286,3 +286,88 @@ func TestDoGet_StatusError(t *testing.T) {
 		})
 	}
 }
+
+// Retry-After の無い二次レート制限は、本文の message で判別してレート制限として扱う（#2266 のレビュー）。
+// 権限不足の 403 と取り違えると、利用者に解決できない再連携を促してしまう。
+func TestDoGet_SecondaryRateLimitWithoutRetryAfter(t *testing.T) {
+	cases := []struct {
+		name          string
+		status        int
+		body          string
+		wantRateLimit bool
+	}{
+		{"403 で本文が二次レート制限", http.StatusForbidden, `{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}`, true},
+		{"大文字小文字を問わない", http.StatusForbidden, `{"message":"You Have Exceeded A Secondary Rate Limit"}`, true},
+		{"403 で権限不足の本文は GitHubAPIError のまま", http.StatusForbidden, `{"message":"Resource protected by organization SAML enforcement"}`, false},
+		{"404 の本文に同じ語があってもレート制限にしない", http.StatusNotFound, `{"message":"secondary rate limit"}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			_, err := (&GitHubService{}).doGet(context.Background(), server.Client(), "token", server.URL+"/x")
+			if got := IsRateLimitError(err); got != tc.wantRateLimit {
+				t.Fatalf("IsRateLimitError = %v, want %v（err = %v）", got, tc.wantRateLimit, err)
+			}
+			if !tc.wantRateLimit && githubAPIStatus(err) != tc.status {
+				t.Fatalf("err = %v, want GitHubAPIError{%d}", err, tc.status)
+			}
+			if strings.Contains(err.Error(), "message") {
+				t.Fatalf("エラーに本文が入っている: %v", err)
+			}
+		})
+	}
+}
+
+// trackingBody は、読み切られたか（EOF まで読まれたか）を記録する本文。
+type trackingBody struct {
+	r       *strings.Reader
+	drained bool
+}
+
+func (b *trackingBody) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if err == io.EOF {
+		b.drained = true
+	}
+	return n, err
+}
+func (b *trackingBody) Close() error { return nil }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// エラー応答の本文は、上限付きで読み切ってから捨てる（HTTP/1.x で接続を再利用するため。#2266 のレビュー）。
+func TestDoGet_DrainsErrorBody(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		headers map[string]string
+	}{
+		{"404", http.StatusNotFound, nil},
+		{"500", http.StatusInternalServerError, nil},
+		{"レート制限（CheckRateLimit で返る経路）", http.StatusForbidden, map[string]string{"X-RateLimit-Remaining": "0"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := &trackingBody{r: strings.NewReader(strings.Repeat("x", 10_000))}
+			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				h := http.Header{}
+				for k, v := range tc.headers {
+					h.Set(k, v)
+				}
+				return &http.Response{StatusCode: tc.status, Header: h, Body: body, Request: r}, nil
+			})}
+			if _, err := (&GitHubService{}).doGet(context.Background(), client, "token", "https://example.test/x"); err == nil {
+				t.Fatal("エラーにならなかった")
+			}
+			if !body.drained {
+				t.Fatal("エラー応答の本文を読み切らずに返した")
+			}
+		})
+	}
+}

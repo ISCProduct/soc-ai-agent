@@ -20,11 +20,13 @@ import (
 	"Backend/internal/controllers/mocks"
 	"Backend/internal/controllers/testsupport"
 	usercontrollers "Backend/internal/controllers/user"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/services/flywheel"
 	githubservice "Backend/internal/services/github"
 	"Backend/internal/services/shared"
 
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	tmock "github.com/stretchr/testify/mock"
 )
@@ -272,18 +274,24 @@ func TestGitHubController_SummarizeRepo_InvalidFullNameFromService(t *testing.T)
 //   - 不正な出力は上流（AI）の応答の問題なので 500 ではなく 502 にし、作り直せる旨の文言を返す
 //   - 再連携・権限の付与で直るもの（401・レート制限以外の 403）は 403 にし、サービスの文言をそのまま返す
 //   - それ以外は従来どおり 500 で、内部の文言は返さない
+//
+// 本番と同じエラーハンドラー（middleware.CustomHTTPErrorHandler）を設定した Echo を通して、
+// 応答の形（{error, code}）とステータスを確かめる（#2266 のレビュー）。testsupport.AssertStatus は
+// Echo の既定のハンドラーを使うので、本番のハンドラーが APIError を扱えなくなっても気づけない。
 func TestGitHubController_SummarizeRepo_ErrorStatus(t *testing.T) {
 	cases := []struct {
 		name        string
 		err         error
 		wantStatus  int
 		wantMessage string
+		wantCode    string
 	}{
 		{
 			name:        "不正な出力は 502",
 			err:         fmt.Errorf("AI summary generation failed: %w", fmt.Errorf("%w: summary_text が空です", githubservice.ErrInvalidRepoSummaryOutput)),
 			wantStatus:  http.StatusBadGateway,
 			wantMessage: "AIの要約をうまく作れませんでした",
+			wantCode:    "BAD_GATEWAY",
 		},
 		{
 			name:        "権限不足の 403 は再連携を促す 403",
@@ -308,8 +316,24 @@ func TestGitHubController_SummarizeRepo_ErrorStatus(t *testing.T) {
 
 			gh := &mocks.GitHubServiceMock{}
 			gh.On("SummarizeRepo", tmock.Anything, uint(1), "owner/repo", false, "").Return(nil, tc.err)
-			testsupport.AssertStatus(t, newGitHubController(gh, nil).SummarizeRepo, testsupport.NewCtx(req, rec), tc.wantStatus)
-			assert.Contains(t, rec.Body.String(), tc.wantMessage)
+			e := echo.New()
+			e.HTTPErrorHandler = middleware.CustomHTTPErrorHandler
+			e.POST("/api/github/repo/summarize", newGitHubController(gh, nil).SummarizeRepo)
+			e.ServeHTTP(rec, req)
+
+			assert.Equal(t, tc.wantStatus, rec.Code)
+			var resp struct {
+				Error string `json:"error"`
+				Code  string `json:"code"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("本番のエラー応答の形（JSON）になっていない: %q", rec.Body.String())
+			}
+			assert.Contains(t, resp.Error, tc.wantMessage)
+			assert.NotEmpty(t, resp.Code)
+			if tc.wantCode != "" {
+				assert.Equal(t, tc.wantCode, resp.Code)
+			}
 			// 内部のエラーの文言（英語のセンチネルや GitHub のステータス）は利用者に返さない
 			assert.NotContains(t, rec.Body.String(), "github api error")
 			assert.NotContains(t, rec.Body.String(), "summary_text が空です")
