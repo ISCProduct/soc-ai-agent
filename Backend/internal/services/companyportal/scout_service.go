@@ -1,16 +1,14 @@
 package companyportal
 
 import (
+	"Backend/internal/models"
+	"Backend/internal/services/shared"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"Backend/domain/entity"
-	"Backend/internal/models"
-	"Backend/internal/services/shared"
 
 	"gorm.io/gorm"
 )
@@ -51,7 +49,7 @@ type scoutVisibility interface {
 }
 
 type scoutUserReader interface {
-	GetUserByID(id uint) (*entity.User, error)
+	GetUserByID(id uint) (*models.User, error)
 }
 
 type scoutCompanyReader interface {

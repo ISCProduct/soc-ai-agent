@@ -395,7 +395,7 @@ func TestChatController_SendReport_UserNotFound(t *testing.T) {
 
 func TestChatController_SendReport_GuestForbidden(t *testing.T) {
 	userRepo := &mocks.UserRepositoryMock{}
-	guestUser := &entity.User{IsGuest: true}
+	guestUser := &models.User{IsGuest: true}
 	userRepo.On("GetUserByID", uint(1)).Return(guestUser, nil)
 
 	body, _ := json.Marshal(map[string]string{"session_id": "s1"})
@@ -410,7 +410,7 @@ func TestChatController_SendReport_GuestForbidden(t *testing.T) {
 func TestChatController_SendReport_AnalysisError(t *testing.T) {
 	userRepo := &mocks.UserRepositoryMock{}
 	analysisSvc := &mocks.AnalysisScoringServiceMock{}
-	user := &entity.User{Email: "test@example.com", IsGuest: false}
+	user := &models.User{Email: "test@example.com", IsGuest: false}
 	userRepo.On("GetUserByID", uint(1)).Return(user, nil)
 	analysisSvc.On("BuildAnalysisSummary", mock.Anything, uint(1), "s1").Return(nil, errors.New("analysis error"))
 
@@ -430,7 +430,7 @@ func TestChatController_SendReport_Success(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
 	emailSvc := &mocks.EmailServiceMock{}
 
-	user := &entity.User{Email: "test@example.com", IsGuest: false}
+	user := &models.User{Email: "test@example.com", IsGuest: false}
 	summary := &analysis.AnalysisSummary{}
 	userRepo.On("GetUserByID", uint(1)).Return(user, nil)
 	analysisSvc.On("BuildAnalysisSummary", mock.Anything, uint(1), "s1").Return(summary, nil)

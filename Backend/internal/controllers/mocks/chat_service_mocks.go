@@ -116,7 +116,7 @@ type EmailServiceMock struct {
 	mock.Mock
 }
 
-func (m *EmailServiceMock) SendAnalysisReport(user *entity.User, summary *analysis.AnalysisSummary, companies []email.EmailReportCompany, sessionID string) error {
+func (m *EmailServiceMock) SendAnalysisReport(user *models.User, summary *analysis.AnalysisSummary, companies []email.EmailReportCompany, sessionID string) error {
 	args := m.Called(user, summary, companies, sessionID)
 	return args.Error(0)
 }

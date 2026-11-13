@@ -1,7 +1,6 @@
 package hr
 
 import (
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
@@ -22,7 +21,7 @@ const ScoutVisibleRole = "student"
 // repositories.StudentSearchRepository.visibleStudents のSQL条件と同一の意味を持ち、
 // 一覧・セマンティック検索・タグ付与・詳細のすべてが同じ条件を通るようにする。
 // 片方だけ条件を変えると認可が不一致になるため、変更時は必ず両方を揃えること。
-func IsScoutVisible(u *entity.User) bool {
+func IsScoutVisible(u *models.User) bool {
 	return u != nil &&
 		u.AllowScoutVisibility &&
 		!u.IsWithdrawn() &&
@@ -31,7 +30,7 @@ func IsScoutVisible(u *entity.User) bool {
 }
 
 type studentUserReader interface {
-	GetUserByID(id uint) (*entity.User, error)
+	GetUserByID(id uint) (*models.User, error)
 }
 
 type interviewSessionLister interface {

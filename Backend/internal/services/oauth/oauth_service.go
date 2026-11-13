@@ -1,10 +1,10 @@
 package oauth
 
 import (
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/config"
 	"Backend/internal/middleware"
+	"Backend/internal/models"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/github"
 	"Backend/internal/services/refreshtoken"
@@ -169,7 +169,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 			user = existingUser
 		} else {
 			// 新規ユーザー作成
-			user = &entity.User{
+			user = &models.User{
 				Email:          userInfo.Email,
 				Name:           userInfo.Name,
 				OAuthProvider:  "google",
@@ -300,7 +300,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, te
 			if name == "" {
 				name = userInfo.Login
 			}
-			user = &entity.User{
+			user = &models.User{
 				Email:          email,
 				Name:           name,
 				OAuthProvider:  "github",

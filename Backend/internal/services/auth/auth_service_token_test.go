@@ -3,6 +3,7 @@ package auth
 import (
 	"Backend/domain/entity"
 	"Backend/internal/middleware"
+	"Backend/internal/models"
 	"os"
 	"testing"
 	"time"
@@ -11,40 +12,40 @@ import (
 )
 
 type userRepoAuthStub struct {
-	user *entity.User
+	user *models.User
 }
 
-func (r *userRepoAuthStub) CreateUser(user *entity.User) error {
+func (r *userRepoAuthStub) CreateUser(user *models.User) error {
 	r.user = user
 	return nil
 }
-func (r *userRepoAuthStub) GetUserByEmail(email string) (*entity.User, error) {
+func (r *userRepoAuthStub) GetUserByEmail(email string) (*models.User, error) {
 	if r.user != nil && r.user.Email == email {
 		return r.user, nil
 	}
 	return nil, nil
 }
-func (r *userRepoAuthStub) GetUserByID(id uint) (*entity.User, error) {
+func (r *userRepoAuthStub) GetUserByID(id uint) (*models.User, error) {
 	if r.user != nil && r.user.ID == id {
 		return r.user, nil
 	}
 	return nil, nil
 }
-func (r *userRepoAuthStub) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
+func (r *userRepoAuthStub) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]models.User, int64, error) {
 	return nil, 0, nil
 }
-func (r *userRepoAuthStub) UpdateUser(user *entity.User) error {
+func (r *userRepoAuthStub) UpdateUser(user *models.User) error {
 	r.user = user
 	return nil
 }
 func (r *userRepoAuthStub) DeleteUser(id uint) error { return nil }
-func (r *userRepoAuthStub) GetUserByVerificationToken(token string) (*entity.User, error) {
+func (r *userRepoAuthStub) GetUserByVerificationToken(token string) (*models.User, error) {
 	return nil, nil
 }
-func (r *userRepoAuthStub) GetUserByPasswordResetToken(token string) (*entity.User, error) {
+func (r *userRepoAuthStub) GetUserByPasswordResetToken(token string) (*models.User, error) {
 	return nil, nil
 }
-func (r *userRepoAuthStub) GetUserByOAuth(provider, oauthID string) (*entity.User, error) {
+func (r *userRepoAuthStub) GetUserByOAuth(provider, oauthID string) (*models.User, error) {
 	return nil, nil
 }
 
@@ -68,7 +69,7 @@ func TestAuthServiceLoginUsesUserSecretForUserToken(t *testing.T) {
 		t.Fatalf("password hash failed: %v", err)
 	}
 	now := time.Now()
-	user := &entity.User{
+	user := &models.User{
 		ID:              1,
 		Email:           "user@example.com",
 		Password:        string(passwordHash),
@@ -98,7 +99,7 @@ func TestAuthServiceGetUserIssuesAdminToken(t *testing.T) {
 	t.Setenv("ADMIN_SECRET", "admin-secret")
 	t.Setenv("USER_SECRET", "user-secret")
 
-	user := &entity.User{
+	user := &models.User{
 		ID:      7,
 		Email:   "admin@example.com",
 		Name:    "Admin",

@@ -54,11 +54,6 @@ func typ[T any]() reflect.Type { return reflect.TypeOf((*T)(nil)).Elem() }
 
 var mapperCases = []mapperCase{
 	{
-		name: "User", model: typ[models.User](), entity: typ[entity.User](),
-		toEntity:   func(m any) any { return mapper.UserToEntity(m.(*models.User)) },
-		fromEntity: func(e any) any { return mapper.UserFromEntity(e.(*entity.User)) },
-	},
-	{
 		name: "PendingRegistration", model: typ[models.PendingRegistration](), entity: typ[entity.PendingRegistration](),
 		toEntity:   func(m any) any { return mapper.PendingRegistrationToEntity(m.(*models.PendingRegistration)) },
 		fromEntity: func(e any) any { return mapper.PendingRegistrationFromEntity(e.(*entity.PendingRegistration)) },

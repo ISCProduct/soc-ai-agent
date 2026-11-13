@@ -11,7 +11,7 @@ import (
 
 // メール認証トークンの有効期限(#330)の判定を、DB から読んだ行が mapper を通る形で確かめる。
 //
-// VerifyEmail は userRepo.GetUserByVerificationToken が返す entity.User の
+// VerifyEmail は userRepo.GetUserByVerificationToken が返す models.User の
 // EmailVerificationExpires を見る。mapper が期限をコピーしないと、DB に期限が入っていても
 // entity では常に nil になり、期限切れの判定が働かない。スタブの userRepo では mapper を
 // 通らないので、実の UserRepository と sqlmock で確かめる。
