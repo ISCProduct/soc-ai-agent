@@ -85,9 +85,19 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 	}
 	readme, err := s.fetchREADME(ctx, client, token, fullName)
 	if err != nil {
-		// 名前は利用者の入力なので %q で引用する（改行で偽のログ行を作らせない）
-		log.Printf("[SummarizeRepo] README fetch warning for %q: %v", fullName, err)
-		readme = ""
+		switch {
+		case isGitHubNotFoundError(err):
+			// README が無いリポジトリ。今までどおり「README なし」で要約する
+			readme = ""
+		case isGitHubAuthError(err):
+			return nil, &GitHubReauthRequiredError{Reason: "GitHubアクセストークンが無効です。GitHubアカウントを再連携してください。"}
+		default:
+			// 404 以外の失敗（5xx・レート制限など）で README 無しの要約を作ると、薄い要約が
+			// キャッシュに残り、README があるのに無い扱いのままになる。要約を作らずにエラーにする（#2226）。
+			// 名前は利用者の入力なので %q で引用する（改行で偽のログ行を作らせない）
+			log.Printf("[SummarizeRepo] README fetch failed for %q: %v", fullName, err)
+			return nil, fmt.Errorf("failed to fetch README: %w", err)
+		}
 	}
 
 	// AI要約生成
