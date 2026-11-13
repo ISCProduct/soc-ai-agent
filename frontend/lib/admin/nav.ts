@@ -68,6 +68,12 @@ export const ADMIN_NAV: AdminNavGroup[] = [
         cta: 'プロファイル再計算へ',
       },
       {
+        title: 'ユーザースコア再計算',
+        description: '旧計算版のユーザースコアを見積もり、進捗を確認しながら再構築します。',
+        href: '/admin/user-score-recalculation',
+        cta: 'スコア再計算へ',
+      },
+      {
         title: '集合知サマリー再構築',
         description: '全企業の行動サマリーをバッチ再集計します。',
         href: '/admin/collective-insights',

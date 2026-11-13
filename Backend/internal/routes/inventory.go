@@ -62,7 +62,7 @@ func Inventory() []Route {
 	SetupCompanyRoutes(api, nil, "", nil, nil, budget)
 	SetupAdminRoutes(api,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", &admincontrollers.AIBudgetController{})
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", &admincontrollers.AIBudgetController{})
 	SetupResumeRoutes(api, nil, "", nil, nil, budget)
 	SetupInterviewRoutes(api, nil, nil, "", nil, nil, budget)
 	SetupGitHubRoutes(api, nil, "", nil, nil, budget)
