@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"Backend/internal/services/prompts"
 	"context"
@@ -126,7 +125,7 @@ func pickPhaseTarget(allowed []string, scoreMap map[string]int, asked map[string
 	return cat, fmt.Sprintf("「%s」を他の軸と同じ回数まで確認するため", cat)
 }
 
-func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, targetLevel string, currentPhase *entity.UserAnalysisProgress, asked map[string]int) (string, uint, string, error) {
+func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, targetLevel string, currentPhase *models.UserAnalysisProgress, asked map[string]int) (string, uint, string, error) {
 	ctx, resolvedVersion := prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration)
 
 	// 狙った軸は呼び出し元に返す。ここはフェーズで絞った allowedCategories から

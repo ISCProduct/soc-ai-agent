@@ -23,16 +23,16 @@ type UserWeightScoreRepository interface {
 
 // AnalysisPhaseRepository は分析フェーズ定義の永続化インターフェース。
 type AnalysisPhaseRepository interface {
-	FindAll() ([]entity.AnalysisPhase, error)
-	FindByID(id uint) (*entity.AnalysisPhase, error)
-	FindByName(name string) (*entity.AnalysisPhase, error)
+	FindAll() ([]models.AnalysisPhase, error)
+	FindByID(id uint) (*models.AnalysisPhase, error)
+	FindByName(name string) (*models.AnalysisPhase, error)
 }
 
 // UserAnalysisProgressRepository はユーザーの分析進捗の永続化インターフェース。
 type UserAnalysisProgressRepository interface {
-	FindByUserAndSession(userID uint, sessionID string) ([]entity.UserAnalysisProgress, error)
-	FindOrCreate(userID uint, sessionID string, phaseID uint) (*entity.UserAnalysisProgress, error)
-	Update(progress *entity.UserAnalysisProgress) error
+	FindByUserAndSession(userID uint, sessionID string) ([]models.UserAnalysisProgress, error)
+	FindOrCreate(userID uint, sessionID string, phaseID uint) (*models.UserAnalysisProgress, error)
+	Update(progress *models.UserAnalysisProgress) error
 }
 
 // UserCompanyMatchRepository はユーザーと企業のマッチング結果の永続化インターフェース。

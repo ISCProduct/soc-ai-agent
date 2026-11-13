@@ -64,19 +64,6 @@ var mapperCases = []mapperCase{
 		toEntity:  func(m any) any { return mapper.UserWeightScoreToEntity(m.(*models.UserWeightScore)) },
 		modelOnly: only(modelOnlyReason, "OrganizationID", "Source"),
 	},
-	{
-		// ToEntity のみ。フェーズは参照だけ。
-		name: "AnalysisPhase", model: typ[models.AnalysisPhase](), entity: typ[entity.AnalysisPhase](),
-		toEntity:  func(m any) any { return mapper.AnalysisPhaseToEntity(m.(*models.AnalysisPhase)) },
-		modelOnly: only(modelOnlyReason, "CreatedAt", "UpdatedAt"),
-	},
-	{
-		name: "UserAnalysisProgress", model: typ[models.UserAnalysisProgress](), entity: typ[entity.UserAnalysisProgress](),
-		toEntity:      func(m any) any { return mapper.UserAnalysisProgressToEntity(m.(*models.UserAnalysisProgress)) },
-		fromEntity:    func(e any) any { return mapper.UserAnalysisProgressFromEntity(e.(*entity.UserAnalysisProgress)) },
-		typeDiffers:   only("関連(Preload)。entity と model で型が別。ToEntity が AnalysisPhaseToEntity で変換する", "Phase"),
-		notFromEntity: only("関連は書き戻さない。保存には外部キー(PhaseID)を使う", "Phase"),
-	},
 }
 
 // filler は構造体の全ての公開項目を、項目ごとに別の、ゼロ値でない値で埋める。
