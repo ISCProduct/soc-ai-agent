@@ -93,10 +93,29 @@ if [ -n "$BASE_REF" ]; then
     echo "    このブランチ: ${version}_${name}"
   done < <(find "$MIGRATIONS_DIR" -name '*.up.sql' -type f | sort)
 
+  # ── 3. “穴”ガード: 新規マイグレーションは base の最大版より大きいこと ──────────
+  # golang-migrate の Up() は現在バージョンより小さい番号を二度と適用しない。base に
+  # 既にある最大版より小さい番号を新規に足すと、本番で永久に未適用のまま静かに
+  # 取りこぼす（連番時代は「欠番検査」がこれを防いでいた）。採番をタイムスタンプへ
+  # 移行したためまず起きないが、6桁の手書きや古いブランチの取り込みで起こりうるので
+  # 機械的に止める。
+  base_max=$(echo "$base_list" | awk '{print $1}' | sort -n | tail -1)
+  base_max=${base_max:-0}
+  base_versions=$(echo "$base_list" | awk '{print $1}')
+  while IFS= read -r up; do
+    [ -z "$up" ] && continue
+    version=$(basename "$up"); version="${version%%_*}"
+    # base に既にあるバージョンは対象外（新規だけ見る）
+    printf '%s\n' "$base_versions" | grep -qx "$version" && continue
+    if [ "$((10#$version))" -le "$((10#$base_max))" ]; then
+      fail=1
+      echo "::error::新規マイグレーション $(basename "$up") の版番号 ${version} が ${BASE_REF} の最大版 ${base_max} 以下です"
+      echo "    golang-migrate は現在版より小さい番号を適用しないため、本番で永久に未適用になります"
+    fi
+  done < <(find "$MIGRATIONS_DIR" -name '*.up.sql' -type f | sort)
+
   if [ "$fail" -ne 0 ]; then
-    next=$(echo "$base_list" | awk '{print $1}' | sort -n | tail -1)
-    echo "::error::${BASE_REF} の最新は ${next} です。$(printf '%06d' $((10#$next + 1))) 以降へ採番し直してください"
-    echo "::error::    ./automation/migration-renumber.sh ${BASE_REF}  で自動で振り直せます（先に ${BASE_REF} を取り込むこと）"
+    echo "::error::${BASE_REF} を取り込んだうえで 'make migrate-new name=...' でタイムスタンプ採番し直してください"
     exit 1
   fi
 fi
