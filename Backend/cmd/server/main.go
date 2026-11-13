@@ -519,6 +519,7 @@ func main() {
 	adminDashboardController := admincontrollers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminDashboardController.SetSchoolService(schoolService)
 	adminDashboardController.SetOrganizationService(organizationService)
+	adminDashboardController.SetFunnelSource(repositories.NewConversionFunnelRepository(db))
 	adminCostsController := admincontrollers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
 	adminAIBudgetController := admincontrollers.NewAIBudgetController(aiBudgetService, auditLogService)
 	userAIBudgetController := usercontrollers.NewAIBudgetController(aiBudgetService)
@@ -568,6 +569,7 @@ func main() {
 	studentSearchRepo := repositories.NewStudentSearchRepository(db)
 	companyStudentTagRepo := repositories.NewCompanyStudentTagRepository(db)
 	studentSemanticClient := hr.NewStudentSemanticClient()
+	hrStudentAnalysisService.SetIdentityRevealer(studentSearchRepo)
 	studentSearchService := hr.NewStudentSearchService(studentSearchRepo, companyStudentTagRepo, studentSemanticClient)
 	industryRepo := repositories.NewIndustryRepository(db)
 	companyStudentController := companycontrollers.NewCompanyStudentController(studentSearchService, hrStudentAnalysisService, industryRepo)
@@ -773,11 +775,11 @@ func main() {
 		}
 	})
 
-	// 期限切れの仮登録・リフレッシュトークンの物理削除（1日1回、#2153）。
+	// 期限切れの仮登録・リフレッシュトークン（学生・企業ユーザー）の物理削除（1日1回、#2153・#2184）。
 	// 退会ユーザーの処理とは別の周期にする。あちらは RAG への HTTP を退会者ごとに待つので、
 	// 障害時に何時間も塞がり、DB だけで済むこの削除まで止まってしまうため（#2179 のレビュー）。
 	// 件数と失敗は Run の中でログに出す。
-	expiredTokenPurger := maintenance.NewExpiredTokenPurger(pendingRegistrationRepo, refreshTokenRepo, slog.Default())
+	expiredTokenPurger := maintenance.NewExpiredTokenPurger(pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, slog.Default())
 	safego.Every(24*time.Hour, true, func() {
 		expiredTokenPurger.Run(time.Now().UTC())
 	})

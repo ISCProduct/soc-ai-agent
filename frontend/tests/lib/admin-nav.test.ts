@@ -1,4 +1,4 @@
-import { ADMIN_NAV, activeAdminNavItem, visibleAdminNav } from '@/lib/admin-nav'
+import { ADMIN_NAV, activeAdminNavItem, visibleAdminNav } from '@/lib/admin/nav'
 
 describe('visibleAdminNav', () => {
   it('プラットフォーム管理者にはシステム管理を出す', () => {

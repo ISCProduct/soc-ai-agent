@@ -231,7 +231,7 @@ export function StudentSearchContent() {
                   onClick={() => router.push(`/company-portal/students/${student.user_id}`)}
                 >
                   <CardContent>
-                    <Typography variant="h6">{student.name || '（氏名未設定）'}</Typography>
+                    <Typography variant="h6">{student.name || '氏名非公開'}</Typography>
                     <Typography variant="body2" color="text.secondary">
                       {[student.school_name, student.target_level].filter(Boolean).join(' / ')}
                     </Typography>

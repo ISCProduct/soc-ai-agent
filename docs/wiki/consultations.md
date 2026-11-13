@@ -4,7 +4,7 @@
 
 ## しくみ
 
-- 案内（`teacher_student_guidances`）を1つのスレッドとし、発言を `guidance_messages`（migration 000069）に積む
+- 案内（`teacher_student_guidances`）を1つのスレッドとし、発言を `guidance_messages`（migration 000070）に積む
 - 学生からの質問は、種類 `question` の案内（`teacher_user_id = 0`）として作り、最初の発言も `guidance_messages` に入れる。担当校の先生なら誰でも答えられる
 - `read_at` は相手側が読んだ日時。学生がスレッドを開くと先生の発言が、先生が開くか返信すると学生の発言が既読になる
 - 学生が返信したスレッドは、閉じていても開き直す（先生の返答を見落とさないように）
