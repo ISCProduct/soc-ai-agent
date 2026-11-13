@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { clientIpHeaders } from '@/lib/api-proxy'
+import { clientIpHeaders, extractUserAuthHeaders, aiBudgetExceededMessage } from '@/lib/api-proxy'
 
 const API_BASE_URL = process.env.BACKEND_URL || 'http://app:8080'
 
@@ -16,7 +16,11 @@ export async function GET(request: NextRequest) {
     const response = await fetch(url, {
       method: 'GET',
       // ゲストAIのIP単位制限を利用者ごとに効かせる(#1407)
-      headers: { 'Content-Type': 'application/json', ...clientIpHeaders(request) },
+      headers: {
+        'Content-Type': 'application/json',
+        ...clientIpHeaders(request),
+        ...extractUserAuthHeaders(request),
+      },
       cache: 'no-store',
       // ブラウザが諦めたあとも課金済みの検索を続けない
       signal: request.signal,
@@ -29,6 +33,15 @@ export async function GET(request: NextRequest) {
         data = JSON.parse(text)
       } catch {
         data = { results: [], message: '企業検索に失敗しました。しばらくしてから再度お試しください' }
+      }
+      // 予算超過は code 付きの error で返る。message だけ見る画面にも同じ文言を載せる。
+      // それ以外の本文は素通しし、失敗を0件の成功に見せない。
+      const budgetMessage = aiBudgetExceededMessage(data)
+      if (budgetMessage && data && typeof data === 'object' && !Array.isArray(data)) {
+        const body = data as Record<string, unknown>
+        if (typeof body.message !== 'string' || body.message.trim() === '') {
+          data = { ...body, message: budgetMessage }
+        }
       }
       return NextResponse.json(data, { status: response.status })
     }

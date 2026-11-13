@@ -244,6 +244,37 @@ cd frontend
 npx playwright test
 ```
 
+> `frontend/e2e/*.spec.ts` は29ファイル中22ファイルが `page.route()` でAPIレスポンスをモックしている。
+> つまり上記はほぼ「フロントエンド単体」のテストで、Backend/RAG/DBを通した結合動作は検証しない。
+> 結合動作を確かめたいときは次の「ローカル統合テスト環境」を使う。
+
+### ローカル統合テスト環境（Backend/DBを通した実結合・SOCAIAGENT-local-e2e-infra）
+
+個人のdev環境（上記 `docker compose up -d`）とは別ポート・別DBの専用スタックを、
+同時に起動したまま実行できる。詳細: PRD/DesignDoc（Notion、本節末尾）。
+
+```sh
+# 初回のみ: テスト専用の .env を作る（個人の Backend/.env とは別ファイル）
+cp Backend/.env.test.example Backend/.env.test
+
+make test-e2e       # 専用スタックを起動 -> 実ユーザーをシード -> 実Backend結合のsmokeを実行
+make test-e2e-down  # 専用スタックを停止（ボリュームは残すので次回起動が速い）
+```
+
+個別に実行する場合:
+
+```sh
+make test-e2e-up    # db/redis/app/frontend を別ポート(既定 13000/18080/13306)で起動
+make test-e2e-seed  # 固定の学生ユーザー(e2e-student@example.com)を冪等に作成
+```
+
+- `frontend/e2e/smoke/smoke.spec.ts` の「実Backend結合（ローカル統合テスト環境専用）」だけが
+  モックなしで実際に `/api/auth/login` を叩く。他の29ファイルはこの専用スタックでも対象外
+  （モック前提のため、実Backendの有無に関係なく結果が変わらない）。
+- AI呼び出しは `Backend/.env.test` の `AI_TEXT_PROVIDER=local` でOpenAIの実コストを避ける。
+  ローカルに互換エンドポイントが無くても、この節のsmokeテスト（ログインのみ）には影響しない。
+- 何かおかしい場合は `docker compose -p soc-ai-agent-test logs app` でログを確認する。
+
 ---
 
 ## 7. よくある問題

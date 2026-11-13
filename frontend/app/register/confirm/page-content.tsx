@@ -43,8 +43,9 @@ function RegisterConfirmForm() {
       .then(({ email }) => {
         setEmail(email)
       })
-      .catch((err: any) => {
-        setTokenError(err.message || '無効または期限切れの登録リンクです。')
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        setTokenError(message || '無効または期限切れの登録リンクです。')
       })
       .finally(() => setLoading(false))
   }, [token])
@@ -67,8 +68,9 @@ function RegisterConfirmForm() {
       const response = await authService.register(email, password, name, '新卒', '', '', token)
       await authService.saveAuth(response)
       router.push('/')
-    } catch (err: any) {
-      setError(err.message || '登録に失敗しました。')
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setError(message || '登録に失敗しました。')
     } finally {
       setSubmitting(false)
     }

@@ -3,9 +3,9 @@ package aibench
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"strings"
 
+	"Backend/internal/aimodel"
 	"Backend/internal/models"
 	"Backend/internal/services/interview"
 )
@@ -32,7 +32,7 @@ func newInterviewTarget(modelOverride string) Target {
 	// 委ねるため、ハーネスでは明示的な既定を持つ（結果にモデル名を残すため）。
 	m := strings.TrimSpace(modelOverride)
 	if m == "" {
-		m = strings.TrimSpace(os.Getenv("INTERVIEW_REPORT_MODEL"))
+		m = strings.TrimSpace(aimodel.For(aimodel.StageInterviewReport))
 	}
 	if m == "" {
 		m = "gpt-4o-mini"

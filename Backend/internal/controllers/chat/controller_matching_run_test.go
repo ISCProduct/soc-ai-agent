@@ -5,13 +5,16 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"Backend/domain/entity"
+	"Backend/internal/services/costs"
 	"Backend/internal/services/matching"
+	"Backend/internal/usagectx"
 )
 
 // stubMatchingService は CalculateMatching の呼び出しを記録する。
@@ -150,5 +153,30 @@ func TestRunBackgroundMatching_PassesDeadline(t *testing.T) {
 	remaining := time.Until(deadline)
 	if remaining <= 0 || remaining > matchingRunTimeout {
 		t.Errorf("期限が不正: remaining=%s, want (0, %s]", remaining, matchingRunTimeout)
+	}
+}
+
+type exceededBudget struct{}
+
+func (exceededBudget) Status(context.Context, uint) (costs.AIBudgetStatus, error) {
+	return costs.AIBudgetStatus{Allowed: false}, nil
+}
+
+// バックグラウンドのマッチングにも予算判定が載る。リクエストの context から切り離して
+// 走るので、載せないと上限を超えた利用者にも AI 理由の費用がかかる（#1776）。
+func TestRunBackgroundMatching_CarriesAIBudgetCheck(t *testing.T) {
+	stub := &stubMatchingService{}
+	c := &ChatController{matchingService: stub}
+	c.SetAIBudget(exceededBudget{})
+	c.runBackgroundMatching(1, "session-budget")
+
+	stub.mu.Lock()
+	ctx := stub.lastCtx
+	stub.mu.Unlock()
+	if err := usagectx.CheckAIBudget(ctx); !errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+		t.Fatalf("CheckAIBudget = %v, want exceeded", err)
+	}
+	if userID, _ := usagectx.Actor(ctx); userID == nil || *userID != 1 {
+		t.Fatalf("actor = %v", userID)
 	}
 }

@@ -29,16 +29,8 @@ func (*captureAIGeneratedQuestionRepository) FindByUserAndSession(uint, string) 
 	return nil, nil
 }
 
-func (*captureAIGeneratedQuestionRepository) GetAskedQuestionIDs(uint, string) ([]uint, error) {
-	return nil, nil
-}
-
 func (*captureAIGeneratedQuestionRepository) UpdateAnswer(uint, string, int) error {
 	return nil
-}
-
-func (*captureAIGeneratedQuestionRepository) FindUnansweredBySession(string) (*models.AIGeneratedQuestion, error) {
-	return nil, nil
 }
 
 func TestGenerateStrategicQuestion_FallbackDoesNotRecordPromptVersion(t *testing.T) {

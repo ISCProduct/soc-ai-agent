@@ -200,8 +200,8 @@ export default function PageContent() {
       }
       setDialogOpen(false)
       await fetchEvents()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setSaving(false)
     }
@@ -214,8 +214,8 @@ export default function PageContent() {
       const res = await fetch(`/api/schedule/${id}`, { method: 'DELETE' })
       if (!res.ok && res.status !== 204) throw new Error('削除に失敗しました')
       await fetchEvents()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e))
     }
   }
 

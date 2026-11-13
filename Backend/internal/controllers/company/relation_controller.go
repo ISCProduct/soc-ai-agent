@@ -205,6 +205,12 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 		defer cancel()
 		results, err := ctrl.validator.SearchCandidates(searchCtx, query, true)
 		if err != nil {
+			if errors.Is(err, usagectx.ErrAIBudgetUnavailable) {
+				return httpapi.AIBudgetUnavailable()
+			}
+			if errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+				return httpapi.AIBudgetExceeded(ctx)
+			}
 			var ve *shared.ValidationError
 			if errors.As(err, &ve) {
 				return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
@@ -232,8 +238,15 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 	}
 
 	results, err := ctrl.searchCompaniesWithOpenAI(ctx.Request().Context(), query)
+	// 予算超過を InternalError の 500 に飲ませない。判定はバリデーションより先。
+	if errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+		return httpapi.AIBudgetExceeded(ctx)
+	}
+	if errors.Is(err, usagectx.ErrAIBudgetUnavailable) {
+		return httpapi.AIBudgetUnavailable()
+	}
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "企業検索に失敗しました")
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"results": results})
 }
@@ -254,6 +267,12 @@ func (ctrl *CompanyRelationController) ValidateCompany(ctx echo.Context) error {
 	defer cancel()
 	result, err := ctrl.validator.Validate(searchCtx, payload.Query)
 	if err != nil {
+		if errors.Is(err, usagectx.ErrAIBudgetUnavailable) {
+			return httpapi.AIBudgetUnavailable()
+		}
+		if errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+			return httpapi.AIBudgetExceeded(ctx)
+		}
 		var ve *shared.ValidationError
 		if errors.As(err, &ve) {
 			return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
@@ -265,6 +284,9 @@ func (ctrl *CompanyRelationController) ValidateCompany(ctx echo.Context) error {
 
 // searchCompaniesWithOpenAI はAIモデルの知識から企業候補を取得する（validator未設定時のフォールバック）
 func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) ([]map[string]string, error) {
+	if err := usagectx.CheckAIBudget(ctx); err != nil {
+		return nil, err
+	}
 	systemPrompt := `あなたは日本企業に詳しいアシスタントです。確実に知っている実在の企業のみを回答し、不明な場合は空配列にしてください。推測で企業を作らないでください。`
 	userPrompt := buildWebSearchUserPrompt(query)
 
@@ -280,6 +302,7 @@ func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Con
 	start := strings.Index(text, "{")
 	end := strings.LastIndex(text, "}")
 	if start == -1 || end == -1 || end <= start {
+		// 読み取れない結果を0件の成功にすると、通信失敗が「その企業は無い」に見える（#1447）。
 		return nil, fmt.Errorf("企業検索の結果を読み取れませんでした")
 	}
 
