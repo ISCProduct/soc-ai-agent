@@ -16,7 +16,7 @@
  * 全ページで表示される共通メニュー）側で既に実装・テスト済み（global-nav-menu.test.tsx）。
  */
 import { render, screen } from '@testing-library/react'
-import { AnalysisSidebar } from '@/components/AnalysisSidebar'
+import { AnalysisSidebar } from '@/components/home/AnalysisSidebar'
 import { SIDEBAR_NAV_ITEMS } from '@/lib/sidebar-nav'
 import type { User } from '@/lib/auth'
 

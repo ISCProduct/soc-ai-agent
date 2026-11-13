@@ -20,7 +20,6 @@ import {
     marketLabels,
     type CapitalRelation,
     type CompanyMarketInfo,
-    type Company,
     type MarketType,
 } from '@/lib/company/data';
 import { formatRelationLabel } from '@/lib/relation-labels';
@@ -33,6 +32,76 @@ type DiagramType = 'capital' | 'business';
 interface CompanyDiagramProps {
     companyId: number;
     diagramType: DiagramType;
+}
+
+/** 起点企業と、直接つながる資本関係、その親会社。ノードとエッジで同じ範囲を使う。 */
+function capitalCompanyIds(relations: CapitalRelation[], focusCompanyId: number): number[] {
+    const relatedIds = new Set<number>([focusCompanyId]);
+
+    relations.forEach(rel => {
+        if (rel.relation_type.startsWith('capital')) {
+            if (rel.parent_id === focusCompanyId || rel.child_id === focusCompanyId) {
+                if (rel.parent_id) relatedIds.add(rel.parent_id);
+                if (rel.child_id) relatedIds.add(rel.child_id);
+            }
+        }
+    });
+
+    // 親会社も追加
+    relations.forEach(rel => {
+        if (rel.relation_type.startsWith('capital') && rel.child_id && relatedIds.has(rel.child_id)) {
+            if (rel.parent_id) relatedIds.add(rel.parent_id);
+        }
+    });
+
+    return Array.from(relatedIds);
+}
+
+function companyFlowNode(
+    compId: number,
+    focusCompanyId: number,
+    marketType: MarketType,
+    position: { x: number; y: number },
+    name: string,
+): Node {
+    const isFocusCompany = compId === focusCompanyId;
+
+    return {
+        id: String(compId),
+        type: 'default',
+        position: { x: position.x, y: position.y },
+        ariaLabel: `${name}（${marketLabels[marketType]}${isFocusCompany ? '・この企業' : ''}）`,
+        data: {
+            label: (
+                <Box sx={{ textAlign: 'center', p: 1 }}>
+                    <Typography
+                        variant="body2"
+                        sx={{ fontWeight: isFocusCompany ? 'bold' : 'normal', mb: 0.5 }}
+                    >
+                        {name}
+                    </Typography>
+                    <Chip
+                        label={marketLabels[marketType]}
+                        size="small"
+                        sx={{
+                            bgcolor: marketColors[marketType],
+                            color: 'white',
+                            fontSize: '10px',
+                            height: '20px',
+                        }}
+                    />
+                </Box>
+            ),
+        },
+        style: {
+            background: isFocusCompany ? '#FFF3CD' : '#fff',
+            border: `3px solid ${isFocusCompany ? '#FFC107' : marketColors[marketType]}`,
+            borderRadius: '8px',
+            padding: '10px',
+            minWidth: '200px',
+            boxShadow: isFocusCompany ? '0 4px 12px rgba(255, 193, 7, 0.3)' : undefined,
+        },
+    };
 }
 
 export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagramProps) {
@@ -81,93 +150,21 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
     }, [relations]);
 
     const createCapitalNodes = useCallback((focusCompanyId: number): Node[] => {
-        const relatedIds = new Set([focusCompanyId]);
-
-        // 資本関係のあるIDを収集
-        relations.forEach(rel => {
-            if (rel.relation_type.startsWith('capital')) {
-                if (rel.parent_id === focusCompanyId || rel.child_id === focusCompanyId) {
-                    if (rel.parent_id) relatedIds.add(rel.parent_id);
-                    if (rel.child_id) relatedIds.add(rel.child_id);
-                }
-            }
-        });
-
-        // 親会社も追加
-        relations.forEach(rel => {
-            if (rel.relation_type.startsWith('capital') && rel.child_id && relatedIds.has(rel.child_id)) {
-                if (rel.parent_id) relatedIds.add(rel.parent_id);
-            }
-        });
-
         // #1022: 親→子の向きで固定配置していた独自ロジックを廃止し、business タブと同様に
         // 起点企業からのBFS距離(layoutCapitalGraphFromEdges)で配置する。起点が子会社でも
         // 親会社が常に上に固定されず、起点企業が常に最上位に来る。
-        const involvedCompanies = Array.from(relatedIds);
+        const involvedCompanies = capitalCompanyIds(relations, focusCompanyId);
         const capitalRelations = relations.filter(rel => rel.relation_type.startsWith('capital'));
         const positions = layoutCapitalGraphFromEdges(focusCompanyId, involvedCompanies, capitalRelations);
 
         return involvedCompanies.map((compId) => {
-            const isFocusCompany = compId === focusCompanyId;
-            const marketType = getMarketType(compId);
             const pos = positions.get(compId) ?? { x: 0, y: 0 };
-
-            return {
-                id: String(compId),
-                type: 'default',
-                position: { x: pos.x, y: pos.y },
-                ariaLabel: `${getCompanyName(compId)}（${marketLabels[marketType]}${isFocusCompany ? '・この企業' : ''}）`,
-                data: {
-                    label: (
-                        <Box sx={{ textAlign: 'center', p: 1 }}>
-                            <Typography
-                                variant="body2"
-                                sx={{ fontWeight: isFocusCompany ? 'bold' : 'normal', mb: 0.5 }}
-                            >
-                                {getCompanyName(compId)}
-                            </Typography>
-                            <Chip
-                                label={marketLabels[marketType]}
-                                size="small"
-                                sx={{
-                                    bgcolor: marketColors[marketType],
-                                    color: 'white',
-                                    fontSize: '10px',
-                                    height: '20px',
-                                }}
-                            />
-                        </Box>
-                    ),
-                },
-                style: {
-                    background: isFocusCompany ? '#FFF3CD' : '#fff',
-                    border: `3px solid ${isFocusCompany ? '#FFC107' : marketColors[marketType]}`,
-                    borderRadius: '8px',
-                    padding: '10px',
-                    minWidth: '200px',
-                    boxShadow: isFocusCompany ? '0 4px 12px rgba(255, 193, 7, 0.3)' : undefined,
-                },
-            };
+            return companyFlowNode(compId, focusCompanyId, getMarketType(compId), pos, getCompanyName(compId));
         });
     }, [relations, getMarketType, getCompanyName]);
 
     const createCapitalEdges = useCallback((focusCompanyId: number): Edge<RelationEdgeData>[] => {
-        const relatedIds = new Set([focusCompanyId]);
-
-        relations.forEach(rel => {
-            if (rel.relation_type.startsWith('capital')) {
-                if (rel.parent_id === focusCompanyId || rel.child_id === focusCompanyId) {
-                    if (rel.parent_id) relatedIds.add(rel.parent_id);
-                    if (rel.child_id) relatedIds.add(rel.child_id);
-                }
-            }
-        });
-
-        relations.forEach(rel => {
-            if (rel.relation_type.startsWith('capital') && rel.child_id && relatedIds.has(rel.child_id)) {
-                if (rel.parent_id) relatedIds.add(rel.parent_id);
-            }
-        });
+        const relatedIds = new Set(capitalCompanyIds(relations, focusCompanyId));
 
         return relations
             .filter(rel =>
@@ -217,46 +214,8 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
         const positions = layoutBusinessGraph(focusCompanyId, involvedCompanies, relations);
 
         return involvedCompanies.map((compId) => {
-            const isFocusCompany = compId === focusCompanyId;
-            const marketType = getMarketType(compId);
             const pos = positions.get(compId) ?? { x: 0, y: 0 };
-
-            return {
-                id: String(compId),
-                type: 'default',
-                position: { x: pos.x, y: pos.y },
-                ariaLabel: `${getCompanyName(compId)}（${marketLabels[marketType]}${isFocusCompany ? '・この企業' : ''}）`,
-                data: {
-                    label: (
-                        <Box sx={{ textAlign: 'center', p: 1 }}>
-                            <Typography
-                                variant="body2"
-                                sx={{ fontWeight: isFocusCompany ? 'bold' : 'normal', mb: 0.5 }}
-                            >
-                                {getCompanyName(compId)}
-                            </Typography>
-                            <Chip
-                                label={marketLabels[marketType]}
-                                size="small"
-                                sx={{
-                                    bgcolor: marketColors[marketType],
-                                    color: 'white',
-                                    fontSize: '10px',
-                                    height: '20px',
-                                }}
-                            />
-                        </Box>
-                    ),
-                },
-                style: {
-                    background: isFocusCompany ? '#FFF3CD' : '#fff',
-                    border: `3px solid ${isFocusCompany ? '#FFC107' : marketColors[marketType]}`,
-                    borderRadius: '8px',
-                    padding: '10px',
-                    minWidth: '200px',
-                    boxShadow: isFocusCompany ? '0 4px 12px rgba(255, 193, 7, 0.3)' : undefined,
-                },
-            };
+            return companyFlowNode(compId, focusCompanyId, getMarketType(compId), pos, getCompanyName(compId));
         });
     }, [relations, getMarketType, getCompanyName]);
 
@@ -343,7 +302,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
     const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes);
     const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState(edges);
 
-    useMemo(() => {
+    useEffect(() => {
         setFlowNodes(nodes);
         setFlowEdges(edges);
     }, [nodes, edges, setFlowNodes, setFlowEdges]);

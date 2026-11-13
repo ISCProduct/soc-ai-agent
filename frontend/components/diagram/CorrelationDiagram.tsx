@@ -40,7 +40,7 @@ import { layoutBusinessGraph, layoutCapitalGraphFromEdges, computeRelationCluste
 import { getCompanyIdFromNode, parseCompanyId } from '@/lib/correlation-diagram-navigation';
 import CorrelationCompanyDetailPanel, {
     CORRELATION_DETAIL_PANEL_WIDTH,
-} from '@/components/CorrelationCompanyDetailPanel';
+} from '@/components/diagram/CorrelationCompanyDetailPanel';
 import { edgeTypes } from '@/components/diagram/RelationEdge';
 import ClusterExplorer from '@/components/diagram/ClusterExplorer';
 import { RelationTextList, type RelationEdgeData } from '@/components/diagram/RelationTextList';

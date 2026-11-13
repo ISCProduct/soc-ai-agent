@@ -29,7 +29,6 @@ import {
     Work,
     Psychology,
     TrendingUp,
-    Speed,
     EmojiEvents,
     Logout,
     History,
@@ -55,10 +54,70 @@ import {
   shouldShowResultsCta,
 } from '@/lib/sidebar-navigation'
 import { SIDEBAR_ADMIN_NAV } from '@/lib/sidebar-nav'
-import { useTranslations } from '@/lib/i18n'
-import { computeProgressTotals } from './mui-chat/utils'
+import { useTranslations, type MessageKey } from '@/lib/i18n'
+import { computeProgressTotals } from '../mui-chat/utils'
 
 const DRAWER_WIDTH = 280
+
+type SidebarDestination = {
+    href: string
+    labelKey: MessageKey<'nav'>
+    icon: React.ReactNode
+}
+
+/** 選考管理より下、区切りの前に置く項目。 */
+const LEAD_NAV: SidebarDestination[] = [
+    { href: '/correlation-diagram', labelKey: 'sidebar.correlationDiagram', icon: <BorderAll color="primary"/> },
+]
+
+/** 区切りの後に置く項目。選考管理はゲスト案内があるのでここには入れない。 */
+const REST_NAV: SidebarDestination[] = [
+    { href: '/chat-history', labelKey: 'sidebar.chatHistory', icon: <History color="primary"/> },
+    { href: '/resume', labelKey: 'sidebar.resume', icon: <Description color="primary"/> },
+    { href: '/assessments', labelKey: 'sidebar.personalityAssessment', icon: <Quiz color="primary"/> },
+    { href: '/ability-assessments', labelKey: 'sidebar.abilityAssessment', icon: <Quiz color="primary"/> },
+    { href: '/interview', labelKey: 'sidebar.interview', icon: <RecordVoiceOver color="primary"/> },
+    { href: '/interview/history', labelKey: 'sidebar.interviewHistory', icon: <Assessment color="primary"/> },
+    { href: '/es-rewrite', labelKey: 'sidebar.esRewrite', icon: <EditNote color="primary"/> },
+    { href: '/schedule', labelKey: 'sidebar.schedule', icon: <CalendarMonth color="primary"/> },
+    { href: '/scout', labelKey: 'sidebar.scout', icon: <MailOutline color="primary"/> },
+    { href: '/profile', labelKey: 'sidebar.profile', icon: <ManageAccounts color="primary"/> },
+]
+
+function SidebarNavButton({
+    icon,
+    label,
+    onClick,
+    secondary,
+    fontWeight = 500,
+}: {
+    icon: React.ReactNode
+    label: string
+    onClick: () => void
+    secondary?: string
+    fontWeight?: number
+}) {
+    return (
+        <ListItem disablePadding>
+            <ListItemButton onClick={onClick} sx={{ borderRadius: 1 }}>
+                <ListItemIcon sx={{minWidth: 36}}>
+                    {icon}
+                </ListItemIcon>
+                <ListItemText
+                    primary={label}
+                    secondary={secondary}
+                    primaryTypographyProps={{
+                        fontSize: '0.875rem',
+                        fontWeight,
+                    }}
+                    secondaryTypographyProps={{
+                        fontSize: '0.7rem',
+                    }}
+                />
+            </ListItemButton>
+        </ListItem>
+    )
+}
 
 interface AnalysisStep {
     id: string
@@ -407,26 +466,14 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
 
 
                 <Divider sx={{my: 2}}/>
-                <ListItem disablePadding>
-                    <ListItemButton
-                        onClick={() => {
-                            router.push(getResultsPathOrChat())
-                            onMobileClose?.()
-                        }}
-                        sx={{ borderRadius: 1 }}
-                    >
-                        <ListItemIcon sx={{minWidth: 36}}>
-                            <Business color="primary"/>
-                        </ListItemIcon>
-                        <ListItemText
-                            primary={t('home.results')}
-                            primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: 500,
-                            }}
-                        />
-                    </ListItemButton>
-                </ListItem>
+                <SidebarNavButton
+                    icon={<Business color="primary"/>}
+                    label={t('home.results')}
+                    onClick={() => {
+                        router.push(getResultsPathOrChat())
+                        onMobileClose?.()
+                    }}
+                />
 
                 <ListItem disablePadding>
                     <Tooltip
@@ -458,250 +505,35 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                     </Tooltip>
                 </ListItem>
 
-                <ListItem disablePadding>
-                    <ListItemButton
-                        onClick={() => router.push('/correlation-diagram')}
-                        sx={{
-                            borderRadius: 1,
-                        }}
-                    >
-                        <ListItemIcon sx={{minWidth: 36}}>
-                            <BorderAll color="primary"/>
-                        </ListItemIcon>
-                        <ListItemText
-                            primary={t('sidebar.correlationDiagram')}
-                            primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: 500,
-                            }}
-                        />
-                    </ListItemButton>
-                </ListItem>
+                {LEAD_NAV.map((item) => (
+                    <SidebarNavButton
+                        key={item.href}
+                        icon={item.icon}
+                        label={t(item.labelKey)}
+                        onClick={() => router.push(item.href)}
+                    />
+                ))}
 
                 <Divider sx={{my: 2}}/>
 
-                <ListItem disablePadding>
-                    <ListItemButton
-                        onClick={() => router.push('/chat-history')}
-                        sx={{
-                            borderRadius: 1,
-                        }}
-                    >
-                        <ListItemIcon sx={{minWidth: 36}}>
-                            <History color="primary"/>
-                        </ListItemIcon>
-                        <ListItemText
-                            primary={t('sidebar.chatHistory')}
-                            primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: 500,
-                            }}
-                        />
-                    </ListItemButton>
-                </ListItem>
+                {REST_NAV.map((item) => (
+                    <SidebarNavButton
+                        key={item.href}
+                        icon={item.icon}
+                        label={t(item.labelKey)}
+                        onClick={() => router.push(item.href)}
+                    />
+                ))}
 
-                <ListItem disablePadding>
-                    <ListItemButton
-                        onClick={() => router.push('/resume')}
-                        sx={{
-                            borderRadius: 1,
-                        }}
-                    >
-                        <ListItemIcon sx={{minWidth: 36}}>
-                            <Description color="primary"/>
-                        </ListItemIcon>
-                        <ListItemText
-                            primary={t('sidebar.resume')}
-                            primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: 500,
-                            }}
-                        />
-                    </ListItemButton>
-                </ListItem>
 
-                <ListItem disablePadding>
-                    <ListItemButton
-                        onClick={() => router.push('/assessments')}
-                        sx={{
-                            borderRadius: 1,
-                        }}
-                    >
-                        <ListItemIcon sx={{minWidth: 36}}>
-                            <Quiz color="primary"/>
-                        </ListItemIcon>
-                        <ListItemText
-                            primary={t('sidebar.personalityAssessment')}
-                            primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: 500,
-                            }}
-                        />
-                    </ListItemButton>
-                </ListItem>
-
-                <ListItem disablePadding>
-                    <ListItemButton
-                        onClick={() => router.push('/ability-assessments')}
-                        sx={{
-                            borderRadius: 1,
-                        }}
-                    >
-                        <ListItemIcon sx={{minWidth: 36}}>
-                            <Quiz color="primary"/>
-                        </ListItemIcon>
-                        <ListItemText
-                            primary={t('sidebar.abilityAssessment')}
-                            primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: 500,
-                            }}
-                        />
-                    </ListItemButton>
-                </ListItem>
-
-                <ListItem disablePadding>
-                    <ListItemButton
-                        onClick={() => router.push('/interview')}
-                        sx={{
-                            borderRadius: 1,
-                        }}
-                    >
-                        <ListItemIcon sx={{minWidth: 36}}>
-                            <RecordVoiceOver color="primary"/>
-                        </ListItemIcon>
-                        <ListItemText
-                            primary={t('sidebar.interview')}
-                            primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: 500,
-                            }}
-                        />
-                    </ListItemButton>
-                </ListItem>
-
-                <ListItem disablePadding>
-                    <ListItemButton
-                        onClick={() => router.push('/interview/history')}
-                        sx={{
-                            borderRadius: 1,
-                        }}
-                    >
-                        <ListItemIcon sx={{minWidth: 36}}>
-                            <Assessment color="primary"/>
-                        </ListItemIcon>
-                        <ListItemText
-                            primary={t('sidebar.interviewHistory')}
-                            primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: 500,
-                            }}
-                        />
-                    </ListItemButton>
-                </ListItem>
-
-                <ListItem disablePadding>
-                    <ListItemButton
-                        onClick={() => router.push('/es-rewrite')}
-                        sx={{
-                            borderRadius: 1,
-                        }}
-                    >
-                        <ListItemIcon sx={{minWidth: 36}}>
-                            <EditNote color="primary"/>
-                        </ListItemIcon>
-                        <ListItemText
-                            primary={t('sidebar.esRewrite')}
-                            primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: 500,
-                            }}
-                        />
-                    </ListItemButton>
-                </ListItem>
-
-                <ListItem disablePadding>
-                    <ListItemButton
-                        onClick={() => router.push('/schedule')}
-                        sx={{
-                            borderRadius: 1,
-                        }}
-                    >
-                        <ListItemIcon sx={{minWidth: 36}}>
-                            <CalendarMonth color="primary"/>
-                        </ListItemIcon>
-                        <ListItemText
-                            primary={t('sidebar.schedule')}
-                            primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: 500,
-                            }}
-                        />
-                    </ListItemButton>
-                </ListItem>
-
-                <ListItem disablePadding>
-                    <ListItemButton
-                        onClick={() => router.push('/scout')}
-                        sx={{
-                            borderRadius: 1,
-                        }}
-                    >
-                        <ListItemIcon sx={{minWidth: 36}}>
-                            <MailOutline color="primary"/>
-                        </ListItemIcon>
-                        <ListItemText
-                            primary={t('sidebar.scout')}
-                            primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: 500,
-                            }}
-                        />
-                    </ListItemButton>
-                </ListItem>
-
-                <ListItem disablePadding>
-                    <ListItemButton
-                        onClick={() => router.push('/profile')}
-                        sx={{
-                            borderRadius: 1,
-                        }}
-                    >
-                        <ListItemIcon sx={{minWidth: 36}}>
-                            <ManageAccounts color="primary"/>
-                        </ListItemIcon>
-                        <ListItemText
-                            primary={t('sidebar.profile')}
-                            primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: 500,
-                            }}
-                        />
-                    </ListItemButton>
-                </ListItem>
-
-                <ListItem disablePadding>
-                    <ListItemButton
-                        onClick={() => {
-                            router.push('/whats-new')
-                            onMobileClose?.()
-                        }}
-                        sx={{
-                            borderRadius: 1,
-                        }}
-                    >
-                        <ListItemIcon sx={{minWidth: 36}}>
-                            <NewReleases color="primary"/>
-                        </ListItemIcon>
-                        <ListItemText
-                            primary="更新情報"
-                            primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: 500,
-                            }}
-                        />
-                    </ListItemButton>
-                </ListItem>
+                <SidebarNavButton
+                    icon={<NewReleases color="primary"/>}
+                    label="更新情報"
+                    onClick={() => {
+                        router.push('/whats-new')
+                        onMobileClose?.()
+                    }}
+                />
 
                 {isAdmin && (
                     <ListItem disablePadding>
