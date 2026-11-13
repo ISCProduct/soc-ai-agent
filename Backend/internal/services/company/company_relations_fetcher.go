@@ -15,8 +15,6 @@ import (
 	"log"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 // RelationEntry はプレビュー/確定用の企業関係1件。
@@ -525,7 +523,7 @@ func (f *CompanyRelationsFetcher) persistResult(ctx context.Context, company *mo
 			continue
 		}
 		toCompany, err := f.companyRepo.FindByName(name)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		if err != nil && !errors.Is(err, repository.ErrNotFound) {
 			continue
 		}
 		if toCompany == nil {

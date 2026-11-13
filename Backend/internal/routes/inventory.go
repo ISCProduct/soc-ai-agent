@@ -62,12 +62,13 @@ func Inventory() []Route {
 	SetupCompanyRoutes(api, nil, "", nil, nil, budget)
 	SetupAdminRoutes(api,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", &admincontrollers.AIBudgetController{})
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", &admincontrollers.AIBudgetController{})
 	SetupResumeRoutes(api, nil, "", nil, nil, budget)
 	SetupInterviewRoutes(api, nil, nil, "", nil, nil, budget)
 	SetupGitHubRoutes(api, nil, "", nil, nil, budget)
 	SetupESRoutes(api, nil, nil, "", nil, nil, budget)
 	SetupScheduleRoutes(api, nil, "", nil, nil)
+	SetupNotificationRoutes(api, nil, "", nil, nil)
 	SetupGoogleCalendarRoutes(api, nil, "", nil, nil)
 	SetupApplicationRoutes(api, nil, nil, "", nil, nil)
 	// company_auth_routes.go と user_routes.go は一部のコントローラを `!= nil` で囲んでいる。
