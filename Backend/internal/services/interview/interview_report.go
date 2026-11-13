@@ -220,7 +220,6 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	// ワーカーには認証ミドルウェアの actor が届かない。載せないとレポートの費用が
 	// 誰の予算にも入らない。
 	ctx = usagectx.WithActor(ctx, session.UserID, session.OrganizationID)
-	lang := normalizeLanguage(session.Language)
 
 	utterances, err := s.utterRepo.FindBySessionID(sessionID)
 	if err != nil {
@@ -229,24 +228,59 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	if len(utterances) == 0 {
 		return fmt.Errorf("%w (session=%d)", ErrNoUtterances, sessionID)
 	}
-	transcript := BuildTranscript(utterances)
-	systemPrompt, userPrompt := BuildReportPrompts(lang, transcript)
 
+	payload, err := s.generateReportPayload(ctx, sessionID, normalizeLanguage(session.Language), utterances)
+	if err != nil {
+		return err
+	}
+
+	report := s.buildReportRecord(sessionID, payload)
+	if err := s.reportRepo.Upsert(report); err != nil {
+		return err
+	}
+	return s.applyReportScores(session, report, utterances)
+}
+
+// reportCandidate は、スコアが妥当だった候補と、その根拠を実発話と照合した結果。
+type reportCandidate struct {
+	payload   reportPayload
+	evidence  EvidenceCheck
+	teacher   EvidenceCheck
+	unmatched []string
+	matched   int
+}
+
+// checkReportEvidence は候補の根拠が実際の発話に基づくかを照合する（#1527）。LLM は呼ばない。
+// 教員向けの detailed_evidence も同じ経路で照合する。教員向けだけ無検証だと、
+// 指導の前提になるレポートに捏造が残る（Issue #1527 の動機そのもの）。
+// 第2戻り値は照合対象にした項目の総数(ログ用)。
+func checkReportEvidence(candidate reportPayload, utterances []models.InterviewUtterance, spoken SpokenEvidence) (reportCandidate, int) {
+	ev := ValidateEvidenceReferences(candidate.Evidence, candidate.EvidenceUtteranceIDs, utterances)
+	te := ValidateEvidence(teacherDetailedEvidence(candidate), spoken)
+	c := reportCandidate{
+		payload:   candidate,
+		evidence:  ev.EvidenceCheck,
+		teacher:   te,
+		unmatched: append(slices.Clone(ev.EvidenceCheck.Unmatched), prefixKeys("teacher.", te.Unmatched)...),
+		matched:   ev.EvidenceCheck.Matched() + te.Matched(),
+	}
+	c.payload.EvidenceUtteranceIDs = evidenceIDsAsPointers(ev.UtteranceIDs)
+	return c, ev.EvidenceCheck.Checked + te.Checked
+}
+
+// generateReportPayload は LLM に講評を作らせ、保存してよい内容を返す。
+//
+// スキーマ違反と根拠の捏造は弾いて1度だけ作り直す（#795, #1527）。
+// 最後の候補だけを見ていると、attempt 1 が妥当で attempt 2 が壊れたときに
+// 妥当なスコアまで捨ててしまうので、スコアが妥当だった候補のうち
+// 照合できた根拠が最も多いものを best として残す。
+func (s *InterviewService) generateReportPayload(ctx context.Context, sessionID uint, lang string, utterances []models.InterviewUtterance) (reportPayload, error) {
+	systemPrompt, userPrompt := BuildReportPrompts(lang, BuildTranscript(utterances))
 	model := aimodel.For(aimodel.StageInterviewReport)
 	// 受験者の発話は候補ごとに作り直さない（#1527）
 	spoken := SpokenContent(utterances)
 
-	// スキーマ違反と根拠の捏造は弾いて1度だけ作り直す（#795, #1527）。
-	//
-	// best* は「スコアが妥当だった候補のうち、照合できた根拠が最も多いもの」を保持する。
-	// 作り直した結果が壊れていても、ここに残した候補を保存できる。
-	// 最後の候補だけを見ていると、attempt 1 が妥当で attempt 2 が壊れたときに
-	// 妥当なスコアまで捨ててしまう。
-	var best reportPayload
-	var bestEvidence, bestTeacher EvidenceCheck
-	var bestUnmatched []string
-	var bestMatched int
-	var haveBest bool
+	var best *reportCandidate
 	// retryNote は作り直しのときだけプロンプトへ足す指示（#1527）。
 	// 温度0.4の単純な再抽選では2回目が改善する理由が無いので、
 	// どの項目が照合できなかったかを具体的に伝える。
@@ -260,7 +294,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		raw, err := s.openaiClient.ChatCompletionWithSchema(llmCtx, systemPrompt, userPrompt+retryNote, 0.4, 2000, interviewReportResponseSchema, model)
 		cancel()
 		if err != nil {
-			return err
+			return reportPayload{}, err
 		}
 		candidate, parseErr := parseReportJSON(raw)
 		if parseErr != nil {
@@ -277,19 +311,14 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 				sessionID, attempt+1, reportGenerationAttempts, scoreErr)
 			continue
 		}
-		// 根拠が実際の発話に基づくかを照合する（#1527）。LLM は呼ばない。
-		// 教員向けの detailed_evidence も同じ経路で照合する。教員向けだけ無検証だと、
-		// 指導の前提になるレポートに捏造が残る（Issue #1527 の動機そのもの）。
-		ev := ValidateEvidenceReferences(candidate.Evidence, candidate.EvidenceUtteranceIDs, utterances)
-		te := ValidateEvidence(teacherDetailedEvidence(candidate), spoken)
-		unmatched := append(slices.Clone(ev.EvidenceCheck.Unmatched), prefixKeys("teacher.", te.Unmatched)...)
-		matched, checked := ev.EvidenceCheck.Matched()+te.Matched(), ev.EvidenceCheck.Checked+te.Checked
-		if checked == 0 {
+
+		cand, total := checkReportEvidence(candidate, utterances, spoken)
+		if total == 0 {
 			// 根拠を1件も返さなかった。照合すべきものが無いので 0/0 になる。
 			// 「完璧に照合できた」と区別できるようにしておく。
 			log.Printf("[Interview] report evidence session=%d matched=0/0 (no evidence returned)", sessionID)
 		} else {
-			log.Printf("[Interview] report evidence session=%d matched=%d/%d", sessionID, matched, checked)
+			log.Printf("[Interview] report evidence session=%d matched=%d/%d", sessionID, cand.matched, total)
 		}
 
 		// 照合できた根拠が最も多い候補を残す。
@@ -303,38 +332,47 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		//
 		// evidence 起因の失敗では lastErr を汚さない
 		// （汚すと finalizeReportPayload がスコアまで捨てる）。
-		if !haveBest || matched > bestMatched {
-			best, bestEvidence, bestTeacher = candidate, ev.EvidenceCheck, te
-			best.EvidenceUtteranceIDs = evidenceIDsAsPointers(ev.UtteranceIDs)
-			bestUnmatched, bestMatched, haveBest = unmatched, matched, true
+		if best == nil || cand.matched > best.matched {
+			best = &cand
 		}
-		if len(unmatched) == 0 {
+		if len(cand.unmatched) == 0 {
 			break
 		}
 		log.Printf("[Interview] report evidence unmatched (session %d, attempt %d/%d): %s",
-			sessionID, attempt+1, reportGenerationAttempts, strings.Join(unmatched, ", "))
-		retryNote = buildEvidenceRetryNote(unmatched)
+			sessionID, attempt+1, reportGenerationAttempts, strings.Join(cand.unmatched, ", "))
+		retryNote = buildEvidenceRetryNote(cand.unmatched)
 	}
 
-	if haveBest {
-		// スコアが妥当な候補があるなら、後続の試行が壊れていてもそれを保存する。
-		payload = best
-		if len(bestUnmatched) > 0 {
-			// やり直しても照合できなかった根拠は空にして保存する。
-			// スコアと講評は残す（誤りを載せるより欠落させる。docs/wiki/scoring.md §2-3）。
-			blankUnmatchedEvidence(payload.Evidence, bestEvidence.Unmatched)
-			blankUnmatchedEvidence(teacherDetailedEvidence(payload), bestTeacher.Unmatched)
-			log.Printf("[Interview] report saved with blanked evidence (session %d): %s",
-				sessionID, strings.Join(bestUnmatched, ", "))
-		}
-	} else {
-		payload, err = finalizeReportPayload(payload, haveBody, lastErr)
+	return settleReportPayload(sessionID, best, payload, haveBody, lastErr)
+}
+
+// settleReportPayload は試行の結果から、保存する内容を決める。
+// best があればそれを使い、無ければスコアを捨てた講評だけを返す。
+func settleReportPayload(sessionID uint, best *reportCandidate, payload reportPayload, haveBody bool, lastErr error) (reportPayload, error) {
+	if best == nil {
+		payload, err := finalizeReportPayload(payload, haveBody, lastErr)
 		if err != nil {
-			return err
+			return reportPayload{}, err
 		}
 		log.Printf("[Interview] report saved without scores (session %d): %v", sessionID, lastErr)
+		return payload, nil
 	}
 
+	// スコアが妥当な候補があるなら、後続の試行が壊れていてもそれを保存する。
+	payload = best.payload
+	if len(best.unmatched) > 0 {
+		// やり直しても照合できなかった根拠は空にして保存する。
+		// スコアと講評は残す（誤りを載せるより欠落させる。docs/wiki/scoring.md §2-3）。
+		blankUnmatchedEvidence(payload.Evidence, best.evidence.Unmatched)
+		blankUnmatchedEvidence(teacherDetailedEvidence(payload), best.teacher.Unmatched)
+		log.Printf("[Interview] report saved with blanked evidence (session %d): %s",
+			sessionID, strings.Join(best.unmatched, ", "))
+	}
+	return payload, nil
+}
+
+// buildReportRecord は保存するレポート行を組み立てる。
+func (s *InterviewService) buildReportRecord(sessionID uint, payload reportPayload) *models.InterviewReport {
 	// スコアを捨てた場合は空文字にする。json.Marshal(nil map) は "null" を返すが、
 	// それだと UpdateScoresFromInterviewReport の ScoresJSON == "" 早期リターンに
 	// 乗らず、スコア反映へ進んでしまう。
@@ -356,7 +394,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		}
 	}
 
-	report := &models.InterviewReport{
+	return &models.InterviewReport{
 		SessionID:                sessionID,
 		SummaryText:              payload.Summary,
 		ScoresJSON:               scoresJSON,
@@ -366,53 +404,54 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		ImprovementsJSON:         string(improvementsJSON),
 		TeacherReportJSON:        string(teacherJSON),
 	}
-	if err := s.reportRepo.Upsert(report); err != nil {
-		return err
+}
+
+// applyReportScores は面接スコアをチャット診断セッションへ反映し、可能なら再マッチングする。
+func (s *InterviewService) applyReportScores(session *models.InterviewSession, report *models.InterviewReport, utterances []models.InterviewUtterance) error {
+	if s.crossFeature == nil {
+		return nil
+	}
+	sessionID := report.SessionID
+	// スコア反映は1回だけ（#1512）。
+	//
+	// Redis 障害時のフォールバック経路はプロセス内の map でしか重複排除して
+	// おらず、本番の backend は最大2タスクへスケールする。排他が無いと
+	// user_weight_scores の移動平均へ二重に反映される。
+	// scores_applied_at が NULL の行を条件付き UPDATE で奪い合い、
+	// 勝った1つだけが以降へ進む。
+	claimed, claimErr := s.reportRepo.ClaimScoresApplication(sessionID)
+	if claimErr != nil {
+		return fmt.Errorf("スコア反映の確保に失敗 (session=%d): %w", sessionID, claimErr)
+	}
+	if !claimed {
+		// 他のタスクが反映済み。レポート本体は保存できているので成功扱いにする。
+		log.Printf("[Interview] scores already applied for session %d, skipped\n", sessionID)
+		return nil
 	}
 
-	// 面接スコアをチャット診断セッションへ反映し、可能なら再マッチングする。
-	if s.crossFeature != nil {
-		// スコア反映は1回だけ（#1512）。
-		//
-		// Redis 障害時のフォールバック経路はプロセス内の map でしか重複排除して
-		// おらず、本番の backend は最大2タスクへスケールする。排他が無いと
-		// user_weight_scores の移動平均へ二重に反映される。
-		// scores_applied_at が NULL の行を条件付き UPDATE で奪い合い、
-		// 勝った1つだけが以降へ進む。
-		claimed, claimErr := s.reportRepo.ClaimScoresApplication(sessionID)
-		if claimErr != nil {
-			return fmt.Errorf("スコア反映の確保に失敗 (session=%d): %w", sessionID, claimErr)
-		}
-		if !claimed {
-			// 他のタスクが反映済み。レポート本体は保存できているので成功扱いにする。
-			log.Printf("[Interview] scores already applied for session %d, skipped\n", sessionID)
-			return nil
-		}
-
-		targetSession, err := s.crossFeature.ResolveDiagnosisSessionID(session.UserID)
-		if err != nil {
-			// 診断セッションを特定できないまま書くと別セッションを汚す。
-			// ここで握りつぶすと面接スコアがどこにも反映されないまま消えるので、
-			// エラーを返してキュー(asynq)のリトライに載せる。レポート本体は Upsert 済みで冪等。
-			// 確保した権利は返す。返さないとリトライがスコアを書けないまま成功扱いになる。
-			s.releaseScoresClaim(sessionID)
-			return fmt.Errorf("診断セッションの解決に失敗 (session=%d): %w", sessionID, err)
-		}
-		// 発話量はレポートに残らないので、ここで統計を作って渡す（#1528）。
-		// ルーブリック6段階だけでは分解能が足りないため、回答量と evidence 量で補正する。
-		stats := flywheel.NewInterviewTranscriptStats(utterances)
-		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, targetSession, report, stats); err != nil {
-			log.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)
-			// 反映できていないので権利を返す。次の試行が改めて確保できる。
-			s.releaseScoresClaim(sessionID)
-		} else if s.matchingRunner != nil && !repositories.IsInterviewSnapshotSession(targetSession) {
-			userID, sessionID := session.UserID, targetSession
-			safego.Go(func() {
-				if err := s.matchingRunner.CalculateMatching(s.rematchContext(userID, session.OrganizationID), userID, sessionID); err != nil {
-					log.Printf("[CrossFeature] rematch after interview failed user=%d session=%s: %v\n", userID, sessionID, err)
-				}
-			})
-		}
+	targetSession, err := s.crossFeature.ResolveDiagnosisSessionID(session.UserID)
+	if err != nil {
+		// 診断セッションを特定できないまま書くと別セッションを汚す。
+		// ここで握りつぶすと面接スコアがどこにも反映されないまま消えるので、
+		// エラーを返してキュー(asynq)のリトライに載せる。レポート本体は Upsert 済みで冪等。
+		// 確保した権利は返す。返さないとリトライがスコアを書けないまま成功扱いになる。
+		s.releaseScoresClaim(sessionID)
+		return fmt.Errorf("診断セッションの解決に失敗 (session=%d): %w", sessionID, err)
+	}
+	// 発話量はレポートに残らないので、ここで統計を作って渡す（#1528）。
+	// ルーブリック6段階だけでは分解能が足りないため、回答量と evidence 量で補正する。
+	stats := flywheel.NewInterviewTranscriptStats(utterances)
+	if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, targetSession, report, stats); err != nil {
+		log.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)
+		// 反映できていないので権利を返す。次の試行が改めて確保できる。
+		s.releaseScoresClaim(sessionID)
+	} else if s.matchingRunner != nil && !repositories.IsInterviewSnapshotSession(targetSession) {
+		userID, sessionID := session.UserID, targetSession
+		safego.Go(func() {
+			if err := s.matchingRunner.CalculateMatching(s.rematchContext(userID, session.OrganizationID), userID, sessionID); err != nil {
+				log.Printf("[CrossFeature] rematch after interview failed user=%d session=%s: %v\n", userID, sessionID, err)
+			}
+		})
 	}
 	return nil
 }
