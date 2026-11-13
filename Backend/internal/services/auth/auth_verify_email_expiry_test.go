@@ -9,12 +9,11 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
-// メール認証トークンの有効期限(#330)の判定を、DB から読んだ行が mapper を通る形で確かめる。
+// メール認証トークンの有効期限(#330)の判定を、実の UserRepository と sqlmock で確かめる。
 //
 // VerifyEmail は userRepo.GetUserByVerificationToken が返す models.User の
-// EmailVerificationExpires を見る。mapper が期限をコピーしないと、DB に期限が入っていても
-// entity では常に nil になり、期限切れの判定が働かない。スタブの userRepo では mapper を
-// 通らないので、実の UserRepository と sqlmock で確かめる。
+// EmailVerificationExpires を見る。スタブの userRepo では DB の行を読む経路を通らないので、
+// 行の列がそのまま判定に届くことを、実の UserRepository で確かめる。
 
 const verifyTokenQuery = "SELECT \\* FROM `users` WHERE email_verification_token = \\? ORDER BY `users`.`id` LIMIT \\?"
 
