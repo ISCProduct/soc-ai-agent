@@ -539,7 +539,7 @@ func main() {
 	companyEntryController := companycontrollers.NewCompanyEntryController(companyEntryService)
 	companyUserRepo := repositories.NewCompanyUserRepository(db)
 	companyUserRefreshRepo := repositories.NewCompanyUserRefreshTokenRepository(db)
-	companyUserService := companyauth.NewCompanyUserService(db, companyUserRepo, companyUserRefreshRepo, emailService, cfg.CompanyUserSecret)
+	companyUserService := companyauth.NewCompanyUserService(companyRepo, companyUserRepo, companyUserRefreshRepo, emailService, cfg.CompanyUserSecret)
 	companyAuthController := companycontrollers.NewCompanyAuthController(companyUserService)
 	companyPortalController := companycontrollers.NewCompanyPortalController(companyUserService)
 	adminCompanyUserController := companycontrollers.NewAdminCompanyUserController(companyUserService)

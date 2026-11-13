@@ -36,7 +36,7 @@ func newCompanyAuthTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 func newTestService(t *testing.T, db *gorm.DB) *CompanyUserService {
 	t.Helper()
 	return NewCompanyUserService(
-		db,
+		repositories.NewCompanyRepository(db),
 		repositories.NewCompanyUserRepository(db),
 		repositories.NewCompanyUserRefreshTokenRepository(db),
 		nil,
