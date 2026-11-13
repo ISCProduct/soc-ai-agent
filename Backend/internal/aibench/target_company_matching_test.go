@@ -170,7 +170,7 @@ func TestMatchingReasonTarget_Run上限到達で呼び直す(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "テスト用")
 
 	c := Case{ID: "mr-x", Target: TargetMatchingReason, Input: Input{
-		Match:          &entity.UserCompanyMatch{MatchScore: 80, Company: models.Company{Name: "テスト株式会社", Industry: "商社"}},
+		Match:          &models.UserCompanyMatch{MatchScore: 80, Company: models.Company{Name: "テスト株式会社", Industry: "商社"}},
 		UserScores:     []entity.UserWeightScore{{WeightCategory: "技術志向", Score: 80}},
 		MustMentionAny: []string{"商社"}, StrengthAny: []string{"技術"},
 	}}

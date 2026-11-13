@@ -125,7 +125,7 @@ func measuredAxisCount(scores []entity.UserWeightScore) int {
 	return len(scores)
 }
 
-func heuristicFlags(scores []entity.UserWeightScore, matches []*entity.UserCompanyMatch) []string {
+func heuristicFlags(scores []entity.UserWeightScore, matches []*models.UserCompanyMatch) []string {
 	var flags []string
 	measured := measuredAxisCount(scores)
 	if measured == 0 {
@@ -281,7 +281,7 @@ func (s *QualityService) evaluateWithLLM(
 	ctx context.Context,
 	scores []entity.UserWeightScore,
 	messages []models.ChatMessage,
-	matches []*entity.UserCompanyMatch,
+	matches []*models.UserCompanyMatch,
 ) (*qualityLLMResult, error) {
 	var scoreLines []string
 	for _, sc := range scores {

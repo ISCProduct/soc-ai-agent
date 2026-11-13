@@ -103,7 +103,7 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 	log.Printf("[CalculateMatching] Loaded %d weight profiles\n", len(profiles))
 
 	// 3. 各企業とのマッチングを計算（プロファイルはメモリ上で参照）
-	pending := make([]*entity.UserCompanyMatch, 0, len(companies))
+	pending := make([]*models.UserCompanyMatch, 0, len(companies))
 	skippedNoProfile := 0
 	for i := range companies {
 		company := &companies[i]
@@ -186,7 +186,7 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 // BuildMatchReason でテンプレ理由を作るため、利用者から見える結果は変わらない。
 // 既定オフのときは何もしない（その場合 match_reason は全件空になる）。
 func (s *MatchingService) applyAIReasonsToTopMatches(
-	ctx context.Context, pending []*entity.UserCompanyMatch, userScores []entity.UserWeightScore,
+	ctx context.Context, pending []*models.UserCompanyMatch, userScores []entity.UserWeightScore,
 ) {
 	if !matchingReasonUseAI() || s.aiClient == nil {
 		return
@@ -219,11 +219,11 @@ func (s *MatchingService) applyAIReasonsToTopMatches(
 // topMatchesByScore は MatchScore 降順の上位 limit 件を返す。
 // pending の並び順は保存順に影響するため変更せず、スライスだけ複製して並べ替える。
 // 同点時の順序を安定させるため SliceStable を使う。
-func topMatchesByScore(pending []*entity.UserCompanyMatch, limit int) []*entity.UserCompanyMatch {
+func topMatchesByScore(pending []*models.UserCompanyMatch, limit int) []*models.UserCompanyMatch {
 	if limit <= 0 || len(pending) == 0 {
 		return nil
 	}
-	sorted := make([]*entity.UserCompanyMatch, len(pending))
+	sorted := make([]*models.UserCompanyMatch, len(pending))
 	copy(sorted, pending)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		return sorted[i].MatchScore > sorted[j].MatchScore
@@ -267,8 +267,8 @@ func (s *MatchingService) loadAllPublishedCompanies() ([]models.Company, error) 
 func (s *MatchingService) calculateMatchScore(
 	userScores map[string]float64,
 	companyProfile *models.CompanyWeightProfile,
-) *entity.UserCompanyMatch {
-	match := &entity.UserCompanyMatch{}
+) *models.UserCompanyMatch {
+	match := &models.UserCompanyMatch{}
 	evaluatedCount := 0
 	totalScore := 0.0
 
@@ -338,7 +338,7 @@ func CalculateCategoryMatch(userScore, companyWeight float64) float64 {
 }
 
 // GetTopMatches マッチング度の高い企業を取得
-func (s *MatchingService) GetTopMatches(ctx context.Context, userID uint, sessionID string, limit int) ([]*entity.UserCompanyMatch, error) {
+func (s *MatchingService) GetTopMatches(ctx context.Context, userID uint, sessionID string, limit int) ([]*models.UserCompanyMatch, error) {
 	return s.matchRepo.FindTopMatchesByUserAndSession(userID, sessionID, limit)
 }
 
@@ -394,7 +394,7 @@ func (s *MatchingService) GetDiagnostics(userID uint, sessionID string) (*Matchi
 
 // GenerateMatchReason はマッチング理由を返す。
 // 既定は DB/テンプレのみ（#588）。AI 生成は MATCHING_REASON_USE_AI=true のときだけ。
-func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) (string, error) {
+func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *models.UserCompanyMatch, userScores []entity.UserWeightScore) (string, error) {
 	if match == nil {
 		return "", fmt.Errorf("match is nil")
 	}
@@ -441,7 +441,7 @@ const MatchingReasonTemperature = 0.4
 
 // MatchingReasonPrompts は GenerateMatchReason が LLM へ渡すシステム・ユーザープロンプトを返す。
 // aibench（#1782）が本番と同じプロンプトで測るために公開する。
-func MatchingReasonPrompts(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) (system, user string) {
+func MatchingReasonPrompts(match *models.UserCompanyMatch, userScores []entity.UserWeightScore) (system, user string) {
 	return prompts.MatchingReasonSystemPrompt, buildMatchingReasonUserPrompt(match, userScores)
 }
 
@@ -450,13 +450,13 @@ func matchingReasonUseAI() bool {
 	return strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
 }
 
-func buildMatchingReasonUserPrompt(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) string {
+func buildMatchingReasonUserPrompt(match *models.UserCompanyMatch, userScores []entity.UserWeightScore) string {
 	return buildMatchingReasonUserPromptWithVersion(
 		match, userScores, prompts.ResolvePromptVersion(prompts.StageMatchingReason),
 	)
 }
 
-func buildMatchingReasonUserPromptWithVersion(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore, version string) string {
+func buildMatchingReasonUserPromptWithVersion(match *models.UserCompanyMatch, userScores []entity.UserWeightScore, version string) string {
 	company := match.Company
 	companyInfo := fmt.Sprintf(
 		"- 企業名: %s\n- 業界: %s\n- 主事業: %s\n- 文化: %s\n- 働き方: %s\n- 開発スタイル: %s\n- 技術スタック: %s",
@@ -501,7 +501,7 @@ func formatTopUserScores(scores []entity.UserWeightScore) string {
 	return strings.Join(parts, ", ")
 }
 
-func formatTopMatchAxes(match *entity.UserCompanyMatch) string {
+func formatTopMatchAxes(match *models.UserCompanyMatch) string {
 	axes := []struct {
 		name  string
 		score float64

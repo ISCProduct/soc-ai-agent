@@ -11,7 +11,7 @@ func TestHeuristicFlags_FewAxesAndSaturated(t *testing.T) {
 		{WeightCategory: "技術志向", Score: 60},
 		{WeightCategory: "成長志向", Score: 40},
 	}
-	matches := []*entity.UserCompanyMatch{
+	matches := []*models.UserCompanyMatch{
 		{CompanyID: 1, MatchScore: 98, MatchedAxisCount: 2},
 		{CompanyID: 2, MatchScore: 97, MatchedAxisCount: 2},
 		{CompanyID: 3, MatchScore: 96, MatchedAxisCount: 2},
@@ -40,7 +40,7 @@ func TestHeuristicFlags_ZeroAxesIsThin(t *testing.T) {
 		{WeightCategory: "細部志向", Score: 50},
 		{WeightCategory: "安定志向", Score: 55},
 	}
-	matches := []*entity.UserCompanyMatch{
+	matches := []*models.UserCompanyMatch{
 		{CompanyID: 1, MatchScore: 80, MatchedAxisCount: 0},
 		{CompanyID: 2, MatchScore: 70, MatchedAxisCount: 0},
 	}
@@ -61,7 +61,7 @@ func TestHeuristicFlags_SingleMatch(t *testing.T) {
 	for i := range scores {
 		scores[i] = entity.UserWeightScore{WeightCategory: "c", Score: 50}
 	}
-	flags := heuristicFlags(scores, []*entity.UserCompanyMatch{
+	flags := heuristicFlags(scores, []*models.UserCompanyMatch{
 		{CompanyID: 1, MatchScore: 88, MatchedAxisCount: 6},
 	})
 	found := false
@@ -80,7 +80,7 @@ func TestHeuristicFlags_Healthy(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		scores = append(scores, entity.UserWeightScore{WeightCategory: "c", Score: 50 + i})
 	}
-	matches := []*entity.UserCompanyMatch{
+	matches := []*models.UserCompanyMatch{
 		{CompanyID: 1, MatchScore: 88, MatchedAxisCount: 8},
 		{CompanyID: 2, MatchScore: 70, MatchedAxisCount: 8},
 	}
@@ -172,12 +172,12 @@ func TestHeuristicFlags_ThinMatchUsesMinimum(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		matches  []*entity.UserCompanyMatch
+		matches  []*models.UserCompanyMatch
 		wantFlag bool
 	}{
 		{
 			name: "全マッチの根拠軸が十分ならフラグなし",
-			matches: []*entity.UserCompanyMatch{
+			matches: []*models.UserCompanyMatch{
 				{CompanyID: 1, MatchScore: 80, MatchedAxisCount: 6},
 				{CompanyID: 2, MatchScore: 60, MatchedAxisCount: 5},
 			},
@@ -185,7 +185,7 @@ func TestHeuristicFlags_ThinMatchUsesMinimum(t *testing.T) {
 		},
 		{
 			name: "先頭は十分でも後続が薄ければフラグを立てる",
-			matches: []*entity.UserCompanyMatch{
+			matches: []*models.UserCompanyMatch{
 				{CompanyID: 1, MatchScore: 80, MatchedAxisCount: 6},
 				{CompanyID: 2, MatchScore: 60, MatchedAxisCount: 2},
 			},

@@ -11,6 +11,7 @@
 package aibench
 
 import (
+	"Backend/internal/models"
 	"bufio"
 	"encoding/json"
 	"fmt"
@@ -101,7 +102,7 @@ type Input struct {
 	Expected   *CompanyExtractExpected `json:"expected,omitempty"`
 	// マッチング理由の生成。Match と UserScores は本番の型のまま受ける（フィールド名は Go の名前）。
 	// Match.Company のキーは models.Company の json タグ(main_business など)。
-	Match      *entity.UserCompanyMatch `json:"match,omitempty"`
+	Match      *models.UserCompanyMatch `json:"match,omitempty"`
 	UserScores []entity.UserWeightScore `json:"user_scores,omitempty"`
 	// MustMentionAny は企業側の事実の語。理由にいずれか1つ以上が入っていること
 	// （プロンプトの「企業側の情報を1つ以上反映」）。

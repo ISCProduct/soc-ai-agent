@@ -31,7 +31,7 @@ func TestFormatTopUserScores(t *testing.T) {
 
 func TestGenerateMatchReasonFallbackWhenAIClientNil(t *testing.T) {
 	svc := matching.NewMatchingServiceForTest()
-	match := &entity.UserCompanyMatch{
+	match := &models.UserCompanyMatch{
 		MatchScore: 88.5,
 		Company: models.Company{
 			ID:           1,
