@@ -3,6 +3,7 @@
  */
 import { render, screen } from '@testing-library/react'
 import LobbyScreen from '@/app/interview/components/LobbyScreen'
+import { RESUME_REFERENCE_NOTICE } from '@/app/interview/resumeNotice'
 
 describe('LobbyScreen', () => {
   const noop = () => {}
@@ -40,7 +41,7 @@ describe('LobbyScreen', () => {
 
   it('履歴書が登録済みのときだけ、質問づくりに参照する旨を表示する', () => {
     renderScreen({ hasResume: true })
-    expect(screen.getByTestId('resume-reference-notice')).toHaveTextContent('登録済みの履歴書を質問づくりに参照します')
+    expect(screen.getByTestId('resume-reference-notice')).toHaveTextContent(RESUME_REFERENCE_NOTICE)
   })
 
   it('履歴書が未登録なら参照の表示を出さない', () => {
