@@ -19,6 +19,8 @@ func SetupUserRoutes(api *echo.Group, profileController *usercontrollers.Integra
 	user.GET("/preferences", preferenceController.Get)
 	user.PUT("/preferences", preferenceController.Put)
 	user.GET("/industries", preferenceController.Industries)
+	user.GET("/training-consent", preferenceController.GetTrainingConsent)
+	user.PUT("/training-consent", preferenceController.PutTrainingConsent)
 	// 教員からの軌道修正・提案案内
 	user.GET("/guidances", guidanceController.List)
 	user.POST("/guidances/:id/dismiss", guidanceController.Dismiss)
@@ -26,6 +28,7 @@ func SetupUserRoutes(api *echo.Group, profileController *usercontrollers.Integra
 	if scoutController != nil {
 		user.GET("/scouts", scoutController.List)
 		user.POST("/scouts/:id/view", scoutController.View)
+		user.POST("/scouts/:id/accept", scoutController.Accept)
 		user.POST("/scouts/:id/decline", scoutController.Decline)
 		user.POST("/scout-blocks", scoutController.BlockCompany)
 	}

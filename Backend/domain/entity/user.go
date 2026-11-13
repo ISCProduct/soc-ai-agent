@@ -30,6 +30,7 @@ type User struct {
 	PasswordResetExpiresAt   *time.Time
 	AllowCollectiveInsight   bool
 	AllowScoutVisibility     bool
+	AllowTrainingUse         bool // 学習利用の同意（#2167）。mapper にも必要（UpdateUser は Save で全カラムを更新するため、無いと false に戻る）
 	WithdrawnAt              *time.Time
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
