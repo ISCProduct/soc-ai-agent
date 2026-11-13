@@ -1,7 +1,7 @@
 'use client'
 
 import { memo, Suspense, useMemo, useState } from 'react'
-import FormatFindingsSection, { type FormatFinding } from '@/components/FormatFindingsSection'
+import FormatFindingsSection, { type FormatFinding } from '@/components/feedback/FormatFindingsSection'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Alert,

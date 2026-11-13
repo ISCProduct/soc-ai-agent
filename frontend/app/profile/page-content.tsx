@@ -32,7 +32,7 @@ import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '
 import GitHubSkills from '@/components/github-skills'
 import { ScoutPreferencesCard } from '@/components/profile/ScoutPreferencesCard'
 import { PageLoading } from '@/components/common/PageLoading'
-import { StudentThemeToggle } from '@/components/StudentThemeToggle'
+import { StudentThemeToggle } from '@/components/layout/StudentThemeToggle'
 
 export default function PageContent() {
   return (

@@ -56,7 +56,7 @@ import {
 } from '@/lib/sidebar-navigation'
 import { SIDEBAR_ADMIN_NAV } from '@/lib/sidebar-nav'
 import { useTranslations } from '@/lib/i18n'
-import { computeProgressTotals } from './mui-chat/utils'
+import { computeProgressTotals } from '../mui-chat/utils'
 
 const DRAWER_WIDTH = 280
 

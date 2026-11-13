@@ -19,7 +19,7 @@ import Link from 'next/link'
 import { authService, AuthResponse } from '@/lib/auth'
 import { BACKEND_URL } from '@/lib/backend-url'
 import { GUEST_LIMITATIONS } from '@/lib/guest-limits'
-import { StudentThemeToggle } from '@/components/StudentThemeToggle'
+import { StudentThemeToggle } from '@/components/layout/StudentThemeToggle'
 import { extractTenantSlug } from '@/lib/tenant'
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
