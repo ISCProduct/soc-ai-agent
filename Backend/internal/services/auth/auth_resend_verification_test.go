@@ -192,10 +192,17 @@ func TestResendVerificationEmail_EnqueueFailureDoesNotLeak(t *testing.T) {
 	}
 }
 
+// renewFailRepo は、RenewEmailVerification だけを失敗させる。
+type renewFailRepo struct{ *userRepoAuthStub }
+
+func (renewFailRepo) RenewEmailVerification(uint, string, time.Time) (bool, error) {
+	return false, errors.New("db down")
+}
+
 // トークンを保存できなかった場合は、メールを送らない。
 // 届いたリンクが使えない(DB にトークンが無い)ので、送るだけ無駄になる(#2002 と同じ考え方)。
 func TestResendVerificationEmail_SaveFailureDoesNotSend(t *testing.T) {
-	repo := &failNthUpdateUserRepo{userRepoAuthStub: &userRepoAuthStub{user: unverifiedUser()}, failOn: 1}
+	repo := renewFailRepo{&userRepoAuthStub{user: unverifiedUser()}}
 	jobs := &resendJobsSpy{}
 	svc := NewAuthService(repo, &pendingRepoAuthStub{}, &email.EmailService{})
 	svc.SetJobEnqueuer(jobs)
@@ -206,6 +213,44 @@ func TestResendVerificationEmail_SaveFailureDoesNotSend(t *testing.T) {
 	if jobs.calls != 0 {
 		t.Fatalf("保存に失敗したら送らない: %d", jobs.calls)
 	}
+}
+
+// 読み込んだあとに認証が完了していた場合(同時に VerifyEmail が走った)は、何も書かず、送らない。
+// 以前の、行を丸ごと保存する実装では、認証済みの印(email_verified_at)を巻き戻していた。
+func TestResendVerificationEmail_VerifiedMeanwhileDoesNothing(t *testing.T) {
+	user := unverifiedUser()
+	repo := &verifiedAfterReadRepo{userRepoAuthStub: &userRepoAuthStub{user: user}}
+	jobs := &resendJobsSpy{}
+	svc := NewAuthService(repo, &pendingRepoAuthStub{}, &email.EmailService{})
+	svc.SetJobEnqueuer(jobs)
+
+	if err := svc.ResendVerificationEmail("user@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if jobs.calls != 0 {
+		t.Fatalf("認証済みになっていたら送らない: %d", jobs.calls)
+	}
+	if user.EmailVerifiedAt == nil {
+		t.Fatal("認証済みの印を巻き戻してはいけない")
+	}
+	if user.EmailVerificationToken != "old-token" {
+		t.Fatalf("トークンを書き換えない: %q", user.EmailVerificationToken)
+	}
+}
+
+// verifiedAfterReadRepo は、GetUserByEmail で読んだ直後に、別の処理が認証を完了させた状況を作る。
+// 読んだ側のコピーは未認証のまま、保存先(元の行)だけが認証済みになる。
+type verifiedAfterReadRepo struct{ *userRepoAuthStub }
+
+func (r *verifiedAfterReadRepo) GetUserByEmail(email string) (*models.User, error) {
+	u, err := r.userRepoAuthStub.GetUserByEmail(email)
+	if u == nil || err != nil {
+		return u, err
+	}
+	snapshot := *u // 読んだ時点のコピー(未認証)
+	now := time.Now()
+	u.EmailVerifiedAt = &now // その直後に認証が完了した
+	return &snapshot, nil
 }
 
 // 実の UserRepository と sqlmock で、新しいトークンと24時間の期限が
@@ -274,5 +319,127 @@ func TestMainWiresResendLimiter(t *testing.T) {
 	}
 	if want := "authService.SetResendLimiter(middleware.VerificationResendEmailRateLimiter)"; !strings.Contains(string(raw), want) {
 		t.Errorf("main.go に %q が無い", want)
+	}
+}
+
+// 入力検証: 長さの上限・形式を満たさないものは、制限器にも DB にもジョブにも通さず、nil を返す。
+// 認証不要の入口なので、巨大な文字列を制限器のキー(1時間残る)にさせない。
+
+// countingUserRepo は、GetUserByEmail が呼ばれた回数を数える。
+type countingUserRepo struct {
+	*userRepoAuthStub
+	lookups int
+}
+
+func (r *countingUserRepo) GetUserByEmail(email string) (*models.User, error) {
+	r.lookups++
+	return r.userRepoAuthStub.GetUserByEmail(email)
+}
+
+func TestResendVerificationEmail_InvalidInputNeverReachesLimiterOrDB(t *testing.T) {
+	tooLong := strings.Repeat("a", 255) // 255 文字(@ が無くても長さで先に弾く)
+	tooLongButValidShape := strings.Repeat("a", 64) + "@" + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 62) + ".com"
+
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"10万文字", strings.Repeat("a", 100000)},
+		{"10万文字(@あり)", strings.Repeat("a", 50000) + "@" + strings.Repeat("b", 49999)},
+		{"255文字", tooLong},
+		{"形式は正しいが255文字", tooLongButValidShape},
+		{"@が無い", "user.example.com"},
+		{"ローカル部が空", "@example.com"},
+		{"ドメインが空", "user@"},
+		{"@が2つ", "user@@example.com"},
+		{"空白を含む", "us er@example.com"},
+		{"表示名つき", "Name <user@example.com>"},
+		{"複数指定", "user@example.com, other@example.com"},
+		{"空白のみ", "   "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			limiter := &resendLimiterSpy{allow: true}
+			repo := &countingUserRepo{userRepoAuthStub: &userRepoAuthStub{user: unverifiedUser()}}
+			jobs := &resendJobsSpy{}
+			svc := NewAuthService(repo, &pendingRepoAuthStub{}, &email.EmailService{})
+			svc.SetJobEnqueuer(jobs)
+			svc.SetResendLimiter(limiter)
+
+			if err := svc.ResendVerificationEmail(tt.input); err != nil {
+				t.Fatalf("エラーを返さない(応答を変えない): %v", err)
+			}
+			if len(limiter.keys) != 0 {
+				t.Fatalf("制限器を通さない(キーが残る): %d 件", len(limiter.keys))
+			}
+			if repo.lookups != 0 {
+				t.Fatalf("DB を検索しない: %d 回", repo.lookups)
+			}
+			if jobs.calls != 0 {
+				t.Fatalf("送らない: %d 件", jobs.calls)
+			}
+		})
+	}
+}
+
+// 上限ちょうど(254 文字)の、形式の正しいメールアドレスは通す。
+func TestResendVerificationEmail_AcceptsMaxLengthAddress(t *testing.T) {
+	addr := strings.Repeat("a", 64) + "@" + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 61)
+	if len(addr) != 254 {
+		t.Fatalf("テストデータの長さ = %d, want 254", len(addr))
+	}
+	limiter := &resendLimiterSpy{allow: true}
+	svc := NewAuthService(&userRepoAuthStub{}, &pendingRepoAuthStub{}, &email.EmailService{})
+	svc.SetResendLimiter(limiter)
+
+	if err := svc.ResendVerificationEmail(addr); err != nil {
+		t.Fatal(err)
+	}
+	if len(limiter.keys) != 1 || limiter.keys[0] != addr {
+		t.Fatalf("254 文字ちょうどは受け付ける: keys=%d", len(limiter.keys))
+	}
+}
+
+// 実の UserRepository で、更新が「対象のカラムだけ・未認証の行だけ」であることを確かめる。
+// 0 行しか更新されなかった(認証済みだった)場合は、メールを送らない。
+func TestResendVerificationEmail_RealRepoUpdatesOnlyUnverifiedRows(t *testing.T) {
+	db, mock := newAuthServiceTestDB(t)
+	var sqls []string
+	if err := db.Callback().Update().After("gorm:update").Register("capture_resend_sql", func(tx *gorm.DB) {
+		sqls = append(sqls, tx.Statement.SQL.String())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewAuthService(repositories.NewUserRepository(db), &pendingRepoAuthStub{}, &email.EmailService{})
+	jobs := &resendJobsSpy{}
+	svc.SetJobEnqueuer(jobs)
+
+	mock.ExpectQuery("SELECT \\* FROM `users` WHERE email = \\? ORDER BY `users`.`id` LIMIT \\?").
+		WithArgs("user@example.com", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "email", "name"}).AddRow(7, "user@example.com", "テスト"))
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `users` SET").WillReturnResult(sqlmock.NewResult(0, 0)) // 0 行 = 既に認証済み
+	mock.ExpectCommit()
+
+	if err := svc.ResendVerificationEmail("user@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql: %v", err)
+	}
+	if jobs.calls != 0 {
+		t.Fatalf("0 行しか更新されなかったら送らない: %d", jobs.calls)
+	}
+	if len(sqls) != 1 {
+		t.Fatalf("UPDATE は 1 回: %v", sqls)
+	}
+	q := sqls[0]
+	if !strings.Contains(q, "email_verified_at IS NULL") {
+		t.Fatalf("未認証の行だけを更新する条件が無い: %s", q)
+	}
+	for _, col := range []string{"`name`", "`password`", "`email_verified_at`=", "`is_admin`"} {
+		if strings.Contains(q, col) {
+			t.Fatalf("対象のカラム以外を書かない(%s を含む): %s", col, q)
+		}
 	}
 }

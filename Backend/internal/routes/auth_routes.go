@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	echomw "github.com/labstack/echo/v4/middleware"
 )
 
 // SetupAuthRoutes 認証関連のルーティング設定
@@ -22,7 +23,7 @@ func SetupAuthRoutes(api *echo.Group, authController *authcontrollers.AuthContro
 	auth.POST("/guest", authController.CreateGuest)
 	auth.GET("/verify-email", authController.VerifyEmail)
 	auth.POST("/forgot-password", authController.RequestPasswordReset, echoPasswordResetRateLimit())
-	auth.POST("/resend-verification", authController.ResendVerification, echoResendVerificationRateLimit())
+	auth.POST("/resend-verification", authController.ResendVerification, echoResendVerificationRateLimit(), echomw.BodyLimit("4K"))
 	auth.POST("/reset-password", authController.ResetPassword)
 	// トークンリフレッシュ・ログアウト（リフレッシュトークン自体が認証情報 #616）
 	auth.POST("/refresh", authController.Refresh)

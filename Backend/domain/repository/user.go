@@ -18,6 +18,9 @@ type UserRepository interface {
 	UpdateUser(user *models.User) error
 	DeleteUser(id uint) error
 	GetUserByVerificationToken(token string) (*models.User, error)
+	// RenewEmailVerification はメール認証トークンと期限だけを、未認証(email_verified_at が NULL)の行に限って更新する。
+	// 更新した場合に true を返す。認証済み・存在しない行では false(エラーではない)。
+	RenewEmailVerification(userID uint, token string, expires time.Time) (bool, error)
 	GetUserByPasswordResetToken(token string) (*models.User, error)
 	GetUserByOAuth(provider, oauthID string) (*models.User, error)
 }

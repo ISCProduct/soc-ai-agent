@@ -38,6 +38,14 @@ func (r *userRepoAuthStub) UpdateUser(user *models.User) error {
 	return nil
 }
 func (r *userRepoAuthStub) DeleteUser(id uint) error { return nil }
+func (r *userRepoAuthStub) RenewEmailVerification(userID uint, token string, expires time.Time) (bool, error) {
+	if r.user == nil || r.user.ID != userID || r.user.EmailVerifiedAt != nil {
+		return false, nil
+	}
+	r.user.EmailVerificationToken = token
+	r.user.EmailVerificationExpires = &expires
+	return true, nil
+}
 func (r *userRepoAuthStub) GetUserByVerificationToken(token string) (*models.User, error) {
 	return nil, nil
 }

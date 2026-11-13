@@ -2,6 +2,7 @@ package mocks
 
 import (
 	"Backend/internal/models"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -48,6 +49,11 @@ func (m *UserRepositoryMock) UpdateUser(user *models.User) error {
 func (m *UserRepositoryMock) DeleteUser(id uint) error {
 	args := m.Called(id)
 	return args.Error(0)
+}
+
+func (m *UserRepositoryMock) RenewEmailVerification(userID uint, token string, expires time.Time) (bool, error) {
+	args := m.Called(userID, token, expires)
+	return args.Bool(0), args.Error(1)
 }
 
 func (m *UserRepositoryMock) GetUserByVerificationToken(token string) (*models.User, error) {

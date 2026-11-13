@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -94,6 +95,10 @@ func (m *mockUserRepo) ListUsersPaged(l, o int, q string, schoolID *uint) ([]mod
 }
 func (m *mockUserRepo) UpdateUser(u *models.User) error { return m.Called(u).Error(0) }
 func (m *mockUserRepo) DeleteUser(id uint) error        { return m.Called(id).Error(0) }
+func (m *mockUserRepo) RenewEmailVerification(id uint, token string, expires time.Time) (bool, error) {
+	args := m.Called(id, token, expires)
+	return args.Bool(0), args.Error(1)
+}
 func (m *mockUserRepo) GetUserByVerificationToken(t string) (*models.User, error) {
 	args := m.Called(t)
 	return args.Get(0).(*models.User), args.Error(1)
