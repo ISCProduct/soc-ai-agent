@@ -53,6 +53,8 @@ func PrintSummary(w io.Writer, model string, s *ModelSummary) {
 		fmt.Fprintln(w, "  推論先: local（API費は0。計算資源・電力の費用は含まない）")
 	case "unknown_model_price":
 		fmt.Fprintln(w, "  推論先: OpenAI（単価未登録のため費用は未算出）")
+	case "openai_estimated_price":
+		fmt.Fprintf(w, "  推論先: %s（OpenAI 公開単価の目安（トークン課金の概算）による概算）\n", s.Provider)
 	default:
 		fmt.Fprintf(w, "  推論先: %s（OpenAI 公開単価による概算）\n", s.Provider)
 	}
@@ -158,7 +160,7 @@ func PrintComparison(w io.Writer, models []string, r Report) {
 		cost := "-"
 		if s.CostBasis == "local_api_only_excludes_compute" {
 			cost = "0.0000*"
-		} else if s.CostBasis == "openai_published_price" {
+		} else if s.CostBasis == "openai_published_price" || s.CostBasis == "openai_estimated_price" {
 			cost = fmt.Sprintf("%.4f", s.EstCostPerMinUSD*speechMinPerInterview)
 		}
 		scored := len(s.Cases) - s.ErroredCases

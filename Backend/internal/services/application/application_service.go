@@ -22,6 +22,7 @@ type ApplicationService struct {
 	appRepo   *repositories.UserApplicationStatusRepository
 	matchRepo repository.UserCompanyMatchRepository
 	db        *gorm.DB
+	access    shared.CompanyAccessReader
 	notifier  notification.Notifier
 }
 
@@ -34,8 +35,9 @@ func NewApplicationService(
 	appRepo *repositories.UserApplicationStatusRepository,
 	matchRepo repository.UserCompanyMatchRepository,
 	db *gorm.DB,
+	access shared.CompanyAccessReader,
 ) *ApplicationService {
-	return &ApplicationService{appRepo: appRepo, matchRepo: matchRepo, db: db}
+	return &ApplicationService{appRepo: appRepo, matchRepo: matchRepo, db: db, access: access}
 }
 
 // ValidStatuses 有効な選考ステータス一覧（docs/requirements/application-status-transition.md §6）
@@ -117,7 +119,7 @@ func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*entity.Use
 	// match の所有権・企業一致チェック（ToggleFavorite と同じパターン: #924）
 	match, err := s.matchRepo.FindByID(matchID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, shared.ErrNotFound
 		}
 		return nil, fmt.Errorf("マッチデータ取得エラー: %w", err)
@@ -138,7 +140,7 @@ func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*entity.Use
 		switch {
 		case findErr == nil:
 			return shared.ErrDuplicateActiveApplication
-		case errors.Is(findErr, gorm.ErrRecordNotFound):
+		case errors.Is(findErr, repository.ErrNotFound):
 			// 進行中の応募なし。続行
 		default:
 			return fmt.Errorf("重複チェックエラー: %w", findErr)
@@ -292,7 +294,7 @@ func (s *ApplicationService) requireCompanyOwner(userID, companyID uint) error {
 	if companyID == 0 {
 		return shared.ErrForbidden
 	}
-	owns, err := shared.UserOwnsCompany(s.db, userID, companyID)
+	owns, err := shared.UserOwnsCompany(s.access, userID, companyID)
 	if err != nil {
 		return err
 	}
@@ -316,7 +318,7 @@ func (s *ApplicationService) GetCorrelation(userID, companyID uint) ([]map[strin
 }
 
 func (s *ApplicationService) authorizeCorrelation(userID, companyID uint) error {
-	isAdmin, err := shared.UserIsAdmin(s.db, userID)
+	isAdmin, err := shared.UserIsAdmin(s.access, userID)
 	if err != nil {
 		return err
 	}
@@ -329,7 +331,7 @@ func (s *ApplicationService) authorizeCorrelation(userID, companyID uint) error 
 	if isAdmin {
 		return nil
 	}
-	owns, err := shared.UserOwnsCompany(s.db, userID, companyID)
+	owns, err := shared.UserOwnsCompany(s.access, userID, companyID)
 	if err != nil {
 		return err
 	}

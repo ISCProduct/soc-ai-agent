@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"Backend/domain/repository"
 	"errors"
 	"log"
 	"net/http"
@@ -11,7 +12,6 @@ import (
 	adminservice "Backend/internal/services/admin"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 )
 
 type UserScoreRecalculationController struct {
@@ -130,7 +130,7 @@ func (c *UserScoreRecalculationController) setJobStatus(
 // recalculationJobError はエラーを HTTP の応答へ変換する。
 // 状態の競合だけを 409 にし、それ以外は本文をログに残して 500 を返す。
 func recalculationJobError(id uint, err error) error {
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return echo.NewHTTPError(http.StatusNotFound, "再計算ジョブが見つかりません")
 	}
 	if message, ok := adminservice.RecalculationConflictMessage(err); ok {
