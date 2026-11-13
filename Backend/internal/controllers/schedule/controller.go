@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/interfaces"
 	"errors"
@@ -8,7 +9,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 )
 
 type ScheduleController struct {
@@ -167,7 +167,7 @@ func mapScheduleServiceError(err error) *echo.HTTPError {
 	if err.Error() == "forbidden" {
 		return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 	}
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return echo.NewHTTPError(http.StatusNotFound, "not found")
 	}
 	return nil

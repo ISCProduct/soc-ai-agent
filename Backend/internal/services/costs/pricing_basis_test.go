@@ -117,15 +117,19 @@ func TestSummaryPriceBasis(t *testing.T) {
 		{"totally-new-model", 1.0, PriceBasisUnknown},
 		{"gpt-oss-20b", 0, ""}, // ローカル推論は単価を使っていないので「単価未登録」と出さない
 		{"o3-pro", 1.0, PriceBasisInherited},
-		// 音声の単価（分・文字数）で課金するモデルは、トークン単価表を使っていない（#2151 のレビュー）
-		{"gpt-4o-mini-transcribe", 1.0, ""},
-		{"whisper-1", 1.0, ""},
-		{"tts-1", 1.0, ""},
-		{"gpt-4o-mini-tts", 1.0, ""}, // -tts を含む名前も音声のモデル（#2151 のレビュー）
 	}
 	for _, tc := range cases {
 		if got := summaryPriceBasis(tc.model, tc.cost, "", true); got != tc.want {
 			t.Errorf("summaryPriceBasis(%q, %v) = %q, want %q", tc.model, tc.cost, got, tc.want)
+		}
+	}
+
+	// 音声の単価（分・文字数）で課金するモデルの、根拠を記録する前の音声の行は、トークン単価表で判定しない
+	// （#2151 のレビュー）。音声の行は ModelBreakdown の「記録の無い行」に数えない（秒数・文字数のある行は除く）ので、
+	// hasUnrecorded は false で渡る。記録した根拠も無いので空（#2224）。
+	for _, model := range []string{"gpt-4o-mini-transcribe", "whisper-1", "tts-1", "gpt-4o-mini-tts"} {
+		if got := summaryPriceBasis(model, 1.0, "", false); got != "" {
+			t.Errorf("summaryPriceBasis(%q) = %q, want 空（根拠を記録する前の音声の行）", model, got)
 		}
 	}
 }
@@ -279,8 +283,10 @@ func TestModelPricing_MatchesOfficialPrices(t *testing.T) {
 	}
 }
 
-// 記録した時点の根拠を api_call_logs に残す（#2004）。音声の単価・ローカル推論・トークン0の行はトークン単価表を使わないので空。
+// 記録した時点の根拠を api_call_logs に残す（#2004）。音声の行は音声の単価の根拠を残す（#2224）。
+// ローカル推論・トークン0の行は単価表を使わないので空。
 func TestRecordedPriceBasis(t *testing.T) {
+	fixAudioRateEnv(t)
 	cases := []struct {
 		name string
 		u    openaiPkg.Usage
@@ -291,8 +297,12 @@ func TestRecordedPriceBasis(t *testing.T) {
 		{"推定値", openaiPkg.Usage{Provider: "openai", Model: "gpt-4-1106-preview", PromptTokens: 100}, PriceBasisEstimated},
 		{"別モデルの単価", openaiPkg.Usage{Provider: "openai", Model: "o3-pro", CompletionTokens: 100}, PriceBasisInherited},
 		{"単価表に無い", openaiPkg.Usage{Provider: "openai", Model: "totally-new-model", PromptTokens: 100}, PriceBasisUnknown},
-		{"音声（秒数）", openaiPkg.Usage{Provider: "openai", Model: "gpt-transcribe", AudioSeconds: 30}, ""},
-		{"音声（文字数）", openaiPkg.Usage{Provider: "openai", Model: "tts-1", Characters: 100}, ""},
+		// 音声の行（#2224 の受け入れ条件）: 表にある STT モデルは listed、表に無い STT モデルは estimated
+		{"STT 表にあるモデル", openaiPkg.Usage{Provider: "openai", Model: "gpt-transcribe", AudioSeconds: 30}, PriceBasisListed},
+		{"STT 表に無いモデル", openaiPkg.Usage{Provider: "openai", Model: "stt-recorded-basis-unknown", AudioSeconds: 30}, PriceBasisEstimated},
+		{"TTS tts-1", openaiPkg.Usage{Provider: "openai", Model: "tts-1", Characters: 100}, PriceBasisListed},
+		{"TTS tts-1 以外", openaiPkg.Usage{Provider: "openai", Model: "gpt-4o-mini-tts", Characters: 100}, PriceBasisEstimated},
+		{"音声でもローカル推論は空", openaiPkg.Usage{Provider: "local", Model: "whisper-local", AudioSeconds: 30}, ""},
 		{"ローカル推論", openaiPkg.Usage{Provider: "local", Model: "gpt-oss-20b", PromptTokens: 100}, ""},
 		// Web 検索のツール料だけの行は、トークン単価を使っていないので根拠を付けない
 		{"トークン0（ツール料だけ）", openaiPkg.Usage{Provider: "openai", Model: "gpt-4o-mini", WebSearchCalls: 1}, ""},
@@ -301,6 +311,26 @@ func TestRecordedPriceBasis(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := apiCallLogFromUsage(tc.u, time.Now()).PriceBasis; got != tc.want {
 				t.Errorf("PriceBasis = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// 音声の単価を env で上書きしているときは、表に無いモデルでも listed で記録する（運用側が確認した単価。#2224）。
+func TestRecordedPriceBasis_AudioEnvOverride(t *testing.T) {
+	t.Setenv(sttCostOverrideEnv, "0.01")
+	t.Setenv(ttsCostOverrideEnv, "30")
+	cases := []struct {
+		name string
+		u    openaiPkg.Usage
+	}{
+		{"STT 表に無いモデル", openaiPkg.Usage{Provider: "openai", Model: "stt-recorded-override-unknown", AudioSeconds: 30}},
+		{"TTS tts-1 以外", openaiPkg.Usage{Provider: "openai", Model: "tts-1-hd", Characters: 100}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := apiCallLogFromUsage(tc.u, time.Now()).PriceBasis; got != PriceBasisListed {
+				t.Errorf("PriceBasis = %q, want listed", got)
 			}
 		})
 	}
@@ -326,7 +356,19 @@ func TestSummaryPriceBasis_PrefersRecorded(t *testing.T) {
 		{"混在: 記録のほうが注意が必要", "gpt-4o-mini", 1.0, PriceBasisInherited, true, PriceBasisInherited},
 		{"混在: 同じなら記録の値", "gpt-4-1106-preview", 1.0, PriceBasisEstimated, true, PriceBasisEstimated},
 		{"金額0なら記録があっても付けない", "gpt-4o-mini", 0, PriceBasisUnknown, false, ""},
-		{"音声のモデルは記録があっても付けない", "gpt-4o-mini-tts", 1.0, PriceBasisInherited, true, ""},
+		// 音声のモデルは、記録した根拠をそのまま出す（#2224）。トークン単価表（gpt-4o-mini-tts なら inherited）では判定しない
+		{"音声のモデルは記録した推定値を出す", "gpt-4o-mini-tts", 1.0, PriceBasisEstimated, false, PriceBasisEstimated},
+		{"音声のモデルは記録した公開価格を出す", "gpt-transcribe", 1.0, PriceBasisListed, false, PriceBasisListed},
+		// 根拠を記録する前の音声の行だけなら、今までどおり空（音声の行は「記録の無い行」に数えない）
+		{"音声のモデルで記録が無ければ空", "gpt-4o-mini-tts", 1.0, "", false, ""},
+		{"音声のモデルでも金額0なら付けない", "gpt-transcribe", 0, PriceBasisEstimated, false, ""},
+		// #2229 のレビュー：同じ音声のモデル名で、トークン課金の記録の無い行があれば、今の単価表と比べる
+		// diarize はトークン単価表に無く、gpt-4o-transcribe の単価に当たる（inherited）
+		{"音声のモデルでも、記録の無いトークンの行があれば注意が必要なほう", "gpt-4o-transcribe-diarize", 1.0, PriceBasisListed, true, PriceBasisInherited},
+		{"音声のモデルで記録が無く、記録の無いトークンの行があれば今の単価表", "gpt-4o-transcribe-diarize", 1.0, "", true, PriceBasisInherited},
+		{"音声のモデルで、記録のほうが注意が必要なら記録の値", "gpt-transcribe", 1.0, PriceBasisUnknown, true, PriceBasisUnknown},
+		// gpt-4o-transcribe はトークン単価表で公開価格（listed）。記録が無く、記録の無いトークンの行だけなら listed
+		{"音声のモデルで記録が無く、トークン単価表では公開価格", "gpt-4o-transcribe", 1.0, "", true, PriceBasisListed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

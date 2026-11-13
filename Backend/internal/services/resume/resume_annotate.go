@@ -1,6 +1,7 @@
 package resume
 
 import (
+	"Backend/domain/repository"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,14 +15,12 @@ import (
 
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
-
-	"gorm.io/gorm"
 )
 
 func (s *ResumeService) OpenAnnotatedFile(documentID uint, requestingUserID uint) (*AnnotatedFile, error) {
 	doc, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, shared.ErrForbidden
 		}
 		return nil, err

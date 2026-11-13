@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 )
 
 type AdminCompanyController struct {
@@ -293,7 +292,7 @@ func changesPublication(existing, payload *models.Company, provisionalSent bool)
 func (c *AdminCompanyController) requireWeightProfile(companyID uint) error {
 	profile, err := c.repo.GetWeightProfile(companyID, nil)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusBadRequest, "weight profile is required before publish")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load weight profile")
@@ -336,7 +335,7 @@ func (c *AdminCompanyController) Publish(ctx echo.Context) error {
 	}
 	profile, err := c.repo.GetWeightProfile(companyID, nil)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusBadRequest, "weight profile is required before publish")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load weight profile")

@@ -104,9 +104,28 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 	}
 	readme, err := s.fetchREADME(ctx, client, token, fullName)
 	if err != nil {
-		// 名前は利用者の入力なので %q で引用する（改行で偽のログ行を作らせない）
-		log.Printf("[SummarizeRepo] README fetch warning for %q: %v", fullName, err)
-		readme = ""
+		switch {
+		case isGitHubNotFoundError(err):
+			// README の 404 は「README が無い」だけでなく、リポジトリが削除・非公開化された、アクセス権を
+			// 失った、存在しない名前、のときも返る（GitHub の仕様上は単に Not Found）。リポジトリ自体に
+			// アクセスできるときだけ「README なし」で要約する（#2231 のレビュー）。
+			if repoErr := s.checkRepoAccessible(ctx, client, token, fullName); repoErr != nil {
+				log.Printf("[SummarizeRepo] repository not accessible for %q: %v", fullName, repoErr)
+				if isGitHubAuthError(repoErr) {
+					return nil, &GitHubReauthRequiredError{Reason: "GitHubアクセストークンが無効です。GitHubアカウントを再連携してください。"}
+				}
+				return nil, fmt.Errorf("repository not accessible: %w", repoErr)
+			}
+			readme = ""
+		case isGitHubAuthError(err):
+			return nil, &GitHubReauthRequiredError{Reason: "GitHubアクセストークンが無効です。GitHubアカウントを再連携してください。"}
+		default:
+			// 404 以外の失敗（5xx・レート制限など）で README 無しの要約を作ると、薄い要約が
+			// キャッシュに残り、README があるのに無い扱いのままになる。要約を作らずにエラーにする（#2226）。
+			// 名前は利用者の入力なので %q で引用する（改行で偽のログ行を作らせない）
+			log.Printf("[SummarizeRepo] README fetch failed for %q: %v", fullName, err)
+			return nil, fmt.Errorf("failed to fetch README: %w", err)
+		}
 	}
 
 	// AI要約生成
@@ -121,6 +140,14 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 		return nil, fmt.Errorf("save summary: %w", err)
 	}
 	return summary, nil
+}
+
+// checkRepoAccessible は、リポジトリ自体を利用者のトークンで取得できるかを確かめる（#2231 のレビュー）。
+// README の 404 が「README が無い」ことによるものか、リポジトリにアクセスできないことによるものかを分けるため。
+func (s *GitHubService) checkRepoAccessible(ctx context.Context, client *http.Client, token, fullName string) error {
+	// fullName は SummarizeRepo の入口で ValidateRepoFullName を通している。
+	_, err := s.doGet(ctx, client, token, fmt.Sprintf("%s/repos/%s", s.getAPIBase(), fullName))
+	return err
 }
 
 // fetchREADME GitHub API経由でリポジトリのREADMEを取得する

@@ -2,6 +2,9 @@ package models
 
 import "time"
 
+// CurrentUserScoreCalculationVersion は採点プロンプトまたはスコア算出式を変えたときに更新する。
+const CurrentUserScoreCalculationVersion = "v1"
+
 // UserWeightScore ユーザーごとの重みカテゴリ別スコア
 type UserWeightScore struct {
 	ID             uint   `gorm:"primaryKey" json:"id"`
@@ -9,10 +12,11 @@ type UserWeightScore struct {
 	UserID         uint   `gorm:"not null;index:idx_user_category" json:"user_id"`
 	SessionID      string `gorm:"size:100;not null;index" json:"session_id"`
 	// Source はスコアの由来（#1678）。chat / assessment。空なら DB 既定の chat。
-	Source         string    `gorm:"size:20;not null;default:chat" json:"source"`
-	WeightCategory string    `gorm:"size:100;not null;index:idx_user_category" json:"category"`
-	Score          int       `gorm:"default:0" json:"score"`
-	PromptVersion  string    `gorm:"size:64;not null;default:''" json:"prompt_version,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	Source             string    `gorm:"size:20;not null;default:chat" json:"source"`
+	WeightCategory     string    `gorm:"size:100;not null;index:idx_user_category" json:"category"`
+	Score              int       `gorm:"default:0" json:"score"`
+	CalculationVersion string    `gorm:"size:32;not null;default:legacy" json:"calculation_version"`
+	PromptVersion      string    `gorm:"size:64;not null;default:''" json:"prompt_version,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }

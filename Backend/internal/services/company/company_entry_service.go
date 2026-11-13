@@ -346,7 +346,7 @@ func (s *CompanyEntryService) markEmailFailed(submissionID uint, msg string) {
 func (s *CompanyEntryService) ResendEmail(submissionID uint) error {
 	var submission models.CompanyEntrySubmission
 	if err := s.db.First(&submission, submissionID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return ErrCompanyEntrySubmissionNotFound
 		}
 		return err
