@@ -332,7 +332,6 @@ func main() {
 	schoolRepo := repositories.NewSchoolRepository(db)
 	schoolService := school.NewSchoolService(schoolRepo, userRepo)
 	authService := auth.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
-	authService.SetDB(db)
 	authService.SetSchoolRepo(schoolRepo)
 	if jobEnqueuer != nil {
 		authService.SetJobEnqueuer(jobEnqueuer)
@@ -376,7 +375,6 @@ func main() {
 	crawlService.SetInfoFetcher(infoFetcher)
 	crawlService.SetJobFetcher(jobFetcher)
 	auditLogService := admin.NewAuditLogService(auditLogRepo)
-	authService.SetAuditLog(auditLogService)
 	analysisService := analysis.NewAnalysisScoringService(
 		userWeightScoreRepo,
 		chatMessageRepo,
@@ -489,10 +487,11 @@ func main() {
 	var objectDeleter auth.ObjectDeleter
 	if s3UploadService != nil {
 		objectDeleter = s3UploadService
-		authService.SetObjectDeleter(s3UploadService)
 		logger.EnableS3ErrorArchive(s3UploadService)
 	}
 	userDeletionService := auth.NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), objectDeleter, auditLogService)
+	// 本人退会も、管理者による退会・日次のパージ・アクセス遮断と同じインスタンスを使う。
+	authService.SetDeletionService(userDeletionService)
 	adminOrganizationController := admincontrollers.NewAdminOrganizationController(organizationService)
 	adminSchoolController := admincontrollers.NewAdminSchoolController(schoolService)
 	// 掲載申請の審査キュー (#1507)。申請テーブルと承認リスト(school_company_approvals)を束ねる。
@@ -588,6 +587,8 @@ func main() {
 	// 希望条件の保存とプロフィール更新の両方から同じ同期処理を呼ぶ (#1094)
 	scoutIndexSyncer := hr.NewStudentIndexSyncer(userPreferenceRepo, studentSemanticClient)
 	authService.SetScoutIndexSyncer(scoutIndexSyncer)
+	// 退会時のベクトル削除と、日次のリコンサイル(ReconcileScoutIndex)も同じ同期処理を使う（#1094, #1204）。
+	userDeletionService.SetScoutIndexSyncer(scoutIndexSyncer)
 	userPreferenceController := usercontrollers.NewUserPreferenceController(userPreferenceRepo, scoutIndexSyncer, industryRepo)
 	integratedProfileController := usercontrollers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
 	entitlementController := usercontrollers.NewEntitlementController(organizationService)
