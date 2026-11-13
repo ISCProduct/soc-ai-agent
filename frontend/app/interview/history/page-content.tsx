@@ -27,7 +27,7 @@ import { INTERVIEW_HISTORY_CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ListSkeleton } from '@/components/common/ListSkeleton'
 
-const InterviewTrendChart = dynamic(() => import('@/components/InterviewTrendChart'), {
+const InterviewTrendChart = dynamic(() => import('@/components/interview/InterviewTrendChart'), {
   ssr: false,
   loading: () => (
     <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>

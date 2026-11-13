@@ -33,7 +33,7 @@ import GitHubSkills from '@/components/github-skills'
 import { ScoutPreferencesCard } from '@/components/profile/ScoutPreferencesCard'
 import { TrainingConsentCard } from '@/components/profile/TrainingConsentCard'
 import { PageLoading } from '@/components/common/PageLoading'
-import { StudentThemeToggle } from '@/components/StudentThemeToggle'
+import { StudentThemeToggle } from '@/components/layout/StudentThemeToggle'
 
 export default function PageContent() {
   return (

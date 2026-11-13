@@ -294,6 +294,42 @@ func TestHandleGoogleCallback(t *testing.T) {
 			wantErr:   "failed to exchange token",
 		},
 		{
+			// #2225：エラーコードがあれば出すが、error_description（本文）は出さない
+			name:      "トークン交換の失敗では、ステータスとエラーコードだけをエラーに入れる",
+			responses: map[string]fakeResponse{fakeTokenURL: {400, `{"error":"invalid_grant","error_description":"` + bodySecret + `"}`}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   `failed to exchange token: unexpected status 400 ("invalid_grant")`,
+		},
+		{
+			// #2225：error フィールドの無い本文は、oauth2 が本文全体をメッセージに入れるので、それを出さない
+			name:      "トークン交換の失敗で error フィールドが無くても、本文をエラーに入れない",
+			responses: map[string]fakeResponse{fakeTokenURL: {500, `<html>` + bodySecret + `</html>`}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "failed to exchange token: unexpected status 500",
+		},
+		{
+			// #2225：id が無いと、別々のアカウントが同じ空の OAuthID に紐付く
+			name:      "id が無いユーザー情報は拒否し、メールが一致する既存ユーザーにも紐付けない",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, `{"email":"new@example.com","verified_email":true}`}},
+			repo:      &oauthUserRepoStub{byEmail: map[string]*entity.User{"new@example.com": {ID: 5, Email: "new@example.com"}}},
+			wantErr:   "missing user id",
+		},
+		{
+			// #2230 のレビュー：照合・保存にも空白を除いた id を使う
+			name:      "id の前後の空白は、照合にも保存にも除いた値を使う",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, `{"id":"  g-1  ","email":"new@example.com","verified_email":true,"name":"新規"}`}},
+			repo:      &oauthUserRepoStub{},
+			want: wantLogin{userID: 100, email: "new@example.com", created: &entity.User{
+				Email: "new@example.com", Name: "新規", OAuthProvider: "google", OAuthID: "g-1",
+			}},
+		},
+		{
+			name:      "id が空白だけのユーザー情報も拒否する",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, `{"id":"  ","email":"new@example.com","verified_email":true}`}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "missing user id",
+		},
+		{
 			name:      "ユーザー情報が JSON でない",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, `<html>not json</html>`}},
 			repo:      &oauthUserRepoStub{},
@@ -581,6 +617,32 @@ func TestHandleGitHubCallback(t *testing.T) {
 			repo:      &oauthUserRepoStub{},
 			wantErr:   "failed to exchange token",
 		},
+		{
+			name:      "トークン交換の失敗で error フィールドが無くても、本文をエラーに入れない",
+			responses: map[string]fakeResponse{fakeTokenURL: {502, bodySecret}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "failed to exchange token: unexpected status 502",
+		},
+		{
+			// #2225：id が無いと "0" に紐付く。メール一覧を取りに行く前に弾く
+			name:      "id が無いユーザー情報は拒否し、メールが一致する既存ユーザーにも紐付けない",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {200, `{"login":"octo","email":"octo@example.com"}`}},
+			repo:      &oauthUserRepoStub{byEmail: map[string]*entity.User{"octo@example.com": {ID: 5, Email: "octo@example.com"}}},
+			wantErr:   "missing user id",
+		},
+		{
+			// #2230 のレビュー：GitHub 側でも error_description（本文）はエラーに入れない
+			name:      "トークン交換の失敗では、エラーコードは出すが error_description は出さない",
+			responses: map[string]fakeResponse{fakeTokenURL: {401, `{"error":"bad_verification_code","error_description":"` + bodySecret + `"}`}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   `failed to exchange token: unexpected status 401 ("bad_verification_code")`,
+		},
+		{
+			name:      "id が 0 のユーザー情報も拒否する",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {200, `{"id":0,"login":"octo","email":"octo@example.com"}`}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "missing user id",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -619,6 +681,70 @@ func TestAuthURLs_CarryState(t *testing.T) {
 	} {
 		if !strings.Contains(u, "state=state-123") {
 			t.Errorf("%s: 認可 URL に state が無い: %s", name, u)
+		}
+	}
+}
+
+// exchangeError の直接のテスト（#2230 のレビュー）。HTTP のフェイクでは作りにくい場合を固定する。
+func TestExchangeError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "Response が nil でも panic せず、ステータス 0 として扱う",
+			err:  &oauth2.RetrieveError{ErrorCode: "invalid_grant"},
+			want: `failed to exchange token: unexpected status 0 ("invalid_grant")`,
+		},
+		{
+			name: "Response もエラーコードも無い",
+			err:  &oauth2.RetrieveError{},
+			want: "failed to exchange token: unexpected status 0",
+		},
+		{
+			name: "制御文字を含むエラーコードは引用して1行に保つ",
+			err:  &oauth2.RetrieveError{ErrorCode: "x\nINFO forged line"},
+			want: `failed to exchange token: unexpected status 0 ("x\nINFO forged line")`,
+		},
+		{
+			name: "長すぎるエラーコードは 64 文字で切る",
+			err:  &oauth2.RetrieveError{ErrorCode: strings.Repeat("a", 100)},
+			want: `failed to exchange token: unexpected status 0 ("` + strings.Repeat("a", 64) + `")`,
+		},
+		{
+			name: "RetrieveError 以外はそのまま包む",
+			err:  errors.New("dial tcp: timeout"),
+			want: "failed to exchange token: dial tcp: timeout",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := exchangeError(tc.err).Error()
+			if got != tc.want {
+				t.Errorf("exchangeError() = %q, want %q", got, tc.want)
+			}
+			if strings.ContainsAny(got, "\n\r") {
+				t.Errorf("エラーに改行が入っている: %q", got)
+			}
+		})
+	}
+}
+
+func TestTruncateRunes(t *testing.T) {
+	cases := []struct {
+		in   string
+		n    int
+		want string
+	}{
+		{"", 3, ""},
+		{"abc", 3, "abc"},
+		{"abcd", 3, "abc"},
+		{"日本語です", 3, "日本語"},
+	}
+	for _, tc := range cases {
+		if got := truncateRunes(tc.in, tc.n); got != tc.want {
+			t.Errorf("truncateRunes(%q, %d) = %q, want %q", tc.in, tc.n, got, tc.want)
 		}
 	}
 }

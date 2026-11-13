@@ -7,8 +7,6 @@ import (
 	"Backend/internal/services/shared"
 	"context"
 	"log"
-
-	"gorm.io/gorm"
 )
 
 // bcryptCost パスワードハッシュのコストパラメータ（#328）
@@ -19,9 +17,6 @@ type AuthService struct {
 	userRepo         repository.UserRepository
 	pendingRepo      repository.PendingRegistrationRepository
 	emailService     *email.EmailService
-	db               *gorm.DB
-	object           ObjectDeleter
-	audit            auditRecorder
 	deletion         *UserDeletionService
 	refreshTokens    *refreshtoken.RefreshTokenService
 	jobs             shared.JobEnqueuer
@@ -57,37 +52,16 @@ func (s *AuthService) SetCompanyOwnershipClaimer(c CompanyOwnershipClaimer) {
 
 // SetScoutIndexSyncer はスカウト検索インデックスの同期処理を注入する（#1094）。
 // 未設定の場合は同期を行わない（RAG未設定環境でもプロフィール更新は動作する）。
+// 退会時の同期は、退会サービス側（UserDeletionService.SetScoutIndexSyncer）に設定する。
 func (s *AuthService) SetScoutIndexSyncer(syncer ScoutIndexSyncer) {
 	s.scoutIndexSyncer = syncer
-	// 退会時のベクトル削除にも同じ同期処理を使う（#1094）
-	s.rebuildDeletionService()
 }
 
-// SetDB はアカウント削除に使用する DB を設定する
-func (s *AuthService) SetDB(db *gorm.DB) {
-	s.db = db
-	s.rebuildDeletionService()
-}
-
-// SetObjectDeleter は退会時の S3 オブジェクト削除先を設定する
-func (s *AuthService) SetObjectDeleter(d ObjectDeleter) {
-	s.object = d
-	s.rebuildDeletionService()
-}
-
-// SetAuditLog は退会監査ログの出力先を設定する
-func (s *AuthService) SetAuditLog(audit auditRecorder) {
-	s.audit = audit
-	s.rebuildDeletionService()
-}
-
-func (s *AuthService) rebuildDeletionService() {
-	if s.db == nil {
-		s.deletion = nil
-		return
-	}
-	s.deletion = NewUserDeletionService(s.db, s.object, s.audit)
-	s.deletion.SetScoutIndexSyncer(s.scoutIndexSyncer)
+// SetDeletionService は本人退会（DeleteAccount）に使う退会サービスを設定する。
+// 管理者による退会・日次のパージ・アクセス遮断と同じインスタンスを渡すこと。
+// 別々に作ると、片方にだけ設定した依存（スカウト検索の同期など）が、もう片方に届かない。
+func (s *AuthService) SetDeletionService(d *UserDeletionService) {
+	s.deletion = d
 }
 
 // SetRefreshTokenService はリフレッシュトークン管理サービスを注入する (#616)

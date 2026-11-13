@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen } from '@testing-library/react'
-import FormatFindingsSection, { type FormatFinding } from '@/components/FormatFindingsSection'
+import FormatFindingsSection, { type FormatFinding } from '@/components/feedback/FormatFindingsSection'
 
 const f = (over: Partial<FormatFinding>): FormatFinding => ({
   rule: 'mixed_style',

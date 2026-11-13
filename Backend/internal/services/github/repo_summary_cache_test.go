@@ -219,6 +219,38 @@ func TestFetchREADME_TruncatesByRunes(t *testing.T) {
 	}
 }
 
+// README の不正な UTF-8 は、プロンプトに入れる前に取り除く（#2228 のレビュー）。正しい UTF-8 はそのまま残す。
+func TestFetchREADME_RemovesInvalidUTF8(t *testing.T) {
+	tests := []struct {
+		name   string
+		readme []byte
+		want   string
+	}{
+		{"正しい UTF-8 はそのまま", []byte("# 日本語 README"), "# 日本語 README"},
+		{"不正なバイトを取り除く", []byte("a\xffb\xfe\xfdc"), "abc"},
+		{"途中で切れた多バイト文字を取り除く", append([]byte("あ"), 0xe3, 0x81), "あ"},
+		{"すべて不正なら空", []byte{0xff, 0xfe}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				content := base64.StdEncoding.EncodeToString(tc.readme)
+				_ = json.NewEncoder(w).Encode(map[string]string{"content": content, "encoding": "base64"})
+			}))
+			defer server.Close()
+
+			s := &GitHubService{apiBaseURL: server.URL}
+			got, err := s.fetchREADME(context.Background(), server.Client(), "token", "owner/repo")
+			if err != nil {
+				t.Fatalf("fetchREADME error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("README = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestValidateRepoSummaryOutput(t *testing.T) {
 	atLimit := strings.Repeat("あ", maxRepoSummaryFieldRunes)
 	overLimit := strings.Repeat("あ", maxRepoSummaryFieldRunes+1)
@@ -288,8 +320,9 @@ func TestGenerateRepoSummary_ValidatesOutput(t *testing.T) {
 			s := &GitHubService{openaiClient: openai.NewWithBaseURL(server.URL, "gpt-4o-mini")}
 			got, err := s.generateRepoSummary(context.Background(), "owner/repo", "README", "")
 			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("エラーにならなかった: %+v", got)
+				// JSON として読めない出力も含め、どれも「モデルの出力が不正」として返す（コントローラで 502 にするため）
+				if !errors.Is(err, ErrInvalidRepoSummaryOutput) {
+					t.Fatalf("got=%+v err=%v, want ErrInvalidRepoSummaryOutput", got, err)
 				}
 				return
 			}
