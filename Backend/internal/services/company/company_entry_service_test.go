@@ -1,6 +1,7 @@
 package company
 
 import (
+	"Backend/internal/repositories"
 	"strings"
 	"testing"
 
@@ -34,7 +35,7 @@ func newCompanyEntryTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 // 更新してはいけない(=UPDATEが発行されないこと)。
 func TestClaimOwnershipOnRegister_AlreadyOwnedByAnotherUser(t *testing.T) {
 	db, mock := newCompanyEntryTestDB(t)
-	svc := &CompanyEntryService{db: db}
+	svc := &CompanyEntryService{entryRepo: repositories.NewCompanyEntryRepository(db)}
 
 	companyID := uint(10)
 	submissionID := uint(20)
@@ -56,7 +57,7 @@ func TestClaimOwnershipOnRegister_AlreadyOwnedByAnotherUser(t *testing.T) {
 // #986: 会社が未所有(新規)の場合は正常にクレームされ、提出物もclaimed状態に更新される。
 func TestClaimOwnershipOnRegister_NewOwnership(t *testing.T) {
 	db, mock := newCompanyEntryTestDB(t)
-	svc := &CompanyEntryService{db: db}
+	svc := &CompanyEntryService{entryRepo: repositories.NewCompanyEntryRepository(db)}
 
 	companyID := uint(11)
 	submissionID := uint(21)
