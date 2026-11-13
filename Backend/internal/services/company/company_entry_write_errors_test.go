@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/services/email"
@@ -55,7 +54,7 @@ type entryPendingRepoStub struct {
 }
 
 func (s entryPendingRepoStub) DeleteByEmail(string) error               { return s.deleteErr }
-func (s entryPendingRepoStub) Create(*entity.PendingRegistration) error { return s.createErr }
+func (s entryPendingRepoStub) Create(*models.PendingRegistration) error { return s.createErr }
 
 func newInviteTestService(t *testing.T, user *models.User, pending entryPendingRepoStub) (*CompanyEntryService, sqlmock.Sqlmock) {
 	t.Helper()

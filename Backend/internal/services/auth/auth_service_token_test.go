@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"os"
@@ -51,8 +50,8 @@ func (r *userRepoAuthStub) GetUserByOAuth(provider, oauthID string) (*models.Use
 
 type pendingRepoAuthStub struct{}
 
-func (r *pendingRepoAuthStub) Create(p *entity.PendingRegistration) error { return nil }
-func (r *pendingRepoAuthStub) FindByToken(token string) (*entity.PendingRegistration, error) {
+func (r *pendingRepoAuthStub) Create(p *models.PendingRegistration) error { return nil }
+func (r *pendingRepoAuthStub) FindByToken(token string) (*models.PendingRegistration, error) {
 	return nil, nil
 }
 func (r *pendingRepoAuthStub) DeleteByEmail(email string) error { return nil }

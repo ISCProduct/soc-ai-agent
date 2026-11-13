@@ -72,10 +72,10 @@ func (m *MatchingServiceMock) CalculateMatching(ctx context.Context, userID uint
 	return args.Error(0)
 }
 
-func (m *MatchingServiceMock) GetTopMatches(ctx context.Context, userID uint, sessionID string, limit int) ([]*entity.UserCompanyMatch, error) {
+func (m *MatchingServiceMock) GetTopMatches(ctx context.Context, userID uint, sessionID string, limit int) ([]*models.UserCompanyMatch, error) {
 	args := m.Called(ctx, userID, sessionID, limit)
 	if v := args.Get(0); v != nil {
-		return v.([]*entity.UserCompanyMatch), args.Error(1)
+		return v.([]*models.UserCompanyMatch), args.Error(1)
 	}
 	return nil, args.Error(1)
 }

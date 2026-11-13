@@ -30,7 +30,7 @@ func (s *AnalysisScoringService) buildRecommendations(userID uint, sessionID str
 	}
 
 	for _, match := range topMatches {
-		if match.Company == nil || match.Company.ID == 0 {
+		if match.Company.ID == 0 {
 			continue
 		}
 		recommendations.TopCompanies = append(recommendations.TopCompanies, CompanyRecommendation{

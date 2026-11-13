@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/safego"
@@ -42,7 +41,7 @@ func (s *AuthService) RequestRegistration(email string) error {
 	}
 	token := base64.URLEncoding.EncodeToString(b)
 
-	pending := &entity.PendingRegistration{
+	pending := &models.PendingRegistration{
 		Token:     token,
 		Email:     email,
 		ExpiresAt: time.Now().Add(config.PendingRegistrationTokenTTL),

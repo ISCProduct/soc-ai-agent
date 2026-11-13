@@ -54,57 +54,10 @@ func typ[T any]() reflect.Type { return reflect.TypeOf((*T)(nil)).Elem() }
 
 var mapperCases = []mapperCase{
 	{
-		name: "PendingRegistration", model: typ[models.PendingRegistration](), entity: typ[entity.PendingRegistration](),
-		toEntity:   func(m any) any { return mapper.PendingRegistrationToEntity(m.(*models.PendingRegistration)) },
-		fromEntity: func(e any) any { return mapper.PendingRegistrationFromEntity(e.(*entity.PendingRegistration)) },
-	},
-	{
-		// ToEntity のみ。企業の書き込みは models.Company を直接使う。
-		name: "Company", model: typ[models.Company](), entity: typ[entity.Company](),
-		toEntity: func(m any) any { return mapper.CompanyToEntity(m.(*models.Company)) },
-		modelOnly: only(modelOnlyReason,
-			"CicdTools", "DeletedAt", "GBizLastSyncedAt", "GBizSyncMessage", "GBizSyncStatus",
-			"InfoFetchedAt", "InfoPromptVersion", "InfraStack", "IsGuestEntry", "JobsFetchedAt",
-			"LastFetchConfidence", "LastModelUsed", "NameReading", "RelationsFetchedAt", "TechFetchedAt"),
-	},
-	{
-		name: "UserApplicationStatus", model: typ[models.UserApplicationStatus](), entity: typ[entity.UserApplicationStatus](),
-		toEntity:      func(m any) any { return mapper.UserApplicationStatusToEntity(m.(*models.UserApplicationStatus)) },
-		fromEntity:    func(e any) any { return mapper.UserApplicationStatusFromEntity(e.(*entity.UserApplicationStatus)) },
-		modelOnly:     only(modelOnlyReason, "ActiveDedupKey", "User"),
-		typeDiffers:   only("関連(Preload)。entity は *Company、model は値。ToEntity が CompanyToEntity で変換する", "Company"),
-		notFromEntity: only("関連は書き戻さない。保存には外部キー(CompanyID)を使う", "Company"),
-	},
-	{
-		name: "UserCompanyMatch", model: typ[models.UserCompanyMatch](), entity: typ[entity.UserCompanyMatch](),
-		toEntity:   func(m any) any { return mapper.UserCompanyMatchToEntity(m.(*models.UserCompanyMatch)) },
-		fromEntity: func(e any) any { return mapper.UserCompanyMatchFromEntity(e.(*entity.UserCompanyMatch)) },
-		modelOnly: map[string]string{
-			"User":          modelOnlyReason,
-			"JobPosition":   modelOnlyReason,
-			"JobPositionID": modelOnlyReason + "。注意: upsert(user_company_match_repository.go の upsertAssignments)は job_position_id を更新対象にするが、UserCompanyMatchFromEntity は書き戻さない",
-		},
-		typeDiffers:   only("関連(Preload)。entity は *Company、model は値。ToEntity が CompanyToEntity で変換する", "Company"),
-		notFromEntity: only("関連は書き戻さない。保存には外部キー(CompanyID)を使う", "Company"),
-	},
-	{
 		// ToEntity のみ。重みの書き込みは models.UserWeightScore を直接使う。
 		name: "UserWeightScore", model: typ[models.UserWeightScore](), entity: typ[entity.UserWeightScore](),
 		toEntity:  func(m any) any { return mapper.UserWeightScoreToEntity(m.(*models.UserWeightScore)) },
 		modelOnly: only(modelOnlyReason, "OrganizationID", "Source"),
-	},
-	{
-		// ToEntity のみ。フェーズは参照だけ。
-		name: "AnalysisPhase", model: typ[models.AnalysisPhase](), entity: typ[entity.AnalysisPhase](),
-		toEntity:  func(m any) any { return mapper.AnalysisPhaseToEntity(m.(*models.AnalysisPhase)) },
-		modelOnly: only(modelOnlyReason, "CreatedAt", "UpdatedAt"),
-	},
-	{
-		name: "UserAnalysisProgress", model: typ[models.UserAnalysisProgress](), entity: typ[entity.UserAnalysisProgress](),
-		toEntity:      func(m any) any { return mapper.UserAnalysisProgressToEntity(m.(*models.UserAnalysisProgress)) },
-		fromEntity:    func(e any) any { return mapper.UserAnalysisProgressFromEntity(e.(*entity.UserAnalysisProgress)) },
-		typeDiffers:   only("関連(Preload)。entity と model で型が別。ToEntity が AnalysisPhaseToEntity で変換する", "Phase"),
-		notFromEntity: only("関連は書き戻さない。保存には外部キー(PhaseID)を使う", "Phase"),
 	},
 }
 
