@@ -8,7 +8,7 @@ API は `GET /api/admin/dashboard/funnel?school_id=&from=YYYY-MM-DD&to=YYYY-MM-D
 | 段階 | 到達とみなす条件 | 期間を見る日時 |
 |---|---|---|
 | 診断 | AI 診断チャットで回答した（`chat_messages` の `role=user`）、または学校の診断を提出した（`assessment_sessions.submitted_at`） | 発言日時・提出日時 |
-| 面接練習 | AI 面接を最後まで終えた（`interview_sessions.status=finished`） | 開始日時 |
+| 面接練習 | AI 面接を最後まで終えた（`interview_sessions.status=finished`、削除済みは除く） | 開始日時（無ければ作成日時） |
 | ES 添削 | ES の添削を受けた（`es_reviews`） | 添削日時 |
 | 応募 | 選考ステータスが応募済み以降（`not_applied` 以外） | 応募日（無ければ登録日時） |
 | 内定 | 選考ステータスが内定・内定承諾（`offered` / `accepted`） | ステータスの最終更新日（無ければ更新日時） |
@@ -29,3 +29,4 @@ API は `GET /api/admin/dashboard/funnel?school_id=&from=YYYY-MM-DD&to=YYYY-MM-D
 
 - **クラス別は未対応**: ユーザーにクラスの項目が無いため、学校別までにしている。クラス別にするには、クラスの項目の追加（migration）が要る
 - **内定後の辞退**: 選考ステータスは履歴を持たないので、内定のあと辞退した学生（`withdrawn`）は内定に数えられない
+- **内定の到達日**: 同じ理由で、内定承諾（`accepted`）は内定の連絡を受けた日ではなく、承諾の更新日で期間に入る（3月に内定・4月に承諾なら4月に数える）。内定に届いた日で数えるには、選考ステータスの履歴（または内定日の列）の追加が要る

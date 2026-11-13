@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Box, Button, Paper, Skeleton, Stack, TextField, Typography } from '@mui/material'
 import { authService } from '@/lib/auth'
 
@@ -54,9 +54,13 @@ export function ConversionFunnelCard({ adminEmail, schoolId }: Props) {
   const [data, setData] = useState<FunnelResponse['funnel'] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  // 学校や期間を続けて変えたとき、古い条件の応答で表示を上書きしないよう、最新のリクエストだけ反映する
+  const requestSeq = useRef(0)
 
   const load = useCallback(async () => {
     if (!adminEmail) return
+    const seq = ++requestSeq.current
+    const isLatest = () => seq === requestSeq.current
     if (from && to && from > to) {
       setError('開始日は終了日以前の日付にしてください')
       return
@@ -73,6 +77,7 @@ export function ConversionFunnelCard({ adminEmail, schoolId }: Props) {
         headers: { 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' },
       })
       const body = await res.json().catch(() => ({}))
+      if (!isLatest()) return
       if (!res.ok) {
         // 担当校を持つ先生は、学校の選択が決まるまで school_id 無しの 400 が返る。エラーとして見せない
         if (res.status === 400 && schoolId === undefined && /school_id/.test(String(body?.message ?? ''))) {
@@ -81,12 +86,15 @@ export function ConversionFunnelCard({ adminEmail, schoolId }: Props) {
         }
         throw new Error(res.status === 403 ? 'この学校のデータを見る権限がありません' : 'ファネルを読み込めませんでした')
       }
-      setData((body as FunnelResponse).funnel)
+      const funnel = (body as Partial<FunnelResponse>).funnel
+      if (!funnel) throw new Error('ファネルを読み込めませんでした')
+      setData(funnel)
     } catch (e: unknown) {
+      if (!isLatest()) return
       setData(null)
       setError(e instanceof Error ? e.message : 'ファネルを読み込めませんでした')
     } finally {
-      setLoading(false)
+      if (isLatest()) setLoading(false)
     }
   }, [adminEmail, schoolId, from, to])
 
@@ -187,6 +195,7 @@ export function ConversionFunnelCard({ adminEmail, schoolId }: Props) {
           <Typography variant="caption" color="text.secondary" display="block" mt={2}>
             「前の段階から継続」は、前の段階に到達した学生のうち、この段階にも到達した割合です。
             内定のあと辞退した学生は、選考の記録が辞退に変わるため内定に数えられません。
+            内定承諾は、承諾した日で期間に入ります。
           </Typography>
         </Box>
       )}

@@ -59,12 +59,13 @@ func withPeriod(q *gorm.DB, column string, p FunnelPeriod) *gorm.DB {
 //
 // 段階の定義（いつ到達したとみなすか）:
 //   - 診断: AI 診断チャットで回答した（chat_messages の role=user の発言）、または学校の診断を提出した（assessment_sessions.submitted_at）
-//   - 面接: AI 面接を最後まで終えた（interview_sessions.status=finished、開始日時で期間を見る）
+//   - 面接: AI 面接を最後まで終えた（interview_sessions.status=finished、削除済みは除く）。開始日時（無ければ作成日時）で期間を見る
 //   - ES: ES の添削を受けた（es_reviews）
 //   - 応募: 選考ステータスが応募済み以降（not_applied 以外）。応募日（無ければ登録日時）で期間を見る
 //   - 内定: 選考ステータスが内定・内定承諾。ステータスの最終更新日（無ければ更新日時）で期間を見る
 //
 // 選考ステータスは履歴を持たないので、内定のあと辞退した学生（withdrawn）は内定に数えられない。
+// また内定承諾（accepted）は、内定の連絡を受けた日ではなく承諾の更新日で期間に入る（内定に届いた日を残していないため）。
 func (r *ConversionFunnelRepository) StageUserIDs(schoolID *uint, p FunnelPeriod) (map[string][]uint, error) {
 	students := r.studentsQuery(schoolID)
 	out := make(map[string][]uint, len(funnel.Stages))
@@ -86,7 +87,11 @@ func (r *ConversionFunnelRepository) StageUserIDs(schoolID *uint, p FunnelPeriod
 	if err := pluck(funnel.StageDiagnosis, assessment); err != nil {
 		return nil, err
 	}
-	interview := withPeriod(r.db.Table("interview_sessions").Where("status = ?", "finished").Where("user_id IN (?)", students), "created_at", p)
+	// interview_sessions は論理削除（deleted_at）を持つ。Table() で引くと GORM の論理削除が効かないので明示する
+	interview := withPeriod(r.db.Table("interview_sessions").
+		Where("status = ?", "finished").
+		Where("deleted_at IS NULL").
+		Where("user_id IN (?)", students), "COALESCE(started_at, created_at)", p)
 	if err := pluck(funnel.StageInterview, interview); err != nil {
 		return nil, err
 	}

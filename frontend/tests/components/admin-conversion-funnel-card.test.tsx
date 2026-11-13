@@ -76,3 +76,23 @@ test('対象の学生が0人なら、その旨を出す', async () => {
   render(<ConversionFunnelCard adminEmail="t@example.com" schoolId={3} />)
   expect(await screen.findByText('対象の学生がいません。学校の選択を確認してください。')).toBeInTheDocument()
 })
+
+test('学校を続けて切り替えたとき、古い条件の応答で表示を上書きしない', async () => {
+  let resolveOld: (v: unknown) => void = () => {}
+  const fn = jest.fn((url: string) => {
+    if (url.includes('school_id=1')) {
+      // 先に出したリクエストが、後から返ってくる
+      return new Promise((r) => { resolveOld = r })
+    }
+    return Promise.resolve({ ok: true, status: 200, json: async () => ({ funnel: { students: 9, stages: FUNNEL.funnel.stages } }) })
+  })
+  global.fetch = fn as unknown as typeof fetch
+  const { rerender } = render(<ConversionFunnelCard adminEmail="t@example.com" schoolId={1} />)
+  rerender(<ConversionFunnelCard adminEmail="t@example.com" schoolId={2} />)
+  expect(await screen.findByText('対象の学生 9 人')).toBeInTheDocument()
+
+  resolveOld({ ok: true, status: 200, json: async () => FUNNEL })
+  await new Promise((r) => setTimeout(r, 0))
+  expect(screen.getByText('対象の学生 9 人')).toBeInTheDocument()
+  expect(screen.queryByText('対象の学生 4 人')).not.toBeInTheDocument()
+})

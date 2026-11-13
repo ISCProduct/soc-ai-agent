@@ -15,6 +15,10 @@ export async function GET(request: NextRequest) {
       'X-Admin-Token': request.headers.get('x-admin-token') || '',
     },
   })
-  const data = await res.json().catch(() => ({}))
+  // 解析できない応答を 200 の空データとして返すと、画面が結果もエラーも出さなくなる
+  const data: unknown = await res.json().catch(() => undefined)
+  if (data === undefined) {
+    return NextResponse.json({ message: 'invalid response from backend' }, { status: 502 })
+  }
   return NextResponse.json(data, { status: res.status })
 }
