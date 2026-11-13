@@ -38,6 +38,7 @@ describe('studentScoutService', () => {
     const fetchMock = mockFetch({ id: 4, company_id: 8, status: 'viewed', message: '本文' })
 
     await studentScoutService.view(4)
+    await studentScoutService.accept(4)
     await studentScoutService.decline(4)
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -49,12 +50,13 @@ describe('studentScoutService', () => {
     const urls = fetchMock.mock.calls.map((call) => call[0] as string)
     expect(urls).toEqual([
       `${BACKEND_URL}/api/user/scouts/4/view`,
+      `${BACKEND_URL}/api/user/scouts/4/accept`,
       `${BACKEND_URL}/api/user/scouts/4/decline`,
       `${BACKEND_URL}/api/user/scout-blocks`,
     ])
     const methods = fetchMock.mock.calls.map((call) => (call[1] as RequestInit).method)
-    expect(methods).toEqual(['POST', 'POST', 'POST'])
-    const blockBody = JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)
+    expect(methods).toEqual(['POST', 'POST', 'POST', 'POST'])
+    const blockBody = JSON.parse((fetchMock.mock.calls[3][1] as RequestInit).body as string)
     expect(blockBody).toEqual({ company_id: 8 })
     for (const call of fetchMock.mock.calls) {
       expect((call[1] as RequestInit).headers).toEqual(

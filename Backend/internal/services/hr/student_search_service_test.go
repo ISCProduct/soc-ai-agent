@@ -48,6 +48,8 @@ func (s *stubStudentSearcher) Search(companyID uint, f repositories.StudentSearc
 
 func (s *stubStudentSearcher) IsVisible(uint) (bool, error) { return s.visible, s.visibleErr }
 
+func (s *stubStudentSearcher) IdentityRevealed(uint, uint) (bool, error) { return false, nil }
+
 type stubTagStore struct {
 	added    []models.CompanyStudentTag
 	byUser   map[uint][]models.CompanyStudentTag

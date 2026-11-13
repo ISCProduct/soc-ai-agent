@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"fmt"
 	"time"
 
 	"Backend/internal/models"
@@ -48,4 +49,20 @@ func (r *CompanyUserRefreshTokenRepository) RevokeAllByCompanyUser(companyUserID
 // Revoke のローテーション猶予期間（並行リフレッシュ対策）を適用させない。
 func (r *CompanyUserRefreshTokenRepository) Delete(id uint) error {
 	return r.db.Delete(&models.CompanyUserRefreshToken{}, id).Error
+}
+
+// DeleteExpired は expires_at が before より前の企業ユーザーのリフレッシュトークンを、期限の古い順に
+// 最大 limit 件だけ物理削除し、削除した件数を返す（定期クリーンアップ用、#2184）。
+// UserRefreshTokenRepository.DeleteExpired と同じ形。expires_at には索引
+// （idx_company_user_refresh_tokens_expires、migrations/000017）があるので、ロックは消す範囲の行に限られる。
+func (r *CompanyUserRefreshTokenRepository) DeleteExpired(before time.Time, limit int) (int64, error) {
+	// GORM は Limit(-1) を「上限なし」と解釈するので、0 以下はここで弾く。
+	if limit <= 0 {
+		return 0, fmt.Errorf("limit は 1 以上を指定してください: %d", limit)
+	}
+	res := r.db.Where("expires_at < ?", before).
+		Order("expires_at").
+		Limit(limit).
+		Delete(&models.CompanyUserRefreshToken{})
+	return res.RowsAffected, res.Error
 }

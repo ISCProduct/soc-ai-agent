@@ -9,11 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
 
 type stubUserRepo struct {
@@ -47,37 +44,43 @@ func (stubInterviewReports) FindBySessionIDs([]uint) ([]models.InterviewReport, 
 	return nil, nil
 }
 
-func newMockDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
-	t.Helper()
-	sqlDB, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}), &gorm.Config{})
-	require.NoError(t, err)
-	return db, mock
+// stubAccess は shared.CompanyAccessReader の偽物。想定した (user, company) で
+// 問い合わせられたことも確かめる(元の sqlmock の WithArgs と同じ役割)。
+type stubAccess struct {
+	t           *testing.T
+	wantUser    uint
+	wantCompany uint
+	owns        bool
+	err         error
+}
+
+func newStubAccess(t *testing.T, user, company uint, owns bool, err error) *stubAccess {
+	return &stubAccess{t: t, wantUser: user, wantCompany: company, owns: owns, err: err}
+}
+
+func (a *stubAccess) IsAdmin(uint) (bool, error) { return false, nil }
+func (a *stubAccess) OwnsCompany(user, company uint) (bool, error) {
+	if a.t != nil && (user != a.wantUser || company != a.wantCompany) {
+		a.t.Errorf("OwnsCompany(%d, %d), want (%d, %d)", user, company, a.wantUser, a.wantCompany)
+	}
+	return a.owns, a.err
 }
 
 func TestStudentAnalysisService_GetAnalysis_ForbiddenWithoutOwnership(t *testing.T) {
-	db, mock := newMockDB(t)
-	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `company_ownerships`").
-		WithArgs(uint(2), uint(99)).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	access := newStubAccess(t, 2, 99, false, nil)
 
 	svc := NewStudentAnalysisService(
-		db, &stubUserRepo{}, &stubCrossFeature{}, nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
+		access, &stubUserRepo{}, &stubCrossFeature{}, nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
 	)
 	_, err := svc.GetAnalysis(2, 99, 10)
 	assert.ErrorIs(t, err, shared.ErrForbidden)
 }
 
 func TestStudentAnalysisService_GetAnalysis_NotVisibleWithoutConsent(t *testing.T) {
-	db, mock := newMockDB(t)
-	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `company_ownerships`").
-		WithArgs(uint(2), uint(10)).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	access := newStubAccess(t, 2, 10, true, nil)
 
 	svc := NewStudentAnalysisService(
-		db,
+		access,
 		&stubUserRepo{user: &entity.User{ID: 5, AllowScoutVisibility: false}},
 		&stubCrossFeature{},
 		nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
@@ -86,14 +89,52 @@ func TestStudentAnalysisService_GetAnalysis_NotVisibleWithoutConsent(t *testing.
 	assert.ErrorIs(t, err, ErrStudentNotVisible)
 }
 
-func TestStudentAnalysisService_GetAnalysis_Success(t *testing.T) {
-	db, mock := newMockDB(t)
-	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `company_ownerships`").
-		WithArgs(uint(2), uint(10)).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+type stubIdentity struct {
+	revealed bool
+	err      error
+}
+
+func (s stubIdentity) IdentityRevealed(uint, uint) (bool, error) {
+	return s.revealed, s.err
+}
+
+func TestStudentAnalysisService_GetAnalysis_承諾前は氏名を返さない(t *testing.T) {
+	access := newStubAccess(t, 2, 10, true, nil)
 
 	svc := NewStudentAnalysisService(
-		db,
+		access,
+		&stubUserRepo{user: &entity.User{ID: 5, Name: "山田太郎", AllowScoutVisibility: true, Role: "student"}},
+		&stubCrossFeature{profile: &flywheel.UserIntegratedProfile{UserID: 5}},
+		nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
+	)
+	svc.SetIdentityRevealer(stubIdentity{revealed: false})
+
+	resp, err := svc.GetAnalysis(2, 10, 5)
+	require.NoError(t, err)
+	assert.Empty(t, resp.Name)
+}
+
+func TestStudentAnalysisService_GetAnalysis_承諾後は氏名を返す(t *testing.T) {
+	access := newStubAccess(t, 2, 10, true, nil)
+
+	svc := NewStudentAnalysisService(
+		access,
+		&stubUserRepo{user: &entity.User{ID: 5, Name: "山田太郎", AllowScoutVisibility: true, Role: "student"}},
+		&stubCrossFeature{profile: &flywheel.UserIntegratedProfile{UserID: 5}},
+		nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
+	)
+	svc.SetIdentityRevealer(stubIdentity{revealed: true})
+
+	resp, err := svc.GetAnalysis(2, 10, 5)
+	require.NoError(t, err)
+	assert.Equal(t, "山田太郎", resp.Name)
+}
+
+func TestStudentAnalysisService_GetAnalysis_Success(t *testing.T) {
+	access := newStubAccess(t, 2, 10, true, nil)
+
+	svc := NewStudentAnalysisService(
+		access,
 		&stubUserRepo{user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "student"}},
 		&stubCrossFeature{profile: &flywheel.UserIntegratedProfile{UserID: 5}},
 		nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
@@ -106,13 +147,10 @@ func TestStudentAnalysisService_GetAnalysis_Success(t *testing.T) {
 }
 
 func TestStudentAnalysisService_GetAnalysis_NotFoundUser(t *testing.T) {
-	db, mock := newMockDB(t)
-	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `company_ownerships`").
-		WithArgs(uint(2), uint(10)).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	access := newStubAccess(t, 2, 10, true, nil)
 
 	svc := NewStudentAnalysisService(
-		db,
+		access,
 		&stubUserRepo{user: nil},
 		&stubCrossFeature{},
 		nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
@@ -122,13 +160,10 @@ func TestStudentAnalysisService_GetAnalysis_NotFoundUser(t *testing.T) {
 }
 
 func TestStudentAnalysisService_GetAnalysis_DBError(t *testing.T) {
-	db, mock := newMockDB(t)
-	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `company_ownerships`").
-		WithArgs(uint(2), uint(10)).
-		WillReturnError(errors.New("db down"))
+	access := newStubAccess(t, 2, 10, false, errors.New("db down"))
 
 	svc := NewStudentAnalysisService(
-		db, &stubUserRepo{}, &stubCrossFeature{}, nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
+		access, &stubUserRepo{}, &stubCrossFeature{}, nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
 	)
 	_, err := svc.GetAnalysis(2, 10, 5)
 	assert.Error(t, err)
@@ -204,14 +239,14 @@ func TestStudentAnalysisService_GetAnalysisForVisibleStudent_AppliesFullGuard(t 
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db, _ := newMockDB(t)
 			svc := NewStudentAnalysisService(
-				db,
+				&stubAccess{},
 				&stubUserRepo{user: tt.user},
 				&stubCrossFeature{profile: &flywheel.UserIntegratedProfile{UserID: 5}},
 				nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
 			)
-			resp, err := svc.GetAnalysisForVisibleStudent(5)
+			svc.SetIdentityRevealer(stubIdentity{revealed: true})
+			resp, err := svc.GetAnalysisForVisibleStudent(10, 5)
 			if tt.wantErr {
 				assert.ErrorIs(t, err, ErrStudentNotVisible)
 				assert.Nil(t, resp)
@@ -219,7 +254,7 @@ func TestStudentAnalysisService_GetAnalysisForVisibleStudent_AppliesFullGuard(t 
 			}
 			require.NoError(t, err)
 			assert.Equal(t, uint(5), resp.UserID)
-			assert.Equal(t, "山田太郎", resp.Name, "企業の学生詳細で氏名を出せるようにする")
+			assert.Equal(t, "山田太郎", resp.Name, "承諾済みなら企業の学生詳細で氏名を出す")
 		})
 	}
 }
