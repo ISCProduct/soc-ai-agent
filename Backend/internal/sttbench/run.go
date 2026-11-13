@@ -2,6 +2,7 @@ package sttbench
 
 import (
 	"Backend/internal/openai"
+	"Backend/internal/services/costs"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -192,16 +193,6 @@ type Report struct {
 	Hints string `json:"hints,omitempty"`
 }
 
-// 公表単価（2026-09-09 時点）。$/分。
-// コード内の定数は過去に実価格と10倍ずれていたことがあるため、
-// 変更時は必ず公表価格を確認すること。
-var costPerMinUSD = map[string]float64{
-	"gpt-transcribe":         0.0045,
-	"gpt-4o-transcribe":      0.006,
-	"gpt-4o-mini-transcribe": 0.003,
-	"whisper-1":              0.006,
-}
-
 // minCharsPerSec は認識失敗とみなす下限。
 // 日本語の自然な発話はおおむね 4〜7文字/秒。
 // 1.0 は「明らかに何も取れていない」水準に絞っている。
@@ -237,7 +228,10 @@ func RunModel(model string, cases []Case, audios []Audio, hints string) *ModelSu
 	s := &ModelSummary{Model: model, Provider: provider}
 	if provider == "local" {
 		s.CostBasis = "local_api_only_excludes_compute"
-	} else if price, ok := costPerMinUSD[model]; ok {
+	} else if price, ok := costs.PublishedSTTCostPerMinuteUSD(model); ok {
+		// 公表単価は本番の記録と同じ表（services/costs の sttPricingPerMinute）を引く。以前はここに
+		// 同じ表を写しており、片方だけ古くなるおそれがあった（#2224。コード内の定数は過去に実価格と
+		// 10倍ずれていたことがある）。STT_COST_PER_MINUTE_USD の上書きは見ない（公表価格での見積もりのため）。
 		s.EstCostPerMinUSD = price
 		s.CostBasis = "openai_published_price"
 	} else {
