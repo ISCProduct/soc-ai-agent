@@ -434,6 +434,11 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 	return reason, nil
 }
 
+// ReasonUsesAI はマッチング理由を AI で生成する設定かを返す。費用の見積もりに使う。
+func ReasonUsesAI() bool {
+	return matchingReasonUseAI()
+}
+
 // MatchingReasonTemperature は AI 理由の生成の温度（GenerateMatchReason と同じ）。
 const MatchingReasonTemperature = 0.4
 
