@@ -15,7 +15,7 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
                                   │ HTTP / WebSocket / WebRTC
                 ┌─────────────────▼──────────────────┐
                 │        Go Backend (Echo / 8080)      │
-                │  DDD: entity → repo → service → ctl │
+                │  DDD: model → repo → service → ctl  │
                 └──┬─────────────┬──────────┬─────────┘
                    │             │          │
         ┌──────────▼──┐ ┌───▼───┐ ┌──▼──────┐ ┌──▼─────────────┐
@@ -110,8 +110,6 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
 │   ├── cmd/migrate/         # DBマイグレーション
 │   ├── migrations/          # up/down SQL（AutoMigrate は廃止済み）
 │   ├── domain/
-│   │   ├── entity/          # ドメインエンティティ（Go struct）
-│   │   ├── mapper/          # model ↔ entity 変換
 │   │   ├── repository/      # リポジトリインターフェース（ポート）
 │   │   └── valueobject/     # 値オブジェクト
 │   ├── internal/
