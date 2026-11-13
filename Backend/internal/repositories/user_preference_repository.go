@@ -60,6 +60,25 @@ func (r *UserPreferenceRepository) GetScoutVisibility(userID uint) (bool, error)
 	return allow, err
 }
 
+// SetTrainingUse は、面接データを学習に使うことへの同意フラグだけを更新する（#2167）。
+// SetScoutVisibility と同じ理由で、対象カラムだけを更新する。
+func (r *UserPreferenceRepository) SetTrainingUse(userID uint, allow bool) error {
+	return r.db.Model(&models.User{}).
+		Where("id = ?", userID).
+		Update("allow_training_use", allow).Error
+}
+
+// GetTrainingUse は、学生本人が設定した学習利用の同意フラグをそのまま返す（#2167）。
+// 本人の設定画面へ現在値を返すためのもの。書き出しの対象かどうか（退会していないかなど）は、
+// 書き出し側（#2168）で判定する。
+func (r *UserPreferenceRepository) GetTrainingUse(userID uint) (bool, error) {
+	var allow bool
+	err := r.db.Model(&models.User{}).
+		Where("id = ?", userID).
+		Select("allow_training_use").Scan(&allow).Error
+	return allow, err
+}
+
 // IsScoutVisible は実際に企業へ公開してよい状態かを返す（#1094）。
 //
 // 同意フラグだけでは足りない。退会しても allow_scout_visibility は 1 のまま

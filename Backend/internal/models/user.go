@@ -41,6 +41,7 @@ type User struct {
 	PasswordResetExpiresAt   *time.Time `gorm:"column:password_reset_expires_at"`                        // パスワードリセットトークン有効期限
 	AllowCollectiveInsight   bool       `gorm:"default:true;column:allow_collective_insight"`            // 集合知レコメンドへの参加同意
 	AllowScoutVisibility     bool       `gorm:"default:false;column:allow_scout_visibility"`             // 企業スカウト向け分析データ公開同意（#1096）
+	AllowTrainingUse         bool       `gorm:"default:false;column:allow_training_use"`                 // 面接データを採点モデルの学習に使う同意（#2167、opt-in、000068）
 	WithdrawnAt              *time.Time `gorm:"index;column:withdrawn_at" json:"withdrawn_at,omitempty"` // 退会日時（論理削除）
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
