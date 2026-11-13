@@ -15,7 +15,7 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
                                   │ HTTP / WebSocket / WebRTC
                 ┌─────────────────▼──────────────────┐
                 │        Go Backend (Echo / 8080)      │
-                │  DDD: model → repo → service → ctl │
+                │  DDD: model → repo → service → ctl  │
                 └──┬─────────────┬──────────┬─────────┘
                    │             │          │
         ┌──────────▼──┐ ┌───▼───┐ ┌──▼──────┐ ┌──▼─────────────┐
