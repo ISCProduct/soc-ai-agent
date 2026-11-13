@@ -2,8 +2,8 @@
  * @jest-environment jsdom
  */
 import { render, screen } from '@testing-library/react'
-import ScoreUpdateBanner from '@/components/ScoreUpdateBanner'
-import type { WeightScore } from '@/components/ScoreUpdateBanner'
+import ScoreUpdateBanner from '@/components/feedback/ScoreUpdateBanner'
+import type { WeightScore } from '@/components/feedback/ScoreUpdateBanner'
 
 describe('ScoreUpdateBanner レンダリング (#1015)', () => {
   const after: WeightScore[] = [{ weight_category: '論理性', score: 60 }]

@@ -31,7 +31,7 @@ jest.mock('@/lib/interview', () => ({
   interviewApi: { listSessions: jest.fn(), getTrend: jest.fn(), getDetail: jest.fn() },
 }))
 // 推移グラフと総評パネルはこのテストの対象外。描画コストと外部依存を避ける。
-jest.mock('@/components/InterviewTrendChart', () => () => <div />)
+jest.mock('@/components/interview/InterviewTrendChart', () => () => <div />)
 jest.mock('@/app/interview/components/InterviewSummary', () => () => <div>総評</div>)
 
 const mockUser = authService.getStoredUser as jest.MockedFunction<typeof authService.getStoredUser>
