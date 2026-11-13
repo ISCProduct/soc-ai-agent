@@ -56,7 +56,9 @@ func (r *UserWithdrawalRepository) Withdraw(userID uint, now time.Time, build re
 		user.EmailVerificationToken = ""
 		user.PasswordResetToken = ""
 		user.IsAdmin = false
-		if err := tx.Save(&user).Error; err != nil {
+		// 学習利用の同意は書かない（#2168）。上で読んだ値で書き戻すと、退会の処理中に本人が取り消した同意を
+		// 元に戻してしまう。同意は SetTrainingUse で履歴と一緒にだけ変える。
+		if err := tx.Omit("allow_training_use").Save(&user).Error; err != nil {
 			return err
 		}
 
@@ -208,6 +210,8 @@ func hardDeleteUserData(tx *gorm.DB, userID uint, collectiveAnonymousID string) 
 		&models.ESReview{},
 		// アプリ内通知（#2033）。先生の案内文や企業名を含むので、退会後に残さない（users への FK は無い）。
 		&models.Notification{},
+		// 学習利用の同意の履歴（#2168）。users への FK CASCADE でも落ちるが、依存を暗黙にしない。
+		&models.TrainingConsentEvent{},
 	}
 	for _, m := range deletes {
 		if err := tx.Where("user_id = ?", userID).Delete(m).Error; err != nil {

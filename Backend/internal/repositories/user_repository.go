@@ -116,9 +116,13 @@ func (r *UserRepository) ListUsersPaged(limit, offset int, query string, schoolI
 }
 
 // UpdateUser ユーザー情報更新
+//
+// 学習利用の同意（allow_training_use）は書かない（#2168）。UpdateUser は読み込んだ時点の値で全カラムを
+// 保存するので、その間に本人が同意を変えると、古い値で書き戻して取り消しを無効にしてしまう。
+// 同意は PUT /api/user/training-consent（UserPreferenceRepository.SetTrainingUse）で、履歴と一緒にだけ変える。
 func (r *UserRepository) UpdateUser(user *entity.User) error {
 	m := mapper.UserFromEntity(user)
-	return r.db.Save(m).Error
+	return r.db.Omit("allow_training_use").Save(m).Error
 }
 
 // DeleteUser ユーザー削除
