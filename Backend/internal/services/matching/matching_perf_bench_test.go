@@ -102,7 +102,7 @@ func BenchmarkBuildMatchReason(b *testing.B) {
 	for i := range b.N {
 		m := &entity.UserCompanyMatch{
 			CompanyID:      1,
-			Company:        &entity.Company{ID: 1, Name: comp.Name, Industry: comp.Industry, MainBusiness: comp.MainBusiness, Culture: comp.Culture, WorkStyle: comp.WorkStyle, TechStack: comp.TechStack},
+			Company:        models.Company{ID: 1, Name: comp.Name, Industry: comp.Industry, MainBusiness: comp.MainBusiness, Culture: comp.Culture, WorkStyle: comp.WorkStyle, TechStack: comp.TechStack},
 			MatchScore:     float64(i % 100),
 			TechnicalMatch: 80, TeamworkMatch: 70, GrowthMatch: 60,
 		}

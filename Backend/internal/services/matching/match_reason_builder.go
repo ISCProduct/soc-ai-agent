@@ -2,6 +2,7 @@ package matching
 
 import (
 	"Backend/domain/entity"
+	"Backend/internal/models"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -65,7 +66,7 @@ type scoreItem struct {
 }
 
 func BuildMatchReason(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) string {
-	if match == nil || match.Company == nil || match.Company.ID == 0 {
+	if match == nil || match.Company.ID == 0 {
 		return ""
 	}
 	if match.MatchReason != "" {
@@ -76,7 +77,7 @@ func BuildMatchReason(match *entity.UserCompanyMatch, userScores []entity.UserWe
 
 	topMatches := topMatchSummaries(match)
 	userStrengths := topUserStrengths(userScores)
-	companyContext := buildCompanyContext(match.Company)
+	companyContext := buildCompanyContext(&match.Company)
 
 	replacer := strings.NewReplacer(
 		"{{match_score}}", fmt.Sprintf("%.0f", match.MatchScore),
@@ -190,7 +191,7 @@ func topUserStrengths(scores []entity.UserWeightScore) string {
 	return strings.Join(parts, "・")
 }
 
-func buildCompanyContext(company *entity.Company) string {
+func buildCompanyContext(company *models.Company) string {
 	if company == nil {
 		return "事業内容や開発環境に合った適性が活かせる企業です。"
 	}

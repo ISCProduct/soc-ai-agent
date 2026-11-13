@@ -4,6 +4,7 @@ package matching_test
 // 実行: cd Backend && go test ./internal/services/... -run TestFormatTopUserScores -v
 
 import (
+	"Backend/internal/models"
 	"strings"
 	"testing"
 
@@ -32,7 +33,7 @@ func TestGenerateMatchReasonFallbackWhenAIClientNil(t *testing.T) {
 	svc := matching.NewMatchingServiceForTest()
 	match := &entity.UserCompanyMatch{
 		MatchScore: 88.5,
-		Company: &entity.Company{
+		Company: models.Company{
 			ID:           1,
 			Name:         "テスト株式会社",
 			Industry:     "IT",
