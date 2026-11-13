@@ -138,6 +138,12 @@ export const ADMIN_NAV: AdminNavGroup[] = [
         cta: '傾向分析へ',
       },
       {
+        title: '学生からの相談',
+        description: '担当校の学生からの、案内への返信と質問を確認して返信します。',
+        href: '/admin/consultations',
+        cta: '相談へ',
+      },
+      {
         title: '学校独自の適性検査',
         description: '学校ごとの検査を作り、学生の受検状況を確認します（おすすめ企業の計算には使われません）。',
         href: '/admin/assessments',
