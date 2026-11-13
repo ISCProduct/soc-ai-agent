@@ -67,6 +67,7 @@ POST /api/admin/crawl-sources
 PUT /api/admin/crawl-sources/:id
 POST /api/admin/crawl-sources/:id/run
 GET /api/admin/dashboard/export/csv
+GET /api/admin/dashboard/funnel
 GET /api/admin/dashboard/users
 GET /api/admin/dashboard/users/:id
 GET /api/admin/diagnosis-quality

@@ -55,6 +55,7 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"GET /dashboard/users":                                  classStaff,
 		"GET /dashboard/users/:id":                              classStaff,
 		"GET /dashboard/export/csv":                             classStaff,
+		"GET /dashboard/funnel":                                 classStaff,
 		"GET /applications":                                     classStaff,
 		"PATCH /applications/:id/status":                        classStaff,
 		"GET /graduate-employments":                             classStaff,
@@ -210,6 +211,7 @@ var schoolScopedRoutes = map[string]bool{
 	"GET /interviews":                         true,
 	"GET /dashboard/users":                    true,
 	"GET /dashboard/export/csv":               true,
+	"GET /dashboard/funnel":                   true,
 	"GET /applications":                       true,
 	"GET /graduate-employments":               true,
 }

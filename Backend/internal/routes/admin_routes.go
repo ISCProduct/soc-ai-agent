@@ -68,6 +68,8 @@ func SetupAdminRoutes(
 	admin.GET("/dashboard/users", adminDashboardController.ListUsers, schoolScope)
 	admin.GET("/dashboard/users/:id", adminDashboardController.UserSessions)
 	admin.GET("/dashboard/export/csv", adminDashboardController.ExportCSV, schoolScope)
+	// 機能横断のコンバージョンファネル（#2039）。担当校以外は数えない
+	admin.GET("/dashboard/funnel", adminDashboardController.Funnel, schoolScope)
 
 	admin.GET("/applications", appController.AdminList, schoolScope)
 	admin.PATCH("/applications/:id/status", appController.AdminUpdateStatus)
