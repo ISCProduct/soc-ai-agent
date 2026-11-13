@@ -173,6 +173,41 @@ AI面接の音声基盤について、**Realtime API 実装を有効化するか
 - 単価はすべて環境変数で上書き可能とし、既定値は現行価格に一致させる
 - 記録は既存の `/admin/costs` から参照できる
 
+### 7.4 音声の単価（現在の実装）
+
+Turn 経路の STT / TTS の単価は `Backend/internal/services/costs/api_cost_service.go` にある。以前この説明を載せていた Design Doc（`docs/design/interview-voice-architecture.md`）はリポジトリから削除済みのため、ここに書く。
+
+**STT（分単価、モデル別）**。OpenAI 公式の価格ページで 2026-11-11 に確認（`gpt-4o-transcribe-diarize` は 2026-11-13）。
+
+| モデル | 単価 | 公式での扱い |
+| --- | --- | --- |
+| `gpt-transcribe`（既定） | $0.0045/分 | 分単価の公開価格 |
+| `gpt-4o-transcribe` | $0.006/分 | トークン課金（$2.50 / $10.00 per 1M）。分単価は公式の目安（est.） |
+| `gpt-4o-transcribe-diarize` | $0.006/分 | トークン課金（$2.50 / $10.00 per 1M）。分単価は公式の目安（est.） |
+| `gpt-4o-mini-transcribe` | $0.003/分 | トークン課金（$1.25 / $5.00 per 1M）。分単価は公式の目安（est.） |
+| `whisper-1` | $0.006/分 | 分単価の公開価格 |
+
+- モデル名は完全一致・日付付きの版名（`gpt-4o-mini-transcribe-2025-12-15` など）・`:` 付きの派生名で照合する。表に無いモデルは、少なく見積もらないよう表の最高値 $0.006/分で計算し、モデルごとに1回ログを出す
+- 秒から分へは按分で換算し、切り上げない（30秒なら0.5分ぶん）。実課金が分単位の丸めかどうかは価格表から分からないため近似である。生の秒数（`api_call_logs.audio_seconds`）を残しているので後から再計算できる
+- `STT_COST_PER_MINUTE_USD` を設定すると、**モデルに関係なく**その値で計算する（表より優先。解釈できない値は無視して表を使う）
+- STT の評価ハーネス（`Backend/internal/sttbench`）も同じ表を引く（上書きの env は見ず、公開価格で見積もる。分単価が目安のモデルは「公開単価の目安」と分けて表示する）
+
+**TTS（文字単価）**。モデルに関係なく既定 $15/100万文字（`tts-1` の公開価格。2026-11-13 確認）。`TTS_COST_PER_1M_CHARS_USD` で上書きできる。`tts-1-hd`（$30/100万文字）や `gpt-4o-mini-tts`（トークン課金）を `OPENAI_TTS_MODEL` に設定した場合、既定値のままでは実際の単価と合わない。
+
+**単価の根拠（`api_call_logs.price_basis`）**。音声の行にも、トークン単価と同じ考え方で付ける。管理画面のモデル別内訳では、`estimated` の行に「推定単価」の印が付く。
+
+| 行 | 根拠 |
+| --- | --- |
+| STT: 分単価が公開価格のモデル（`gpt-transcribe`・`whisper-1`） | `listed` |
+| STT: 分単価が公式の目安のモデル（`gpt-4o-transcribe` 系。出力のトークン数で実額が変わる） | `estimated` |
+| STT: 表に無いモデル（$0.006/分で計算） | `estimated` |
+| TTS: `tts-1` | `listed` |
+| TTS: `tts-1` 以外のモデル（$15/100万文字で計算） | `estimated` |
+| `STT_COST_PER_MINUTE_USD` / `TTS_COST_PER_1M_CHARS_USD` で上書きした単価 | `listed`（運用側が確認した単価として扱う。トークン単価の `AI_MODEL_PRICING_JSON` と同じ） |
+| ローカル推論 | 空（単価を使っていない） |
+
+根拠を記録する前の音声の行は空のままで、内訳でも印は付かない。
+
 ## 8. 受け入れ条件
 
 1. Realtime の死んだコードが、削除または動作する状態のいずれかになっている
@@ -223,7 +258,7 @@ AI面接の音声基盤について、**Realtime API 実装を有効化するか
 
 ## 11. 参照
 
-- Design Doc: `docs/design/interview-voice-architecture.md`
+- Design Doc: `docs/design/interview-voice-architecture.md`（2026-11-06 にリポジトリから削除済み。音声の単価は 7.4 を参照）
 - 既存の面接設計: `docs/design/interview-question-deepening.md`
 - OpenAI 価格: https://developers.openai.com/api/docs/pricing
 - OpenAI 廃止一覧: https://developers.openai.com/api/docs/deprecations
