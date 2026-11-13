@@ -23,6 +23,7 @@ type studentSearchService interface {
 	RemoveTag(companyID, tagID uint) error
 	ListTagNames(companyID uint) ([]string, error)
 	ListTagsForUser(companyID, userID uint) ([]hrsvc.StudentTagView, error)
+	IdentityRevealed(companyID, userID uint) (bool, error)
 }
 
 type industryLister interface {
@@ -30,7 +31,7 @@ type industryLister interface {
 }
 
 type studentVisibleAnalysisService interface {
-	GetAnalysisForVisibleStudent(targetUserID uint) (*hrsvc.StudentAnalysisResponse, error)
+	GetAnalysisForVisibleStudent(companyID, targetUserID uint) (*hrsvc.StudentAnalysisResponse, error)
 }
 
 // CompanyStudentController は企業ポータルの学生検索・タグ管理（#1094）。
@@ -124,9 +125,16 @@ func (c *CompanyStudentController) Detail(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
-	analysis, err := c.analysis.GetAnalysisForVisibleStudent(userID)
+	analysis, err := c.analysis.GetAnalysisForVisibleStudent(companyID, userID)
 	if err != nil {
 		return mapStudentSearchError(err)
+	}
+	revealed, err := c.search.IdentityRevealed(companyID, userID)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	if analysis != nil && !revealed {
+		analysis.Name = ""
 	}
 	tags, err := c.search.ListTagsForUser(companyID, userID)
 	if err != nil {

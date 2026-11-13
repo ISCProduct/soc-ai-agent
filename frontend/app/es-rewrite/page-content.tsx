@@ -82,11 +82,15 @@ type StarBreakdown = {
   result: string
 }
 
-// 字数の結果(#1523)。ES添削・ESリライトで同じ形を返す（生成経路が同じ / #1533）
+// 字数の結果(#1523 / #1606)。ES添削・ESリライトで同じ形を返す（生成経路が同じ / #1533）
 type CharLimitResult = {
   improved_text_length?: number
   // 指定字数に収まったか。上限未指定なら null
   char_limit_satisfied?: boolean | null
+  // 改善文が目標レンジ（元の100〜130%）に入ったか。指定字数があるときは null
+  improved_length_satisfied?: boolean | null
+  // short は元の100%未満、long は130%超え。範囲内と指定字数があるときは null
+  improved_length_issue?: 'short' | 'long' | null
 }
 
 type RewriteResult = CharLimitResult & {
@@ -298,17 +302,36 @@ function formatPreviousDate(iso: string): string {
 
 function CharCountNote({ result, charLimit }: { result: CharLimitResult; charLimit: number | null }) {
   const length = result.improved_text_length
-  if (typeof length !== 'number' || length <= 0) return null
   const overLimit = result.char_limit_satisfied === false
+  const tooLong = result.improved_length_issue === 'long'
+  // 理由が無い応答は false を短さとみなす。長い文章に「短くなりました」とは出さない。
+  const tooShort = result.improved_length_issue === 'short'
+    || (result.improved_length_issue == null && result.improved_length_satisfied === false)
+  const lengthKnown = typeof length === 'number' && length > 0
+  // 字数が0でも「短い」と分かっているときは警告を出す。ここで return すると、
+  // 空の改善文が説明なしで画面に残る（#1606）。
+  if (!lengthKnown && !tooShort && !tooLong) return null
   return (
     <Box sx={{ mt: 1.5 }}>
-      <Typography sx={{ fontSize: 13, fontWeight: 600, color: overLimit ? '#b45309' : UI.inkFaint }}>
-        {charLimit === null ? `${length} 文字` : `${length} / ${charLimit} 文字`}
-        （改行と前後の空白は数えません）
-      </Typography>
+      {lengthKnown && (
+        <Typography sx={{ fontSize: 13, fontWeight: 600, color: overLimit || tooShort || tooLong ? '#b45309' : UI.inkFaint }}>
+          {charLimit === null ? `${length} 文字` : `${length} / ${charLimit} 文字`}
+          （改行と前後の空白は数えません）
+        </Typography>
+      )}
       {overLimit && (
         <Alert severity="warning" role="status" sx={{ mt: 1, borderRadius: 2, fontSize: 13 }}>
           指定字数に収まりませんでした。勝手に切り詰めずそのまま出しているので、削る箇所を選んでから提出してください。もう一度実行すると収まることもあります。
+        </Alert>
+      )}
+      {tooShort && (
+        <Alert severity="warning" role="status" sx={{ mt: 1, borderRadius: 2, fontSize: 13 }}>
+          生成された文章が元の文章より短くなりました。要約になっていて、元の内容が落ちていることがあります。このまま提出せず、元の文章と見比べてください。
+        </Alert>
+      )}
+      {tooLong && (
+        <Alert severity="warning" role="status" sx={{ mt: 1, borderRadius: 2, fontSize: 13 }}>
+          生成された文章が元の文章の130%を超えています。このまま提出せず、残す内容を選んで短くしてください。
         </Alert>
       )}
     </Box>
@@ -856,23 +879,25 @@ function ESRewriteContent() {
               )}
 
               {/* Before / After comparison */}
-              {reviewResult.improved_text && (
+              {(reviewResult.improved_text || reviewResult.improved_length_satisfied === false) && (
                 <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
                     <Typography sx={{ fontWeight: 700, fontSize: 16 }}>改善後テキスト</Typography>
-                    <Tooltip title={copied ? 'コピーしました' : 'クリップボードにコピー'}>
-                      <IconButton
-                        size="small"
-                        onClick={() => handleCopy(reviewResult.improved_text)}
-                        aria-label="改善文をコピー"
-                        sx={{ bgcolor: copied ? '#10b981' : UI.tint, '&:hover': { bgcolor: copied ? '#059669' : UI.ruleSoft } }}
-                      >
-                        {copied
-                          ? <CheckIcon sx={{ color: '#fff', fontSize: 18 }} />
-                          : <ContentCopyIcon sx={{ color: UI.inkSoft, fontSize: 18 }} />
-                        }
-                      </IconButton>
-                    </Tooltip>
+                    {reviewResult.improved_text && (
+                      <Tooltip title={copied ? 'コピーしました' : 'クリップボードにコピー'}>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleCopy(reviewResult.improved_text)}
+                          aria-label="改善文をコピー"
+                          sx={{ bgcolor: copied ? '#10b981' : UI.tint, '&:hover': { bgcolor: copied ? '#059669' : UI.ruleSoft } }}
+                        >
+                          {copied
+                            ? <CheckIcon sx={{ color: '#fff', fontSize: 18 }} />
+                            : <ContentCopyIcon sx={{ color: UI.inkSoft, fontSize: 18 }} />
+                          }
+                        </IconButton>
+                      </Tooltip>
+                    )}
                   </Box>
                   <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: 'wrap' }}>
                     <Chip size="small" label="追加" sx={{ bgcolor: '#dcfce7', color: '#166534' }} />
