@@ -455,3 +455,6 @@ jobs:
         with:
           config: file://atlas.hcl
           env: migrations
+          # マイグレーションディレクトリの論理名（レポート用の必須入力）。
+          # Atlas Cloud には登録しない（lint は Cloud 不要で完結する）。
+          dir-name: soc-ai-agent-migrations
