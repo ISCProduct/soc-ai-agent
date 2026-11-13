@@ -79,4 +79,4 @@ AI面接の質問は、セッション開始時に作る「質問キュー」（
 - 面接中に Web 検索・企業調査の LLM 呼び出しを足さない（追加の LLM 呼び出しは追質問の既存の1回だけ。
   差別質問の再生成は面接官の返答に限った1回）。
 - start-turn / turn / report のレスポンス形は変えない。
-- スキーマ変更は `Backend/migrations/000076_add_interview_question_target_axis` の up/down。
+- スキーマ変更は `Backend/migrations/20261114004733_add_interview_question_target_axis` の up/down。
