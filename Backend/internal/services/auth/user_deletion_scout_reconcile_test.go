@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"Backend/internal/repositories"
 	"context"
 	"errors"
 	"testing"
@@ -44,7 +45,7 @@ func newReconcileService(t *testing.T, syncer ScoutIndexSyncer) (*UserDeletionSe
 	if err != nil {
 		t.Fatalf("gorm: %v", err)
 	}
-	s := NewUserDeletionService(db, nil, nil)
+	s := NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), nil, nil)
 	s.SetScoutIndexSyncer(syncer)
 	return s, mock
 }

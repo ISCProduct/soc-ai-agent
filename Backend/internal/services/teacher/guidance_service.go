@@ -1,6 +1,7 @@
 package teacher
 
 import (
+	"Backend/internal/services/notification"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,6 +40,12 @@ type StudentByID interface {
 type GuidanceService struct {
 	store    GuidanceStore
 	students StudentByID
+	notifier notification.Notifier
+}
+
+// SetNotifier は先生の案内を学生へ知らせる通知を設定する（#2033）。
+func (s *GuidanceService) SetNotifier(n notification.Notifier) {
+	s.notifier = n
 }
 
 func NewGuidanceService(store GuidanceStore, students StudentByID) *GuidanceService {
@@ -118,6 +125,16 @@ func (s *GuidanceService) Create(in CreateGuidanceInput) (*GuidanceView, error) 
 	}
 	if err := s.store.Create(g); err != nil {
 		return nil, err
+	}
+	if s.notifier != nil {
+		s.notifier.Notify(notification.Notice{
+			UserID:    g.StudentUserID,
+			Kind:      models.NotificationKindGuidance,
+			Title:     "先生から案内が届きました",
+			Body:      msg,
+			Link:      "/",
+			DedupeKey: fmt.Sprintf("guidance:%d", g.ID),
+		})
 	}
 	return toGuidanceView(g), nil
 }

@@ -42,7 +42,7 @@ import {
   resumeAttentionLabel,
   NO_DATA_LABEL,
   type StudentTendency,
-} from '@/lib/student-insights'
+} from '@/lib/admin/student-insights'
 import { LOW_MATCH_THRESHOLD } from '@/lib/low-match'
 import { sendTeacherGuidance } from '@/lib/teacher-guidance'
 
