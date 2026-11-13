@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/usagectx"
 	"context"
@@ -9,8 +10,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 const (
@@ -47,7 +46,7 @@ func (s *ChatService) ensureUserEmbedding(ctx context.Context, userID uint, sess
 	}
 	if _, err := s.userEmbeddingRepo.FindByUserAndSession(userID, sessionID); err == nil {
 		return nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+	} else if !errors.Is(err, repository.ErrNotFound) {
 		return err
 	}
 
@@ -95,7 +94,7 @@ func (s *ChatService) ensureJobCategoryEmbedding(ctx context.Context, jobCategor
 	}
 	if _, err := s.jobEmbeddingRepo.FindByJobCategoryID(jobCategoryID); err == nil {
 		return nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+	} else if !errors.Is(err, repository.ErrNotFound) {
 		return err
 	}
 

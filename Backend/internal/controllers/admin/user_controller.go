@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 )
 
 const maxAdminUsersOffset = 10000
@@ -234,7 +233,7 @@ func (c *AdminUserController) Delete(ctx echo.Context) error {
 	}
 	actor := strings.TrimSpace(ctx.Request().Header.Get("X-Admin-Email"))
 	if err := c.deletion.DeleteUser(uint(id), auth.UserDeletionActor{Kind: "admin", Email: actor}); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")
 		}
 		if errors.Is(err, auth.ErrAlreadyWithdrawn) {

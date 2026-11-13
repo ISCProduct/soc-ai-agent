@@ -294,6 +294,33 @@ func TestHandleGoogleCallback(t *testing.T) {
 			wantErr:   "failed to exchange token",
 		},
 		{
+			// #2225：エラーコードがあれば出すが、error_description（本文）は出さない
+			name:      "トークン交換の失敗では、ステータスとエラーコードだけをエラーに入れる",
+			responses: map[string]fakeResponse{fakeTokenURL: {400, `{"error":"invalid_grant","error_description":"` + bodySecret + `"}`}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "failed to exchange token: unexpected status 400 (invalid_grant)",
+		},
+		{
+			// #2225：error フィールドの無い本文は、oauth2 が本文全体をメッセージに入れるので、それを出さない
+			name:      "トークン交換の失敗で error フィールドが無くても、本文をエラーに入れない",
+			responses: map[string]fakeResponse{fakeTokenURL: {500, `<html>` + bodySecret + `</html>`}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "failed to exchange token: unexpected status 500",
+		},
+		{
+			// #2225：id が無いと、別々のアカウントが同じ空の OAuthID に紐付く
+			name:      "id が無いユーザー情報は拒否し、メールが一致する既存ユーザーにも紐付けない",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, `{"email":"new@example.com","verified_email":true}`}},
+			repo:      &oauthUserRepoStub{byEmail: map[string]*models.User{"new@example.com": {ID: 5, Email: "new@example.com"}}},
+			wantErr:   "missing user id",
+		},
+		{
+			name:      "id が空白だけのユーザー情報も拒否する",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, `{"id":"  ","email":"new@example.com","verified_email":true}`}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "missing user id",
+		},
+		{
 			name:      "ユーザー情報が JSON でない",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, `<html>not json</html>`}},
 			repo:      &oauthUserRepoStub{},
@@ -580,6 +607,25 @@ func TestHandleGitHubCallback(t *testing.T) {
 			responses: map[string]fakeResponse{fakeTokenURL: {401, `{"error":"bad_verification_code"}`}},
 			repo:      &oauthUserRepoStub{},
 			wantErr:   "failed to exchange token",
+		},
+		{
+			name:      "トークン交換の失敗で error フィールドが無くても、本文をエラーに入れない",
+			responses: map[string]fakeResponse{fakeTokenURL: {502, bodySecret}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "failed to exchange token: unexpected status 502",
+		},
+		{
+			// #2225：id が無いと "0" に紐付く。メール一覧を取りに行く前に弾く
+			name:      "id が無いユーザー情報は拒否し、メールが一致する既存ユーザーにも紐付けない",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {200, `{"login":"octo","email":"octo@example.com"}`}},
+			repo:      &oauthUserRepoStub{byEmail: map[string]*models.User{"octo@example.com": {ID: 5, Email: "octo@example.com"}}},
+			wantErr:   "missing user id",
+		},
+		{
+			name:      "id が 0 のユーザー情報も拒否する",
+			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {200, `{"id":0,"login":"octo","email":"octo@example.com"}`}},
+			repo:      &oauthUserRepoStub{},
+			wantErr:   "missing user id",
 		},
 	}
 	for _, tc := range cases {

@@ -1,6 +1,7 @@
 package company
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"context"
 	"errors"
@@ -8,8 +9,6 @@ import (
 	"log"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 func (s *CrawlService) runSource(source *models.CrawlSource) (*models.CrawlRun, error) {
@@ -83,10 +82,10 @@ func (s *CrawlService) executeCompanyCrawl(source *models.CrawlSource) error {
 	}
 	now := time.Now()
 	company, err := s.companyRepo.FindByName(source.Name)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return err
 	}
-	if company == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+	if company == nil || errors.Is(err, repository.ErrNotFound) {
 		newCompany := &models.Company{
 			Name:            source.Name,
 			SourceType:      source.SourceType,

@@ -1,7 +1,9 @@
 package companyportal
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
+	"Backend/internal/services/notification"
 	"Backend/internal/services/shared"
 	"errors"
 	"fmt"
@@ -9,8 +11,6 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"gorm.io/gorm"
 )
 
 // 同一企業→同一学生への再送クールダウン（#1095）。
@@ -69,6 +69,12 @@ type ScoutService struct {
 	mailer    scoutMailer
 	now       func() time.Time
 	appURL    string
+	notifier  notification.Notifier
+}
+
+// SetNotifier はスカウトの受信を学生へ知らせる通知を設定する（#2033）。
+func (s *ScoutService) SetNotifier(n notification.Notifier) {
+	s.notifier = n
 }
 
 func NewScoutService(
@@ -167,7 +173,7 @@ func (s *ScoutService) UpdateTemplate(companyID, id uint, in ScoutTemplateInput)
 		return nil, err
 	}
 	if err := s.store.UpdateTemplate(companyID, id, strings.TrimSpace(in.Title), strings.TrimSpace(in.Body)); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrScoutNotFound
 		}
 		return nil, err
@@ -180,7 +186,7 @@ func (s *ScoutService) DeleteTemplate(companyID, id uint) error {
 		return shared.ErrForbidden
 	}
 	if err := s.store.DeleteTemplate(companyID, id); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return ErrScoutNotFound
 		}
 		return err
@@ -203,7 +209,7 @@ type SendScoutResult struct {
 func (s *ScoutService) CooldownRemaining(companyID, userID uint) (time.Duration, error) {
 	last, err := s.store.LatestBetween(companyID, userID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return 0, nil
 		}
 		return 0, err
@@ -257,7 +263,7 @@ func (s *ScoutService) Send(companyID, companyUserID uint, in SendScoutInput) (*
 	if in.TemplateID != 0 {
 		tpl, err := s.store.FindTemplate(companyID, in.TemplateID)
 		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
+			if errors.Is(err, repository.ErrNotFound) {
 				return nil, &shared.ValidationError{Message: "テンプレートが見つかりません"}
 			}
 			return nil, err
@@ -295,6 +301,18 @@ func (s *ScoutService) Send(companyID, companyUserID uint, in SendScoutInput) (*
 	}
 	if remaining > 0 {
 		return &SendScoutResult{RemainingMs: remaining.Milliseconds()}, ErrScoutCooldown
+	}
+
+	// アプリ内通知はメールより先に作る。メール送信（SMTP）が応答しないと、通知まで届かなくなるため（#2033）
+	if s.notifier != nil {
+		s.notifier.Notify(notification.Notice{
+			UserID:    in.UserID,
+			Kind:      models.NotificationKindScout,
+			Title:     "企業からスカウトが届きました",
+			Body:      company.Name + " からスカウトが届きました。内容を確認しましょう。",
+			Link:      "/scout",
+			DedupeKey: fmt.Sprintf("scout:%d", scout.ID),
+		})
 	}
 
 	if s.mailer != nil && student.Email != "" && !student.IsGuest {
@@ -404,14 +422,14 @@ func (s *ScoutService) ListStudentScouts(userID uint, limit, offset int) ([]Stud
 func (s *ScoutService) MarkViewed(userID, scoutID uint) (*models.Scout, error) {
 	scout, err := s.store.FindByIDForUser(userID, scoutID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrScoutNotFound
 		}
 		return nil, err
 	}
 	if scout.Status == models.ScoutStatusSent {
 		if err := s.store.UpdateStatusForUser(userID, scoutID, []string{models.ScoutStatusSent}, models.ScoutStatusViewed); err != nil {
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
+			if !errors.Is(err, repository.ErrNotFound) {
 				return nil, err
 			}
 		} else {
@@ -426,7 +444,7 @@ func (s *ScoutService) MarkViewed(userID, scoutID uint) (*models.Scout, error) {
 func (s *ScoutService) Accept(userID, scoutID uint) (*models.Scout, error) {
 	scout, err := s.store.FindByIDForUser(userID, scoutID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrScoutNotFound
 		}
 		return nil, err
@@ -442,7 +460,7 @@ func (s *ScoutService) Accept(userID, scoutID uint) (*models.Scout, error) {
 		[]string{models.ScoutStatusSent, models.ScoutStatusViewed},
 		models.ScoutStatusAccepted,
 	); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrScoutNotFound
 		}
 		return nil, err
@@ -456,7 +474,7 @@ func (s *ScoutService) Decline(userID, scoutID uint) (*models.Scout, error) {
 		[]string{models.ScoutStatusSent, models.ScoutStatusViewed, models.ScoutStatusAccepted},
 		models.ScoutStatusDeclined,
 	); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrScoutNotFound
 		}
 		return nil, err

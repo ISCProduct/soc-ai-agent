@@ -16,6 +16,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"golang.org/x/oauth2"
 )
@@ -95,6 +96,26 @@ func checkProviderStatus(resp *http.Response) error {
 	return fmt.Errorf("unexpected status %d", resp.StatusCode)
 }
 
+// exchangeError は、トークン交換の失敗をエラーにする（#2225）。
+//
+// oauth2 の RetrieveError は、応答に error フィールドが無いと本文全体を Error() に含めるため、
+// そのまま %w で包むとサーバーログに本文が出る。プロバイダの応答本文はログに出さない方針（#2154）に揃え、
+// ステータスとエラーコードだけを入れる。RetrieveError 以外（通信の失敗など）は本文を持たないので、そのまま包む。
+func exchangeError(err error) error {
+	var re *oauth2.RetrieveError
+	if errors.As(err, &re) {
+		status := 0
+		if re.Response != nil {
+			status = re.Response.StatusCode
+		}
+		if re.ErrorCode != "" {
+			return fmt.Errorf("failed to exchange token: unexpected status %d (%s)", status, re.ErrorCode)
+		}
+		return fmt.Errorf("failed to exchange token: unexpected status %d", status)
+	}
+	return fmt.Errorf("failed to exchange token: %w", err)
+}
+
 // GetGoogleAuthURL Google OAuth認証URLを取得
 func (s *OAuthService) GetGoogleAuthURL(state string) string {
 	return s.oauthConfig.Google.AuthCodeURL(state, oauth2.AccessTypeOffline)
@@ -110,7 +131,7 @@ func (s *OAuthService) GetGitHubAuthURL(state string) string {
 func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, tenantOrgID uint) (*auth.AuthResponse, error) {
 	token, err := s.oauthConfig.Google.Exchange(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("failed to exchange token: %w", err)
+		return nil, exchangeError(err)
 	}
 
 	// ユーザー情報取得
@@ -136,6 +157,10 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 
 	if !userInfo.VerifiedEmail {
 		return nil, errors.New("email not verified")
+	}
+	// id が無いと、別々の Google アカウントが同じ空の OAuthID に紐付いてしまう（#2225）
+	if strings.TrimSpace(userInfo.ID) == "" {
+		return nil, errors.New("failed to get user info: missing user id")
 	}
 
 	// 既存ユーザーチェック（OAuth）
@@ -223,7 +248,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, tenantOrgID uint) (*auth.AuthResponse, error) {
 	token, err := s.oauthConfig.GitHub.Exchange(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("failed to exchange token: %w", err)
+		return nil, exchangeError(err)
 	}
 
 	// ユーザー情報取得
@@ -245,6 +270,11 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, te
 	var userInfo GitHubUserInfo
 	if err := json.Unmarshal(body, &userInfo); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal user info: %w", err)
+	}
+	// id が無い（0）と、別々の GitHub アカウントが同じ "0" に紐付いてしまう（#2225）。
+	// メール一覧を取りに行く前に弾く。
+	if userInfo.ID <= 0 {
+		return nil, errors.New("failed to get user info: missing user id")
 	}
 
 	// メールアドレスが公開されていない場合は別途取得

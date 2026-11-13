@@ -1,12 +1,13 @@
 import './globals.css'
 import type { Metadata } from 'next'
-import { MuiProvider } from '@/components/MuiProvider'
-import { StudentBottomNav } from '@/components/StudentBottomNav'
-import { GlobalNavMenu } from '@/components/GlobalNavMenu'
+import { MuiProvider } from '@/components/providers/MuiProvider'
+import { StudentBottomNav } from '@/components/layout/StudentBottomNav'
+import { GlobalNavMenu } from '@/components/layout/GlobalNavMenu'
+import { NotificationBell } from '@/components/layout/NotificationBell'
 import { Analytics } from '@vercel/analytics/react'
 // Vercelでホスティングされるまで実データは収集されない(AWS ECSデプロイのため現状は未計測)
 import { SpeedInsights } from '@vercel/speed-insights/next'
-import { SentryClientInit } from '@/components/SentryClientInit'
+import { SentryClientInit } from '@/components/providers/SentryClientInit'
 import { DEFAULT_LOCALE, createTranslator, htmlLang, ogLocale } from '@/lib/i18n'
 
 // 文言は辞書（messages/ja.json の metadata）が正本。言語は lib/i18n の既定値から決める（SOCAIAGENT-595）。
@@ -47,6 +48,7 @@ export default function RootLayout({
         <SentryClientInit />
         <MuiProvider>
           {children}
+          <NotificationBell />
           <GlobalNavMenu />
           <StudentBottomNav />
         </MuiProvider>

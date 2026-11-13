@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { render, screen, waitFor } from '@testing-library/react'
-import { LoginContent } from '@/components/LoginContent'
+import { LoginContent } from '@/components/auth/LoginContent'
 import { authService } from '@/lib/auth'
 
 const replace = jest.fn()
@@ -15,7 +15,7 @@ jest.mock('next/navigation', () => ({
 }))
 
 // ログインフォーム本体はこのテストの対象外。遷移の判断だけを見る
-jest.mock('@/components/LoginPage', () => ({
+jest.mock('@/components/auth/LoginPage', () => ({
   LoginPage: () => <div data-testid="login-form" />,
 }))
 
