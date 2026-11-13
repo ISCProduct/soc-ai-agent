@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"Backend/domain/entity"
 	"Backend/internal/openai"
 	"Backend/internal/services/prompts"
 )
@@ -53,7 +52,7 @@ func TestGenerateMatchReason_ABは対象の利用者で割り当てる(t *testin
 			client := openai.NewWithBaseURL(server.URL, "gpt-4o-mini")
 			client.OnUsage = func(u openai.Usage) { usage = u }
 			svc := &MatchingService{aiClient: client}
-			match := &entity.UserCompanyMatch{
+			match := &models.UserCompanyMatch{
 				UserID:     users[tt.version],
 				MatchScore: 80,
 				Company:    models.Company{ID: 1, Name: "テスト株式会社", Industry: "IT", MainBusiness: "開発"},

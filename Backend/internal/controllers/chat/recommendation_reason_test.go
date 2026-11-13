@@ -35,7 +35,7 @@ func TestGetRecommendations_ReasonIsBuiltWhenNotStored(t *testing.T) {
 		{WeightCategory: "growth_orientation", Score: 70},
 	}
 	// 保存済みの理由は空。CalculateMatching が保存しなくなった状態を再現する。
-	matches := []*entity.UserCompanyMatch{{
+	matches := []*models.UserCompanyMatch{{
 		ID:             11,
 		UserID:         userID,
 		SessionID:      sessionID,
@@ -82,7 +82,7 @@ func TestGetRecommendations_ReasonIsBuiltWhenNotStored(t *testing.T) {
 		t.Fatal("理由が空。保存をやめた前提（読み出し側が生成し直す）が崩れている")
 	}
 	// 保存していた場合と同じ文面になること。
-	want := matching.BuildMatchReason(&entity.UserCompanyMatch{
+	want := matching.BuildMatchReason(&models.UserCompanyMatch{
 		CompanyID:      7,
 		Company:        models.Company{ID: 7, Name: "株式会社テスト", Industry: "情報通信業", MainBusiness: "BtoB SaaSの開発"},
 		MatchScore:     72,
@@ -106,7 +106,7 @@ func TestGetRecommendations_StoredAIReasonWins(t *testing.T) {
 	const aiReason = "AIが生成した固有の理由文です。"
 
 	scores := []entity.UserWeightScore{{WeightCategory: "technical_orientation", Score: 80}}
-	matches := []*entity.UserCompanyMatch{{
+	matches := []*models.UserCompanyMatch{{
 		ID:          11,
 		UserID:      userID,
 		SessionID:   sessionID,

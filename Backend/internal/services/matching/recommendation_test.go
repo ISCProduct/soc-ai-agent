@@ -12,13 +12,13 @@ import (
 func TestMinMatchedAxisCount(t *testing.T) {
 	tests := []struct {
 		name    string
-		matches []*entity.UserCompanyMatch
+		matches []*models.UserCompanyMatch
 		want    int
 	}{
 		{name: "空なら0", want: 0},
 		{
 			name: "最小値を返す",
-			matches: []*entity.UserCompanyMatch{
+			matches: []*models.UserCompanyMatch{
 				{MatchedAxisCount: 6},
 				{MatchedAxisCount: 2},
 				{MatchedAxisCount: 4},
@@ -111,7 +111,7 @@ func TestSplitTechStack(t *testing.T) {
 // TestDisplayableMatches_DropsUnresolvedCompany は企業を解決できない match が
 // 表示にも根拠軸数の集計にも入らないことを見る。
 func TestDisplayableMatches_DropsUnresolvedCompany(t *testing.T) {
-	matches := []*entity.UserCompanyMatch{
+	matches := []*models.UserCompanyMatch{
 		{MatchedAxisCount: 1}, // Company 無し
 		{MatchedAxisCount: 8, Company: models.Company{ID: 7}},
 		{MatchedAxisCount: 2, Company: models.Company{}}, // ID 0

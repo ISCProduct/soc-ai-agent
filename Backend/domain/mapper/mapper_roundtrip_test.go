@@ -59,18 +59,6 @@ var mapperCases = []mapperCase{
 		fromEntity: func(e any) any { return mapper.UserFromEntity(e.(*entity.User)) },
 	},
 	{
-		name: "UserCompanyMatch", model: typ[models.UserCompanyMatch](), entity: typ[entity.UserCompanyMatch](),
-		toEntity:   func(m any) any { return mapper.UserCompanyMatchToEntity(m.(*models.UserCompanyMatch)) },
-		fromEntity: func(e any) any { return mapper.UserCompanyMatchFromEntity(e.(*entity.UserCompanyMatch)) },
-		modelOnly: map[string]string{
-			"User":          modelOnlyReason,
-			"JobPosition":   modelOnlyReason,
-			"JobPositionID": modelOnlyReason + "。注意: upsert(user_company_match_repository.go の upsertAssignments)は job_position_id を更新対象にするが、UserCompanyMatchFromEntity は書き戻さない",
-		},
-		typeDiffers:   only("関連(Preload)。entity は *Company、model は値。ToEntity が CompanyToEntity で変換する", "Company"),
-		notFromEntity: only("関連は書き戻さない。保存には外部キー(CompanyID)を使う", "Company"),
-	},
-	{
 		// ToEntity のみ。重みの書き込みは models.UserWeightScore を直接使う。
 		name: "UserWeightScore", model: typ[models.UserWeightScore](), entity: typ[entity.UserWeightScore](),
 		toEntity:  func(m any) any { return mapper.UserWeightScoreToEntity(m.(*models.UserWeightScore)) },

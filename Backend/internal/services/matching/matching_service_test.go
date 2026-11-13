@@ -26,7 +26,7 @@ func TestFormatTopUserScores(t *testing.T) {
 
 func TestGenerateMatchReasonFallbackWhenAIClientNil(t *testing.T) {
 	svc := &MatchingService{aiClient: nil}
-	match := &entity.UserCompanyMatch{
+	match := &models.UserCompanyMatch{
 		MatchScore: 88.5,
 		Company: models.Company{
 			ID:           1,
@@ -63,7 +63,7 @@ func TestGenerateMatchReason_DefaultSkipsAI(t *testing.T) {
 		t.Fatal("AI should be off by default")
 	}
 	svc := &MatchingService{aiClient: nil}
-	match := &entity.UserCompanyMatch{
+	match := &models.UserCompanyMatch{
 		MatchScore: 70,
 		Company: models.Company{
 			ID: 2, Name: "DBのみ株式会社", Industry: "SI", MainBusiness: "受託開発",

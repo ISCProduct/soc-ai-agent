@@ -65,7 +65,7 @@ type scoreItem struct {
 	score float64
 }
 
-func BuildMatchReason(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) string {
+func BuildMatchReason(match *models.UserCompanyMatch, userScores []entity.UserWeightScore) string {
 	if match == nil || match.Company.ID == 0 {
 		return ""
 	}
@@ -134,7 +134,7 @@ func closingPhrase(score float64, companyName string) string {
 	}
 }
 
-func topMatchSummaries(match *entity.UserCompanyMatch) string {
+func topMatchSummaries(match *models.UserCompanyMatch) string {
 	scores := []scoreItem{
 		{label: "技術志向", score: match.TechnicalMatch},
 		{label: "チームワーク", score: match.TeamworkMatch},

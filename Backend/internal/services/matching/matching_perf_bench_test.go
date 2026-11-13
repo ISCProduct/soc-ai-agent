@@ -100,7 +100,7 @@ func BenchmarkBuildMatchReason(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := range b.N {
-		m := &entity.UserCompanyMatch{
+		m := &models.UserCompanyMatch{
 			CompanyID:      1,
 			Company:        models.Company{ID: 1, Name: comp.Name, Industry: comp.Industry, MainBusiness: comp.MainBusiness, Culture: comp.Culture, WorkStyle: comp.WorkStyle, TechStack: comp.TechStack},
 			MatchScore:     float64(i % 100),
