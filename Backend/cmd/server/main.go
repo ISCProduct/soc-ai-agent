@@ -482,7 +482,7 @@ func main() {
 		matchingService,
 	)
 	userScoreRecalculationController := admincontrollers.NewUserScoreRecalculationController(userScoreRecalculationService)
-	companyEntryService := company.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
+	companyEntryService := company.NewCompanyEntryService(repositories.NewCompanyEntryRepository(db), userRepo, pendingRegistrationRepo, emailService)
 	authService.SetCompanyOwnershipClaimer(companyEntryService)
 	companyEntryController := companycontrollers.NewCompanyEntryController(companyEntryService)
 	companyUserRepo := repositories.NewCompanyUserRepository(db)

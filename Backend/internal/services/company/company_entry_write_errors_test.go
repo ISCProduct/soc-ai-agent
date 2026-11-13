@@ -1,6 +1,7 @@
 package company
 
 import (
+	"Backend/internal/repositories"
 	"bytes"
 	"errors"
 	"log"
@@ -61,7 +62,7 @@ func newInviteTestService(t *testing.T, user *entity.User, pending entryPendingR
 	t.Helper()
 	db, mock := newCompanyEntryTestDB(t)
 	return &CompanyEntryService{
-		db:          db,
+		entryRepo:   repositories.NewCompanyEntryRepository(db),
 		userRepo:    entryUserRepoStub{user: user},
 		pendingRepo: pending,
 		email:       &email.EmailService{}, // host が空なので送らずにログだけ出し、成功を返す
@@ -145,7 +146,7 @@ func TestSendInviteEmail_PendingAndFailureRecordFail_Logged(t *testing.T) {
 func TestClaimOwnershipOnRegister_StatusUpdateFails_Logged(t *testing.T) {
 	buf := captureCompanyEntryLog(t)
 	db, mock := newCompanyEntryTestDB(t)
-	svc := &CompanyEntryService{db: db}
+	svc := &CompanyEntryService{entryRepo: repositories.NewCompanyEntryRepository(db)}
 	companyID, submissionID, userID := uint(11), uint(21), uint(42)
 
 	mock.ExpectQuery("SELECT \\* FROM `company_ownerships`").
@@ -172,7 +173,7 @@ func TestClaimOwnershipOnRegister_StatusUpdateFails_Logged(t *testing.T) {
 func TestClaimOwnershipOnRegister_Normal_NoExtraLog(t *testing.T) {
 	buf := captureCompanyEntryLog(t)
 	db, mock := newCompanyEntryTestDB(t)
-	svc := &CompanyEntryService{db: db}
+	svc := &CompanyEntryService{entryRepo: repositories.NewCompanyEntryRepository(db)}
 	companyID, submissionID := uint(11), uint(21)
 
 	mock.ExpectQuery("SELECT \\* FROM `company_ownerships`").
