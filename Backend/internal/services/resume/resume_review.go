@@ -1,6 +1,7 @@
 package resume
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"bufio"
@@ -19,8 +20,6 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/ragclient"
-
-	"gorm.io/gorm"
 )
 
 // ctx はリクエストIDを RAG まで伝播させるために受け取る(#1188)
@@ -28,7 +27,7 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 	// クエリを user_id でスコープする。所有者以外には見つからない（#1156）
 	doc, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, nil, nil, shared.ErrForbidden
 		}
 		return nil, nil, nil, err
@@ -381,7 +380,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 
 	doc, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			sendEvent(map[string]any{"type": "error", "message": "forbidden"})
 			return shared.ErrForbidden
 		}

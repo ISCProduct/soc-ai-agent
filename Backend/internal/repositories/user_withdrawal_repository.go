@@ -98,7 +98,7 @@ func (r *UserWithdrawalRepository) MarkPurged(withdrawnUserID uint, at time.Time
 func (r *UserWithdrawalRepository) FindWithdrawalState(userID uint) (*models.User, bool, error) {
 	var user models.User
 	if err := r.db.Select("id", "withdrawn_at").First(&user, userID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, false, nil
 		}
 		return nil, false, err
@@ -109,7 +109,7 @@ func (r *UserWithdrawalRepository) FindWithdrawalState(userID uint) (*models.Use
 func hardDeleteUserData(tx *gorm.DB, userID uint, collectiveAnonymousID string) error {
 	var user models.User
 	if err := tx.First(&user, userID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil
 		}
 		return err
