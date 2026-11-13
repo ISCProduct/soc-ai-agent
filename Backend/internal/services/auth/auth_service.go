@@ -2,6 +2,7 @@ package auth
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/repositories"
 	"Backend/internal/services/email"
 	"Backend/internal/services/refreshtoken"
 	"Backend/internal/services/shared"
@@ -86,7 +87,7 @@ func (s *AuthService) rebuildDeletionService() {
 		s.deletion = nil
 		return
 	}
-	s.deletion = NewUserDeletionService(s.db, s.object, s.audit)
+	s.deletion = NewUserDeletionService(repositories.NewUserWithdrawalRepository(s.db), s.object, s.audit)
 	s.deletion.SetScoutIndexSyncer(s.scoutIndexSyncer)
 }
 

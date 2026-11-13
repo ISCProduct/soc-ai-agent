@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"context"
@@ -11,10 +12,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 const WithdrawalRetentionDays = 30
@@ -37,14 +37,14 @@ type UserDeletionActor struct {
 
 // UserDeletionService は退会（論理）と猶予後の物理パージを担当する。
 type UserDeletionService struct {
-	db               *gorm.DB
+	repo             repository.UserWithdrawalRepository
 	object           ObjectDeleter
 	audit            auditRecorder
 	scoutIndexSyncer ScoutIndexSyncer
 }
 
-func NewUserDeletionService(db *gorm.DB, object ObjectDeleter, audit auditRecorder) *UserDeletionService {
-	return &UserDeletionService{db: db, object: object, audit: audit}
+func NewUserDeletionService(repo repository.UserWithdrawalRepository, object ObjectDeleter, audit auditRecorder) *UserDeletionService {
+	return &UserDeletionService{repo: repo, object: object, audit: audit}
 }
 
 // SetScoutIndexSyncer は退会時にスカウト検索インデックスを同期する処理を注入する（#1094）。
@@ -54,7 +54,8 @@ func (s *UserDeletionService) SetScoutIndexSyncer(syncer ScoutIndexSyncer) {
 }
 
 var (
-	ErrAlreadyWithdrawn = errors.New("account already withdrawn")
+	// ErrAlreadyWithdrawn は repository.ErrAlreadyWithdrawn と同じ値。errors.Is / == どちらでも判定できる。
+	ErrAlreadyWithdrawn = repository.ErrAlreadyWithdrawn
 	ErrAccountWithdrawn = errors.New("account has been withdrawn")
 )
 
@@ -65,7 +66,7 @@ type UserAccessGuard interface {
 
 // DeleteUser は退会処理（論理削除）。S3・関連行は残し、閲覧・ログインを不可にする。
 func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) error {
-	if s.db == nil {
+	if s.repo == nil {
 		return errors.New("database not configured")
 	}
 
@@ -74,20 +75,9 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 	var email string
 	var keyCount int
 
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		var user models.User
-		if err := tx.First(&user, userID).Error; err != nil {
-			return err
-		}
-		if user.IsWithdrawn() {
-			return ErrAlreadyWithdrawn
-		}
+	err := s.repo.Withdraw(userID, now, func(user *models.User, rawObjectKeys []string) models.WithdrawnUser {
 		email = user.Email
-
-		keys, err := collectUserObjectKeys(tx, userID)
-		if err != nil {
-			return err
-		}
+		keys := normalizeObjectKeys(rawObjectKeys)
 		keyCount = len(keys)
 		keysJSON, _ := json.Marshal(keys)
 
@@ -100,7 +90,7 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 			}
 		}
 
-		record := models.WithdrawnUser{
+		return models.WithdrawnUser{
 			UserID:       userID,
 			EmailHash:    hashEmail(email),
 			EmailMasked:  maskEmail(email),
@@ -110,34 +100,6 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 			WithdrawnAt:  now,
 			PurgeAfter:   purgeAfter,
 		}
-		if err := tx.Create(&record).Error; err != nil {
-			return err
-		}
-
-		// 元のメールアドレスの仮登録（本登録が完了する前に作られた行）を消す。
-		// 下でメールをスクランブルすると、パージ時には元のアドレスが分からず消せなくなる（#2140 のレビュー）。
-		// 消せなければ退会全体を巻き戻す（個人情報を残したまま退会済みにしない）。0件は正常。
-		if err := tx.Where("email = ?", email).Delete(&models.PendingRegistration{}).Error; err != nil {
-			return fmt.Errorf("delete pending registrations: %w", err)
-		}
-
-		// メール再利用を許し、ログイン不能にする
-		user.WithdrawnAt = &now
-		user.Email = fmt.Sprintf("withdrawn+%d@deleted.invalid", userID)
-		user.Password = ""
-		user.OAuthProvider = ""
-		user.OAuthID = ""
-		user.EmailVerificationToken = ""
-		user.PasswordResetToken = ""
-		user.IsAdmin = false
-		if err := tx.Save(&user).Error; err != nil {
-			return err
-		}
-
-		// 全端末のリフレッシュトークンを即時失効させる（self/admin 両経路 #616）
-		return tx.Model(&models.UserRefreshToken{}).
-			Where("user_id = ? AND revoked_at IS NULL", userID).
-			Update("revoked_at", now).Error
 	})
 	if err != nil {
 		return err
@@ -171,15 +133,15 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 
 // IsUserWithdrawn はユーザーが退会済み（未パージ）かどうかを返す。
 func (s *UserDeletionService) IsUserWithdrawn(userID uint) (bool, error) {
-	if s.db == nil {
+	if s.repo == nil {
 		return false, errors.New("database not configured")
 	}
-	var user models.User
-	if err := s.db.Select("id", "withdrawn_at").First(&user, userID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return true, nil // 完全削除済みも閲覧不可
-		}
+	user, found, err := s.repo.FindWithdrawalState(userID)
+	if err != nil {
 		return false, err
+	}
+	if !found {
+		return true, nil // 完全削除済みも閲覧不可
 	}
 	return user.IsWithdrawn(), nil
 }
@@ -198,15 +160,15 @@ func (s *UserDeletionService) EnsureActiveUser(userID uint) error {
 
 // PurgeExpiredWithdrawals は PurgeAfter を過ぎた退会ユーザーを物理削除する。
 func (s *UserDeletionService) PurgeExpiredWithdrawals(now time.Time) (int, error) {
-	if s.db == nil {
+	if s.repo == nil {
 		return 0, errors.New("database not configured")
 	}
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
 
-	var due []models.WithdrawnUser
-	if err := s.db.Where("purged_at IS NULL AND purge_after <= ?", now).Find(&due).Error; err != nil {
+	due, err := s.repo.ListDueWithdrawals(now)
+	if err != nil {
 		return 0, err
 	}
 
@@ -239,7 +201,7 @@ type scoutIndexDeleter interface {
 //
 // 戻り値: (試行件数, 失敗件数, エラー)。エラーは対象の取得に失敗した場合のみ。
 func (s *UserDeletionService) ReconcileScoutIndex(ctx context.Context) (int, int, error) {
-	if s.db == nil {
+	if s.repo == nil {
 		return 0, 0, errors.New("database not configured")
 	}
 	deleter, ok := s.scoutIndexSyncer.(scoutIndexDeleter)
@@ -248,8 +210,8 @@ func (s *UserDeletionService) ReconcileScoutIndex(ctx context.Context) (int, int
 		return 0, 0, nil
 	}
 
-	var pending []models.WithdrawnUser
-	if err := s.db.Where("purged_at IS NULL").Find(&pending).Error; err != nil {
+	pending, err := s.repo.ListPendingWithdrawals()
+	if err != nil {
 		return 0, 0, err
 	}
 
@@ -268,10 +230,7 @@ func (s *UserDeletionService) purgeOne(w models.WithdrawnUser) error {
 	var keys []string
 	_ = json.Unmarshal([]byte(w.S3ObjectKeys), &keys)
 
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		return hardDeleteUserData(tx, w.UserID)
-	})
-	if err != nil {
+	if err := s.repo.HardDeleteUser(w.UserID, collectiveAnonymousHash(w.UserID)); err != nil {
 		return err
 	}
 
@@ -280,9 +239,7 @@ func (s *UserDeletionService) purgeOne(w models.WithdrawnUser) error {
 	// 物理削除はもうコミット済みなので、記録に失敗しても成功として扱う（エラーを返すと「削除失敗」と記録され実態とずれる）。
 	// purged_at が残らないと次回のパージでもう一度対象になるが、消えたデータを消し直すだけなので害は無い。
 	// 失敗はログで分かるようにする（#2001）。
-	if err := s.db.Model(&models.WithdrawnUser{}).Where("id = ?", w.ID).Updates(map[string]any{
-		"purged_at": now,
-	}).Error; err != nil {
+	if err := s.repo.MarkPurged(w.ID, now); err != nil {
 		log.Printf("[UserDeletion] purged but failed to record purged_at withdrawn_user_id=%d user_id=%d: %v", w.ID, w.UserID, err)
 	}
 
@@ -298,134 +255,6 @@ func (s *UserDeletionService) purgeOne(w models.WithdrawnUser) error {
 		s.audit.Record("system", "user.purge", "user", w.UserID, meta)
 	}
 	return nil
-}
-
-func hardDeleteUserData(tx *gorm.DB, userID uint) error {
-	var user models.User
-	if err := tx.First(&user, userID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
-		return err
-	}
-
-	// 個人の AI 利用上限。scope_id は外部キーを持てないので明示的に消す。
-	if err := tx.Where("scope = ? AND scope_id = ?", models.AIBudgetScopeUser, userID).Delete(&models.AIBudgetSetting{}).Error; err != nil {
-		return err
-	}
-
-	// リフレッシュトークンを削除（#616）
-	if err := tx.Where("user_id = ?", userID).Delete(&models.UserRefreshToken{}).Error; err != nil {
-		return err
-	}
-
-	sessionIDs, err := collectUserSessionIDs(tx, userID)
-	if err != nil {
-		return err
-	}
-	if len(sessionIDs) > 0 {
-		if err := tx.Where("session_id IN ?", sessionIDs).Delete(&models.SessionValidation{}).Error; err != nil {
-			return err
-		}
-	}
-
-	interviewSessionIDs, err := collectInterviewSessionIDs(tx, userID)
-	if err != nil {
-		return err
-	}
-	if len(interviewSessionIDs) > 0 {
-		if err := tx.Where("interview_session_id IN ?", interviewSessionIDs).Delete(&models.RealtimeUsageLog{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("session_id IN ?", interviewSessionIDs).Delete(&models.InterviewUtterance{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("session_id IN ?", interviewSessionIDs).Delete(&models.InterviewReport{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("session_id IN ?", interviewSessionIDs).Delete(&models.InterviewQuestionState{}).Error; err != nil {
-			return err
-		}
-	}
-
-	resumeDocumentIDs, err := collectResumeDocumentIDs(tx, userID)
-	if err != nil {
-		return err
-	}
-	if len(resumeDocumentIDs) > 0 {
-		resumeReviewIDs, err := collectResumeReviewIDs(tx, resumeDocumentIDs)
-		if err != nil {
-			return err
-		}
-		if len(resumeReviewIDs) > 0 {
-			if err := tx.Where("review_id IN ?", resumeReviewIDs).Delete(&models.ResumeReviewItem{}).Error; err != nil {
-				return err
-			}
-		}
-		if err := tx.Where("document_id IN ?", resumeDocumentIDs).Delete(&models.ResumeTextBlock{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("document_id IN ?", resumeDocumentIDs).Delete(&models.ResumeReview{}).Error; err != nil {
-			return err
-		}
-	}
-
-	deletes := []any{
-		&models.ChatMessage{},
-		&models.AIGeneratedQuestion{},
-		&models.ConversationContext{},
-		&models.UserWeightScore{},
-		// 再計算の控え（#1770）。scores_json にスコアを丸ごと持つので、退会後に残さない
-		&models.UserScoreRecalculationSnapshot{},
-		&models.UserAnalysisProgress{},
-		&models.UserEmbedding{},
-		&models.VariantAssignment{},
-		&models.UserCompanyMatch{},
-		&models.UserApplicationStatus{},
-		&models.CompanyReview{},
-		&models.ResumeDocument{},
-		&models.InterviewSession{},
-		&models.InterviewVideo{},
-		&models.RealtimeUsageLog{},
-		&models.ScheduleEvent{},
-		&models.SkillScore{},
-		&models.GitHubRepoSummary{},
-		&models.GitHubLanguageStat{},
-		&models.GitHubRepo{},
-		&models.GitHubProfile{},
-		&models.UserGoogleToken{},
-		// 適性検査（#1678）。回答は assessment_sessions の FK CASCADE で消える
-		&models.AssessmentResult{},
-		&models.AssessmentSession{},
-		// ES添削（#1531）。ES本文・改善文を持つので明示的に消す。
-		// users への FK CASCADE でも落ちるが、依存を暗黙にしない。
-		&models.ESReview{},
-		// アプリ内通知（#2033）。先生の案内文や企業名を含むので、退会後に残さない（users への FK は無い）。
-		&models.Notification{},
-	}
-	for _, m := range deletes {
-		if err := tx.Where("user_id = ?", userID).Delete(m).Error; err != nil {
-			return err
-		}
-	}
-	// 教員案内は生徒・送信教員のどちらとして退会しても本文が残らないよう両側で消す
-	if err := tx.Where("student_user_id = ? OR teacher_user_id = ?", userID, userID).Delete(&models.TeacherStudentGuidance{}).Error; err != nil {
-		return err
-	}
-	// organization_memberships は users への FK があるため、ユーザー削除前に除去する
-	if err := tx.Where("user_id = ?", userID).Delete(&models.OrganizationMembership{}).Error; err != nil {
-		return err
-	}
-	if err := tx.Where("anonymous_user_id = ?", collectiveAnonymousHash(userID)).Delete(&models.CollectiveInsightLog{}).Error; err != nil {
-		return err
-	}
-	// 退会時にスクランブル済みメールだが、念のため元パターンでも消す。
-	// 仮登録にはメールアドレスが入っているので、消せなければ全体を巻き戻し、次回のパージで再試行する。
-	// 握りつぶすとコミットされ、物理削除したのに仮登録だけが残る（#2001）。0件は正常（Delete はエラーにならない）。
-	if err := tx.Where("email = ? OR email LIKE ?", user.Email, fmt.Sprintf("withdrawn+%d@%%", userID)).Delete(&models.PendingRegistration{}).Error; err != nil {
-		return fmt.Errorf("delete pending registrations: %w", err)
-	}
-	return tx.Delete(&models.User{}, userID).Error
 }
 
 func (s *UserDeletionService) deleteObjectsBestEffort(keys []string) []string {
@@ -455,45 +284,29 @@ func (s *UserDeletionService) deleteObjectsBestEffort(keys []string) []string {
 	return errs
 }
 
-func collectUserObjectKeys(tx *gorm.DB, userID uint) ([]string, error) {
+// normalizeObjectKeys は、保存されている保存先の文字列から、S3 のキー(または手元のパス)を取り出す。
+// S3 の URI はバケットを除いたキーにし、空と重複は除く。並びは安定させる(昇順)。
+func normalizeObjectKeys(raw []string) []string {
 	seen := map[string]struct{}{}
-	add := func(raw string) {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			return
+	for _, r := range raw {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
 		}
-		if _, key, ok := shared.ParseS3URI(raw); ok {
-			raw = key
+		if _, key, ok := shared.ParseS3URI(r); ok {
+			r = key
 		}
-		if raw == "" {
-			return
+		if r == "" {
+			continue
 		}
-		seen[raw] = struct{}{}
+		seen[r] = struct{}{}
 	}
-
-	var videos []models.InterviewVideo
-	if err := tx.Where("user_id = ?", userID).Find(&videos).Error; err != nil {
-		return nil, err
-	}
-	for _, v := range videos {
-		add(v.DriveFileID)
-	}
-
-	var docs []models.ResumeDocument
-	if err := tx.Where("user_id = ?", userID).Find(&docs).Error; err != nil {
-		return nil, err
-	}
-	for _, d := range docs {
-		add(d.StoredPath)
-		add(d.NormalizedPath)
-		add(d.AnnotatedPath)
-	}
-
 	out := make([]string, 0, len(seen))
 	for k := range seen {
 		out = append(out, k)
 	}
-	return out, nil
+	sort.Strings(out)
+	return out
 }
 
 func collectiveAnonymousHash(userID uint) string {
