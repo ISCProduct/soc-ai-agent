@@ -108,7 +108,7 @@ export default function CompanyPortalScoutsPage() {
             <Paper key={s.id} variant="outlined" sx={{ p: 2 }}>
               <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={1} flexWrap="wrap">
                 <Typography fontWeight="bold">
-                  {s.student_name ? `${s.student_name}さん` : `学生 #${s.user_id}`}
+                  {s.status === 'accepted' && s.student_name ? `${s.student_name}さん` : '氏名非公開'}
                 </Typography>
                 <MarkLabel {...scoutMark(s.status)} />
               </Stack>
