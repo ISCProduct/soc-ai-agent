@@ -1,0 +1,589 @@
+'use client'
+import React, {useState, useEffect} from 'react'
+import Link from 'next/link'
+import styles from './AnalysisSidebar.module.css'
+import
+{
+    Box,
+    Drawer,
+    List,
+    ListItem,
+    ListItemButton,
+    ListItemIcon,
+    ListItemText,
+    Typography,
+    LinearProgress,
+    Divider,
+    Chip,
+    Avatar,
+    IconButton,
+    useTheme,
+    useMediaQuery,
+    Tooltip,
+}
+    from '@mui/material'
+import {
+    BorderAll,
+    CheckCircle,
+    RadioButtonUnchecked,
+    Work,
+    Psychology,
+    TrendingUp,
+    EmojiEvents,
+    Logout,
+    History,
+    ManageAccounts,
+    Description,
+    AdminPanelSettings,
+    RecordVoiceOver,
+    EditNote,
+    CalendarMonth,
+    Business,
+    Assignment,
+    MailOutline,
+    NewReleases,
+    Assessment,
+    Quiz,
+} from '@mui/icons-material'
+import {authService, User} from '@/lib/auth'
+import {useRouter} from 'next/navigation'
+import { getResultsPathOrChat } from '@/lib/results-navigation'
+import {
+  getApplicationsNavTarget,
+  getTodayActionLabel,
+  shouldShowResultsCta,
+} from '@/lib/sidebar-navigation'
+import { SIDEBAR_ADMIN_NAV } from '@/lib/sidebar-nav'
+import { useTranslations, type MessageKey } from '@/lib/i18n'
+import { computeProgressTotals } from '../mui-chat/utils'
+
+const DRAWER_WIDTH = 280
+
+type SidebarDestination = {
+    href: string
+    labelKey: MessageKey<'nav'>
+    icon: React.ReactNode
+}
+
+/** 選考管理より下、区切りの前に置く項目。 */
+const LEAD_NAV: SidebarDestination[] = [
+    { href: '/correlation-diagram', labelKey: 'sidebar.correlationDiagram', icon: <BorderAll color="primary"/> },
+]
+
+/** 区切りの後に置く項目。選考管理はゲスト案内があるのでここには入れない。 */
+const REST_NAV: SidebarDestination[] = [
+    { href: '/chat-history', labelKey: 'sidebar.chatHistory', icon: <History color="primary"/> },
+    { href: '/resume', labelKey: 'sidebar.resume', icon: <Description color="primary"/> },
+    { href: '/assessments', labelKey: 'sidebar.personalityAssessment', icon: <Quiz color="primary"/> },
+    { href: '/ability-assessments', labelKey: 'sidebar.abilityAssessment', icon: <Quiz color="primary"/> },
+    { href: '/interview', labelKey: 'sidebar.interview', icon: <RecordVoiceOver color="primary"/> },
+    { href: '/interview/history', labelKey: 'sidebar.interviewHistory', icon: <Assessment color="primary"/> },
+    { href: '/es-rewrite', labelKey: 'sidebar.esRewrite', icon: <EditNote color="primary"/> },
+    { href: '/schedule', labelKey: 'sidebar.schedule', icon: <CalendarMonth color="primary"/> },
+    { href: '/scout', labelKey: 'sidebar.scout', icon: <MailOutline color="primary"/> },
+    { href: '/profile', labelKey: 'sidebar.profile', icon: <ManageAccounts color="primary"/> },
+]
+
+function SidebarNavButton({
+    icon,
+    label,
+    onClick,
+    secondary,
+    fontWeight = 500,
+}: {
+    icon: React.ReactNode
+    label: string
+    onClick: () => void
+    secondary?: string
+    fontWeight?: number
+}) {
+    return (
+        <ListItem disablePadding>
+            <ListItemButton onClick={onClick} sx={{ borderRadius: 1 }}>
+                <ListItemIcon sx={{minWidth: 36}}>
+                    {icon}
+                </ListItemIcon>
+                <ListItemText
+                    primary={label}
+                    secondary={secondary}
+                    primaryTypographyProps={{
+                        fontSize: '0.875rem',
+                        fontWeight,
+                    }}
+                    secondaryTypographyProps={{
+                        fontSize: '0.7rem',
+                    }}
+                />
+            </ListItemButton>
+        </ListItem>
+    )
+}
+
+interface AnalysisStep {
+    id: string
+    label: string
+    icon: React.ReactNode
+    completed: boolean
+    /** 0〜100。待機中(0)と完了(100)も値を持つ。表示するかどうかは描画側で決める。 */
+    progress: number
+}
+
+/**
+ * 進捗の文言。0%と100%でも必ず何か出す。
+ *
+ * 以前は progress を undefined にしていたため、待機中と完了の項目から進捗の表示が
+ * 丸ごと消え、学生からは「何も起きていない」ように見えていた。
+ * 「0% 完了」は日本語として読みにくいので、両端だけ言葉にする。
+ */
+function stepCaption(percent: number): string {
+    if (percent >= 100) return '完了'
+    if (percent <= 0) return 'これから'
+    return `${percent}% 完了`
+}
+
+interface PhaseProgress {
+    phase_name: string
+    display_name: string
+    questions_asked: number
+    valid_answers: number
+    completion_score: number
+    is_completed: boolean
+    min_questions: number
+    max_questions: number
+}
+
+interface AnalysisSidebarProps {
+    user: User
+    onLogout: () => void
+    mobileOpen?: boolean
+    onMobileClose?: () => void
+}
+
+export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClose}: AnalysisSidebarProps) {
+    const router = useRouter()
+    // ナビの表示名は辞書（messages/ja.json の nav）が正本（SOCAIAGENT-595。#2162 のセルフレビュー）
+    const t = useTranslations('nav')
+    const [messageCount, setMessageCount] = useState(0)
+    const [questionCount, setQuestionCount] = useState(0)
+    const [totalQuestions, setTotalQuestions] = useState(15)
+    const [phases, setPhases] = useState<PhaseProgress[] | null>(null)
+    const [isAdmin, setIsAdmin] = useState(!!user.is_admin)
+    const theme = useTheme()
+    const isMobile = useMediaQuery(theme.breakpoints.down('md'))
+
+    useEffect(() => {
+        setIsAdmin(!!user.is_admin)
+        const refreshAdminFlag = async () => {
+            if (!user?.user_id || user.is_admin) return
+            try {
+                const fresh = await authService.getUser()
+                if (fresh?.is_admin) {
+                    setIsAdmin(true)
+                    await authService.saveAuth({
+                        user_id: fresh.user_id,
+                        email: fresh.email,
+                        name: fresh.name,
+                        is_guest: fresh.is_guest,
+                        target_level: fresh.target_level,
+                        school_name: fresh.school_name,
+                        is_admin: fresh.is_admin,
+                        is_staff: fresh.is_staff,
+                        certifications_acquired: fresh.certifications_acquired,
+                        certifications_in_progress: fresh.certifications_in_progress,
+                        oauth_provider: fresh.oauth_provider,
+                        avatar_url: fresh.avatar_url,
+                    })
+                }
+            } catch {
+                // ignore
+            }
+        }
+        refreshAdminFlag()
+
+        const handleChatProgress = (event: CustomEvent) => {
+            setMessageCount(event.detail.messageCount || 0)
+            setQuestionCount(event.detail.questionCount || 0)
+            setTotalQuestions(event.detail.totalQuestions || 15)
+            if (event.detail.phases) {
+                setPhases(event.detail.phases as PhaseProgress[])
+            }
+        }
+
+        window.addEventListener('chatProgress', handleChatProgress as EventListener)
+        return () => {
+            window.removeEventListener('chatProgress', handleChatProgress as EventListener)
+        }
+    }, [user])
+
+    const phaseProgressFor = (phaseName: string) => {
+        if (!phases) return null
+        return phases.find(p => p.phase_name === phaseName) || null
+    }
+    const getPhasePercent = (phaseName: string, fallback: number) => {
+        const phase = phaseProgressFor(phaseName)
+        if (!phase) return fallback
+        // まだ質問が始まっていないフェーズは「待機中」として fallback を返さない
+        if (phase.questions_asked === 0) return 0
+        const required = phase.max_questions > 0 ? phase.max_questions : phase.min_questions
+        if (required > 0) {
+            return Math.min(100, Math.max(0, Math.floor((phase.valid_answers / required) * 100)))
+        }
+        return Math.min(100, Math.floor((phase.valid_answers / phase.questions_asked) * 100))
+    }
+
+    const expectedTotalQuestions = (() => {
+        if (!phases || phases.length === 0) return totalQuestions
+        return phases.reduce((sum, phase) => {
+            const required = phase.max_questions > 0 ? phase.max_questions : phase.min_questions
+            return sum + (required > 0 ? required : 0)
+        }, 0)
+    })()
+
+    const fallbackOverall = (() => {
+        if (!phases || phases.length === 0) {
+            return expectedTotalQuestions > 0
+                ? Math.min(100, Math.floor((questionCount / expectedTotalQuestions) * 100))
+                : 0
+        }
+        let valid = 0
+        let asked = 0
+        for (const phase of phases) {
+            asked += phase.questions_asked
+            valid += phase.valid_answers
+        }
+        if (asked <= 0) return 0
+        return Math.min(100, Math.floor((valid / asked) * 100))
+    })()
+    const phasePercents = {
+        job: getPhasePercent('job_analysis', fallbackOverall),
+        interest: getPhasePercent('interest_analysis', fallbackOverall),
+        aptitude: getPhasePercent('aptitude_analysis', fallbackOverall),
+        future: getPhasePercent('future_analysis', fallbackOverall),
+    }
+    const progress = {
+        overall: phases ? Math.floor((phasePercents.job + phasePercents.interest + phasePercents.aptitude + phasePercents.future) / 4) : fallbackOverall,
+        ...phasePercents,
+    }
+    // ヘッダー（ChatHeader）と同じ算出ロジックを使い、「X/Y 完了」の表示が一致するようにする
+    const progressTotals = computeProgressTotals({ phases, questionCount, totalQuestions })
+
+    // ラベルは話題名のままにする。「職種分析進行中」のような内部フェーズ名＋状態は、
+    // 学生に何について答えているのかではなく処理の名前を読ませることになる
+    // (.claude/skills/school-career-ui-design/SKILL.md 4.3「学生向け画面では
+    // システム用語を避ける」)。状態はアイコン・太字・進捗バーと下の文言で示す。
+    const analysisSteps: AnalysisStep[] = [
+        {
+            id: 'job',
+            label: '希望の職種',
+            icon: <Work/>,
+            completed: getPhasePercent('job_analysis', progress.job) === 100,
+            progress: getPhasePercent('job_analysis', progress.job),
+        },
+        {
+            id: 'interest',
+            label: '興味のあること',
+            icon: <Psychology/>,
+            completed: getPhasePercent('interest_analysis', progress.interest) === 100,
+            progress: getPhasePercent('interest_analysis', progress.interest),
+        },
+        {
+            id: 'aptitude',
+            label: '得意なこと',
+            icon: <TrendingUp/>,
+            completed: getPhasePercent('aptitude_analysis', progress.aptitude) === 100,
+            progress: getPhasePercent('aptitude_analysis', progress.aptitude),
+        },
+        {
+            id: 'future',
+            label: '働き方の希望',
+            icon: <EmojiEvents/>,
+            completed: getPhasePercent('future_analysis', progress.future) === 100,
+            progress: getPhasePercent('future_analysis', progress.future),
+        },
+    ]
+
+    const drawerSx = {
+        width: DRAWER_WIDTH,
+        flexShrink: 0,
+        '& .MuiDrawer-paper': {
+            width: DRAWER_WIDTH,
+            boxSizing: 'border-box',
+            backgroundColor: '#f7f7f8',
+            borderRight: '1px solid #e0e0e0',
+            overflowY: 'auto',
+        },
+    }
+
+    const drawerContent = (
+            <Box sx={{p: 2}}>
+                <Box sx={{display: 'flex', alignItems: 'center', mb: 2, gap: 1}}>
+                    <Avatar sx={{bgcolor: user.is_guest ? 'grey.500' : 'primary.main'}}>
+                        {user.name.charAt(0).toUpperCase()}
+                    </Avatar>
+                    <Box sx={{flex: 1, minWidth: 0}}>
+                        <Typography variant="subtitle2" noWrap sx={{fontWeight: 600}}>
+                            {user.name}
+                        </Typography>
+                        {user.school_name && (
+                            <Typography variant="caption" noWrap color="text.secondary" sx={{display: 'block'}}>
+                                {user.school_name}
+                            </Typography>
+                        )}
+                        {user.is_guest && (
+                            <Chip label="ゲスト" size="small" sx={{height: 18, fontSize: '0.7rem'}}/>
+                        )}
+                        {user.oauth_provider && (
+                            <Chip
+                                label={user.oauth_provider}
+                                size="small"
+                                sx={{height: 18, fontSize: '0.7rem', textTransform: 'capitalize'}}
+                            />
+                        )}
+                    </Box>
+                    <IconButton size="small" onClick={onLogout} title="ログアウト">
+                        <Logout fontSize="small"/>
+                    </IconButton>
+                </Box>
+
+                <Divider sx={{mb: 2}}/>
+
+                {/* 今日やること（推奨フロー） */}
+                {progress.overall < 100 && (
+                    <Box sx={{ mb: 2, p: 1.5, bgcolor: 'action.hover', borderRadius: 1, border: '2px solid', borderColor: 'primary.main' }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: 'primary.main', display: 'block', mb: 0.5 }}>
+                            今日やること
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontSize: '0.8rem', color: 'text.secondary', mb: shouldShowResultsCta(progress.overall) ? 1 : 0 }}>
+                            {getTodayActionLabel(progress.overall)}
+                        </Typography>
+                        {shouldShowResultsCta(progress.overall) && (
+                            <ListItemButton
+                                onClick={() => {
+                                    router.push(getResultsPathOrChat())
+                                    onMobileClose?.()
+                                }}
+                                sx={{
+                                    borderRadius: 1,
+                                    bgcolor: 'primary.main',
+                                    color: 'primary.contrastText',
+                                    py: 0.75,
+                                    '&:hover': { bgcolor: 'primary.dark' },
+                                }}
+                            >
+                                <ListItemIcon sx={{ minWidth: 32, color: 'inherit' }}>
+                                    <Business fontSize="small" />
+                                </ListItemIcon>
+                                <ListItemText
+                                    primary="マッチング結果を見る"
+                                    primaryTypographyProps={{ fontSize: '0.8rem', fontWeight: 600 }}
+                                />
+                            </ListItemButton>
+                        )}
+                    </Box>
+                )}
+
+                <Typography variant="h6" sx={{fontWeight: 600, mb: 1}}>
+                    AI分析進捗
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{mb: 2}}>
+                    質問 {progressTotals.valid}/{progressTotals.required}（{progressTotals.percent}%）
+                </Typography>
+
+                <List sx={{p: 0}}>
+                    {analysisSteps.map((step, index) => (
+                        <React.Fragment key={step.id}>
+                            <ListItem
+                                sx={{
+                                    borderRadius: 1,
+                                    mb: 0.5,
+                                    backgroundColor: step.completed ? '#e8f5e9' : 'transparent',
+                                    '&:hover': {
+                                        backgroundColor: step.completed ? '#e8f5e9' : '#f0f0f0',
+                                    },
+                                }}
+                            >
+                                <ListItemIcon sx={{minWidth: 36}}>
+                                    {step.completed ? (
+                                        <CheckCircle color="success" aria-label="完了" />
+                                    ) : (
+                                        <RadioButtonUnchecked color="action" aria-label="未完了" />
+                                    )}
+                                </ListItemIcon>
+                                <ListItemText
+                                    primary={step.label}
+                                    primaryTypographyProps={{
+                                        fontSize: '0.95rem',
+                                        fontWeight: step.completed ? 700 : 500,
+                                    }}
+                                />
+                            </ListItem>
+                            <Box sx={{px: 2, pb: 1}}>
+                                {/* バーは進行中だけに出す。0%と100%の棒は情報を足さない。 */}
+                                {step.progress > 0 && step.progress < 100 && (
+                                    <LinearProgress
+                                        variant="determinate"
+                                        value={step.progress}
+                                        aria-label={`${step.label} ${step.progress}%`}
+                                        sx={{
+                                          height: 10,
+                                          borderRadius: 1,
+                                          bgcolor: 'action.selected',
+                                          '& .MuiLinearProgress-bar': {
+                                            backgroundImage: 'repeating-linear-gradient(90deg, transparent, transparent 4px, rgba(255,255,255,0.35) 4px, rgba(255,255,255,0.35) 8px)',
+                                          },
+                                        }}
+                                    />
+                                )}
+                                {/* 文言は常に出す。待機中と完了の項目が無表示にならないようにする。 */}
+                                <Typography
+                                    variant="caption"
+                                    color="text.secondary"
+                                    sx={{mt: 0.5, display: 'block'}}
+                                >
+                                    {stepCaption(step.progress)}
+                                </Typography>
+                            </Box>
+                        </React.Fragment>
+                    ))}
+                </List>
+
+                <Divider sx={{my: 2}}/>
+
+                <Box>
+                    <Typography variant="subtitle2" sx={{mb: 1, fontWeight: 600}}>
+                        IT業界キャリアエージェント
+                    </Typography>
+                    {/*
+                      「AIが質問を動的に生成し、あなたの適性を分析」と
+                      「AI分析中」バッジをやめた。どちらも仕組みの説明で、
+                      学生が次に何をすればいいかには関係しない。
+                      代わりに、答え方のコツを一行だけ置く。
+                    */}
+                    <Typography variant="body2" color="text.secondary">
+                        答えた内容に合わせて次の質問が変わります。思ったとおりに答えてください。
+                    </Typography>
+                </Box>
+
+
+                <Divider sx={{my: 2}}/>
+                <SidebarNavButton
+                    icon={<Business color="primary"/>}
+                    label={t('home.results')}
+                    onClick={() => {
+                        router.push(getResultsPathOrChat())
+                        onMobileClose?.()
+                    }}
+                />
+
+                <ListItem disablePadding>
+                    <Tooltip
+                        title={user.is_guest ? '選考管理はログイン後に利用できます' : ''}
+                        disableHoverListener={!user.is_guest}
+                    >
+                        <ListItemButton
+                            onClick={() => {
+                                router.push(getApplicationsNavTarget(user.is_guest))
+                                onMobileClose?.()
+                            }}
+                            sx={{ borderRadius: 1 }}
+                        >
+                            <ListItemIcon sx={{minWidth: 36}}>
+                                <Assignment color="primary"/>
+                            </ListItemIcon>
+                            <ListItemText
+                                primary={t('sidebar.applications')}
+                                secondary={user.is_guest ? 'ログインが必要です' : undefined}
+                                primaryTypographyProps={{
+                                    fontSize: '0.875rem',
+                                    fontWeight: 500,
+                                }}
+                                secondaryTypographyProps={{
+                                    fontSize: '0.7rem',
+                                }}
+                            />
+                        </ListItemButton>
+                    </Tooltip>
+                </ListItem>
+
+                {LEAD_NAV.map((item) => (
+                    <SidebarNavButton
+                        key={item.href}
+                        icon={item.icon}
+                        label={t(item.labelKey)}
+                        onClick={() => router.push(item.href)}
+                    />
+                ))}
+
+                <Divider sx={{my: 2}}/>
+
+                {REST_NAV.map((item) => (
+                    <SidebarNavButton
+                        key={item.href}
+                        icon={item.icon}
+                        label={t(item.labelKey)}
+                        onClick={() => router.push(item.href)}
+                    />
+                ))}
+
+
+                <SidebarNavButton
+                    icon={<NewReleases color="primary"/>}
+                    label="更新情報"
+                    onClick={() => {
+                        router.push('/whats-new')
+                        onMobileClose?.()
+                    }}
+                />
+
+                {isAdmin && (
+                    <ListItem disablePadding>
+                        <ListItemButton
+                            component={Link}
+                            href={SIDEBAR_ADMIN_NAV.href}
+                            prefetch
+                            onClick={onMobileClose}
+                            sx={{
+                                borderRadius: 1,
+                            }}
+                        >
+                            <ListItemIcon sx={{minWidth: 36}}>
+                                <AdminPanelSettings color="primary"/>
+                            </ListItemIcon>
+                            <ListItemText
+                                primary={SIDEBAR_ADMIN_NAV.label}
+                                primaryTypographyProps={{
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                }}
+                            />
+                        </ListItemButton>
+                    </ListItem>
+                )}
+            </Box>
+    )
+
+    return (
+        <>
+            {/* モバイル用: Temporary Drawer */}
+            <Drawer
+                variant="temporary"
+                open={mobileOpen}
+                onClose={onMobileClose}
+                ModalProps={{ keepMounted: true }}
+                className={styles.drawerMobile}
+                sx={drawerSx}
+            >
+                {drawerContent}
+            </Drawer>
+            {/* デスクトップ用: Permanent Drawer */}
+            <Drawer
+                variant="permanent"
+                className={styles.drawerDesktop}
+                sx={drawerSx}
+                open
+            >
+                {drawerContent}
+            </Drawer>
+        </>
+    )
+}

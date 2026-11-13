@@ -484,6 +484,15 @@ components:
         star: { $ref: "#/components/schemas/StarBreakdown" }
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
+        improved_length_satisfied:
+          type: boolean
+          nullable: true
+          description: "改善文が目標レンジ（元の100〜130%）に入ったか。char_limit 指定時は null（#1606）"
+        improved_length_issue:
+          type: string
+          nullable: true
+          enum: [short, long]
+          description: "外れた理由。short は元の100%未満、long は130%超え。範囲内と char_limit 指定時は null"
         format_findings:
           type: array
           description: 原文の形式チェック（#1530）。重要度順（同じなら出現位置順）。指摘が無いときは空配列
@@ -509,6 +518,15 @@ components:
         improved_text: { type: string }
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
+        improved_length_satisfied:
+          type: boolean
+          nullable: true
+          description: "改善文が目標レンジ（元の100〜130%）に入ったか。char_limit 指定時は null（#1606）"
+        improved_length_issue:
+          type: string
+          nullable: true
+          enum: [short, long]
+          description: "外れた理由。short は元の100%未満、long は130%超え。範囲内と char_limit 指定時は null"
         format_findings:
           type: array
           description: 原文の形式チェック（#1530）。重要度順（同じなら出現位置順）。指摘が無いときは空配列。RAG の応答が想定外の形のときは付かず、RAG の応答をそのまま返す
@@ -3364,6 +3382,48 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/admin/dashboard/funnel:
+    get:
+      tags: [admin-analytics]
+      summary: 機能横断のコンバージョンファネル（診断→面接→ES→応募→内定）
+      description: |
+        段階ごとの到達人数・対象の学生に対する割合・前の段階からの継続率を返す（#2039）。
+        担当校スコープが掛かる。担当校を持つ管理者は `school_id` が必須で、担当校以外は 403。
+        担当校を持たないシステム管理者だけが `school_id` なし（全体）で見られる。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - { in: query, name: school_id, schema: { type: integer } }
+        - { in: query, name: from, description: 期間の開始日（含む、YYYY-MM-DD、日本時間）, schema: { type: string, format: date } }
+        - { in: query, name: to, description: 期間の終了日（含む、YYYY-MM-DD、日本時間）, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  school_id: { type: integer, nullable: true }
+                  from: { type: string }
+                  to: { type: string }
+                  funnel:
+                    type: object
+                    properties:
+                      students: { type: integer }
+                      stages:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            stage: { type: string, enum: [diagnosis, interview, es, applied, offered] }
+                            reached: { type: integer }
+                            rate_of_students: { type: number }
+                            continued_from_previous: { type: integer }
+                            continuation_rate: { type: number }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   /api/admin/teacher/students/tendency-analysis:
     get:
       tags: [admin-analytics]
@@ -4371,6 +4431,27 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/user/scouts/{id}/accept:
+    post:
+      tags: [user]
+      summary: スカウトを承諾する
+      description: |
+        承諾すると、その企業の学生検索とスカウト一覧に氏名・学校・写真が見えるようになる。
+        辞退済みは承諾できない。
+      security: [{ userToken: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: スカウトが見つからない }
+        "422": { description: 辞退済みのため承諾できない }
 
   /api/user/scouts/{id}/decline:
     post:
