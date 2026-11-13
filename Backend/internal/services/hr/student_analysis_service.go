@@ -9,8 +9,6 @@ import (
 	"Backend/internal/services/shared"
 	"encoding/json"
 	"errors"
-
-	"gorm.io/gorm"
 )
 
 const maxInterviewReports = 5
@@ -43,9 +41,15 @@ type interviewReportFinder interface {
 	FindBySessionIDs(sessionIDs []uint) ([]models.InterviewReport, error)
 }
 
+// identityRevealer は、その企業が学生のスカウトを承諾済みかを返す。
+// 未設定のときは氏名を出さない（旧HR APIが承諾チェックを飛ばせないようにする）。
+type identityRevealer interface {
+	IdentityRevealed(companyID, userID uint) (bool, error)
+}
+
 // StudentAnalysisService 企業向け学生分析データの集約（#1096）
 type StudentAnalysisService struct {
-	db                      *gorm.DB
+	access                  shared.CompanyAccessReader
 	userRepo                studentUserReader
 	crossFeature            interfaces.CrossFeatureIntegrationService
 	weightScoreRepo         *repositories.UserWeightScoreRepository
@@ -53,10 +57,11 @@ type StudentAnalysisService struct {
 	interviewSessionRepo    interviewSessionLister
 	interviewReportRepo     interviewReportFinder
 	resumeRepo              interfaces.ResumeDocumentFinder
+	identity                identityRevealer
 }
 
 func NewStudentAnalysisService(
-	db *gorm.DB,
+	access shared.CompanyAccessReader,
 	userRepo studentUserReader,
 	crossFeature interfaces.CrossFeatureIntegrationService,
 	weightScoreRepo *repositories.UserWeightScoreRepository,
@@ -66,7 +71,7 @@ func NewStudentAnalysisService(
 	resumeRepo interfaces.ResumeDocumentFinder,
 ) *StudentAnalysisService {
 	return &StudentAnalysisService{
-		db:                      db,
+		access:                  access,
 		userRepo:                userRepo,
 		crossFeature:            crossFeature,
 		weightScoreRepo:         weightScoreRepo,
@@ -77,26 +82,65 @@ func NewStudentAnalysisService(
 	}
 }
 
+// SetIdentityRevealer はスカウト承諾の有無で氏名を出す判定を入れる。
+func (s *StudentAnalysisService) SetIdentityRevealer(r identityRevealer) {
+	s.identity = r
+}
+
 // GetAnalysis 企業オーナー向けに学生の分析プロファイルを返す（company_ownerships 経由）
 func (s *StudentAnalysisService) GetAnalysis(ownerUserID, companyID, targetUserID uint) (*StudentAnalysisResponse, error) {
 	if err := s.requireCompanyOwner(ownerUserID, companyID); err != nil {
 		return nil, err
 	}
-	return s.buildAnalysis(targetUserID)
+	resp, err := s.buildAnalysis(targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.redactNameUnlessRevealed(resp, companyID, targetUserID); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 // GetAnalysisForVisibleStudent は認可済みの呼び出し元向けに分析プロファイルを返す（#1094 企業ポータル）。
 // 企業ポータルJWTは company_id を直接持つため company_ownerships の確認は不要だが、
-// 学生の公開同意チェック（buildAnalysis 内）は共通で必ず通る。
-func (s *StudentAnalysisService) GetAnalysisForVisibleStudent(targetUserID uint) (*StudentAnalysisResponse, error) {
-	return s.buildAnalysis(targetUserID)
+// 学生の公開同意チェック（buildAnalysis 内）と、承諾するまでの氏名非公開は共通で必ず通る。
+func (s *StudentAnalysisService) GetAnalysisForVisibleStudent(companyID, targetUserID uint) (*StudentAnalysisResponse, error) {
+	resp, err := s.buildAnalysis(targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.redactNameUnlessRevealed(resp, companyID, targetUserID); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// redactNameUnlessRevealed は、自社スカウトを承諾していない学生の氏名を空にする。
+// 判定を持たない組み立ては氏名を出さない。旧HR APIがこのチェックを飛ばせないようにする。
+func (s *StudentAnalysisService) redactNameUnlessRevealed(resp *StudentAnalysisResponse, companyID, userID uint) error {
+	if resp == nil {
+		return nil
+	}
+	if s.identity == nil || companyID == 0 {
+		resp.Name = ""
+		return nil
+	}
+	revealed, err := s.identity.IdentityRevealed(companyID, userID)
+	if err != nil {
+		return err
+	}
+	if !revealed {
+		resp.Name = ""
+	}
+	return nil
 }
 
 // buildAnalysis は認可後の共通組み立て処理。公開同意していない学生は ErrStudentNotVisible。
 func (s *StudentAnalysisService) buildAnalysis(targetUserID uint) (*StudentAnalysisResponse, error) {
 	student, err := s.userRepo.GetUserByID(targetUserID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrStudentNotVisible
 		}
 		return nil, err
@@ -138,7 +182,7 @@ func (s *StudentAnalysisService) requireCompanyOwner(userID, companyID uint) err
 	if companyID == 0 {
 		return shared.ErrForbidden
 	}
-	owns, err := shared.UserOwnsCompany(s.db, userID, companyID)
+	owns, err := shared.UserOwnsCompany(s.access, userID, companyID)
 	if err != nil {
 		return err
 	}

@@ -20,7 +20,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 )
 
 type InterviewController struct {
@@ -193,7 +192,7 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "session not found")
 		}
 		return httpapi.InternalError(err)

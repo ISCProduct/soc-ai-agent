@@ -15,7 +15,7 @@ script = textwrap.dedent(body)
 FAILED = []
 
 def run(name, env, issue_status, pr=None, expect_patch=None, hits=(), expect_warn=False,
-        desc='本文', expect_desc=None):
+        desc='本文', expect_desc=None, routes=()):
     d = tempfile.mkdtemp()
     os.makedirs(f'{d}/.github/scripts')
     src = open(f'{REPO}/.github/scripts/backlog_client.py', encoding='utf-8').read()
@@ -44,7 +44,11 @@ import urllib.request, io, json as _j
 class _R(io.BytesIO):
     def __enter__(self): return self
     def __exit__(self, *a): pass
-def _fake(req, *a, **k): return _R(b'[]' if '/commits' in req.full_url else {json.dumps(json.dumps(pr))}.encode())
+_ROUTES = {json.dumps(list(routes), ensure_ascii=False)}
+def _fake(req, *a, **k):
+    for frag, resp in _ROUTES:
+        if req.full_url.split('?')[0].endswith(frag): return _R(_j.dumps(resp).encode())
+    return _R(b'[]' if '/commits' in req.full_url else {json.dumps(json.dumps(pr))}.encode())
 urllib.request.urlopen = _fake
 '''
     e = dict(os.environ, GH_TOKEN='t', GH_REPO='o/r', **env)
@@ -107,6 +111,14 @@ run('P3 節の後ろの本文を URL 行に連結しない', dict(ACTION='opened
     expect_desc=f'本文\n\n## GitHub PR\nhttps://github.com/o/r/pull/8\n{U}\n追記メモ')
 run('P4 同じURLを二重に積まない(PATCHしない)', dict(ACTION='synchronize', PR_NUMBER='9'), (5, 'PR確認待ち'), pr=PRU,
     desc=f'本文\n\n## GitHub PR\n{U}')
+# --- 昇格PR: コミットが参照するPRにキーが無くても、ブランチ名の番号から Issue を辿る ---
+PROMO = dict(PRBASE, number=100, title='Release: develop to main', base={'ref': 'main'}, head={'ref': 'release'}, merged=True)
+run('Q 昇格PR→キー無しの子PRをブランチ名の番号から解決', dict(ACTION='closed', PR_NUMBER='100'), (6, 'ステージング環境反映'), pr=PROMO,
+    routes=[('/pulls/100/commits', [{'commit': {'message': 'fix: 監査ログ (#50)'}}]),
+            ('/issues/50', {'title': 'fix: 監査ログ (#50)', 'body': '', 'pull_request': {}}),
+            ('/pulls/50', {'head': {'ref': 'fix/1991-audit-log'}}),
+            ('/issues/1991', {'title': '[SOCAIAGENT-488] 監査ログ', 'body': ''})],
+    expect_patch=4)
 
 if FAILED:
     print('FAIL:', ', '.join(FAILED))

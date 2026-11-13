@@ -1,6 +1,8 @@
 package companyportal
 
 import (
+	"Backend/domain/repository"
+	"Backend/internal/services/notification"
 	"errors"
 	"fmt"
 	"log"
@@ -11,8 +13,6 @@ import (
 	"Backend/domain/entity"
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
-
-	"gorm.io/gorm"
 )
 
 // 同一企業→同一学生への再送クールダウン（#1095）。
@@ -47,6 +47,7 @@ type scoutStore interface {
 type scoutVisibility interface {
 	IsVisible(userID uint) (bool, error)
 	VisibleStudentNames(companyID uint, userIDs []uint) (map[uint]string, error)
+	IdentityRevealed(companyID, userID uint) (bool, error)
 }
 
 type scoutUserReader interface {
@@ -70,6 +71,12 @@ type ScoutService struct {
 	mailer    scoutMailer
 	now       func() time.Time
 	appURL    string
+	notifier  notification.Notifier
+}
+
+// SetNotifier はスカウトの受信を学生へ知らせる通知を設定する（#2033）。
+func (s *ScoutService) SetNotifier(n notification.Notifier) {
+	s.notifier = n
 }
 
 func NewScoutService(
@@ -112,6 +119,16 @@ func (in ScoutTemplateInput) Validate() error {
 		return &shared.ValidationError{Message: "本文が長すぎます"}
 	}
 	return nil
+}
+
+// anonymizeScoutMessage は企業に残す本文から登録氏名を除く。
+// クライアントが展開済みの文面を送っても、保存分には実名を残さない。
+func anonymizeScoutMessage(message, studentName string) string {
+	name := strings.TrimSpace(studentName)
+	if name == "" {
+		return message
+	}
+	return strings.ReplaceAll(message, name, "学生")
 }
 
 func InterpolateScoutBody(body, studentName, companyName string) string {
@@ -158,7 +175,7 @@ func (s *ScoutService) UpdateTemplate(companyID, id uint, in ScoutTemplateInput)
 		return nil, err
 	}
 	if err := s.store.UpdateTemplate(companyID, id, strings.TrimSpace(in.Title), strings.TrimSpace(in.Body)); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrScoutNotFound
 		}
 		return nil, err
@@ -171,7 +188,7 @@ func (s *ScoutService) DeleteTemplate(companyID, id uint) error {
 		return shared.ErrForbidden
 	}
 	if err := s.store.DeleteTemplate(companyID, id); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return ErrScoutNotFound
 		}
 		return err
@@ -194,7 +211,7 @@ type SendScoutResult struct {
 func (s *ScoutService) CooldownRemaining(companyID, userID uint) (time.Duration, error) {
 	last, err := s.store.LatestBetween(companyID, userID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return 0, nil
 		}
 		return 0, err
@@ -244,10 +261,11 @@ func (s *ScoutService) Send(companyID, companyUserID uint, in SendScoutInput) (*
 
 	var templateID *uint
 	message := strings.TrimSpace(in.Message)
+	emailMessage := message
 	if in.TemplateID != 0 {
 		tpl, err := s.store.FindTemplate(companyID, in.TemplateID)
 		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
+			if errors.Is(err, repository.ErrNotFound) {
 				return nil, &shared.ValidationError{Message: "テンプレートが見つかりません"}
 			}
 			return nil, err
@@ -255,8 +273,14 @@ func (s *ScoutService) Send(companyID, companyUserID uint, in SendScoutInput) (*
 		id := tpl.ID
 		templateID = &id
 		if message == "" {
-			message = InterpolateScoutBody(tpl.Body, student.Name, company.Name)
+			// 学生本人へのメールは実名。企業に残す文面は下で匿名にする。
+			emailMessage = InterpolateScoutBody(tpl.Body, student.Name, company.Name)
+			message = InterpolateScoutBody(tpl.Body, "学生", company.Name)
 		}
+	}
+	// 画面は展開済みの本文を送る。空のときだけ匿名化するのでは、実名が保存される。
+	if emailMessage == message {
+		message = anonymizeScoutMessage(message, student.Name)
 	}
 	if message == "" {
 		return nil, &shared.ValidationError{Message: "文面が空です"}
@@ -281,12 +305,24 @@ func (s *ScoutService) Send(companyID, companyUserID uint, in SendScoutInput) (*
 		return &SendScoutResult{RemainingMs: remaining.Milliseconds()}, ErrScoutCooldown
 	}
 
+	// アプリ内通知はメールより先に作る。メール送信（SMTP）が応答しないと、通知まで届かなくなるため（#2033）
+	if s.notifier != nil {
+		s.notifier.Notify(notification.Notice{
+			UserID:    in.UserID,
+			Kind:      models.NotificationKindScout,
+			Title:     "企業からスカウトが届きました",
+			Body:      company.Name + " からスカウトが届きました。内容を確認しましょう。",
+			Link:      "/scout",
+			DedupeKey: fmt.Sprintf("scout:%d", scout.ID),
+		})
+	}
+
 	if s.mailer != nil && student.Email != "" && !student.IsGuest {
 		appURL := s.appURL
 		if appURL == "" {
 			appURL = "http://localhost:3000"
 		}
-		if err := s.mailer.SendScoutOfferEmail(student.Email, student.Name, company.Name, message, appURL); err != nil {
+		if err := s.mailer.SendScoutOfferEmail(student.Email, student.Name, company.Name, emailMessage, appURL); err != nil {
 			log.Printf("[ScoutService] メール送信失敗 scout_id=%d: %v", scout.ID, err)
 		}
 	}
@@ -313,9 +349,26 @@ func (s *ScoutService) ListCompanyScouts(companyID uint, limit, offset int) ([]C
 	if err != nil {
 		return nil, 0, err
 	}
+	revealed := map[uint]bool{}
 	ids := make([]uint, 0, len(rows))
+	seen := map[uint]struct{}{}
 	for i := range rows {
-		ids = append(ids, rows[i].UserID)
+		id := rows[i].UserID
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		if s.visible == nil {
+			continue
+		}
+		ok, err := s.visible.IdentityRevealed(companyID, id)
+		if err != nil {
+			return nil, 0, err
+		}
+		if ok {
+			revealed[id] = true
+			ids = append(ids, id)
+		}
 	}
 	names := map[uint]string{}
 	if s.visible != nil && len(ids) > 0 {
@@ -326,9 +379,13 @@ func (s *ScoutService) ListCompanyScouts(companyID uint, limit, offset int) ([]C
 	}
 	out := make([]CompanyScoutView, 0, len(rows))
 	for i := range rows {
+		name := ""
+		if revealed[rows[i].UserID] {
+			name = names[rows[i].UserID]
+		}
 		out = append(out, CompanyScoutView{
 			Scout:       rows[i],
-			StudentName: names[rows[i].UserID],
+			StudentName: name,
 		})
 	}
 	return out, total, nil
@@ -367,14 +424,14 @@ func (s *ScoutService) ListStudentScouts(userID uint, limit, offset int) ([]Stud
 func (s *ScoutService) MarkViewed(userID, scoutID uint) (*models.Scout, error) {
 	scout, err := s.store.FindByIDForUser(userID, scoutID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrScoutNotFound
 		}
 		return nil, err
 	}
 	if scout.Status == models.ScoutStatusSent {
 		if err := s.store.UpdateStatusForUser(userID, scoutID, []string{models.ScoutStatusSent}, models.ScoutStatusViewed); err != nil {
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
+			if !errors.Is(err, repository.ErrNotFound) {
 				return nil, err
 			}
 		} else {
@@ -384,13 +441,42 @@ func (s *ScoutService) MarkViewed(userID, scoutID uint) (*models.Scout, error) {
 	return scout, nil
 }
 
+// Accept は学生がスカウトを承諾する。承諾した企業にだけ氏名を公開する。
+// 辞退済みは戻せない。既に承諾済みならそのまま返す。
+func (s *ScoutService) Accept(userID, scoutID uint) (*models.Scout, error) {
+	scout, err := s.store.FindByIDForUser(userID, scoutID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrScoutNotFound
+		}
+		return nil, err
+	}
+	if scout.Status == models.ScoutStatusDeclined {
+		return nil, &shared.ValidationError{Message: "辞退したスカウトは承諾できません"}
+	}
+	if scout.Status == models.ScoutStatusAccepted {
+		return scout, nil
+	}
+	if err := s.store.UpdateStatusForUser(
+		userID, scoutID,
+		[]string{models.ScoutStatusSent, models.ScoutStatusViewed},
+		models.ScoutStatusAccepted,
+	); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrScoutNotFound
+		}
+		return nil, err
+	}
+	return s.store.FindByIDForUser(userID, scoutID)
+}
+
 func (s *ScoutService) Decline(userID, scoutID uint) (*models.Scout, error) {
 	if err := s.store.UpdateStatusForUser(
 		userID, scoutID,
 		[]string{models.ScoutStatusSent, models.ScoutStatusViewed, models.ScoutStatusAccepted},
 		models.ScoutStatusDeclined,
 	); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrScoutNotFound
 		}
 		return nil, err

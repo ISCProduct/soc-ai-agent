@@ -61,8 +61,10 @@ var modelPricing = map[string][2]float64{
 const (
 	// PriceBasisListed は modelPricing の単価（公開価格、または AI_MODEL_PRICING_JSON で運用側が上書きした単価）。
 	// 一致したキーがモデル名そのもの・日付付きの版（-20…）・":" 付きの派生名のときだけ。
+	// 音声の単価では、公開価格の表に一致した単価と、STT_COST_PER_MINUTE_USD / TTS_COST_PER_1M_CHARS_USD で上書きした単価（#2224）。
 	PriceBasisListed = "listed"
 	// PriceBasisEstimated は estimatedPricing の単価（実価格を確認していない推定値）。
+	// 音声の単価では、表に無いモデルに既定値を当てた単価（#2224）。
 	PriceBasisEstimated = "estimated"
 	// PriceBasisInherited は、単価表に無いモデルが前方一致で別モデルの単価に当たったもの
 	// （例: o3-pro → o3、gpt-4o-mini-tts → gpt-4o-mini）。モデル自身の単価ではない（#2151 のレビュー）。
@@ -208,24 +210,66 @@ func isAudioPricedModel(model string) bool {
 //
 // STT は分単位、TTS は文字単位で課金され、トークン単価の表では表せない。
 //
-// TTS の既定値は 2026-05 時点、STT の表は 2026-11-11 に確認した公開価格に基づく。価格改定が入っている
-// 可能性があるため、実請求額との突き合わせで必ず確認すること（#1193 では旧価格が3年ぶん残っていた）。
+// STT の表は 2026-11-11、TTS の既定値（tts-1 の $15/100万文字）は 2026-11-13 に確認した公開価格に基づく。
+// 価格改定が入っている可能性があるため、実請求額との突き合わせで必ず確認すること（#1193 では旧価格が3年ぶん残っていた）。
 // 生の使用量（audio_seconds / characters）を保存しているので、単価が違っていても
 // 後から再計算できる。
+//
+// 単価の根拠（api_call_logs.price_basis）は、トークン単価と同じ考え方で付ける（#2224）。
+// 公開価格の表に一致した単価と、env で運用側が指定した単価（AI_MODEL_PRICING_JSON の上書きと同じく、
+// 運用側が確認した単価として扱う）は listed、表に無いモデルに既定値を当てた単価は estimated。
 
 // sttPricingPerMinute は STT のモデル別の分単価（USD per minute）。
 //
 // 以前はモデルに関係なく $0.006/分で計算していたが、既定のモデル gpt-transcribe は $0.0045/分、
 // gpt-4o-mini-transcribe は $0.003/分で、文字起こしの料金を多めに記録していた（#2173）。
 // 値は OpenAI の公式の価格ページ（https://developers.openai.com/api/docs/pricing）の標準料金で、
-// 2026-11-11 に確認した。whisper-1・gpt-4o-transcribe・gpt-4o-mini-transcribe は 2027-02-26 に
+// 2026-11-11 に確認した（gpt-4o-transcribe-diarize は 2026-11-13 に確認して追加。#2224）。
+// whisper-1・gpt-4o-transcribe・gpt-4o-mini-transcribe は 2027-02-26 に
 // 提供終了の予定だが、過去の記録や設定の残りを正しく計算できるよう残す。
 // 価格改定のときは、ここを直すか STT_COST_PER_MINUTE_USD で上書きする（上書きは全モデル一律の単価になる）。
-var sttPricingPerMinute = map[string]float64{
-	"gpt-transcribe":         0.0045,
-	"gpt-4o-transcribe":      0.006,
-	"gpt-4o-mini-transcribe": 0.003,
-	"whisper-1":              0.006,
+// STT の評価ハーネス（internal/sttbench）も PublishedSTTCostPerMinuteUSD でこの表を引く。表を写すと片方だけ古くなるため。
+//
+// estimate は、分単価が公式の概算かどうか。公式の価格ページの文字起こしの表（列は Input・Output・Estimated cost。
+// 2026-11-13 に再確認）で、gpt-4o-transcribe 系の3つは入力・出力のトークン単価が載っているトークン課金で、
+// 分単価は出力のトークン数で実額が変わる概算にすぎない。根拠は listed ではなく estimated にする（#2229 のレビュー）。
+// gpt-transcribe と Whisper はトークン単価が「-」で、分単価だけが載っている（分単価そのものが価格）。
+// 単価と概算かどうかを1つの表で持つのは、モデルを足すときに片方の表だけに書いて食い違わないようにするため（#2229 のレビュー）。
+var sttPricingPerMinute = map[string]sttPrice{
+	"gpt-transcribe":            {perMinute: 0.0045},
+	"gpt-4o-transcribe":         {perMinute: 0.006, estimate: true},
+	"gpt-4o-transcribe-diarize": {perMinute: 0.006, estimate: true},
+	"gpt-4o-mini-transcribe":    {perMinute: 0.003, estimate: true},
+	"whisper-1":                 {perMinute: 0.006},
+}
+
+// sttPrice は STT の1モデルの分単価と、それが公式の概算かどうか。
+type sttPrice struct {
+	perMinute float64
+	estimate  bool
+}
+
+// lookupSTTPrice は、STT のモデル名で分単価の表を引く。表に無ければ false。
+//
+// モデル名の照合はトークン単価表と同じく isSameModel を使い、日付付きの版名
+// （gpt-4o-mini-transcribe-2025-12-15 など）も同じモデルとみなす。前方一致にしないのは、
+// gpt-transcribe-pro のような表に無い別モデルに、別のモデルの単価を黙って当てないため。
+func lookupSTTPrice(model string) (sttPrice, bool) {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	for k, p := range sttPricingPerMinute {
+		// キー同士は isSameModel で互いに一致しないので、一致するキーは高々1つ（反復順に依存しない）
+		if isSameModel(lower, k) {
+			return p, true
+		}
+	}
+	return sttPrice{}, false
+}
+
+// STTPerMinuteIsEstimate は、表の分単価が公式の概算かを返す。表に無いモデルは false。
+// 評価ハーネス（internal/sttbench）が、見積もりの根拠を「公開単価」と「公開単価の目安」に分けるために使う。
+func STTPerMinuteIsEstimate(model string) bool {
+	p, ok := lookupSTTPrice(model)
+	return ok && p.estimate
 }
 
 // sttFallbackCostPerMinuteUSD は、表に無い STT モデルに使う分単価。
@@ -239,35 +283,74 @@ const sttCostOverrideEnv = "STT_COST_PER_MINUTE_USD"
 // sttPricingWarned は、表に無い STT モデルで計算したことを、モデルごとに1回だけログに出すための記録。
 var sttPricingWarned sync.Map
 
-// sttCostPerMinuteUSD は、STT のモデル名から分単価を返す。
-//
-// モデル名の照合はトークン単価表と同じく isSameModel を使い、日付付きの版名
-// （gpt-4o-mini-transcribe-2025-12-15 など）も同じモデルとみなす。前方一致にしないのは、
-// gpt-4o-transcribe-diarize のような別モデルに、別のモデルの単価を黙って当てないため。
-func sttCostPerMinuteUSD(model string) float64 {
-	// 解釈できない値は、以前（shared.GetFloatEnv）と同じく無視する
-	if raw := strings.TrimSpace(os.Getenv(sttCostOverrideEnv)); raw != "" {
-		if v, err := strconv.ParseFloat(raw, 64); err == nil {
-			return v
-		}
+// PublishedSTTCostPerMinuteUSD は、STT のモデルの分単価を表から返す。表に無ければ false。
+// env の上書きは見ない。評価ハーネス（internal/sttbench）が「公開価格での見積もり」を出すために使う。
+// 概算（estimate）かどうかは STTPerMinuteIsEstimate で分かる。
+func PublishedSTTCostPerMinuteUSD(model string) (float64, bool) {
+	p, ok := lookupSTTPrice(model)
+	return p.perMinute, ok
+}
+
+// sttCostPerMinuteUSD は、STT のモデル名から分単価と、その根拠を返す。
+// STT_COST_PER_MINUTE_USD の上書きと、分単価が公開価格のモデルは listed。分単価が公式の概算のモデル
+// （sttPricingPerMinute の estimate）と、表に無く既定値で計算したときは estimated（#2224、#2229 のレビュー）。
+func sttCostPerMinuteUSD(model string) (float64, string) {
+	if v, ok := audioRateOverride(sttCostOverrideEnv); ok {
+		return v, PriceBasisListed
 	}
-	lower := strings.ToLower(strings.TrimSpace(model))
-	for k, p := range sttPricingPerMinute {
-		// キー同士は isSameModel で互いに一致しないので、一致するキーは高々1つ（反復順に依存しない）
-		if isSameModel(lower, k) {
-			return p
+	if p, ok := lookupSTTPrice(model); ok {
+		if p.estimate {
+			return p.perMinute, PriceBasisEstimated
 		}
+		return p.perMinute, PriceBasisListed
 	}
 	// 表の検索と同じく小文字にそろえる（大文字・小文字の違いで2回出さない）
+	lower := strings.ToLower(strings.TrimSpace(model))
 	if _, loaded := sttPricingWarned.LoadOrStore(lower, struct{}{}); !loaded {
 		log.Printf("[APICost] 音声認識のモデル %q は分単価の表に無いため $%g/分で計算しています（%s で上書きするか、表に単価を登録してください）",
 			lower, sttFallbackCostPerMinuteUSD, sttCostOverrideEnv)
 	}
-	return sttFallbackCostPerMinuteUSD
+	return sttFallbackCostPerMinuteUSD, PriceBasisEstimated
 }
 
-func ttsCostPer1MCharsUSD() float64 {
-	return shared.GetFloatEnv("TTS_COST_PER_1M_CHARS_USD", 15.0)
+// ttsCostOverrideEnv は、TTS の文字単価をモデルに関係なく上書きする env。
+const ttsCostOverrideEnv = "TTS_COST_PER_1M_CHARS_USD"
+
+// ttsDefaultCostPer1MCharsUSD は TTS の既定の文字単価（USD per 1M characters）。
+// tts-1 の公開価格（$15.00 / 1M characters）で、2026-11-13 に公式の価格ページで確認した。
+const ttsDefaultCostPer1MCharsUSD = 15.0
+
+// ttsDefaultPricedModel は、既定の文字単価が公開価格そのものであるモデル（今の既定の TTS モデル）。
+const ttsDefaultPricedModel = "tts-1"
+
+// ttsCostPer1MCharsUSD は、TTS の文字単価と、その根拠を返す。単価はモデルに関係なく同じ（以前どおり）。
+//
+// 根拠は、TTS_COST_PER_1M_CHARS_USD の上書きと tts-1 は listed。それ以外のモデルは estimated にする。
+// $15 は tts-1 の公開価格で、ほかのモデルの単価ではない（tts-1-hd は $30 / 100万文字、
+// gpt-4o-mini-tts はトークン課金。どちらも 2026-11-13 の公式の価格ページ）。印を付けないと、
+// OPENAI_TTS_MODEL を変えたときに少なく見積もっていても管理画面で気づけない（#2224）。
+func ttsCostPer1MCharsUSD(model string) (float64, string) {
+	if v, ok := audioRateOverride(ttsCostOverrideEnv); ok {
+		return v, PriceBasisListed
+	}
+	if isSameModel(strings.ToLower(strings.TrimSpace(model)), ttsDefaultPricedModel) {
+		return ttsDefaultCostPer1MCharsUSD, PriceBasisListed
+	}
+	return ttsDefaultCostPer1MCharsUSD, PriceBasisEstimated
+}
+
+// audioRateOverride は、音声の単価を上書きする env を読む。未設定・解釈できない値は無視する
+// （以前の shared.GetFloatEnv と同じ扱い。計測の設定ミスでサーバーを止めない）。
+func audioRateOverride(env string) (float64, bool) {
+	raw := strings.TrimSpace(os.Getenv(env))
+	if raw == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
 }
 
 // webSearchCostPerCallUSD は web_search ツール1コールあたりの料金。
@@ -287,19 +370,42 @@ func webSearchCostPerCallUSD() float64 {
 }
 
 // calculateAudioCost は音声経路のコストを返す。ローカル推論は 0。
-// STT の分単価は model で引く（#2173）。TTS の文字単価はモデルに関係なく同じ。
 func calculateAudioCost(provider, model string, audioSeconds float64, characters int) float64 {
+	cost, _ := audioCost(provider, model, audioSeconds, characters)
+	return cost
+}
+
+// audioCost は、音声の単価での料金と、使った単価の根拠を同じ計算で返す（#2224）。
+// STT の分単価は model で引く（#2173）。TTS の文字単価はモデルに関係なく同じ。
+// ローカル推論は単価を使わないので、料金は 0、根拠は空。
+//
+// 秒から分へは按分で換算し、切り上げない（30秒なら0.5分ぶん）。実際の課金が分単位の丸めかどうかは
+// 価格表からは分からないため、#2173 以前と同じ近似のまま。生の秒数（audio_seconds）を残しているので、
+// 丸めると分かったら後から再計算できる。
+//
+// 秒数と文字数の両方がある行は、STT と TTS の根拠のうち注意が必要なほうを返す。
+func audioCost(provider, model string, audioSeconds float64, characters int) (float64, string) {
 	if provider != "" && !strings.EqualFold(provider, "openai") {
-		return 0
+		return 0, ""
 	}
 	cost := 0.0
+	basis := ""
 	if audioSeconds > 0 {
-		cost += audioSeconds / 60.0 * sttCostPerMinuteUSD(model)
+		rate, b := sttCostPerMinuteUSD(model)
+		cost += audioSeconds / 60.0 * rate
+		basis = b
 	}
 	if characters > 0 {
-		cost += float64(characters) / 1_000_000.0 * ttsCostPer1MCharsUSD()
+		rate, b := ttsCostPer1MCharsUSD(model)
+		cost += float64(characters) / 1_000_000.0 * rate
+		// worsePriceBasis は空を listed と同じ順位で扱うので、STT の根拠が無いときはそのまま使う
+		if basis == "" {
+			basis = b
+		} else {
+			basis = worsePriceBasis(basis, b)
+		}
 	}
-	return cost
+	return cost, basis
 }
 
 // modelPricingOverrideEnv は単価表を再ビルドなしに差し替える env（#1294 DesignDoc §3.4）。
@@ -406,9 +512,9 @@ func usageCostUSD(u openaiPkg.Usage) float64 {
 	return cost
 }
 
-// usageCostAndBasis は、1コールぶんの課金額と、トークン単価の根拠を同じ計算で返す（#2004）。
-// 根拠は記録する時点の単価表で決まり、api_call_logs.price_basis に残す。トークン単価表を使ったときだけ付け、
-// 音声の単価で計算した行・ローカル推論の行・トークンが0の行（web_search のツール料だけの行）は空にする。
+// usageCostAndBasis は、1コールぶんの課金額と、単価の根拠を同じ計算で返す（#2004）。
+// 根拠は記録する時点の単価で決まり、api_call_logs.price_basis に残す。トークン単価表を使った行と、
+// 音声の単価（分・文字数）で計算した行（#2224）に付け、ローカル推論の行・トークンが0の行（web_search のツール料だけの行）は空にする。
 // 料金の計算と根拠の判定を別々に書くと、片方だけ変わったときに根拠が料金の計算方法と食い違うので、まとめている。
 func usageCostAndBasis(u openaiPkg.Usage) (float64, string) {
 	// 音声経路（STT/TTS）はトークンが返らない。秒数・文字数から計算する。
@@ -417,7 +523,7 @@ func usageCostAndBasis(u openaiPkg.Usage) (float64, string) {
 	basis := ""
 	switch {
 	case u.AudioSeconds > 0 || u.Characters > 0:
-		cost = calculateAudioCost(u.Provider, u.Model, u.AudioSeconds, u.Characters)
+		cost, basis = audioCost(u.Provider, u.Model, u.AudioSeconds, u.Characters)
 	case u.PromptTokens+u.CompletionTokens > 0:
 		cost, basis = tokenCost(u.Provider, u.Model, u.PromptTokens, u.CompletionTokens)
 	}
@@ -659,7 +765,9 @@ func (s *APICostService) GetModelBreakdown(since time.Time) ([]ModelCostSummary,
 
 // summaryPriceBasis は内訳の1行に付ける単価の根拠を返す。金額が0の行（ローカル推論など、
 // 単価を使っていない行）は空にする。単価表に無いローカルのモデル名が「単価未登録」と出ないようにするため。
-// 音声の単価（分・文字数）で課金するモデルも、トークン単価表を使っていないので空にする（#2151 のレビュー）。
+// 音声の単価（分・文字数）で課金するモデルは、記録した根拠（#2224）だけを出し、トークン単価表では判定しない
+// （トークン単価表を使っていないので「単価未登録」などと出さない。#2151 のレビュー）。根拠を記録する前の
+// 音声の行は空のまま（今の単価で判定し直すと、過去の行の単価の状態を正しく表さないため）。
 //
 // 根拠は、記録した時点の値（api_call_logs.price_basis）を使う（#2004）。recorded は、期間内の行のうち
 // 一番注意が必要な根拠（unknown > inherited > estimated > listed）。hasUnrecorded は、トークン単価で計算したのに
@@ -667,8 +775,20 @@ func (s *APICostService) GetModelBreakdown(since time.Time) ([]ModelCostSummary,
 // どちらも無ければ、トークン単価を使った行が無いので空にする。デプロイ直後の、古い行と新しい行が
 // 混ざる期間に、新しい行だけで「公開価格」と表示して古い行の状態を隠さないため。
 func summaryPriceBasis(model string, totalCostUSD float64, recorded string, hasUnrecorded bool) string {
-	if totalCostUSD <= 0 || isAudioPricedModel(model) {
+	if totalCostUSD <= 0 {
 		return ""
+	}
+	if isAudioPricedModel(model) {
+		// 音声の行そのものは ModelBreakdown の hasUnrecorded に数えない（秒数・文字数のある行は除く）。
+		// ただし同じモデル名で、トークンで課金された記録の無い行が期間内にあれば、それはトークン単価表で
+		// 判定し、注意が必要なほうを出す（音声の行の記録だけで、トークンの行の状態を隠さない。#2229 のレビュー）。
+		if hasUnrecorded {
+			if recorded == "" {
+				return PriceBasis(model)
+			}
+			return worsePriceBasis(recorded, PriceBasis(model))
+		}
+		return recorded
 	}
 	if recorded == "" {
 		// 記録が無く、記録の無いトークンの行も無い ＝ トークン単価を使った行が無い（Web 検索のツール料だけなど）

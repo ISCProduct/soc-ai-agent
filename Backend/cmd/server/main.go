@@ -13,6 +13,7 @@ import (
 	githubcontrollers "Backend/internal/controllers/github"
 	insightcontrollers "Backend/internal/controllers/insight"
 	interviewcontrollers "Backend/internal/controllers/interview"
+	notificationcontrollers "Backend/internal/controllers/notification"
 	releasecontrollers "Backend/internal/controllers/release"
 	resumecontrollers "Backend/internal/controllers/resume"
 	schedulecontrollers "Backend/internal/controllers/schedule"
@@ -50,6 +51,7 @@ import (
 	"Backend/internal/services/interview"
 	"Backend/internal/services/maintenance"
 	"Backend/internal/services/matching"
+	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/oauth"
 	"Backend/internal/services/organization"
 	"Backend/internal/services/refreshtoken"
@@ -292,6 +294,8 @@ func main() {
 	skillScoreRepo := repositories.NewSkillScoreRepository(db)
 	// 応募・選考ステータス
 	appStatusRepo := repositories.NewUserApplicationStatusRepository(db)
+	// 管理者・企業所有者の判定(応募管理・学生分析・面接の企業ブリーフが使う)
+	companyAccessRepo := repositories.NewCompanyAccessRepository(db)
 	// APIコストモニタリング
 	apiCallLogRepo := repositories.NewAPICallLogRepository(db)
 	aiBudgetRepo := repositories.NewAIBudgetRepository(db)
@@ -422,7 +426,7 @@ func main() {
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
 	interviewService.SetCompanyRepo(companyPublicRepo)
 	interviewService.SetCompanyOwnerChecker(func(userID, companyID uint) (bool, error) {
-		return shared.UserOwnsCompany(db, userID, companyID)
+		return shared.UserOwnsCompany(companyAccessRepo, userID, companyID)
 	})
 	resumeService.SetCrossFeatureService(crossFeatureService)
 
@@ -518,12 +522,20 @@ func main() {
 	adminDashboardController := admincontrollers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminDashboardController.SetSchoolService(schoolService)
 	adminDashboardController.SetOrganizationService(organizationService)
+	adminDashboardController.SetFunnelSource(repositories.NewConversionFunnelRepository(db))
 	adminCostsController := admincontrollers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
 	adminAIBudgetController := admincontrollers.NewAIBudgetController(aiBudgetService, auditLogService)
 	userAIBudgetController := usercontrollers.NewAIBudgetController(aiBudgetService)
 	adminVectorController := admincontrollers.NewAdminVectorController(admin.NewAdminVectorService())
 	profileRecalcService := flywheel.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
 	profileRecalcController := admincontrollers.NewAdminProfileRecalculationController(profileRecalcService)
+	userScoreRecalculationService := admin.NewUserScoreRecalculationService(
+		userWeightScoreRepo,
+		repositories.NewUserScoreRecalculationRepository(db),
+		chatService,
+		matchingService,
+	)
+	userScoreRecalculationController := admincontrollers.NewUserScoreRecalculationController(userScoreRecalculationService)
 	companyEntryService := company.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
 	authService.SetCompanyOwnershipClaimer(companyEntryService)
 	companyEntryController := companycontrollers.NewCompanyEntryController(companyEntryService)
@@ -549,11 +561,14 @@ func main() {
 	// ES添削の結果を履歴として残し、前回との差分とスコア連携を行う(#1531)。
 	esReviewRepo := repositories.NewESReviewRepository(db)
 	esReviewController.SetReviewService(esreview.NewService(esReviewRepo, crossFeatureService))
-	appService := application.NewApplicationService(appStatusRepo, matchRepo, db)
+	// アプリ内通知（#2033）。応募・スカウト・先生の案内・予定の前日に、学生へ知らせる
+	notificationService := notificationsvc.NewService(repositories.NewNotificationRepository(db))
+	appService := application.NewApplicationService(appStatusRepo, matchRepo, db, companyAccessRepo)
+	appService.SetNotifier(notificationService)
 	appController := applicationcontrollers.NewApplicationController(appService)
 	appController.SetSchoolAccess(schoolService)
 	hrStudentAnalysisService := hr.NewStudentAnalysisService(
-		db,
+		companyAccessRepo,
 		userRepo,
 		crossFeatureService,
 		userWeightScoreRepo,
@@ -567,6 +582,7 @@ func main() {
 	studentSearchRepo := repositories.NewStudentSearchRepository(db)
 	companyStudentTagRepo := repositories.NewCompanyStudentTagRepository(db)
 	studentSemanticClient := hr.NewStudentSemanticClient()
+	hrStudentAnalysisService.SetIdentityRevealer(studentSearchRepo)
 	studentSearchService := hr.NewStudentSearchService(studentSearchRepo, companyStudentTagRepo, studentSemanticClient)
 	industryRepo := repositories.NewIndustryRepository(db)
 	companyStudentController := companycontrollers.NewCompanyStudentController(studentSearchService, hrStudentAnalysisService, industryRepo)
@@ -662,10 +678,11 @@ func main() {
 	teacherInsightController := insightcontrollers.NewTeacherStudentInsightController(teacherInsightService)
 	guidanceRepo := repositories.NewTeacherStudentGuidanceRepository(db)
 	guidanceService := teacher.NewGuidanceService(guidanceRepo, userRepo)
+	guidanceService.SetNotifier(notificationService)
 	teacherGuidanceController := insightcontrollers.NewTeacherGuidanceController(guidanceService, schoolService)
 	teacherESReviewController := insightcontrollers.NewTeacherESReviewController(esReviewRepo)
 	studentGuidanceController := usercontrollers.NewStudentGuidanceController(guidanceService)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, teacherGuidanceController, teacherESReviewController, userRepo, schoolService, cfg.AdminSecret, adminAIBudgetController)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, userScoreRecalculationController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, teacherGuidanceController, teacherESReviewController, userRepo, schoolService, cfg.AdminSecret, adminAIBudgetController)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 適性検査 第1段（#1678）。結果は source=assessment で user_weight_scores へ入り、マッチングへ合流する
 	assessmentRepo := repositories.NewAssessmentRepository(db)
@@ -684,6 +701,7 @@ func main() {
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupESRoutes(api, esRewriteController, esReviewController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
+	routes.SetupNotificationRoutes(api, notificationcontrollers.NewController(notificationService), cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)
 	// 企業ポータルのダッシュボードと応募者管理 (#1320)。
@@ -712,6 +730,7 @@ func main() {
 	// 通知メールのリンクはデプロイが設定する APP_URL を使う。
 	// FRONTEND_URL は staging / production に無く、未設定だと localhost になる。
 	scoutService := companyportal.NewScoutService(scoutRepo, studentSearchRepo, userRepo, companyRepo, emailService, config.AppURL())
+	scoutService.SetNotifier(notificationService)
 	companyPortalScoutController := companycontrollers.NewCompanyPortalScoutController(scoutService)
 	studentScoutController := usercontrollers.NewStudentScoutController(scoutService)
 	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyPortalInterviewQuestionController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, companyPortalSchoolApplicationController, companyPortalScoutController, cfg.CompanyUserSecret, companyUserRepo, companyRepo)
@@ -728,7 +747,7 @@ func main() {
 	adminEntry.GET("/companies/:id/company-users", adminCompanyUserController.List)
 	adminEntry.PATCH("/companies/:id/company-users/:userID", adminCompanyUserController.SetDisabled)
 	// 学習データのエクスポート(#268)。候補者の発話と選考結果を含むため管理者のみ。
-	adminTrainingController := admincontrollers.NewAdminTrainingController(training.NewService(db))
+	adminTrainingController := admincontrollers.NewAdminTrainingController(training.NewService(repositories.NewTrainingExportRepository(db)))
 	// stats は件数しか返さない(個人情報を含まない)。運用から機械的に叩けるよう、
 	// whats-new/ingest と同じサービス間認証にする。管理者になりすます形を避ける。
 	api.GET("/admin/training/stats", adminTrainingController.Stats, routes.EchoStaticSecretAuth(cfg.ServiceSecret))
@@ -746,6 +765,8 @@ func main() {
 	// 同じ goroutine に入れると、ここが落ちたときにクロールごと止まる。
 	safego.Go(crawlService.EnsureL1WarmCrawlSource)
 	safego.Every(1*time.Minute, false, crawlService.RunDueSources)
+	// 予定（締切・面接など）の前日通知（#2033）。同じ予定には1件だけ（dedupe_key）
+	safego.Every(1*time.Hour, true, notificationService.NotifyUpcomingSchedules)
 
 	// 退会ユーザーの猶予期間経過後の物理削除（1日1回）
 	safego.Every(24*time.Hour, true, func() {
@@ -769,11 +790,11 @@ func main() {
 		}
 	})
 
-	// 期限切れの仮登録・リフレッシュトークンの物理削除（1日1回、#2153）。
+	// 期限切れの仮登録・リフレッシュトークン（学生・企業ユーザー）の物理削除（1日1回、#2153・#2184）。
 	// 退会ユーザーの処理とは別の周期にする。あちらは RAG への HTTP を退会者ごとに待つので、
 	// 障害時に何時間も塞がり、DB だけで済むこの削除まで止まってしまうため（#2179 のレビュー）。
 	// 件数と失敗は Run の中でログに出す。
-	expiredTokenPurger := maintenance.NewExpiredTokenPurger(pendingRegistrationRepo, refreshTokenRepo, slog.Default())
+	expiredTokenPurger := maintenance.NewExpiredTokenPurger(pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, slog.Default())
 	safego.Every(24*time.Hour, true, func() {
 		expiredTokenPurger.Run(time.Now().UTC())
 	})

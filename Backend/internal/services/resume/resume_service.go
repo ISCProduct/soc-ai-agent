@@ -21,8 +21,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 // allowedMIMETypes はアップロード可能なファイルタイプ
@@ -258,7 +256,7 @@ type ResumeUploadResult struct {
 
 func (s *ResumeService) EnsureDocumentOwner(documentID uint, requestingUserID uint) error {
 	if _, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return shared.ErrForbidden
 		}
 		return err
