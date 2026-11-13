@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"Backend/internal/repositories"
 	"testing"
 	"time"
 
@@ -37,8 +38,8 @@ func TestDeleteAccount_DBNotConfigured(t *testing.T) {
 
 func TestDeleteAccount_SoftWithdraw(t *testing.T) {
 	db, mock := newAuthServiceTestDB(t)
-	svc := &AuthService{db: db}
-	svc.rebuildDeletionService()
+	svc := &AuthService{}
+	svc.SetDeletionService(NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), nil, nil))
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT \\* FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").
@@ -72,8 +73,8 @@ func TestDeleteAccount_SoftWithdraw(t *testing.T) {
 
 func TestDeleteAccount_AlreadyWithdrawn(t *testing.T) {
 	db, mock := newAuthServiceTestDB(t)
-	svc := &AuthService{db: db}
-	svc.rebuildDeletionService()
+	svc := &AuthService{}
+	svc.SetDeletionService(NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), nil, nil))
 
 	now := time.Now().UTC()
 	mock.ExpectBegin()
@@ -87,47 +88,6 @@ func TestDeleteAccount_AlreadyWithdrawn(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sqlmock expectations: %v", err)
-	}
-}
-
-func TestCollectInterviewAndResumeIDs(t *testing.T) {
-	db, mock := newAuthServiceTestDB(t)
-
-	mock.ExpectQuery("SELECT `id` FROM `interview_sessions` WHERE user_id = \\?").
-		WithArgs(uint(9)).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(3).AddRow(5))
-	mock.ExpectQuery("SELECT `id` FROM `resume_documents` WHERE user_id = \\?").
-		WithArgs(uint(9)).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(11))
-	mock.ExpectQuery("SELECT `id` FROM `resume_reviews` WHERE document_id IN \\(\\?\\)").
-		WithArgs(uint(11)).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(21))
-
-	interviewIDs, err := collectInterviewSessionIDs(db, 9)
-	if err != nil {
-		t.Fatalf("collectInterviewSessionIDs: %v", err)
-	}
-	if len(interviewIDs) != 2 || interviewIDs[0] != 3 || interviewIDs[1] != 5 {
-		t.Fatalf("interviewIDs=%v", interviewIDs)
-	}
-
-	docIDs, err := collectResumeDocumentIDs(db, 9)
-	if err != nil {
-		t.Fatalf("collectResumeDocumentIDs: %v", err)
-	}
-	if len(docIDs) != 1 || docIDs[0] != 11 {
-		t.Fatalf("docIDs=%v", docIDs)
-	}
-
-	reviewIDs, err := collectResumeReviewIDs(db, docIDs)
-	if err != nil {
-		t.Fatalf("collectResumeReviewIDs: %v", err)
-	}
-	if len(reviewIDs) != 1 || reviewIDs[0] != 21 {
-		t.Fatalf("reviewIDs=%v", reviewIDs)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet: %v", err)
 	}
 }
 

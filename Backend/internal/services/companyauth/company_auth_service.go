@@ -1,6 +1,7 @@
 package companyauth
 
 import (
+	"Backend/domain/repository"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -134,7 +135,7 @@ func (s *CompanyUserService) Invite(companyID uint, req InviteRequest) (*models.
 
 	var company models.Company
 	if err := s.db.First(&company, companyID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrCompanyNotFound
 		}
 		return nil, err

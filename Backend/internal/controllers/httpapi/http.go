@@ -33,6 +33,7 @@ const (
 	ErrCodeConflict        = "CONFLICT"
 	ErrCodeTooManyRequests = "TOO_MANY_REQUESTS"
 	ErrCodeGatewayTimeout  = "GATEWAY_TIMEOUT"
+	ErrCodeBadGateway      = "BAD_GATEWAY"
 )
 
 // ── ヘルパー関数 ──────────────────────────────────────────────────────────────

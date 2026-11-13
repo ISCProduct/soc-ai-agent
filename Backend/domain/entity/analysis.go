@@ -56,14 +56,15 @@ func (p *UserAnalysisProgress) CompletionPercent() float64 {
 
 // UserWeightScore ユーザーの重みカテゴリ別スコアエンティティ
 type UserWeightScore struct {
-	ID             uint
-	UserID         uint
-	SessionID      string
-	WeightCategory string
-	Score          int
-	PromptVersion  string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID                 uint
+	UserID             uint
+	SessionID          string
+	WeightCategory     string
+	Score              int
+	CalculationVersion string
+	PromptVersion      string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // SessionValidation セッションバリデーション状態エンティティ

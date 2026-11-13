@@ -1,4 +1,4 @@
-import { ADMIN_NAV, activeAdminNavItem, visibleAdminNav } from '@/lib/admin-nav'
+import { ADMIN_NAV, activeAdminNavItem, visibleAdminNav } from '@/lib/admin/nav'
 
 describe('visibleAdminNav', () => {
   it('プラットフォーム管理者にはシステム管理を出す', () => {
@@ -53,6 +53,12 @@ describe('ADMIN_NAV', () => {
   it('href が重複しない', () => {
     const hrefs = ADMIN_NAV.flatMap((g) => g.items.map((i) => i.href))
     expect(new Set(hrefs).size).toBe(hrefs.length)
+  })
+
+  it('ユーザースコア再計算をプラットフォーム管理へ表示する', () => {
+    const item = ADMIN_NAV.flatMap((group) => group.items).find((candidate) => candidate.href === '/admin/user-score-recalculation')
+    expect(item?.title).toBe('ユーザースコア再計算')
+    expect(visibleAdminNav(true).flatMap((group) => group.items)).toContain(item)
   })
 
   it('全項目に説明と具体的な操作名がある', () => {

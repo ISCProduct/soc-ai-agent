@@ -422,3 +422,52 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
           retention-days: 7
+
+  # ── Atlas migrate lint（マイグレーションの衝突/順序逆転/破壊的変更を検出）──────────
+  # 既存の golang-migrate 形式 Backend/migrations（6桁連番 up/down）を、形式変換せずに
+  # そのまま Atlas で lint する。ランタイム適用は従来どおり golang-migrate(embed) のままで、
+  # Atlas はここ（CIゲート）とローカルの atlas.sum 生成でしか使わない（本番適用経路は不変）。
+  #
+  # 何を見るか（automation/test/migration-version-unique-test.sh の上位互換）:
+  #   - atlas.sum の整合: 並行PRで採番が衝突すると atlas.sum が食い違い/コンフリクトして顕在化
+  #   - このPRが追加したマイグレーション差分に対し、破壊的変更 / データ依存変更 /
+  #     後方非互換 / 順序逆転(non-linear) を検出
+  # 解析は Atlas Cloud 不要・使い捨ての MySQL(docker://mysql/8/dev) だけで完結する。
+  atlas-migrate-lint:
+    name: Atlas migrate lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # base との差分に対して lint する。push では比較対象の base が無いためスキップする。
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # base との差分（このPRが足したマイグレーション）を特定するため全履歴を取得する。
+          fetch-depth: 0
+      - name: Install Atlas (Community Edition)
+        # v0.38 以降、公式版の `atlas migrate lint` は Atlas Pro(atlas login)必須になったが、
+        # Community Edition では引き続き無料・ログイン不要で使える（Apache-2.0）。
+        # Atlas Cloud アカウントもトークンも要らない。
+        run: |
+          mkdir -p "$HOME/.atlas/bin"
+          curl -fsSL "https://release.ariga.io/atlas/atlas-community-linux-amd64-latest" -o "$HOME/.atlas/bin/atlas"
+          chmod +x "$HOME/.atlas/bin/atlas"
+          echo "$HOME/.atlas/bin" >> "$GITHUB_PATH"
+          "$HOME/.atlas/bin/atlas" version
+      - name: Check atlas.sum integrity
+        # マイグレーション追加時に `make migrate-hash` を忘れていないか検査する。
+        # 並行PRの採番衝突はこの atlas.sum の不一致/コンフリクトとして顕在化する。
+        run: |
+          atlas migrate hash --env migrations
+          if ! git diff --exit-code Backend/migrations/atlas.sum; then
+            echo "::error::atlas.sum が最新ではありません。'make migrate-hash' を実行してコミットしてください" >&2
+            exit 1
+          fi
+      - name: Lint migrations
+        # このPRが base(develop 等)に対して足したマイグレーションだけを解析し、
+        # 破壊的変更 / データ依存変更 / 後方非互換 / 順序逆転(non-linear) を検出する。
+        run: |
+          git fetch --quiet origin "${{ github.base_ref }}"
+          atlas migrate lint --env migrations --git-base "origin/${{ github.base_ref }}"

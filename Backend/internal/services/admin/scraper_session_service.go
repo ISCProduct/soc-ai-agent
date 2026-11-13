@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"encoding/json"
@@ -11,8 +12,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type ScraperSessionService struct {
@@ -69,7 +68,7 @@ func (s *ScraperSessionService) Delete(siteKey string) error {
 func (s *ScraperSessionService) GetCookiesForSite(siteKey string) []models.ScraperCookie {
 	session, err := s.repo.GetBySiteKey(siteKey)
 	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
+		if !errors.Is(err, repository.ErrNotFound) {
 			log.Printf("[ScraperSession] failed to get session for %s: %v", siteKey, err)
 		}
 		return nil
