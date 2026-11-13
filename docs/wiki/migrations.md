@@ -67,7 +67,14 @@ DB_HOST=127.0.0.1 go run ./cmd/migrate force <N>  # バージョンを強制設�
    手元で lint も回すなら `make migrate-lint`（Docker が要る）。
 
    > `make migrate-hash` / `make migrate-lint` には Atlas CLI が必要です。
-   > 導入: `curl -sSf https://atlasgo.sh | sh`（community 版で十分）。
+   > **Community Edition** を入れてください（v0.38 以降、`atlas migrate lint` は
+   > 公式版だと Atlas Pro=login 必須になりましたが、Community では無料・ログイン不要）。
+   >
+   > ```bash
+   > # macOS(arm64) の例。amd64 や linux は -darwin-arm64 の部分を差し替える
+   > curl -fsSL https://release.ariga.io/atlas/atlas-community-darwin-arm64-latest \
+   >   -o "$(go env GOPATH)/bin/atlas" && chmod +x "$(go env GOPATH)/bin/atlas"
+   > ```
 
 ### 書き方の注意
 

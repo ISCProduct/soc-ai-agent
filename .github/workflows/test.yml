@@ -441,20 +441,33 @@ jobs:
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
-      # lint 結果をPRに要約コメントとして残すため（検出有無の判定自体には不要）。
-      pull-requests: write
     steps:
       - uses: actions/checkout@v7
         with:
           # base との差分（このPRが足したマイグレーション）を特定するため全履歴を取得する。
           fetch-depth: 0
-      - name: Set up Atlas
-        uses: ariga/setup-atlas@v0
+      - name: Install Atlas (Community Edition)
+        # v0.38 以降、公式版の `atlas migrate lint` は Atlas Pro(atlas login)必須になったが、
+        # Community Edition では引き続き無料・ログイン不要で使える（Apache-2.0）。
+        # Atlas Cloud アカウントもトークンも要らない。
+        run: |
+          mkdir -p "$HOME/.atlas/bin"
+          curl -fsSL "https://release.ariga.io/atlas/atlas-community-linux-amd64-latest" -o "$HOME/.atlas/bin/atlas"
+          chmod +x "$HOME/.atlas/bin/atlas"
+          echo "$HOME/.atlas/bin" >> "$GITHUB_PATH"
+          "$HOME/.atlas/bin/atlas" version
+      - name: Check atlas.sum integrity
+        # マイグレーション追加時に `make migrate-hash` を忘れていないか検査する。
+        # 並行PRの採番衝突はこの atlas.sum の不一致/コンフリクトとして顕在化する。
+        run: |
+          atlas migrate hash --env migrations
+          if ! git diff --exit-code Backend/migrations/atlas.sum; then
+            echo "::error::atlas.sum が最新ではありません。'make migrate-hash' を実行してコミットしてください" >&2
+            exit 1
+          fi
       - name: Lint migrations
-        uses: ariga/atlas-action/migrate/lint@v1
-        with:
-          config: file://atlas.hcl
-          env: migrations
-          # マイグレーションディレクトリの論理名（レポート用の必須入力）。
-          # Atlas Cloud には登録しない（lint は Cloud 不要で完結する）。
-          dir-name: soc-ai-agent-migrations
+        # このPRが base(develop 等)に対して足したマイグレーションだけを解析し、
+        # 破壊的変更 / データ依存変更 / 後方非互換 / 順序逆転(non-linear) を検出する。
+        run: |
+          git fetch --quiet origin "${{ github.base_ref }}"
+          atlas migrate lint --env migrations --git-base "origin/${{ github.base_ref }}"
