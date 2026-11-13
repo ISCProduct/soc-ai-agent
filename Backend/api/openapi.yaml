@@ -775,6 +775,7 @@ paths:
         新しいトークンを発行して、前のトークンは使えなくなる。
         アカウントの有無・認証済みか否かにかかわらず、常に同じ 200 を返す（存在を伏せる）。
         IP 単位とメールアドレス単位のレート制限がかかる。メールアドレス単位の上限を超えたときも 200 を返し、メールは送らない。
+        メールアドレスの形式が不正、または 254 文字を超える場合も、200 を返し、何もしない。
       requestBody:
         required: true
         content:
@@ -788,6 +789,7 @@ paths:
       responses:
         "200": { description: 受け付けた（該当するアカウントがある場合だけ、メールが届く） }
         "400": { description: リクエストボディが不正 }
+        "413": { description: リクエストボディが 4KB を超えている }
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/auth/forgot-password:
