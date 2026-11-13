@@ -4,12 +4,10 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
-
-	"Backend/domain/entity"
 )
 
-// 応答の形は、移行前に応答へ出していた domain/entity の UserWeightScore と同じでなければならない。
-// entity が無くなるまでの間、同じ値を JSON にして突き合わせる。
+// 応答の JSON は、api/openapi.yaml の UserWeightScore（キーが Go のフィールド名のまま）と同じでなければならない。
+// 移行前に応答へ出していた形を、固定の文字列で持つ。
 func TestUserWeightScoreResponse_従来の応答と同じJSON(t *testing.T) {
 	at := time.Date(2026, 11, 13, 9, 30, 0, 0, time.UTC)
 	row := UserWeightScore{
@@ -17,19 +15,12 @@ func TestUserWeightScoreResponse_従来の応答と同じJSON(t *testing.T) {
 		WeightCategory: "技術志向", Score: 82, CalculationVersion: "v1", PromptVersion: "p2",
 		CreatedAt: at, UpdatedAt: at.Add(time.Hour),
 	}
-	old := entity.UserWeightScore{
-		ID: 7, UserID: 11, SessionID: "s-1", WeightCategory: "技術志向", Score: 82,
-		CalculationVersion: "v1", PromptVersion: "p2", CreatedAt: at, UpdatedAt: at.Add(time.Hour),
-	}
 	got, err := json.Marshal(NewUserWeightScoreResponses([]UserWeightScore{row}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := json.Marshal([]entity.UserWeightScore{old})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != string(want) {
+	const want = `[{"ID":7,"UserID":11,"SessionID":"s-1","WeightCategory":"技術志向","Score":82,"CalculationVersion":"v1","PromptVersion":"p2","CreatedAt":"2026-11-13T09:30:00Z","UpdatedAt":"2026-11-13T10:30:00Z"}]`
+	if string(got) != want {
 		t.Fatalf("応答の JSON が従来と違う\n got: %s\nwant: %s", got, want)
 	}
 }
