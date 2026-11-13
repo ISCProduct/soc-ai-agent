@@ -234,6 +234,10 @@ func RunModel(model string, cases []Case, audios []Audio, hints string) *ModelSu
 		// 10倍ずれていたことがある）。STT_COST_PER_MINUTE_USD の上書きは見ない（公表価格での見積もりのため）。
 		s.EstCostPerMinUSD = price
 		s.CostBasis = "openai_published_price"
+		if costs.STTPerMinuteIsEstimate(model) {
+			// トークン課金のモデルで、分単価は公式の概算（est.）。公開単価とは分けて表示する（#2229 のレビュー）
+			s.CostBasis = "openai_estimated_price"
+		}
 	} else {
 		s.CostBasis = "unknown_model_price"
 	}

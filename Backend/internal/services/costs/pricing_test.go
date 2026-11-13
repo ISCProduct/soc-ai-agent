@@ -163,16 +163,18 @@ func TestSTTCostPerMinuteUSD(t *testing.T) {
 		wantBasis string
 	}{
 		{"gpt-transcribe", "gpt-transcribe", 0.0045, PriceBasisListed},
-		{"gpt-4o-transcribe", "gpt-4o-transcribe", 0.006, PriceBasisListed},
-		{"gpt-4o-transcribe-diarize", "gpt-4o-transcribe-diarize", 0.006, PriceBasisListed},
-		{"gpt-4o-mini-transcribe", "gpt-4o-mini-transcribe", 0.003, PriceBasisListed},
+		// トークン課金のモデルの分単価は公式の概算（est.）なので estimated（#2229 のレビュー）
+		{"gpt-4o-transcribe", "gpt-4o-transcribe", 0.006, PriceBasisEstimated},
+		{"gpt-4o-transcribe-diarize", "gpt-4o-transcribe-diarize", 0.006, PriceBasisEstimated},
+		{"gpt-4o-mini-transcribe", "gpt-4o-mini-transcribe", 0.003, PriceBasisEstimated},
+		{"whisper-1", "whisper-1", 0.006, PriceBasisListed},
 		{"whisper-1", "whisper-1", 0.006, PriceBasisListed},
 		{"大文字・前後の空白はそろえる", " GPT-Transcribe ", 0.0045, PriceBasisListed},
 		// 日付付きの版名は同じモデル
-		{"日付付きの版名（mini）", "gpt-4o-mini-transcribe-2025-12-15", 0.003, PriceBasisListed},
-		{"日付付きの版名（4o）", "gpt-4o-transcribe-2025-03-20", 0.006, PriceBasisListed},
+		{"日付付きの版名（mini）", "gpt-4o-mini-transcribe-2025-12-15", 0.003, PriceBasisEstimated},
+		{"日付付きの版名（4o）", "gpt-4o-transcribe-2025-03-20", 0.006, PriceBasisEstimated},
 		{"日付付きの版名（gpt-transcribe）", "gpt-transcribe-2026-03-01", 0.0045, PriceBasisListed},
-		{"派生名（:）", "gpt-4o-mini-transcribe:ft-test", 0.003, PriceBasisListed},
+		{"派生名（:）", "gpt-4o-mini-transcribe:ft-test", 0.003, PriceBasisEstimated},
 		// 名前の似た別モデルを取り違えない（前方一致・部分一致で別の単価に当てない）。表に無いので既定値で、根拠は estimated（#2224）
 		{"表に無い派生モデルは既定値", "gpt-4o-mini-transcribe-diarize", 0.006, PriceBasisEstimated},
 		{"表に無い上位版は gpt-transcribe の単価にしない", "gpt-transcribe-pro", 0.006, PriceBasisEstimated},

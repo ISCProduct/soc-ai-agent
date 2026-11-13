@@ -237,6 +237,28 @@ var sttPricingPerMinute = map[string]float64{
 	"whisper-1":                 0.006,
 }
 
+// sttPerMinuteEstimated は、分単価が公式の価格ページで「目安（est.）」として載っているモデル。
+// これらはトークン課金（入力・出力のトークン単価）で、分単価は公式の概算にすぎない。出力のトークン数で
+// 実額が変わるので、根拠は listed ではなく estimated にする（#2229 のレビュー、2026-11-11 の価格ページで確認）。
+// 分単価そのものが公開価格なのは gpt-transcribe と whisper-1 だけ。
+var sttPerMinuteEstimated = map[string]bool{
+	"gpt-4o-transcribe":         true,
+	"gpt-4o-transcribe-diarize": true,
+	"gpt-4o-mini-transcribe":    true,
+}
+
+// STTPerMinuteIsEstimate は、表の分単価が公式の概算（est.）かを返す。表に無いモデルは false。
+// 評価ハーネス（internal/sttbench）が、見積もりの根拠を「公開単価」と「公開単価の目安」に分けるために使う。
+func STTPerMinuteIsEstimate(model string) bool {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	for k := range sttPerMinuteEstimated {
+		if isSameModel(lower, k) {
+			return true
+		}
+	}
+	return false
+}
+
 // sttFallbackCostPerMinuteUSD は、表に無い STT モデルに使う分単価。
 // 表の中で最も高い単価（以前の一律の既定値と同じ）にして、少なく見積もらないようにする。
 const sttFallbackCostPerMinuteUSD = 0.006
@@ -266,12 +288,16 @@ func PublishedSTTCostPerMinuteUSD(model string) (float64, bool) {
 }
 
 // sttCostPerMinuteUSD は、STT のモデル名から分単価と、その根拠を返す。
-// STT_COST_PER_MINUTE_USD の上書き・表に一致した単価は listed、表に無く既定値で計算したときは estimated（#2224）。
+// STT_COST_PER_MINUTE_USD の上書きと、分単価が公開価格のモデルは listed。分単価が公式の概算のモデル
+// （sttPerMinuteEstimated）と、表に無く既定値で計算したときは estimated（#2224、#2229 のレビュー）。
 func sttCostPerMinuteUSD(model string) (float64, string) {
 	if v, ok := audioRateOverride(sttCostOverrideEnv); ok {
 		return v, PriceBasisListed
 	}
 	if p, ok := PublishedSTTCostPerMinuteUSD(model); ok {
+		if STTPerMinuteIsEstimate(model) {
+			return p, PriceBasisEstimated
+		}
 		return p, PriceBasisListed
 	}
 	// 表の検索と同じく小文字にそろえる（大文字・小文字の違いで2回出さない）
@@ -749,7 +775,15 @@ func summaryPriceBasis(model string, totalCostUSD float64, recorded string, hasU
 		return ""
 	}
 	if isAudioPricedModel(model) {
-		// 音声の行は ModelBreakdown の hasUnrecorded に数えないので、記録の有無だけで決まる
+		// 音声の行そのものは ModelBreakdown の hasUnrecorded に数えない（秒数・文字数のある行は除く）。
+		// ただし同じモデル名で、トークンで課金された記録の無い行が期間内にあれば、それはトークン単価表で
+		// 判定し、注意が必要なほうを出す（音声の行の記録だけで、トークンの行の状態を隠さない。#2229 のレビュー）。
+		if hasUnrecorded {
+			if recorded == "" {
+				return PriceBasis(model)
+			}
+			return worsePriceBasis(recorded, PriceBasis(model))
+		}
 		return recorded
 	}
 	if recorded == "" {

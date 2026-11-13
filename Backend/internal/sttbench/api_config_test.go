@@ -171,8 +171,9 @@ func TestRunModel_OpenAICostUsesSharedPriceTable(t *testing.T) {
 		wantCost  float64
 	}{
 		{"gpt-transcribe", "openai_published_price", 0.0045},
-		{"gpt-4o-mini-transcribe", "openai_published_price", 0.003},
-		{"gpt-4o-transcribe-diarize", "openai_published_price", 0.006},
+		// トークン課金のモデルは、分単価が公式の概算なので目安として分ける（#2229 のレビュー）
+		{"gpt-4o-mini-transcribe", "openai_estimated_price", 0.003},
+		{"gpt-4o-transcribe-diarize", "openai_estimated_price", 0.006},
 		{"sttbench-unknown-model", "unknown_model_price", 0},
 	}
 	for _, tt := range tests {

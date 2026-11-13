@@ -117,16 +117,19 @@ func TestSummaryPriceBasis(t *testing.T) {
 		{"totally-new-model", 1.0, PriceBasisUnknown},
 		{"gpt-oss-20b", 0, ""}, // ローカル推論は単価を使っていないので「単価未登録」と出さない
 		{"o3-pro", 1.0, PriceBasisInherited},
-		// 音声の単価（分・文字数）で課金するモデルは、トークン単価表で判定しない（#2151 のレビュー）。
-		// 記録した根拠が無い（根拠を記録する前の音声の行）ので空（#2224）
-		{"gpt-4o-mini-transcribe", 1.0, ""},
-		{"whisper-1", 1.0, ""},
-		{"tts-1", 1.0, ""},
-		{"gpt-4o-mini-tts", 1.0, ""}, // -tts を含む名前も音声のモデル（#2151 のレビュー）
 	}
 	for _, tc := range cases {
 		if got := summaryPriceBasis(tc.model, tc.cost, "", true); got != tc.want {
 			t.Errorf("summaryPriceBasis(%q, %v) = %q, want %q", tc.model, tc.cost, got, tc.want)
+		}
+	}
+
+	// 音声の単価（分・文字数）で課金するモデルの、根拠を記録する前の音声の行は、トークン単価表で判定しない
+	// （#2151 のレビュー）。音声の行は ModelBreakdown の「記録の無い行」に数えない（秒数・文字数のある行は除く）ので、
+	// hasUnrecorded は false で渡る。記録した根拠も無いので空（#2224）。
+	for _, model := range []string{"gpt-4o-mini-transcribe", "whisper-1", "tts-1", "gpt-4o-mini-tts"} {
+		if got := summaryPriceBasis(model, 1.0, "", false); got != "" {
+			t.Errorf("summaryPriceBasis(%q) = %q, want 空（根拠を記録する前の音声の行）", model, got)
 		}
 	}
 }
@@ -356,10 +359,16 @@ func TestSummaryPriceBasis_PrefersRecorded(t *testing.T) {
 		// 音声のモデルは、記録した根拠をそのまま出す（#2224）。トークン単価表（gpt-4o-mini-tts なら inherited）では判定しない
 		{"音声のモデルは記録した推定値を出す", "gpt-4o-mini-tts", 1.0, PriceBasisEstimated, false, PriceBasisEstimated},
 		{"音声のモデルは記録した公開価格を出す", "gpt-transcribe", 1.0, PriceBasisListed, false, PriceBasisListed},
-		{"音声のモデルは記録の無い行があっても今の単価表と比べない", "gpt-4o-mini-tts", 1.0, PriceBasisListed, true, PriceBasisListed},
-		// 根拠を記録する前の音声の行だけなら、今までどおり空
-		{"音声のモデルで記録が無ければ空", "gpt-4o-mini-tts", 1.0, "", true, ""},
+		// 根拠を記録する前の音声の行だけなら、今までどおり空（音声の行は「記録の無い行」に数えない）
+		{"音声のモデルで記録が無ければ空", "gpt-4o-mini-tts", 1.0, "", false, ""},
 		{"音声のモデルでも金額0なら付けない", "gpt-transcribe", 0, PriceBasisEstimated, false, ""},
+		// #2229 のレビュー：同じ音声のモデル名で、トークン課金の記録の無い行があれば、今の単価表と比べる
+		// diarize はトークン単価表に無く、gpt-4o-transcribe の単価に当たる（inherited）
+		{"音声のモデルでも、記録の無いトークンの行があれば注意が必要なほう", "gpt-4o-transcribe-diarize", 1.0, PriceBasisListed, true, PriceBasisInherited},
+		{"音声のモデルで記録が無く、記録の無いトークンの行があれば今の単価表", "gpt-4o-transcribe-diarize", 1.0, "", true, PriceBasisInherited},
+		{"音声のモデルで、記録のほうが注意が必要なら記録の値", "gpt-transcribe", 1.0, PriceBasisUnknown, true, PriceBasisUnknown},
+		// gpt-4o-transcribe はトークン単価表で公開価格（listed）。記録が無く、記録の無いトークンの行だけなら listed
+		{"音声のモデルで記録が無く、トークン単価表では公開価格", "gpt-4o-transcribe", 1.0, "", true, PriceBasisListed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
