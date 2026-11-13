@@ -2,6 +2,7 @@ package flywheel
 
 import (
 	"Backend/domain/entity"
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"encoding/json"
@@ -9,8 +10,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-
-	"gorm.io/gorm"
 )
 
 // CrossFeatureIntegrationService 機能間データ連携サービス
@@ -70,12 +69,12 @@ func (s *CrossFeatureIntegrationService) ResolveDiagnosisSessionID(userID uint) 
 }
 
 // PickDiagnosisSessionID は診断セッション選定の純関数（テスト用にも公開）。
-// 「診断が無い」(gorm.ErrRecordNotFound) だけをフォールバック条件にし、
+// 「診断が無い」(repository.ErrNotFound) だけをフォールバック条件にし、
 // 接続断などの一時エラーは呼び出し元へ返す。
 func PickDiagnosisSessionID(userID uint, latestChatSession string, err error) (string, error) {
 	fallback := fmt.Sprintf("interview-%d", userID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return fallback, nil
 		}
 		return "", err
@@ -244,7 +243,7 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromESReview(userID uint, r
 // （反映側はエラーをログに流すので、書き込みの有無だけでは検証が効かない）。
 func (s *CrossFeatureIntegrationService) esTargetSession(userID uint) (string, bool, error) {
 	sessionID, err := s.weightScoreRepo.FindLatestDiagnosisSessionID(userID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return "", false, nil
 	}
 	if err != nil {
@@ -429,7 +428,7 @@ func (s *CrossFeatureIntegrationService) applyMovingAverage(
 	newValue = clampInt(newValue, 0, 100)
 
 	existing, err := s.weightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, category)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return fmt.Errorf("スコア取得エラー: %w", err)
 	}
 	if existing == nil {

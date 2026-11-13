@@ -9,7 +9,7 @@ import {
   lastActivityLabel,
   NO_DATA_LABEL,
   type StudentTendency,
-} from '@/lib/student-insights'
+} from '@/lib/admin/student-insights'
 
 const withData: StudentTendency = {
   user_id: 1,
