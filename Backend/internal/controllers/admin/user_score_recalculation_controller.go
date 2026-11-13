@@ -86,13 +86,22 @@ func (c *UserScoreRecalculationController) DryRun(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, result)
 }
 
-// Rollback は POST /api/admin/user-score-recalculation/jobs/:job_id/rollback。
+// Rollback は POST /api/admin/user-score-recalculation/jobs/:job_id/rollback?after_id=。
+// after_id は前回の応答の next_after_id（初回は省略）。戻さなかった分の控えは残るので、ID のカーソルで進める。
 func (c *UserScoreRecalculationController) Rollback(ctx echo.Context) error {
 	id, err := parseRecalculationJobID(ctx)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "job_id が不正です")
 	}
-	result, err := c.service.Rollback(ctx.Request().Context(), id)
+	var afterID uint
+	if raw := ctx.QueryParam("after_id"); raw != "" {
+		v, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "after_id が不正です")
+		}
+		afterID = uint(v)
+	}
+	result, err := c.service.Rollback(ctx.Request().Context(), id, afterID)
 	if err != nil {
 		return recalculationJobError(id, err)
 	}

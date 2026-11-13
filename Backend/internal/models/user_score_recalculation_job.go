@@ -17,6 +17,10 @@ const (
 	UserScoreRecalculationFailureSave          = "save_failed"
 	UserScoreRecalculationFailureTargetChanged = "target_changed"
 	UserScoreRecalculationFailureMatching      = "matching_failed"
+	// LLM が使えず、評価が欠けた値になるので保存しなかった。計算版も進めないので次のジョブで拾い直す（#1770 B3）
+	UserScoreRecalculationFailureLLMDegraded = "llm_degraded"
+	// 保存軸もテンプレートの軸も無い回答があり、再計算しなかった（スコアは残し、計算版だけ進める）（#1770 B2）
+	UserScoreRecalculationFailureAxisUnknown = "axis_unknown"
 )
 
 type UserScoreRecalculationJob struct {

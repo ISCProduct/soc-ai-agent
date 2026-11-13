@@ -248,6 +248,13 @@ func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, s
 	if err != nil {
 		return nil, fmt.Errorf("failed to load chat session for recalculation: %w", err)
 	}
+	// 保存軸が無い質問は、ライブ採点（processChoiceAnswer）と同じく AI 生成の質問のテンプレートから軸を引く（B2）
+	var aiQuestions []models.AIGeneratedQuestion
+	if s.aiGeneratedQuestionRepo != nil {
+		if aiQuestions, err = s.aiGeneratedQuestionRepo.FindByUserAndSession(userID, sessionID); err != nil {
+			return nil, fmt.Errorf("failed to load ai questions for recalculation: %w", err)
+		}
+	}
 
 	scores := make(map[string]int)
 	for i, message := range messages {
@@ -263,7 +270,13 @@ func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, s
 			continue
 		}
 		if category == "" {
-			category = s.inferCategoryFromQuestion(question)
+			category = templateCategoryForQuestion(aiQuestions, question)
+		}
+		if category == "" {
+			// 軸が決まらない回答は推測しない（B2）。推測が外れると、置換で元の軸のスコアが消える。
+			// 回答だけ飛ばしても、置換でセッションのチャット行が入れ替わるので元のスコアが消える。
+			// セッションごと再計算しない（呼び出し側がスコアを残して計算版だけ進める）。
+			return nil, ErrRecalculationAxisUnknown
 		}
 
 		resolved := ResolveChoiceAnswer(question, message.Content)
@@ -281,6 +294,10 @@ func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, s
 				scoreInput = resolved.Text
 			}
 			result = s.answerEvaluator.EvaluateHumanScoringWithContext(ctx, question, scoreInput, false, false, nil)
+			if result.LLMUnavailable {
+				// LLM 障害中の値で確定させない（B3）。呼び出し側は保存せず、計算版も進めない
+				return nil, ErrRecalculationLLMUnavailable
+			}
 			if result.Action == PrecheckSkip || result.Action == PrecheckIgnore {
 				continue
 			}
@@ -297,6 +314,27 @@ func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, s
 		}
 	}
 	return scores, nil
+}
+
+// ErrRecalculationAxisUnknown は、保存軸もテンプレートの軸も無い回答があり、再計算できないこと（#1770 B2）。
+var ErrRecalculationAxisUnknown = errors.New("answer axis is unknown for recalculation")
+
+// ErrRecalculationLLMUnavailable は、再計算で LLM の評価が必要な回答があったのに LLM が使えなかったこと（#1770 B3）。
+var ErrRecalculationLLMUnavailable = errors.New("llm unavailable during recalculation")
+
+// templateCategoryForQuestion は、質問文に一致する AI 生成の質問のテンプレートの軸を返す。
+// ライブ採点（processChoiceAnswer）と同じ照合（後ろから探し、含む・含まれる）。見つからなければ空。
+func templateCategoryForQuestion(aiQuestions []models.AIGeneratedQuestion, question string) string {
+	head := strings.Split(question, "\n")[0]
+	for i := len(aiQuestions) - 1; i >= 0; i-- {
+		if strings.Contains(question, aiQuestions[i].QuestionText) || strings.Contains(aiQuestions[i].QuestionText, head) {
+			if aiQuestions[i].Template != nil {
+				return aiQuestions[i].Template.Category
+			}
+			return ""
+		}
+	}
+	return ""
 }
 
 // isChoiceAnswer 選択肢回答かどうかを判定

@@ -270,23 +270,29 @@ export default function PageContent() {
     let restored = 0
     let skipped = 0
     let matchingFailed = 0
+    // 戻さなかったセッションの控えは残るので、前回の続きの位置（next_after_id）から進める
+    let afterID = 0
     try {
       for (;;) {
-        const body = await request(`jobs/${job.id}/rollback`, 'POST')
+        const body = await request(`jobs/${job.id}/rollback${afterID > 0 ? `?after_id=${afterID}` : ''}`, 'POST')
         if (
           !isRecord(body) ||
           typeof body.restored !== 'number' ||
           typeof body.skipped !== 'number' ||
           typeof body.matching_failed !== 'number' ||
-          typeof body.remaining !== 'number'
+          typeof body.remaining !== 'number' ||
+          typeof body.next_after_id !== 'number'
         ) throw new Error('復元の結果を読み取れませんでした')
         restored += body.restored
         skipped += body.skipped
         matchingFailed += body.matching_failed
         if (body.remaining === 0) break
+        // カーソルが進まなければ止める（同じ範囲を繰り返さない）
+        if (body.next_after_id <= afterID) throw new Error('元に戻す処理が進みませんでした。時間をおいてやり直してください')
+        afterID = body.next_after_id
       }
       setRollbackMessage(
-        `${restored} セッションを元に戻しました。再計算の後に更新があった ${skipped} セッションは戻していません。` +
+        `${restored} セッションを元に戻しました。再計算の後に更新があった ${skipped} セッションは、その更新を消さないよう戻していません（控えは残しています）。` +
         (matchingFailed > 0 ? `${matchingFailed} セッションは企業マッチングを更新できませんでした。` : ''),
       )
       void loadData()

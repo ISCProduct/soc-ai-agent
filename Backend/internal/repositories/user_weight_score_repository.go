@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -302,6 +303,11 @@ func (r *UserWeightScoreRepository) ReplaceChatSessionScores(jobID, userID uint,
 		if err != nil {
 			return err
 		}
+		// 置換しても created_at / updated_at は元の行から引き継ぐ（B1）。再計算の時刻を打つと、
+		// 「最新セッション」を updated_at で決める FindLatestByUser・FindLatestDiagnosisSessionID・
+		// FindLatestScoresByUsers で、古いセッションが最新に昇格して表示とマッチングの基準が巻き戻る。
+		// 元に無かったカテゴリは、元の行の最小の created_at と最大の updated_at を使う。
+		byCategory, minCreated, maxUpdated := recalculationTimes(existing)
 		if err := tx.Create(&models.UserScoreRecalculationSnapshot{
 			JobID: jobID, UserID: userID, SessionID: sessionID, ScoresJSON: string(payload),
 		}).Error; err != nil {
@@ -321,6 +327,11 @@ func (r *UserWeightScoreRepository) ReplaceChatSessionScores(jobID, userID uint,
 				WeightCategory: string(normalized), Score: max(0, min(100, score)),
 				CalculationVersion: version,
 			}
+			if prev, ok := byCategory[row.WeightCategory]; ok {
+				row.CreatedAt, row.UpdatedAt = prev.CreatedAt, prev.UpdatedAt
+			} else if len(existing) > 0 {
+				row.CreatedAt, row.UpdatedAt = minCreated, maxUpdated
+			}
 			if len(existing) > 0 {
 				row.OrganizationID = existing[0].OrganizationID
 			} else if err := fillOrganizationID(tx, userID, &row.OrganizationID); err != nil {
@@ -332,6 +343,57 @@ func (r *UserWeightScoreRepository) ReplaceChatSessionScores(jobID, userID uint,
 		}
 		return nil
 	})
+}
+
+// recalculationTimes は置換前の行から、カテゴリ別の行・最小の created_at・最大の updated_at を返す。
+// 置換で時刻を引き継ぐときと、ロールバックで「再計算の後に更新があったか」を判定するときに、
+// 同じ規則を使う。
+func recalculationTimes(rows []models.UserWeightScore) (map[string]models.UserWeightScore, time.Time, time.Time) {
+	byCategory := make(map[string]models.UserWeightScore, len(rows))
+	var minCreated, maxUpdated time.Time
+	for _, r := range rows {
+		byCategory[r.WeightCategory] = r
+		if minCreated.IsZero() || r.CreatedAt.Before(minCreated) {
+			minCreated = r.CreatedAt
+		}
+		if r.UpdatedAt.After(maxUpdated) {
+			maxUpdated = r.UpdatedAt
+		}
+	}
+	return byCategory, minCreated, maxUpdated
+}
+
+// changedSinceRecalculation は、再計算で書いた行の後に更新があったかを返す（B5）。
+//
+// 置換は元の行の時刻を引き継ぐので（recalculationTimes）、updated_at が置換時に書いた値と
+// 違えば、その後にライブの採点（AddScore）や新しいカテゴリの回答（SetScore）があった。
+// 計算版が違う行も、別の経路で書き直されている。updated_at > created_at の比較は、時刻を
+// 引き継ぐと再計算前の更新でも真になるので使わない。
+func changedSinceRecalculation(current, snapshot []models.UserWeightScore, version string) bool {
+	if len(snapshot) == 0 {
+		// 置換前の行が無ければ時刻を引き継いでいないので、作成後に更新されたかだけを見る
+		for _, r := range current {
+			if r.CalculationVersion != version || !r.UpdatedAt.Equal(r.CreatedAt) {
+				return true
+			}
+		}
+		return false
+	}
+	byCategory, _, maxUpdated := recalculationTimes(snapshot)
+	for _, r := range current {
+		if r.CalculationVersion != version {
+			return true
+		}
+		expected := maxUpdated
+		if prev, ok := byCategory[r.WeightCategory]; ok {
+			expected = prev.UpdatedAt
+		}
+		// DB の精度（秒またはミリ秒）で丸めて比べる
+		if !r.UpdatedAt.Truncate(time.Second).Equal(expected.Truncate(time.Second)) {
+			return true
+		}
+	}
+	return false
 }
 
 // MarkChatSessionCalculationVersion は、採点できる回答が無かったセッションの計算版だけを
@@ -400,17 +462,23 @@ type RecalculationRollbackResult struct {
 	Restored []UserScoreRecalculationTarget
 	// Skipped は再計算の後に更新があったので戻さなかったセッションの数。
 	Skipped int
+	// LastSnapshotID は今回見た最後のスナップショットの ID。次の呼び出しの afterID に渡す。
+	LastSnapshotID uint
 }
 
-// RollbackRecalculatedSessions はジョブのスナップショットを limit 件まで元に戻す。
-// 処理したスナップショットは消すので、繰り返し呼ぶと残りを処理できる。
-func (r *UserWeightScoreRepository) RollbackRecalculatedSessions(jobID uint, version string, limit int) (RecalculationRollbackResult, error) {
-	var result RecalculationRollbackResult
+// RollbackRecalculatedSessions はジョブのスナップショットを、afterID より後から limit 件まで元に戻す。
+//
+// 戻したセッションのスナップショットだけを消す（B5）。戻さなかったセッション（再計算の後に更新が
+// あった）の控えは残すので、「処理した行を消す」ことで進むページングはできない。ID のカーソルで進め、
+// 呼び出し側は LastSnapshotID を次の afterID に渡す。
+func (r *UserWeightScoreRepository) RollbackRecalculatedSessions(jobID uint, version string, limit int, afterID uint) (RecalculationRollbackResult, error) {
+	result := RecalculationRollbackResult{LastSnapshotID: afterID}
 	var snapshots []models.UserScoreRecalculationSnapshot
-	if err := r.db.Where("job_id = ?", jobID).Order("id").Limit(limit).Find(&snapshots).Error; err != nil {
+	if err := r.db.Where("job_id = ? AND id > ?", jobID, afterID).Order("id").Limit(limit).Find(&snapshots).Error; err != nil {
 		return result, err
 	}
 	for _, snapshot := range snapshots {
+		result.LastSnapshotID = snapshot.ID
 		restored, err := r.rollbackSnapshot(snapshot, version)
 		if err != nil {
 			return result, err
@@ -425,7 +493,8 @@ func (r *UserWeightScoreRepository) RollbackRecalculatedSessions(jobID uint, ver
 }
 
 // rollbackSnapshot は1セッションを元に戻す。再計算の後にチャット回答や履歴書・ES・面接の
-// 反映があったセッションは、戻すとその更新が消えるので戻さない。
+// 反映があったセッションは、戻すとその更新が消えるので戻さない。戻さなかったスナップショットは
+// 消さない（唯一の控えなので）。
 func (r *UserWeightScoreRepository) rollbackSnapshot(snapshot models.UserScoreRecalculationSnapshot, version string) (bool, error) {
 	var rows []models.UserWeightScore
 	if err := json.Unmarshal([]byte(snapshot.ScoresJSON), &rows); err != nil {
@@ -435,28 +504,27 @@ func (r *UserWeightScoreRepository) rollbackSnapshot(snapshot models.UserScoreRe
 	err := r.db.Transaction(func(tx *gorm.DB) error {
 		scope := tx.Model(&models.UserWeightScore{}).
 			Where("user_id = ? AND session_id = ? AND source = ?", snapshot.UserID, snapshot.SessionID, models.ScoreSourceChat)
-		var lockedIDs []uint
-		if err := scope.Session(&gorm.Session{}).Clauses(clause.Locking{Strength: "UPDATE"}).Pluck("id", &lockedIDs).Error; err != nil {
+		var current []models.UserWeightScore
+		if err := scope.Session(&gorm.Session{}).Clauses(clause.Locking{Strength: "UPDATE"}).Order("id").Find(&current).Error; err != nil {
 			return err
 		}
-		var changed int64
-		if err := scope.Session(&gorm.Session{}).
-			Where("calculation_version <> ? OR updated_at > created_at", version).
-			Count(&changed).Error; err != nil {
+		if len(current) == 0 || changedSinceRecalculation(current, rows, version) {
+			return nil
+		}
+		lockedIDs := make([]uint, len(current))
+		for i, r := range current {
+			lockedIDs[i] = r.ID
+		}
+		if err := tx.Where("id IN ?", lockedIDs).Delete(&models.UserWeightScore{}).Error; err != nil {
 			return err
 		}
-		if len(lockedIDs) > 0 && changed == 0 {
-			if err := tx.Where("id IN ?", lockedIDs).Delete(&models.UserWeightScore{}).Error; err != nil {
+		for i := range rows {
+			rows[i].ID = 0
+			if err := tx.Create(&rows[i]).Error; err != nil {
 				return err
 			}
-			for i := range rows {
-				rows[i].ID = 0
-				if err := tx.Create(&rows[i]).Error; err != nil {
-					return err
-				}
-			}
-			restored = true
 		}
+		restored = true
 		return tx.Delete(&models.UserScoreRecalculationSnapshot{}, snapshot.ID).Error
 	})
 	return restored, err

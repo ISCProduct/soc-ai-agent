@@ -50,9 +50,10 @@ func (r *UserScoreRecalculationRepository) FindByID(id uint) (*models.UserScoreR
 }
 
 // CountSnapshots は元に戻せるセッションの数を返す。
-func (r *UserScoreRecalculationRepository) CountSnapshots(jobID uint) (int64, error) {
+// afterID より後（まだ見ていない）のスナップショットだけを数える。戻さなかった分は残るので（B5）。
+func (r *UserScoreRecalculationRepository) CountSnapshots(jobID, afterID uint) (int64, error) {
 	var count int64
-	err := r.db.Model(&models.UserScoreRecalculationSnapshot{}).Where("job_id = ?", jobID).Count(&count).Error
+	err := r.db.Model(&models.UserScoreRecalculationSnapshot{}).Where("job_id = ? AND id > ?", jobID, afterID).Count(&count).Error
 	return count, err
 }
 

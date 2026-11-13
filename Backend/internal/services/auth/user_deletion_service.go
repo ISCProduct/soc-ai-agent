@@ -370,6 +370,8 @@ func hardDeleteUserData(tx *gorm.DB, userID uint) error {
 		&models.AIGeneratedQuestion{},
 		&models.ConversationContext{},
 		&models.UserWeightScore{},
+		// 再計算の控え（#1770）。scores_json にスコアを丸ごと持つので、退会後に残さない
+		&models.UserScoreRecalculationSnapshot{},
 		&models.UserAnalysisProgress{},
 		&models.UserEmbedding{},
 		&models.VariantAssignment{},

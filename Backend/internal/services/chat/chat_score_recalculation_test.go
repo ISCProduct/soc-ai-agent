@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"math"
 	"testing"
@@ -101,13 +102,6 @@ func TestRecalculateChatSession_MatchesLiveScoring(t *testing.T) {
 				{Role: "user", Content: "Go でサーバーを作り、性能を測定して改善しました。"},
 				{Role: "assistant", Content: "挑戦した経験を教えてください", WeightCategory: "チャレンジ志向"},
 				{Role: "user", Content: "未経験の分野のコンテストに参加して入賞しました。"},
-			},
-		},
-		{
-			name: "軸が保存されていない過去の質問は本文から推測する",
-			messages: []models.ChatMessage{
-				{Role: "assistant", Content: "チームで協力した経験を教えてください"},
-				{Role: "user", Content: "文化祭の準備でメンバーと協力し、期限に間に合わせました。"},
 			},
 		},
 		{
@@ -251,5 +245,41 @@ func TestRecalculateChatSession_IgnoresAnswersFollowedByValidationFeedback(t *te
 	}
 	if got["チームワーク志向"] != want {
 		t.Fatalf("recalculated score = %d, want valid answer score %d", got["チームワーク志向"], want)
+	}
+}
+
+// #1770 B2: 保存軸が無い過去の質問は、ライブ採点と同じく AI 生成の質問のテンプレートから軸を引く。
+// それでも決まらなければ推測せず、セッションごと再計算しない（推測が外れると置換で元の軸のスコアが消える）。
+type templateAIQuestionRepository struct {
+	parityAIQuestionRepository
+	questions []models.AIGeneratedQuestion
+}
+
+func (r templateAIQuestionRepository) FindByUserAndSession(uint, string) ([]models.AIGeneratedQuestion, error) {
+	return r.questions, nil
+}
+
+func TestRecalculateChatSession_AxisFromTemplateOrUnknown(t *testing.T) {
+	messages := []models.ChatMessage{
+		{Role: "assistant", Content: "チームで協力した経験を教えてください"},
+		{Role: "user", Content: "文化祭の準備でメンバーと協力し、期限に間に合わせました。"},
+	}
+	withTemplate := templateAIQuestionRepository{questions: []models.AIGeneratedQuestion{
+		{QuestionText: "チームで協力した経験を教えてください", Template: &models.AIQuestionTemplate{Category: "リーダーシップ志向"}},
+	}}
+	service := NewChatService(nil, nil, recalculationChatMessageRepository{messages: messages},
+		nil, withTemplate, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	got, err := service.RecalculateChatSession(context.Background(), 7, "session-1")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if _, ok := got["リーダーシップ志向"]; !ok || len(got) != 1 {
+		t.Fatalf("テンプレートの軸に載せること: %v", got)
+	}
+
+	service = NewChatService(nil, nil, recalculationChatMessageRepository{messages: messages},
+		nil, parityAIQuestionRepository{}, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	if _, err := service.RecalculateChatSession(context.Background(), 7, "session-1"); !errors.Is(err, ErrRecalculationAxisUnknown) {
+		t.Fatalf("軸が決まらなければ ErrRecalculationAxisUnknown: err = %v", err)
 	}
 }

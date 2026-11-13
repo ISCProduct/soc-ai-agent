@@ -16,7 +16,9 @@ function adminHeaders(request: NextRequest) {
 async function proxy(request: NextRequest, path: string[]) {
   const suffix = path.map(encodeURIComponent).join('/')
   const body = request.method === 'POST' ? await request.text() : undefined
-  const response = await fetch(`${BACKEND_URL}/api/admin/user-score-recalculation/${suffix}`, {
+  // クエリ（ドライランの limit、ロールバックの after_id）も Backend へ渡す。落とすと既定値のままになる
+  const qs = request.nextUrl.searchParams.toString()
+  const response = await fetch(`${BACKEND_URL}/api/admin/user-score-recalculation/${suffix}${qs ? `?${qs}` : ''}`, {
     method: request.method,
     headers: adminHeaders(request),
     body: body || undefined,

@@ -212,6 +212,7 @@ func (s *UserScoreRecalculationService) RunBatch(ctx context.Context, id uint) (
 		return s.jobs.FindByID(id)
 	}
 
+	degraded := 0
 	for _, target := range targets {
 		// 一時停止をセッションごとに拾うため毎回読み直す。1セッションで LLM を
 		// 何度も呼ぶので、主キー検索1回の負荷より、止まるまでの費用を優先する。
@@ -238,6 +239,19 @@ func (s *UserScoreRecalculationService) RunBatch(ctx context.Context, id uint) (
 		if err := s.jobs.Advance(id, target.ScoreID, leaseToken, failure); err != nil {
 			return nil, fmt.Errorf("再計算ジョブの進捗保存に失敗: %w", err)
 		}
+		// LLM の障害が続くなら止める（B3）。続けても劣化値は保存しないが、LLM の呼び出しの費用だけがかかる
+		if failure == models.UserScoreRecalculationFailureLLMDegraded {
+			degraded++
+		} else {
+			degraded = 0
+		}
+		if degraded >= recalculationMaxConsecutiveLLMDegraded {
+			log.Printf("[UserScoreRecalculation] job=%d LLM が %d セッション続けて使えないため一時停止します", id, degraded)
+			if err := s.jobs.UpdateStatus(id, models.UserScoreRecalculationJobPaused); err != nil {
+				return nil, err
+			}
+			break
+		}
 	}
 
 	job, err = s.jobs.FindByID(id)
@@ -262,9 +276,9 @@ func (s *UserScoreRecalculationService) RunBatch(ctx context.Context, id uint) (
 }
 
 // recalculateTarget は1セッションを再計算して保存し、失敗の分類を返す（成功なら空）。
-// リクエストが切れた場合だけ err を返す。LLM の失敗はルール採点へ切り替わり、
-// エラーとして返らない。切断の直後に保存すると LLM の評価が欠けた値で上書きするので、
-// 保存せず進捗も進めず、次のバッチで処理し直す。
+// リクエストが切れた場合だけ err を返す。切断の直後に保存すると LLM の評価が欠けた値で
+// 上書きするので、保存せず進捗も進めず、次のバッチで処理し直す。LLM が使えなかった
+// セッションも保存せず llm_degraded に数える（計算版を進めないので次のジョブで拾い直す）。
 func (s *UserScoreRecalculationService) recalculateTarget(
 	ctx context.Context,
 	jobID uint,
@@ -275,12 +289,23 @@ func (s *UserScoreRecalculationService) recalculateTarget(
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return "", ctxErr
 	}
+	if errors.Is(err, chat.ErrRecalculationAxisUnknown) {
+		// 軸を推測して置換すると元の軸のスコアが消えるので、スコアは残して計算版だけ進める
+		return s.markUnscorableSession(jobID, target, version, models.UserScoreRecalculationFailureAxisUnknown,
+			"保存軸もテンプレートの軸も無い回答があるため、スコアは残し、計算版だけ現行にしました"), nil
+	}
+	if errors.Is(err, chat.ErrRecalculationLLMUnavailable) {
+		// 劣化値で確定させない。保存も計算版の更新もしないので、次のジョブで拾い直す
+		logRecalculationFailure(jobID, target, models.UserScoreRecalculationFailureLLMDegraded, err)
+		return models.UserScoreRecalculationFailureLLMDegraded, nil
+	}
 	if err != nil {
 		logRecalculationFailure(jobID, target, models.UserScoreRecalculationFailureLoad, err)
 		return models.UserScoreRecalculationFailureLoad, nil
 	}
 	if len(scores) == 0 {
-		return s.markUnscorableSession(jobID, target, version), nil
+		return s.markUnscorableSession(jobID, target, version, models.UserScoreRecalculationFailureNoScores,
+			"採点できる回答がありません。スコアは残し、計算版だけ現行にしました"), nil
 	}
 	return s.saveRecalculatedScores(ctx, jobID, target, scores, version), nil
 }
@@ -293,6 +318,8 @@ func (s *UserScoreRecalculationService) markUnscorableSession(
 	jobID uint,
 	target repositories.UserScoreRecalculationTarget,
 	version string,
+	failureKind string,
+	reason string,
 ) string {
 	if err := s.scores.MarkChatSessionCalculationVersion(target.UserID, target.SessionID, version); err != nil {
 		failure := models.UserScoreRecalculationFailureSave
@@ -302,9 +329,8 @@ func (s *UserScoreRecalculationService) markUnscorableSession(
 		logRecalculationFailure(jobID, target, failure, err)
 		return failure
 	}
-	logRecalculationFailure(jobID, target, models.UserScoreRecalculationFailureNoScores,
-		errors.New("採点できる回答がありません。スコアは残し、計算版だけ現行にしました"))
-	return models.UserScoreRecalculationFailureNoScores
+	logRecalculationFailure(jobID, target, failureKind, errors.New(reason))
+	return failureKind
 }
 
 // saveRecalculatedScores はスコアを置換して企業マッチングを作り直し、失敗の分類を返す（成功なら空）。
@@ -338,16 +364,22 @@ func logRecalculationFailure(jobID uint, target repositories.UserScoreRecalculat
 		jobID, target.ScoreID, target.UserID, target.SessionID, failure, err)
 }
 
-// UserScoreRecalculationRollback は1回のロールバックの結果。Remaining が 0 になるまで繰り返す。
+// recalculationMaxConsecutiveLLMDegraded は、LLM が使えないセッションがこの数だけ続いたらジョブを一時停止する数。
+const recalculationMaxConsecutiveLLMDegraded = 3
+
+// UserScoreRecalculationRollback は1回のロールバックの結果。Remaining が 0 になるまで、
+// NextAfterID を after_id に渡して繰り返す。
 type UserScoreRecalculationRollback struct {
 	Restored       int   `json:"restored"`
 	Skipped        int   `json:"skipped"`
 	MatchingFailed int   `json:"matching_failed"`
 	Remaining      int64 `json:"remaining"`
+	NextAfterID    uint  `json:"next_after_id"`
 }
 
 // Rollback はジョブが置き換えたスコアを元に戻し、企業マッチングも作り直す。
-func (s *UserScoreRecalculationService) Rollback(ctx context.Context, id uint) (*UserScoreRecalculationRollback, error) {
+// afterID より後のスナップショットから処理する（戻さなかった分の控えは残すため、ID のカーソルで進める）。
+func (s *UserScoreRecalculationService) Rollback(ctx context.Context, id, afterID uint) (*UserScoreRecalculationRollback, error) {
 	job, err := s.jobs.FindByID(id)
 	if err != nil {
 		return nil, err
@@ -359,18 +391,18 @@ func (s *UserScoreRecalculationService) Rollback(ctx context.Context, id uint) (
 	if active != nil {
 		return nil, ErrRecalculationJobActive
 	}
-	batch, err := s.scores.RollbackRecalculatedSessions(id, job.CalculationVersion, recalculationRollbackBatchSize)
+	batch, err := s.scores.RollbackRecalculatedSessions(id, job.CalculationVersion, recalculationRollbackBatchSize, afterID)
 	if err != nil {
 		return nil, fmt.Errorf("スコアの復元に失敗: %w", err)
 	}
-	result := &UserScoreRecalculationRollback{Restored: len(batch.Restored), Skipped: batch.Skipped}
+	result := &UserScoreRecalculationRollback{Restored: len(batch.Restored), Skipped: batch.Skipped, NextAfterID: batch.LastSnapshotID}
 	for _, target := range batch.Restored {
 		if err := s.matching.CalculateMatching(ctx, target.UserID, target.SessionID); err != nil {
 			logRecalculationFailure(id, target, models.UserScoreRecalculationFailureMatching, err)
 			result.MatchingFailed++
 		}
 	}
-	result.Remaining, err = s.jobs.CountSnapshots(id)
+	result.Remaining, err = s.jobs.CountSnapshots(id, batch.LastSnapshotID)
 	if err != nil {
 		return nil, err
 	}

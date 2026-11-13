@@ -153,7 +153,7 @@ func TestMarkUnscorableSession(t *testing.T) {
 			service := &UserScoreRecalculationService{scores: repositories.NewUserWeightScoreRepository(db)}
 			target := repositories.UserScoreRecalculationTarget{ScoreID: 1, UserID: 7, SessionID: "session-1"}
 
-			if got := service.markUnscorableSession(1, target, "v2"); got != tt.wantFailure {
+			if got := service.markUnscorableSession(1, target, "v2", models.UserScoreRecalculationFailureNoScores, "採点できる回答がありません"); got != tt.wantFailure {
 				t.Fatalf("failure = %q, want %q", got, tt.wantFailure)
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {
