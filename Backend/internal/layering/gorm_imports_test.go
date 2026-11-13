@@ -23,7 +23,6 @@ var allowedServiceFiles = []string{
 	"internal/services/auth/auth_service.go",
 	"internal/services/auth/user_deletion_service.go",
 	"internal/services/company/company_audit_apply.go",
-	"internal/services/company/company_entry_service.go",
 	"internal/services/companyauth/company_auth_service.go",
 	"internal/services/hr/student_analysis_service.go",
 	"internal/services/release/release_note_service.go",
