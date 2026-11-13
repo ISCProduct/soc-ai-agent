@@ -52,17 +52,21 @@ DB_HOST=127.0.0.1 go run ./cmd/migrate force <N>  # バージョンを強制設�
 
 ## スキーマ変更の手順
 
-1. `make migrate-new name=add_xxx_to_users` でファイルを追加する（**UTCタイムスタンプ採番**）
+1. `make migrate-new name=add_xxx_to_users` でファイルを追加する（**日本時間(JST)タイムスタンプ採番**）
 
    ```
-   20261113091500_add_xxx_to_users.up.sql    # 変更を適用するSQL
-   20261113091500_add_xxx_to_users.down.sql  # 変更を取り消すSQL
+   20261114181500_add_xxx_to_users.up.sql    # 変更を適用するSQL
+   20261114181500_add_xxx_to_users.down.sql  # 変更を取り消すSQL
    ```
 
    採番は連番からタイムスタンプへ移行済み（並行ブランチが「次の番号」を取り合わない＝
    採番衝突の根治）。既存の6桁連番(`000001`〜)はそのまま。golang-migrate は数値順に
    適用するため、タイムスタンプ(14桁)は常に6桁連番の後に適用される。
    `make migrate-new` は `atlas.sum` も自動更新する。
+
+   > タイムゾーンは **Asia/Tokyo に固定**している（`make migrate-new` が `TZ` を指定）。
+   > 正しさの条件は「UTCかJSTか」ではなく「全員が同じTZで一貫採番すること」。
+   > 日本は夏時間が無いため JST は年中 +9 の単調なオフセットで、数値順＝作成時刻順が保たれる。
 
 2. **up/down は必ずペアで作成する**（downがないとロールバックできない）
 3. GORMモデル（`internal/models/`）も同じPRで変更し、スキーマと一致させる

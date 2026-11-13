@@ -57,14 +57,16 @@ core-up:
 	docker compose up -d --build db app frontend
 	@echo "Migrations run automatically via app entrypoint (see Backend/scripts/docker-entrypoint.dev.sh)"
 
-# 新しいマイグレーションを作成する（UTCタイムスタンプ採番）。
+# 新しいマイグレーションを作成する（日本時間(JST)タイムスタンプ採番）。
 # 連番ではなくタイムスタンプを使うことで、並行ブランチが「次の番号」を取り合わない
 # （採番衝突の根治）。既存の6桁連番(000001〜)はそのまま。golang-migrate は数値順に
 # 適用するため、タイムスタンプ(14桁)は常に6桁の後に適用される。
+# TZ を Asia/Tokyo に固定し、各自のマシン設定に依存せず必ず JST で採番する
+# （全員が同一TZで一貫採番することが数値順＝作成順を保つ条件。日本は夏時間なし）。
 # 使い方: make migrate-new name=add_foo_to_users
 migrate-new:
 	@test -n "$(name)" || { echo "usage: make migrate-new name=<snake_case_name>"; exit 1; }
-	@ts=$$(date -u +%Y%m%d%H%M%S); \
+	@ts=$$(TZ='Asia/Tokyo' date +%Y%m%d%H%M%S); \
 	up="Backend/migrations/$${ts}_$(name).up.sql"; \
 	down="Backend/migrations/$${ts}_$(name).down.sql"; \
 	if [ -e "$$up" ]; then echo "already exists: $$up (1秒おいて再実行)"; exit 1; fi; \
