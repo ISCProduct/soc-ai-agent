@@ -1,4 +1,4 @@
-package company
+package repositories
 
 import (
 	"fmt"
@@ -7,15 +7,15 @@ import (
 	"gorm.io/gorm"
 )
 
-// AuditChange は1社ぶんの変更と、戻すための元の値(backup の1行)。
-type AuditChange struct {
+// CompanyAuditChange は1社ぶんの変更と、戻すための元の値(backup の1行)。
+type CompanyAuditChange struct {
 	ID     uint           `json:"id"`
 	Name   string         `json:"name"`
 	Before map[string]any `json:"before"`
 	After  map[string]any `json:"after"`
 }
 
-// auditColumns は点検が触ってよい companies の列(PlanFix が作るキー)。
+// auditColumns は点検が触ってよい companies の列(company.PlanFix が作るキー)。
 // --restore は外部の JSON ファイルを読むため、列名はここに無ければ受け付けない。
 var auditColumns = map[string]bool{
 	"industry":             true,
@@ -26,12 +26,12 @@ var auditColumns = map[string]bool{
 	"employee_count_basis": true,
 }
 
-// ApplyAuditChanges は changes を tx 上で適用する。restore=true なら After → Before へ戻す。
+// ApplyCompanyAuditChanges は changes を tx 上で適用する。restore=true なら After → Before へ戻す。
 //
 // 更新は「現在値が想定どおりの行だけ」にする。読み込みから適用までの間に管理画面や再取得ジョブが
 // 同じ列を更新していたら、その行は上書きせず全体を失敗にする(呼び出し側がロールバックする)。
 // backup 経由の戻しも同じ条件で行い、適用後に手で直された値を巻き戻さない。
-func ApplyAuditChanges(tx *gorm.DB, changes []AuditChange, restore bool) error {
+func ApplyCompanyAuditChanges(tx *gorm.DB, changes []CompanyAuditChange, restore bool) error {
 	for _, c := range changes {
 		from, to := c.Before, c.After
 		if restore {

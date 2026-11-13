@@ -18,8 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type GBizInfoService struct {
@@ -546,10 +544,10 @@ func splitClearAgencyNames(raw string) []string {
 
 func (s *GBizInfoService) findOrCreateProvisionalPartner(ctx context.Context, name string) (*models.Company, error) {
 	partnerCompany, err := s.companyRepo.FindByName(name)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return nil, err
 	}
-	if partnerCompany != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if partnerCompany != nil && !errors.Is(err, repository.ErrNotFound) {
 		return partnerCompany, nil
 	}
 	now := time.Now()

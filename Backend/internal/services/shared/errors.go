@@ -1,9 +1,14 @@
 package shared
 
-import "errors"
+import (
+	"errors"
+
+	"Backend/domain/repository"
+)
 
 // ErrForbidden は複数のサービスクラスタ・コントローラで共有される汎用の権限エラー。
-var ErrForbidden = errors.New("forbidden")
+// Repository も返すため、定義は domain/repository にあり、ここは同じ値を指す。
+var ErrForbidden = repository.ErrForbidden
 
 // ErrNotFound は複数のサービスクラスタ・コントローラで共有される汎用のnot-foundエラー。
 var ErrNotFound = errors.New("not found")
