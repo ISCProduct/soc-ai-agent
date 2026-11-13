@@ -5,6 +5,7 @@ import (
 	"Backend/internal/services/company"
 	"context"
 	"errors"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -84,9 +85,14 @@ func (c *companyReadingCache) store(key, value string) {
 // resolveCompanyInfo は共有企業情報を優先し、無ければクライアント文面を使う。
 // Search/LLM 調査はしない。companyType（general/sier）ではゲートしない。
 func (s *InterviewService) resolveCompanyInfo(companyID uint, companyName, clientInfo string) string {
+	return s.resolveCompanyInfoForPosition(companyID, companyName, "", clientInfo)
+}
+
+// resolveCompanyInfoForPosition は resolveCompanyInfo に、応募職種の求人要件を足す（#2274）。
+func (s *InterviewService) resolveCompanyInfoForPosition(companyID uint, companyName, position, clientInfo string) string {
 	brief := ""
 	if companyID > 0 || strings.TrimSpace(companyName) != "" {
-		brief = s.lookupCompanyProfile(companyID, companyName)
+		brief = s.lookupCompanyProfile(companyID, companyName, position)
 	}
 	if brief != "" {
 		return brief
@@ -94,9 +100,34 @@ func (s *InterviewService) resolveCompanyInfo(companyID uint, companyName, clien
 	return strings.TrimSpace(clientInfo)
 }
 
+// jobPositionFinder は職種名から募集職種を引く面。CompanyBriefReader に足さず、
+// 実装（CompanyRepository）が持っていれば使う任意の面にして、既存の注入先を壊さない。
+type jobPositionFinder interface {
+	FindJobPositionByCompanyAndTitle(companyID uint, title string) (*models.CompanyJobPosition, error)
+}
+
+// findJobPosition は応募職種名に一致する募集職種を返す。一致しない・引けないときは nil。
+func (s *InterviewService) findJobPosition(companyID uint, position string) *models.CompanyJobPosition {
+	position = strings.TrimSpace(position)
+	if companyID == 0 || position == "" || s.companyRepo == nil {
+		return nil
+	}
+	finder, ok := s.companyRepo.(jobPositionFinder)
+	if !ok {
+		// 実装が職種を引けないと、職種別の人物像・求人要件が黙って使われなくなる
+		log.Printf("[Interview] company repo does not implement jobPositionFinder: %T", s.companyRepo)
+		return nil
+	}
+	job, err := finder.FindJobPositionByCompanyAndTitle(companyID, position)
+	if err != nil || job == nil {
+		return nil
+	}
+	return job
+}
+
 // lookupCompanyProfile は共有キャッシュ（companies）から企業スナップショットを読む。
 // Search / LLM による企業調査は行わない。未登録・未整備なら空文字。
-func (s *InterviewService) lookupCompanyProfile(companyID uint, companyName string) string {
+func (s *InterviewService) lookupCompanyProfile(companyID uint, companyName, position string) string {
 	comp := s.findCompany(companyID, companyName)
 	if comp == nil {
 		return ""
@@ -107,7 +138,32 @@ func (s *InterviewService) lookupCompanyProfile(companyID uint, companyName stri
 			profile = p
 		}
 	}
-	return company.BuildCompanyBrief(comp, profile)
+	return company.BuildCompanyBriefForJob(comp, profile, s.findJobPosition(comp.ID, position))
+}
+
+// selectInterviewAxes は企業×職種の人物像から質問の軸を選ぶ（#2274）。
+// 職種別プロファイルがあればそれを、無ければ企業単位を使う。DB 登録済みで brief に出してよい
+// 企業だけが対象で、未審査・ゲスト企業・未登録企業は軸なし（従来の標準トピック）。
+func (s *InterviewService) selectInterviewAxes(companyID uint, position string) []interviewAxis {
+	if companyID == 0 || s.companyRepo == nil {
+		return nil
+	}
+	comp := s.findCompany(companyID, "")
+	if !company.IsBriefVisible(comp) {
+		return nil
+	}
+	var profile *models.CompanyWeightProfile
+	if job := s.findJobPosition(comp.ID, position); job != nil {
+		if p, err := s.companyRepo.GetWeightProfile(comp.ID, &job.ID); err == nil {
+			profile = p
+		}
+	}
+	if profile == nil {
+		if p, err := s.companyRepo.GetWeightProfile(comp.ID, nil); err == nil {
+			profile = p
+		}
+	}
+	return SelectTargetAxes(profile)
 }
 
 func (s *InterviewService) findCompany(companyID uint, companyName string) *models.Company {

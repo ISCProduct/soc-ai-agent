@@ -128,3 +128,41 @@ func TestFindLatestResumeFactsByUsers_MapsScoreAndMissingReview(t *testing.T) {
 	require.False(t, ok, "未提出ユーザーは map に載らない")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+// #2274: 経歴型の面接は本人の履歴書だけを読む。user_id と organization_id の両方で絞る。
+// テキストブロックがあるドキュメントのうち最新を選ぶ（最新が本文空なら古いものにフォールバック）。
+func TestFindLatestResumeText_ScopesByUserAndOrganization(t *testing.T) {
+	db, mock := newResumeMockDB(t)
+	repo := NewResumeRepository(db)
+
+	mock.ExpectQuery("SELECT.*resume_documents.*user_id = \\? AND organization_id = \\?.*ORDER BY created_at DESC, id DESC.*LIMIT").
+		WithArgs(uint(7), uint(3), maxResumeTextCandidates).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "organization_id"}).AddRow(21, 7, 3).AddRow(20, 7, 3))
+	// 最新(21)は本文が空 -> 古い(20)にフォールバック
+	mock.ExpectQuery("SELECT.*resume_text_blocks.*document_id.*ORDER BY page_number ASC, block_index ASC").
+		WithArgs(uint(21)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "text"}).AddRow(9, 21, "  "))
+	mock.ExpectQuery("SELECT.*resume_text_blocks.*document_id.*ORDER BY page_number ASC, block_index ASC").
+		WithArgs(uint(20)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "text"}).
+			AddRow(1, 20, "職務経歴").AddRow(2, 20, "  ").AddRow(3, 20, "ゼミ代表"))
+
+	got, err := repo.FindLatestResumeText(7, 3)
+	require.NoError(t, err)
+	require.Equal(t, "職務経歴\nゼミ代表", got)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestFindLatestResumeText_NoDocumentReturnsEmpty(t *testing.T) {
+	db, mock := newResumeMockDB(t)
+	repo := NewResumeRepository(db)
+
+	mock.ExpectQuery("SELECT.*resume_documents.*user_id = \\? AND organization_id = \\?").
+		WithArgs(uint(7), uint(4), maxResumeTextCandidates).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	got, err := repo.FindLatestResumeText(7, 4)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

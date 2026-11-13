@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { interviewLimits } from '@/lib/interview'
 import { authService, User } from '@/lib/auth'
+import { fetchResumeStatus } from '@/lib/resume-reminder'
 import ConsentDialog from './components/ConsentDialog'
 import SelectionScreen, { type CompanyHints } from './components/SelectionScreen'
 import LobbyScreen from './components/LobbyScreen'
@@ -76,6 +77,18 @@ function InterviewContent() {
     setUser(storedUser)
     setLoading(false)
   }, [router])
+
+  // 履歴書が登録済みか。質問づくりに履歴書を参照することをロビーで示すためだけに使う。
+  // 取得に失敗したときは表示しない（参照の有無を断定しない）。
+  const [hasResume, setHasResume] = useState(false)
+  useEffect(() => {
+    if (loading) return
+    let cancelled = false
+    fetchResumeStatus()
+      .then((status) => { if (!cancelled) setHasResume(status.has_document) })
+      .catch(() => { if (!cancelled) setHasResume(false) })
+    return () => { cancelled = true }
+  }, [loading])
 
   // マッチング結果から遷移した場合: URL パラメータで企業を事前選択してロビーへ
   useEffect(() => {
@@ -310,6 +323,7 @@ function InterviewContent() {
         hintsError={hintsError}
         onRetryHints={retryHints}
         questionDurationSeconds={questionDurationSeconds}
+        hasResume={hasResume}
         onStartInterview={() => {
           if (interviewCompany?.name) {
             saveInterviewLobbyDraft({
@@ -356,6 +370,7 @@ function InterviewContent() {
         lobbyVideoRef={media.lobbyVideoRef}
         onBack={handleBackToSelection}
         onJoinWithConsent={session.handleJoinWithConsent}
+        hasResume={hasResume}
         consentDialog={consentDialog}
       />
     )

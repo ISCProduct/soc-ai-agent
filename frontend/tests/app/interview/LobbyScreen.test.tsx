@@ -3,6 +3,7 @@
  */
 import { render, screen } from '@testing-library/react'
 import LobbyScreen from '@/app/interview/components/LobbyScreen'
+import { RESUME_REFERENCE_NOTICE } from '@/app/interview/resumeNotice'
 
 describe('LobbyScreen', () => {
   const noop = () => {}
@@ -36,6 +37,16 @@ describe('LobbyScreen', () => {
 
     expect(screen.getByText('準備はできましたか？')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '面接に参加' })).toBeInTheDocument()
+  })
+
+  it('履歴書が登録済みのときだけ、質問づくりに参照する旨を表示する', () => {
+    renderScreen({ hasResume: true })
+    expect(screen.getByTestId('resume-reference-notice')).toHaveTextContent(RESUME_REFERENCE_NOTICE)
+  })
+
+  it('履歴書が未登録なら参照の表示を出さない', () => {
+    renderScreen()
+    expect(screen.queryByTestId('resume-reference-notice')).not.toBeInTheDocument()
   })
 
   it('許可エラー時も video 要素を残し再試行ボタンを表示する', () => {

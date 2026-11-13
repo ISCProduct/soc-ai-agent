@@ -21,6 +21,7 @@ import PsychologyIcon from '@mui/icons-material/Psychology'
 import { interviewLimits } from '@/lib/interview'
 
 import type { InterviewCompany } from '../types'
+import { RESUME_REFERENCE_NOTICE } from '../resumeNotice'
 import styles from './interview.module.css'
 import { UI } from '@/lib/design/tokens'
 
@@ -39,6 +40,8 @@ export interface LobbyScreenProps {
   lobbyVideoRef: RefObject<HTMLVideoElement | null>
   onBack: () => void
   onJoinWithConsent: () => void
+  /** 履歴書が登録済みか。true のときだけ「質問づくりに参照します」を表示する */
+  hasResume?: boolean
   /** 親コンポーネントが保持する ConsentDialog インスタンス（LOBBY / SESSION 画面で共有） */
   consentDialog: ReactNode
 }
@@ -63,6 +66,7 @@ export default function LobbyScreen({
   lobbyVideoRef,
   onBack,
   onJoinWithConsent,
+  hasResume = false,
   consentDialog,
 }: LobbyScreenProps) {
   return (
@@ -189,6 +193,15 @@ export default function LobbyScreen({
                 ⏱ このセッションは最大{interviewLimits.maxMinutes}分です
               </Typography>
             </Box>
+
+            {hasResume && (
+              <Box
+                data-testid="resume-reference-notice"
+                sx={{ mb: 3, px: 2, py: 1, bgcolor: '#f1f8e9', borderRadius: 1, border: '1px solid #aed581', maxWidth: 340 }}
+              >
+                <Typography sx={{ fontSize: 13, color: '#33691e' }}>{RESUME_REFERENCE_NOTICE}</Typography>
+              </Box>
+            )}
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ width: '100%', maxWidth: 340 }}>
               <Button

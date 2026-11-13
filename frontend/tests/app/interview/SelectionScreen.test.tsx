@@ -3,6 +3,7 @@
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import SelectionScreen from '@/app/interview/components/SelectionScreen'
+import { RESUME_REFERENCE_NOTICE } from '@/app/interview/resumeNotice'
 import { POSITIONS } from '@/app/interview/constants'
 import type { User } from '@/lib/auth'
 
@@ -62,6 +63,17 @@ describe('SelectionScreen', () => {
     expect(screen.getByText('IT業界キャリアエージェント')).toBeInTheDocument()
     expect(screen.getByText('企業未選択')).toBeInTheDocument()
     expect(screen.getAllByText(POSITIONS[0].title).length).toBeGreaterThan(0)
+  })
+
+  it('履歴書が登録済みのときだけ、質問づくりに参照する旨を表示する', () => {
+    renderScreen({ hasResume: true })
+    expect(screen.getByTestId('resume-reference-notice')).toHaveTextContent(RESUME_REFERENCE_NOTICE)
+  })
+
+  it('履歴書が未登録（または未指定）なら参照の表示を出さない', () => {
+    renderScreen()
+    expect(screen.queryByTestId('resume-reference-notice')).not.toBeInTheDocument()
+    expect(screen.queryByText(RESUME_REFERENCE_NOTICE)).not.toBeInTheDocument()
   })
 
   it('面接傾向の取得失敗を表示して再試行できる', () => {

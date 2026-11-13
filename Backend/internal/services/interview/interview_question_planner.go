@@ -14,6 +14,8 @@ const (
 	questionSourceGenerated = "generated"
 	questionSourceTopic     = "topic"
 	questionSourceFollowUp  = "follow_up"
+	// questionSourceAxis は企業の人物像の軸を行動事象型で聞く質問スロット（#2274）。
+	questionSourceAxis = "axis"
 
 	questionStatusPending     = "pending"
 	questionStatusAsked       = "asked"
@@ -49,6 +51,16 @@ type questionDirective struct {
 	TotalQuestions int
 	// CompanyQuestionID は元の企業別カスタム質問（評価したい観点の引き先）。標準トピックでは nil
 	CompanyQuestionID *uint
+	// TargetAxis は軸スロット（とその深掘り）が狙う人物像の軸キー。それ以外は空
+	TargetAxis string
+	// Plan は実際のキュー順のトピック名。軸スロットを含むキューのときだけ入る（空なら標準5トピック）
+	Plan []string
+	// PlanPosition は Plan の中でこの質問が何番目か（1始まり）
+	PlanPosition int
+	// PendingQuestions はこの質問のあとに残る未実施の質問数（Plan があるときだけ）
+	PendingQuestions int
+	// state は記録済みの質問行。実際に聞いた文が変わったとき（差別質問の差し替え）に更新する
+	state *models.InterviewQuestionState
 }
 
 type companyQuestionHintsContextKey struct{}
@@ -91,6 +103,14 @@ func normalizeCompanyQuestionHints(hints []string) []string {
 // BuildQuestionQueue は必須質問→企業別候補→標準トピック→推奨質問の順でキューを構築する。
 // 保存済み質問がある場合は、生成候補を追加しない。
 func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompanyQuestion, generatedHints ...string) []models.InterviewQuestionState {
+	return BuildQuestionQueueWithAxes(sessionID, customQuestions, nil, generatedHints)
+}
+
+// BuildQuestionQueueWithAxes は BuildQuestionQueue に人物像の軸スロットを加える（#2274）。
+// axes があるときは、冒頭（自己紹介・志望動機）と末尾（逆質問）の標準トピックを残し、
+// 中間の標準トピックを軸の数だけ後ろから置き換える。axes が空なら従来と同じキュー。
+// 必須カスタム質問は引き続き最優先。
+func BuildQuestionQueueWithAxes(sessionID uint, customQuestions []models.InterviewCompanyQuestion, axes []interviewAxis, generatedHints []string) []models.InterviewQuestionState {
 	states := make([]models.InterviewQuestionState, 0)
 	order := 0
 
@@ -113,6 +133,17 @@ func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompan
 			order++
 		}
 	}
+	appendTopic := func(topic string) {
+		states = append(states, models.InterviewQuestionState{
+			SessionID:    sessionID,
+			Source:       questionSourceTopic,
+			Category:     topic,
+			QuestionText: topic,
+			Status:       questionStatusPending,
+			SortOrder:    order,
+		})
+		order++
+	}
 
 	appendCustom(true)
 	if len(customQuestions) == 0 {
@@ -128,16 +159,32 @@ func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompan
 			order++
 		}
 	}
-	for _, topic := range interviewTopics {
-		states = append(states, models.InterviewQuestionState{
-			SessionID:    sessionID,
-			Source:       questionSourceTopic,
-			Category:     topic,
-			QuestionText: topic,
-			Status:       questionStatusPending,
-			SortOrder:    order,
-		})
-		order++
+	if len(axes) == 0 {
+		for _, topic := range interviewTopics {
+			appendTopic(topic)
+		}
+	} else {
+		// 先頭=自己紹介・志望動機、末尾=逆質問、その間が置き換え対象
+		middle := interviewTopics[1 : len(interviewTopics)-1]
+		axes = axes[:min(len(axes), len(middle))]
+		appendTopic(interviewTopics[0])
+		for _, topic := range middle[:len(middle)-len(axes)] {
+			appendTopic(topic)
+		}
+		for _, axis := range axes {
+			key := axis.Key
+			states = append(states, models.InterviewQuestionState{
+				SessionID:    sessionID,
+				Source:       questionSourceAxis,
+				Category:     axis.CategoryLabel(),
+				QuestionText: axis.Question,
+				TargetAxis:   &key,
+				Status:       questionStatusPending,
+				SortOrder:    order,
+			})
+			order++
+		}
+		appendTopic(interviewTopics[len(interviewTopics)-1])
 	}
 	appendCustom(false)
 	return states

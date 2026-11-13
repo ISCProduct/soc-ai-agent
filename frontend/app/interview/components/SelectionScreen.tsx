@@ -26,6 +26,7 @@ import { interviewLimits } from '@/lib/interview'
 import { POSITIONS } from '../constants'
 import type { InterviewCompany, Position } from '../types'
 import { resolveCompanyByName, mergeResolvedCompany } from '../utils'
+import { RESUME_REFERENCE_NOTICE } from '../resumeNotice'
 import { UI } from '@/lib/design/tokens'
 
 const COMPANY_RESOLVE_DEBOUNCE_MS = 400
@@ -75,6 +76,8 @@ export interface SelectionScreenProps {
   hintsError?: string | null
   onRetryHints?: () => void
   questionDurationSeconds: number
+  /** 履歴書が登録済みか。true のときだけ「質問づくりに参照します」を表示する */
+  hasResume?: boolean
   onStartInterview: () => void
 }
 
@@ -111,6 +114,7 @@ export default function SelectionScreen({
   hintsError = null,
   onRetryHints = () => {},
   questionDurationSeconds,
+  hasResume = false,
   onStartInterview,
 }: SelectionScreenProps) {
   // 入力中の企業名解決は親の一覧取得と同様にデバウンスし、1文字ごとの API 連打を避ける。
@@ -597,6 +601,12 @@ export default function SelectionScreen({
                     </Typography>
                   )}
                 </Paper>
+              )}
+
+              {hasResume && (
+                <Alert severity="info" icon={false} data-testid="resume-reference-notice">
+                  {RESUME_REFERENCE_NOTICE}
+                </Alert>
               )}
 
               <Button

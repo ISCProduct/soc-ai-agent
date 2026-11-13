@@ -2,6 +2,7 @@ package company
 
 import (
 	"Backend/internal/models"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -10,6 +11,19 @@ import (
 // 壁打ち/面接/レビュー用の短いスナップショット文を組み立てる。
 // Search / LLM 調査は行わない。
 func BuildCompanyBrief(company *models.Company, profile *models.CompanyWeightProfile) string {
+	return BuildCompanyBriefForJob(company, profile, nil)
+}
+
+// IsBriefVisible は企業行を brief・面接の質問計画に使ってよいか（未審査のゲスト投稿でないか）を返す。
+func IsBriefVisible(c *models.Company) bool {
+	return c != nil && briefVisible(c)
+}
+
+// BuildCompanyBriefForJob は BuildCompanyBrief に、応募職種の求人要件
+// （required_skills / preferred_skills）を足す（#2274）。
+// 求人は公開済み（data_status=published かつ is_active）のものだけ載せる。
+// 未公開の求人文面は審査前の自由記述が入り得るため、brief には入れない。
+func BuildCompanyBriefForJob(company *models.Company, profile *models.CompanyWeightProfile, job *models.CompanyJobPosition) string {
 	if company == nil || !briefVisible(company) {
 		return ""
 	}
@@ -46,7 +60,35 @@ func BuildCompanyBrief(company *models.Company, profile *models.CompanyWeightPro
 			fmt.Fprintf(&b, "重視傾向: %s\n", strings.Join(top, "、"))
 		}
 	}
+	if job != nil && job.DataStatus == "published" && job.IsActive {
+		if req := skillList(job.RequiredSkills); req != "" {
+			fmt.Fprintf(&b, "求人の必須スキル: %s\n", req)
+		}
+		if pref := skillList(job.PreferredSkills); pref != "" {
+			fmt.Fprintf(&b, "求人の歓迎スキル: %s\n", pref)
+		}
+	}
 	return strings.TrimSpace(b.String())
+}
+
+// skillList は required_skills / preferred_skills（JSON 配列の文字列。そうでなければ生の文字列）を
+// 読点区切りの短い文にする。空・null・[] は空文字。
+func skillList(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" || raw == "[]" {
+		return ""
+	}
+	var items []string
+	if err := json.Unmarshal([]byte(raw), &items); err == nil {
+		kept := items[:0]
+		for _, it := range items {
+			if it = strings.TrimSpace(it); it != "" {
+				kept = append(kept, it)
+			}
+		}
+		raw = strings.Join(kept, "、")
+	}
+	return trimRunes(raw, 120)
 }
 
 // briefVisible は brief に文面を出してよい企業行かを判定する（#1600）。

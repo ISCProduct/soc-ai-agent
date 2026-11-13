@@ -98,7 +98,7 @@ func (s *InterviewService) Turn(
 			result.reading = s.resolveCompanyReading(ctx, result.id, companyName)
 			result.readingResolved = true
 		}
-		result.info = s.resolveCompanyInfo(result.id, companyName, companyInfo)
+		result.info = s.resolveCompanyInfoForPosition(result.id, companyName, position, companyInfo)
 	}()
 
 	// STT: Whisper でユーザー音声をテキスト化。
@@ -215,6 +215,10 @@ func (s *InterviewService) Turn(
 	history = append(history, map[string]string{"role": "user", "content": userText})
 
 	// Chat: 面接官として返答生成
+	// 軸スロットの質問・追質問には、LLM 推定の「重視傾向」を企業の事実として渡さない（#2274）
+	if directive != nil && directive.TargetAxis != "" {
+		companyInfo = stripInferredTendency(companyInfo)
+	}
 	systemPrompt := buildInterviewSystemPrompt(
 		companyName,
 		companyReading,
@@ -231,6 +235,13 @@ func (s *InterviewService) Turn(
 		questionDurationSeconds,
 		directive,
 	)
+	// 経歴型の面接（#2274）: 軸スロットの質問（とその深掘り）のときだけ、本人の履歴書を材料として渡す。
+	// 軸なしの面接・標準トピックの質問は従来のプロンプトのまま。
+	if directive != nil && directive.TargetAxis != "" {
+		if resumeCtx := s.buildResumeContext(session); resumeCtx != "" {
+			systemPrompt = resumeCtx + "\n" + systemPrompt
+		}
+	}
 	if s.crossFeature != nil {
 		if profileCtx := s.crossFeature.BuildInterviewContextFromUser(userID); profileCtx != "" {
 			systemPrompt = profileCtx + "\n" + systemPrompt
@@ -244,6 +255,13 @@ func (s *InterviewService) Turn(
 	if err != nil {
 		log.Printf("[Interview] chat error: %v", err)
 		aiText = interviewFallbackReplyText
+	} else {
+		// 質問を求めるターンだけ、就職差別につながる質問が生成されたら1回だけ再生成し、
+		// それでも含まれるなら定型質問にする（差し替えたら記録済みの質問文も更新）
+		aiText = s.guardAIText(directive, aiText, func() (string, error) {
+			text, _, regenErr := s.chatInterview(ctx, systemPrompt, history)
+			return text, regenErr
+		})
 	}
 
 	// TTS: AI返答を音声化（企業名は読み仮名に置換して誤読を防ぐ。表示用のaiTextはそのまま保持）。
@@ -349,7 +367,7 @@ func (s *InterviewService) StartTurn(
 	}
 
 	// 企業情報: 共有キャッシュ優先（general/sier 問わず）。無ければクライアント文面をフォールバック
-	companyInfo = s.resolveCompanyInfo(companyID, companyName, companyInfo)
+	companyInfo = s.resolveCompanyInfoForPosition(companyID, companyName, position, companyInfo)
 
 	// 企業別カスタム質問とGitHubスキルスコアを取得
 	customQuestions := s.fetchCustomQuestions(companyID, position)
@@ -362,6 +380,10 @@ func (s *InterviewService) StartTurn(
 		totalQuestions = directive.TotalQuestions
 	}
 
+	// 軸スロットの質問・追質問には、LLM 推定の「重視傾向」を企業の事実として渡さない（#2274）
+	if directive != nil && directive.TargetAxis != "" {
+		companyInfo = stripInferredTendency(companyInfo)
+	}
 	systemPromptStart := buildInterviewSystemPrompt(
 		companyName,
 		companyReading,
@@ -387,12 +409,18 @@ func (s *InterviewService) StartTurn(
 		systemPromptStart = nameCtx + "\n" + systemPromptStart
 	}
 	// Chat失敗時も面接開始を中断させず、定型の冒頭挨拶にフォールバックする（#910）
-	aiText, llmOutcome, err := s.chatInterview(ctx, systemPromptStart, []map[string]string{
+	startHistory := []map[string]string{
 		{"role": "user", "content": "面接を開始してください。最初の自己紹介・志望動機の質問からお願いします。"},
-	})
+	}
+	aiText, llmOutcome, err := s.chatInterview(ctx, systemPromptStart, startHistory)
 	if err != nil {
 		log.Printf("[Interview] chat error: %v", err)
 		aiText = "本日はよろしくお願いします。早速ですが、簡単に自己紹介をお願いできますか？"
+	} else {
+		aiText = s.guardAIText(directive, aiText, func() (string, error) {
+			text, _, regenErr := s.chatInterview(ctx, systemPromptStart, startHistory)
+			return text, regenErr
+		})
 	}
 
 	// TTS: 企業名は読み仮名に置換して誤読を防ぐ（表示用のaiTextはそのまま保持）。

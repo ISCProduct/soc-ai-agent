@@ -94,6 +94,17 @@ func buildInterviewSystemPrompt(
 		}
 	}
 
+	// 軸スロットを含むキュー（#2274）では、現在のトピック・残りトピック・進め方を実際のキューに合わせる。
+	// 標準5トピックの表と食い違うと、面接官が存在しないトピックへ移行したり、
+	// 残りトピック数を誤って「ペースを上げて」と伝えたりする。
+	if directive != nil && len(directive.Plan) > 0 {
+		topicPosition = fmt.Sprintf("%d/%d", directive.PlanPosition, len(directive.Plan))
+		remainingTopics = directive.PendingQuestions
+		if directive.TargetAxis != "" {
+			currentTopic = axisTopicName
+		}
+	}
+
 	// 【役割の徹底】は #1223。面接官が企業側であること・逆質問には自分が答えることは
 	// 従来プロンプトに書かれておらず、モデルの暗黙の補完に依存していた。
 	// #1209 の計測では、補完できないモデルに与えると自社を「御社」と呼び（8ターン中5回）、
@@ -105,6 +116,7 @@ func buildInterviewSystemPrompt(
 - 必ず1つの質問で締めくくる
 - 評価・講評は面接終了まで行わない
 - 企業名を発話する際は、英字・略語はカタカナの正しい読み方で読んでください
+- 家族構成・出身地・本籍・国籍・宗教・支持政党・思想など、応募者の適性・能力と関係のない事項は質問しない
 - 常に中立的で丁寧なトーンを保ち、叱責・説教・高圧的な言い回しは絶対にしない
 - 回答が的外れ・曖昧・無回答でも、いらだちや不満を示さず「聞き取れなかった」体で
   穏やかに言い換えるか、別の角度から質問し直す
@@ -139,16 +151,15 @@ func buildInterviewSystemPrompt(
 		}
 	}
 
-	base += `
-
-【質問の進め方】
-面接は以下の順番でトピックを進めてください:
-1. 自己紹介・志望動機
-2. 職務経験・実績
-3. 強み・弱み
-4. キャリアビジョン
-5. 逆質問
-
+	topicOrder := interviewTopics
+	if directive != nil && len(directive.Plan) > 0 {
+		topicOrder = directive.Plan
+	}
+	var order strings.Builder
+	for i, topic := range topicOrder {
+		fmt.Fprintf(&order, "%d. %s\n", i+1, topic)
+	}
+	base += "\n\n【質問の進め方】\n面接は以下の順番でトピックを進めてください:\n" + order.String() + `
 【深掘りの判断基準】（重要）
 - 応募者の回答が抽象的・表面的な場合のみ深掘りしてください
 - 採用判断に有益な情報（具体的エピソード・数値・自分の行動・結果）が得られた場合は次のトピックへ移行してください
@@ -212,7 +223,12 @@ func buildInterviewSystemPrompt(
 	}
 
 	// 企業別カスタム質問をシステムプロンプトに注入
-	if directive != nil && strings.TrimSpace(directive.Text) != "" {
+	if axis := axisByKey(axisKeyOf(directive)); axis.Key != "" && directive.Source == questionSourceAxis && !directive.IsDeepening {
+		// 軸スロット（#2274）。質問文は定型の行動事象型質問で、言い回しは面接官が履歴書・企業情報に
+		// 合わせて調整する。評価観点（軸名）は応募者に読み上げない。
+		// 定型質問は DB 由来ではなくコード定数なので、非信頼テキストの囲みは不要。
+		base += "\n\n" + buildAxisDirectiveBlock(axis, directive.Text)
+	} else if directive != nil && strings.TrimSpace(directive.Text) != "" {
 		base += "\n\n【今回の質問】"
 		if directive.IsDeepening {
 			base += "\n前の回答を踏まえた深掘り質問です。"
