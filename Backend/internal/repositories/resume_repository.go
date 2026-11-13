@@ -159,31 +159,37 @@ WHERE d.rn = 1`
 	return result, nil
 }
 
+// maxResumeTextCandidates は本文を探すときに新しい順に見る履歴書の最大数。
+const maxResumeTextCandidates = 10
+
 // FindLatestResumeText は本人の最新の履歴書の本文（テキストブロックを頁・行順に改行で結合）を返す（#2274）。
+// テキストブロックがあるドキュメントのうち最新を選ぶ（最新が本文空なら古いものにフォールバック）。
 // user_id と organization_id の両方で絞り、他人・他組織の履歴書は読めない。
 // 履歴書が無い、またはテキストが無いときは空文字。
 func (r *ResumeRepository) FindLatestResumeText(userID, organizationID uint) (string, error) {
-	var doc models.ResumeDocument
-	err := r.db.Where("user_id = ? AND organization_id = ?", userID, organizationID).
+	var docs []models.ResumeDocument
+	if err := r.db.Where("user_id = ? AND organization_id = ?", userID, organizationID).
 		Order("created_at DESC, id DESC").
-		First(&doc).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", nil
-	}
-	if err != nil {
+		Limit(maxResumeTextCandidates).
+		Find(&docs).Error; err != nil {
 		return "", err
 	}
-	var blocks []models.ResumeTextBlock
-	if err := r.db.Where("document_id = ?", doc.ID).
-		Order("page_number ASC, block_index ASC").
-		Find(&blocks).Error; err != nil {
-		return "", err
-	}
-	lines := make([]string, 0, len(blocks))
-	for _, b := range blocks {
-		if t := strings.TrimSpace(b.Text); t != "" {
-			lines = append(lines, t)
+	for _, doc := range docs {
+		var blocks []models.ResumeTextBlock
+		if err := r.db.Where("document_id = ?", doc.ID).
+			Order("page_number ASC, block_index ASC").
+			Find(&blocks).Error; err != nil {
+			return "", err
+		}
+		lines := make([]string, 0, len(blocks))
+		for _, b := range blocks {
+			if t := strings.TrimSpace(b.Text); t != "" {
+				lines = append(lines, t)
+			}
+		}
+		if len(lines) > 0 {
+			return strings.Join(lines, "\n"), nil
 		}
 	}
-	return strings.Join(lines, "\n"), nil
+	return "", nil
 }

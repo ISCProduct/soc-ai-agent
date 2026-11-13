@@ -94,6 +94,17 @@ func buildInterviewSystemPrompt(
 		}
 	}
 
+	// 軸スロットを含むキュー（#2274）では、現在のトピック・残りトピック・進め方を実際のキューに合わせる。
+	// 標準5トピックの表と食い違うと、面接官が存在しないトピックへ移行したり、
+	// 残りトピック数を誤って「ペースを上げて」と伝えたりする。
+	if directive != nil && len(directive.Plan) > 0 {
+		topicPosition = fmt.Sprintf("%d/%d", directive.PlanPosition, len(directive.Plan))
+		remainingTopics = directive.PendingQuestions
+		if directive.TargetAxis != "" {
+			currentTopic = axisTopicName
+		}
+	}
+
 	// 【役割の徹底】は #1223。面接官が企業側であること・逆質問には自分が答えることは
 	// 従来プロンプトに書かれておらず、モデルの暗黙の補完に依存していた。
 	// #1209 の計測では、補完できないモデルに与えると自社を「御社」と呼び（8ターン中5回）、
@@ -140,16 +151,15 @@ func buildInterviewSystemPrompt(
 		}
 	}
 
-	base += `
-
-【質問の進め方】
-面接は以下の順番でトピックを進めてください:
-1. 自己紹介・志望動機
-2. 職務経験・実績
-3. 強み・弱み
-4. キャリアビジョン
-5. 逆質問
-
+	topicOrder := interviewTopics
+	if directive != nil && len(directive.Plan) > 0 {
+		topicOrder = directive.Plan
+	}
+	var order strings.Builder
+	for i, topic := range topicOrder {
+		fmt.Fprintf(&order, "%d. %s\n", i+1, topic)
+	}
+	base += "\n\n【質問の進め方】\n面接は以下の順番でトピックを進めてください:\n" + order.String() + `
 【深掘りの判断基準】（重要）
 - 応募者の回答が抽象的・表面的な場合のみ深掘りしてください
 - 採用判断に有益な情報（具体的エピソード・数値・自分の行動・結果）が得られた場合は次のトピックへ移行してください

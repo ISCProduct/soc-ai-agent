@@ -57,6 +57,35 @@ func TestSelectTargetAxes(t *testing.T) {
 			p.CommunicationSkill = 59
 			p.DetailOrientation = 10
 		}), []string{"leadership"}},
+		{"スコア59は選ばない(差は十分)", profileWith(func(p *models.CompanyWeightProfile) {
+			p.TeamworkOrientation = 59
+			p.DetailOrientation, p.StabilityOrientation, p.WorkLifeBalance, p.GrowthOrientation, p.CreativityOrientation, p.ChallengeSeeking = 10, 10, 10, 10, 10, 10
+		}), nil},
+		{"スコア60は選ぶ(差は十分)", profileWith(func(p *models.CompanyWeightProfile) {
+			p.TeamworkOrientation = 60
+			p.DetailOrientation, p.StabilityOrientation, p.WorkLifeBalance, p.GrowthOrientation, p.CreativityOrientation, p.ChallengeSeeking = 10, 10, 10, 10, 10, 10
+		}), []string{"teamwork"}},
+		{"低い外れ値1軸だけで差があっても、上位が中央値と変わらなければ軸なし", profileWith(func(p *models.CompanyWeightProfile) {
+			p.TeamworkOrientation, p.TechnicalOrientation, p.LeadershipOrientation = 65, 64, 63
+			p.CreativityOrientation, p.StabilityOrientation, p.GrowthOrientation = 62, 62, 62
+			p.WorkLifeBalance, p.ChallengeSeeking, p.CommunicationSkill = 62, 62, 62
+			p.DetailOrientation = 10
+		}), nil},
+		{"高い外れ値1軸は軸にする", profileWith(func(p *models.CompanyWeightProfile) {
+			p.TeamworkOrientation = 90
+		}), []string{"teamwork"}},
+		{"上位と中央値の差が19なら軸なし(6軸が中央値)", profileWith(func(p *models.CompanyWeightProfile) {
+			p.TeamworkOrientation = 89
+			p.TechnicalOrientation, p.LeadershipOrientation, p.CreativityOrientation = 70, 70, 70
+			p.StabilityOrientation, p.GrowthOrientation, p.WorkLifeBalance = 70, 70, 70
+			p.ChallengeSeeking, p.DetailOrientation, p.CommunicationSkill = 20, 20, 20
+		}), nil},
+		{"上位と中央値の差が20なら選ぶ(6軸が中央値)", profileWith(func(p *models.CompanyWeightProfile) {
+			p.TeamworkOrientation = 90
+			p.TechnicalOrientation, p.LeadershipOrientation, p.CreativityOrientation = 70, 70, 70
+			p.StabilityOrientation, p.GrowthOrientation, p.WorkLifeBalance = 70, 70, 70
+			p.ChallengeSeeking, p.DetailOrientation, p.CommunicationSkill = 20, 20, 20
+		}), []string{"teamwork", "technical", "leadership"}},
 		{"同点は表の順で安定", profileWith(func(p *models.CompanyWeightProfile) {
 			p.CreativityOrientation = 80
 			p.TechnicalOrientation = 80

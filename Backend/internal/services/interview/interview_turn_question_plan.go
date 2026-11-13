@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"time"
 )
@@ -59,6 +60,10 @@ func (s *InterviewService) advanceQuestionPlan(
 					targetAxis = *asked.TargetAxis
 				}
 				brief := s.lookupCompanyProfile(companyID, companyName, position)
+				if targetAxis != "" {
+					// 軸の追質問には LLM 推定の重視傾向を渡さない（企業の事実ではない）
+					brief = stripInferredTendency(brief)
+				}
 				if generated, genErr := s.generateFollowUpQuestion(ctx, asked.QuestionText, userAnswer, brief, targetAxis); genErr == nil && strings.TrimSpace(generated) != "" {
 					// 就職差別につながる質問が生成されたら採用せず、テンプレートの追質問のままにする。
 					// 追質問は追加のLLM呼び出しを増やさないため、再生成はしない。
@@ -84,7 +89,7 @@ func (s *InterviewService) advanceQuestionPlan(
 				if err := s.questionStateRepo.Create(followUp); err != nil {
 					return nil, err
 				}
-				return &questionDirective{
+				d := &questionDirective{
 					Text:              followUpText,
 					Source:            questionSourceFollowUp,
 					Category:          asked.Category,
@@ -92,7 +97,15 @@ func (s *InterviewService) advanceQuestionPlan(
 					TargetAxis:        targetAxis,
 					IsDeepening:       true,
 					TotalQuestions:    totalQuestions + 1,
-				}, nil
+					state:             followUp,
+				}
+				if targetAxis != "" {
+					// 軸の深掘りでもプロンプトの進行表示を実キューに合わせる
+					if all, err := s.questionStateRepo.FindBySessionID(session.ID); err == nil {
+						d.Plan, d.PlanPosition, d.PendingQuestions = describeQueue(all, slices.IndexFunc(all, func(st models.InterviewQuestionState) bool { return st.ID == asked.ID }))
+					}
+				}
+				return d, nil
 			}
 		}
 	}
@@ -114,14 +127,59 @@ func (s *InterviewService) advanceQuestionPlan(
 	if next.TargetAxis != nil {
 		nextAxis = *next.TargetAxis
 	}
-	return &questionDirective{
+	nextIdx := -1
+	for i := range states {
+		if &states[i] == next {
+			nextIdx = i
+			break
+		}
+	}
+	d := &questionDirective{
 		Text:              next.QuestionText,
 		Source:            next.Source,
 		Category:          next.Category,
 		CompanyQuestionID: next.CompanyQuestionID,
 		TargetAxis:        nextAxis,
 		TotalQuestions:    totalQuestions,
-	}, nil
+		state:             next,
+	}
+	d.Plan, d.PlanPosition, d.PendingQuestions = describeQueue(states, nextIdx)
+	return d, nil
+}
+
+// describeQueue は軸スロットを含むキューについて、実際の出題順のトピック名・現在位置（1始まり）・
+// 残りの未実施数を返す。軸スロットが無いキューは標準5トピックのままなので nil を返す。
+// 深掘り（follow_up）は数えない。
+func describeQueue(states []models.InterviewQuestionState, current int) (plan []string, position, pending int) {
+	hasAxis := false
+	for _, st := range states {
+		if st.Source == questionSourceAxis {
+			hasAxis = true
+		}
+	}
+	if !hasAxis {
+		return nil, 0, 0
+	}
+	for i, st := range states {
+		if st.Source == questionSourceFollowUp {
+			continue
+		}
+		switch st.Source {
+		case questionSourceAxis:
+			plan = append(plan, axisTopicName)
+		case questionSourceTopic:
+			plan = append(plan, st.Category)
+		default:
+			plan = append(plan, "企業別質問")
+		}
+		if i == current {
+			position = len(plan)
+		}
+		if st.Status == questionStatusPending && i != current {
+			pending++
+		}
+	}
+	return plan, position, pending
 }
 
 func (s *InterviewService) persistInterviewContext(session *models.InterviewSession, companyID uint, position, companyName string) error {

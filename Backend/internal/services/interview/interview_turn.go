@@ -215,6 +215,10 @@ func (s *InterviewService) Turn(
 	history = append(history, map[string]string{"role": "user", "content": userText})
 
 	// Chat: 面接官として返答生成
+	// 軸スロットの質問・追質問には、LLM 推定の「重視傾向」を企業の事実として渡さない（#2274）
+	if directive != nil && directive.TargetAxis != "" {
+		companyInfo = stripInferredTendency(companyInfo)
+	}
 	systemPrompt := buildInterviewSystemPrompt(
 		companyName,
 		companyReading,
@@ -252,8 +256,9 @@ func (s *InterviewService) Turn(
 		log.Printf("[Interview] chat error: %v", err)
 		aiText = interviewFallbackReplyText
 	} else {
-		// 就職差別につながる質問が生成されたら1回だけ再生成し、それでも含まれるなら定型質問にする
-		aiText = guardDiscriminatory(aiText, func() (string, error) {
+		// 質問を求めるターンだけ、就職差別につながる質問が生成されたら1回だけ再生成し、
+		// それでも含まれるなら定型質問にする（差し替えたら記録済みの質問文も更新）
+		aiText = s.guardAIText(directive, aiText, func() (string, error) {
 			text, _, regenErr := s.chatInterview(ctx, systemPrompt, history)
 			return text, regenErr
 		})
@@ -375,6 +380,10 @@ func (s *InterviewService) StartTurn(
 		totalQuestions = directive.TotalQuestions
 	}
 
+	// 軸スロットの質問・追質問には、LLM 推定の「重視傾向」を企業の事実として渡さない（#2274）
+	if directive != nil && directive.TargetAxis != "" {
+		companyInfo = stripInferredTendency(companyInfo)
+	}
 	systemPromptStart := buildInterviewSystemPrompt(
 		companyName,
 		companyReading,
@@ -408,7 +417,7 @@ func (s *InterviewService) StartTurn(
 		log.Printf("[Interview] chat error: %v", err)
 		aiText = "本日はよろしくお願いします。早速ですが、簡単に自己紹介をお願いできますか？"
 	} else {
-		aiText = guardDiscriminatory(aiText, func() (string, error) {
+		aiText = s.guardAIText(directive, aiText, func() (string, error) {
 			text, _, regenErr := s.chatInterview(ctx, systemPromptStart, startHistory)
 			return text, regenErr
 		})

@@ -53,6 +53,14 @@ type questionDirective struct {
 	CompanyQuestionID *uint
 	// TargetAxis は軸スロット（とその深掘り）が狙う人物像の軸キー。それ以外は空
 	TargetAxis string
+	// Plan は実際のキュー順のトピック名。軸スロットを含むキューのときだけ入る（空なら標準5トピック）
+	Plan []string
+	// PlanPosition は Plan の中でこの質問が何番目か（1始まり）
+	PlanPosition int
+	// PendingQuestions はこの質問のあとに残る未実施の質問数（Plan があるときだけ）
+	PendingQuestions int
+	// state は記録済みの質問行。実際に聞いた文が変わったとき（差別質問の差し替え）に更新する
+	state *models.InterviewQuestionState
 }
 
 type companyQuestionHintsContextKey struct{}

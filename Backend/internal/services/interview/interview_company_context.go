@@ -5,6 +5,7 @@ import (
 	"Backend/internal/services/company"
 	"context"
 	"errors"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -108,8 +109,13 @@ type jobPositionFinder interface {
 // findJobPosition は応募職種名に一致する募集職種を返す。一致しない・引けないときは nil。
 func (s *InterviewService) findJobPosition(companyID uint, position string) *models.CompanyJobPosition {
 	position = strings.TrimSpace(position)
+	if companyID == 0 || position == "" || s.companyRepo == nil {
+		return nil
+	}
 	finder, ok := s.companyRepo.(jobPositionFinder)
-	if !ok || companyID == 0 || position == "" {
+	if !ok {
+		// 実装が職種を引けないと、職種別の人物像・求人要件が黙って使われなくなる
+		log.Printf("[Interview] company repo does not implement jobPositionFinder: %T", s.companyRepo)
 		return nil
 	}
 	job, err := finder.FindJobPositionByCompanyAndTitle(companyID, position)
