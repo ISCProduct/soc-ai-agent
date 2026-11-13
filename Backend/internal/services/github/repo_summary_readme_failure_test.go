@@ -30,12 +30,17 @@ func TestSummarizeRepo_READMEFetchResult(t *testing.T) {
 		// README の応答
 		status  int
 		headers map[string]string
+		// リポジトリ自体（/repos/{owner}/{repo}）の応答。0 なら 200（README が 404 のときだけ呼ばれる）
+		repoStatus int
 		// 期待
 		wantSummary bool
 		wantReauth  bool
 		wantErrPart string
 	}{
-		{name: "404 は README なしで要約する", status: http.StatusNotFound, wantSummary: true},
+		{name: "README が 404 でリポジトリにはアクセスできれば、README なしで要約する", status: http.StatusNotFound, wantSummary: true},
+		// #2231 のレビュー：README の 404 は、リポジトリが削除・非公開化されたときも返る
+		{name: "README もリポジトリも 404 なら要約を作らずエラー", status: http.StatusNotFound, repoStatus: http.StatusNotFound, wantErrPart: "repository not accessible"},
+		{name: "README が 404 でリポジトリが 401 なら再連携を促す", status: http.StatusNotFound, repoStatus: http.StatusUnauthorized, wantReauth: true},
 		{name: "500 は要約を作らずエラー", status: http.StatusInternalServerError, wantErrPart: "failed to fetch README"},
 		{name: "502 も要約を作らずエラー", status: http.StatusBadGateway, wantErrPart: "failed to fetch README"},
 		{
@@ -48,7 +53,18 @@ func TestSummarizeRepo_READMEFetchResult(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			var repoRequests atomic.Int32
 			githubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/repos/owner/repo" {
+					repoRequests.Add(1)
+					status := tc.repoStatus
+					if status == 0 {
+						status = http.StatusOK
+					}
+					w.WriteHeader(status)
+					_, _ = w.Write([]byte(`{"full_name":"owner/repo"}`))
+					return
+				}
 				for k, v := range tc.headers {
 					w.Header().Set(k, v)
 				}
@@ -124,6 +140,14 @@ func TestSummarizeRepo_READMEFetchResult(t *testing.T) {
 				if n := openaiCalls.Load(); n != 0 {
 					t.Fatalf("要約を作らないはずが OpenAI を %d 回呼んだ", n)
 				}
+			}
+			// リポジトリ自体の確認は、README が 404 のときだけ行う
+			wantRepoRequests := int32(0)
+			if tc.status == http.StatusNotFound {
+				wantRepoRequests = 1
+			}
+			if n := repoRequests.Load(); n != wantRepoRequests {
+				t.Fatalf("リポジトリの確認の回数 = %d, want %d", n, wantRepoRequests)
 			}
 			// 失敗のときは INSERT の期待を置いていないので、保存すれば sqlmock が失敗する
 			if err := mock.ExpectationsWereMet(); err != nil {

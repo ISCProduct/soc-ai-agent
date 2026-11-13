@@ -87,7 +87,16 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 	if err != nil {
 		switch {
 		case isGitHubNotFoundError(err):
-			// README が無いリポジトリ。今までどおり「README なし」で要約する
+			// README の 404 は「README が無い」だけでなく、リポジトリが削除・非公開化された、アクセス権を
+			// 失った、存在しない名前、のときも返る（GitHub の仕様上は単に Not Found）。リポジトリ自体に
+			// アクセスできるときだけ「README なし」で要約する（#2231 のレビュー）。
+			if repoErr := s.checkRepoAccessible(ctx, client, token, fullName); repoErr != nil {
+				log.Printf("[SummarizeRepo] repository not accessible for %q: %v", fullName, repoErr)
+				if isGitHubAuthError(repoErr) {
+					return nil, &GitHubReauthRequiredError{Reason: "GitHubアクセストークンが無効です。GitHubアカウントを再連携してください。"}
+				}
+				return nil, fmt.Errorf("repository not accessible: %w", repoErr)
+			}
 			readme = ""
 		case isGitHubAuthError(err):
 			return nil, &GitHubReauthRequiredError{Reason: "GitHubアクセストークンが無効です。GitHubアカウントを再連携してください。"}
@@ -112,6 +121,14 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 		return nil, fmt.Errorf("save summary: %w", err)
 	}
 	return summary, nil
+}
+
+// checkRepoAccessible は、リポジトリ自体を利用者のトークンで取得できるかを確かめる（#2231 のレビュー）。
+// README の 404 が「README が無い」ことによるものか、リポジトリにアクセスできないことによるものかを分けるため。
+func (s *GitHubService) checkRepoAccessible(ctx context.Context, client *http.Client, token, fullName string) error {
+	// fullName は SummarizeRepo の入口で ValidateRepoFullName を通している。
+	_, err := s.doGet(ctx, client, token, fmt.Sprintf("%s/repos/%s", s.getAPIBase(), fullName))
+	return err
 }
 
 // fetchREADME GitHub API経由でリポジトリのREADMEを取得する
