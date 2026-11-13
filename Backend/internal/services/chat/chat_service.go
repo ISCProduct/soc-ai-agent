@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -212,7 +211,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		log.Printf("Warning: failed to get phases: %v\n", err)
 	}
 	completedProgresses, _ := s.progressRepo.FindByUserAndSession(req.UserID, req.SessionID)
-	phaseByID := make(map[uint]*entity.AnalysisPhase, len(allPhases))
+	phaseByID := make(map[uint]*models.AnalysisPhase, len(allPhases))
 	for i := range allPhases {
 		phaseByID[allPhases[i].ID] = &allPhases[i]
 	}

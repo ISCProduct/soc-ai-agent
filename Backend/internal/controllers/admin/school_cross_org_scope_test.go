@@ -1,20 +1,18 @@
 package admin_test
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-
-	"Backend/domain/entity"
 	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/controllers/mocks"
 	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
 	"Backend/internal/services/school"
+	"bytes"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
 
 	"github.com/labstack/echo/v4"
 )
@@ -83,7 +81,7 @@ func TestSchoolService_AddMemberRejectsCrossOrganization(t *testing.T) {
 	repo := &mocks.SchoolRepositoryMock{}
 	repo.On("FindByID", uint(5)).Return(&models.School{ID: 5, OrganizationID: 1}, nil)
 
-	svc := school.NewSchoolService(repo, stubUserReader{user: &entity.User{ID: 2, OrganizationID: 9}})
+	svc := school.NewSchoolService(repo, stubUserReader{user: &models.User{ID: 2, OrganizationID: 9}})
 	if err := svc.AddMember(2, 5); !errors.Is(err, school.ErrMemberOrganizationMismatch) {
 		t.Fatalf("学園をまたいだ割当を許している: %v", err)
 	}
@@ -119,7 +117,7 @@ func TestAdminSchoolController_AddMember_CrossOrganizationIsBadRequest(t *testin
 	ctx.SetParamValues("5")
 
 	ctrl := admincontrollers.NewAdminSchoolController(
-		school.NewSchoolService(repo, stubUserReader{user: &entity.User{ID: 2, OrganizationID: 9}}))
+		school.NewSchoolService(repo, stubUserReader{user: &models.User{ID: 2, OrganizationID: 9}}))
 	testsupport.AssertStatus(t, ctrl.AddMember, ctx, http.StatusBadRequest)
 	repo.AssertNotCalled(t, "AddMember")
 }
@@ -150,9 +148,9 @@ func TestAdminControllers_RejectCrossOrganizationTarget(t *testing.T) {
 			Return(&models.School{ID: schoolID, OrganizationID: schoolOrg}, nil)
 		return school.NewSchoolService(repo, nil)
 	}
-	foreignTarget := func() *entity.User {
+	foreignTarget := func() *models.User {
 		sid := schoolID
-		return &entity.User{ID: targetID, Email: "t@example.com", Role: entity.UserRoleStudent,
+		return &models.User{ID: targetID, Email: "t@example.com", Role: models.UserRoleStudent,
 			OrganizationID: foreignOrg, SchoolID: &sid}
 	}
 	newReq := func(method string, body []byte) echo.Context {

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"Backend/domain/entity"
 	"Backend/internal/services/matching"
 )
 
@@ -31,9 +30,9 @@ func TestFormatTopUserScores(t *testing.T) {
 
 func TestGenerateMatchReasonFallbackWhenAIClientNil(t *testing.T) {
 	svc := matching.NewMatchingServiceForTest()
-	match := &entity.UserCompanyMatch{
+	match := &models.UserCompanyMatch{
 		MatchScore: 88.5,
-		Company: &entity.Company{
+		Company: models.Company{
 			ID:           1,
 			Name:         "テスト株式会社",
 			Industry:     "IT",

@@ -1,7 +1,6 @@
 package matching
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -19,10 +18,10 @@ const aiReasonText = "AI が生成したマッチング理由"
 // capturingMatchRepo は保存されたマッチ結果を検査するために CreateOrUpdateBatch だけ差し替える。
 type capturingMatchRepo struct {
 	matchingMatchRepo
-	captured []*entity.UserCompanyMatch
+	captured []*models.UserCompanyMatch
 }
 
-func (s *capturingMatchRepo) CreateOrUpdateBatch(matches []*entity.UserCompanyMatch) (int, error) {
+func (s *capturingMatchRepo) CreateOrUpdateBatch(matches []*models.UserCompanyMatch) (int, error) {
 	s.captured = matches
 	return len(matches), nil
 }
@@ -162,10 +161,10 @@ func TestCalculateMatching_NoAICallsWhenFlagOff(t *testing.T) {
 }
 
 func TestTopMatchesByScore(t *testing.T) {
-	mk := func(id uint, score float64) *entity.UserCompanyMatch {
-		return &entity.UserCompanyMatch{CompanyID: id, MatchScore: score}
+	mk := func(id uint, score float64) *models.UserCompanyMatch {
+		return &models.UserCompanyMatch{CompanyID: id, MatchScore: score}
 	}
-	pending := []*entity.UserCompanyMatch{mk(1, 10), mk(2, 50), mk(3, 30), mk(4, 50)}
+	pending := []*models.UserCompanyMatch{mk(1, 10), mk(2, 50), mk(3, 30), mk(4, 50)}
 
 	tests := []struct {
 		name  string
@@ -194,7 +193,7 @@ func TestTopMatchesByScore(t *testing.T) {
 }
 
 func TestTopMatchesByScore_DoesNotReorderInput(t *testing.T) {
-	pending := []*entity.UserCompanyMatch{
+	pending := []*models.UserCompanyMatch{
 		{CompanyID: 1, MatchScore: 10},
 		{CompanyID: 2, MatchScore: 90},
 	}

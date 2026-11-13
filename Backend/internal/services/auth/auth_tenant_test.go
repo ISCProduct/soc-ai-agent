@@ -1,7 +1,7 @@
 package auth
 
 import (
-	"Backend/domain/entity"
+	"Backend/internal/models"
 	"Backend/internal/services/email"
 	"testing"
 	"time"
@@ -15,7 +15,7 @@ func TestAuthServiceLogin_TenantMismatchRejected(t *testing.T) {
 		t.Fatalf("password hash failed: %v", err)
 	}
 	now := time.Now()
-	user := &entity.User{
+	user := &models.User{
 		ID:              1,
 		Email:           "user@example.com",
 		Password:        string(passwordHash),
@@ -43,7 +43,7 @@ func TestAuthServiceLogin_TenantMismatchAllowedForAdmin(t *testing.T) {
 		t.Fatalf("password hash failed: %v", err)
 	}
 	now := time.Now()
-	admin := &entity.User{
+	admin := &models.User{
 		ID:              1,
 		Email:           "admin@example.com",
 		Password:        string(passwordHash),

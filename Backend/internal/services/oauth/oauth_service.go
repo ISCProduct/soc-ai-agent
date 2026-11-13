@@ -1,10 +1,10 @@
 package oauth
 
 import (
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/config"
 	"Backend/internal/middleware"
+	"Backend/internal/models"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/github"
 	"Backend/internal/services/refreshtoken"
@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/oauth2"
 )
@@ -109,11 +110,25 @@ func exchangeError(err error) error {
 			status = re.Response.StatusCode
 		}
 		if re.ErrorCode != "" {
-			return fmt.Errorf("failed to exchange token: unexpected status %d (%s)", status, re.ErrorCode)
+			// エラーコードもプロバイダの応答の一部なので、%q で引用し（改行などの制御文字で偽のログ行を作らせない）、
+			// 長さも切る（巨大な値でログを埋めさせない）。エラーコードは本来 invalid_grant のような短い語（#2230 のレビュー）
+			return fmt.Errorf("failed to exchange token: unexpected status %d (%q)", status, truncateRunes(re.ErrorCode, maxErrorCodeRunes))
 		}
 		return fmt.Errorf("failed to exchange token: unexpected status %d", status)
 	}
 	return fmt.Errorf("failed to exchange token: %w", err)
+}
+
+// maxErrorCodeRunes は、トークン交換のエラーコードとしてエラーに入れる最大の文字数。
+// RFC 6749 のエラーコードは invalid_grant などの短い語なので、これを超える部分は切る。
+const maxErrorCodeRunes = 64
+
+// truncateRunes は s を最大 n 文字（ルーン）に切る。UTF-8 の途中では切らない。
+func truncateRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n])
 }
 
 // GetGoogleAuthURL Google OAuth認証URLを取得
@@ -158,8 +173,10 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 	if !userInfo.VerifiedEmail {
 		return nil, errors.New("email not verified")
 	}
-	// id が無いと、別々の Google アカウントが同じ空の OAuthID に紐付いてしまう（#2225）
-	if strings.TrimSpace(userInfo.ID) == "" {
+	// id が無いと、別々の Google アカウントが同じ空の OAuthID に紐付いてしまう（#2225）。
+	// 照合・保存にも、検査と同じ前後の空白を除いた値を使う（検査と保存で値が食い違わないように。#2230 のレビュー）
+	userInfo.ID = strings.TrimSpace(userInfo.ID)
+	if userInfo.ID == "" {
 		return nil, errors.New("failed to get user info: missing user id")
 	}
 
@@ -194,7 +211,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 			user = existingUser
 		} else {
 			// 新規ユーザー作成
-			user = &entity.User{
+			user = &models.User{
 				Email:          userInfo.Email,
 				Name:           userInfo.Name,
 				OAuthProvider:  "google",
@@ -330,7 +347,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, te
 			if name == "" {
 				name = userInfo.Login
 			}
-			user = &entity.User{
+			user = &models.User{
 				Email:          email,
 				Name:           name,
 				OAuthProvider:  "github",

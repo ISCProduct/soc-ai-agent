@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"Backend/domain/entity"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/matching"
 	"Backend/internal/usagectx"
@@ -45,7 +44,7 @@ func (s *stubMatchingService) CalculateMatching(ctx context.Context, userID uint
 	return nil
 }
 
-func (s *stubMatchingService) GetTopMatches(context.Context, uint, string, int) ([]*entity.UserCompanyMatch, error) {
+func (s *stubMatchingService) GetTopMatches(context.Context, uint, string, int) ([]*models.UserCompanyMatch, error) {
 	return nil, nil
 }
 func (s *stubMatchingService) ToggleFavorite(uint, uint) error { return nil }

@@ -1,7 +1,6 @@
 package matching
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"context"
 	"errors"
@@ -133,20 +132,20 @@ type matchingMatchRepo struct {
 	batchCalls int
 	saved      int
 	// savedMatches は保存対象そのもの。どの企業が対象に残ったかを検証する（#1380）
-	savedMatches []*entity.UserCompanyMatch
+	savedMatches []*models.UserCompanyMatch
 }
 
-func (s *matchingMatchRepo) CreateOrUpdate(*entity.UserCompanyMatch) error { return nil }
-func (s *matchingMatchRepo) CreateOrUpdateBatch(matches []*entity.UserCompanyMatch) (int, error) {
+func (s *matchingMatchRepo) CreateOrUpdate(*models.UserCompanyMatch) error { return nil }
+func (s *matchingMatchRepo) CreateOrUpdateBatch(matches []*models.UserCompanyMatch) (int, error) {
 	s.batchCalls++
 	s.saved = len(matches)
 	s.savedMatches = matches
 	return len(matches), nil
 }
-func (s *matchingMatchRepo) FindTopMatchesByUserAndSession(uint, string, int) ([]*entity.UserCompanyMatch, error) {
+func (s *matchingMatchRepo) FindTopMatchesByUserAndSession(uint, string, int) ([]*models.UserCompanyMatch, error) {
 	return nil, nil
 }
-func (s *matchingMatchRepo) FindByID(uint) (*entity.UserCompanyMatch, error) { return nil, nil }
+func (s *matchingMatchRepo) FindByID(uint) (*models.UserCompanyMatch, error) { return nil, nil }
 func (s *matchingMatchRepo) MarkAsViewed(uint) error                         { return nil }
 func (s *matchingMatchRepo) ToggleFavorite(uint) error                       { return nil }
 func (s *matchingMatchRepo) MarkAsApplied(uint) error                        { return nil }

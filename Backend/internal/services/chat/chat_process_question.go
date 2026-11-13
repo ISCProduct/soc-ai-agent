@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"context"
 	"fmt"
@@ -14,10 +13,10 @@ type processQuestionInput struct {
 	history             []models.ChatMessage
 	jobCategoryID       uint
 	jobJustResolved     bool
-	currentPhase        *entity.UserAnalysisProgress
-	allPhases           []entity.AnalysisPhase
-	completedProgresses []entity.UserAnalysisProgress
-	phaseByID           map[uint]*entity.AnalysisPhase
+	currentPhase        *models.UserAnalysisProgress
+	allPhases           []models.AnalysisPhase
+	completedProgresses []models.UserAnalysisProgress
+	phaseByID           map[uint]*models.AnalysisPhase
 }
 
 func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input processQuestionInput) (*ChatResponse, error) {

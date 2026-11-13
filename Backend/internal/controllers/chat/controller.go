@@ -491,7 +491,7 @@ func (c *ChatController) SendReport(ctx echo.Context) error {
 
 	var companies []email.EmailReportCompany
 	for i, match := range matches {
-		if match.Company == nil || match.Company.ID == 0 {
+		if match.Company.ID == 0 {
 			continue
 		}
 		companies = append(companies, email.EmailReportCompany{
