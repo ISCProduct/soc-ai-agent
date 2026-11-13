@@ -1,4 +1,4 @@
-h1:+m2yP1ibqX5lFEAJsnFQGgbGKd3N05+MmNrjTKNnUIc=
+h1:9c1j5ZSef0sYJEnr5YleAzAyr/GR50b/GT2vHItGVsw=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -68,3 +68,8 @@ h1:+m2yP1ibqX5lFEAJsnFQGgbGKd3N05+MmNrjTKNnUIc=
 000067_pending_registrations_expires_at_index.up.sql h1:dAasRF3z8YKL5B0zUpFqAmpcrJq0Dc0FSYPs8cWDYaA=
 000068_add_allow_training_use.up.sql h1:zzmUe+WlN7dJrxRSyYQQZ8wT2csIlRuBgNS6+gMF5P0=
 000069_add_repo_summary_prompt_version.up.sql h1:XNmOw6UHV+PoevMl82rK076QQCAYtCLq8yzldANNLEA=
+000070_notifications.up.sql h1:Ad31UthxcALjoVJ5bxeTG/fTKbH11VFNYb3yDJV4W74=
+000071_user_weight_score_calculation_version.up.sql h1:7h1tZ5Z6L9zd/dv1KeIJIn3k8Sjq0nPQJqg39N3APSA=
+000072_backfill_assessment_calculation_version.up.sql h1:frspr5ZXvYIngf9ZhhaKvR3imZ1/aQuKda2d1E73lpw=
+000073_user_score_recalculation_jobs.up.sql h1:3j2q8xYkosAgiEeNiJeTjfryHBF2Xf6DsX5dR1CaDjA=
+000074_user_score_recalculation_snapshots.up.sql h1:NU4uBlVRMXRAhUjmsPS+nPaY+LkC5fwGJ4Fiysqehxo=
