@@ -137,6 +137,7 @@ Referer に user_id が残るだけです。
 | POST | `/api/auth/refresh` | トークンリフレッシュ（ローテーション #616） |
 | POST | `/api/auth/logout` | リフレッシュトークン失効 |
 | POST | `/api/auth/verify-email` | メール認証 |
+| POST | `/api/auth/resend-verification` | メール認証のメール再送（期限切れ・未着のとき）。**存在有無に関わらず常に200**、IP 単位とメールアドレス単位のレート制限あり |
 | POST | `/api/auth/forgot-password` | パスワードリセット要求 |
 | GET | `/api/auth/google` | Google OAuth開始 |
 | GET | `/api/auth/github` | GitHub OAuth開始 |

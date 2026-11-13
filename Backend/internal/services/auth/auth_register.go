@@ -198,12 +198,20 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 	}
 
 	// 認証メール送信（失敗しても登録は成功扱い）
+	s.dispatchVerificationEmail(user)
+
+	return buildRegisterResponse(user)
+}
+
+// dispatchVerificationEmail は、user に保存済みの認証トークンでメール認証のメールを送る。
+// 送信の失敗は呼び出し側へ返さない(登録・再送のどちらも、メールが出ないだけで処理は成立している)。
+func (s *AuthService) dispatchVerificationEmail(user *models.User) {
 	appURL := config.AppURL()
 	// 未注入で goroutine に入ると nil 参照でプロセスごと落ちる。
 	// メールが出ないだけなら登録は成立しているので、ログに残して続ける。
 	if s.emailService == nil {
 		log.Printf("[AuthService] email service is not configured; skipped verification email for %s", guestPromotionLogLabel(user.ID))
-		return buildRegisterResponse(user)
+		return
 	}
 	if s.jobs != nil {
 		if err := s.jobs.EnqueueEmailVerification(user.ID, user.Email, user.Name, user.EmailVerificationToken, appURL); err != nil {
@@ -221,8 +229,6 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 			}
 		})
 	}
-
-	return buildRegisterResponse(user)
 }
 
 // buildRegisterResponse は登録・昇格どちらでも同じ内容を返す。

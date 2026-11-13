@@ -3,6 +3,7 @@ package repositories
 import (
 	"Backend/internal/models"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -130,6 +131,18 @@ func (r *UserRepository) GetUserByVerificationToken(token string) (*models.User,
 		return nil, err
 	}
 	return &m, nil
+}
+
+// RenewEmailVerification はメール認証トークンと期限だけを、未認証の行に限って更新する。
+// 行を丸ごと保存(UpdateUser)しないので、他の処理が同時に書いた列(認証済みの印など)を巻き戻さない。
+func (r *UserRepository) RenewEmailVerification(userID uint, token string, expires time.Time) (bool, error) {
+	res := r.db.Model(&models.User{}).
+		Where("id = ? AND email_verified_at IS NULL", userID).
+		Updates(map[string]any{
+			"email_verification_token":   token,
+			"email_verification_expires": expires,
+		})
+	return res.RowsAffected > 0, res.Error
 }
 
 // GetUserByPasswordResetToken パスワードリセットトークンでユーザー取得

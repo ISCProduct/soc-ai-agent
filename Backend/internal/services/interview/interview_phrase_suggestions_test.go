@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
@@ -66,6 +67,9 @@ func (m *mockUserRepo2) ListUsersPaged(limit, offset int, query string, schoolID
 }
 func (m *mockUserRepo2) UpdateUser(u *models.User) error { return nil }
 func (m *mockUserRepo2) DeleteUser(id uint) error        { return nil }
+func (m *mockUserRepo2) RenewEmailVerification(uint, string, time.Time) (bool, error) {
+	return false, nil
+}
 func (m *mockUserRepo2) GetUserByVerificationToken(token string) (*models.User, error) {
 	return nil, nil
 }
