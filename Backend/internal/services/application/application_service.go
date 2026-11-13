@@ -1,8 +1,6 @@
 package application
 
 import (
-	"Backend/domain/entity"
-	"Backend/domain/mapper"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
@@ -115,7 +113,7 @@ func CanTransition(current, next string, isAdmin bool) bool {
 // match の所有権・企業一致を検証し、進行中の応募が既にある場合のみ重複エラーとする。
 // 応募作成とマッチの is_applied 更新は同一トランザクションで行い、
 // 片方が失敗した場合は両方ロールバックする。
-func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*models.UserApplicationStatus, error) {
 	// match の所有権・企業一致チェック（ToggleFavorite と同じパターン: #924）
 	match, err := s.matchRepo.FindByID(matchID)
 	if err != nil {
@@ -131,7 +129,7 @@ func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*entity.Use
 		return nil, fmt.Errorf("match_id と company_id が一致しません")
 	}
 
-	var app *entity.UserApplicationStatus
+	var app *models.UserApplicationStatus
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		// 進行中（終了状態でない）の応募が既にあるか確認
 		var existing models.UserApplicationStatus
@@ -167,7 +165,7 @@ func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*entity.Use
 			return fmt.Errorf("マッチのis_applied更新エラー: %w", markErr)
 		}
 
-		app = mapper.UserApplicationStatusToEntity(m)
+		app = m
 		return nil
 	})
 	if err != nil {
@@ -186,7 +184,7 @@ func isDuplicateEntryErr(err error) bool {
 
 // UpdateStatus 選考ステータスを更新する
 // isAdmin=true の場合は管理者権限の遷移が許可される（コントローラー側でクライアント入力から isAdmin を取らないこと）
-func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, status string, notes *string, isAdmin bool) (*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, status string, notes *string, isAdmin bool) (*models.UserApplicationStatus, error) {
 	if !isValidStatus(status) {
 		return nil, fmt.Errorf("invalid_status: 無効なステータス %s", status)
 	}
@@ -220,10 +218,7 @@ func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, statu
 	}
 	// 学校・企業が更新したときだけ学生へ知らせる（学生が自分で変えたときは知らせない）（#2033）
 	if isAdmin && s.notifier != nil {
-		companyName := ""
-		if app.Company != nil {
-			companyName = app.Company.Name
-		}
+		companyName := app.Company.Name
 		if n, ok := notification.ApplicationStatusNotice(app.UserID, app.ID, status, companyName); ok {
 			s.notifier.Notify(n)
 		}
@@ -231,12 +226,12 @@ func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, statu
 	return app, nil
 }
 
-func (s *ApplicationService) Withdraw(applicationID, userID uint, isAdmin bool) (*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) Withdraw(applicationID, userID uint, isAdmin bool) (*models.UserApplicationStatus, error) {
 	return s.UpdateStatus(applicationID, userID, "withdrawn", nil, isAdmin)
 }
 
 // Accept 内定を承諾する（§10.4）。offered 以外は application_not_offered を返す。
-func (s *ApplicationService) Accept(applicationID, userID uint, isAdmin bool) (*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) Accept(applicationID, userID uint, isAdmin bool) (*models.UserApplicationStatus, error) {
 	app, err := s.appRepo.FindByID(applicationID)
 	if err != nil {
 		return nil, fmt.Errorf("application_not_found: 応募データが見つかりません: %w", err)
@@ -251,14 +246,14 @@ func (s *ApplicationService) Accept(applicationID, userID uint, isAdmin bool) (*
 }
 
 // GetApplicationsByUser ユーザーの応募一覧を取得する
-func (s *ApplicationService) GetApplicationsByUser(userID uint) ([]*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) GetApplicationsByUser(userID uint) ([]*models.UserApplicationStatus, error) {
 	return s.appRepo.FindByUserID(userID)
 }
 
 // ListForAdmin 管理者向けに条件を指定して応募一覧を取得する（§10.5）。
 // userID/companyID が 0、status が空文字の場合はその条件を絞り込まない。
 // schoolID は担当校を持つ管理者(先生)向けの絞り込み。nil は絞り込みなし(プラットフォーム管理者)。
-func (s *ApplicationService) ListForAdmin(userID, companyID uint, status string, schoolID *uint) ([]*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) ListForAdmin(userID, companyID uint, status string, schoolID *uint) ([]*models.UserApplicationStatus, error) {
 	return s.appRepo.FindAll(userID, companyID, status, schoolID)
 }
 
@@ -269,7 +264,7 @@ func (s *ApplicationService) OwnerSchoolID(applicationID uint) (*uint, error) {
 
 // ListForOwner は企業オーナー向け応募一覧。company_id 必須、所有権がなければ 403。
 // プラットフォーム管理者は /api/admin/applications を使う（HRスコープと混ぜない）。
-func (s *ApplicationService) ListForOwner(userID, companyID uint, status string) ([]*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) ListForOwner(userID, companyID uint, status string) ([]*models.UserApplicationStatus, error) {
 	if err := s.requireCompanyOwner(userID, companyID); err != nil {
 		return nil, err
 	}
@@ -278,7 +273,7 @@ func (s *ApplicationService) ListForOwner(userID, companyID uint, status string)
 
 // UpdateStatusAsOwner は企業オーナーによる選考ステータス更新。
 // 応募の company_id の所有者のみ許可し、遷移表は管理者相当を使う。
-func (s *ApplicationService) UpdateStatusAsOwner(applicationID, userID uint, status string, notes *string) (*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) UpdateStatusAsOwner(applicationID, userID uint, status string, notes *string) (*models.UserApplicationStatus, error) {
 	app, err := s.appRepo.FindByID(applicationID)
 	if err != nil {
 		return nil, fmt.Errorf("application_not_found: 応募データが見つかりません: %w", err)

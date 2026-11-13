@@ -68,14 +68,6 @@ var mapperCases = []mapperCase{
 			"LastFetchConfidence", "LastModelUsed", "NameReading", "RelationsFetchedAt", "TechFetchedAt"),
 	},
 	{
-		name: "UserApplicationStatus", model: typ[models.UserApplicationStatus](), entity: typ[entity.UserApplicationStatus](),
-		toEntity:      func(m any) any { return mapper.UserApplicationStatusToEntity(m.(*models.UserApplicationStatus)) },
-		fromEntity:    func(e any) any { return mapper.UserApplicationStatusFromEntity(e.(*entity.UserApplicationStatus)) },
-		modelOnly:     only(modelOnlyReason, "ActiveDedupKey", "User"),
-		typeDiffers:   only("関連(Preload)。entity は *Company、model は値。ToEntity が CompanyToEntity で変換する", "Company"),
-		notFromEntity: only("関連は書き戻さない。保存には外部キー(CompanyID)を使う", "Company"),
-	},
-	{
 		name: "UserCompanyMatch", model: typ[models.UserCompanyMatch](), entity: typ[entity.UserCompanyMatch](),
 		toEntity:   func(m any) any { return mapper.UserCompanyMatchToEntity(m.(*models.UserCompanyMatch)) },
 		fromEntity: func(e any) any { return mapper.UserCompanyMatchFromEntity(e.(*entity.UserCompanyMatch)) },

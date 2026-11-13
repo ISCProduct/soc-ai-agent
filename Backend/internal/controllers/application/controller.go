@@ -1,9 +1,9 @@
 package application
 
 import (
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/controllers/httpapi"
+	"Backend/internal/models"
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/school"
 	"Backend/internal/services/shared"
@@ -310,7 +310,7 @@ func (c *ApplicationController) HRUpdateStatus(ctx echo.Context) error {
 	})
 }
 
-func jsonAdminApplicationList(ctx echo.Context, apps []*entity.UserApplicationStatus) error {
+func jsonAdminApplicationList(ctx echo.Context, apps []*models.UserApplicationStatus) error {
 	type AdminAppResponse struct {
 		ID          uint   `json:"id"`
 		UserID      uint   `json:"user_id"`
@@ -323,10 +323,7 @@ func jsonAdminApplicationList(ctx echo.Context, apps []*entity.UserApplicationSt
 
 	resp := make([]AdminAppResponse, len(apps))
 	for i, app := range apps {
-		name := ""
-		if app.Company != nil {
-			name = app.Company.Name
-		}
+		name := app.Company.Name
 		resp[i] = AdminAppResponse{
 			ID:          app.ID,
 			UserID:      app.UserID,
@@ -370,12 +367,8 @@ func (c *ApplicationController) List(ctx echo.Context) error {
 
 	resp := make([]AppResponse, len(apps))
 	for i, app := range apps {
-		name := ""
-		industry := ""
-		if app.Company != nil {
-			name = app.Company.Name
-			industry = app.Company.Industry
-		}
+		name := app.Company.Name
+		industry := app.Company.Industry
 		resp[i] = AppResponse{
 			ID:              app.ID,
 			CompanyID:       app.CompanyID,

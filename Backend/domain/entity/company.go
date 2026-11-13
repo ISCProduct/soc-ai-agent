@@ -34,21 +34,6 @@ type Company struct {
 	UpdatedAt          time.Time
 }
 
-// UserApplicationStatus 応募・選考ステータスエンティティ
-type UserApplicationStatus struct {
-	ID              uint
-	UserID          uint
-	CompanyID       uint
-	Company         *Company
-	MatchID         uint
-	Status          string // ValidStatuses: not_applied / applied / document_screening / document_passed / interview_scheduled / interview_in_progress / offered / accepted / withdrawn / rejected
-	Notes           string
-	AppliedAt       *time.Time
-	StatusUpdatedAt *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-}
-
 // IsPublished 公開済みかどうか
 func (c *Company) IsPublished() bool {
 	return c.DataStatus == "published" && c.IsActive

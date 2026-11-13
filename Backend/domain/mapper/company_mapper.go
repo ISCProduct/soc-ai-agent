@@ -42,46 +42,6 @@ func CompanyToEntity(m *models.Company) *entity.Company {
 	}
 }
 
-// UserApplicationStatusToEntity models.UserApplicationStatus を entity.UserApplicationStatus に変換
-func UserApplicationStatusToEntity(m *models.UserApplicationStatus) *entity.UserApplicationStatus {
-	if m == nil {
-		return nil
-	}
-	e := &entity.UserApplicationStatus{
-		ID:              m.ID,
-		UserID:          m.UserID,
-		CompanyID:       m.CompanyID,
-		MatchID:         m.MatchID,
-		Status:          m.Status,
-		Notes:           m.Notes,
-		AppliedAt:       m.AppliedAt,
-		StatusUpdatedAt: m.StatusUpdatedAt,
-		CreatedAt:       m.CreatedAt,
-		UpdatedAt:       m.UpdatedAt,
-	}
-	e.Company = CompanyToEntity(&m.Company)
-	return e
-}
-
-// UserApplicationStatusFromEntity entity.UserApplicationStatus を models.UserApplicationStatus に変換
-func UserApplicationStatusFromEntity(e *entity.UserApplicationStatus) *models.UserApplicationStatus {
-	if e == nil {
-		return nil
-	}
-	return &models.UserApplicationStatus{
-		ID:              e.ID,
-		UserID:          e.UserID,
-		CompanyID:       e.CompanyID,
-		MatchID:         e.MatchID,
-		Status:          e.Status,
-		Notes:           e.Notes,
-		AppliedAt:       e.AppliedAt,
-		StatusUpdatedAt: e.StatusUpdatedAt,
-		CreatedAt:       e.CreatedAt,
-		UpdatedAt:       e.UpdatedAt,
-	}
-}
-
 // UserCompanyMatchToEntity models.UserCompanyMatch を entity.UserCompanyMatch に変換
 func UserCompanyMatchToEntity(m *models.UserCompanyMatch) *entity.UserCompanyMatch {
 	if m == nil {
