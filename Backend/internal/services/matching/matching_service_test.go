@@ -2,6 +2,7 @@ package matching
 
 import (
 	"Backend/domain/entity"
+	"Backend/internal/models"
 	"strings"
 	"testing"
 )
@@ -27,7 +28,7 @@ func TestGenerateMatchReasonFallbackWhenAIClientNil(t *testing.T) {
 	svc := &MatchingService{aiClient: nil}
 	match := &entity.UserCompanyMatch{
 		MatchScore: 88.5,
-		Company: &entity.Company{
+		Company: models.Company{
 			ID:           1,
 			Name:         "テスト株式会社",
 			Industry:     "IT",
@@ -64,7 +65,7 @@ func TestGenerateMatchReason_DefaultSkipsAI(t *testing.T) {
 	svc := &MatchingService{aiClient: nil}
 	match := &entity.UserCompanyMatch{
 		MatchScore: 70,
-		Company: &entity.Company{
+		Company: models.Company{
 			ID: 2, Name: "DBのみ株式会社", Industry: "SI", MainBusiness: "受託開発",
 		},
 	}

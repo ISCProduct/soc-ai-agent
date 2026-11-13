@@ -2,7 +2,6 @@ package matching
 
 import (
 	"Backend/domain/entity"
-	"Backend/domain/mapper"
 	"Backend/domain/repository"
 	"Backend/domain/valueobject"
 	"Backend/internal/aimodel"
@@ -132,7 +131,7 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 		match.UserID = userID
 		match.SessionID = sessionID
 		match.CompanyID = company.ID
-		match.Company = mapper.CompanyToEntity(company)
+		match.Company = *company
 
 		// テンプレ理由はここでは作らない。
 		//
@@ -399,7 +398,7 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 	if match == nil {
 		return "", fmt.Errorf("match is nil")
 	}
-	if match.Company == nil {
+	if match.Company.ID == 0 {
 		return "", fmt.Errorf("company is nil")
 	}
 	if !matchingReasonUseAI() || s.aiClient == nil {

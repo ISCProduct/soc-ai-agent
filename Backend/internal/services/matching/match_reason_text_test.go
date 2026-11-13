@@ -1,6 +1,7 @@
 package matching
 
 import (
+	"Backend/internal/models"
 	"strings"
 	"testing"
 
@@ -73,7 +74,7 @@ func TestBuildMatchReasonScoreWording(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			match := &entity.UserCompanyMatch{
 				CompanyID:      1,
-				Company:        &entity.Company{ID: 1, Name: "テスト株式会社", Industry: "IT"},
+				Company:        models.Company{ID: 1, Name: "テスト株式会社", Industry: "IT"},
 				MatchScore:     tt.score,
 				TechnicalMatch: 70,
 			}
@@ -104,7 +105,7 @@ func TestBuildMatchReasonScoreWording(t *testing.T) {
 func TestBuildMatchReasonExcludesUnmeasuredAxes(t *testing.T) {
 	match := &entity.UserCompanyMatch{
 		CompanyID:  1,
-		Company:    &entity.Company{ID: 1, Name: "テスト株式会社", Industry: "IT"},
+		Company:    models.Company{ID: 1, Name: "テスト株式会社", Industry: "IT"},
 		MatchScore: 55,
 		// 測れたのは2軸だけ。残り8軸は未計測で0のまま保存されている。
 		TechnicalMatch: 80,
@@ -137,7 +138,7 @@ func TestBuildMatchReasonExcludesUnmeasuredAxes(t *testing.T) {
 func TestBuildMatchReasonAllAxesUnmeasured(t *testing.T) {
 	match := &entity.UserCompanyMatch{
 		CompanyID:  1,
-		Company:    &entity.Company{ID: 1, Name: "テスト株式会社", Industry: "IT"},
+		Company:    models.Company{ID: 1, Name: "テスト株式会社", Industry: "IT"},
 		MatchScore: 0,
 	}
 

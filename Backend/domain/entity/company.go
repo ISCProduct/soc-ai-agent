@@ -1,43 +1,9 @@
 package entity
 
-import "time"
-
-// Company 企業ドメインエンティティ
-type Company struct {
-	ID                 uint
-	Name               string
-	Description        string
-	Industry           string
-	EmployeeCount      int
-	EmployeeCountBasis string
-	FoundedYear        int
-	Location           string
-	WebsiteURL         string
-	LogoURL            string
-	CorporateNumber    string
-	SourceType         string
-	SourceURL          string
-	SourceFetchedAt    *time.Time
-	IsProvisional      bool
-	DataStatus         string // draft, published
-	Culture            string
-	WorkStyle          string
-	WelfareDetails     string
-	TechStack          string
-	DevelopmentStyle   string
-	MainBusiness       string
-	AverageAge         float64
-	FemaleRatio        float64
-	IsActive           bool
-	IsVerified         bool
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-}
-
-// IsPublished 公開済みかどうか
-func (c *Company) IsPublished() bool {
-	return c.DataStatus == "published" && c.IsActive
-}
+import (
+	"Backend/internal/models"
+	"time"
+)
 
 // CompanyWeightProfile 企業の適性プロファイル（10カテゴリの重視度）
 type CompanyWeightProfile struct {
@@ -64,7 +30,7 @@ type UserCompanyMatch struct {
 	UserID             uint
 	SessionID          string
 	CompanyID          uint
-	Company            *Company
+	Company            models.Company
 	MatchScore         float64 // 総合マッチ度（0-100）
 	TechnicalMatch     float64
 	TeamworkMatch      float64

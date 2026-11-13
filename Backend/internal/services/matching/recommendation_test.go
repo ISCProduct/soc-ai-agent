@@ -2,6 +2,7 @@ package matching
 
 import (
 	"Backend/domain/entity"
+	"Backend/internal/models"
 	"reflect"
 	"testing"
 )
@@ -112,8 +113,8 @@ func TestSplitTechStack(t *testing.T) {
 func TestDisplayableMatches_DropsUnresolvedCompany(t *testing.T) {
 	matches := []*entity.UserCompanyMatch{
 		{MatchedAxisCount: 1}, // Company 無し
-		{MatchedAxisCount: 8, Company: &entity.Company{ID: 7}},
-		{MatchedAxisCount: 2, Company: &entity.Company{}}, // ID 0
+		{MatchedAxisCount: 8, Company: models.Company{ID: 7}},
+		{MatchedAxisCount: 2, Company: models.Company{}}, // ID 0
 	}
 	got := DisplayableMatches(matches)
 	if len(got) != 1 || got[0].Company.ID != 7 {

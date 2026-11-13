@@ -1,6 +1,7 @@
 package matching
 
 import (
+	"Backend/internal/models"
 	"context"
 	"io"
 	"net/http"
@@ -55,7 +56,7 @@ func TestGenerateMatchReason_ABは対象の利用者で割り当てる(t *testin
 			match := &entity.UserCompanyMatch{
 				UserID:     users[tt.version],
 				MatchScore: 80,
-				Company:    &entity.Company{ID: 1, Name: "テスト株式会社", Industry: "IT", MainBusiness: "開発"},
+				Company:    models.Company{ID: 1, Name: "テスト株式会社", Industry: "IT", MainBusiness: "開発"},
 			}
 
 			// 実行主体の無い context（ワーカー・バッチと同じ）

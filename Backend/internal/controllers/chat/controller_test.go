@@ -578,7 +578,7 @@ func TestChatController_GetRecommendations_WithMatches_Success(t *testing.T) {
 	matchSvc := &mocks.MatchingServiceMock{}
 	chatSvc := &mocks.ChatServiceMock{}
 	matches := []*entity.UserCompanyMatch{
-		{MatchScore: 85.0, Company: &entity.Company{ID: 1, Name: "Test Corp"}},
+		{MatchScore: 85.0, Company: models.Company{ID: 1, Name: "Test Corp"}},
 	}
 	matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 10).Return(matches, nil)
 	chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
@@ -615,7 +615,7 @@ func TestChatController_GetRecommendations_LimitCap(t *testing.T) {
 			matchSvc := &mocks.MatchingServiceMock{}
 			chatSvc := &mocks.ChatServiceMock{}
 			matches := []*entity.UserCompanyMatch{
-				{MatchScore: 85.0, Company: &entity.Company{ID: 1, Name: "Test Corp"}},
+				{MatchScore: 85.0, Company: models.Company{ID: 1, Name: "Test Corp"}},
 			}
 			matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", tt.wantLimit).Return(matches, nil)
 			chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)

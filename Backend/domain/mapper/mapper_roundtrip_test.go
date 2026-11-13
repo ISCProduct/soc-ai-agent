@@ -59,15 +59,6 @@ var mapperCases = []mapperCase{
 		fromEntity: func(e any) any { return mapper.UserFromEntity(e.(*entity.User)) },
 	},
 	{
-		// ToEntity のみ。企業の書き込みは models.Company を直接使う。
-		name: "Company", model: typ[models.Company](), entity: typ[entity.Company](),
-		toEntity: func(m any) any { return mapper.CompanyToEntity(m.(*models.Company)) },
-		modelOnly: only(modelOnlyReason,
-			"CicdTools", "DeletedAt", "GBizLastSyncedAt", "GBizSyncMessage", "GBizSyncStatus",
-			"InfoFetchedAt", "InfoPromptVersion", "InfraStack", "IsGuestEntry", "JobsFetchedAt",
-			"LastFetchConfidence", "LastModelUsed", "NameReading", "RelationsFetchedAt", "TechFetchedAt"),
-	},
-	{
 		name: "UserCompanyMatch", model: typ[models.UserCompanyMatch](), entity: typ[entity.UserCompanyMatch](),
 		toEntity:   func(m any) any { return mapper.UserCompanyMatchToEntity(m.(*models.UserCompanyMatch)) },
 		fromEntity: func(e any) any { return mapper.UserCompanyMatchFromEntity(e.(*entity.UserCompanyMatch)) },

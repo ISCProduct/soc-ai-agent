@@ -5,43 +5,6 @@ import (
 	"Backend/internal/models"
 )
 
-// CompanyToEntity models.Company を entity.Company に変換
-func CompanyToEntity(m *models.Company) *entity.Company {
-	if m == nil {
-		return nil
-	}
-	return &entity.Company{
-		ID:                 m.ID,
-		Name:               m.Name,
-		Description:        m.Description,
-		Industry:           m.Industry,
-		EmployeeCount:      m.EmployeeCount,
-		EmployeeCountBasis: m.EmployeeCountBasis,
-		FoundedYear:        m.FoundedYear,
-		Location:           m.Location,
-		WebsiteURL:         m.WebsiteURL,
-		LogoURL:            m.LogoURL,
-		CorporateNumber:    m.CorporateNumber,
-		SourceType:         m.SourceType,
-		SourceURL:          m.SourceURL,
-		SourceFetchedAt:    m.SourceFetchedAt,
-		IsProvisional:      m.IsProvisional,
-		DataStatus:         m.DataStatus,
-		Culture:            m.Culture,
-		WorkStyle:          m.WorkStyle,
-		WelfareDetails:     m.WelfareDetails,
-		TechStack:          m.TechStack,
-		DevelopmentStyle:   m.DevelopmentStyle,
-		MainBusiness:       m.MainBusiness,
-		AverageAge:         m.AverageAge,
-		FemaleRatio:        m.FemaleRatio,
-		IsActive:           m.IsActive,
-		IsVerified:         m.IsVerified,
-		CreatedAt:          m.CreatedAt,
-		UpdatedAt:          m.UpdatedAt,
-	}
-}
-
 // UserCompanyMatchToEntity models.UserCompanyMatch を entity.UserCompanyMatch に変換
 func UserCompanyMatchToEntity(m *models.UserCompanyMatch) *entity.UserCompanyMatch {
 	if m == nil {
@@ -72,7 +35,7 @@ func UserCompanyMatchToEntity(m *models.UserCompanyMatch) *entity.UserCompanyMat
 		CreatedAt:                m.CreatedAt,
 		UpdatedAt:                m.UpdatedAt,
 	}
-	e.Company = CompanyToEntity(&m.Company)
+	e.Company = m.Company
 	return e
 }
 

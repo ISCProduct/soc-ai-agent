@@ -123,7 +123,7 @@ func EmptyRecommendationReason(d *MatchingDiagnostics) string {
 func DisplayableMatches(matches []*entity.UserCompanyMatch) []*entity.UserCompanyMatch {
 	displayed := make([]*entity.UserCompanyMatch, 0, len(matches))
 	for _, match := range matches {
-		if match.Company == nil || match.Company.ID == 0 {
+		if match.Company.ID == 0 {
 			continue
 		}
 		displayed = append(displayed, match)

@@ -1,6 +1,7 @@
 package chat_test
 
 import (
+	"Backend/internal/models"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -39,7 +40,7 @@ func TestGetRecommendations_ReasonIsBuiltWhenNotStored(t *testing.T) {
 		UserID:         userID,
 		SessionID:      sessionID,
 		CompanyID:      7,
-		Company:        &entity.Company{ID: 7, Name: "株式会社テスト", Industry: "情報通信業", MainBusiness: "BtoB SaaSの開発"},
+		Company:        models.Company{ID: 7, Name: "株式会社テスト", Industry: "情報通信業", MainBusiness: "BtoB SaaSの開発"},
 		MatchScore:     72,
 		TechnicalMatch: 85,
 		GrowthMatch:    60,
@@ -83,7 +84,7 @@ func TestGetRecommendations_ReasonIsBuiltWhenNotStored(t *testing.T) {
 	// 保存していた場合と同じ文面になること。
 	want := matching.BuildMatchReason(&entity.UserCompanyMatch{
 		CompanyID:      7,
-		Company:        &entity.Company{ID: 7, Name: "株式会社テスト", Industry: "情報通信業", MainBusiness: "BtoB SaaSの開発"},
+		Company:        models.Company{ID: 7, Name: "株式会社テスト", Industry: "情報通信業", MainBusiness: "BtoB SaaSの開発"},
 		MatchScore:     72,
 		TechnicalMatch: 85,
 		GrowthMatch:    60,
@@ -110,7 +111,7 @@ func TestGetRecommendations_StoredAIReasonWins(t *testing.T) {
 		UserID:      userID,
 		SessionID:   sessionID,
 		CompanyID:   7,
-		Company:     &entity.Company{ID: 7, Name: "株式会社テスト", Industry: "情報通信業"},
+		Company:     models.Company{ID: 7, Name: "株式会社テスト", Industry: "情報通信業"},
 		MatchScore:  91,
 		MatchReason: aiReason,
 	}}

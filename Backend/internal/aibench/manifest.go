@@ -100,6 +100,7 @@ type Input struct {
 	WebsiteURL string                  `json:"website_url,omitempty"`
 	Expected   *CompanyExtractExpected `json:"expected,omitempty"`
 	// マッチング理由の生成。Match と UserScores は本番の型のまま受ける（フィールド名は Go の名前）。
+	// Match.Company のキーは models.Company の json タグ(main_business など)。
 	Match      *entity.UserCompanyMatch `json:"match,omitempty"`
 	UserScores []entity.UserWeightScore `json:"user_scores,omitempty"`
 	// MustMentionAny は企業側の事実の語。理由にいずれか1つ以上が入っていること
@@ -218,7 +219,7 @@ func validateCase(c Case) error {
 			}
 		}
 	case TargetMatchingReason:
-		if c.Input.Match == nil || c.Input.Match.Company == nil || strings.TrimSpace(c.Input.Match.Company.Name) == "" {
+		if c.Input.Match == nil || strings.TrimSpace(c.Input.Match.Company.Name) == "" {
 			return fmt.Errorf("input.match.Company.Name は必須")
 		}
 		if len(c.Input.MustMentionAny) == 0 || len(c.Input.StrengthAny) == 0 {
@@ -286,7 +287,7 @@ func (c Case) InputText() string {
 	case TargetCompanyExtract:
 		return c.Input.FactsText
 	case TargetMatchingReason:
-		if c.Input.Match != nil && c.Input.Match.Company != nil {
+		if c.Input.Match != nil {
 			company := c.Input.Match.Company
 			return company.Industry + company.MainBusiness + company.Culture + company.WorkStyle
 		}
