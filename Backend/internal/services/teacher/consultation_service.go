@@ -6,10 +6,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
-
-	"gorm.io/gorm"
 )
 
 // 教員と学生の相談（案内への返信・学生からの質問、#2028）。
@@ -82,7 +81,7 @@ func (s *ConsultationService) Ask(studentUserID uint, body string) (*ThreadView,
 // guidanceForStudent は学生本人の案内だけを返す（他人の案内は見つからない扱い）。
 func (s *ConsultationService) guidanceForStudent(studentUserID, guidanceID uint) (*models.TeacherStudentGuidance, error) {
 	g, err := s.store.FindGuidance(guidanceID)
-	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && g.StudentUserID != studentUserID) {
+	if errors.Is(err, repository.ErrNotFound) || (err == nil && g.StudentUserID != studentUserID) {
 		return nil, ErrConsultationNotFound
 	}
 	return g, err
@@ -91,7 +90,7 @@ func (s *ConsultationService) guidanceForStudent(studentUserID, guidanceID uint)
 // FindGuidance は案内を返す（教員側の学校の確認に使う）。無ければ ErrConsultationNotFound。
 func (s *ConsultationService) FindGuidance(guidanceID uint) (*models.TeacherStudentGuidance, error) {
 	g, err := s.store.FindGuidance(guidanceID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrConsultationNotFound
 	}
 	return g, err
