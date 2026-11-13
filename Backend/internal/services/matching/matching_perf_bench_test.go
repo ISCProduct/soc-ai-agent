@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"Backend/domain/entity"
 	"Backend/internal/models"
 )
 
@@ -52,15 +51,15 @@ func benchCompanies(n int) ([]models.Company, map[uint]*models.CompanyWeightProf
 	return companies, profiles
 }
 
-func benchUserScores() []entity.UserWeightScore {
+func benchUserScores() []models.UserWeightScore {
 	cats := []string{
 		"technical_orientation", "teamwork_orientation", "leadership_orientation",
 		"creativity_orientation", "stability_orientation", "growth_orientation",
 		"work_life_balance", "challenge_seeking", "detail_orientation", "communication_skill",
 	}
-	out := make([]entity.UserWeightScore, len(cats))
+	out := make([]models.UserWeightScore, len(cats))
 	for i, c := range cats {
-		out[i] = entity.UserWeightScore{WeightCategory: c, Score: 50 + i*3}
+		out[i] = models.UserWeightScore{WeightCategory: c, Score: 50 + i*3}
 	}
 	return out
 }
@@ -100,9 +99,9 @@ func BenchmarkBuildMatchReason(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := range b.N {
-		m := &entity.UserCompanyMatch{
+		m := &models.UserCompanyMatch{
 			CompanyID:      1,
-			Company:        &entity.Company{ID: 1, Name: comp.Name, Industry: comp.Industry, MainBusiness: comp.MainBusiness, Culture: comp.Culture, WorkStyle: comp.WorkStyle, TechStack: comp.TechStack},
+			Company:        models.Company{ID: 1, Name: comp.Name, Industry: comp.Industry, MainBusiness: comp.MainBusiness, Culture: comp.Culture, WorkStyle: comp.WorkStyle, TechStack: comp.TechStack},
 			MatchScore:     float64(i % 100),
 			TechnicalMatch: 80, TeamworkMatch: 70, GrowthMatch: 60,
 		}

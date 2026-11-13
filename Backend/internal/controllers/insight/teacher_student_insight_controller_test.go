@@ -9,18 +9,16 @@ package insight_test
 // 実行: cd Backend && go test ./internal/controllers/insight/... -run TeacherStudentInsight -v
 
 import (
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-	"time"
-
-	"Backend/domain/entity"
 	insightcontrollers "Backend/internal/controllers/insight"
 	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services/teacher"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,10 +30,10 @@ type schoolScopeSpy struct {
 	called      bool
 }
 
-func (s *schoolScopeSpy) ListStudentsPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
+func (s *schoolScopeSpy) ListStudentsPaged(limit, offset int, query string, schoolID *uint) ([]models.User, int64, error) {
 	s.called = true
 	s.gotSchoolID = schoolID
-	return []entity.User{{ID: 1, Name: "生徒A", Email: "a@example.com"}}, 1, nil
+	return []models.User{{ID: 1, Name: "生徒A", Email: "a@example.com"}}, 1, nil
 }
 
 type noopScores struct{}
@@ -133,7 +131,7 @@ func TestTeacherStudentInsight_ClampsPaging(t *testing.T) {
 
 type pagingSpy struct{ onCall func(limit, offset int) }
 
-func (s *pagingSpy) ListStudentsPaged(limit, offset int, _ string, _ *uint) ([]entity.User, int64, error) {
+func (s *pagingSpy) ListStudentsPaged(limit, offset int, _ string, _ *uint) ([]models.User, int64, error) {
 	s.onCall(limit, offset)
 	return nil, 0, nil
 }

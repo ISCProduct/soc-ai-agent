@@ -1,12 +1,15 @@
 package repositories
 
 import (
-	"Backend/domain/entity"
-	"Backend/domain/mapper"
+	"Backend/domain/repository"
 	"Backend/internal/models"
+	"errors"
+	"fmt"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type UserApplicationStatusRepository struct {
@@ -18,19 +21,13 @@ func NewUserApplicationStatusRepository(db *gorm.DB) *UserApplicationStatusRepos
 }
 
 // Create 応募ステータスを新規作成
-func (r *UserApplicationStatusRepository) Create(app *entity.UserApplicationStatus) error {
-	m := mapper.UserApplicationStatusFromEntity(app)
-	if err := r.db.Create(m).Error; err != nil {
-		return err
-	}
-	app.ID = m.ID
-	app.CreatedAt = m.CreatedAt
-	app.UpdatedAt = m.UpdatedAt
-	return nil
+func (r *UserApplicationStatusRepository) Create(app *models.UserApplicationStatus) error {
+	// Company/User は関連の書き込みを避けるため、保存対象から外す
+	return r.db.Omit(clause.Associations).Create(app).Error
 }
 
 // FindByUserAndCompany ユーザーIDと企業IDで検索（重複チェック用）
-func (r *UserApplicationStatusRepository) FindByUserAndCompany(userID, companyID uint) (*entity.UserApplicationStatus, error) {
+func (r *UserApplicationStatusRepository) FindByUserAndCompany(userID, companyID uint) (*models.UserApplicationStatus, error) {
 	var m models.UserApplicationStatus
 	err := r.db.Where("user_id = ? AND company_id = ?", userID, companyID).
 		Preload("Company").
@@ -41,21 +38,21 @@ func (r *UserApplicationStatusRepository) FindByUserAndCompany(userID, companyID
 	if err != nil {
 		return nil, err
 	}
-	return mapper.UserApplicationStatusToEntity(&m), nil
+	return &m, nil
 }
 
 // FindByID IDで取得
-func (r *UserApplicationStatusRepository) FindByID(id uint) (*entity.UserApplicationStatus, error) {
+func (r *UserApplicationStatusRepository) FindByID(id uint) (*models.UserApplicationStatus, error) {
 	var m models.UserApplicationStatus
 	err := r.db.Preload("Company").First(&m, id).Error
 	if err != nil {
 		return nil, err
 	}
-	return mapper.UserApplicationStatusToEntity(&m), nil
+	return &m, nil
 }
 
 // FindByUserID ユーザーの全応募一覧を取得
-func (r *UserApplicationStatusRepository) FindByUserID(userID uint) ([]*entity.UserApplicationStatus, error) {
+func (r *UserApplicationStatusRepository) FindByUserID(userID uint) ([]*models.UserApplicationStatus, error) {
 	var ms []*models.UserApplicationStatus
 	err := r.db.Where("user_id = ?", userID).
 		Preload("Company").
@@ -64,16 +61,12 @@ func (r *UserApplicationStatusRepository) FindByUserID(userID uint) ([]*entity.U
 	if err != nil {
 		return nil, err
 	}
-	result := make([]*entity.UserApplicationStatus, len(ms))
-	for i, m := range ms {
-		result[i] = mapper.UserApplicationStatusToEntity(m)
-	}
-	return result, nil
+	return ms, nil
 }
 
 // FindAll 条件を指定して応募一覧を取得する（管理者向け。§10.5）。
 // userID/companyID が 0、status が空文字の場合はその条件で絞り込まない。
-func (r *UserApplicationStatusRepository) FindAll(userID, companyID uint, status string, schoolID *uint) ([]*entity.UserApplicationStatus, error) {
+func (r *UserApplicationStatusRepository) FindAll(userID, companyID uint, status string, schoolID *uint) ([]*models.UserApplicationStatus, error) {
 	q := r.db.Preload("Company")
 	// 担当校を持つ管理者(先生)には自校の生徒の応募だけを返す(#1157)。
 	// 呼び出し側の検証だけに頼らず、クエリ自体をスコープする。
@@ -97,11 +90,7 @@ func (r *UserApplicationStatusRepository) FindAll(userID, companyID uint, status
 	if err := q.Order("user_application_statuses.created_at DESC").Find(&ms).Error; err != nil {
 		return nil, err
 	}
-	result := make([]*entity.UserApplicationStatus, len(ms))
-	for i, m := range ms {
-		result[i] = mapper.UserApplicationStatusToEntity(m)
-	}
-	return result, nil
+	return ms, nil
 }
 
 // FindOwnerSchoolID は応募データを所有するユーザーの学校ID(未所属ならnil)を返す。
@@ -261,7 +250,7 @@ func (r *UserApplicationStatusRepository) FindLowMatchApplicationsByUsers(
 // 学生名の表示に User を使うので Preload する。
 func (r *UserApplicationStatusRepository) FindByCompanyPaged(
 	companyID uint, status string, limit, offset int,
-) ([]*entity.UserApplicationStatus, int64, error) {
+) ([]*models.UserApplicationStatus, int64, error) {
 	if companyID == 0 {
 		return nil, 0, gorm.ErrInvalidValue
 	}
@@ -289,11 +278,7 @@ func (r *UserApplicationStatusRepository) FindByCompanyPaged(
 		return nil, 0, err
 	}
 
-	result := make([]*entity.UserApplicationStatus, len(ms))
-	for i, m := range ms {
-		result[i] = mapper.UserApplicationStatusToEntity(m)
-	}
-	return result, total, nil
+	return ms, total, nil
 }
 
 // CountByCompanyAndStatuses は企業の応募をステータスで数える。
@@ -339,4 +324,61 @@ func (r *UserApplicationStatusRepository) CountGroupedByStatus(companyID uint) (
 		out[row.Status] = row.Count
 	}
 	return out, nil
+}
+
+// CreateActive は、進行中の応募が無いときだけ応募(status=applied)を作り、
+// 紐づくマッチの is_applied を立てる。1トランザクションで行い、片方が失敗したら両方を巻き戻す。
+//
+// 進行中とは、terminalStatuses 以外のステータス。既にあれば ErrDuplicateActiveApplication。
+// 並行リクエストによる競合は、DB の一意制約(active_dedup_key)が最終防御になり、
+// その違反も ErrDuplicateActiveApplication で返す。
+func (r *UserApplicationStatusRepository) CreateActive(userID, companyID, matchID uint, terminalStatuses []string) (*models.UserApplicationStatus, error) {
+	var created *models.UserApplicationStatus
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		// 進行中（終了状態でない）の応募が既にあるか確認
+		var existing models.UserApplicationStatus
+		findErr := tx.Where("user_id = ? AND company_id = ? AND status NOT IN ?", userID, companyID, terminalStatuses).
+			First(&existing).Error
+		switch {
+		case findErr == nil:
+			return repository.ErrDuplicateActiveApplication
+		case errors.Is(findErr, repository.ErrNotFound):
+			// 進行中の応募なし。続行
+		default:
+			return fmt.Errorf("重複チェックエラー: %w", findErr)
+		}
+
+		now := time.Now()
+		m := &models.UserApplicationStatus{
+			UserID:    userID,
+			CompanyID: companyID,
+			MatchID:   matchID,
+			Status:    "applied",
+			AppliedAt: &now,
+		}
+		if createErr := tx.Create(m).Error; createErr != nil {
+			if isDuplicateEntryErr(createErr) {
+				return repository.ErrDuplicateActiveApplication
+			}
+			return fmt.Errorf("応募登録エラー: %w", createErr)
+		}
+
+		// UserCompanyMatch の IsApplied フラグも更新。失敗時は Create ごとロールバックする
+		if markErr := tx.Model(&models.UserCompanyMatch{}).Where("id = ?", matchID).Update("is_applied", true).Error; markErr != nil {
+			return fmt.Errorf("マッチのis_applied更新エラー: %w", markErr)
+		}
+
+		created = m
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// isDuplicateEntryErr はMySQLの一意制約違反(Error 1062)かどうかを判定する。
+func isDuplicateEntryErr(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }

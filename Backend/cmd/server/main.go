@@ -482,12 +482,12 @@ func main() {
 		matchingService,
 	)
 	userScoreRecalculationController := admincontrollers.NewUserScoreRecalculationController(userScoreRecalculationService)
-	companyEntryService := company.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
+	companyEntryService := company.NewCompanyEntryService(repositories.NewCompanyEntryRepository(db), userRepo, pendingRegistrationRepo, emailService)
 	authService.SetCompanyOwnershipClaimer(companyEntryService)
 	companyEntryController := companycontrollers.NewCompanyEntryController(companyEntryService)
 	companyUserRepo := repositories.NewCompanyUserRepository(db)
 	companyUserRefreshRepo := repositories.NewCompanyUserRefreshTokenRepository(db)
-	companyUserService := companyauth.NewCompanyUserService(db, companyUserRepo, companyUserRefreshRepo, emailService, cfg.CompanyUserSecret)
+	companyUserService := companyauth.NewCompanyUserService(companyRepo, companyUserRepo, companyUserRefreshRepo, emailService, cfg.CompanyUserSecret)
 	companyAuthController := companycontrollers.NewCompanyAuthController(companyUserService)
 	companyPortalController := companycontrollers.NewCompanyPortalController(companyUserService)
 	adminCompanyUserController := companycontrollers.NewAdminCompanyUserController(companyUserService)
@@ -509,7 +509,7 @@ func main() {
 	esReviewController.SetReviewService(esreview.NewService(esReviewRepo, crossFeatureService))
 	// アプリ内通知（#2033）。応募・スカウト・先生の案内・予定の前日に、学生へ知らせる
 	notificationService := notificationsvc.NewService(repositories.NewNotificationRepository(db))
-	appService := application.NewApplicationService(appStatusRepo, matchRepo, db, companyAccessRepo)
+	appService := application.NewApplicationService(appStatusRepo, matchRepo, companyAccessRepo)
 	appService.SetNotifier(notificationService)
 	appController := applicationcontrollers.NewApplicationController(appService)
 	appController.SetSchoolAccess(schoolService)

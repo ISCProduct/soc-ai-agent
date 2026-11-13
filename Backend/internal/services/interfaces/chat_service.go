@@ -1,7 +1,6 @@
 package interfaces
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/chat"
@@ -18,17 +17,17 @@ type ChatService interface {
 	GetChatHistoryForUser(sessionID string, userID uint) ([]models.ChatMessage, error)
 	SessionHasOtherUserMessages(sessionID string, userID uint) (bool, error)
 	ClaimSessionOwnership(sessionID string, userID uint) error
-	GetUserScores(userID uint, sessionID string) ([]entity.UserWeightScore, error)
+	GetUserScores(userID uint, sessionID string) ([]models.UserWeightScore, error)
 	GetUserChatSessions(userID uint) ([]models.ChatSession, error)
 }
 
 // MatchingService マッチングサービスのインターフェース
 type MatchingService interface {
 	CalculateMatching(ctx context.Context, userID uint, sessionID string) error
-	GetTopMatches(ctx context.Context, userID uint, sessionID string, limit int) ([]*entity.UserCompanyMatch, error)
+	GetTopMatches(ctx context.Context, userID uint, sessionID string, limit int) ([]*models.UserCompanyMatch, error)
 	ToggleFavorite(matchID uint, userID uint) error
 	GetDiagnostics(userID uint, sessionID string) (*matching.MatchingDiagnostics, error)
-	ReasonScores(userID uint, scores []entity.UserWeightScore) []entity.UserWeightScore
+	ReasonScores(userID uint, scores []models.UserWeightScore) []models.UserWeightScore
 }
 
 // AnalysisScoringService 分析・スコアリングサービスのインターフェース
@@ -38,6 +37,6 @@ type AnalysisScoringService interface {
 
 // EmailService メールサービスのインターフェース
 type EmailService interface {
-	SendAnalysisReport(user *entity.User, summary *analysis.AnalysisSummary, companies []email.EmailReportCompany, sessionID string) error
+	SendAnalysisReport(user *models.User, summary *analysis.AnalysisSummary, companies []email.EmailReportCompany, sessionID string) error
 	SendSystemAlertEmail(recipients []string, subject, body string) error
 }

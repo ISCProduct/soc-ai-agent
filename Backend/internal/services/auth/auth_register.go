@@ -1,8 +1,8 @@
 package auth
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/config"
+	"Backend/internal/models"
 	"Backend/internal/safego"
 	"crypto/rand"
 	"encoding/base64"
@@ -41,7 +41,7 @@ func (s *AuthService) RequestRegistration(email string) error {
 	}
 	token := base64.URLEncoding.EncodeToString(b)
 
-	pending := &entity.PendingRegistration{
+	pending := &models.PendingRegistration{
 		Token:     token,
 		Email:     email,
 		ExpiresAt: time.Now().Add(config.PendingRegistrationTokenTTL),
@@ -138,7 +138,7 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 	}
 
 	// ゲストからの昇格か、新規作成かを決める。
-	var user *entity.User
+	var user *models.User
 	promoting := false
 	if promoteGuestUserID != 0 {
 		guest, err := s.userRepo.GetUserByID(promoteGuestUserID)
@@ -160,7 +160,7 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 	} else {
 		// 新規作成なので保つべき既存値は無い。解決できなければ nil のままにする。
 		newUserSchoolID, _ := s.resolveSchoolID(req.SchoolName, tenantOrgID)
-		user = &entity.User{
+		user = &models.User{
 			Email:                    req.Email,
 			Password:                 string(hashedPassword),
 			Name:                     req.Name,
@@ -226,7 +226,7 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 }
 
 // buildRegisterResponse は登録・昇格どちらでも同じ内容を返す。
-func buildRegisterResponse(user *entity.User) (*AuthResponse, error) {
+func buildRegisterResponse(user *models.User) (*AuthResponse, error) {
 	return &AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,

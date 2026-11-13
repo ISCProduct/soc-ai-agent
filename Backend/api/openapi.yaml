@@ -293,7 +293,7 @@ components:
         10カテゴリの重みスコア。
 
         **キーが Go のフィールド名のままになっている。**
-        `domain/entity.UserWeightScore` を直接 JSON 化しており、同型に json タグが
+        応答用の型 `models.UserWeightScoreResponse` を JSON 化しており、同型に json タグが
         無いため `id` や `user_id` ではなく `ID` / `UserID` が返る。
         snake_case を前提に生成したクライアントは値を取得できない。
       properties:
