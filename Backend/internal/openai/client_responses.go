@@ -141,6 +141,38 @@ func (e *ResponsesAPIError) Retryable() bool {
 	return e.StatusCode == http.StatusTooManyRequests || e.StatusCode >= 500
 }
 
+// Responses API のレスポンスのうち、読む部分。
+type responsesContent struct {
+	Type    string `json:"type"`
+	Text    string `json:"text"`
+	Refusal string `json:"refusal"`
+}
+type responsesOutput struct {
+	Content []responsesContent `json:"content"`
+}
+type promptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens,omitempty"`
+}
+type responsesUsage struct {
+	InputTokens         int                  `json:"input_tokens"`
+	OutputTokens        int                  `json:"output_tokens"`
+	PromptTokensDetails *promptTokensDetails `json:"prompt_tokens_details,omitempty"`
+}
+type responsesResponse struct {
+	Output            []responsesOutput `json:"output"`
+	OutputText        string            `json:"output_text"`
+	Usage             responsesUsage    `json:"usage"`
+	IncompleteDetails struct {
+		Reason string `json:"reason"`
+	} `json:"incomplete_details"`
+}
+type responsesErrorWrapper struct {
+	Error struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// doResponses は Responses API を1回呼び、本文のテキストを返す。
 func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (string, error) {
 	ctx = withFallbackFlag(ctx)
 	// ensureText と二重管理にすると local プロバイダで Responses 系が全滅するため、
@@ -149,14 +181,34 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 		return "", err
 	}
 
-	body, err := json.Marshal(payload)
+	respBody, start, err := cli.postResponses(ctx, payload)
 	if err != nil {
 		return "", err
 	}
 
+	var parsed responsesResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", err
+	}
+	// 上限到達は本文が途中まで返っていても起きる。本文の取り出しより
+	// 先に記録しないと、切れた本文が正常な応答として呼び出し側へ渡る（#1529）。
+	// 切れていなければ下げる（出力枠を増やした再試行が成功した場合に効く）。
+	setOutputTruncated(ctx, parsed.IncompleteDetails.Reason == truncationReasonMaxTokens)
+	cli.recordResponsesUsage(ctx, payload, parsed.Usage, time.Since(start))
+	return extractResponsesText(parsed, respBody)
+}
+
+// postResponses はリクエストを送り、2xx の本文を返す。2xx 以外は *ResponsesAPIError。
+// 戻り値の時刻は送信の直前で、使用量の latency の起点になる。
+func (cli *Client) postResponses(ctx context.Context, payload responsesRequest) ([]byte, time.Time, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.BaseURL()+"/responses", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return nil, time.Time{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+cli.textKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -165,92 +217,64 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, start, err
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return nil, start, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", &ResponsesAPIError{StatusCode: resp.StatusCode, Body: string(respBody)}
+		return nil, start, &ResponsesAPIError{StatusCode: resp.StatusCode, Body: string(respBody)}
 	}
+	return respBody, start, nil
+}
 
-	type responsesContent struct {
-		Type    string `json:"type"`
-		Text    string `json:"text"`
-		Refusal string `json:"refusal"`
+// recordResponsesUsage はトークン使用量を費用計測へ送り、プロンプトキャッシュの利用をログに出す。
+func (cli *Client) recordResponsesUsage(ctx context.Context, payload responsesRequest, usage responsesUsage, latency time.Duration) {
+	if usage.InputTokens <= 0 && usage.OutputTokens <= 0 {
+		return
 	}
-	type responsesOutput struct {
-		Content []responsesContent `json:"content"`
+	cli.reportUsage(ctx, usageReport{
+		provider:         cli.textProvider,
+		model:            payload.Model,
+		promptTokens:     usage.InputTokens,
+		completionTokens: usage.OutputTokens,
+		latency:          latency,
+		cacheHit:         usage.PromptTokensDetails != nil && usage.PromptTokensDetails.CachedTokens > 0,
+		webSearchCalls:   countWebSearchTools(payload.Tools),
+	})
+	if usage.PromptTokensDetails == nil {
+		return
 	}
-	type promptTokensDetails struct {
-		CachedTokens int `json:"cached_tokens,omitempty"`
+	cached := usage.PromptTokensDetails.CachedTokens
+	var hit float64
+	if usage.InputTokens > 0 {
+		hit = float64(cached) / float64(usage.InputTokens)
 	}
-	type responsesUsage struct {
-		InputTokens         int                  `json:"input_tokens"`
-		OutputTokens        int                  `json:"output_tokens"`
-		PromptTokensDetails *promptTokensDetails `json:"prompt_tokens_details,omitempty"`
+	// 日本語プレーンテキストログ: 見込まれる改善率、キャッシュ利用、ヒット率
+	if cached > 0 && usage.InputTokens > 0 {
+		log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=%.2f%% キャッシュ利用=%d/%d ヒット率=%.2f", payload.Model, hit*100, cached, usage.InputTokens, hit)
+	} else {
+		log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=0.00%% キャッシュ利用=%d/%d ヒット率=0.00", payload.Model, cached, usage.InputTokens)
 	}
-	type responsesResponse struct {
-		Output            []responsesOutput `json:"output"`
-		OutputText        string            `json:"output_text"`
-		Usage             responsesUsage    `json:"usage"`
-		IncompleteDetails struct {
-			Reason string `json:"reason"`
-		} `json:"incomplete_details"`
+	// JSON structured log for machines
+	if jl, err := json.Marshal(map[string]any{
+		"event":          "openai_prompt_cache",
+		"model":          payload.Model,
+		"cached_tokens":  cached,
+		"input_tokens":   usage.InputTokens,
+		"cache_hit_rate": hit,
+	}); err == nil {
+		log.Println(string(jl))
 	}
-	type responsesError struct {
-		Message string `json:"message"`
-	}
-	type responsesErrorWrapper struct {
-		Error responsesError `json:"error"`
-	}
+}
 
-	var parsed responsesResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return "", err
-	}
-	// 上限到達は本文が途中まで返っていても起きる。OutputText の早期 return より
-	// 先に記録しないと、切れた本文が正常な応答として呼び出し側へ渡る（#1529）。
-	// 切れていなければ下げる（出力枠を増やした再試行が成功した場合に効く）。
-	setOutputTruncated(ctx, parsed.IncompleteDetails.Reason == truncationReasonMaxTokens)
-	if parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0 {
-		cli.reportUsage(ctx, usageReport{
-			provider:         cli.textProvider,
-			model:            payload.Model,
-			promptTokens:     parsed.Usage.InputTokens,
-			completionTokens: parsed.Usage.OutputTokens,
-			latency:          time.Since(start),
-			cacheHit:         parsed.Usage.PromptTokensDetails != nil && parsed.Usage.PromptTokensDetails.CachedTokens > 0,
-			webSearchCalls:   countWebSearchTools(payload.Tools),
-		})
-		if parsed.Usage.PromptTokensDetails != nil {
-			cached := parsed.Usage.PromptTokensDetails.CachedTokens
-			var hit float64
-			if parsed.Usage.InputTokens > 0 {
-				hit = float64(cached) / float64(parsed.Usage.InputTokens)
-			}
-			// 日本語プレーンテキストログ: 見込まれる改善率、キャッシュ利用、ヒット率
-			if cached > 0 && parsed.Usage.InputTokens > 0 {
-				log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=%.2f%% キャッシュ利用=%d/%d ヒット率=%.2f", payload.Model, hit*100, cached, parsed.Usage.InputTokens, hit)
-			} else {
-				log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=0.00%% キャッシュ利用=%d/%d ヒット率=0.00", payload.Model, cached, parsed.Usage.InputTokens)
-			}
-			// JSON structured log for machines
-			if jl, err := json.Marshal(map[string]any{
-				"event":          "openai_prompt_cache",
-				"model":          payload.Model,
-				"cached_tokens":  cached,
-				"input_tokens":   parsed.Usage.InputTokens,
-				"cache_hit_rate": hit,
-			}); err == nil {
-				log.Println(string(jl))
-			}
-			// prometheus metrics disabled in this environment
-		}
-	}
+// extractResponsesText はレスポンスから本文のテキストを取り出す。
+// output_text → error.message → output[].content[] の順に見て、
+// 拒否(refusal)や空応答はエラーにする。
+func extractResponsesText(parsed responsesResponse, respBody []byte) (string, error) {
 	if strings.TrimSpace(parsed.OutputText) != "" {
 		return strings.TrimSpace(parsed.OutputText), nil
 	}
@@ -346,11 +370,18 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 		model = "gpt-4o-mini"
 	}
 
+	callCtx, cancelCall := context.WithTimeout(ctx, responsesCallTimeout)
+	defer cancelCall()
+
 	var lastErr error
 	// attempts を 5 回に増やし、各リクエストにタイムアウトを設定
 	const maxAttempts = 5
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		ctxReq, cancel := context.WithTimeout(ctx, 60*time.Second)
+		attemptTimeout, err := callAttemptTimeout(callCtx, responsesAttemptCap)
+		if err != nil {
+			return "", wrapCallTimeout(err)
+		}
+		ctxReq, cancel := context.WithTimeout(callCtx, attemptTimeout)
 		messageInput := []map[string]any{
 			{
 				"role": "user",
@@ -387,7 +418,10 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 			println("OpenAI API error (attempt", attempt, "):", err.Error())
 		}
 
-		if stop := waitBeforeRetry(ctx, lastErr, attempt, maxAttempts); stop {
+		if stop := waitBeforeRetry(callCtx, lastErr, attempt, maxAttempts); stop {
+			if callCtx.Err() != nil {
+				return "", wrapCallTimeout(callCtx.Err())
+			}
 			return "", lastErr
 		}
 	}
@@ -410,10 +444,17 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 		model = "gpt-4o-mini"
 	}
 
+	callCtx, cancelCall := context.WithTimeout(ctx, responsesCallTimeout)
+	defer cancelCall()
+
 	var lastErr error
 	const maxAttempts = 5
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		ctxReq, cancel := context.WithTimeout(ctx, 60*time.Second)
+		attemptTimeout, err := callAttemptTimeout(callCtx, responsesAttemptCap)
+		if err != nil {
+			return "", wrapCallTimeout(err)
+		}
+		ctxReq, cancel := context.WithTimeout(callCtx, attemptTimeout)
 		messageInput := []map[string]any{
 			{
 				"role": "system",
@@ -459,7 +500,10 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 			println("OpenAI API error (attempt", attempt, "):", err.Error())
 		}
 
-		if stop := waitBeforeRetry(ctx, lastErr, attempt, maxAttempts); stop {
+		if stop := waitBeforeRetry(callCtx, lastErr, attempt, maxAttempts); stop {
+			if callCtx.Err() != nil {
+				return "", wrapCallTimeout(callCtx.Err())
+			}
 			return "", lastErr
 		}
 	}
@@ -569,16 +613,8 @@ func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, use
 		model = "gpt-4o-mini"
 	}
 
-	format := textFormatNone
-	if jsonMode {
-		format = textFormatJSON
-	}
-
-	const maxAttempts = 5
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		ctxReq, cancel := context.WithTimeout(ctx, 90*time.Second)
-		messageInput := []map[string]any{
+	call := responsesCall{
+		input: []map[string]any{
 			{
 				"role": "system",
 				"content": []map[string]string{
@@ -591,46 +627,33 @@ func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, use
 					{"type": "input_text", "text": userPrompt},
 				},
 			},
+		},
+		model:           model,
+		temperature:     &temperature,
+		maxOutputTokens: maxOutputTokens,
+		jsonMode:        jsonMode,
+		format:          textFormatNone,
+	}
+	if jsonMode {
+		call.format = textFormatJSON
+	}
+
+	callCtx, cancelCall := context.WithTimeout(ctx, responsesMaxTokensCallTimeout)
+	defer cancelCall()
+
+	const maxAttempts = 5
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		attemptTimeout, aerr := callAttemptTimeout(callCtx, responsesMaxTokensAttemptCap)
+		if aerr != nil {
+			return "", wrapCallTimeout(aerr)
 		}
-		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, format)
-		// 4xx（429 以外）は投げ直しても同じ結果なので待たずに返す。5回とも同じ400を
-		// 踏んでバックオフ分（62秒）だけ空転してから失敗していた（#1595）。
-		// 判定は WebSearchJSON と同じ ResponsesAPIError.Retryable() を使う。
-		// isRetryableAPIErr は使わない（*ResponsesAPIError 以外に false を返すので、
-		// ネットワークエラーや90秒タイムアウトの再試行まで止まってしまう）。
-		//
-		// ただし text.format を送っていたなら、それ自体が拒否の原因かもしれないので
-		// 形式なしで1度だけ確かめる。形式が原因でなければ2回目も同じく失敗するため、
-		// 誤って JSON mode を落とす（＝指示遵守率が黙って 0% に戻る）ことが起きない。
-		// 逆に2回目が通ったなら、それが形式が原因だった証明になる。
-		var apiErr *ResponsesAPIError
-		if err != nil && errors.As(err, &apiErr) && !apiErr.Retryable() {
-			fatal := err
-			if format != textFormatNone {
-				logTextFormatFallback(model, apiErr.StatusCode, err)
-				content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, textFormatNone)
-				if err == nil {
-					// 形式が原因だったと確定。以降の試行も形式なしで投げる。
-					// jsonMode も倒して「JSON mode である」前提の下のガードと食い違わせない。
-					format, jsonMode, fatal = textFormatNone, false, nil
-				}
-			}
-			if fatal != nil {
-				// 返すのは元のエラー。形式なしの2回目は原因の切り分け用でしかない。
-				cancel()
-				return "", fatal
-			}
-		}
-		// 空応答のときに text.format を付け替えて試すのは JSON mode 以外だけ。
-		// JSON mode で text を落とすと出力形式の強制も一緒に消えるので、
-		// 同じ形式のまま外側のループで再試行させる。
-		if err != nil && !jsonMode && strings.Contains(err.Error(), "empty response from responses api") {
-			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, textFormatText)
-		}
-		if err != nil && strings.Contains(err.Error(), "max_output_tokens") {
-			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens*2, format)
-		}
+		ctxReq, cancel := context.WithTimeout(callCtx, attemptTimeout)
+		content, giveUp, err := cli.attemptResponses(ctxReq, &call)
 		cancel()
+		if giveUp {
+			return "", err
+		}
 
 		if err == nil && strings.TrimSpace(content) != "" {
 			return strings.TrimSpace(content), nil
@@ -645,11 +668,10 @@ func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, use
 		if attempt == maxAttempts {
 			break
 		}
-		// 待っている間に呼び出し側が諦めたら即座に返す（WebSearchJSON と同じ形）。
-		// 返すのは ctx.Err() ではなく直前のエラーで、原因が分かるようにする。
+		// 論理コールの締切か呼び出し側のキャンセルで、バックオフを打ち切る（#1994）。
 		select {
-		case <-ctx.Done():
-			return "", lastErr
+		case <-callCtx.Done():
+			return "", wrapCallTimeout(callCtx.Err())
 		case <-time.After(responsesBackoff(attempt)):
 		}
 	}
@@ -658,4 +680,65 @@ func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, use
 		lastErr = errors.New("no response from model")
 	}
 	return "", lastErr
+}
+
+// responsesCall は responsesWithMaxTokens の1つの論理コール。試行をまたいで引き継ぐ状態を持つ。
+type responsesCall struct {
+	input           []map[string]any
+	model           string
+	temperature     *float32
+	maxOutputTokens int
+	// format と jsonMode は、text.format が拒否の原因だと分かった時点で倒す。
+	format   string
+	jsonMode bool
+}
+
+// attemptResponses は試行1回ぶんを行う。その場で行う救済(text.format を落とす、
+// 空応答に text を付ける、出力枠を倍にする)を含み、リトライの待機や締切は扱わない。
+//
+// giveUp が true のときは、投げ直しても同じ結果になる失敗なので、呼び出し側は
+// 待たずに err を返す。
+func (cli *Client) attemptResponses(ctx context.Context, c *responsesCall) (content string, giveUp bool, err error) {
+	call := func(maxOutputTokens int, format string) (string, error) {
+		return cli.callResponsesAPIWithTempFallback(ctx, c.input, c.model, c.temperature, maxOutputTokens, format)
+	}
+	content, err = call(c.maxOutputTokens, c.format)
+
+	// 4xx（429 以外）は投げ直しても同じ結果なので待たずに返す。5回とも同じ400を
+	// 踏んでバックオフ分（62秒）だけ空転してから失敗していた（#1595）。
+	// 判定は WebSearchJSON と同じ ResponsesAPIError.Retryable() を使う。
+	// isRetryableAPIErr は使わない（*ResponsesAPIError 以外に false を返すので、
+	// ネットワークエラーや90秒タイムアウトの再試行まで止まってしまう）。
+	//
+	// ただし text.format を送っていたなら、それ自体が拒否の原因かもしれないので
+	// 形式なしで1度だけ確かめる。形式が原因でなければ2回目も同じく失敗するため、
+	// 誤って JSON mode を落とす（＝指示遵守率が黙って 0% に戻る）ことが起きない。
+	// 逆に2回目が通ったなら、それが形式が原因だった証明になる。
+	var apiErr *ResponsesAPIError
+	if err != nil && errors.As(err, &apiErr) && !apiErr.Retryable() {
+		fatal := err
+		if c.format != textFormatNone {
+			logTextFormatFallback(c.model, apiErr.StatusCode, err)
+			content, err = call(c.maxOutputTokens, textFormatNone)
+			if err == nil {
+				// 形式が原因だったと確定。以降の試行も形式なしで投げる。
+				// jsonMode も倒して「JSON mode である」前提の下のガードと食い違わせない。
+				c.format, c.jsonMode, fatal = textFormatNone, false, nil
+			}
+		}
+		if fatal != nil {
+			// 返すのは元のエラー。形式なしの2回目は原因の切り分け用でしかない。
+			return "", true, fatal
+		}
+	}
+	// 空応答のときに text.format を付け替えて試すのは JSON mode 以外だけ。
+	// JSON mode で text を落とすと出力形式の強制も一緒に消えるので、
+	// 同じ形式のまま外側のループで再試行させる。
+	if err != nil && !c.jsonMode && strings.Contains(err.Error(), "empty response from responses api") {
+		content, err = call(c.maxOutputTokens, textFormatText)
+	}
+	if err != nil && strings.Contains(err.Error(), "max_output_tokens") {
+		content, err = call(c.maxOutputTokens*2, c.format)
+	}
+	return content, false, err
 }

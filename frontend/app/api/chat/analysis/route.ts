@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     headers: authHeaders,
   })
   const raw = await response.text()
-  let data: any = {}
+  let data: unknown = {}
   if (raw) {
     try {
       data = JSON.parse(raw)

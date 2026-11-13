@@ -31,21 +31,30 @@ func PrintSummary(w io.Writer, model string, s *ModelSummary) {
 		case c.Failed:
 			mark = "✗"
 		}
-		fmt.Fprintf(w, "%-26s %8.3f %8.3f %10s %10s %6s %8d\n", c.ID, c.CER, c.SemanticCER, kw, num, mark, c.LatencyMS)
+		// APIエラーのケースは測れていないので、CER 0（完璧）に見せない。
+		fmt.Fprintf(w, "%-26s %8s %8s %10s %10s %6s %8d\n",
+			c.ID, cerOrDash(c.CER, !c.Errored), cerOrDash(c.SemanticCER, !c.Errored), kw, num, mark, c.LatencyMS)
 	}
-	// 平均の母数は「APIが成功し、かつ認識失敗でもない件数」。
+	// 平均の母数は「APIが成功した件数」。認識失敗は測定結果なので母数に入る。
 	// APIエラー件数を必ず添えるのは、残高切れで大半が落ちた run を
 	// 「CERが改善した」と読まないため。
 	scored := len(s.Cases) - s.ErroredCases
-	fmt.Fprintf(w, "  平均CER %.3f(意味 %.3f) / 固有名詞 %s / 数値 %s / 認識失敗率 %.1f%% / 平均 %dms\n",
-		s.MeanCER, s.MeanSemanticCER, pctOrDash(s.KeywordAccuracy), pctOrDash(s.NumberAccuracy),
-		s.FailureRate*100, s.MeanLatencyMS)
+	latency := "-"
+	if scored > 0 {
+		latency = fmt.Sprintf("%dms", s.MeanLatencyMS)
+	}
+	fmt.Fprintf(w, "  平均CER %s(意味 %s) / 固有名詞 %s / 数値 %s / 認識失敗率 %s / 平均 %s\n",
+		cerOrDash(s.MeanCER, scored > 0), cerOrDash(s.MeanSemanticCER, scored > 0),
+		pctOrDash(s.KeywordAccuracy), pctOrDash(s.NumberAccuracy),
+		rateOrDash(s.FailureRate, scored > 0), latency)
 	fmt.Fprintf(w, "  APIエラー %d件（平均の母数は %d件 / 全 %d件）\n", s.ErroredCases, scored, len(s.Cases))
 	switch s.CostBasis {
 	case "local_api_only_excludes_compute":
 		fmt.Fprintln(w, "  推論先: local（API費は0。計算資源・電力の費用は含まない）")
 	case "unknown_model_price":
 		fmt.Fprintln(w, "  推論先: OpenAI（単価未登録のため費用は未算出）")
+	case "openai_estimated_price":
+		fmt.Fprintf(w, "  推論先: %s（OpenAI 公開単価の目安（トークン課金の概算）による概算）\n", s.Provider)
 	default:
 		fmt.Fprintf(w, "  推論先: %s（OpenAI 公開単価による概算）\n", s.Provider)
 	}
@@ -88,10 +97,39 @@ func printGroups(w io.Writer, title string, groups []GroupSummary) {
 	}
 	fmt.Fprintf(w, "  [%s]\n", title)
 	for _, g := range groups {
-		fmt.Fprintf(w, "    %-16s 件数%3d(APIエラー%3d)  CER %.3f  固有名詞 %s  数値 %s  認識失敗率 %.1f%%\n",
-			g.Key, g.Cases, g.Errored, g.MeanCER,
-			pctOrDash(g.KeywordAccuracy), pctOrDash(g.NumberAccuracy), g.FailureRate*100)
+		scored := g.Cases - g.Errored
+		fmt.Fprintf(w, "    %-16s 件数%3d(APIエラー%3d)  CER %s  固有名詞 %s  数値 %s  認識失敗率 %s\n",
+			g.Key, g.Cases, g.Errored, cerOrDash(g.MeanCER, scored > 0),
+			pctOrDash(g.KeywordAccuracy), pctOrDash(g.NumberAccuracy), rateOrDash(g.FailureRate, scored > 0))
 	}
+}
+
+// cerOrDash は母数が無い CER を "-" にする。0.000 と出すと完璧な結果に見える。
+func cerOrDash(v float64, hasDenominator bool) string {
+	if !hasDenominator {
+		return "-"
+	}
+	return fmt.Sprintf("%.3f", v)
+}
+
+// rateOrDash は母数が無い割合を "-" にする。
+func rateOrDash(v float64, hasDenominator bool) string {
+	if !hasDenominator {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f%%", v*100)
+}
+
+// UnevaluatedModels は1件も評価できなかったモデルを名前順に返す。
+func UnevaluatedModels(r Report) []string {
+	var models []string
+	for m, s := range r.Models {
+		if s != nil && len(s.Cases) == s.ErroredCases {
+			models = append(models, m)
+		}
+	}
+	sort.Strings(models)
+	return models
 }
 
 // pctOrDash は -1（母数なし）を "-" に、それ以外を百分率にする。
@@ -122,12 +160,14 @@ func PrintComparison(w io.Writer, models []string, r Report) {
 		cost := "-"
 		if s.CostBasis == "local_api_only_excludes_compute" {
 			cost = "0.0000*"
-		} else if s.CostBasis == "openai_published_price" {
+		} else if s.CostBasis == "openai_published_price" || s.CostBasis == "openai_estimated_price" {
 			cost = fmt.Sprintf("%.4f", s.EstCostPerMinUSD*speechMinPerInterview)
 		}
-		fmt.Fprintf(w, "%-26s %8.3f %8.3f %10s %8s %9.1f%% %8d %8d %12s\n",
-			m, s.MeanCER, s.MeanSemanticCER, pctOrDash(s.KeywordAccuracy), pctOrDash(s.NumberAccuracy),
-			s.FailureRate*100, len(s.Cases)-s.ErroredCases, s.ErroredCases, cost)
+		scored := len(s.Cases) - s.ErroredCases
+		fmt.Fprintf(w, "%-26s %8s %8s %10s %8s %10s %8d %8d %12s\n",
+			m, cerOrDash(s.MeanCER, scored > 0), cerOrDash(s.MeanSemanticCER, scored > 0),
+			pctOrDash(s.KeywordAccuracy), pctOrDash(s.NumberAccuracy),
+			rateOrDash(s.FailureRate, scored > 0), scored, s.ErroredCases, cost)
 	}
 	hasLocalProvider := false
 	for _, summary := range r.Models {

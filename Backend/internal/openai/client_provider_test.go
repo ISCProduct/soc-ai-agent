@@ -613,6 +613,27 @@ var llmTestCalls = []struct {
 			return err
 		},
 	},
+	{
+		name: "Responses",
+		call: func(cli *Client, ctx context.Context) error {
+			_, err := cli.Responses(ctx, "user")
+			return err
+		},
+	},
+	{
+		name: "ResponsesWithTemperature",
+		call: func(cli *Client, ctx context.Context) error {
+			_, err := cli.ResponsesWithTemperature(ctx, "sys", "user", 0)
+			return err
+		},
+	},
+	{
+		name: "responsesWithMaxTokens",
+		call: func(cli *Client, ctx context.Context) error {
+			_, err := cli.responsesWithMaxTokens(ctx, "sys", "user", 0, 64, true)
+			return err
+		},
+	},
 }
 
 func setLLMDuration(t *testing.T, target *time.Duration, value time.Duration) {
@@ -698,6 +719,8 @@ func TestLLMLogicalCallTimeoutApplies(t *testing.T) {
 			setLLMDuration(t, &llmMinAttemptRemaining, 0)
 			setLLMDuration(t, &chatCompletionCallTimeout, 100*time.Millisecond)
 			setLLMDuration(t, &webSearchCallTimeout, 100*time.Millisecond)
+			setLLMDuration(t, &responsesCallTimeout, 100*time.Millisecond)
+			setLLMDuration(t, &responsesMaxTokensCallTimeout, 100*time.Millisecond)
 			cli := newLLMTestClient(t, func(_ http.ResponseWriter, r *http.Request) { hangUntilCanceled(r) })
 
 			started := time.Now()

@@ -10,6 +10,7 @@ import (
 	"Backend/internal/scraper"
 	"Backend/internal/services/company"
 	ifaces "Backend/internal/services/interfaces"
+	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"bytes"
 	"context"
@@ -25,7 +26,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 )
 
 // AdminCompanyGraphController exposes the multi-source scraping pipeline via HTTP.
@@ -250,7 +250,7 @@ func (c *AdminCompanyGraphController) syncRelationsFromNodes(nodes map[string]*s
 			for _, name := range names {
 				// 既存企業を名前で検索、なければプロビジョナル企業として登録
 				toCompany, err := c.companyRepo.FindByName(name)
-				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				if err != nil && !errors.Is(err, repository.ErrNotFound) {
 					continue
 				}
 				if toCompany == nil {
@@ -300,7 +300,7 @@ func (c *AdminCompanyGraphController) upsertNodes(nodes map[string]*scraper.Comp
 		}
 
 		existing, err := c.companyRepo.FindByCorporateNumber(node.CorporateNumber)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		if err != nil && !errors.Is(err, repository.ErrNotFound) {
 			skipped++
 			continue
 		}
@@ -310,7 +310,7 @@ func (c *AdminCompanyGraphController) upsertNodes(nodes map[string]*scraper.Comp
 			sourceURL = node.SourceURLs[0]
 		}
 
-		if existing == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+		if existing == nil || errors.Is(err, repository.ErrNotFound) {
 			company := &models.Company{
 				Name:             node.OfficialName,
 				CorporateNumber:  node.CorporateNumber,
@@ -437,7 +437,7 @@ func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
 				continue
 			}
 			toCompany, findErr := c.companyRepo.FindByName(name)
-			if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
+			if findErr != nil && !errors.Is(findErr, repository.ErrNotFound) {
 				continue
 			}
 			if toCompany == nil {
@@ -518,7 +518,7 @@ func (c *AdminCompanyGraphController) fetchRelationsWithLLM(ctx context.Context,
 	userPrompt := fmt.Sprintf(
 		`「%s」の企業関係情報について知っているものを答えてください。子会社・グループ会社・資本提携先・主要取引先を、実在する企業名のみで以下のJSON形式のみで返してください。余分な説明は不要です。
 {"subsidiaries":["子会社・グループ会社名"],"affiliates":["資本提携・関連会社名"],"business_partners":["主要取引先名"]}`,
-		companyName,
+		shared.InlinePromptName(companyName), // 企業名は DB 由来。「」の中に置くので整える（#1970 のレビュー）
 	)
 
 	ctxTimeout, cancel := context.WithTimeout(ctx, 60*time.Second)

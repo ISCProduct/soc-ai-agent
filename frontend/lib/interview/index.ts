@@ -151,14 +151,16 @@ export const interviewApi = {
   },
 
   /**
-   * 発話を保存する。半開きの接続で固まると面接ターンごと止まるため、必ずタイムアウトを付ける。
+   * 学生の発話を保存する。半開きの接続で固まると面接ターンごと止まるため、必ずタイムアウトを付ける。
+   * サーバーが受け付けるのは role=user だけ(#1969)。面接官の発話は /start-turn・/turn の中で
+   * サーバーが保存する。
    * 失敗は呼び出し側（saveUtteranceWithRetry）が再試行し、駄目ならUIに出す（#1476）。
    *
    * clientUtteranceId は発話ごとに1つだけ発行し、再試行でも同じ値を送ること。
    * タイムアウトや応答のロストは「保存できたかどうか分からない」失敗なので、
    * この ID をサーバー側の一意制約に当てて二重保存を防ぐ。
    */
-  async saveUtterance(sessionId: number, userId: number, role: 'user' | 'ai', text: string, clientUtteranceId: string): Promise<void> {
+  async saveUtterance(sessionId: number, userId: number, role: 'user', text: string, clientUtteranceId: string): Promise<void> {
     const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/utterances`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

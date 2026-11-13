@@ -1,15 +1,20 @@
 import './globals.css'
 import type { Metadata } from 'next'
-import { MuiProvider } from '@/components/MuiProvider'
-import { StudentBottomNav } from '@/components/StudentBottomNav'
-import { GlobalNavMenu } from '@/components/GlobalNavMenu'
+import { MuiProvider } from '@/components/providers/MuiProvider'
+import { StudentBottomNav } from '@/components/layout/StudentBottomNav'
+import { GlobalNavMenu } from '@/components/layout/GlobalNavMenu'
+import { NotificationBell } from '@/components/layout/NotificationBell'
 import { Analytics } from '@vercel/analytics/react'
 // Vercelでホスティングされるまで実データは収集されない(AWS ECSデプロイのため現状は未計測)
 import { SpeedInsights } from '@vercel/speed-insights/next'
-import { SentryClientInit } from '@/components/SentryClientInit'
+import { SentryClientInit } from '@/components/providers/SentryClientInit'
+import { DEFAULT_LOCALE, createTranslator, htmlLang, ogLocale } from '@/lib/i18n'
 
-const TITLE = 'IT企業エージェント | 就活AI'
-const DESCRIPTION = '適性診断から企業マッチングまで。IT就活を支援するAIエージェントです。'
+// 文言は辞書（messages/ja.json の metadata）が正本。言語は lib/i18n の既定値から決める（SOCAIAGENT-595）。
+const locale = DEFAULT_LOCALE
+const t = createTranslator('metadata', locale)
+const TITLE = t('title')
+const DESCRIPTION = t('description')
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://shukatsu-ai.jp'),
@@ -18,9 +23,9 @@ export const metadata: Metadata = {
   openGraph: {
     title: TITLE,
     description: DESCRIPTION,
-    locale: 'ja_JP',
+    locale: ogLocale(locale),
     type: 'website',
-    siteName: '就活AI',
+    siteName: t('siteName'),
   },
   twitter: {
     card: 'summary_large_image',
@@ -35,7 +40,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="ja" suppressHydrationWarning>
+    <html lang={htmlLang(locale)} suppressHydrationWarning>
       <head>
         <meta charSet="UTF-8" />
       </head>
@@ -43,6 +48,7 @@ export default function RootLayout({
         <SentryClientInit />
         <MuiProvider>
           {children}
+          <NotificationBell />
           <GlobalNavMenu />
           <StudentBottomNav />
         </MuiProvider>

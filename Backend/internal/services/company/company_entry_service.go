@@ -285,7 +285,10 @@ func (s *CompanyEntryService) sendInviteEmail(submission *models.CompanyEntrySub
 	}
 
 	if existing == nil {
-		_ = s.pendingRepo.DeleteByEmail(submission.ContactEmail)
+		// 古い仮登録が残ると、次の Create が衝突しうる。消せなくても Create の結果で判断するので続ける（#2000）
+		if err := s.pendingRepo.DeleteByEmail(submission.ContactEmail); err != nil {
+			log.Printf("[CompanyEntry] delete previous pending registration failed submission=%d: %v", submission.ID, err)
+		}
 		b := make([]byte, 32)
 		if _, err := rand.Read(b); err != nil {
 			s.markEmailFailed(submission.ID, "token generate failed")
@@ -305,8 +308,8 @@ func (s *CompanyEntryService) sendInviteEmail(submission *models.CompanyEntrySub
 			s.markEmailFailed(submission.ID, err.Error())
 			return false
 		}
-		submission.InviteToken = &inviteToken
-		_ = s.db.Model(submission).Update("invite_token", inviteToken).Error
+		// 検証に使うのは pending_registrations のトークンだけ。
+		// submissions に平文を残すと、読む箇所が無くても DB と将来の JSON に残る（#1990）。
 	}
 
 	if err := s.email.SendCompanyEntryThankYouAndInvite(submission.ContactEmail, companyName, inviteToken); err != nil {
@@ -314,28 +317,36 @@ func (s *CompanyEntryService) sendInviteEmail(submission *models.CompanyEntrySub
 		return false
 	}
 	now := time.Now()
-	_ = s.db.Model(&models.CompanyEntrySubmission{}).Where("id = ?", submission.ID).Updates(map[string]any{
+	// メールはもう出ているので、記録に失敗しても送信は成功として返す。
+	// ただし email_status が pending のまま残り、管理画面が「未送信」と表示するので、ログで分かるようにする（#2000）
+	if err := s.db.Model(&models.CompanyEntrySubmission{}).Where("id = ?", submission.ID).Updates(map[string]any{
 		"email_status":     "sent",
 		"email_sent_at":    now,
 		"email_last_error": "",
 		"email_attempts":   gorm.Expr("email_attempts + 1"),
-	}).Error
+	}).Error; err != nil {
+		log.Printf("[CompanyEntry] invite email sent but failed to record status submission=%d: %v", submission.ID, err)
+	}
 	return true
 }
 
 func (s *CompanyEntryService) markEmailFailed(submissionID uint, msg string) {
-	_ = s.db.Model(&models.CompanyEntrySubmission{}).Where("id = ?", submissionID).Updates(map[string]any{
+	// 送信の失敗を記録できないと email_last_error が空のまま残るので、記録の失敗もログに出す（#2000）。
+	// msg はログに出さない。仮登録の Create の一意制約違反などでは、メールアドレスや招待トークンが入る（#2136 のレビュー）
+	if err := s.db.Model(&models.CompanyEntrySubmission{}).Where("id = ?", submissionID).Updates(map[string]any{
 		"email_status":     "failed",
 		"email_last_error": msg,
 		"email_attempts":   gorm.Expr("email_attempts + 1"),
-	}).Error
+	}).Error; err != nil {
+		log.Printf("[CompanyEntry] failed to record invite email failure submission=%d: %v", submissionID, err)
+	}
 }
 
 // ResendEmail は管理者による招待メール再送。
 func (s *CompanyEntryService) ResendEmail(submissionID uint) error {
 	var submission models.CompanyEntrySubmission
 	if err := s.db.First(&submission, submissionID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return ErrCompanyEntrySubmissionNotFound
 		}
 		return err
@@ -373,6 +384,10 @@ func (s *CompanyEntryService) ClaimOwnershipOnRegister(userID uint, companyID, s
 		return
 	}
 	if submissionID != nil && *submissionID != 0 {
-		_ = s.db.Model(&models.CompanyEntrySubmission{}).Where("id = ?", *submissionID).Update("status", "claimed").Error
+		// 所有権はもう付与済みなので続ける。claimed にできないと submitted のまま残り、
+		// 管理者が二重に扱うので、ログで分かるようにする（#2000）
+		if err := s.db.Model(&models.CompanyEntrySubmission{}).Where("id = ?", *submissionID).Update("status", "claimed").Error; err != nil {
+			log.Printf("[CompanyEntry] ownership claimed but failed to mark submission=%d as claimed company=%d user=%d: %v", *submissionID, *companyID, userID, err)
+		}
 	}
 }

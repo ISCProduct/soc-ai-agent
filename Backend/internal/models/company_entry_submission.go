@@ -15,7 +15,6 @@ type CompanyEntrySubmission struct {
 	EmailSentAt      *time.Time `json:"email_sent_at,omitempty"`
 	EmailLastError   string     `gorm:"type:text" json:"email_last_error,omitempty"`
 	EmailAttempts    int        `gorm:"not null;default:0" json:"email_attempts"`
-	InviteToken      *string    `gorm:"type:varchar(255)" json:"invite_token,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 }

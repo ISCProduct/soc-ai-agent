@@ -4,7 +4,7 @@
 
 1. [デプロイ手順](#1-デプロイ手順)
    - [停止日の本番デプロイ](#11-停止日の本番デプロイ-1518)
-   - [staging の自動停止とデプロイの競合](#12-staging-の自動停止とデプロイの競合-1693)
+   - [staging は常時起動](#12-staging-は常時起動デプロイ後の自動停止は廃止)
 2. [定期バッチ作業](#2-定期バッチ作業)
 3. [監視項目](#3-監視項目)
    - [リクエストIDでサービス横断追跡](#31-リクエストidでサービス横断追跡-1188)
@@ -13,6 +13,7 @@
    - [エラートラッキング(Sentry)の有効化](#34-エラートラッキングsentryの有効化-1185)
    - [エラートラッキング（Sentry）](#34-エラートラッキングsentry619--1185)
    - [クライアントIPをBFFからBackendへ引き継ぐ](#35-クライアントipをbffからbackendへ引き継ぐ-1407)
+   - [プロンプト版ラベルの切り替えと比較](#36-プロンプト版ラベルの切り替えと比較-1778)
 4. [障害対応](#4-障害対応)
 5. [データベース管理](#5-データベース管理)
 6. [管理画面操作](#6-管理画面操作)
@@ -57,7 +58,7 @@ curl http://localhost:8080/healthz
 
 バージョン管理型マイグレーション（`Backend/migrations/`、`cmd/migrate`）を使用（GORMの `AutoMigrate` は禁止）。CI/CD（`.github/workflows/deployment.yml`）で以下の通り自動適用される（#618）。
 
-- **staging**: `docker compose up -d` 後、backendコンテナ内で `docker compose exec -T backend /bin/migrate up` を実行。失敗するとデプロイジョブが失敗する。
+- **staging**: `docker compose up -d` の前に `docker compose run --rm --no-deps -T backend /bin/migrate up` を実行。失敗するとサービスを起動せず、デプロイジョブが失敗する。
 - **production**: 新イメージのタスク定義を登録し、backendサービスと同じネットワーク設定でワンオフECSタスクとして `/bin/migrate up` を実行。マイグレーションが失敗した場合はサービスの更新（新イメージへの切り替え）自体を行わない。
 
 手動実行する場合:
@@ -239,41 +240,23 @@ index+attestation の分だけ減らしている（provenance は誰も参照し
 
 ---
 
-## 1.2 staging の自動停止とデプロイの競合 (#1693)
+## 1.2 staging は常時起動（デプロイ後の自動停止は廃止）
 
-staging はコスト削減のため、デプロイから1時間で自動停止する（`deployment.yml` の
-`staging-auto-stop` ジョブが `sleep 3600` の後に ASG を desired=0、RDS を停止する）。
-1時間以内に次のデプロイが来れば、同じ concurrency group `staging-auto-stop` で
-前回分がキャンセルされ、実質タイマーがリセットされる。
+以前はコスト削減のため、デプロイから1時間で ASG(desired=0) と RDS を止める
+`staging-auto-stop` ジョブがあった（#1693 で次のデプロイとの競合対策も入れていた）。
+停止後は次のデプロイか手動の起動操作まで staging が落ちたままになり、
+「staging が起動していない」状態が日常的に起きていたため廃止した。
 
-**キャンセルはデプロイの開始時点で行う。** auto-stop は `deploy-staging` の後続なので、
-デプロイ成功後にしかキャンセルが掛からないようにすると、デプロイ中（や失敗時）に
-前回の auto-stop が発火して起動中の staging を落とす。これを避けるため、
-`deploy-staging` と並んで走る空ジョブ `cancel-staging-auto-stop` が
-同じ group を先に押さえる。
+起動/停止は SSM `/soc-app/staging-uptime`（`on` / `off`）だけで決まる。
 
-それでもキャンセルの取り合いには数秒〜数十秒の隙があるため、
-`Wait for staging infra ready` は待機ループの中で ASG の `DesiredCapacity` を
-毎回読み、0 に戻っていたら 1 へ上げ直す（自己修復）。
-**desired が 0 の周回では EC2 の state を見ない。** desired=0 の直後でも
-終了処理が始まるまでインスタンスは `running` のままで、そこで待機を抜けると
-これから落とされる台へデプロイしてしまう。
+- 既定は `on`。`staging-uptime-scheduler.yml` が毎時 ASG(min=1,desired=1) と RDS を起動状態に保つ。
+- 止めたいときは Discord の `/staging state:off`。戻すときは `/staging state:on`。
+  反映は次のスケジューラ実行（最大1時間後）。すぐ反映したいときは
+  `staging-uptime-scheduler.yml` を `workflow_dispatch` で手動実行する。
+- GitHub の `schedule` は遅延・欠落することがある（実測で4〜8時間空いた）。止まっていたら
+  同じく手動実行する。
+- `deploy-staging` の `Wait for staging infra ready` は、止まっていたら起動し直す自己修復を残している。
 
-### 失敗したときの読み方
-
-末尾の `desired:` を先に見る。
-
-- `desired: 0` — 5分間 0 のままだった。上げ直しが効いていないので、前回の auto-stop が
-  まだ生きているか、ASG の min/max や権限を疑う。desired が 0 の周回では state を
-  読まないため `state: unread` と出る（インスタンスの有無は分からない）。
-- `desired: 1` かつ `state: None` — desired は戻っているがインスタンスが現れない
-  （`None` = 該当インスタンスなし）。AZ の容量不足や launch template の不備を疑う。
-- `desired: unknown` — ASG を読めていない。権限か API 障害。
-
-いずれも再実行で復帰することが多いが、`desired: 0` が続くなら
-auto-stop のキャンセルが効いていない。
-
-判定ロジックは `automation/test/staging-infra-wait-test.sh` が固定している。
 
 ---
 
@@ -311,6 +294,47 @@ curl -X POST http://localhost:8080/api/admin/score-validation/calibration/run \
 
 ## 3. 監視項目
 
+### 3.6 プロンプト版ラベルの切り替えと比較 (#1778)
+
+版ラベルはプロンプト本文を識別する運用メタデータである。本文を変更するリリースでは、同じリリースで
+`PROMPT_VERSION_<STAGE>` も更新する。工程別値は `PROMPT_VERSION` より優先され、未設定時は `v2`。
+設定例と Terraform 変数は `.env.example` と `infra/terraform/environments/` を参照する。
+
+staging の Terraform 変数 `prompt_version` / `prompt_versions` は新規インスタンスの user_data にしか
+届かない。稼働中のインスタンスへ反映するときは、`/opt/app/.env` も手で更新する。
+
+デプロイ後、利用ログの工程別件数と版ラベルを確認する:
+
+```sql
+SELECT prompt_stage, prompt_version, COUNT(*) AS calls
+FROM api_call_logs
+WHERE called_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY
+GROUP BY prompt_stage, prompt_version
+ORDER BY prompt_stage, prompt_version;
+```
+
+質問・評価・企業情報・マッチング理由の生成結果に記録されたラベルは、それぞれ
+`ai_generated_questions.prompt_version`、`user_weight_scores.prompt_version`、
+`companies.info_prompt_version`、`user_company_matches.match_reason_prompt_version` で確認する。
+A/B 割当（`PROMPT_AB_<STAGE>`）を設定した工程は、割り当てた群ごとに比べる。群が空の呼び出しは A/B の対象外:
+
+```sql
+SELECT prompt_stage, prompt_ab_group, COUNT(*) AS calls, SUM(cost_usd) AS cost_usd
+FROM api_call_logs
+WHERE called_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY AND prompt_ab_group <> ''
+GROUP BY prompt_stage, prompt_ab_group
+ORDER BY prompt_stage, prompt_ab_group;
+```
+
+設定は Terraform 変数 `prompt_ab`（例: `{ score_evaluation = "v2:50,v3:50" }`）で渡す。prod は `terraform apply` でタスク定義へ入る。
+staging は `prompt_versions` と同じく新規インスタンスの user_data にしか届かないので、稼働中のインスタンスは `/opt/app/.env` も手で更新する。
+設定が無効（候補の本文が未登録など）なら、起動後の最初の呼び出しで `プロンプトの A/B 設定を無視します` の警告が出る。
+`prompt_stage='unknown'` は工程メタデータが付与されていない呼び出しを表す。
+
+prod のデプロイはイメージを差し替えるだけなので、`PROMPT_VERSION` と工程別ラベルをタスク定義へ入れるには `terraform apply` が必要。
+
+詳細は [プロンプト版の記録](./prompt-versioning.md) を参照。
+
 ### APIコスト監視
 
 OpenAI APIのコストを管理画面で確認できます:
@@ -328,6 +352,19 @@ GET /api/admin/costs/monthly   # 月別コスト
   - 同一月は1回のみ通知
 - Realtime: `REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200` を超えるとメール/Slack
   - `REALTIME_ALERT_EMAILS` / `REALTIME_ALERT_SLACK_WEBHOOK_URL`
+
+
+### AI利用予算（利用者・学校単位）
+
+利用者と学校ごとに日次・月次の上限を設定できる（`/api/admin/ai-budgets`、管理画面のコスト画面）。上限は既定で未設定で、0 は「上限なし」を表す。
+
+- **判定:** AI を実行するルートで、認証の後に過去の利用額を読む。超過なら 429 と `code: ai_budget_exceeded`、判定できなければ 503（fail-closed）を返す
+- **超過の許容:** ロックも予約もしない。同時に走ったリクエストのぶんだけ上限を少し超えることがある。ロックを持つと AI の応答待ちの間 DB 接続を占有し、同じ学校の利用者を直列化するため
+- **窓:** 日次は毎日 0:00、月次は毎月 1 日 0:00（いずれも日本時間）に切り替わる。既存のコスト集計は UTC 基準なので、月末月初の数字は一致しない
+- **集計対象:** `api_call_logs` と `realtime_usage_logs`。終了していないリアルタイム音声は経過時間から見積もる。日次には当日 0:00 以降の経過だけを足すので、日付をまたいで続く通話も新しい日の上限に入る。月次は開始月に入る。開始時刻が現在より後の行は 0 として数える。学校は記録時点の所属で帰属する。導入前のログには `school_id` がないので、導入した月の学校の月次は実態より小さく出る。記録時に所属校を引けなかった（DB の失敗）呼び出しは学校の利用額に入らず、ログに `[AIBudget] school lookup failed` が出る
+- **対象外:** 開始後の面接（turn / utterances / finish）と保存済みレポートのメール送信は止めない。未ログインの利用者はレート制限で保護する。面接レポートと診断後のマッチングはワーカーで動くので止めず、利用額は利用者に帰属させる。ワーカーのマッチングでも AI 理由の生成の前には利用者の予算を判定し、上限ならテンプレートの理由のままにする
+- **DB 接続:** `DB_MAX_OPEN_CONNS`（既定30）と `DB_MAX_IDLE_CONNS`（既定10）でタスクごとの接続数を制限する。prod には接続数のアラーム（`rds_connections`）がある
+- **既存のブレーキとの違い:** `OpenAIFallbackGuard` はフォールバックの課金だけを見る別の財布で、DB 障害時は fail-open。`OPENAI_COST_ALERT_THRESHOLD_USD` は通知だけで止めない
 
 ### govulncheck の例外
 
@@ -692,7 +729,8 @@ null を返し、`Backend/internal/observability/sentry.go` も DSN 空なら初
 - リクエストボディ（履歴書・チャット本文の混入防止）
 - パンくずの URL、および console のパンくずは丸ごと破棄
 
-`sendDefaultPii: false` / `tracesSampleRate: 0`（トレースは送らない＝Sentry の枠を消費しない）。
+`dataCollection`（ユーザー情報・Cookie・リクエスト本文・DBクエリ等を収集しない設定）/ `tracesSampleRate: 0`（トレースは送らない＝Sentry の枠を消費しない）。
+`@sentry/nextjs` v11 で `sendDefaultPii` が廃止され、`dataCollection` を省くと既定でこれらを収集する。`lib/sentry.ts` で v10 の既定（収集しない）に明示固定しているので、消さないこと（`tests/lib/sentry.test.ts` が検出する）。
 
 ---
 

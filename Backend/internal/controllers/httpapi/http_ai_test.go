@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
+	"Backend/internal/companyfetch"
 	"Backend/internal/middleware"
 	"Backend/internal/openai"
 
@@ -26,11 +28,19 @@ func TestEchoInternalError_AIUnavailable(t *testing.T) {
 		wantCode    string
 		wantMessage string
 	}{
-		{name: "AI未設定は503", err: openai.ErrAIUnavailable, wantStatus: http.StatusServiceUnavailable},
 		{
-			name:       "ラップされていても503",
-			err:        fmt.Errorf("generate failed: %w", openai.ErrAIUnavailable),
-			wantStatus: http.StatusServiceUnavailable,
+			name:        "AI未設定は503",
+			err:         openai.ErrAIUnavailable,
+			wantStatus:  http.StatusServiceUnavailable,
+			wantCode:    ErrCodeServiceUnavail,
+			wantMessage: "現在AI機能を利用できません。しばらくしてから再度お試しください。",
+		},
+		{
+			name:        "ラップされていても503",
+			err:         fmt.Errorf("generate failed: %w", openai.ErrAIUnavailable),
+			wantStatus:  http.StatusServiceUnavailable,
+			wantCode:    ErrCodeServiceUnavail,
+			wantMessage: "現在AI機能を利用できません。しばらくしてから再度お試しください。",
 		},
 		{
 			name:        "LLMの打ち切りは504で再試行可能な文面",
@@ -40,11 +50,26 @@ func TestEchoInternalError_AIUnavailable(t *testing.T) {
 			wantMessage: "処理に時間がかかっています。時間をおいて再度お試しください。",
 		},
 		{
-			name:       "LLM以外のdeadlineは従来どおり500",
-			err:        fmt.Errorf("db query failed: %w", context.DeadlineExceeded),
-			wantStatus: http.StatusInternalServerError,
+			name:        "検索予算超過は429で英語の内部文を出さない",
+			err:         fmt.Errorf("search: %w", companyfetch.ErrSearchBudgetExceeded),
+			wantStatus:  http.StatusTooManyRequests,
+			wantCode:    ErrCodeTooManyRequests,
+			wantMessage: "検索の回数が多すぎます。少し時間を置いてからお試しください。",
 		},
-		{name: "その他のエラーは従来どおり500", err: errors.New("db error"), wantStatus: http.StatusInternalServerError},
+		{
+			name:        "LLM以外のdeadlineは従来どおり500",
+			err:         fmt.Errorf("db query failed: %w", context.DeadlineExceeded),
+			wantStatus:  http.StatusInternalServerError,
+			wantCode:    ErrCodeInternalError,
+			wantMessage: InternalServerErrorMessage,
+		},
+		{
+			name:        "その他のエラーは従来どおり500",
+			err:         errors.New("db error"),
+			wantStatus:  http.StatusInternalServerError,
+			wantCode:    ErrCodeInternalError,
+			wantMessage: InternalServerErrorMessage,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -56,17 +81,18 @@ func TestEchoInternalError_AIUnavailable(t *testing.T) {
 			if he.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", he.Code, tt.wantStatus)
 			}
-			if tt.wantCode != "" {
-				resp, ok := he.Message.(middleware.APIError)
-				if !ok {
-					t.Fatalf("message type = %T, want API error", he.Message)
-				}
-				if got := resp.Code; got != tt.wantCode {
-					t.Errorf("error code = %q, want %q", got, tt.wantCode)
-				}
-				if got := resp.Msg; got != tt.wantMessage {
-					t.Errorf("error message = %q, want %q", got, tt.wantMessage)
-				}
+			resp, ok := he.Message.(middleware.APIError)
+			if !ok {
+				t.Fatalf("message type = %T, want API error", he.Message)
+			}
+			if got := resp.Code; got != tt.wantCode {
+				t.Errorf("error code = %q, want %q", got, tt.wantCode)
+			}
+			if got := resp.Msg; got != tt.wantMessage {
+				t.Errorf("error message = %q, want %q", got, tt.wantMessage)
+			}
+			if strings.Contains(resp.Msg, "budget exceeded") || strings.Contains(resp.Msg, "db error") || strings.Contains(resp.Msg, "db query") {
+				t.Errorf("内部エラーを本文に出した: %q", resp.Msg)
 			}
 		})
 	}

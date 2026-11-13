@@ -16,6 +16,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/oauth2"
 )
@@ -79,6 +81,56 @@ type GitHubEmail struct {
 	Visibility string `json:"visibility"`
 }
 
+// maxDiscardBodyBytes は、2xx 以外の応答で本文を読み捨てるときの上限。
+// 読み切ると接続を再利用できるが、プロバイダが巨大な本文を返しても読み続けないよう上限を設ける。
+// 上限を超える本文は読み切らないので、その応答の接続は再利用されない（失敗時だけなので許容する）。
+const maxDiscardBodyBytes = 64 << 10
+
+// checkProviderStatus は、プロバイダの応答が 2xx でなければ本文を読み捨ててエラーを返す (#2154)。
+// エラー応答の本文でも、確認済みユーザーの形をしていればユーザーが作られてしまうため、JSON を読む前に拒否する。
+// 本文はトークンなどを含みうるので、エラーメッセージにはステータスコードだけを入れる。
+func checkProviderStatus(resp *http.Response) error {
+	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+		return nil
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDiscardBodyBytes))
+	return fmt.Errorf("unexpected status %d", resp.StatusCode)
+}
+
+// exchangeError は、トークン交換の失敗をエラーにする（#2225）。
+//
+// oauth2 の RetrieveError は、応答に error フィールドが無いと本文全体を Error() に含めるため、
+// そのまま %w で包むとサーバーログに本文が出る。プロバイダの応答本文はログに出さない方針（#2154）に揃え、
+// ステータスとエラーコードだけを入れる。RetrieveError 以外（通信の失敗など）は本文を持たないので、そのまま包む。
+func exchangeError(err error) error {
+	var re *oauth2.RetrieveError
+	if errors.As(err, &re) {
+		status := 0
+		if re.Response != nil {
+			status = re.Response.StatusCode
+		}
+		if re.ErrorCode != "" {
+			// エラーコードもプロバイダの応答の一部なので、%q で引用し（改行などの制御文字で偽のログ行を作らせない）、
+			// 長さも切る（巨大な値でログを埋めさせない）。エラーコードは本来 invalid_grant のような短い語（#2230 のレビュー）
+			return fmt.Errorf("failed to exchange token: unexpected status %d (%q)", status, truncateRunes(re.ErrorCode, maxErrorCodeRunes))
+		}
+		return fmt.Errorf("failed to exchange token: unexpected status %d", status)
+	}
+	return fmt.Errorf("failed to exchange token: %w", err)
+}
+
+// maxErrorCodeRunes は、トークン交換のエラーコードとしてエラーに入れる最大の文字数。
+// RFC 6749 のエラーコードは invalid_grant などの短い語なので、これを超える部分は切る。
+const maxErrorCodeRunes = 64
+
+// truncateRunes は s を最大 n 文字（ルーン）に切る。UTF-8 の途中では切らない。
+func truncateRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n])
+}
+
 // GetGoogleAuthURL Google OAuth認証URLを取得
 func (s *OAuthService) GetGoogleAuthURL(state string) string {
 	return s.oauthConfig.Google.AuthCodeURL(state, oauth2.AccessTypeOffline)
@@ -94,7 +146,7 @@ func (s *OAuthService) GetGitHubAuthURL(state string) string {
 func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, tenantOrgID uint) (*auth.AuthResponse, error) {
 	token, err := s.oauthConfig.Google.Exchange(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("failed to exchange token: %w", err)
+		return nil, exchangeError(err)
 	}
 
 	// ユーザー情報取得
@@ -104,6 +156,9 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 		return nil, fmt.Errorf("failed to get user info: %w", err)
 	}
 	defer resp.Body.Close()
+	if err := checkProviderStatus(resp); err != nil {
+		return nil, fmt.Errorf("failed to get user info: %w", err)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -117,6 +172,12 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 
 	if !userInfo.VerifiedEmail {
 		return nil, errors.New("email not verified")
+	}
+	// id が無いと、別々の Google アカウントが同じ空の OAuthID に紐付いてしまう（#2225）。
+	// 照合・保存にも、検査と同じ前後の空白を除いた値を使う（検査と保存で値が食い違わないように。#2230 のレビュー）
+	userInfo.ID = strings.TrimSpace(userInfo.ID)
+	if userInfo.ID == "" {
+		return nil, errors.New("failed to get user info: missing user id")
 	}
 
 	// 既存ユーザーチェック（OAuth）
@@ -204,7 +265,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, tenantOrgID uint) (*auth.AuthResponse, error) {
 	token, err := s.oauthConfig.GitHub.Exchange(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("failed to exchange token: %w", err)
+		return nil, exchangeError(err)
 	}
 
 	// ユーザー情報取得
@@ -214,6 +275,9 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, te
 		return nil, fmt.Errorf("failed to get user info: %w", err)
 	}
 	defer resp.Body.Close()
+	if err := checkProviderStatus(resp); err != nil {
+		return nil, fmt.Errorf("failed to get user info: %w", err)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -223,6 +287,11 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, te
 	var userInfo GitHubUserInfo
 	if err := json.Unmarshal(body, &userInfo); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal user info: %w", err)
+	}
+	// id が無い（0）と、別々の GitHub アカウントが同じ "0" に紐付いてしまう（#2225）。
+	// メール一覧を取りに行く前に弾く。
+	if userInfo.ID <= 0 {
+		return nil, errors.New("failed to get user info: missing user id")
 	}
 
 	// メールアドレスが公開されていない場合は別途取得
@@ -342,6 +411,9 @@ func (s *OAuthService) getGitHubPrimaryEmail(ctx context.Context, client *http.C
 		return "", err
 	}
 	defer resp.Body.Close()
+	if err := checkProviderStatus(resp); err != nil {
+		return "", err
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

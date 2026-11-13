@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"Backend/internal/companyfetch"
+	"Backend/internal/services/shared"
 )
 
 // searchContextTTL は共有した検索結果を使い回す時間。
@@ -109,7 +110,8 @@ func sharedSearchPrompt(companyName, websiteURL string) string {
 		siteHint = "（公式サイト: " + websiteURL + "）"
 	}
 
-	return "日本の企業「" + companyName + "」" + siteHint + "について、公開情報から確認できる事実を調べてください。" +
+	// 検索クエリになるので、囲まずに名前として整える（#1970 のレビュー）
+	return "日本の企業「" + shared.InlinePromptName(companyName) + "」" + siteHint + "について、公開情報から確認できる事実を調べてください。" +
 		"次の2つは別のページに載っていることが多いので、どちらかに偏らず順に確認してください。\n\n" +
 		"【1. 企業の基本情報】会社概要・IR資料から\n" +
 		"企業概要、業種、本社所在地、公式サイトURL、設立年、従業員数（直近有価証券報告書の連結を優先し、連結か単体かを明記）、" +

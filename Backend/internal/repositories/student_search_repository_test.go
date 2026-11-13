@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -111,4 +112,30 @@ func TestStudentSearchRepository_VisibilitySQLContainsGuards(t *testing.T) {
 		assert.True(t, regexp.MustCompile(regexp.QuoteMeta(guard)).MatchString(sql),
 			"公開判定SQLに %q が含まれること: %s", guard, sql)
 	}
+}
+
+func TestStudentSearchRepository_HidesIdentityUntilScoutAccepted(t *testing.T) {
+	db, _ := newSearchMockDB(t)
+	repo := NewStudentSearchRepository(db)
+
+	sql := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+		r := &StudentSearchRepository{db: tx}
+		return r.identityRedactedSelect(7, StudentSearchFilters{}).Find(&[]StudentSearchRow{})
+	})
+	_ = repo
+
+	for _, fragment := range []string{
+		"CASE WHEN",
+		"FROM scouts",
+		"sc.status",
+		"accepted",
+		"ELSE '' END AS name",
+		"ELSE '' END AS school_name",
+		"ELSE '' END AS avatar_url",
+	} {
+		assert.Contains(t, sql, fragment, "承諾前は氏名・学校・写真を空にすること: %s", sql)
+	}
+	assert.False(t, strings.Contains(sql, "u.name,"), "氏名を無条件に選ばないこと: %s", sql)
+	assert.False(t, strings.Contains(sql, "u.school_name,"), "学校名を無条件に選ばないこと: %s", sql)
+	assert.False(t, strings.Contains(sql, "u.avatar_url,"), "写真を無条件に選ばないこと: %s", sql)
 }

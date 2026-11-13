@@ -1,7 +1,9 @@
 package resume
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"bufio"
 	"bytes"
 	"context"
@@ -18,8 +20,6 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/ragclient"
-
-	"gorm.io/gorm"
 )
 
 // ctx はリクエストIDを RAG まで伝播させるために受け取る(#1188)
@@ -27,7 +27,7 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 	// クエリを user_id でスコープする。所有者以外には見つからない（#1156）
 	doc, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, nil, nil, shared.ErrForbidden
 		}
 		return nil, nil, nil, err
@@ -156,11 +156,15 @@ var errReviewOutputTruncated error = &shared.ValidationError{
 // 「解析に失敗しました」になって原因が上限だと分からない**ため。
 // items を最後以外へ動かすと途中までが読めてしまう余地も残るので、
 // スキーマ変更に対する保険も兼ねている。
-func (s *ResumeService) requestReviewJSON(systemPrompt, userPrompt, model string) (string, error) {
+//
+// ctx はリクエストの ctx を渡す（#1993）。context.Background() から始めると、機能名・実行主体
+// （利用者単位の予算ブレーカー #1776 が数える）・クライアント切断時のキャンセルがすべて届かない。
+func (s *ResumeService) requestReviewJSON(ctx context.Context, systemPrompt, userPrompt, model string) (string, error) {
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureResumeReview)
 	// 同じ枠・同じ温度でやり直しても同じ位置で切れるので、枠を倍にする方だけ試す。
 	for _, maxTokens := range []int{ReviewMaxOutputTokens, ReviewMaxOutputTokens * 2} {
 		// 上限到達を検知するためフラグ付きのコンテキストで呼ぶ（#1529）。
-		aiCtx := openai.WithTruncationFlag(context.Background())
+		aiCtx := openai.WithTruncationFlag(ctx)
 		// JSON mode で呼ぶ（#1583）。素の JSON しか返らなくなるので、decodeJSON の
 		// 復旧処理（'{' 〜 '}' の切り出し）は保険として残るだけで通らなくなる。
 		// JSON mode がプロンプトへ要求する "JSON" の語は、初回の ReviewSystemPrompt と
@@ -376,7 +380,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 
 	doc, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			sendEvent(map[string]any{"type": "error", "message": "forbidden"})
 			return shared.ErrForbidden
 		}
@@ -418,7 +422,12 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 	doc.NormalizedPath = normalizedStored
 	doc.Status = "normalized"
-	_ = s.repo.UpdateDocument(doc)
+	// 途中の印なので、保存できなくてもレビューは続ける。最後の finalizeDocument が同じドキュメントを
+	// まるごと保存し直し、そこでの失敗はユーザーに伝える。ここで止めると、待っている学生のレビューが
+	// 途中の印のためだけに失敗する。失敗はログで分かるようにする（#2002）
+	if err := s.repo.UpdateDocument(doc); err != nil {
+		log.Printf("resume_review_stream: UpdateDocument(normalized) failed document_id=%d err=%v", doc.ID, err)
+	}
 
 	if err := validatePathInDir(pdfPath, workDir); err != nil {
 		log.Printf("resume_review_stream: pdf path outside workDir pdf=%q workDir=%q err=%v", pdfPath, workDir, err)
@@ -460,7 +469,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 
 	// スコア・指摘事項を生成
-	review, items, err := s.buildReviewScoreItems(blocks, companyName, jobTitle, candidateType, ragReport)
+	review, items, err := s.buildReviewScoreItems(ctx, blocks, companyName, jobTitle, candidateType, ragReport)
 	if err != nil {
 		log.Printf("resume_review_stream: build score failed: %v", err)
 		var ve *shared.ValidationError
@@ -580,12 +589,12 @@ func (s *ResumeService) buildResumeReviewWithAI(ctx context.Context, blocks []mo
 			log.Printf("resume_review: rag report failed: %v", err)
 		}
 	}
-	return s.buildReviewScoreItems(blocks, companyName, jobTitle, candidateType, companyInfo)
+	return s.buildReviewScoreItems(ctx, blocks, companyName, jobTitle, candidateType, companyInfo)
 }
 
 // buildReviewScoreItems はcompanyInfoを受け取りOpenAIでスコア・指摘事項を生成する。
 // fetchRAGReportStream など外部から取得したRAGレポートを直接渡す場合に使用する。
-func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, companyName, jobTitle, candidateType, companyInfo string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (s *ResumeService) buildReviewScoreItems(ctx context.Context, blocks []models.ResumeTextBlock, companyName, jobTitle, candidateType, companyInfo string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	if s.aiClient == nil {
 		return nil, nil, fmt.Errorf("AIクライアントが初期化されていません")
 	}
@@ -609,7 +618,7 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 	prompt := buildReviewPrompt(text, companyName, jobTitle, companyInfo, candidateType)
 
 	modelOverride := ReviewModel()
-	raw, err := s.requestReviewJSON(ReviewSystemPrompt, prompt, modelOverride)
+	raw, err := s.requestReviewJSON(ctx, ReviewSystemPrompt, prompt, modelOverride)
 	if err != nil {
 		log.Printf("resume_review: openai review failed: %v", err)
 		if errors.Is(err, errReviewOutputTruncated) {
@@ -642,7 +651,7 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 		blocksForRetry := selectReviewBlocks(blocks, 40)
 		blockList := buildBlockList(blocksForRetry)
 		retryPrompt := buildReviewRetryPrompt(blockList, companyName, jobTitle, companyInfo, candidateType)
-		rawRetry, retryReqErr := s.requestReviewJSON(reviewRetrySystemPrompt, retryPrompt, modelOverride)
+		rawRetry, retryReqErr := s.requestReviewJSON(ctx, reviewRetrySystemPrompt, retryPrompt, modelOverride)
 		if retryReqErr != nil {
 			log.Printf("resume_review: やり直しの生成に失敗: %v", retryReqErr)
 		}

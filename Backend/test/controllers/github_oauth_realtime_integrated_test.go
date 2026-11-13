@@ -8,8 +8,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	authcontrollers "Backend/internal/controllers/auth"
@@ -18,10 +20,13 @@ import (
 	"Backend/internal/controllers/mocks"
 	"Backend/internal/controllers/testsupport"
 	usercontrollers "Backend/internal/controllers/user"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/services/flywheel"
+	githubservice "Backend/internal/services/github"
 	"Backend/internal/services/shared"
 
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	tmock "github.com/stretchr/testify/mock"
 )
@@ -216,6 +221,125 @@ func TestGitHubController_SummarizeRepo_Success(t *testing.T) {
 		Return(&models.GitHubRepoSummary{FullName: "owner/repo"}, nil)
 	testsupport.AssertStatus(t, newGitHubController(gh, nil).SummarizeRepo, testsupport.NewCtx(req, rec), http.StatusOK)
 	gh.AssertExpectations(t)
+}
+
+// #2176: 形が正しくない full_name は、本物のサービスの入口の検証で弾かれて 400 になる。
+// サービスの依存（DB・トークン・OpenAI）を nil で作っているので、検証より先へ進めば panic で落ちる
+// ＝ GitHub API へのリクエストまで届かない。
+func TestGitHubController_SummarizeRepo_InvalidFullName(t *testing.T) {
+	cases := []string{
+		"../users/x",
+		"owner/repo/../../x",
+		"owner/repo?x=1",
+		"owner/repo#x",
+		"ownerrepo",
+		"owner/repo/x",
+		"owner/..",
+		"owner/.",
+		strings.Repeat("a", 40) + "/repo",
+		"owner/" + strings.Repeat("r", 101),
+	}
+	// サービスはモック（期待なし）。ハンドラが入口で弾かずにサービスを呼ぶと、モックが失敗する
+	gh := &mocks.GitHubServiceMock{}
+	ctrl := newGitHubController(gh, nil)
+	for _, fullName := range cases {
+		t.Run(fullName, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{"full_name": fullName})
+			req := httptest.NewRequest(http.MethodPost, "/api/github/repo/summarize", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			req = testsupport.WithUserID(req, 1)
+			rec := httptest.NewRecorder()
+			testsupport.AssertStatus(t, ctrl.SummarizeRepo, testsupport.NewCtx(req, rec), http.StatusBadRequest)
+		})
+	}
+	gh.AssertNotCalled(t, "SummarizeRepo", tmock.Anything, tmock.Anything, tmock.Anything, tmock.Anything, tmock.Anything)
+}
+
+// サービスが ErrInvalidRepoFullName を包んで返しても 400 にする（500 にしない）。
+func TestGitHubController_SummarizeRepo_InvalidFullNameFromService(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{"full_name": "owner/repo"})
+	req := httptest.NewRequest(http.MethodPost, "/api/github/repo/summarize", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+
+	gh := &mocks.GitHubServiceMock{}
+	gh.On("SummarizeRepo", tmock.Anything, uint(1), "owner/repo", false, "").
+		Return(nil, fmt.Errorf("wrap: %w", githubservice.ErrInvalidRepoFullName))
+	testsupport.AssertStatus(t, newGitHubController(gh, nil).SummarizeRepo, testsupport.NewCtx(req, rec), http.StatusBadRequest)
+	gh.AssertExpectations(t)
+}
+
+// サービスのエラーごとの HTTP ステータスと、利用者向けの文言を固定する（#2228・#2231 のレビュー）。
+//   - 不正な出力は上流（AI）の応答の問題なので 500 ではなく 502 にし、作り直せる旨の文言を返す
+//   - 再連携・権限の付与で直るもの（401・レート制限以外の 403）は 403 にし、サービスの文言をそのまま返す
+//   - それ以外は従来どおり 500 で、内部の文言は返さない
+//
+// 本番と同じエラーハンドラー（middleware.CustomHTTPErrorHandler）を設定した Echo を通して、
+// 応答の形（{error, code}）とステータスを確かめる（#2266 のレビュー）。testsupport.AssertStatus は
+// Echo の既定のハンドラーを使うので、本番のハンドラーが APIError を扱えなくなっても気づけない。
+func TestGitHubController_SummarizeRepo_ErrorStatus(t *testing.T) {
+	cases := []struct {
+		name        string
+		err         error
+		wantStatus  int
+		wantMessage string
+		wantCode    string
+	}{
+		{
+			name:        "不正な出力は 502",
+			err:         fmt.Errorf("AI summary generation failed: %w", fmt.Errorf("%w: summary_text が空です", githubservice.ErrInvalidRepoSummaryOutput)),
+			wantStatus:  http.StatusBadGateway,
+			wantMessage: "AIの要約をうまく作れませんでした",
+			wantCode:    "BAD_GATEWAY",
+		},
+		{
+			name:        "権限不足の 403 は再連携を促す 403",
+			err:         &githubservice.GitHubReauthRequiredError{Reason: "このリポジトリを読む権限がありません。"},
+			wantStatus:  http.StatusForbidden,
+			wantMessage: "このリポジトリを読む権限がありません。",
+		},
+		{
+			name:        "README の取得失敗は 500",
+			err:         fmt.Errorf("failed to fetch README: %w", &githubservice.GitHubAPIError{StatusCode: http.StatusInternalServerError}),
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "内部エラーが発生しました",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{"full_name": "owner/repo"})
+			req := httptest.NewRequest(http.MethodPost, "/api/github/repo/summarize", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			req = testsupport.WithUserID(req, 1)
+			rec := httptest.NewRecorder()
+
+			gh := &mocks.GitHubServiceMock{}
+			gh.On("SummarizeRepo", tmock.Anything, uint(1), "owner/repo", false, "").Return(nil, tc.err)
+			e := echo.New()
+			e.HTTPErrorHandler = middleware.CustomHTTPErrorHandler
+			e.POST("/api/github/repo/summarize", newGitHubController(gh, nil).SummarizeRepo)
+			e.ServeHTTP(rec, req)
+
+			assert.Equal(t, tc.wantStatus, rec.Code)
+			var resp struct {
+				Error string `json:"error"`
+				Code  string `json:"code"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("本番のエラー応答の形（JSON）になっていない: %q", rec.Body.String())
+			}
+			assert.Contains(t, resp.Error, tc.wantMessage)
+			assert.NotEmpty(t, resp.Code)
+			if tc.wantCode != "" {
+				assert.Equal(t, tc.wantCode, resp.Code)
+			}
+			// 内部のエラーの文言（英語のセンチネルや GitHub のステータス）は利用者に返さない
+			assert.NotContains(t, rec.Body.String(), "github api error")
+			assert.NotContains(t, rec.Body.String(), "summary_text が空です")
+			gh.AssertExpectations(t)
+		})
+	}
 }
 
 // ========== OAuthController ==========

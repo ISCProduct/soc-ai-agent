@@ -98,13 +98,14 @@ type UserCompanyMatch struct {
 	// 「5点中0点」を正規化した正当なスコア（cross_feature_integration_service.go）なので、
 	// 測れていないわけではない。
 	//
-	// なお chat_controller.go の countEvaluatedCategories は score != 0 で数えるため、
+	// なお services/matching の CountEvaluatedCategories は score != 0 で数えるため、
 	// 同じ「何軸で測れたか」でも値が食い違う。あちらは 0 を未計測とみなす簡略化。
-	MatchedAxisCount int
-	MatchReason      string
-	IsViewed         bool
-	IsFavorited      bool
-	IsApplied        bool
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	MatchedAxisCount         int
+	MatchReason              string
+	MatchReasonPromptVersion string
+	IsViewed                 bool
+	IsFavorited              bool
+	IsApplied                bool
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }

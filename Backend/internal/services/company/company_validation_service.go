@@ -6,6 +6,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,10 @@ import (
 var companyValidationCacheTTL = 30 * time.Minute
 
 const companyValidationMaxTok = 200
+
+// 失敗を「存在しない」として30分キャッシュすると、実在企業を不存在に見せる（#1447）。
+// 失敗そのものは短時間だけ覚え、同じクエリの web_search を連打しない。
+const companyValidationFailureCooldown = 90 * time.Second
 
 func init() {
 	companyValidationCacheTTL = time.Duration(config.ValidationCacheTTLMinutes()) * time.Minute
@@ -52,6 +57,11 @@ type companyValidationCacheEntry struct {
 	expiresAt time.Time
 }
 
+type companyValidationFailureEntry struct {
+	err       error
+	expiresAt time.Time
+}
+
 // CompanyValidationService は DB 優先・必要時のみ軽量 WebSearch で企業の実在を確認する。
 type CompanyValidationService struct {
 	companyRepo  companyLookup
@@ -60,6 +70,7 @@ type CompanyValidationService struct {
 	flight       *CompanySearchFlight
 	mu           sync.RWMutex
 	cache        map[string]companyValidationCacheEntry
+	failures     map[string]companyValidationFailureEntry
 }
 
 func NewCompanyValidationService(companyRepo companyLookup, client *openai.Client) *CompanyValidationService {
@@ -67,6 +78,7 @@ func NewCompanyValidationService(companyRepo companyLookup, client *openai.Clien
 		companyRepo:  companyRepo,
 		openaiClient: client,
 		cache:        make(map[string]companyValidationCacheEntry),
+		failures:     make(map[string]companyValidationFailureEntry),
 	}
 	// キャッシュ掃除ループが panic するとプロセスごと落ちる(#1446)。
 	safego.Go(s.purgeLoop)
@@ -223,9 +235,13 @@ func (s *CompanyValidationService) SearchCandidates(ctx context.Context, query s
 	}
 
 	validated, err := s.Validate(ctx, q)
+	if errors.Is(err, usagectx.ErrAIBudgetExceeded) || errors.Is(err, usagectx.ErrAIBudgetUnavailable) {
+		// 上限で止めたことを利用者へ伝える。空の結果にすると該当企業なしに見える。
+		return out, err
+	}
 	if err != nil {
-		// WEB 補完失敗時も DB 結果（空）を返し、UI でメッセージ表示できるようにする
-		return out, nil
+		// 失敗を空配列にすると、UI は「検索結果が見つかりません」と出す（#1447）。
+		return nil, err
 	}
 	if validated.Exists {
 		key := normalizeCompanyKey(validated.CanonicalName)
@@ -237,63 +253,43 @@ func (s *CompanyValidationService) SearchCandidates(ctx context.Context, query s
 }
 
 func (s *CompanyValidationService) validateWithWebSearch(ctx context.Context, query string) (*CompanyValidationResult, error) {
-	if s.openaiClient == nil {
-		return &CompanyValidationResult{
-			Exists:        false,
-			CanonicalName: "",
-			Source:        "web_search",
-			Confidence:    "low",
-			Query:         query,
-		}, nil
+	key := normalizeCompanyKey(query)
+	if err, ok := s.cachedFailure(key); ok {
+		return nil, err
+	}
+
+	// singleflight の外で利用者ごとに判定する。中で判定すると、待機側の利用者が
+	// リーダーの判定結果を共有し、別の学校の上限で止められたりすり抜けたりする。
+	if err := usagectx.CheckAIBudget(ctx); err != nil {
+		return nil, err
 	}
 
 	run := func() (*CompanyValidationResult, error) {
 		if s.budget != nil {
 			if err := s.budget.AllowSearch(); err != nil {
-				if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
-					return &CompanyValidationResult{
-						Exists:        false,
-						CanonicalName: "",
-						Source:        "cache",
-						Confidence:    "low",
-						Query:         query,
-						Description:   "月次の企業Search上限に達したため、キャッシュのみで確認しています。しばらくしてから再度お試しください",
-					}, nil
-				}
 				return nil, err
 			}
 		}
 
+		// 検索キーワードは学生・ゲストの入力。検索クエリになるので囲まずに整える（#1970 のレビュー）
 		prompt := fmt.Sprintf(`日本の実在企業かどうかだけを判定してください。推測で企業を作らないでください。
 検索対象: 「%s」
 
 次のJSONオブジェクトのみを返してください（説明文不要）:
 {"exists":true/false,"canonical_name":"正式な企業名（存在する場合）","evidence_urls":["公式サイト等のURL"],"confidence":"high|medium|low","description":"事業の1行説明"}
 
-exists=false の場合は canonical_name を空文字、evidence_urls を空配列にしてください。`, query)
+exists=false の場合は canonical_name を空文字、evidence_urls を空配列にしてください。`, shared.InlinePromptName(query))
 
 		text, err := s.openaiClient.WebSearchJSON(ctx, prompt, companyValidationMaxTok)
 		if err != nil {
-			log.Printf("[CompanyValidation] web search failed query=%q err=%v", query, err)
-			return &CompanyValidationResult{
-				Exists:        false,
-				CanonicalName: "",
-				Source:        "web_search",
-				Confidence:    "low",
-				Query:         query,
-				Description:   "WEB検索による実在確認に失敗しました。企業名を変えるか、しばらくしてから再度お試しください",
-			}, nil
+			log.Printf("[CompanyValidation] web search failed query=%q err=%s", query, truncateRunes(err.Error(), 300))
+			return nil, err
 		}
 
 		parsed, parseErr := parseValidationJSON(text)
 		if parseErr != nil {
 			log.Printf("[CompanyValidation] parse failed query=%q raw=%q err=%v", query, truncateRunes(text, 200), parseErr)
-			return &CompanyValidationResult{
-				Exists:     false,
-				Source:     "web_search",
-				Confidence: "low",
-				Query:      query,
-			}, nil
+			return nil, fmt.Errorf("企業検索の結果を読み取れませんでした")
 		}
 
 		parsed.Source = "web_search"
@@ -310,14 +306,22 @@ exists=false の場合は canonical_name を空文字、evidence_urls を空配�
 		return parsed, nil
 	}
 
-	if s.flight == nil {
-		return run()
+	finish := func(result *CompanyValidationResult, err error) (*CompanyValidationResult, error) {
+		if err != nil {
+			s.rememberFailure(key, err)
+			return nil, err
+		}
+		return result, nil
 	}
-	v, err := s.flight.Do("validate", normalizeCompanyKey(query), func() (any, error) {
+
+	if s.flight == nil {
+		return finish(run())
+	}
+	v, err := s.flight.Do("validate", key, func() (any, error) {
 		return run()
 	})
 	if err != nil {
-		return nil, err
+		return finish(nil, err)
 	}
 	if v == nil {
 		return &CompanyValidationResult{Exists: false, Source: "web_search", Confidence: "low", Query: query}, nil
@@ -365,6 +369,36 @@ func (s *CompanyValidationService) purgeExpired() {
 		if now.After(v.expiresAt) {
 			delete(s.cache, k)
 		}
+	}
+	for k, v := range s.failures {
+		if now.After(v.expiresAt) {
+			delete(s.failures, k)
+		}
+	}
+}
+
+func (s *CompanyValidationService) cachedFailure(key string) (error, bool) {
+	if key == "" {
+		return nil, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entry, ok := s.failures[key]
+	if !ok || time.Now().After(entry.expiresAt) {
+		return nil, false
+	}
+	return entry.err, true
+}
+
+func (s *CompanyValidationService) rememberFailure(key string, err error) {
+	if key == "" || err == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failures[key] = companyValidationFailureEntry{
+		err:       err,
+		expiresAt: time.Now().Add(companyValidationFailureCooldown),
 	}
 }
 

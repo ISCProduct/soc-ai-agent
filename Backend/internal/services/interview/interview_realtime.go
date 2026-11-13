@@ -1,6 +1,8 @@
 package interview
 
 import (
+	"Backend/domain/repository"
+	"Backend/internal/aimodel"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/shared"
@@ -11,8 +13,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 const interviewPhraseSuggestionsLLMTimeout = 60 * time.Second
@@ -27,7 +27,7 @@ func (s *InterviewService) GetReport(userID uint, sessionID uint) (*models.Inter
 	}
 	report, err := s.reportRepo.FindBySessionID(sessionID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, nil
 		}
 		return nil, err
@@ -74,7 +74,7 @@ func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint
 		// interview_report.go の面接ログと同じものなので同じく囲む（#1600）。
 		shared.WrapUntrustedText(transcript, "応募者発言"))
 
-	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
+	model := aimodel.For(aimodel.StageInterviewReport)
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewRealtime)
 	llmCtx, cancel := context.WithTimeout(ctx, interviewPhraseSuggestionsLLMTimeout)
 	defer cancel()

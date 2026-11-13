@@ -33,6 +33,27 @@ func TestFeature(t *testing.T) {
 	}
 }
 
+func TestPromptVersionFromContext(t *testing.T) {
+	tests := []struct {
+		name    string
+		stage   string
+		version string
+		want    PromptVersion
+	}{
+		{name: "工程と版を載せる", stage: "matching_reason", version: "v3", want: PromptVersion{Stage: "matching_reason", Version: "v3"}},
+		{name: "工程が空なら載せない", version: "v3"},
+		{name: "版が空なら載せない", stage: "matching_reason"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := WithPromptVersion(context.Background(), tt.stage, tt.version)
+			if got := PromptVersionFromContext(ctx); got != tt.want {
+				t.Fatalf("PromptVersionFromContext()=%+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestActor は実行主体と配賦先の出し入れを検証する。
 // バッチ経路は主体を持たないため、nil のまま記録されることが正しい。
 func TestActor(t *testing.T) {
@@ -76,5 +97,17 @@ func assertPtr(t *testing.T, label string, got, want *uint) {
 		t.Errorf("%s: got=%v, want=%v", label, got, want)
 	case *got != *want:
 		t.Errorf("%s: got=%d, want=%d", label, *got, *want)
+	}
+}
+
+// 呼び出し元が付けた機能名は上書きしない（#1993）。
+func TestWithDefaultFeature(t *testing.T) {
+	ctx := WithDefaultFeature(context.Background(), FeatureChatQuestion)
+	if got := Feature(ctx); got != FeatureChatQuestion {
+		t.Fatalf("未設定なら既定を載せる: %q", got)
+	}
+	ctx = WithDefaultFeature(WithFeature(context.Background(), FeatureChatAnswerEval), FeatureChatQuestion)
+	if got := Feature(ctx); got != FeatureChatAnswerEval {
+		t.Fatalf("設定済みの機能名を上書きした: %q", got)
 	}
 }

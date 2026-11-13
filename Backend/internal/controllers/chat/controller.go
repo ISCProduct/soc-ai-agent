@@ -7,19 +7,19 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services/chat"
+	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
 	"Backend/internal/services/email"
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/matching"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -37,9 +37,9 @@ type ChatController struct {
 	qualityRepo     *repositories.DiagnosisQualityRepository
 	matchingTimers  sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
 	matchingRunning sync.Map // key: sessionID, value: struct{}（実行中の多重起動防止, #1167）
+	aiBudget        costs.AIBudgetStatusProvider
 }
 
-const minEvaluatedCategoriesForFinal = 4
 const matchingRetryMaxAttempts = 3
 const matchingDebounceDelay = 3 * time.Second
 
@@ -64,6 +64,12 @@ func NewChatController(chatService ifaces.ChatService, matchingService ifaces.Ma
 	}
 }
 
+// SetAIBudget はバックグラウンドのマッチングで AI 理由を作る前の予算判定を設定する（#1776）。
+// 設定しないと、上限を超えた利用者にも AI 理由の費用がかかる。
+func (c *ChatController) SetAIBudget(p costs.AIBudgetStatusProvider) {
+	c.aiBudget = p
+}
+
 // SetJobEnqueuer は診断妥当性ジョブ等の投入先を設定する。
 func (c *ChatController) SetJobEnqueuer(j shared.JobEnqueuer) {
 	c.jobs = j
@@ -72,16 +78,6 @@ func (c *ChatController) SetJobEnqueuer(j shared.JobEnqueuer) {
 // SetDiagnosisQualityRepo は recommendations に診断信頼度を載せるための参照先。
 func (c *ChatController) SetDiagnosisQualityRepo(r *repositories.DiagnosisQualityRepository) {
 	c.qualityRepo = r
-}
-
-func countEvaluatedCategories(scores []entity.UserWeightScore) int {
-	count := 0
-	for _, score := range scores {
-		if score.Score != 0 {
-			count++
-		}
-	}
-	return count
 }
 
 func (c *ChatController) loadDiagnosisQuality(userID uint, sessionID string) (confidence int, flags []string, summary string) {
@@ -93,29 +89,6 @@ func (c *ChatController) loadDiagnosisQuality(userID uint, sessionID string) (co
 		return 0, nil, ""
 	}
 	return report.Confidence, diagnosis.ParseFlagsJSON(report.FlagsJSON), report.Summary
-}
-
-func minMatchedAxisCount(matches []*entity.UserCompanyMatch) int {
-	if len(matches) == 0 {
-		return 0
-	}
-	minAxes := matches[0].MatchedAxisCount
-	for _, m := range matches[1:] {
-		if m.MatchedAxisCount < minAxes {
-			minAxes = m.MatchedAxisCount
-		}
-	}
-	return minAxes
-}
-
-func isRecommendationProvisional(evaluatedCategories, diagnosisConfidence int, diagnosisFlags []string, minAxes int) bool {
-	if evaluatedCategories < minEvaluatedCategoriesForFinal {
-		return true
-	}
-	if minAxes > 0 && minAxes < minEvaluatedCategoriesForFinal {
-		return true
-	}
-	return diagnosis.ForcesProvisional(diagnosisConfidence, diagnosisFlags)
 }
 
 func parseEmailListFromEnv(key string) []string {
@@ -168,8 +141,11 @@ func (c *ChatController) runBackgroundMatching(userID uint, sessionID string) {
 	}
 	defer c.matchingRunning.Delete(sessionID)
 
-	ctx, cancel := context.WithTimeout(context.Background(), matchingRunTimeout)
+	// バックグラウンドには actor が届かない。載せないと AI 理由の費用が誰の予算にも入らない。
+	// 予算判定もリクエストの context にしか載らないので、ここで載せ直す。
+	ctx, cancel := context.WithTimeout(usagectx.WithActor(context.Background(), userID, 0), matchingRunTimeout)
 	defer cancel()
+	ctx = costs.WithUserAIBudgetCheck(ctx, c.aiBudget, userID)
 
 	var lastErr error
 
@@ -387,91 +363,18 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 			userScores = []entity.UserWeightScore{}
 		}
 
-		reason := "matching_results_empty"
-		if diagnostics != nil {
-			if diagnostics.UserScoreCount == 0 {
-				reason = "insufficient_user_scores"
-			} else if diagnostics.ActiveCompanyCount == 0 {
-				reason = "insufficient_company_data"
-			} else if diagnostics.CompaniesWithoutProfile >= diagnostics.ActiveCompanyCount {
-				// 公開企業はあってもプロファイルが1社も無ければマッチングは0件になる（#1380）。
-				// insufficient_company_data と混ぜると、フロントが
-				// 「企業情報を公開するまでお待ちください」と案内してしまう。
-				// 公開は済んでいて、必要なのはプロファイル生成なので別 reason にする。
-				reason = "insufficient_company_profiles"
-			}
-		}
-
-		type RecommendationResponse struct {
-			Recommendations     []any                         `json:"recommendations"`
-			Reason              string                        `json:"reason,omitempty"`
-			Diagnostics         *matching.MatchingDiagnostics `json:"diagnostics,omitempty"`
-			EvaluatedCategories int                           `json:"evaluated_categories"`
-			IsProvisional       bool                          `json:"is_provisional"`
-			DiagnosisConfidence int                           `json:"diagnosis_confidence,omitempty"`
-			DiagnosisFlags      []string                      `json:"diagnosis_flags,omitempty"`
-			DiagnosisSummary    string                        `json:"diagnosis_summary,omitempty"`
-			MinMatchedAxisCount int                           `json:"min_matched_axis_count,omitempty"`
-		}
-
-		evaluatedCategories := countEvaluatedCategories(userScores)
+		evaluatedCategories := matching.CountEvaluatedCategories(userScores)
 		diagConf, diagFlags, diagSummary := c.loadDiagnosisQuality(userID, sessionID)
-		isProvisional := isRecommendationProvisional(evaluatedCategories, diagConf, diagFlags, 0)
-		response := RecommendationResponse{
-			Recommendations:     []any{},
-			Reason:              reason,
+		return ctx.JSON(http.StatusOK, matching.RecommendationResponse{
+			Recommendations:     []matching.Recommendation{},
+			Reason:              matching.EmptyRecommendationReason(diagnostics),
 			Diagnostics:         diagnostics,
 			EvaluatedCategories: evaluatedCategories,
-			IsProvisional:       isProvisional,
+			IsProvisional:       matching.IsRecommendationProvisional(evaluatedCategories, diagConf, diagFlags, 0),
 			DiagnosisConfidence: diagConf,
 			DiagnosisFlags:      diagFlags,
 			DiagnosisSummary:    diagSummary,
-		}
-
-		return ctx.JSON(http.StatusOK, response)
-	}
-
-	// フロントエンド用のレスポンス形式に変換
-	type CategoryScores struct {
-		Technical     float64 `json:"technical"`
-		Teamwork      float64 `json:"teamwork"`
-		Leadership    float64 `json:"leadership"`
-		Creativity    float64 `json:"creativity"`
-		Stability     float64 `json:"stability"`
-		Growth        float64 `json:"growth"`
-		WorkLife      float64 `json:"work_life"`
-		Challenge     float64 `json:"challenge"`
-		Detail        float64 `json:"detail"`
-		Communication float64 `json:"communication"`
-	}
-
-	type CompanyRecommendation struct {
-		ID             int            `json:"id"`
-		MatchID        uint           `json:"match_id"`      // マッチングレコードID（お気に入り操作に使用）
-		CategoryName   string         `json:"category_name"` // 企業名
-		Score          int            `json:"score"`         // マッチスコア
-		Reason         string         `json:"reason"`        // マッチ理由
-		Industry       string         `json:"industry"`
-		Location       string         `json:"location"`
-		Employees      string         `json:"employees"`
-		TechStack      []string       `json:"tech_stack"`
-		CategoryScores CategoryScores `json:"category_scores"`
-		IsFavorited    bool           `json:"is_favorited"`
-		IsApplied      bool           `json:"is_applied"`
-		// MatchedAxisCount は Score の算出に使えた軸の数（0-10、#1124）。
-		// 少ないほど根拠が薄い。低マッチ警告の抑制に使う。
-		// レスポンス直下の evaluated_categories（ユーザースコアの非ゼロ件数）とは別物。
-		MatchedAxisCount int `json:"matched_axis_count"`
-	}
-
-	type RecommendationResponse struct {
-		Recommendations     []CompanyRecommendation `json:"recommendations"`
-		EvaluatedCategories int                     `json:"evaluated_categories"`
-		IsProvisional       bool                    `json:"is_provisional"`
-		DiagnosisConfidence int                     `json:"diagnosis_confidence,omitempty"`
-		DiagnosisFlags      []string                `json:"diagnosis_flags,omitempty"`
-		DiagnosisSummary    string                  `json:"diagnosis_summary,omitempty"`
-		MinMatchedAxisCount int                     `json:"min_matched_axis_count,omitempty"`
+		})
 	}
 
 	userScores, err := c.chatService.GetUserScores(userID, sessionID)
@@ -479,74 +382,22 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		log.Printf("[GetRecommendations] Failed to load user scores: %v\n", err)
 		userScores = []entity.UserWeightScore{}
 	}
-	evaluatedCategories := countEvaluatedCategories(userScores)
+	evaluatedCategories := matching.CountEvaluatedCategories(userScores)
 	// 理由文はマッチ度と同じ合流後の適性で書く（評価済みカテゴリ数はチャット診断の進み具合なので合流しない）
 	reasonScores := c.matchingService.ReasonScores(userID, userScores)
 	diagConf, diagFlags, diagSummary := c.loadDiagnosisQuality(userID, sessionID)
 
-	// 企業を解決できない match は表示されないので、根拠軸数の集計からも外す。
-	displayed := make([]*entity.UserCompanyMatch, 0, len(matches))
-	for _, match := range matches {
-		if match.Company == nil || match.Company.ID == 0 {
-			continue
-		}
-		displayed = append(displayed, match)
-	}
-	minAxes := minMatchedAxisCount(displayed)
-	isProvisional := isRecommendationProvisional(evaluatedCategories, diagConf, diagFlags, minAxes)
-
-	var items []CompanyRecommendation
-	for _, match := range displayed {
-		employeeCount := "未定"
-		if label := models.FormatEmployeeCount(match.Company.EmployeeCount, match.Company.EmployeeCountBasis); label != "" {
-			employeeCount = label
-		}
-
-		techStack := []string{}
-		if match.Company.TechStack != "" {
-			// 簡易的にカンマ区切りで分割
-			techStack = splitTechStack(match.Company.TechStack)
-		}
-
-		items = append(items, CompanyRecommendation{
-			ID:               int(match.Company.ID),
-			MatchID:          match.ID,
-			CategoryName:     match.Company.Name,
-			Score:            int(match.MatchScore),
-			Reason:           matching.BuildMatchReason(match, reasonScores),
-			Industry:         match.Company.Industry,
-			Location:         match.Company.Location,
-			Employees:        employeeCount,
-			TechStack:        techStack,
-			IsFavorited:      match.IsFavorited,
-			IsApplied:        match.IsApplied,
-			MatchedAxisCount: match.MatchedAxisCount,
-			CategoryScores: CategoryScores{
-				Technical:     match.TechnicalMatch,
-				Teamwork:      match.TeamworkMatch,
-				Leadership:    match.LeadershipMatch,
-				Creativity:    match.CreativityMatch,
-				Stability:     match.StabilityMatch,
-				Growth:        match.GrowthMatch,
-				WorkLife:      match.WorkLifeMatch,
-				Challenge:     match.ChallengeMatch,
-				Detail:        match.DetailMatch,
-				Communication: match.CommunicationMatch,
-			},
-		})
-	}
-
-	response := RecommendationResponse{
-		Recommendations:     items,
+	displayed := matching.DisplayableMatches(matches)
+	minAxes := matching.MinMatchedAxisCount(displayed)
+	return ctx.JSON(http.StatusOK, matching.RecommendationResponse{
+		Recommendations:     matching.BuildRecommendations(displayed, reasonScores),
 		EvaluatedCategories: evaluatedCategories,
-		IsProvisional:       isProvisional,
+		IsProvisional:       matching.IsRecommendationProvisional(evaluatedCategories, diagConf, diagFlags, minAxes),
 		DiagnosisConfidence: diagConf,
 		DiagnosisFlags:      diagFlags,
 		DiagnosisSummary:    diagSummary,
 		MinMatchedAxisCount: minAxes,
-	}
-
-	return ctx.JSON(http.StatusOK, response)
+	})
 }
 
 // ToggleFavorite お気に入りをトグル (POST /api/chat/favorite)
@@ -598,78 +449,6 @@ func (c *ChatController) GetAnalysisSummary(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, summary)
-}
-
-// generateMatchReason 企業マッチングの理由を生成
-func generateMatchReason(match *entity.UserCompanyMatch) string {
-	// AIで生成された理由があればそれを使用
-	if match.MatchReason != "" {
-		return match.MatchReason
-	}
-
-	// 各スコアを収集
-	scores := map[string]float64{
-		"技術力":        match.TechnicalMatch,
-		"チームワーク":     match.TeamworkMatch,
-		"リーダーシップ":    match.LeadershipMatch,
-		"創造性・発想力":    match.CreativityMatch,
-		"安定志向":       match.StabilityMatch,
-		"成長意欲":       match.GrowthMatch,
-		"ワークライフバランス": match.WorkLifeMatch,
-		"挑戦意欲":       match.ChallengeMatch,
-		"緻密さ":        match.DetailMatch,
-		"コミュニケーション力": match.CommunicationMatch,
-	}
-
-	// トップ3を抽出
-	type scoreItem struct {
-		name  string
-		score float64
-	}
-	var items []scoreItem
-	for name, score := range scores {
-		items = append(items, scoreItem{name, score})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].score > items[j].score
-	})
-
-	// 具体的な理由を生成
-	if len(items) >= 3 {
-		return fmt.Sprintf("総合マッチ度%.0f%% - あなたの%s(%.0f%%)、%s(%.0f%%)、%s(%.0f%%)が企業の求める人材像と高く一致しています。特に%sを活かせる環境で、即戦力として活躍が期待できます。",
-			match.MatchScore,
-			items[0].name, items[0].score,
-			items[1].name, items[1].score,
-			items[2].name, items[2].score,
-			items[0].name)
-	} else if len(items) >= 1 {
-		return fmt.Sprintf("総合マッチ度%.0f%% - 特にあなたの%sが企業文化と合致しており、スムーズな適応が見込めます。",
-			match.MatchScore, items[0].name)
-	}
-
-	return fmt.Sprintf("総合マッチ度%.0f%% - あなたの適性と企業の求める人材像が合致しています。", match.MatchScore)
-}
-
-// splitTechStack 技術スタック文字列を配列に変換
-func splitTechStack(techStack string) []string {
-	if techStack == "" {
-		return []string{}
-	}
-	// JSONパース試行、失敗したらカンマ区切り
-	var stack []string
-	if err := json.Unmarshal([]byte(techStack), &stack); err == nil {
-		return stack
-	}
-	// カンマ区切りにフォールバック
-	parts := strings.Split(techStack, ",")
-	result := []string{}
-	for _, p := range parts {
-		trimmed := strings.TrimSpace(p)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-	return result
 }
 
 // SendReport チャット分析結果をメールで送信

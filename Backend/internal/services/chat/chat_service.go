@@ -65,6 +65,23 @@ func NewChatService(
 	}
 }
 
+// RecalculationModel はチャットスコア再計算の概算に使うモデルと課金有無を返す。
+func (s *ChatService) RecalculationModel() (string, bool) {
+	if s.aiClient == nil {
+		return "", false
+	}
+	provider, _, _ := s.aiClient.Providers()
+	if provider == "openai" {
+		return s.aiClient.DefaultModel, true
+	}
+	// ローカル推論先でも、障害時は OpenAI へ再送されて課金される。
+	// 管理者が承認する金額を超えないよう、全件が再送された場合で見積もる。
+	if model, ok := s.aiClient.TextFallbackModel(); ok {
+		return model, true
+	}
+	return s.aiClient.DefaultModel, false
+}
+
 // ChatRequest チャットリクエスト
 type ChatRequest struct {
 	UserID        uint   `json:"user_id"`
@@ -185,7 +202,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	currentPhase, err := s.getCurrentOrNextPhase(ctx, req.UserID, req.SessionID)
 	if err != nil {
 		if err.Error() == "all phases completed" {
-			return s.handleAllPhasesCompletedFromPhaseError(req, history)
+			return s.handleAllPhasesCompletedFromPhaseError(ctx, req, history)
 		}
 		return nil, fmt.Errorf("failed to get current phase: %w", err)
 	}
@@ -199,7 +216,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	for i := range allPhases {
 		phaseByID[allPhases[i].ID] = &allPhases[i]
 	}
-	if resp, handled := s.handleAllPhasesCompletedFromCount(req, history, allPhases, completedProgresses, phaseByID); handled {
+	if resp, handled := s.handleAllPhasesCompletedFromCount(ctx, req, history, allPhases, completedProgresses, phaseByID); handled {
 		return resp, nil
 	}
 

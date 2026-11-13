@@ -8,6 +8,10 @@ type UserWeightScoreRepository interface {
 	SetScore(userID uint, sessionID, category string, absoluteScore int) error
 	// AddScore は既存レコードのスコアに差分を加算する
 	AddScore(userID uint, sessionID, category string, delta int) error
+	// SetScoreWithPromptVersion は SetScore に加えて、評価に使ったプロンプト版を記録する
+	SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore int, promptVersion string) error
+	// AddScoreWithPromptVersion は AddScore に加えて、評価に使ったプロンプト版を記録する
+	AddScoreWithPromptVersion(userID uint, sessionID, category string, delta int, promptVersion string) error
 	FindByUserAndSession(userID uint, sessionID string) ([]entity.UserWeightScore, error)
 	FindTopCategories(userID uint, sessionID string, limit int) ([]entity.UserWeightScore, error)
 	FindByUserSessionAndCategory(userID uint, sessionID, category string) (*entity.UserWeightScore, error)
@@ -26,7 +30,6 @@ type UserAnalysisProgressRepository interface {
 	FindByUserAndSession(userID uint, sessionID string) ([]entity.UserAnalysisProgress, error)
 	FindOrCreate(userID uint, sessionID string, phaseID uint) (*entity.UserAnalysisProgress, error)
 	Update(progress *entity.UserAnalysisProgress) error
-	GetCurrentPhase(userID uint, sessionID string) (*entity.UserAnalysisProgress, error)
 }
 
 // UserCompanyMatchRepository はユーザーと企業のマッチング結果の永続化インターフェース。
@@ -39,6 +42,5 @@ type UserCompanyMatchRepository interface {
 	MarkAsViewed(matchID uint) error
 	ToggleFavorite(matchID uint) error
 	MarkAsApplied(matchID uint) error
-	FindFavoritesByUser(userID uint, sessionID string) ([]*entity.UserCompanyMatch, error)
 	GetMatchStatistics(userID uint, sessionID string) (map[string]any, error)
 }

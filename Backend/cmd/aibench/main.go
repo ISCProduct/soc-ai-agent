@@ -38,6 +38,8 @@ func main() {
 	yes := flag.Bool("yes", false, "概算コストの確認を省略する")
 	dryRun := flag.Bool("dry-run", false, "APIを呼ばず、マニフェストの検証と概算コストだけ出す")
 	diff := flag.String("diff", "", "比較モード: 前回と今回の結果JSONを 'prev.json,cur.json' で渡す")
+	// CI（#1782）で1回の費用に上限を置くため。上限見積もりがこれを超えたら API を呼ばずに止める。
+	maxCost := flag.Float64("max-cost-usd", 0, "概算コストの上限（USD）。超えたら実行せず終了コード4。0 で上限なし")
 	flag.Parse()
 
 	if *diff != "" {
@@ -66,7 +68,7 @@ func main() {
 	counts := aibench.LabelCounts(cases)
 	fmt.Printf("=== %s: %d件（good=%d mid=%d bad=%d）× %d回 ===\n",
 		*target, len(cases), counts[aibench.LabelGood], counts[aibench.LabelMid], counts[aibench.LabelBad], *n)
-	if counts[aibench.LabelGood] == 0 || counts[aibench.LabelBad] == 0 {
+	if !aibench.LabelOptional(*target) && (counts[aibench.LabelGood] == 0 || counts[aibench.LabelBad] == 0) {
 		// 良と悪が揃っていないと順位相関が意味を持たない。
 		// -limit で絞ったときに起きるので、止めずに警告する。
 		fmt.Println("⚠ good/bad が揃っていないため弁別力は参考値になりません")
@@ -81,6 +83,10 @@ func main() {
 	// 実行前に概算コストを出す。間違ったマニフェストで数千件を回す事故を止める。
 	est := aibench.EstimateCost(tgt, cases, *n)
 	fmt.Printf("モデル %s / 概算コスト $%.4f（出力上限いっぱいを仮定した上限見積もり）\n", tgt.Model(), est)
+	if *maxCost > 0 && est > *maxCost {
+		fmt.Fprintf(os.Stderr, "概算コスト $%.4f が上限 $%.4f を超えるため実行しません（-max-cost-usd）\n", est, *maxCost)
+		os.Exit(4)
+	}
 
 	if *dryRun {
 		fmt.Println("-dry-run のためAPIは呼びません")

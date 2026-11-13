@@ -35,7 +35,7 @@ describe('企業のスカウト送信履歴', () => {
           user_id: 9,
           student_name: params?.offset ? '佐藤' : '山田',
           message: '本文',
-          status: 'sent',
+          status: params?.offset ? 'accepted' : 'sent',
           created_at: '2026-10-02T00:00:00Z',
         },
       ],
@@ -46,7 +46,8 @@ describe('企業のスカウト送信履歴', () => {
   it('31件目以降は offset を付けて次ページを読む', async () => {
     render(<CompanyPortalScoutsPage />)
 
-    expect(await screen.findByText('山田さん')).toBeInTheDocument()
+    expect(await screen.findByText('氏名非公開')).toBeInTheDocument()
+    expect(screen.queryByText('山田さん')).not.toBeInTheDocument()
     expect(listScouts).toHaveBeenCalledWith({ limit: 30, offset: 0 })
 
     fireEvent.click(screen.getByRole('button', { name: '次へ' }))

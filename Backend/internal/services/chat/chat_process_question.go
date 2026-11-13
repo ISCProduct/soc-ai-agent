@@ -32,27 +32,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 
 	// 3. ユーザーの回答から重み係数を判定・更新し、回答品質に応じてフェーズ進捗を更新
 	// isQualityAnswer: スキップフレーズ・極短回答・スコア0でなければ true（進捗カウント対象）
-	trimmedAnswer := strings.TrimSpace(req.Message)
-	lastAssistantQuestion := findLastAssistantQuestion(history)
-	resolved := ResolveChoiceAnswer(lastAssistantQuestion, trimmedAnswer)
-	log.Printf("[ProcessChat] Checking answer: raw=%q resolved_choice=%v letter=%q reason=%q free_text=%v\n",
-		trimmedAnswer, resolved.IsChoice, resolved.Letter, resolved.Reason, resolved.IsFreeText)
-	isQualityAnswer := false
-	if resolved.IsChoice && s.isChoiceAnswer(resolved.Letter) {
-		log.Printf("[ProcessChat] Processing as choice answer\n")
-		var err error
-		isQualityAnswer, err = s.processChoiceAnswer(ctx, req.UserID, req.SessionID, resolved.Letter, resolved.Reason, history, jobCategoryID)
-		if err != nil {
-			log.Printf("Warning: failed to process choice answer: %v\n", err)
-		}
-	} else {
-		log.Printf("[ProcessChat] Processing as text answer\n")
-		var err error
-		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, resolved.Text, jobCategoryID, history)
-		if err != nil {
-			log.Printf("Warning: failed to update weights: %v\n", err)
-		}
-	}
+	isQualityAnswer := s.scoreAnswer(ctx, req.UserID, req.SessionID, req.Message, jobCategoryID, history)
 
 	// 品質回答のみ valid_answers をインクリメントして進捗を進める。
 	// 職種選択に答えたこの回答は resolveJobCategoryForChat 内の
@@ -91,42 +71,17 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	// 全カテゴリ（職種に応じて並び順を調整）
 	allCategories := s.getCategoryOrder(jobCategoryID)
 
-	// 未評価カテゴリを優先的に選択
-	var targetCategory string
-	unevaluatedCategories := []string{}
-	weaklyEvaluatedCategories := []string{}
-
-	for _, cat := range allCategories {
-		score, exists := scoreMap[cat]
-		if !exists || score == 0 {
-			unevaluatedCategories = append(unevaluatedCategories, cat)
-		} else if score > -3 && score < 3 {
-			// スコアが-3〜3の範囲は評価が曖昧
-			weaklyEvaluatedCategories = append(weaklyEvaluatedCategories, cat)
-		}
+	// フェーズの質問枠を、先頭の未評価軸が使い切らないように配る（SOCAIAGENT-473）。
+	phaseNameForPick := ""
+	if currentPhase != nil && currentPhase.Phase != nil {
+		phaseNameForPick = currentPhase.Phase.PhaseName
 	}
-
-	if len(unevaluatedCategories) > 0 {
-		targetCategory = unevaluatedCategories[0]
-		log.Printf("Targeting unevaluated category: %s\n", targetCategory)
-	} else if len(weaklyEvaluatedCategories) > 0 {
-		targetCategory = weaklyEvaluatedCategories[0]
-		log.Printf("Targeting weakly evaluated category: %s (score: %d)\n", targetCategory, scoreMap[targetCategory])
-	} else {
-		// 全カテゴリ評価済みなら、最もスコアが極端なものを深掘り
-		maxAbsScore := 0
-		for cat, score := range scoreMap {
-			absScore := score
-			if absScore < 0 {
-				absScore = -absScore
-			}
-			if absScore > maxAbsScore {
-				maxAbsScore = absScore
-				targetCategory = cat
-			}
-		}
-		log.Printf("All categories evaluated, deepening strongest: %s (score: %d)\n", targetCategory, scoreMap[targetCategory])
-	}
+	targetCategory, _ := pickPhaseTarget(
+		allowedCategoriesForPhase(phaseNameForPick, allCategories),
+		scoreMap,
+		askedCategoryCounts(history),
+	)
+	log.Printf("Targeting category: %s\n", targetCategory)
 
 	// 常にまずルールベース質問を試し、なければAIで生成
 	var questionWeightID uint
@@ -161,7 +116,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		// targetCategory とは一致しないことがある。実際に狙った軸を受け取って
 		// 質問メッセージに残す(#1333)。
 		var usedCategory string
-		aiResponse, _, usedCategory, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, jobCategoryID, targetLevel, currentPhase)
+		aiResponse, _, usedCategory, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, jobCategoryID, targetLevel, currentPhase, askedCategoryCounts(history))
 		if usedCategory != "" {
 			targetCategory = usedCategory
 		}
@@ -277,7 +232,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	// 完了している場合は要約を生成して応答に含める
 	var sessionSummary *SessionSummary
 	if isComplete {
-		summary, _ := s.buildAndSaveSessionSummary(context.Background(), req.UserID, req.SessionID)
+		summary, _ := s.buildAndSaveSessionSummary(ctx, req.UserID, req.SessionID)
 		sessionSummary = summary
 	}
 	return &ChatResponse{

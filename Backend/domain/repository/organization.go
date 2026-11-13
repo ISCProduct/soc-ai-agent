@@ -10,9 +10,7 @@ type OrganizationRepository interface {
 	FindBySlug(slug string) (*models.Organization, error)
 	List(limit, offset int) ([]models.Organization, int64, error)
 
-	CreateMembership(m *models.OrganizationMembership) error
 	UpdateMembership(m *models.OrganizationMembership) error
-	DeleteMembership(organizationID, userID uint) error
 	FindMembership(organizationID, userID uint) (*models.OrganizationMembership, error)
 	FindMembershipByUserID(userID uint) (*models.OrganizationMembership, error)
 	ListMembers(organizationID uint) ([]models.OrganizationMembership, error)

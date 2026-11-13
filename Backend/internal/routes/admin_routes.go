@@ -26,6 +26,7 @@ func SetupAdminRoutes(
 	adminDashboardController *admincontrollers.AdminDashboardController,
 	adminCostsController *admincontrollers.AdminCostsController,
 	profileRecalcController *admincontrollers.AdminProfileRecalculationController,
+	userScoreRecalculationController *admincontrollers.UserScoreRecalculationController,
 	scoreValidationController *admincontrollers.AdminScoreValidationController,
 	diagnosisQualityController *admincontrollers.AdminDiagnosisQualityController,
 	collectiveInsightController *insightcontrollers.CollectiveInsightController,
@@ -38,6 +39,7 @@ func SetupAdminRoutes(
 	userRepo *repositories.UserRepository,
 	schoolService *school.SchoolService,
 	adminSecret string,
+	aiBudgetController *admincontrollers.AIBudgetController,
 ) {
 	admin := api.Group("/admin", EchoAdminAuth(userRepo, adminSecret))
 	schoolScope := EchoAdminSchoolScope(schoolService)
@@ -66,6 +68,8 @@ func SetupAdminRoutes(
 	admin.GET("/dashboard/users", adminDashboardController.ListUsers, schoolScope)
 	admin.GET("/dashboard/users/:id", adminDashboardController.UserSessions)
 	admin.GET("/dashboard/export/csv", adminDashboardController.ExportCSV, schoolScope)
+	// 機能横断のコンバージョンファネル（#2039）。担当校以外は数えない
+	admin.GET("/dashboard/funnel", adminDashboardController.Funnel, schoolScope)
 
 	admin.GET("/applications", appController.AdminList, schoolScope)
 	admin.PATCH("/applications/:id/status", appController.AdminUpdateStatus)
@@ -144,11 +148,26 @@ func SetupAdminRoutes(
 	admin.GET("/costs/breakdown", adminCostsController.Breakdown, platform)
 	admin.GET("/costs/daily", adminCostsController.Daily, platform)
 	admin.GET("/costs/monthly", adminCostsController.Monthly, platform)
+	if aiBudgetController != nil {
+		admin.GET("/ai-budgets", aiBudgetController.List, platform)
+		admin.PUT("/ai-budgets", aiBudgetController.Set, platform)
+		admin.DELETE("/ai-budgets/:scope/:scope_id", aiBudgetController.Delete, platform)
+	}
 
 	admin.POST("/profile-recalculation", profileRecalcController.RecalculateAll, platform)
 	admin.POST("/profile-recalculation/:id", profileRecalcController.RecalculateOne, platform)
 	admin.POST("/profile-recalculation/:id/rollback", profileRecalcController.Rollback, platform)
 	admin.GET("/profile-recalculation/history", profileRecalcController.GetHistory, platform)
+
+	admin.GET("/user-score-recalculation/preview", userScoreRecalculationController.Preview, platform)
+	admin.POST("/user-score-recalculation/jobs", userScoreRecalculationController.Start, platform)
+	admin.GET("/user-score-recalculation/jobs/:job_id", userScoreRecalculationController.GetJob, platform)
+	admin.POST("/user-score-recalculation/jobs/:job_id/run", userScoreRecalculationController.RunBatch, platform)
+	admin.POST("/user-score-recalculation/jobs/:job_id/pause", userScoreRecalculationController.Pause, platform)
+	admin.POST("/user-score-recalculation/jobs/:job_id/resume", userScoreRecalculationController.Resume, platform)
+	admin.POST("/user-score-recalculation/jobs/:job_id/cancel", userScoreRecalculationController.Cancel, platform)
+	admin.POST("/user-score-recalculation/jobs/:job_id/rollback", userScoreRecalculationController.Rollback, platform)
+	admin.POST("/user-score-recalculation/dry-run", userScoreRecalculationController.DryRun, platform)
 
 	admin.GET("/score-validation/correlation", scoreValidationController.GetCorrelation, platform)
 	admin.GET("/score-validation/phase-metrics", scoreValidationController.GetPhaseMetrics, platform)

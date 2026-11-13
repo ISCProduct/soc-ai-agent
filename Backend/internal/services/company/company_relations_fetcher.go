@@ -7,6 +7,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/gbizinfo"
+	"Backend/internal/services/shared"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,8 +15,6 @@ import (
 	"log"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 // RelationEntry はプレビュー/確定用の企業関係1件。
@@ -332,24 +331,7 @@ func (f *CompanyRelationsFetcher) acquireViaAISearch(ctx context.Context, compan
 - 取引先の description は具体的な取引内容（推定可）。推定も弱く種別しか分からない場合は空文字（表示は主要取引先）。空の代わりに「主要取引先」と書かない。
 - subsidiaries は議決権50%以上の子会社・完全子会社のみ。独立した上場企業は、出資が50%未満なら affiliates、資本関係が無ければ business_partners。
 - 出資比率が分かる場合は必ず ratio に入れる（パーセント、例: 100, 51, 5.02）。`
-	siteHint := ""
-	if websiteURL != "" {
-		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
-	}
-	searchPrompt := fmt.Sprintf(
-		`日本の企業「%s」%sについて、公開情報から次を調べてください。
-1. 子会社・グループ会社（議決権50%%以上）と資本関係の内容。出資比率が分かればパーセントで
-2. 資本提携・関連会社（議決権50%%未満の出資）と提携内容
-3. 取引先・業務提携先（資本関係が無い相手。独立上場企業の協業含む）と取引内容。曖昧な社名は載せない
-4. 入札・調達・補助金がある場合は発注元の省庁・自治体名（共同企業体名は載せない）
-5. 上場区分・証券コード
-根拠URLがあれば含めてください。組織名が不明・曖昧ならその件は省略してください。`,
-		companyName, siteHint,
-	)
-	parseUser := fmt.Sprintf(
-		"企業名「%s」について次のJSON形式で回答してください。name ははっきりした組織名のみ（曖昧・JV・その他は禁止）。subsidiaries は議決権50%%以上のみ。50%%未満の出資は affiliates。資本関係が無い相手は business_partners。入札案件は省庁・自治体名。ratio はパーセント。description は取引内容（推定可、弱ければ空）。\n%s",
-		companyName, companyRelationsJSONSchema,
-	)
+	searchPrompt, parseUser := buildRelationsSearchPrompts(companyName, websiteURL)
 	raw, modelsUsed, err := searchThenParse(ctx, f.shared, f.llm, companyName, sharedSearchPrompt(companyName, websiteURL), searchPrompt, systemPrompt, parseUser, 1200)
 	if err != nil {
 		return nil, fmt.Errorf("企業関係情報のAI取得失敗: %w", err)
@@ -364,6 +346,30 @@ func (f *CompanyRelationsFetcher) acquireViaAISearch(ctx context.Context, compan
 	result.Confidence = companyfetch.ConfidenceMedium
 	// 取引内容の追撃は acquireForCompany 側（既存関係マージ後）に集約し、二重 LLM を避ける。
 	return result, nil
+}
+
+// buildRelationsSearchPrompts は企業関係の検索プロンプトと抽出プロンプトを組み立てる。
+// 検索プロンプトはそのまま検索クエリになるので企業名を整え、抽出プロンプトでは囲む（#1970 のレビュー）。
+func buildRelationsSearchPrompts(companyName, websiteURL string) (searchPrompt, parseUser string) {
+	siteHint := ""
+	if websiteURL != "" {
+		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
+	}
+	searchPrompt = fmt.Sprintf(
+		`日本の企業「%s」%sについて、公開情報から次を調べてください。
+1. 子会社・グループ会社（議決権50%%以上）と資本関係の内容。出資比率が分かればパーセントで
+2. 資本提携・関連会社（議決権50%%未満の出資）と提携内容
+3. 取引先・業務提携先（資本関係が無い相手。独立上場企業の協業含む）と取引内容。曖昧な社名は載せない
+4. 入札・調達・補助金がある場合は発注元の省庁・自治体名（共同企業体名は載せない）
+5. 上場区分・証券コード
+根拠URLがあれば含めてください。組織名が不明・曖昧ならその件は省略してください。`,
+		shared.InlinePromptName(companyName), siteHint,
+	)
+	parseUser = fmt.Sprintf(
+		"次の企業について次のJSON形式で回答してください。name ははっきりした組織名のみ（曖昧・JV・その他は禁止）。subsidiaries は議決権50%%以上のみ。50%%未満の出資は affiliates。資本関係が無い相手は business_partners。入札案件は省庁・自治体名。ratio はパーセント。description は取引内容（推定可、弱ければ空）。\n%s%s",
+		shared.UntrustedSection(companyName, "企業名"), companyRelationsJSONSchema,
+	)
+	return searchPrompt, parseUser
 }
 
 // enrichTransactionDescriptions は取引先名は分かっているが取引内容が空の件を、取引内容に特化した検索で埋める。
@@ -393,28 +399,10 @@ func (f *CompanyRelationsFetcher) enrichTransactionDescriptions(
 		return &CompanyRelationsResult{Relations: nil}, nil
 	}
 
-	siteHint := ""
-	if websiteURL != "" {
-		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
-	}
-	partnerList := strings.Join(targets, "、")
 	systemPrompt := `あなたは日本企業の取引関係に詳しいアシスタントです。検索結果と妥当な推定をJSON化してください。
 はっきりした組織名のみ載せる。曖昧名・共同企業体・「その他」は禁止。入札・調達の相手は省庁・自治体名。不明なら省略。
 description は具体的な取引内容（推定可）。弱い場合は空文字（『主要取引先』と書かない）。`
-	searchPrompt := fmt.Sprintf(
-		`日本の企業「%s」%sと、次の関連企業との関係について、公開情報および事業内容から妥当な取引・協業・資本関係の内容を調べてください: %s。各ペアについて「何を取引・提携しているか」を1行で示してください。根拠URLがあれば含めてください。推定もできないペアは省略するか description を空にしてください。`,
-		companyName, siteHint, partnerList,
-	)
-	parseSchema := `{
-  "business_partners": [{"name": "関連企業名", "description": "取引内容（推定可）。弱い場合は空文字"}],
-  "affiliates": [{"name": "関連企業名", "description": "資本・提携の具体内容"}],
-  "subsidiaries": [{"name": "関連企業名", "description": "資本関係の具体内容", "ratio": null}],
-  "market_info": {"is_listed": false, "market_type": "", "stock_code": ""}
-}`
-	parseUser := fmt.Sprintf(
-		"企業「%s」と関連企業（%s）について次のJSONを返してください。description は具体的な取引内容（推定可）。弱いフォールバックなら空文字（『主要取引先』と書かない）。\n%s",
-		companyName, partnerList, parseSchema,
-	)
+	searchPrompt, parseUser := buildRelationEnrichPrompts(companyName, websiteURL, targets)
 	// ここは共有検索を使わない。この補完パスが走るのは、1回目の取得で
 	// description が空だった相手が残っているときだけで、その「1回目」が
 	// 読んだのが共有テキストそのものだからだ。同じテキストを読み直しても
@@ -433,6 +421,37 @@ description は具体的な取引内容（推定可）。弱い場合は空文�
 	result.ModelUsed = modelsUsed
 	result.Confidence = companyfetch.ConfidenceMedium
 	return result, nil
+}
+
+// buildRelationEnrichPrompts は取引内容の補完に使う検索プロンプトと抽出プロンプトを組み立てる。
+// 関連企業名も Web・DB 由来なので、企業名と同じく、検索プロンプトでは1件ずつ整え、
+// 抽出プロンプトでは囲む（#1970 のレビュー）。
+func buildRelationEnrichPrompts(companyName, websiteURL string, targets []string) (searchPrompt, parseUser string) {
+	siteHint := ""
+	if websiteURL != "" {
+		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
+	}
+	searchTargets := make([]string, 0, len(targets))
+	for _, t := range targets {
+		if n := shared.InlinePromptName(t); n != "" {
+			searchTargets = append(searchTargets, n)
+		}
+	}
+	searchPrompt = fmt.Sprintf(
+		`日本の企業「%s」%sと、次の関連企業との関係について、公開情報および事業内容から妥当な取引・協業・資本関係の内容を調べてください: %s。各ペアについて「何を取引・提携しているか」を1行で示してください。根拠URLがあれば含めてください。推定もできないペアは省略するか description を空にしてください。`,
+		shared.InlinePromptName(companyName), siteHint, strings.Join(searchTargets, "、"),
+	)
+	parseSchema := `{
+  "business_partners": [{"name": "関連企業名", "description": "取引内容（推定可）。弱い場合は空文字"}],
+  "affiliates": [{"name": "関連企業名", "description": "資本・提携の具体内容"}],
+  "subsidiaries": [{"name": "関連企業名", "description": "資本関係の具体内容", "ratio": null}],
+  "market_info": {"is_listed": false, "market_type": "", "stock_code": ""}
+}`
+	parseUser = fmt.Sprintf(
+		"次の企業と関連企業について次のJSONを返してください。description は具体的な取引内容（推定可）。弱いフォールバックなら空文字（『主要取引先』と書かない）。\n%s%s%s",
+		shared.UntrustedSection(companyName, "企業名"), shared.UntrustedSection(strings.Join(targets, "、"), "関連企業"), parseSchema,
+	)
+	return searchPrompt, parseUser
 }
 
 func (f *CompanyRelationsFetcher) resultFromDB(company *models.Company, source, model, confidence string) (*CompanyRelationsResult, error) {
@@ -504,7 +523,7 @@ func (f *CompanyRelationsFetcher) persistResult(ctx context.Context, company *mo
 			continue
 		}
 		toCompany, err := f.companyRepo.FindByName(name)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		if err != nil && !errors.Is(err, repository.ErrNotFound) {
 			continue
 		}
 		if toCompany == nil {

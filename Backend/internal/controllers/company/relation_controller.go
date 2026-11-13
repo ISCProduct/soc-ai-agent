@@ -199,13 +199,23 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 	}
 
 	if ctrl.validator != nil {
-		results, err := ctrl.validator.SearchCandidates(ctx.Request().Context(), query, true)
+		// フロントの45秒より手前で切る。切らないと応答前にブラウザが諦め、
+		// 課金済みの web_search だけが残る。
+		searchCtx, cancel := context.WithTimeout(ctx.Request().Context(), 40*time.Second)
+		defer cancel()
+		results, err := ctrl.validator.SearchCandidates(searchCtx, query, true)
 		if err != nil {
+			if errors.Is(err, usagectx.ErrAIBudgetUnavailable) {
+				return httpapi.AIBudgetUnavailable()
+			}
+			if errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+				return httpapi.AIBudgetExceeded(ctx)
+			}
 			var ve *shared.ValidationError
 			if errors.As(err, &ve) {
 				return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
 			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "企業検索に失敗しました")
+			return httpapi.InternalError(err)
 		}
 		out := make([]map[string]any, 0, len(results))
 		for _, r := range results {
@@ -227,7 +237,17 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 		return ctx.JSON(http.StatusOK, map[string]any{"results": out})
 	}
 
-	results := ctrl.searchCompaniesWithOpenAI(ctx.Request().Context(), query)
+	results, err := ctrl.searchCompaniesWithOpenAI(ctx.Request().Context(), query)
+	// 予算超過を InternalError の 500 に飲ませない。判定はバリデーションより先。
+	if errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+		return httpapi.AIBudgetExceeded(ctx)
+	}
+	if errors.Is(err, usagectx.ErrAIBudgetUnavailable) {
+		return httpapi.AIBudgetUnavailable()
+	}
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
 	return ctx.JSON(http.StatusOK, map[string]any{"results": results})
 }
 
@@ -243,19 +263,30 @@ func (ctrl *CompanyRelationController) ValidateCompany(ctx echo.Context) error {
 	if err := ctx.Bind(&payload); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
-	result, err := ctrl.validator.Validate(ctx.Request().Context(), payload.Query)
+	searchCtx, cancel := context.WithTimeout(ctx.Request().Context(), 40*time.Second)
+	defer cancel()
+	result, err := ctrl.validator.Validate(searchCtx, payload.Query)
 	if err != nil {
+		if errors.Is(err, usagectx.ErrAIBudgetUnavailable) {
+			return httpapi.AIBudgetUnavailable()
+		}
+		if errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+			return httpapi.AIBudgetExceeded(ctx)
+		}
 		var ve *shared.ValidationError
 		if errors.As(err, &ve) {
 			return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, result)
 }
 
 // searchCompaniesWithOpenAI はAIモデルの知識から企業候補を取得する（validator未設定時のフォールバック）
-func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) []map[string]string {
+func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) ([]map[string]string, error) {
+	if err := usagectx.CheckAIBudget(ctx); err != nil {
+		return nil, err
+	}
 	systemPrompt := `あなたは日本企業に詳しいアシスタントです。確実に知っている実在の企業のみを回答し、不明な場合は空配列にしてください。推測で企業を作らないでください。`
 	userPrompt := buildWebSearchUserPrompt(query)
 
@@ -265,25 +296,26 @@ func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Con
 	ctxTimeout = usagectx.WithFeature(ctxTimeout, usagectx.FeatureCompanySearch)
 	text, err := ctrl.openaiClient.ChatCompletionJSON(ctxTimeout, systemPrompt, userPrompt, 0.2, 500, companyfetch.ExtractModel())
 	if err != nil {
-		return []map[string]string{}
+		return nil, err
 	}
 
 	start := strings.Index(text, "{")
 	end := strings.LastIndex(text, "}")
 	if start == -1 || end == -1 || end <= start {
-		return []map[string]string{}
+		// 読み取れない結果を0件の成功にすると、通信失敗が「その企業は無い」に見える（#1447）。
+		return nil, fmt.Errorf("企業検索の結果を読み取れませんでした")
 	}
 
 	var parsed struct {
 		Results []map[string]string `json:"results"`
 	}
 	if err := json.Unmarshal([]byte(text[start:end+1]), &parsed); err != nil {
-		return []map[string]string{}
+		return nil, fmt.Errorf("企業検索の結果を読み取れませんでした")
 	}
 	if parsed.Results == nil {
-		return []map[string]string{}
+		return []map[string]string{}, nil
 	}
-	return parsed.Results
+	return parsed.Results, nil
 }
 
 // buildWebSearchUserPrompt は企業のWEB検索のユーザープロンプトを組み立てる。

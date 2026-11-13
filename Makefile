@@ -1,5 +1,10 @@
 # SOC AI Agent — ローカル開発用ショートカット (#589)
-.PHONY: help rag-up rag-down rag-smoke rag-rebuild core-up api-docs api-docs-down api-catalog prod-status prod-logs prod-logs-follow prod-logs-errors
+.PHONY: help rag-up rag-down rag-smoke rag-rebuild core-up migrate-new migrate-hash migrate-lint api-docs api-docs-down api-catalog prod-status prod-logs prod-logs-follow prod-logs-errors test-e2e-up test-e2e-seed test-e2e test-e2e-down
+
+# ローカル統合テスト環境（個人の dev スタックと分離・同時起動可。compose.test.yml）
+TEST_COMPOSE := docker compose -p soc-ai-agent-test -f compose.yml -f compose.test.yml
+TEST_BACKEND_PORT ?= 18080
+TEST_FRONTEND_PORT ?= 13000
 
 help:
 	@echo "Targets:"
@@ -19,10 +24,68 @@ help:
 	@echo "  make prod-logs          # 直近ログ (SVC=backend|frontend|rag|chroma|all, SINCE=1h)"
 	@echo "  make prod-logs-follow   # ライブ追尾"
 	@echo "  make prod-logs-errors   # エラー行のみ抽出"
+	@echo ""
+	@echo "ローカル統合テスト環境 (個人のdevスタックと同時起動可。docs/wiki/getting-started.md):"
+	@echo "  make test-e2e-up    # db/redis/app/frontend を分離した専用スタックで起動"
+	@echo "  make test-e2e-seed  # 固定の学生ユーザーを冪等にシード"
+	@echo "  make test-e2e       # up -> seed -> smoke E2E を一括実行"
+	@echo "  make test-e2e-down  # 専用スタックを停止（ボリュームは残す）"
+
+test-e2e-up:
+	@test -f Backend/.env.test || (echo "Backend/.env.test が無い。'cp Backend/.env.test.example Backend/.env.test' を実行してください" && exit 1)
+	$(TEST_COMPOSE) up -d --build db redis app frontend
+	@printf "Backend起動待ち"; \
+	for i in $$(seq 1 60); do \
+		curl -sf http://127.0.0.1:$(TEST_BACKEND_PORT)/healthz >/dev/null 2>&1 && \
+		curl -sf http://127.0.0.1:$(TEST_FRONTEND_PORT)/api/healthz >/dev/null 2>&1 && echo " OK" && exit 0; \
+		printf "."; sleep 2; \
+	done; \
+	echo " タイムアウト。'docker compose -p soc-ai-agent-test logs app frontend' を確認してください" && exit 1
+
+test-e2e-seed:
+	cd Backend && go run ./cmd/seed-e2e
+
+# 並列make(-j)でも up -> seed の順を守るため、seed は up の後に再帰makeで呼ぶ。
+test-e2e: test-e2e-up
+	$(MAKE) test-e2e-seed
+	cd frontend && E2E_LOCAL_INTEGRATION=true PLAYWRIGHT_BASE_URL=http://localhost:$(TEST_FRONTEND_PORT) PLAYWRIGHT_API_BASE_URL=http://localhost:$(TEST_BACKEND_PORT) npx playwright test --config=playwright.smoke.config.ts
+
+test-e2e-down:
+	$(TEST_COMPOSE) down
 
 core-up:
 	docker compose up -d --build db app frontend
 	@echo "Migrations run automatically via app entrypoint (see Backend/scripts/docker-entrypoint.dev.sh)"
+
+# 新しいマイグレーションを作成する（日本時間(JST)タイムスタンプ採番）。
+# 連番ではなくタイムスタンプを使うことで、並行ブランチが「次の番号」を取り合わない
+# （採番衝突の根治）。既存の6桁連番(000001〜)はそのまま。golang-migrate は数値順に
+# 適用するため、タイムスタンプ(14桁)は常に6桁の後に適用される。
+# TZ を Asia/Tokyo に固定し、各自のマシン設定に依存せず必ず JST で採番する
+# （全員が同一TZで一貫採番することが数値順＝作成順を保つ条件。日本は夏時間なし）。
+# 使い方: make migrate-new name=add_foo_to_users
+migrate-new:
+	@test -n "$(name)" || { echo "usage: make migrate-new name=<snake_case_name>"; exit 1; }
+	@ts=$$(TZ='Asia/Tokyo' date +%Y%m%d%H%M%S); \
+	up="Backend/migrations/$${ts}_$(name).up.sql"; \
+	down="Backend/migrations/$${ts}_$(name).down.sql"; \
+	if [ -e "$$up" ]; then echo "already exists: $$up (1秒おいて再実行)"; exit 1; fi; \
+	touch "$$up" "$$down"; \
+	echo "created: $$up"; echo "created: $$down"; \
+	atlas migrate hash --env migrations; \
+	echo "atlas.sum を更新しました。SQLを書いたら up/down/atlas.sum を同じPRでコミットしてください"
+
+# マイグレーション整合ハッシュ(atlas.sum)を再計算する。
+# Backend/migrations/ に up/down を追加・変更したら必ず実行し、atlas.sum を同じPRでコミットする。
+# DBは不要（ファイルのチェックサムのみ）。atlas の Community 版が要る（docs/wiki/migrations.md 参照）。
+migrate-hash:
+	atlas migrate hash --env migrations
+
+# マイグレーションを lint する（破壊的変更/データ依存/後方非互換/順序逆転を検出）。
+# 解析用の使い捨てMySQLを docker で起動するため Docker が必要。origin/develop との差分を見る。
+migrate-lint:
+	git fetch --quiet origin develop
+	atlas migrate lint --env migrations --git-base origin/develop
 
 api-docs:
 	docker compose --profile docs up -d swagger-ui

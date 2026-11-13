@@ -2,15 +2,15 @@ package chat
 
 import (
 	"Backend/domain/entity"
+	"Backend/domain/repository"
 	"Backend/internal/models"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 const (
@@ -47,7 +47,7 @@ func (s *ChatService) ensureUserEmbedding(ctx context.Context, userID uint, sess
 	}
 	if _, err := s.userEmbeddingRepo.FindByUserAndSession(userID, sessionID); err == nil {
 		return nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+	} else if !errors.Is(err, repository.ErrNotFound) {
 		return err
 	}
 
@@ -69,7 +69,8 @@ func (s *ChatService) ensureUserEmbedding(ctx context.Context, userID uint, sess
 		return nil
 	}
 
-	ctxReq, cancel := context.WithTimeout(ctx, 45*time.Second)
+	embedCtx := usagectx.WithFeature(ctx, usagectx.FeatureEmbedding)
+	ctxReq, cancel := context.WithTimeout(embedCtx, 45*time.Second)
 	defer cancel()
 
 	vector, err := s.aiClient.Embedding(ctxReq, text)
@@ -94,7 +95,7 @@ func (s *ChatService) ensureJobCategoryEmbedding(ctx context.Context, jobCategor
 	}
 	if _, err := s.jobEmbeddingRepo.FindByJobCategoryID(jobCategoryID); err == nil {
 		return nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+	} else if !errors.Is(err, repository.ErrNotFound) {
 		return err
 	}
 
@@ -111,7 +112,8 @@ func (s *ChatService) ensureJobCategoryEmbedding(ctx context.Context, jobCategor
 		return nil
 	}
 
-	ctxReq, cancel := context.WithTimeout(ctx, 45*time.Second)
+	embedCtx := usagectx.WithFeature(ctx, usagectx.FeatureEmbedding)
+	ctxReq, cancel := context.WithTimeout(embedCtx, 45*time.Second)
 	defer cancel()
 
 	vector, err := s.aiClient.Embedding(ctxReq, text)

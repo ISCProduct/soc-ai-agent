@@ -2,14 +2,12 @@ package interview
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/aifailover"
 	"Backend/internal/controllers/httpapi"
-	"Backend/internal/models"
-	"Backend/internal/safego"
 	ifaces "Backend/internal/services/interfaces"
 	interviewsvc "Backend/internal/services/interview"
 	"Backend/internal/services/shared"
 	"Backend/internal/services/storage"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,25 +17,24 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 )
 
 type InterviewController struct {
 	interviewService ifaces.InterviewService
-	videoRepo        repository.InterviewVideoRepository
-	s3Service        *storage.S3UploadService
+	// videoUpload は動画保存の設定が揃っているときだけ非nil。nil なら UploadVideo は 503。
+	videoUpload *interviewsvc.VideoUploadService
 }
 
 func NewInterviewController(interviewService ifaces.InterviewService, videoRepo repository.InterviewVideoRepository, s3Service *storage.S3UploadService) *InterviewController {
-	return &InterviewController{
-		interviewService: interviewService,
-		videoRepo:        videoRepo,
-		s3Service:        s3Service,
+	c := &InterviewController{interviewService: interviewService}
+	// nil のポインタをインターフェースに入れると非nilになるので、ここで判定してから渡す。
+	if videoRepo != nil && s3Service != nil {
+		c.videoUpload = interviewsvc.NewVideoUploadService(videoRepo, s3Service)
 	}
+	return c
 }
 
 type interviewCreateRequest struct {
@@ -174,8 +171,6 @@ func (c *InterviewController) SendReport(ctx echo.Context) error {
 }
 
 // maxVideoSize は受け付ける動画の最大サイズ（500 MB）
-const maxVideoSize = 500 << 20
-
 // UploadVideo POST /api/interviews/:id/upload-video
 func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 	sessionID, err := httpapi.UintParam(ctx, "id")
@@ -183,7 +178,7 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
 
-	if c.videoRepo == nil || c.s3Service == nil {
+	if c.videoUpload == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "video upload service not configured")
 	}
 
@@ -197,7 +192,7 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "session not found")
 		}
 		return httpapi.InternalError(err)
@@ -214,51 +209,17 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "動画ファイルが見つかりません")
 	}
 
-	// ファイルサイズ上限チェック
-	if header.Size > maxVideoSize {
-		file.Close()
-		return echo.NewHTTPError(http.StatusRequestEntityTooLarge,
-			fmt.Sprintf("動画ファイルが大きすぎます（上限 %d MB）。録画設定を下げて再度お試しください", maxVideoSize>>20))
-	}
-
-	mimeType := header.Header.Get("Content-Type")
-	if mimeType == "" {
-		mimeType = "video/webm"
-	}
-
-	now := time.Now()
-	s3Key := fmt.Sprintf("interview-videos/%d/%d_%s.webm", sessionID, userID, now.Format("20060102_150405"))
-	fileName := fmt.Sprintf("interview_%d_%d_%s.webm", sessionID, userID, now.Format("20060102_150405"))
-
-	videoRecord := &models.InterviewVideo{
-		SessionID:     sessionID,
-		UserID:        userID,
-		FileName:      fileName,
-		FileSizeBytes: header.Size,
-		MimeType:      mimeType,
-		Status:        "uploading",
-	}
-	if err := c.videoRepo.Create(r.Context(), videoRecord); err != nil {
-		file.Close()
+	video, err := c.videoUpload.Start(r.Context(), sessionID, userID, header.Size, header.Header.Get("Content-Type"), file)
+	if err != nil {
+		if errors.Is(err, interviewsvc.ErrVideoTooLarge) {
+			return echo.NewHTTPError(http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("動画ファイルが大きすぎます（上限 %d MB）。録画設定を下げて再度お試しください", interviewsvc.MaxVideoSize>>20))
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "動画レコードの作成に失敗しました")
 	}
 
-	// S3 へのアップロードを非同期で実行（io.Reader をそのまま渡してメモリを節約）
-	vid, f, key := videoRecord, file, s3Key
-	safego.Go(func() {
-		defer f.Close()
-		ctx := context.Background()
-		fileID, s3URL, uploadErr := c.s3Service.UploadReader(ctx, key, vid.MimeType, f)
-		uploadedAt := time.Now()
-		if uploadErr != nil {
-			c.videoRepo.UpdateStatus(ctx, vid.ID, "error", fmt.Sprintf("S3へのアップロードに失敗しました: %v", uploadErr), "", "", nil)
-			return
-		}
-		c.videoRepo.UpdateStatus(ctx, vid.ID, "done", "", fileID, s3URL, &uploadedAt)
-	})
-
 	return ctx.JSON(http.StatusOK, map[string]any{
-		"video_id": videoRecord.ID,
+		"video_id": video.ID,
 		"status":   "uploading",
 		"message":  "動画のアップロードを開始しました",
 	})
@@ -340,29 +301,20 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		return httpapi.InternalError(err)
 	}
 
-	// multipart レスポンス: JSON メタ + audio
-	w := ctx.Response().Writer
-	mw := multipart.NewWriter(w)
-	ctx.Response().Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
-
-	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
-	json.NewEncoder(metaPart).Encode(map[string]any{
+	return writeTurnMultipart(ctx, map[string]any{
 		"user_text":                result.UserText,
 		"ai_text":                  result.AIText,
+		"utterance_save_failed":    result.UtteranceSaveFailed,
 		"question_source":          result.QuestionSource,
 		"question_category":        result.QuestionCategory,
 		"is_deepening":             result.IsDeepening,
 		"total_questions":          result.TotalQuestions,
 		"resolved_company_id":      result.ResolvedCompanyID,
 		"custom_questions_enabled": result.CustomQuestionsEnabled,
+		"ai_fallback":              result.AIFallback,
 		"company_reading":          result.CompanyReading,
 		"company_reading_resolved": result.CompanyReadingResolved,
-	})
-
-	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
-	audioPart.Write(result.Audio)
-	mw.Close()
-	return nil
+	}, result.Audio)
 }
 
 // StartTurn POST /api/interviews/:id/start-turn
@@ -421,25 +373,32 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		return httpapi.InternalError(err)
 	}
 
-	w := ctx.Response().Writer
-	mw := multipart.NewWriter(w)
-	ctx.Response().Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
-
-	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
-	json.NewEncoder(metaPart).Encode(map[string]any{
+	return writeTurnMultipart(ctx, map[string]any{
 		"ai_text":                  result.AIText,
+		"utterance_save_failed":    result.UtteranceSaveFailed,
 		"question_source":          result.QuestionSource,
 		"question_category":        result.QuestionCategory,
 		"is_deepening":             result.IsDeepening,
 		"total_questions":          result.TotalQuestions,
 		"resolved_company_id":      result.ResolvedCompanyID,
 		"custom_questions_enabled": result.CustomQuestionsEnabled,
+		"ai_fallback":              result.AIFallback,
 		"company_reading":          result.CompanyReading,
 		"company_reading_resolved": result.CompanyReadingResolved,
-	})
+	}, result.Audio)
+}
 
-	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
-	audioPart.Write(result.Audio)
+// writeTurnMultipart は Turn / StartTurn の応答を multipart/mixed で書く。
+// 1つ目が JSON のメタ情報、2つ目が音声。
+func writeTurnMultipart(ctx echo.Context, meta map[string]any, audio []byte) error {
+	mw := multipart.NewWriter(ctx.Response().Writer)
+	ctx.Response().Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
+
+	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
+	json.NewEncoder(metaPart).Encode(meta)
+
+	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {audioContentType(audio)}})
+	audioPart.Write(audio)
 	mw.Close()
 	return nil
 }
@@ -639,4 +598,14 @@ func parseFormInt(r interface{ FormValue(string) string }, key string, def int) 
 		return def
 	}
 	return n
+}
+
+// audioContentType は音声の中身から Content-Type を決める（#1833）。
+// OpenAI の TTS は mp3、OpenAI 障害時のローカル（VOICEVOX）は WAV を返す。
+// ブラウザはどちらもそのまま再生できるが、Content-Type が中身と違うと再生に失敗する環境がある。
+func audioContentType(audio []byte) string {
+	if aifailover.IsWAV(audio) {
+		return "audio/wav"
+	}
+	return "audio/mpeg"
 }

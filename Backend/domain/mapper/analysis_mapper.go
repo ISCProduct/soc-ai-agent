@@ -11,13 +11,15 @@ func UserWeightScoreToEntity(m *models.UserWeightScore) *entity.UserWeightScore 
 		return nil
 	}
 	return &entity.UserWeightScore{
-		ID:             m.ID,
-		UserID:         m.UserID,
-		SessionID:      m.SessionID,
-		WeightCategory: m.WeightCategory,
-		Score:          m.Score,
-		CreatedAt:      m.CreatedAt,
-		UpdatedAt:      m.UpdatedAt,
+		ID:                 m.ID,
+		UserID:             m.UserID,
+		SessionID:          m.SessionID,
+		WeightCategory:     m.WeightCategory,
+		Score:              m.Score,
+		CalculationVersion: m.CalculationVersion,
+		PromptVersion:      m.PromptVersion,
+		CreatedAt:          m.CreatedAt,
+		UpdatedAt:          m.UpdatedAt,
 	}
 }
 

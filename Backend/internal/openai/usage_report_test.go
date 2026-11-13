@@ -16,16 +16,23 @@ func TestReportUsageFillsAttribution(t *testing.T) {
 		ctx         context.Context
 		report      usageReport
 		wantFeature string
+		wantPrompt  usagectx.PromptVersion
 		wantUser    bool
 		wantOrg     bool
 		wantLatency int
 		wantCache   bool
 	}{
 		{
-			name:        "機能名と主体が載る",
-			ctx:         usagectx.WithActor(usagectx.WithFeature(context.Background(), usagectx.FeatureESReview), 42, 7),
+			name: "機能名と主体が載る",
+			ctx: usagectx.WithActor(
+				usagectx.WithPromptVersion(
+					usagectx.WithFeature(context.Background(), usagectx.FeatureESReview),
+					"matching_reason", "v3",
+				), 42, 7,
+			),
 			report:      usageReport{provider: "openai", model: "gpt-4o", promptTokens: 10, completionTokens: 5, latency: 1500 * time.Millisecond},
 			wantFeature: usagectx.FeatureESReview,
+			wantPrompt:  usagectx.PromptVersion{Stage: "matching_reason", Version: "v3"},
 			wantUser:    true,
 			wantOrg:     true,
 			wantLatency: 1500,
@@ -55,6 +62,9 @@ func TestReportUsageFillsAttribution(t *testing.T) {
 			if got.Feature != tt.wantFeature {
 				t.Errorf("Feature=%q, 期待=%q", got.Feature, tt.wantFeature)
 			}
+			if got.PromptStage != tt.wantPrompt.Stage || got.PromptVersion != tt.wantPrompt.Version {
+				t.Errorf("PromptVersion=(%q,%q), 期待=%+v", got.PromptStage, got.PromptVersion, tt.wantPrompt)
+			}
 			if (got.UserID != nil) != tt.wantUser {
 				t.Errorf("UserID=%v, 主体の期待=%v", got.UserID, tt.wantUser)
 			}
@@ -69,6 +79,29 @@ func TestReportUsageFillsAttribution(t *testing.T) {
 			}
 			if got.Model != tt.report.model {
 				t.Errorf("Model=%q, 期待=%q", got.Model, tt.report.model)
+			}
+		})
+	}
+}
+
+// 音声と RAG の経路も reportUsage と同じくプロンプト版を記録することを検証する（#1778）。
+func TestReportUsageVariantsFillPromptVersion(t *testing.T) {
+	ctx := usagectx.WithPromptVersion(context.Background(), "score_evaluation", "score-t1")
+
+	tests := []struct {
+		name   string
+		report func(*Client)
+	}{
+		{name: "ReportAudioUsage", report: func(cli *Client) { cli.ReportAudioUsage(ctx, AudioUsage{Model: "stt"}) }},
+		{name: "ReportProxyUsage", report: func(cli *Client) { cli.ReportProxyUsage(ctx, ProxyUsage{Model: "rag"}) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got Usage
+			tt.report(&Client{OnUsage: func(u Usage) { got = u }})
+
+			if got.PromptStage != "score_evaluation" || got.PromptVersion != "score-t1" {
+				t.Fatalf("PromptVersion=(%q,%q), want (score_evaluation,score-t1)", got.PromptStage, got.PromptVersion)
 			}
 		})
 	}

@@ -41,3 +41,16 @@ SOC AI Agent: 採用支援SaaS (Go + Next.js + Python RAG)
 - スコアは `user_weight_scores` (10カテゴリ×4フェーズ)。
 - マッチングは `UserWeightScore × CompanyWeightProfile`。
 - 詳細設計は `docs/wiki/` 参照。
+
+## スキルルーティング
+ユーザーの依頼がこのプロジェクトのスキルに合致する場合は、それを呼び出す。該当がなければ直接対応する。
+
+- 機能/バグ修正のIssue起票＋Notion PRD/DesignDoc作成 → `/issue`
+- PRD/Design Doc/仕様書を個別に作成・更新したい → `product-docs-writer` スキル
+- Issue確認→実装チーム→クロスレビュー2名→ロール別テスター→報告 → `/issue-team`（事前に `.claude/issue-team.config.md` 必須）
+- 他者PRのレビュー（単体・動作確認込み） → `/pr-review`
+- 他者PRのレビュー（テスター/レビュアー分離・観点別並列） → `/pr-review-parallel`
+- 不具合修正→クロスレビュー→並列テスト→Backlog報告 → `/fix-review-test`（事前に `.claude/fix-review-test.config.md` 必須）
+- UI/UX設計・改修 → `.claude/skills/school-career-ui-design/SKILL.md` に従う
+
+課題（タスク）の起票先は **Backlog**（`gh issue create` は使わない。`backlog-to-github-issue.yml` がGitHub Issueを自動生成する）。

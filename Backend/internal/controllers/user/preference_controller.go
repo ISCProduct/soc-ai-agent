@@ -129,3 +129,50 @@ func (c *UserPreferenceController) Put(ctx echo.Context) error {
 
 	return ctx.JSON(http.StatusOK, userPreferenceResponse{UserPreference: pref, AllowScoutVisibility: allow})
 }
+
+// trainingConsentBody は学習利用の同意の更新内容。未指定（nil）は 400 にする。
+// 同意は明示的な操作でだけ変えるため、送り忘れを false として扱わない。
+type trainingConsentBody struct {
+	AllowTrainingUse *bool `json:"allow_training_use"`
+}
+
+type trainingConsentResponse struct {
+	AllowTrainingUse bool `json:"allow_training_use"`
+}
+
+// GetTrainingConsent GET /api/user/training-consent
+//
+// 面接データを採点モデルの学習に使うことへの同意（#2167）。希望条件（PUT /preferences）とは
+// 別の口にする。PUT /preferences は希望条件をまるごと保存するため、同意だけを変える画面から
+// 呼ぶと、希望条件を空で上書きしてしまう。
+func (c *UserPreferenceController) GetTrainingConsent(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
+	}
+	allow, err := c.repo.GetTrainingUse(userID)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, trainingConsentResponse{AllowTrainingUse: allow})
+}
+
+// PutTrainingConsent PUT /api/user/training-consent
+func (c *UserPreferenceController) PutTrainingConsent(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
+	}
+	var body trainingConsentBody
+	if err := ctx.Bind(&body); err != nil || body.AllowTrainingUse == nil {
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "allow_training_use を指定してください")
+	}
+	if err := c.repo.SetTrainingUse(userID, *body.AllowTrainingUse); err != nil {
+		return httpapi.InternalError(err)
+	}
+	allow, err := c.repo.GetTrainingUse(userID)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, trainingConsentResponse{AllowTrainingUse: allow})
+}
