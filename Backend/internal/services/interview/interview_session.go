@@ -1,18 +1,18 @@
 package interview
 
 import (
+	"Backend/domain/repository"
 	"log"
 
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"gorm.io/gorm"
+	"github.com/google/uuid"
 )
 
 // ErrInterviewBudgetExceeded は月次の面接上限に達したことを表す。
@@ -415,7 +415,7 @@ func (s *InterviewService) GetSessionDetail(userID uint, sessionID uint) (*Inter
 	var report *models.InterviewReport
 	report, err = s.reportRepo.FindBySessionID(sessionID)
 	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
+		if !errors.Is(err, repository.ErrNotFound) {
 			return nil, err
 		}
 		report = nil
