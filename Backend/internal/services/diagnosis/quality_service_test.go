@@ -1,13 +1,12 @@
 package diagnosis
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"testing"
 )
 
 func TestHeuristicFlags_FewAxesAndSaturated(t *testing.T) {
-	scores := []entity.UserWeightScore{
+	scores := []models.UserWeightScore{
 		{WeightCategory: "技術志向", Score: 60},
 		{WeightCategory: "成長志向", Score: 40},
 	}
@@ -34,7 +33,7 @@ func TestHeuristicFlags_FewAxesAndSaturated(t *testing.T) {
 }
 
 func TestHeuristicFlags_ZeroAxesIsThin(t *testing.T) {
-	scores := []entity.UserWeightScore{
+	scores := []models.UserWeightScore{
 		{WeightCategory: "技術志向", Score: 60},
 		{WeightCategory: "成長志向", Score: 40},
 		{WeightCategory: "細部志向", Score: 50},
@@ -57,9 +56,9 @@ func TestHeuristicFlags_ZeroAxesIsThin(t *testing.T) {
 }
 
 func TestHeuristicFlags_SingleMatch(t *testing.T) {
-	scores := make([]entity.UserWeightScore, 6)
+	scores := make([]models.UserWeightScore, 6)
 	for i := range scores {
-		scores[i] = entity.UserWeightScore{WeightCategory: "c", Score: 50}
+		scores[i] = models.UserWeightScore{WeightCategory: "c", Score: 50}
 	}
 	flags := heuristicFlags(scores, []*models.UserCompanyMatch{
 		{CompanyID: 1, MatchScore: 88, MatchedAxisCount: 6},
@@ -76,9 +75,9 @@ func TestHeuristicFlags_SingleMatch(t *testing.T) {
 }
 
 func TestHeuristicFlags_Healthy(t *testing.T) {
-	scores := make([]entity.UserWeightScore, 0, 8)
+	scores := make([]models.UserWeightScore, 0, 8)
 	for i := 0; i < 8; i++ {
-		scores = append(scores, entity.UserWeightScore{WeightCategory: "c", Score: 50 + i})
+		scores = append(scores, models.UserWeightScore{WeightCategory: "c", Score: 50 + i})
 	}
 	matches := []*models.UserCompanyMatch{
 		{CompanyID: 1, MatchScore: 88, MatchedAxisCount: 8},
@@ -91,7 +90,7 @@ func TestHeuristicFlags_Healthy(t *testing.T) {
 }
 
 func TestHeuristicFlags_ScoreZeroStillCounts(t *testing.T) {
-	scores := []entity.UserWeightScore{
+	scores := []models.UserWeightScore{
 		{WeightCategory: "a", Score: 0},
 		{WeightCategory: "b", Score: 0},
 		{WeightCategory: "c", Score: 0},
@@ -145,9 +144,9 @@ func TestChatEvidenceFlags_SupportingReasonIsSubstantial(t *testing.T) {
 }
 
 func TestHeuristicConfidence_ChatFlagsPenalizeHarder(t *testing.T) {
-	scores := make([]entity.UserWeightScore, 8)
+	scores := make([]models.UserWeightScore, 8)
 	for i := range scores {
-		scores[i] = entity.UserWeightScore{WeightCategory: "c", Score: 50}
+		scores[i] = models.UserWeightScore{WeightCategory: "c", Score: 50}
 	}
 	base := heuristicConfidence(scores, nil)
 	weak := heuristicConfidence(scores, []string{"mostly_choice_only", "thin_chat_evidence"})
@@ -161,7 +160,7 @@ func TestHeuristicConfidence_ChatFlagsPenalizeHarder(t *testing.T) {
 // 先頭だけ見ていると「1位は根拠十分、2位以降は根拠が薄い」結果を
 // 信頼できる診断として扱い、confidence のペナルティも落ちる。
 func TestHeuristicFlags_ThinMatchUsesMinimum(t *testing.T) {
-	scores := []entity.UserWeightScore{
+	scores := []models.UserWeightScore{
 		{WeightCategory: "技術志向", Score: 60},
 		{WeightCategory: "成長志向", Score: 40},
 		{WeightCategory: "チームワーク志向", Score: 55},

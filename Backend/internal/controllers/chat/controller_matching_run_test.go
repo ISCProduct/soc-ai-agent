@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"Backend/domain/entity"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/matching"
 	"Backend/internal/usagectx"
@@ -53,7 +52,7 @@ func (s *stubMatchingService) GetDiagnostics(uint, string) (*matching.MatchingDi
 	return nil, nil
 }
 
-func (s *stubMatchingService) ReasonScores(_ uint, scores []entity.UserWeightScore) []entity.UserWeightScore {
+func (s *stubMatchingService) ReasonScores(_ uint, scores []models.UserWeightScore) []models.UserWeightScore {
 	return scores
 }
 

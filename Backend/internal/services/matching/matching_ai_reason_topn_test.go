@@ -1,7 +1,6 @@
 package matching
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -57,7 +56,7 @@ func buildScoredCompanies(n int) (*matchingCompanyRepo, *matchingScoreRepo) {
 		profiles[id] = &models.CompanyWeightProfile{CompanyID: id, TechnicalOrientation: i + 1}
 	}
 	return &matchingCompanyRepo{companies: companies, profiles: profiles},
-		&matchingScoreRepo{scores: []entity.UserWeightScore{{WeightCategory: "技術志向", Score: 70}}}
+		&matchingScoreRepo{scores: []models.UserWeightScore{{WeightCategory: "技術志向", Score: 70}}}
 }
 
 // TestCalculateMatching_AIReasonOnlyForTopN は #1061 の受け入れ条件。

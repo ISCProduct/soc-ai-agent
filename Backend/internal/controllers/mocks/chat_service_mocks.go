@@ -1,7 +1,6 @@
 package mocks
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/chat"
@@ -46,10 +45,10 @@ func (m *ChatServiceMock) ClaimSessionOwnership(sessionID string, userID uint) e
 	return args.Error(0)
 }
 
-func (m *ChatServiceMock) GetUserScores(userID uint, sessionID string) ([]entity.UserWeightScore, error) {
+func (m *ChatServiceMock) GetUserScores(userID uint, sessionID string) ([]models.UserWeightScore, error) {
 	args := m.Called(userID, sessionID)
 	if v := args.Get(0); v != nil {
-		return v.([]entity.UserWeightScore), args.Error(1)
+		return v.([]models.UserWeightScore), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
@@ -94,7 +93,7 @@ func (m *MatchingServiceMock) GetDiagnostics(userID uint, sessionID string) (*ma
 }
 
 // ReasonScores は合流しない（そのまま返す）。合流の検証は matching パッケージのテストで行う。
-func (m *MatchingServiceMock) ReasonScores(_ uint, scores []entity.UserWeightScore) []entity.UserWeightScore {
+func (m *MatchingServiceMock) ReasonScores(_ uint, scores []models.UserWeightScore) []models.UserWeightScore {
 	return scores
 }
 

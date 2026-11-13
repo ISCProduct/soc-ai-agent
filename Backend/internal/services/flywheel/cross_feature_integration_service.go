@@ -1,7 +1,6 @@
 package flywheel
 
 import (
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
@@ -375,11 +374,11 @@ func (s *CrossFeatureIntegrationService) BuildResumeContextFromScores(
 
 // UserIntegratedProfile ユーザーの統合プロファイル
 type UserIntegratedProfile struct {
-	UserID        uint                     `json:"user_id"`
-	ChatSessionID string                   `json:"chat_session_id"`
-	WeightScores  []entity.UserWeightScore `json:"weight_scores"`
-	TopCategories []entity.UserWeightScore `json:"top_categories"`
-	SourceSummary ProfileSourceSummary     `json:"source_summary"`
+	UserID        uint                             `json:"user_id"`
+	ChatSessionID string                           `json:"chat_session_id"`
+	WeightScores  []models.UserWeightScoreResponse `json:"weight_scores"`
+	TopCategories []models.UserWeightScoreResponse `json:"top_categories"`
+	SourceSummary ProfileSourceSummary             `json:"source_summary"`
 }
 
 // ProfileSourceSummary 各機能からのデータ取得状況
@@ -406,8 +405,8 @@ func (s *CrossFeatureIntegrationService) BuildIntegratedProfile(
 	return &UserIntegratedProfile{
 		UserID:        userID,
 		ChatSessionID: chatSessionID,
-		WeightScores:  scores,
-		TopCategories: top,
+		WeightScores:  models.NewUserWeightScoreResponses(scores),
+		TopCategories: models.NewUserWeightScoreResponses(top),
 		SourceSummary: ProfileSourceSummary{
 			HasChatScores:    len(scores) > 0,
 			InterviewCount:   interviewCount,
@@ -444,11 +443,11 @@ func (s *CrossFeatureIntegrationService) applyMovingAverage(
 }
 
 // extractTopBottom スコア上位3件と下位3件を返す
-func extractTopBottom(scores []entity.UserWeightScore) (top, bottom []entity.UserWeightScore) {
+func extractTopBottom(scores []models.UserWeightScore) (top, bottom []models.UserWeightScore) {
 	if len(scores) == 0 {
 		return nil, nil
 	}
-	sorted := make([]entity.UserWeightScore, len(scores))
+	sorted := make([]models.UserWeightScore, len(scores))
 	copy(sorted, scores)
 
 	// バブルソート（降順）

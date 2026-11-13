@@ -19,8 +19,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-
-	"Backend/domain/entity"
 )
 
 // ゴールドラベル。良/中/悪の3値のみ。
@@ -100,10 +98,11 @@ type Input struct {
 	FactsText  string                  `json:"facts_text,omitempty"`
 	WebsiteURL string                  `json:"website_url,omitempty"`
 	Expected   *CompanyExtractExpected `json:"expected,omitempty"`
-	// マッチング理由の生成。Match と UserScores は本番の型のまま受ける（フィールド名は Go の名前）。
-	// Match.Company のキーは models.Company の json タグ(main_business など)。
+	// マッチング理由の生成。Match.Company のキーは models.Company の json タグ(main_business など)、
+	// UserScores は models.UserWeightScore の json タグ(id / user_id / category / score …)で受ける。
+	// Match のそのほかの項目は本番の型のまま(フィールド名は Go の名前)。
 	Match      *models.UserCompanyMatch `json:"match,omitempty"`
-	UserScores []entity.UserWeightScore `json:"user_scores,omitempty"`
+	UserScores []models.UserWeightScore `json:"user_scores,omitempty"`
 	// MustMentionAny は企業側の事実の語。理由にいずれか1つ以上が入っていること
 	// （プロンプトの「企業側の情報を1つ以上反映」）。
 	MustMentionAny []string `json:"must_mention_any,omitempty"`

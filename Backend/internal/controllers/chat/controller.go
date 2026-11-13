@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
@@ -328,7 +327,7 @@ func (c *ChatController) GetScores(ctx echo.Context) error {
 		return httpapi.InternalError(err)
 	}
 
-	return ctx.JSON(http.StatusOK, scores)
+	return ctx.JSON(http.StatusOK, models.NewUserWeightScoreResponses(scores))
 }
 
 // GetRecommendations トップ適性企業を取得
@@ -360,7 +359,7 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		userScores, scoreErr := c.chatService.GetUserScores(userID, sessionID)
 		if scoreErr != nil {
 			log.Printf("[GetRecommendations] Failed to load user scores for provisional status: %v\n", scoreErr)
-			userScores = []entity.UserWeightScore{}
+			userScores = []models.UserWeightScore{}
 		}
 
 		evaluatedCategories := matching.CountEvaluatedCategories(userScores)
@@ -380,7 +379,7 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 	userScores, err := c.chatService.GetUserScores(userID, sessionID)
 	if err != nil {
 		log.Printf("[GetRecommendations] Failed to load user scores: %v\n", err)
-		userScores = []entity.UserWeightScore{}
+		userScores = []models.UserWeightScore{}
 	}
 	evaluatedCategories := matching.CountEvaluatedCategories(userScores)
 	// 理由文はマッチ度と同じ合流後の適性で書く（評価済みカテゴリ数はチャット診断の進み具合なので合流しない）

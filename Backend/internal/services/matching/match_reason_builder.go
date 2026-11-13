@@ -1,7 +1,6 @@
 package matching
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"encoding/json"
 	"fmt"
@@ -65,7 +64,7 @@ type scoreItem struct {
 	score float64
 }
 
-func BuildMatchReason(match *models.UserCompanyMatch, userScores []entity.UserWeightScore) string {
+func BuildMatchReason(match *models.UserCompanyMatch, userScores []models.UserWeightScore) string {
 	if match == nil || match.Company.ID == 0 {
 		return ""
 	}
@@ -171,7 +170,7 @@ func topMatchSummaries(match *models.UserCompanyMatch) string {
 	return strings.Join(parts, "・")
 }
 
-func topUserStrengths(scores []entity.UserWeightScore) string {
+func topUserStrengths(scores []models.UserWeightScore) string {
 	if len(scores) == 0 {
 		return "複数の軸でバランス良く評価"
 	}

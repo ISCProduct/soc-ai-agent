@@ -1,7 +1,6 @@
 package analysis
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"math"
 	"slices"
@@ -116,7 +115,7 @@ func TestBuildScoreComment(t *testing.T) {
 func TestBuildJobSuitabilityComment(t *testing.T) {
 	tests := []struct {
 		name               string
-		scores             []entity.UserWeightScore
+		scores             []models.UserWeightScore
 		wantCommentContain string
 		wantMinRoles       int
 		wantRoleContain    string
@@ -128,7 +127,7 @@ func TestBuildJobSuitabilityComment(t *testing.T) {
 		},
 		{
 			name: "主要スコアがある場合にコメントとロールを返す",
-			scores: []entity.UserWeightScore{
+			scores: []models.UserWeightScore{
 				{WeightCategory: "リーダーシップ志向", Score: 90},
 				{WeightCategory: "成長志向", Score: 85},
 				{WeightCategory: "チャレンジ志向", Score: 80},
