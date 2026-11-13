@@ -54,6 +54,25 @@ func (c *Company) IsPublished() bool {
 	return c.DataStatus == "published" && c.IsActive
 }
 
+// CompanyWeightProfile 企業の適性プロファイル（10カテゴリの重視度）
+type CompanyWeightProfile struct {
+	ID                    uint
+	CompanyID             uint
+	JobPositionID         *uint
+	TechnicalOrientation  int // 技術志向 (0-100)
+	TeamworkOrientation   int // チームワーク志向 (0-100)
+	LeadershipOrientation int // リーダーシップ志向 (0-100)
+	CreativityOrientation int // 創造性志向 (0-100)
+	StabilityOrientation  int // 安定志向 (0-100)
+	GrowthOrientation     int // 成長志向 (0-100)
+	WorkLifeBalance       int // ワークライフバランス (0-100)
+	ChallengeSeeking      int // チャレンジ志向 (0-100)
+	DetailOrientation     int // 細部志向 (0-100)
+	CommunicationSkill    int // コミュニケーション力 (0-100)
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+}
+
 // UserCompanyMatch ユーザーと企業のマッチング結果
 type UserCompanyMatch struct {
 	ID                 uint
@@ -79,7 +98,7 @@ type UserCompanyMatch struct {
 	// 「5点中0点」を正規化した正当なスコア（cross_feature_integration_service.go）なので、
 	// 測れていないわけではない。
 	//
-	// なお chat_controller.go の countEvaluatedCategories は score != 0 で数えるため、
+	// なお services/matching の CountEvaluatedCategories は score != 0 で数えるため、
 	// 同じ「何軸で測れたか」でも値が食い違う。あちらは 0 を未計測とみなす簡略化。
 	MatchedAxisCount         int
 	MatchReason              string
