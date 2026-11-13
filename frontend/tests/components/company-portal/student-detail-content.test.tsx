@@ -94,7 +94,7 @@ describe('StudentDetailContent', () => {
     visibleStudent('  ')
     render(<StudentDetailContent userId={5} />)
 
-    expect(await screen.findByRole('heading', { name: '氏名未設定' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '氏名非公開' })).toBeInTheDocument()
     expect(screen.queryByText(/学生 #5/)).not.toBeInTheDocument()
   })
 
