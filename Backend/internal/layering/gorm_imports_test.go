@@ -18,7 +18,6 @@ import (
 // allowedServiceFiles は、今も *gorm.DB を直接持っている Service。新しく足してはいけない。
 // Repository へ移したら、ここから消すこと(消し忘れはログに出る。失敗にはならない)。
 var allowedServiceFiles = []string{
-	"internal/services/application/application_service.go",
 	"internal/services/auth/auth_deletion.go",
 	"internal/services/auth/auth_service.go",
 	"internal/services/auth/user_deletion_service.go",
