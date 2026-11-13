@@ -17,10 +17,14 @@ const (
 	// RefreshTokenRetention は期限切れのリフレッシュトークンを消すまでの猶予。
 	// 期限が切れた直後の行を残し、直前の失効・ローテーションを監査で追えるようにする。
 	RefreshTokenRetention = 7 * 24 * time.Hour
+	// purgeBatchPause はバッチの間に置く待ち。起動直後に溜まった分を消すとき、
+	// 最大 purgeMaxBatches 回の DELETE を間を空けずに流して DB を占有しないため（#2179 のレビュー）。
+	purgeBatchPause = 100 * time.Millisecond
 )
 
 // ExpiredDeleter は cutoff で期限切れと判定した行を、最大 limit 件だけ消して件数を返す。
-// PendingRegistrationRepository / UserRefreshTokenRepository の DeleteExpired が満たす。
+// PendingRegistrationRepository / UserRefreshTokenRepository / CompanyUserRefreshTokenRepository の
+// DeleteExpired が満たす。
 type ExpiredDeleter interface {
 	DeleteExpired(cutoff time.Time, limit int) (int64, error)
 }
@@ -41,17 +45,21 @@ type PurgeResult struct {
 	Err          error
 }
 
-// ExpiredTokenPurger は期限切れの仮登録とリフレッシュトークンを消す（#2153）。
+// ExpiredTokenPurger は期限切れの仮登録とリフレッシュトークン（学生・企業ユーザー）を消す（#2153・#2184）。
 // 仮登録にはメールアドレスが入っており、溜め続けると不要な個人情報を持ち続けることになる。
 type ExpiredTokenPurger struct {
 	targets    []purgeTarget
 	batchSize  int
 	maxBatches int
-	logger     *slog.Logger
+	pause      time.Duration
+	// sleep はバッチの間の待ち。テストで差し替える。
+	sleep  func(time.Duration)
+	logger *slog.Logger
 }
 
-// NewExpiredTokenPurger は仮登録・リフレッシュトークンの順に消す ExpiredTokenPurger を作る。
-func NewExpiredTokenPurger(pendingRegistrations, refreshTokens ExpiredDeleter, logger *slog.Logger) *ExpiredTokenPurger {
+// NewExpiredTokenPurger は仮登録・学生のリフレッシュトークン・企業ユーザーのリフレッシュトークンの順に
+// 消す ExpiredTokenPurger を作る。
+func NewExpiredTokenPurger(pendingRegistrations, refreshTokens, companyRefreshTokens ExpiredDeleter, logger *slog.Logger) *ExpiredTokenPurger {
 	return &ExpiredTokenPurger{
 		targets: []purgeTarget{
 			{
@@ -65,9 +73,18 @@ func NewExpiredTokenPurger(pendingRegistrations, refreshTokens ExpiredDeleter, l
 				deleter: refreshTokens,
 				cutoff:  func(now time.Time) time.Time { return now.Add(-RefreshTokenRetention) },
 			},
+			{
+				// 企業ポータルも更新のたびに旧い行を失効させて新しい行を作り、ログアウト以外に
+				// 物理削除する経路が無いので、学生側と同じ猶予で消す（#2184）。
+				name:    "company_user_refresh_tokens",
+				deleter: companyRefreshTokens,
+				cutoff:  func(now time.Time) time.Time { return now.Add(-RefreshTokenRetention) },
+			},
 		},
 		batchSize:  purgeBatchSize,
 		maxBatches: purgeMaxBatches,
+		pause:      purgeBatchPause,
+		sleep:      time.Sleep,
 		logger:     logger,
 	}
 }
@@ -97,13 +114,16 @@ func (p *ExpiredTokenPurger) Run(now time.Time) []PurgeResult {
 }
 
 // purge は1つの対象をバッチに分けて消す。
-// 1バッチが上限より少なければ、消し終えたとみなして止める。
+// 1バッチが上限より少なければ、消し終えたとみなして止める。バッチの間には p.pause だけ待つ。
 // 複数台で同時に走ると、もう1台が消した分だけ少なく返ることがあるが、
 // 残りはそちらの実行か翌日の実行で消えるので問題ない。
 func (p *ExpiredTokenPurger) purge(t purgeTarget, now time.Time) PurgeResult {
 	cutoff := t.cutoff(now)
 	r := PurgeResult{Target: t.name}
-	for range p.maxBatches {
+	for i := range p.maxBatches {
+		if i > 0 {
+			p.sleep(p.pause)
+		}
 		n, err := t.deleter.DeleteExpired(cutoff, p.batchSize)
 		r.Deleted += n
 		if err != nil {
@@ -114,6 +134,16 @@ func (p *ExpiredTokenPurger) purge(t purgeTarget, now time.Time) PurgeResult {
 			return r
 		}
 	}
-	r.LimitReached = true
+	// 最後のバッチがちょうど上限だった場合、残りがあるかは分からない。1件だけ消してみて、
+	// 消えたときだけ「上限に当たった」とする（消し切っているのに警告を出さないため。#2179 のレビュー）。
+	// 消した1件も期限切れの行なので、上限を1件超えて消しても問題ない。
+	p.sleep(p.pause)
+	n, err := t.deleter.DeleteExpired(cutoff, 1)
+	r.Deleted += n
+	if err != nil {
+		r.Err = err
+		return r
+	}
+	r.LimitReached = n > 0
 	return r
 }
