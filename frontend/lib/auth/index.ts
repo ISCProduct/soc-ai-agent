@@ -217,6 +217,24 @@ export const authService = {
   },
 
   /**
+   * 認証メールを再送する（期限切れ・未着のとき）。
+   * アカウントの有無にかかわらず BE は同じ 200 を返すので、成功時は「送った」とは言い切れない文言で案内する。
+   */
+  async resendVerification(email: string): Promise<void> {
+    const res = await fetch(`${BACKEND_URL}/api/auth/resend-verification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getTenantHeaders() },
+      body: JSON.stringify({ email }),
+    })
+    if (res.status === 429) {
+      throw new Error('再送の回数が上限に達しました。しばらく待ってからもう一度お試しください。')
+    }
+    if (!res.ok) {
+      throw new Error('認証メールの再送に失敗しました。時間をおいて再度お試しください。')
+    }
+  },
+
+  /**
    * 本登録する。
    *
    * ゲストとして診断まで進んでいる場合は、その結果を引き継ぐ。
