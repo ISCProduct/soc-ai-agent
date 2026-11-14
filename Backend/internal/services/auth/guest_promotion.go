@@ -1,7 +1,7 @@
 package auth
 
 import (
-	"Backend/domain/entity"
+	"Backend/internal/models"
 	"errors"
 	"fmt"
 	"strings"
@@ -24,7 +24,7 @@ var ErrGuestNotPromotable = errors.New("guest account cannot be promoted")
 // 同じ行を昇格させれば user_id が変わらず、引き継ぎ漏れが構造的に起きない。
 // 移送方式だと user_id を参照する表を列挙する必要があり、1つ落とすだけで
 // 静かにデータが欠ける。
-func PromotableGuest(u *entity.User) error {
+func PromotableGuest(u *models.User) error {
 	if u == nil {
 		return ErrGuestNotPromotable
 	}
@@ -48,7 +48,7 @@ func PromotableGuest(u *entity.User) error {
 // これらに紐づいているため、変えると引き継ぎの意味が無くなる。
 // schoolName は「リクエストで実際に指定された学校名」。既定値で補完したものを
 // 渡してはいけない（ゲストが設定済みの学校名を既定値で潰す）。
-func applyRegistrationToGuest(u *entity.User, req RegisterRequest, schoolName, hashedPassword string, schoolID *uint) {
+func applyRegistrationToGuest(u *models.User, req RegisterRequest, schoolName, hashedPassword string, schoolID *uint) {
 	u.Email = req.Email
 	u.Password = hashedPassword
 	u.Name = req.Name

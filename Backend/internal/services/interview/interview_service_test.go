@@ -1,7 +1,6 @@
 package interview_test
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/interview"
@@ -10,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -74,38 +74,42 @@ func (m *mockReportRepo) Upsert(r *models.InterviewReport) error { return m.Call
 
 type mockUserRepo struct{ mock.Mock }
 
-func (m *mockUserRepo) CreateUser(u *entity.User) error { return m.Called(u).Error(0) }
-func (m *mockUserRepo) GetUserByEmail(e string) (*entity.User, error) {
+func (m *mockUserRepo) CreateUser(u *models.User) error { return m.Called(u).Error(0) }
+func (m *mockUserRepo) GetUserByEmail(e string) (*models.User, error) {
 	args := m.Called(e)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*entity.User), args.Error(1)
+	return args.Get(0).(*models.User), args.Error(1)
 }
-func (m *mockUserRepo) GetUserByID(id uint) (*entity.User, error) {
+func (m *mockUserRepo) GetUserByID(id uint) (*models.User, error) {
 	args := m.Called(id)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*entity.User), args.Error(1)
+	return args.Get(0).(*models.User), args.Error(1)
 }
-func (m *mockUserRepo) ListUsersPaged(l, o int, q string, schoolID *uint) ([]entity.User, int64, error) {
+func (m *mockUserRepo) ListUsersPaged(l, o int, q string, schoolID *uint) ([]models.User, int64, error) {
 	args := m.Called(l, o, q, schoolID)
-	return args.Get(0).([]entity.User), args.Get(1).(int64), args.Error(2)
+	return args.Get(0).([]models.User), args.Get(1).(int64), args.Error(2)
 }
-func (m *mockUserRepo) UpdateUser(u *entity.User) error { return m.Called(u).Error(0) }
+func (m *mockUserRepo) UpdateUser(u *models.User) error { return m.Called(u).Error(0) }
 func (m *mockUserRepo) DeleteUser(id uint) error        { return m.Called(id).Error(0) }
-func (m *mockUserRepo) GetUserByVerificationToken(t string) (*entity.User, error) {
-	args := m.Called(t)
-	return args.Get(0).(*entity.User), args.Error(1)
+func (m *mockUserRepo) RenewEmailVerification(id uint, token string, expires time.Time) (bool, error) {
+	args := m.Called(id, token, expires)
+	return args.Bool(0), args.Error(1)
 }
-func (m *mockUserRepo) GetUserByPasswordResetToken(t string) (*entity.User, error) {
+func (m *mockUserRepo) GetUserByVerificationToken(t string) (*models.User, error) {
 	args := m.Called(t)
-	return args.Get(0).(*entity.User), args.Error(1)
+	return args.Get(0).(*models.User), args.Error(1)
 }
-func (m *mockUserRepo) GetUserByOAuth(p, o string) (*entity.User, error) {
+func (m *mockUserRepo) GetUserByPasswordResetToken(t string) (*models.User, error) {
+	args := m.Called(t)
+	return args.Get(0).(*models.User), args.Error(1)
+}
+func (m *mockUserRepo) GetUserByOAuth(p, o string) (*models.User, error) {
 	args := m.Called(p, o)
-	return args.Get(0).(*entity.User), args.Error(1)
+	return args.Get(0).(*models.User), args.Error(1)
 }
 
 func TestInterviewService_CreateSession(t *testing.T) {
@@ -114,7 +118,7 @@ func TestInterviewService_CreateSession(t *testing.T) {
 	svc := interview.NewInterviewService(sRepo, nil, nil, uRepo, nil, nil, nil)
 
 	t.Run("Success male", func(t *testing.T) {
-		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1}, nil).Once()
+		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1}, nil).Once()
 		sRepo.On("Create", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 			s := args.Get(0).(*models.InterviewSession)
 			assert.Equal(t, "male", s.InterviewerGender)
@@ -127,7 +131,7 @@ func TestInterviewService_CreateSession(t *testing.T) {
 	})
 
 	t.Run("Default male", func(t *testing.T) {
-		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1}, nil).Once()
+		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1}, nil).Once()
 		sRepo.On("Create", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 			s := args.Get(0).(*models.InterviewSession)
 			assert.Equal(t, "male", s.InterviewerGender)
@@ -171,7 +175,7 @@ func TestInterviewService_TTSVoiceSelection(t *testing.T) {
 			Language:          "ja",
 		}
 		sRepo.On("FindByID", uint(100)).Return(session, nil)
-		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1, Name: "テスト太郎"}, nil)
+		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1, Name: "テスト太郎"}, nil)
 
 		_, err := svc.StartTurn(context.Background(), 1, 100, "", "", "", "", "", 0, 0, 0, 0, 0)
 		assert.NoError(t, err)
@@ -205,7 +209,7 @@ func TestInterviewService_TTSVoiceSelection(t *testing.T) {
 			Language:          "ja",
 		}
 		sRepo.On("FindByID", uint(101)).Return(session, nil)
-		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1, Name: "テスト太郎"}, nil)
+		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1, Name: "テスト太郎"}, nil)
 
 		_, err := svc.StartTurn(context.Background(), 1, 101, "", "", "", "", "", 0, 0, 0, 0, 0)
 		assert.NoError(t, err)
@@ -242,7 +246,7 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 
 		session := newSession(200)
 		sRepo.On("FindByID", uint(200)).Return(session, nil)
-		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1, Name: "テスト太郎"}, nil)
+		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1, Name: "テスト太郎"}, nil)
 
 		result, err := svc.Turn(context.Background(), 1, 200, []byte("dummy-audio"), "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 		assert.NoError(t, err)
@@ -271,7 +275,7 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 
 		session := newSession(201)
 		sRepo.On("FindByID", uint(201)).Return(session, nil)
-		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1, Name: "テスト太郎"}, nil)
+		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1, Name: "テスト太郎"}, nil)
 
 		result, err := svc.Turn(context.Background(), 1, 201, []byte("dummy-audio"), "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 		assert.NoError(t, err)
@@ -301,7 +305,7 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 
 		session := newSession(202)
 		sRepo.On("FindByID", uint(202)).Return(session, nil)
-		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1, Name: "テスト太郎"}, nil)
+		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1, Name: "テスト太郎"}, nil)
 
 		result, err := svc.Turn(context.Background(), 1, 202, []byte("dummy-audio"), "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 		assert.NoError(t, err)
@@ -318,7 +322,7 @@ func TestInterviewService_EnsureSessionOwnership(t *testing.T) {
 		actorID   uint
 		sessionID uint
 		session   *models.InterviewSession
-		actor     *entity.User
+		actor     *models.User
 		wantErr   string // 空文字なら成功期待
 	}{
 		{
@@ -333,7 +337,7 @@ func TestInterviewService_EnsureSessionOwnership(t *testing.T) {
 			actorID:   2,
 			sessionID: 100,
 			session:   &models.InterviewSession{ID: 100, UserID: 1},
-			actor:     &entity.User{IsAdmin: false},
+			actor:     &models.User{IsAdmin: false},
 			wantErr:   "forbidden",
 		},
 		{
@@ -341,7 +345,7 @@ func TestInterviewService_EnsureSessionOwnership(t *testing.T) {
 			actorID:   2,
 			sessionID: 100,
 			session:   &models.InterviewSession{ID: 100, UserID: 1},
-			actor:     &entity.User{IsAdmin: true},
+			actor:     &models.User{IsAdmin: true},
 			wantErr:   "",
 		},
 	}

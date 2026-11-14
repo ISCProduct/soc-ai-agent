@@ -7,7 +7,6 @@ import (
 	"math"
 	"testing"
 
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 
@@ -60,12 +59,12 @@ func (r *parityScoreRepository) AddScoreWithPromptVersion(userID uint, sessionID
 	return r.AddScore(userID, sessionID, category, delta)
 }
 
-func (r *parityScoreRepository) FindByUserSessionAndCategory(_ uint, _, category string) (*entity.UserWeightScore, error) {
+func (r *parityScoreRepository) FindByUserSessionAndCategory(_ uint, _, category string) (*models.UserWeightScore, error) {
 	score, ok := r.scores[category]
 	if !ok {
 		return nil, gorm.ErrRecordNotFound
 	}
-	return &entity.UserWeightScore{WeightCategory: category, Score: score}, nil
+	return &models.UserWeightScore{WeightCategory: category, Score: score}, nil
 }
 
 type parityAIQuestionRepository struct {

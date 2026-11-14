@@ -1,14 +1,12 @@
 package teacher
 
 import (
+	"Backend/internal/models"
 	"Backend/internal/services/notification"
 	"errors"
 	"strings"
 	"testing"
 	"time"
-
-	"Backend/domain/entity"
-	"Backend/internal/models"
 )
 
 type stubGuidanceStore struct {
@@ -46,11 +44,11 @@ func (s *stubGuidanceStore) Dismiss(id, studentUserID uint) error {
 }
 
 type stubStudentByID struct {
-	user *entity.User
+	user *models.User
 	err  error
 }
 
-func (s *stubStudentByID) GetUserByID(uint) (*entity.User, error) {
+func (s *stubStudentByID) GetUserByID(uint) (*models.User, error) {
 	return s.user, s.err
 }
 
@@ -88,7 +86,7 @@ func TestGuidanceService_RejectsBadKind(t *testing.T) {
 func TestGuidanceService_ResolveStudentSchool(t *testing.T) {
 	schoolID := uint(7)
 	svc := NewGuidanceService(&stubGuidanceStore{}, &stubStudentByID{
-		user: &entity.User{ID: 3, Role: "student", OrganizationID: 4, SchoolID: &schoolID},
+		user: &models.User{ID: 3, Role: "student", OrganizationID: 4, SchoolID: &schoolID},
 	})
 	// 学園も返す。school_id を単体で返すと、呼び出し元が学園一致を検査せずに
 	// 担当校スコープの判定へ渡せてしまう（#1675）。
@@ -106,12 +104,12 @@ func TestGuidanceService_ResolveStudentSchool_RejectsNonStudents(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
 		name string
-		user entity.User
+		user models.User
 	}{
-		{"教員", entity.User{Role: "teacher", SchoolID: &schoolID}},
-		{"管理者", entity.User{Role: "student", IsAdmin: true, SchoolID: &schoolID}},
-		{"ゲスト", entity.User{Role: "student", IsGuest: true, SchoolID: &schoolID}},
-		{"退会済み", entity.User{Role: "student", WithdrawnAt: &now, SchoolID: &schoolID}},
+		{"教員", models.User{Role: "teacher", SchoolID: &schoolID}},
+		{"管理者", models.User{Role: "student", IsAdmin: true, SchoolID: &schoolID}},
+		{"ゲスト", models.User{Role: "student", IsGuest: true, SchoolID: &schoolID}},
+		{"退会済み", models.User{Role: "student", WithdrawnAt: &now, SchoolID: &schoolID}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

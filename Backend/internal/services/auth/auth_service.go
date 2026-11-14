@@ -23,6 +23,7 @@ type AuthService struct {
 	ownershipClaimer CompanyOwnershipClaimer
 	schoolRepo       repository.SchoolRepository
 	scoutIndexSyncer ScoutIndexSyncer
+	resendLimiter    ResendLimiter
 }
 
 // CompanyOwnershipClaimer は本登録時に企業クレームを行う（#754）

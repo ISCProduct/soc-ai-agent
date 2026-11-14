@@ -1,17 +1,16 @@
 package interview_test
 
 import (
+	"Backend/internal/models"
+	openaiPkg "Backend/internal/openai"
+	"Backend/internal/services/interview"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"Backend/domain/entity"
-	"Backend/internal/models"
-	openaiPkg "Backend/internal/openai"
-	"Backend/internal/services/interview"
+	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
@@ -56,25 +55,28 @@ func (m *mockInterviewUtterRepo) FindBySessionID(sessionID uint) ([]models.Inter
 
 // mockUserRepo は repository.UserRepository の最小モック実装。
 type mockUserRepo2 struct {
-	user *entity.User
+	user *models.User
 	err  error
 }
 
-func (m *mockUserRepo2) GetUserByID(id uint) (*entity.User, error)         { return m.user, m.err }
-func (m *mockUserRepo2) CreateUser(u *entity.User) error                   { return nil }
-func (m *mockUserRepo2) GetUserByEmail(email string) (*entity.User, error) { return nil, nil }
-func (m *mockUserRepo2) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
+func (m *mockUserRepo2) GetUserByID(id uint) (*models.User, error)         { return m.user, m.err }
+func (m *mockUserRepo2) CreateUser(u *models.User) error                   { return nil }
+func (m *mockUserRepo2) GetUserByEmail(email string) (*models.User, error) { return nil, nil }
+func (m *mockUserRepo2) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]models.User, int64, error) {
 	return nil, 0, nil
 }
-func (m *mockUserRepo2) UpdateUser(u *entity.User) error { return nil }
+func (m *mockUserRepo2) UpdateUser(u *models.User) error { return nil }
 func (m *mockUserRepo2) DeleteUser(id uint) error        { return nil }
-func (m *mockUserRepo2) GetUserByVerificationToken(token string) (*entity.User, error) {
+func (m *mockUserRepo2) RenewEmailVerification(uint, string, time.Time) (bool, error) {
+	return false, nil
+}
+func (m *mockUserRepo2) GetUserByVerificationToken(token string) (*models.User, error) {
 	return nil, nil
 }
-func (m *mockUserRepo2) GetUserByPasswordResetToken(token string) (*entity.User, error) {
+func (m *mockUserRepo2) GetUserByPasswordResetToken(token string) (*models.User, error) {
 	return nil, nil
 }
-func (m *mockUserRepo2) GetUserByOAuth(provider, oauthID string) (*entity.User, error) {
+func (m *mockUserRepo2) GetUserByOAuth(provider, oauthID string) (*models.User, error) {
 	return nil, nil
 }
 

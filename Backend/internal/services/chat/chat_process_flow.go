@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"context"
 	"log"
@@ -78,9 +77,9 @@ func (s *ChatService) handleAllPhasesCompletedFromCount(
 	ctx context.Context,
 	req ChatRequest,
 	history []models.ChatMessage,
-	allPhases []entity.AnalysisPhase,
-	completedProgresses []entity.UserAnalysisProgress,
-	phaseByID map[uint]*entity.AnalysisPhase,
+	allPhases []models.AnalysisPhase,
+	completedProgresses []models.UserAnalysisProgress,
+	phaseByID map[uint]*models.AnalysisPhase,
 ) (*ChatResponse, bool) {
 	completedPhaseCount := 0
 	for _, p := range completedProgresses {

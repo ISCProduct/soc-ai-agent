@@ -71,6 +71,10 @@ func (m *AuthServiceMock) VerifyEmail(token string) error {
 	return m.Called(token).Error(0)
 }
 
+func (m *AuthServiceMock) ResendVerificationEmail(email string) error {
+	return m.Called(email).Error(0)
+}
+
 func (m *AuthServiceMock) DeleteAccount(userID uint) error {
 	return m.Called(userID).Error(0)
 }

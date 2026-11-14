@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"Backend/domain/entity"
+	"Backend/internal/models"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,7 +24,7 @@ func (s *scoutSyncerSpy) Sync(_ context.Context, userID uint) {
 func TestUpdateProfile_SyncsScoutIndex(t *testing.T) {
 	t.Setenv("USER_SECRET", "user-secret")
 
-	user := &entity.User{ID: 7, Email: "student@example.com", Name: "学生", TargetLevel: "新卒"}
+	user := &models.User{ID: 7, Email: "student@example.com", Name: "学生", TargetLevel: "新卒"}
 	service := NewAuthService(&userRepoAuthStub{user: user}, &pendingRepoAuthStub{}, nil)
 	spy := &scoutSyncerSpy{}
 	service.SetScoutIndexSyncer(spy)
@@ -43,7 +43,7 @@ func TestUpdateProfile_SyncsScoutIndex(t *testing.T) {
 func TestUpdateProfile_WithoutSyncerConfigured(t *testing.T) {
 	t.Setenv("USER_SECRET", "user-secret")
 
-	user := &entity.User{ID: 7, Email: "student@example.com", Name: "学生", TargetLevel: "新卒"}
+	user := &models.User{ID: 7, Email: "student@example.com", Name: "学生", TargetLevel: "新卒"}
 	service := NewAuthService(&userRepoAuthStub{user: user}, &pendingRepoAuthStub{}, nil)
 
 	resp, err := service.UpdateProfile(UpdateProfileRequest{

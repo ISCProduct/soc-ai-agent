@@ -1,10 +1,9 @@
 package repositories
 
 import (
-	"Backend/domain/entity"
-	"Backend/domain/mapper"
 	"Backend/internal/models"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -18,8 +17,9 @@ func NewUserRepository(db *gorm.DB) *UserRepository {
 }
 
 // CreateUser 新規ユーザー作成（デフォルト組織へ所属）
-func (r *UserRepository) CreateUser(user *entity.User) error {
-	m := mapper.UserFromEntity(user)
+func (r *UserRepository) CreateUser(user *models.User) error {
+	m := new(models.User)
+	*m = *user
 	if m.OrganizationID == 0 {
 		m.OrganizationID = models.DefaultOrganizationID
 	}
@@ -39,13 +39,13 @@ func (r *UserRepository) CreateUser(user *entity.User) error {
 		if err := tx.Create(&membership).Error; err != nil {
 			return err
 		}
-		*user = *mapper.UserToEntity(m)
+		*user = *m
 		return nil
 	})
 }
 
 // GetUserByEmail メールアドレスでユーザー取得
-func (r *UserRepository) GetUserByEmail(email string) (*entity.User, error) {
+func (r *UserRepository) GetUserByEmail(email string) (*models.User, error) {
 	var m models.User
 	if err := r.db.Where("email = ?", email).First(&m).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -53,11 +53,11 @@ func (r *UserRepository) GetUserByEmail(email string) (*entity.User, error) {
 		}
 		return nil, err
 	}
-	return mapper.UserToEntity(&m), nil
+	return &m, nil
 }
 
 // GetUserByID IDでユーザー取得
-func (r *UserRepository) GetUserByID(id uint) (*entity.User, error) {
+func (r *UserRepository) GetUserByID(id uint) (*models.User, error) {
 	var m models.User
 	if err := r.db.First(&m, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -65,7 +65,7 @@ func (r *UserRepository) GetUserByID(id uint) (*entity.User, error) {
 		}
 		return nil, err
 	}
-	return mapper.UserToEntity(&m), nil
+	return &m, nil
 }
 
 // scopeUsersBySchool は「担当校の在籍者」の絞り込みを1箇所にまとめる（#1675）。
@@ -90,7 +90,7 @@ func scopeUsersBySchool(q *gorm.DB, schoolID *uint) *gorm.DB {
 
 // ListUsersPaged ページング付きユーザー一覧を取得
 // schoolID が非nilの場合は個別校で絞り込む。
-func (r *UserRepository) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
+func (r *UserRepository) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]models.User, int64, error) {
 	var ms []models.User
 	var total int64
 
@@ -107,18 +107,13 @@ func (r *UserRepository) ListUsersPaged(limit, offset int, query string, schoolI
 	if err != nil {
 		return nil, 0, err
 	}
-	result := make([]entity.User, len(ms))
-	for i, m := range ms {
-		e := mapper.UserToEntity(&m)
-		result[i] = *e
-	}
-	return result, total, nil
+	return ms, total, nil
 }
 
 // UpdateUser ユーザー情報更新
-func (r *UserRepository) UpdateUser(user *entity.User) error {
-	m := mapper.UserFromEntity(user)
-	return r.db.Save(m).Error
+func (r *UserRepository) UpdateUser(user *models.User) error {
+	m := *user
+	return r.db.Save(&m).Error
 }
 
 // DeleteUser ユーザー削除
@@ -127,7 +122,7 @@ func (r *UserRepository) DeleteUser(id uint) error {
 }
 
 // GetUserByVerificationToken メール認証トークンでユーザー取得
-func (r *UserRepository) GetUserByVerificationToken(token string) (*entity.User, error) {
+func (r *UserRepository) GetUserByVerificationToken(token string) (*models.User, error) {
 	var m models.User
 	if err := r.db.Where("email_verification_token = ?", token).First(&m).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -135,11 +130,23 @@ func (r *UserRepository) GetUserByVerificationToken(token string) (*entity.User,
 		}
 		return nil, err
 	}
-	return mapper.UserToEntity(&m), nil
+	return &m, nil
+}
+
+// RenewEmailVerification はメール認証トークンと期限だけを、未認証の行に限って更新する。
+// 行を丸ごと保存(UpdateUser)しないので、他の処理が同時に書いた列(認証済みの印など)を巻き戻さない。
+func (r *UserRepository) RenewEmailVerification(userID uint, token string, expires time.Time) (bool, error) {
+	res := r.db.Model(&models.User{}).
+		Where("id = ? AND email_verified_at IS NULL", userID).
+		Updates(map[string]any{
+			"email_verification_token":   token,
+			"email_verification_expires": expires,
+		})
+	return res.RowsAffected > 0, res.Error
 }
 
 // GetUserByPasswordResetToken パスワードリセットトークンでユーザー取得
-func (r *UserRepository) GetUserByPasswordResetToken(token string) (*entity.User, error) {
+func (r *UserRepository) GetUserByPasswordResetToken(token string) (*models.User, error) {
 	var m models.User
 	if err := r.db.Where("password_reset_token = ?", token).First(&m).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -147,11 +154,11 @@ func (r *UserRepository) GetUserByPasswordResetToken(token string) (*entity.User
 		}
 		return nil, err
 	}
-	return mapper.UserToEntity(&m), nil
+	return &m, nil
 }
 
 // GetUserByOAuth OAuth情報でユーザー取得
-func (r *UserRepository) GetUserByOAuth(provider, oauthID string) (*entity.User, error) {
+func (r *UserRepository) GetUserByOAuth(provider, oauthID string) (*models.User, error) {
 	var m models.User
 	if err := r.db.Where("oauth_provider = ? AND oauth_id = ?", provider, oauthID).First(&m).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -159,7 +166,7 @@ func (r *UserRepository) GetUserByOAuth(provider, oauthID string) (*entity.User,
 		}
 		return nil, err
 	}
-	return mapper.UserToEntity(&m), nil
+	return &m, nil
 }
 
 // ListStudentsPaged は生徒のみをページング付きで返す（#1027）。
@@ -167,7 +174,7 @@ func (r *UserRepository) GetUserByOAuth(provider, oauthID string) (*entity.User,
 // ListUsersPaged は role / is_guest / is_admin で絞っていないため、
 // 管理者やゲストも混ざる。教員向けの生徒一覧ではそれらを除く。
 // schoolID が非nilなら担当校で絞る（EchoAdminSchoolScope の結果を渡す）。
-func (r *UserRepository) ListStudentsPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
+func (r *UserRepository) ListStudentsPaged(limit, offset int, query string, schoolID *uint) ([]models.User, int64, error) {
 	var ms []models.User
 	var total int64
 
@@ -188,9 +195,5 @@ func (r *UserRepository) ListStudentsPaged(limit, offset int, query string, scho
 	if err := q.Order("created_at desc, id desc").Limit(limit).Offset(offset).Find(&ms).Error; err != nil {
 		return nil, 0, err
 	}
-	result := make([]entity.User, len(ms))
-	for i, m := range ms {
-		result[i] = *mapper.UserToEntity(&m)
-	}
-	return result, total, nil
+	return ms, total, nil
 }

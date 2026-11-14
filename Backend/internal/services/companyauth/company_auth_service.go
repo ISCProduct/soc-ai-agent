@@ -19,9 +19,7 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/services/email"
 
-	"github.com/go-sql-driver/mysql"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
 const (
@@ -91,28 +89,28 @@ type AuthResponse struct {
 }
 
 type CompanyUserService struct {
-	users   *repositories.CompanyUserRepository
-	refresh *repositories.CompanyUserRefreshTokenRepository
-	email   *email.EmailService
-	db      *gorm.DB
-	secret  string
-	now     func() time.Time
+	companies repository.CompanyRepository
+	users     *repositories.CompanyUserRepository
+	refresh   *repositories.CompanyUserRefreshTokenRepository
+	email     *email.EmailService
+	secret    string
+	now       func() time.Time
 }
 
 func NewCompanyUserService(
-	db *gorm.DB,
+	companies repository.CompanyRepository,
 	users *repositories.CompanyUserRepository,
 	refresh *repositories.CompanyUserRefreshTokenRepository,
 	emailSvc *email.EmailService,
 	secret string,
 ) *CompanyUserService {
 	return &CompanyUserService{
-		users:   users,
-		refresh: refresh,
-		email:   emailSvc,
-		db:      db,
-		secret:  secret,
-		now:     time.Now,
+		companies: companies,
+		users:     users,
+		refresh:   refresh,
+		email:     emailSvc,
+		secret:    secret,
+		now:       time.Now,
 	}
 }
 
@@ -133,8 +131,8 @@ func (s *CompanyUserService) Invite(companyID uint, req InviteRequest) (*models.
 		return nil, errors.New("invalid role")
 	}
 
-	var company models.Company
-	if err := s.db.First(&company, companyID).Error; err != nil {
+	company, err := s.companies.FindByID(companyID)
+	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrCompanyNotFound
 		}
@@ -230,48 +228,28 @@ func (s *CompanyUserService) Register(req RegisterRequest) (*AuthResponse, error
 		return nil, err
 	}
 
-	var created *models.CompanyUser
-	err = s.db.Transaction(func(tx *gorm.DB) error {
-		company := &models.Company{
-			Name:          companyName,
-			SourceType:    "manual",
-			DataStatus:    "draft",
-			IsProvisional: true,
-			IsActive:      true,
-			IsVerified:    false,
-			IsGuestEntry:  false,
+	company := &models.Company{
+		Name:          companyName,
+		SourceType:    "manual",
+		DataStatus:    "draft",
+		IsProvisional: true,
+		IsActive:      true,
+		IsVerified:    false,
+		IsGuestEntry:  false,
+	}
+	created := &models.CompanyUser{
+		Email:    emailAddr,
+		Password: string(hashed),
+		Name:     name,
+		Role:     models.CompanyUserRoleOwner,
+	}
+	if err := s.users.CreateOwnerWithCompany(company, created); err != nil {
+		if errors.Is(err, repository.ErrCompanyUserEmailTaken) {
+			return nil, ErrEmailExists
 		}
-		if err := tx.Create(company).Error; err != nil {
-			return err
-		}
-		user := &models.CompanyUser{
-			CompanyID: company.ID,
-			Email:     emailAddr,
-			Password:  string(hashed),
-			Name:      name,
-			Role:      models.CompanyUserRoleOwner,
-		}
-		if err := tx.Create(user).Error; err != nil {
-			// 事前のメール検索と INSERT の間に同じアドレスが登録されると、
-			// 一意制約（1062）になる。TranslateError が無いのでここで重複に正規化する。
-			if isDuplicateEntryErr(err) {
-				return ErrEmailExists
-			}
-			return err
-		}
-		created = user
-		return nil
-	})
-	if err != nil {
 		return nil, err
 	}
 	return s.buildAuthResponse(created, true)
-}
-
-// isDuplicateEntryErr は MySQL の一意制約違反 (Error 1062) かどうか。
-func isDuplicateEntryErr(err error) bool {
-	var mysqlErr *mysql.MySQLError
-	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }
 
 func (s *CompanyUserService) AcceptInvite(req AcceptInviteRequest) (*AuthResponse, error) {

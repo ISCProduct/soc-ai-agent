@@ -12,13 +12,6 @@ package controllers_test
 // 実行: cd Backend && go test ./test/controllers/... -run "AdminCrawl|AdminInterview|Question|Schedule|CompanyEntry|CompanyRelation|ESReview|ESRewrite|GitHub" -v
 
 import (
-	"bytes"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-
-	"Backend/domain/entity"
 	admincontrollers "Backend/internal/controllers/admin"
 	chatcontrollers "Backend/internal/controllers/chat"
 	companycontrollers "Backend/internal/controllers/company"
@@ -28,6 +21,11 @@ import (
 	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
 	"Backend/internal/services/school"
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -80,7 +78,7 @@ func TestAdminInterviewController_ListVideos_SchoolAccessDenied(t *testing.T) {
 	sessionRepo := &mocks.InterviewSessionRepositoryMock{}
 	sessionRepo.On("FindByID", uint(5)).Return(&models.InterviewSession{ID: 5, UserID: 3}, nil)
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "u3@example.com", SchoolID: &otherSchoolID}, nil)
+	userRepo.On("GetUserByID", uint(3)).Return(&models.User{Email: "u3@example.com", SchoolID: &otherSchoolID}, nil)
 	schoolRepo := &mocks.SchoolRepositoryMock{}
 	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
 	// 対象学生の学園と一致する学校を返す（#1675 の学園一致検査を通す）。
@@ -106,7 +104,7 @@ func TestAdminInterviewController_ListVideos_SchoolAccessAllowed(t *testing.T) {
 	sessionRepo := &mocks.InterviewSessionRepositoryMock{}
 	sessionRepo.On("FindByID", uint(5)).Return(&models.InterviewSession{ID: 5, UserID: 3}, nil)
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "u3@example.com", SchoolID: &ownSchoolID}, nil)
+	userRepo.On("GetUserByID", uint(3)).Return(&models.User{Email: "u3@example.com", SchoolID: &ownSchoolID}, nil)
 	schoolRepo := &mocks.SchoolRepositoryMock{}
 	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
 	// 対象学生の学園と一致する学校を返す（#1675 の学園一致検査を通す）。担当校(1)と一致するので許可。
@@ -132,7 +130,7 @@ func TestAdminInterviewController_VideoURL_SchoolAccessDenied(t *testing.T) {
 	otherSchoolID := uint(99)
 	videoRepo.On("FindByID", mock.Anything, uint(7)).Return(&models.InterviewVideo{ID: 7, UserID: 3, Status: "done", DriveFileID: "f1"}, nil)
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "u3@example.com", SchoolID: &otherSchoolID}, nil)
+	userRepo.On("GetUserByID", uint(3)).Return(&models.User{Email: "u3@example.com", SchoolID: &otherSchoolID}, nil)
 	schoolRepo := &mocks.SchoolRepositoryMock{}
 	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
 	// 対象学生の学園と一致する学校を返す（#1675 の学園一致検査を通す）。

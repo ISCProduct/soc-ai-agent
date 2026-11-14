@@ -9,9 +9,9 @@ package application
 // ここで行う。遷移表と値の検証（UpdateStatus）は共通のものを使う。
 
 import (
+	"Backend/internal/models"
 	"fmt"
 
-	"Backend/domain/entity"
 	"Backend/internal/services/shared"
 )
 
@@ -35,7 +35,7 @@ var PortalPendingStatuses = []string{
 // 受け取った値を渡すと他社の応募が見える。
 func (s *ApplicationService) ListForCompanyPortal(
 	companyID uint, status string, limit, offset int,
-) ([]*entity.UserApplicationStatus, int64, error) {
+) ([]*models.UserApplicationStatus, int64, error) {
 	if companyID == 0 {
 		return nil, 0, shared.ErrForbidden
 	}
@@ -70,7 +70,7 @@ func (s *ApplicationService) CountStatusesForCompanyPortal(companyID uint) (map[
 // 呼び出し元は先に owner 権限を確認すること。ここでは企業スコープだけを見る。
 func (s *ApplicationService) UpdateStatusForCompanyPortal(
 	applicationID, companyID uint, status string, notes *string,
-) (*entity.UserApplicationStatus, error) {
+) (*models.UserApplicationStatus, error) {
 	if companyID == 0 {
 		return nil, shared.ErrForbidden
 	}

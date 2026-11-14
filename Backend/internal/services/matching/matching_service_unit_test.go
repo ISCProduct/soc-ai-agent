@@ -4,15 +4,15 @@ package matching_test
 // 実行: cd Backend && go test ./internal/services/... -run TestFormatTopUserScores -v
 
 import (
+	"Backend/internal/models"
 	"strings"
 	"testing"
 
-	"Backend/domain/entity"
 	"Backend/internal/services/matching"
 )
 
 func TestFormatTopUserScores(t *testing.T) {
-	scores := []entity.UserWeightScore{
+	scores := []models.UserWeightScore{
 		{WeightCategory: "成長志向", Score: 72},
 		{WeightCategory: "技術志向", Score: 90},
 		{WeightCategory: "チームワーク志向", Score: 81},
@@ -30,9 +30,9 @@ func TestFormatTopUserScores(t *testing.T) {
 
 func TestGenerateMatchReasonFallbackWhenAIClientNil(t *testing.T) {
 	svc := matching.NewMatchingServiceForTest()
-	match := &entity.UserCompanyMatch{
+	match := &models.UserCompanyMatch{
 		MatchScore: 88.5,
-		Company: &entity.Company{
+		Company: models.Company{
 			ID:           1,
 			Name:         "テスト株式会社",
 			Industry:     "IT",
@@ -44,7 +44,7 @@ func TestGenerateMatchReasonFallbackWhenAIClientNil(t *testing.T) {
 		TeamworkMatch:  90.0,
 		GrowthMatch:    92.0,
 	}
-	userScores := []entity.UserWeightScore{
+	userScores := []models.UserWeightScore{
 		{WeightCategory: "技術志向", Score: 88},
 		{WeightCategory: "成長志向", Score: 84},
 	}

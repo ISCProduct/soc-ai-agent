@@ -1,17 +1,16 @@
 package chat
 
 import (
+	"Backend/internal/models"
 	"errors"
 	"testing"
-
-	"Backend/domain/entity"
 
 	"gorm.io/gorm"
 )
 
 // mockWeightScoreRepo は updateCategoryScore のテスト用最小モック。
 type mockWeightScoreRepo struct {
-	findResult *entity.UserWeightScore
+	findResult *models.UserWeightScore
 	findErr    error
 	setCalled  bool
 	addCalled  bool
@@ -40,13 +39,13 @@ func (m *mockWeightScoreRepo) AddScoreWithPromptVersion(userID uint, sessionID, 
 	m.addVersion = promptVersion
 	return nil
 }
-func (m *mockWeightScoreRepo) FindByUserAndSession(userID uint, sessionID string) ([]entity.UserWeightScore, error) {
+func (m *mockWeightScoreRepo) FindByUserAndSession(userID uint, sessionID string) ([]models.UserWeightScore, error) {
 	return nil, nil
 }
-func (m *mockWeightScoreRepo) FindTopCategories(userID uint, sessionID string, limit int) ([]entity.UserWeightScore, error) {
+func (m *mockWeightScoreRepo) FindTopCategories(userID uint, sessionID string, limit int) ([]models.UserWeightScore, error) {
 	return nil, nil
 }
-func (m *mockWeightScoreRepo) FindByUserSessionAndCategory(userID uint, sessionID, category string) (*entity.UserWeightScore, error) {
+func (m *mockWeightScoreRepo) FindByUserSessionAndCategory(userID uint, sessionID, category string) (*models.UserWeightScore, error) {
 	return m.findResult, m.findErr
 }
 func (m *mockWeightScoreRepo) CountByUserAndSession(userID uint, sessionID string) (int64, error) {
@@ -84,7 +83,7 @@ func TestUpdateCategoryScore_CreatesOnRecordNotFound(t *testing.T) {
 }
 
 func TestUpdateCategoryScore_UpdatesExisting(t *testing.T) {
-	repo := &mockWeightScoreRepo{findResult: &entity.UserWeightScore{Score: 50}}
+	repo := &mockWeightScoreRepo{findResult: &models.UserWeightScore{Score: 50}}
 	s := &ChatService{userWeightScoreRepo: repo}
 
 	if err := s.updateCategoryScore(1, "session-1", "技術志向", 80, "v2"); err != nil {
@@ -103,7 +102,7 @@ func TestUpdateCategoryScore_UpdatesExisting(t *testing.T) {
 }
 
 func TestUpdateCategoryScore_UpdatesPromptVersionWhenScoreIsUnchanged(t *testing.T) {
-	repo := &mockWeightScoreRepo{findResult: &entity.UserWeightScore{Score: 50}}
+	repo := &mockWeightScoreRepo{findResult: &models.UserWeightScore{Score: 50}}
 	s := &ChatService{userWeightScoreRepo: repo}
 
 	if err := s.updateCategoryScore(1, "session-1", "技術志向", 50, "v2"); err != nil {
@@ -124,7 +123,7 @@ func TestUpdateCategoryScore_SkipsUpdateWhenScoreAndPromptVersionAreUnchanged(t 
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo := &mockWeightScoreRepo{findResult: &entity.UserWeightScore{Score: 50, PromptVersion: "v2"}}
+			repo := &mockWeightScoreRepo{findResult: &models.UserWeightScore{Score: 50, PromptVersion: "v2"}}
 			s := &ChatService{userWeightScoreRepo: repo}
 
 			if err := s.updateCategoryScore(1, "session-1", "技術志向", 50, tt.promptVersion); err != nil {

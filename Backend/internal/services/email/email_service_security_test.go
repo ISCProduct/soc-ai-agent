@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"Backend/domain/entity"
+	"Backend/internal/models"
 )
 
 // newEmailServiceForTest は log プロバイダでテスト用の EmailService を返す
@@ -27,7 +27,7 @@ func TestSendVerificationEmail_EscapesUserName(t *testing.T) {
 	svc := newEmailServiceForTest()
 
 	// XSSペイロードを含む名前
-	user := &entity.User{
+	user := &models.User{
 		Name:  `<script>alert("xss")</script>`,
 		Email: "user@example.com",
 	}
@@ -53,7 +53,7 @@ func TestSendVerificationEmail_EscapesUserName(t *testing.T) {
 func TestSendReVerificationEmail_EscapesUserName(t *testing.T) {
 	svc := newEmailServiceForTest()
 
-	user := &entity.User{
+	user := &models.User{
 		Name:  `Alice & <b>Bob</b>`,
 		Email: "user@example.com",
 	}
