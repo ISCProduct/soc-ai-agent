@@ -383,6 +383,8 @@ function InterviewContent() {
         onSendEmail={session.sendReportEmail}
         onRetryReport={() => { void session.retryReportPolling() }}
         reportRetryError={session.reportRetryError}
+        reportProgress={session.reportProgress}
+        reportFailedByServer={session.reportFailedByServer}
         finishFailed={session.finishFailed}
         onRetryFinish={session.retryFinish}
         utteranceSaveFailed={session.utteranceSaveFailed}

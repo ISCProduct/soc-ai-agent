@@ -4,6 +4,7 @@ import Link from 'next/link'
 import {
   Box,
   Button,
+  CircularProgress,
   IconButton,
   LinearProgress,
   Paper,
@@ -13,6 +14,8 @@ import {
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import HistoryIcon from '@mui/icons-material/History'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
 import { InterviewReport, InterviewSession } from '@/lib/interview'
 import InterviewSummary from './InterviewSummary'
 import ScoreUpdateBanner, { WeightScore } from '@/components/feedback/ScoreUpdateBanner'
@@ -20,6 +23,7 @@ import { ErrorAlert } from '@/components/common/ErrorAlert'
 
 import { UTTERANCE_SAVE_FAILED_MESSAGE } from '../utteranceSave'
 import type { ReportStatus } from '../hooks/useInterviewSession'
+import { REPORT_STAGE_STEPS, type ReportProgressView } from '../reportProgress'
 import {
   GUEST_EMAIL_DISABLED_REASON,
   GUEST_REGISTER_CTA_LABEL,
@@ -31,6 +35,10 @@ export interface ReportScreenProps {
   onBack: () => void
   errorMessage: string | null
   reportStatus: ReportStatus
+  /** 生成の段階・%。バックエンドが返さない間は null（従来の不定表示） */
+  reportProgress?: ReportProgressView | null
+  /** サーバーが「失敗」と確定したか（タイムアウト・通信失敗とは文言を分ける） */
+  reportFailedByServer?: boolean
   report: InterviewReport | null
   scoresBefore: WeightScore[] | null
   scoresAfter: WeightScore[] | null
@@ -70,6 +78,8 @@ export default function ReportScreen({
   onBack,
   errorMessage,
   reportStatus,
+  reportProgress,
+  reportFailedByServer,
   report,
   scoresBefore,
   scoresAfter,
@@ -132,8 +142,12 @@ export default function ReportScreen({
 
         {reportStatus === 'pending' && (
           <Paper sx={{ bgcolor: UI.nightPanel, border: '1px solid rgba(255,255,255,0.08)', p: 3, borderRadius: 2 }}>
-            <Typography sx={{ color: UI.nightInk, mb: 1.5 }}>レポートを生成中です...</Typography>
-            <LinearProgress sx={{ bgcolor: '#3c4043', '& .MuiLinearProgress-bar': { bgcolor: '#4285f4' } }} />
+            {reportProgress ? <ReportProgressCard view={reportProgress} /> : (
+              <>
+                <Typography sx={{ color: UI.nightInk, mb: 1.5 }}>レポートを生成中です...</Typography>
+                <LinearProgress sx={{ bgcolor: '#3c4043', '& .MuiLinearProgress-bar': { bgcolor: '#4285f4' } }} />
+              </>
+            )}
           </Paper>
         )}
 
@@ -184,9 +198,11 @@ export default function ReportScreen({
         {(reportStatus === 'error' || reportStatus === 'timeout') && (
           <Paper sx={{ bgcolor: UI.nightPanel, border: '1px solid rgba(234,67,53,0.3)', p: 3, borderRadius: 2 }}>
             <Typography variant="body2" sx={{ color: '#f28b82', mb: onRetryReport ? 2 : 0 }}>
-              {reportStatus === 'timeout'
-                ? 'レポート生成がタイムアウトしました。時間をおいて再試行してください。'
-                : 'レポート生成に失敗しました。'}
+              {reportFailedByServer
+                ? 'レポートを作れませんでした。回答はすべて保存されています。もう一度試すと、最初から作り直します。'
+                : reportStatus === 'timeout'
+                  ? 'レポート生成がタイムアウトしました。時間をおいて再試行してください。'
+                  : 'レポート生成に失敗しました。'}
             </Typography>
             {onRetryReport && (
               <Button
@@ -194,7 +210,7 @@ export default function ReportScreen({
                 onClick={onRetryReport}
                 sx={{ bgcolor: UI.mark, '&:hover': { bgcolor: '#d14f10' } }}
               >
-                再試行
+                {reportFailedByServer ? 'もう一度試す' : '再試行'}
               </Button>
             )}
             {/* 再試行そのものが失敗したなら、生成中に戻さずここで知らせる（#1476） */}
@@ -226,5 +242,47 @@ export default function ReportScreen({
         )}
       </Box>
     </Box>
+  )
+}
+
+/** 段階リスト＋全体の%。状態は色だけでなくアイコンと文言でも示す */
+function ReportProgressCard({ view }: { view: ReportProgressView }) {
+  const current = REPORT_STAGE_STEPS.findIndex((s) => s.stage === view.stage)
+  return (
+    <Stack spacing={2}>
+      <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <Typography sx={{ color: UI.nightInk, fontWeight: 700 }}>レポートを作っています</Typography>
+        <Typography sx={{ color: UI.mark, fontWeight: 700, fontSize: 26 }}>{view.percent}%</Typography>
+      </Box>
+      <LinearProgress
+        variant="determinate"
+        value={view.percent}
+        aria-label="レポート作成の進み具合"
+        sx={{ height: 8, borderRadius: 4, bgcolor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { bgcolor: UI.mark } }}
+      />
+      <Stack component="ul" spacing={1} sx={{ listStyle: 'none', m: 0, p: 0 }}>
+        {REPORT_STAGE_STEPS.map((step, i) => {
+          const done = current < 0 ? view.stage === 'done' : i < current
+          const active = i === current
+          return (
+            <Box component="li" key={step.stage} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              {done ? <CheckCircleIcon fontSize="small" sx={{ color: '#34a853' }} />
+                : active ? <CircularProgress size={18} sx={{ color: UI.mark, mx: '1px' }} />
+                : <RadioButtonUncheckedIcon fontSize="small" sx={{ color: UI.nightMuted }} />}
+              <Typography variant="body2" sx={{ color: active ? UI.nightInk : UI.nightSoft, flex: 1 }}>{step.label}</Typography>
+              <Typography variant="caption" sx={{ color: UI.nightMuted }}>{done ? '完了' : active ? '進行中' : '待機中'}</Typography>
+            </Box>
+          )
+        })}
+      </Stack>
+      {view.stage === 'generating' && (
+        <Typography variant="caption" sx={{ color: UI.nightMuted }}>分析中の%は、進み具合の目安です</Typography>
+      )}
+      {view.stalled && (
+        <Typography role="status" variant="body2" sx={{ color: '#fdd663' }}>
+          いつもより時間がかかっています。このまま待つか、あとでもう一度開いてください。回答は保存されています。
+        </Typography>
+      )}
+    </Stack>
   )
 }
