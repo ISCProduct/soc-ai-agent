@@ -1,19 +1,17 @@
 package insight_test
 
 import (
-	"bytes"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-
-	"Backend/domain/entity"
 	"Backend/internal/controllers/insight"
 	"Backend/internal/controllers/mocks"
 	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
 	"Backend/internal/services/school"
 	"Backend/internal/services/teacher"
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
 
 	"github.com/labstack/echo/v4"
 )
@@ -29,9 +27,9 @@ func (s *guidanceStoreStub) FindByIDForStudent(uint, uint) (*models.TeacherStude
 }
 func (s *guidanceStoreStub) Dismiss(uint, uint) error { return nil }
 
-type studentStub struct{ user *entity.User }
+type studentStub struct{ user *models.User }
 
-func (s studentStub) GetUserByID(uint) (*entity.User, error) { return s.user, nil }
+func (s studentStub) GetUserByID(uint) (*models.User, error) { return s.user, nil }
 
 // 面談記録の作成は書き込みなので、学園をまたいだ対象には絶対に通してはいけない（#1675）。
 // 担当校(5)に在籍しているように見えても、学校の学園(1)と生徒の学園(9)が違えば拒否する。
@@ -44,8 +42,8 @@ func TestTeacherGuidanceController_Create_RejectsCrossOrganizationStudent(t *tes
 		schoolOrg = uint(1)
 	)
 	sid := schoolID
-	student := &entity.User{
-		ID: studentID, Role: entity.UserRoleStudent,
+	student := &models.User{
+		ID: studentID, Role: models.UserRoleStudent,
 		OrganizationID: 9, // 学校の学園(1)と違う
 		SchoolID:       &sid,
 	}

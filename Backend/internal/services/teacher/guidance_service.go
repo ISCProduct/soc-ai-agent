@@ -1,15 +1,13 @@
 package teacher
 
 import (
+	"Backend/internal/models"
 	"Backend/internal/services/notification"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
-
-	"Backend/domain/entity"
-	"Backend/internal/models"
 )
 
 const (
@@ -34,7 +32,7 @@ type GuidanceStore interface {
 
 // StudentByID は生徒1件の取得面（学校スコープ検証用）。
 type StudentByID interface {
-	GetUserByID(id uint) (*entity.User, error)
+	GetUserByID(id uint) (*models.User, error)
 }
 
 type GuidanceService struct {

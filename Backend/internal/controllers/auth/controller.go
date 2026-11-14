@@ -234,6 +234,25 @@ func (c *AuthController) RequestPasswordReset(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "パスワードリセットメールを送信しました"})
 }
 
+// ResendVerification POST /api/auth/resend-verification
+// メール認証の期限切れ・未着のとき、未認証のユーザーが認証メールを再送してもらう。
+func (c *AuthController) ResendVerification(ctx echo.Context) error {
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := ctx.Bind(&body); err != nil {
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
+	}
+
+	// 結果にかかわらず、常に同じ応答を返す(アカウントの有無・認証済みか否かを漏らさない)。
+	// サーバー側の失敗はログに残して握りつぶす。
+	if err := c.authService.ResendVerificationEmail(body.Email); err != nil {
+		log.Printf("[AuthController] resend verification failed: %v", err)
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]string{"message": "該当するアカウントがある場合は、認証メールを送信しました。届かない場合は、迷惑メールフォルダもご確認ください。"})
+}
+
 // ResetPassword POST /api/auth/reset-password
 func (c *AuthController) ResetPassword(ctx echo.Context) error {
 	var body struct {

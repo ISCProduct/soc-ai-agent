@@ -13,8 +13,8 @@
 - Live2D Cubism Editor 5.3.04 FREE のインストールと起動確認
 - 男性の 2048 PNG を Cubism のアートメッシュとして取り込み確認
 - `~/Desktop/Untitled Model.cmo3` の実ファイルとCubism 5.3.04での再オープンを確認
-- 編集用バックアップを `docs/avatar/live2d-interviewers/cubism-wip/` へ保存
-- 男性・女性の `.cmo3` を保存
+- 編集用の `.cmo3` は Git には入れず、S3 の `live2d-authoring/` に置く。取得は `make live2d-authoring`（`docs/wiki/live2d-assets.md` 参照）
+- 男性・女性の `.cmo3` を保存（ローカルの `cubism-wip/` は上記コマンドで展開する）
 - 男性・女性の正規 `.moc3`、`.model3.json`、`.cdi3.json`、テクスチャを書き出し
 - 男女とも `ParamMouthOpenY` を LipSync グループに登録
 - 男女とも `ParamEyeLOpen` / `ParamEyeROpen` を EyeBlink グループに登録

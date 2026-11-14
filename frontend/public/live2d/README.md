@@ -32,7 +32,8 @@ frontend/public/live2d/
 ├── README.md                     ← 追跡する
 ├── shaders/                      ← 追跡する（Framework付属・再配布可、SDKからコピー済み）
 ├── interviewers/
-│   ├── source/ cubism-input/ *.md ← 追跡する（元素材とドキュメント）
+│   ├── *.md                      ← 追跡する（ドキュメント）
+│   ├── source/ cubism-input/     ← S3から展開（Git管理外・制作用）
 │   ├── male/                     ← S3から展開（Git管理外）
 │   │   ├── male-interviewer.model3.json
 │   │   ├── male-interviewer.moc3

@@ -64,6 +64,8 @@ UserCompanyMatch（総合マッチ度 0-100）
 
 ### データ構造（`UserWeightScore`）
 
+保存する型は `internal/models.UserWeightScore`（json タグは `id` / `user_id` / `category` …）。API 応答には、キーを Go のフィールド名のまま出す `models.UserWeightScoreResponse` に変換して返す（`api/openapi.yaml` の `UserWeightScore`）。以下は応答の形。
+
 ```go
 type UserWeightScore struct {
     ID             uint
