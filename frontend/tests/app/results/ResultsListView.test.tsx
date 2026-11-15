@@ -3,7 +3,7 @@
  */
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import ResultsListView from '@/app/results/components/ResultsListView'
-import type { Company } from '@/app/results/types'
+import type { CategoryScores, Company } from '@/app/results/types'
 
 const sampleCompany: Company = {
   id: '1',
@@ -20,8 +20,28 @@ const sampleCompany: Company = {
   isApplied: false,
 }
 
+const axisScores: CategoryScores = {
+  technical: 10, teamwork: 95, leadership: 10, creativity: 10, stability: 10,
+  growth: 97, work_life: 10, challenge: 77, detail: 10, communication: 10,
+}
+
+/** jsdom には matchMedia が無いので、min-width クエリを desktop かどうかで答える */
+function setDesktop(desktop: boolean) {
+  window.matchMedia = ((query: string) => ({
+    matches: desktop && query.includes('min-width'),
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    onchange: null,
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia
+}
+
 describe('ResultsListView', () => {
   const noop = () => {}
+  beforeEach(() => setDesktop(true))
 
   function renderList(overrides: Partial<React.ComponentProps<typeof ResultsListView>> = {}) {
     return render(
@@ -84,8 +104,8 @@ describe('ResultsListView', () => {
   it('他より根拠が薄い行にだけ印を出す', () => {
     renderList({
       companies: [
-        { ...sampleCompany, matchedAxisCount: 9 },
-        { ...sampleCompany, id: '2', name: '根拠が薄い株式会社', matchedAxisCount: 6 },
+        { ...sampleCompany, matchedAxisCount: 9, categoryScores: axisScores },
+        { ...sampleCompany, id: '2', name: '根拠が薄い株式会社', matchedAxisCount: 6, categoryScores: axisScores },
       ],
     })
     expect(screen.getByText(/根拠 6軸/)).toBeInTheDocument()
@@ -107,22 +127,117 @@ describe('ResultsListView', () => {
     expect(screen.queryByRole('button', { name: '再読み込み' })).not.toBeInTheDocument()
   })
 
-  it('CTA行はflexWrapで折り返し、狭い画面でもボタンがはみ出さない', () => {
-    renderList()
-    const ctaButton = screen.getByRole('button', { name: 'ES添削・リライト' })
-    // Stack(direction="row") の直下の行コンテナに flexWrap が効いていること
-    const ctaRow = ctaButton.closest('.MuiStack-root')
-    expect(ctaRow).toHaveStyle({ flexWrap: 'wrap' })
+  it('「その他」メニューから関連企業・ES添削へ遷移し、行の詳細は開かない', () => {
+    const onNavigate = jest.fn()
+    const onSelectCompany = jest.fn()
+    renderList({ onNavigate, onSelectCompany })
+
+    fireEvent.click(screen.getByRole('button', { name: /のその他の操作/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'ES添削・リライト' }))
+    expect(onNavigate).toHaveBeenCalledWith(expect.stringMatching(/^\/es-rewrite\?company_name=/))
+
+    fireEvent.click(screen.getByRole('button', { name: /のその他の操作/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '関連企業を見る' }))
+    expect(onNavigate).toHaveBeenCalledWith('/correlation-diagram?company_id=1')
+    expect(onSelectCompany).not.toHaveBeenCalled()
   })
 
-  it('「ES添削・リライト」CTAはラベルどおり /es-rewrite へ企業名付きで遷移する', () => {
+  it('「面接を練習する」は /interview へ遷移し、行の詳細は開かない', () => {
     const onNavigate = jest.fn()
-    renderList({ onNavigate })
+    const onSelectCompany = jest.fn()
+    renderList({ onNavigate, onSelectCompany })
 
-    fireEvent.click(screen.getByRole('button', { name: 'ES添削・リライト' }))
-    expect(onNavigate).toHaveBeenCalledWith(
-      expect.stringMatching(/^\/es-rewrite\?company_name=/),
-    )
+    fireEvent.click(screen.getByRole('button', { name: '面接を練習する' }))
+    expect(onNavigate).toHaveBeenCalledWith(expect.stringMatching(/^\/interview\?company_id=1/))
+    expect(onSelectCompany).not.toHaveBeenCalled()
+  })
+
+  it('タブで お気に入り / 応募済み に絞り込める。0件なら案内を出す', () => {
+    renderList({
+      companies: [
+        { ...sampleCompany, name: 'A社', isFavorited: true },
+        { ...sampleCompany, id: '2', name: 'B社', isApplied: true },
+        { ...sampleCompany, id: '3', name: 'C社' },
+      ],
+    })
+    expect(screen.getByRole('tab', { name: 'すべて 3' })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.click(screen.getByRole('tab', { name: 'お気に入り 1' }))
+    expect(screen.getByText('A社')).toBeInTheDocument()
+    expect(screen.queryByText('B社')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '応募済み 1' }))
+    expect(screen.getByText('B社')).toBeInTheDocument()
+    expect(screen.queryByText('A社')).not.toBeInTheDocument()
+  })
+
+  it('絞り込み結果が0件のとき「該当する企業がありません」を出す', () => {
+    renderList()
+    fireEvent.click(screen.getByRole('tab', { name: 'お気に入り 0' }))
+    expect(screen.getByText('該当する企業がありません')).toBeInTheDocument()
+  })
+
+  it('噛み合った軸を上位3つ表示する。categoryScores が無ければ出さない', () => {
+    renderList({ companies: [{ ...sampleCompany, categoryScores: axisScores }] })
+    expect(screen.getByText('噛み合った軸')).toBeInTheDocument()
+    expect(screen.getByText('成長意欲 97')).toBeInTheDocument()
+    expect(screen.getByText('チームワーク 95')).toBeInTheDocument()
+    expect(screen.getByText('挑戦意欲 77')).toBeInTheDocument()
+  })
+
+  it('categoryScores が無い行には「噛み合った軸」を出さない', () => {
+    renderList()
+    expect(screen.queryByText('噛み合った軸')).not.toBeInTheDocument()
+  })
+
+  it('50未満の軸があるとき、最低の軸名でチャットへ戻る導線を出す', () => {
+    const onBack = jest.fn()
+    renderList({ analysisScores: { job: 100, interest: 100, aptitude: 55, future: 20 }, scoreComment: 'コメント', onBack })
+    fireEvent.click(screen.getByRole('button', { name: /チャットで将来の話を続ける/ }))
+    expect(onBack).toHaveBeenCalledTimes(1)
+  })
+
+  it('全軸が50以上なら続ける導線を出さない', () => {
+    renderList({ analysisScores: { job: 80, interest: 80, aptitude: 80, future: 80 }, scoreComment: 'コメント' })
+    expect(screen.queryByRole('button', { name: /の話を続ける/ })).not.toBeInTheDocument()
+  })
+
+  it('向いていそうな職種は、コメントも職種も無ければ出さない', () => {
+    renderList()
+    expect(screen.queryByText('向いていそうな職種')).not.toBeInTheDocument()
+    renderList({ suggestedRoles: [{ title: 'データ基盤エンジニア', reason: '粘り強さ' }] })
+    expect(screen.getByText('データ基盤エンジニア')).toBeInTheDocument()
+  })
+
+  it('ゲストはメール送信と選考管理が無効になる', () => {
+    renderList({ isGuestUser: true })
+    expect(screen.getByRole('button', { name: '結果をメールで受け取る' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '選考管理を見る' })).toBeDisabled()
+  })
+
+  describe('SP', () => {
+    beforeEach(() => setDesktop(false))
+
+    it('「どこまで聞けているか」は閉じており、開閉でき、閉じていても軸の値が見える', () => {
+      renderList({
+        analysisScores: { job: 100, interest: 100, aptitude: 55, future: 20 },
+        scoreComment: 'コメント',
+        suggestedRoles: [{ title: 'データ基盤エンジニア', reason: '粘り強さ' }],
+      })
+      const toggle = screen.getByRole('button', { name: 'どこまで聞けているか' })
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.getByText('将来 20')).toBeInTheDocument()
+      expect(screen.queryByText('データ基盤エンジニア')).not.toBeInTheDocument()
+
+      fireEvent.click(toggle)
+      expect(toggle).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByText('データ基盤エンジニア')).toBeInTheDocument()
+    })
+
+    it('メール送信ボタンは1つだけ出る', () => {
+      renderList()
+      expect(screen.getAllByRole('button', { name: '結果をメールで受け取る' })).toHaveLength(1)
+    })
   })
 
   it('応募成功snackbarに選考管理(/applications)へのリンクがある', () => {
