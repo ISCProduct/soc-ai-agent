@@ -1,8 +1,8 @@
 package auth
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/config"
+	"Backend/internal/models"
 	"Backend/internal/services/refreshtoken"
 	"crypto/rand"
 	"encoding/base64"
@@ -146,7 +146,7 @@ func (s *AuthService) CreateGuestUser(tenantOrgID uint) (*AuthResponse, error) {
 	}
 	guestID := base64.URLEncoding.EncodeToString(randomBytes)
 
-	user := &entity.User{
+	user := &models.User{
 		Email:          fmt.Sprintf("guest_%s@%s", guestID, config.GuestEmailDomain()),
 		Password:       "", // ゲストユーザーはパスワード不要
 		Name:           fmt.Sprintf("Guest_%s", guestID[:8]),

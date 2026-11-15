@@ -1,13 +1,13 @@
 package matching
 
 import (
-	"Backend/domain/entity"
+	"Backend/internal/models"
 	"strings"
 	"testing"
 )
 
 func TestFormatTopUserScores(t *testing.T) {
-	scores := []entity.UserWeightScore{
+	scores := []models.UserWeightScore{
 		{WeightCategory: "成長志向", Score: 72},
 		{WeightCategory: "技術志向", Score: 90},
 		{WeightCategory: "チームワーク志向", Score: 81},
@@ -25,9 +25,9 @@ func TestFormatTopUserScores(t *testing.T) {
 
 func TestGenerateMatchReasonFallbackWhenAIClientNil(t *testing.T) {
 	svc := &MatchingService{aiClient: nil}
-	match := &entity.UserCompanyMatch{
+	match := &models.UserCompanyMatch{
 		MatchScore: 88.5,
-		Company: &entity.Company{
+		Company: models.Company{
 			ID:           1,
 			Name:         "テスト株式会社",
 			Industry:     "IT",
@@ -39,7 +39,7 @@ func TestGenerateMatchReasonFallbackWhenAIClientNil(t *testing.T) {
 		TeamworkMatch:  90.0,
 		GrowthMatch:    92.0,
 	}
-	userScores := []entity.UserWeightScore{
+	userScores := []models.UserWeightScore{
 		{WeightCategory: "技術志向", Score: 88},
 		{WeightCategory: "成長志向", Score: 84},
 	}
@@ -62,9 +62,9 @@ func TestGenerateMatchReason_DefaultSkipsAI(t *testing.T) {
 		t.Fatal("AI should be off by default")
 	}
 	svc := &MatchingService{aiClient: nil}
-	match := &entity.UserCompanyMatch{
+	match := &models.UserCompanyMatch{
 		MatchScore: 70,
-		Company: &entity.Company{
+		Company: models.Company{
 			ID: 2, Name: "DBのみ株式会社", Industry: "SI", MainBusiness: "受託開発",
 		},
 	}

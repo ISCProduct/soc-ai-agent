@@ -1,13 +1,11 @@
 package interview_test
 
 import (
-	"errors"
-	"testing"
-
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"Backend/internal/services/email"
 	"Backend/internal/services/interview"
+	"errors"
+	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -71,7 +69,7 @@ func TestSendReportEmail_Success(t *testing.T) {
 			EvidenceJSON: `{"logic":"根拠"}`,
 		},
 	}
-	userRepo := &mockUserRepo2{user: &entity.User{ID: 1, Name: "山田太郎", Email: "yamada@example.com"}}
+	userRepo := &mockUserRepo2{user: &models.User{ID: 1, Name: "山田太郎", Email: "yamada@example.com"}}
 	svc := interview.NewInterviewService(sessionRepo, &mockInterviewUtterRepo{}, reportRepo, userRepo, &email.EmailService{}, nil, nil)
 
 	err := svc.SendReportEmail(1, 1)

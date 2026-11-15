@@ -1,11 +1,9 @@
 package auth
 
 import (
+	"Backend/internal/models"
 	"testing"
 	"time"
-
-	"Backend/domain/entity"
-	"Backend/internal/models"
 )
 
 // orgScopedSchoolRepo は学園で絞って学校名を引く最小実装。
@@ -48,7 +46,7 @@ func (r *orgScopedSchoolRepo) ListApprovedCompanyIDs(uint) ([]uint, error)      
 // 混ざる（#1675 のテナント越境）。学園を跨いだ解決は許さない。
 func TestUpdateProfile_SchoolNameDoesNotResolveAcrossOrganizations(t *testing.T) {
 	now := time.Now()
-	user := &entity.User{
+	user := &models.User{
 		ID:              1,
 		Email:           "student@example.com",
 		Name:            "学生",
@@ -111,7 +109,7 @@ func TestRegister_GuestPromotionResolvesWithinGuestOrganization(t *testing.T) {
 	now := time.Now()
 	existing := uint(101)
 	// ゲストはメール未設定（既存ユーザー扱いにならないようにする）。
-	guest := &entity.User{
+	guest := &models.User{
 		ID:              5,
 		Name:            "ゲスト",
 		IsGuest:         true,

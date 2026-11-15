@@ -36,6 +36,7 @@ type mockAuthService struct {
 	verifyEmailFn         func(token string) error
 	createGuestFn         func(tenantOrgID uint) (*auth.AuthResponse, error)
 	deleteAccountFn       func(userID uint) error
+	resendVerificationFn  func(email string) error
 }
 
 func (m *mockAuthService) Register(req auth.RegisterRequest, tenantOrgID uint, promoteGuestUserID uint) (*auth.AuthResponse, error) {
@@ -70,6 +71,9 @@ func (m *mockAuthService) DeleteAccount(userID uint) error {
 	return m.deleteAccountFn(userID)
 }
 func (m *mockAuthService) RequestPasswordReset(_ string) error { return nil }
+func (m *mockAuthService) ResendVerificationEmail(email string) error {
+	return m.resendVerificationFn(email)
+}
 
 // ── テスト共通セットアップ ─────────────────────────────────────────────────────
 

@@ -293,7 +293,7 @@ components:
         10カテゴリの重みスコア。
 
         **キーが Go のフィールド名のままになっている。**
-        `domain/entity.UserWeightScore` を直接 JSON 化しており、同型に json タグが
+        応答用の型 `models.UserWeightScoreResponse` を JSON 化しており、同型に json タグが
         無いため `id` や `user_id` ではなく `ID` / `UserID` が返る。
         snake_case を前提に生成したクライアントは値を取得できない。
       properties:
@@ -765,6 +765,32 @@ paths:
       responses:
         "200": { description: 確認した }
         "400": { description: トークンが無効か期限切れ }
+
+  /api/auth/resend-verification:
+    post:
+      tags: [auth]
+      summary: メール認証のメールを再送する
+      description: |
+        メール認証の期限（24 時間）が切れた、またはメールが届かなかったときに、未認証のユーザーが新しいトークンを受け取る。
+        新しいトークンを発行して、前のトークンは使えなくなる。
+        アカウントの有無・認証済みか否かにかかわらず、常に同じ 200 を返す（存在を伏せる）。
+        IP 単位とメールアドレス単位のレート制限がかかる。メールアドレス単位の上限を超えたときも 200 を返し、メールは送らない。
+        メールアドレスの形式が不正、または 254 文字を超える場合も、200 を返し、何もしない。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      security: []
+      responses:
+        "200": { description: 受け付けた（該当するアカウントがある場合だけ、メールが届く） }
+        "400": { description: リクエストボディが不正 }
+        "413": { description: リクエストボディが 4KB を超えている }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/auth/forgot-password:
     post:

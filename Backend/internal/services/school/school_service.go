@@ -1,7 +1,6 @@
 package school
 
 import (
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"errors"
@@ -26,7 +25,7 @@ var (
 
 // UserReader は担当校割当の学園一致チェックに使う最小のユーザー参照（#1675）。
 type UserReader interface {
-	GetUserByID(id uint) (*entity.User, error)
+	GetUserByID(id uint) (*models.User, error)
 }
 
 // SchoolService は学園(Organization)配下の個別校・担当管理者・企業掲載承認リストを管理する。

@@ -1,14 +1,14 @@
 package auth
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/middleware"
+	"Backend/internal/models"
 	"os"
 )
 
 // attachAuthTokens はログイン済みユーザー向けの HMAC トークンを resp に付与する。
 // includeRefresh が true のときのみ refresh_token を発行する（GetUser では不要）。
-func (s *AuthService) attachAuthTokens(resp *AuthResponse, user *entity.User, includeRefresh bool) {
+func (s *AuthService) attachAuthTokens(resp *AuthResponse, user *models.User, includeRefresh bool) {
 	adminSecret := os.Getenv("ADMIN_SECRET")
 	userSecret := os.Getenv("USER_SECRET")
 	// 職員ロール（role=staff）の判定を返す。ログイン後にチャットを出さず

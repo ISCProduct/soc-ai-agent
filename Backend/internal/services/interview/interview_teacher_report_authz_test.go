@@ -1,23 +1,21 @@
 package interview
 
 import (
-	"errors"
-	"testing"
-
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
+	"errors"
+	"testing"
 )
 
 // roleUserRepoStub は actor ごとの User を返すだけのスタブ（#1814）。
 // 登録のない ID は DB エラー扱いにして fail-close を検証できるようにする。
 type roleUserRepoStub struct {
 	repository.UserRepository
-	users map[uint]*entity.User
+	users map[uint]*models.User
 }
 
-func (r roleUserRepoStub) GetUserByID(id uint) (*entity.User, error) {
+func (r roleUserRepoStub) GetUserByID(id uint) (*models.User, error) {
 	if u, ok := r.users[id]; ok {
 		return u, nil
 	}
@@ -35,26 +33,26 @@ func TestTeacherReportVisibility(t *testing.T) {
 		sessionID = uint(10)
 		secret    = `{"coaching":"secret"}`
 	)
-	owner := &entity.User{ID: ownerID, Role: models.UserRoleStudent}
-	staffOwner := &entity.User{ID: 2, Role: models.UserRoleStaff}
-	admin := &entity.User{ID: 3, Role: models.UserRoleStudent, IsAdmin: true}
+	owner := &models.User{ID: ownerID, Role: models.UserRoleStudent}
+	staffOwner := &models.User{ID: 2, Role: models.UserRoleStaff}
+	admin := &models.User{ID: 3, Role: models.UserRoleStudent, IsAdmin: true}
 
 	tests := []struct {
 		name       string
 		session    uint // セッション所有者
 		actor      uint
-		users      map[uint]*entity.User
+		users      map[uint]*models.User
 		wantSecret bool
 		wantErr    error
 	}{
-		{"生徒本人には教員用レポートを返さない", ownerID, ownerID, map[uint]*entity.User{ownerID: owner}, false, nil},
-		{"職員本人には教員用レポートを返す", 2, 2, map[uint]*entity.User{2: staffOwner}, true, nil},
-		{"管理者には教員用レポートを返す", ownerID, 3, map[uint]*entity.User{ownerID: owner, 3: admin}, true, nil},
-		{"ユーザーを引けない本人には返さない(fail-close)", ownerID, ownerID, map[uint]*entity.User{}, false, nil},
-		{"ユーザーがnilでも本人には返さない(fail-close)", ownerID, ownerID, map[uint]*entity.User{ownerID: nil}, false, nil},
-		{"管理者かつ職員でも返す", 4, 4, map[uint]*entity.User{4: {ID: 4, Role: models.UserRoleStaff, IsAdmin: true}}, true, nil},
-		{"旧データの teacher 値だけでは返さない", 5, 5, map[uint]*entity.User{5: {ID: 5, Role: "teacher"}}, false, nil},
-		{"他人のセッションは403", ownerID, 9, map[uint]*entity.User{9: {ID: 9, Role: models.UserRoleStudent}}, false, shared.ErrForbidden},
+		{"生徒本人には教員用レポートを返さない", ownerID, ownerID, map[uint]*models.User{ownerID: owner}, false, nil},
+		{"職員本人には教員用レポートを返す", 2, 2, map[uint]*models.User{2: staffOwner}, true, nil},
+		{"管理者には教員用レポートを返す", ownerID, 3, map[uint]*models.User{ownerID: owner, 3: admin}, true, nil},
+		{"ユーザーを引けない本人には返さない(fail-close)", ownerID, ownerID, map[uint]*models.User{}, false, nil},
+		{"ユーザーがnilでも本人には返さない(fail-close)", ownerID, ownerID, map[uint]*models.User{ownerID: nil}, false, nil},
+		{"管理者かつ職員でも返す", 4, 4, map[uint]*models.User{4: {ID: 4, Role: models.UserRoleStaff, IsAdmin: true}}, true, nil},
+		{"旧データの teacher 値だけでは返さない", 5, 5, map[uint]*models.User{5: {ID: 5, Role: "teacher"}}, false, nil},
+		{"他人のセッションは403", ownerID, 9, map[uint]*models.User{9: {ID: 9, Role: models.UserRoleStudent}}, false, shared.ErrForbidden},
 	}
 
 	for _, tt := range tests {

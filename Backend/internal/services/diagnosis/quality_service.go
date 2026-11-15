@@ -1,7 +1,6 @@
 package diagnosis
 
 import (
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -120,12 +119,12 @@ func (s *QualityService) RunDiagnosisQuality(ctx context.Context, userID uint, s
 	return nil
 }
 
-func measuredAxisCount(scores []entity.UserWeightScore) int {
+func measuredAxisCount(scores []models.UserWeightScore) int {
 	// マッチングと同じく「行がある＝計測済み」（値0も含む）
 	return len(scores)
 }
 
-func heuristicFlags(scores []entity.UserWeightScore, matches []*entity.UserCompanyMatch) []string {
+func heuristicFlags(scores []models.UserWeightScore, matches []*models.UserCompanyMatch) []string {
 	var flags []string
 	measured := measuredAxisCount(scores)
 	if measured == 0 {
@@ -218,7 +217,7 @@ func chatEvidenceFlags(messages []models.ChatMessage) (flags []string, stats map
 	return flags, stats
 }
 
-func heuristicConfidence(scores []entity.UserWeightScore, flags []string) int {
+func heuristicConfidence(scores []models.UserWeightScore, flags []string) int {
 	measured := measuredAxisCount(scores)
 	base := measured * 10
 	if base > 100 {
@@ -279,9 +278,9 @@ func minInt(a, b int) int {
 
 func (s *QualityService) evaluateWithLLM(
 	ctx context.Context,
-	scores []entity.UserWeightScore,
+	scores []models.UserWeightScore,
 	messages []models.ChatMessage,
-	matches []*entity.UserCompanyMatch,
+	matches []*models.UserCompanyMatch,
 ) (*qualityLLMResult, error) {
 	var scoreLines []string
 	for _, sc := range scores {

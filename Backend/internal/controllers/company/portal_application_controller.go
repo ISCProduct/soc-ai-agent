@@ -8,12 +8,12 @@ package company
 // 404 にすると「そのIDが存在するか」が漏れる（#1156）。
 
 import (
+	"Backend/internal/models"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 
-	"Backend/domain/entity"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/services/shared"
@@ -26,10 +26,10 @@ import (
 const newCandidateWindowDays = 7
 
 type portalApplicationLister interface {
-	ListForCompanyPortal(companyID uint, status string, limit, offset int) ([]*entity.UserApplicationStatus, int64, error)
+	ListForCompanyPortal(companyID uint, status string, limit, offset int) ([]*models.UserApplicationStatus, int64, error)
 	CountPendingForCompanyPortal(companyID uint) (int64, error)
 	CountStatusesForCompanyPortal(companyID uint) (map[string]int64, error)
-	UpdateStatusForCompanyPortal(applicationID, companyID uint, status string, notes *string) (*entity.UserApplicationStatus, error)
+	UpdateStatusForCompanyPortal(applicationID, companyID uint, status string, notes *string) (*models.UserApplicationStatus, error)
 }
 
 type portalJobCounter interface {
@@ -132,7 +132,7 @@ type applicationItem struct {
 	CreatedAt       time.Time  `json:"created_at"`
 }
 
-func toApplicationItem(a *entity.UserApplicationStatus, studentName string) applicationItem {
+func toApplicationItem(a *models.UserApplicationStatus, studentName string) applicationItem {
 	return applicationItem{
 		ID:              a.ID,
 		UserID:          a.UserID,

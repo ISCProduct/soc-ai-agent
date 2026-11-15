@@ -1,7 +1,6 @@
 package hr
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/shared"
@@ -14,11 +13,11 @@ import (
 )
 
 type stubUserRepo struct {
-	user *entity.User
+	user *models.User
 	err  error
 }
 
-func (s *stubUserRepo) GetUserByID(uint) (*entity.User, error) {
+func (s *stubUserRepo) GetUserByID(uint) (*models.User, error) {
 	return s.user, s.err
 }
 
@@ -81,7 +80,7 @@ func TestStudentAnalysisService_GetAnalysis_NotVisibleWithoutConsent(t *testing.
 
 	svc := NewStudentAnalysisService(
 		access,
-		&stubUserRepo{user: &entity.User{ID: 5, AllowScoutVisibility: false}},
+		&stubUserRepo{user: &models.User{ID: 5, AllowScoutVisibility: false}},
 		&stubCrossFeature{},
 		nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
 	)
@@ -103,7 +102,7 @@ func TestStudentAnalysisService_GetAnalysis_承諾前は氏名を返さない(t 
 
 	svc := NewStudentAnalysisService(
 		access,
-		&stubUserRepo{user: &entity.User{ID: 5, Name: "山田太郎", AllowScoutVisibility: true, Role: "student"}},
+		&stubUserRepo{user: &models.User{ID: 5, Name: "山田太郎", AllowScoutVisibility: true, Role: "student"}},
 		&stubCrossFeature{profile: &flywheel.UserIntegratedProfile{UserID: 5}},
 		nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
 	)
@@ -119,7 +118,7 @@ func TestStudentAnalysisService_GetAnalysis_承諾後は氏名を返す(t *testi
 
 	svc := NewStudentAnalysisService(
 		access,
-		&stubUserRepo{user: &entity.User{ID: 5, Name: "山田太郎", AllowScoutVisibility: true, Role: "student"}},
+		&stubUserRepo{user: &models.User{ID: 5, Name: "山田太郎", AllowScoutVisibility: true, Role: "student"}},
 		&stubCrossFeature{profile: &flywheel.UserIntegratedProfile{UserID: 5}},
 		nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
 	)
@@ -135,7 +134,7 @@ func TestStudentAnalysisService_GetAnalysis_Success(t *testing.T) {
 
 	svc := NewStudentAnalysisService(
 		access,
-		&stubUserRepo{user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "student"}},
+		&stubUserRepo{user: &models.User{ID: 5, AllowScoutVisibility: true, Role: "student"}},
 		&stubCrossFeature{profile: &flywheel.UserIntegratedProfile{UserID: 5}},
 		nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
 	)
@@ -177,37 +176,37 @@ func TestIsScoutVisible(t *testing.T) {
 	withdrawn := time.Now()
 	tests := []struct {
 		name string
-		user *entity.User
+		user *models.User
 		want bool
 	}{
 		{
 			name: "同意済みの学生は公開",
-			user: &entity.User{AllowScoutVisibility: true, Role: "student"},
+			user: &models.User{AllowScoutVisibility: true, Role: "student"},
 			want: true,
 		},
 		{
 			name: "未同意は非公開",
-			user: &entity.User{AllowScoutVisibility: false, Role: "student"},
+			user: &models.User{AllowScoutVisibility: false, Role: "student"},
 			want: false,
 		},
 		{
 			name: "退会済みは同意済みでも非公開",
-			user: &entity.User{AllowScoutVisibility: true, Role: "student", WithdrawnAt: &withdrawn},
+			user: &models.User{AllowScoutVisibility: true, Role: "student", WithdrawnAt: &withdrawn},
 			want: false,
 		},
 		{
 			name: "ゲストは同意済みでも非公開",
-			user: &entity.User{AllowScoutVisibility: true, Role: "student", IsGuest: true},
+			user: &models.User{AllowScoutVisibility: true, Role: "student", IsGuest: true},
 			want: false,
 		},
 		{
 			name: "教員は同意済みでも非公開",
-			user: &entity.User{AllowScoutVisibility: true, Role: "teacher"},
+			user: &models.User{AllowScoutVisibility: true, Role: "teacher"},
 			want: false,
 		},
 		{
 			name: "ロール未設定は非公開",
-			user: &entity.User{AllowScoutVisibility: true, Role: ""},
+			user: &models.User{AllowScoutVisibility: true, Role: ""},
 			want: false,
 		},
 		{
@@ -229,13 +228,13 @@ func TestStudentAnalysisService_GetAnalysisForVisibleStudent_AppliesFullGuard(t 
 	withdrawn := time.Now()
 	tests := []struct {
 		name    string
-		user    *entity.User
+		user    *models.User
 		wantErr bool
 	}{
-		{name: "同意済みの学生は取得できる", user: &entity.User{ID: 5, Name: "山田太郎", AllowScoutVisibility: true, Role: "student"}},
-		{name: "退会済みはID直指定でも取得できない", user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "student", WithdrawnAt: &withdrawn}, wantErr: true},
-		{name: "ゲストはID直指定でも取得できない", user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "student", IsGuest: true}, wantErr: true},
-		{name: "教員はID直指定でも取得できない", user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "teacher"}, wantErr: true},
+		{name: "同意済みの学生は取得できる", user: &models.User{ID: 5, Name: "山田太郎", AllowScoutVisibility: true, Role: "student"}},
+		{name: "退会済みはID直指定でも取得できない", user: &models.User{ID: 5, AllowScoutVisibility: true, Role: "student", WithdrawnAt: &withdrawn}, wantErr: true},
+		{name: "ゲストはID直指定でも取得できない", user: &models.User{ID: 5, AllowScoutVisibility: true, Role: "student", IsGuest: true}, wantErr: true},
+		{name: "教員はID直指定でも取得できない", user: &models.User{ID: 5, AllowScoutVisibility: true, Role: "teacher"}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

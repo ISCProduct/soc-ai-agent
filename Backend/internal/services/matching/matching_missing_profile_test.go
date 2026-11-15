@@ -1,7 +1,6 @@
 package matching
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"context"
 	"testing"
@@ -24,14 +23,14 @@ func flatProfile(companyID uint, v int) *models.CompanyWeightProfile {
 	}
 }
 
-func scoresFor(v int) []entity.UserWeightScore {
+func scoresFor(v int) []models.UserWeightScore {
 	categories := []string{
 		"技術志向", "チームワーク志向", "リーダーシップ志向", "創造性志向", "安定志向",
 		"成長志向", "ワークライフバランス", "チャレンジ志向", "細部志向", "コミュニケーション力",
 	}
-	out := make([]entity.UserWeightScore, 0, len(categories))
+	out := make([]models.UserWeightScore, 0, len(categories))
 	for _, c := range categories {
-		out = append(out, entity.UserWeightScore{WeightCategory: c, Score: v})
+		out = append(out, models.UserWeightScore{WeightCategory: c, Score: v})
 	}
 	return out
 }
@@ -44,7 +43,7 @@ func scoresFor(v int) []entity.UserWeightScore {
 func TestCalculateMatching_CompaniesWithoutProfileAreExcluded(t *testing.T) {
 	tests := []struct {
 		name          string
-		userScores    []entity.UserWeightScore
+		userScores    []models.UserWeightScore
 		profiles      map[uint]*models.CompanyWeightProfile
 		wantCompanies []uint
 	}{
@@ -70,7 +69,7 @@ func TestCalculateMatching_CompaniesWithoutProfileAreExcluded(t *testing.T) {
 		},
 		{
 			name:       "スコアが1軸も無い学生でも扱いは同じ",
-			userScores: []entity.UserWeightScore{{WeightCategory: "技術志向", Score: 50}},
+			userScores: []models.UserWeightScore{{WeightCategory: "技術志向", Score: 50}},
 			profiles: map[uint]*models.CompanyWeightProfile{
 				2: flatProfile(2, 30),
 			},

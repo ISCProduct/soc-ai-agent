@@ -1,8 +1,6 @@
 package matching
 
 import (
-	"Backend/domain/entity"
-	"Backend/domain/mapper"
 	"Backend/domain/repository"
 	"Backend/domain/valueobject"
 	"Backend/internal/aimodel"
@@ -30,6 +28,8 @@ type MatchingService struct {
 	aiClient            *openai.Client
 	// 適性検査の結果（#1678）。未注入なら合流しない。
 	assessmentScores AssessmentScoreReader
+	// キャリブレーション重み（#203）。未注入・未アクティブなら全軸 1.0。
+	calibration CalibrationWeightReader
 }
 
 // AssessmentScoreReader は最新の標準適性検査のカテゴリ別スコアを返す。未受検なら nil。
@@ -37,9 +37,19 @@ type AssessmentScoreReader interface {
 	LatestStandardScores(userID uint) (map[string]float64, error)
 }
 
+// CalibrationWeightReader は有効なカテゴリ重みを返す（#203）。
+type CalibrationWeightReader interface {
+	GetLatestCalibrationWeights() ([]models.ScoreCalibrationWeight, error)
+}
+
 // SetAssessmentScoreReader は適性検査スコアの合流を有効にする（#1678、オプション）。
 func (s *MatchingService) SetAssessmentScoreReader(r AssessmentScoreReader) {
 	s.assessmentScores = r
+}
+
+// SetCalibrationWeightReader は #203 のキャリブレーション重み適用を有効にする。
+func (s *MatchingService) SetCalibrationWeightReader(r CalibrationWeightReader) {
+	s.calibration = r
 }
 
 func NewMatchingService(
@@ -103,8 +113,13 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 	}
 	log.Printf("[CalculateMatching] Loaded %d weight profiles\n", len(profiles))
 
+	axisWeights := s.loadCalibrationAxisWeights()
+	if len(axisWeights) > 0 {
+		log.Printf("[CalculateMatching] applying calibration axis weights (%d categories)\n", len(axisWeights))
+	}
+
 	// 3. 各企業とのマッチングを計算（プロファイルはメモリ上で参照）
-	pending := make([]*entity.UserCompanyMatch, 0, len(companies))
+	pending := make([]*models.UserCompanyMatch, 0, len(companies))
 	skippedNoProfile := 0
 	for i := range companies {
 		company := &companies[i]
@@ -124,15 +139,15 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 			continue
 		}
 
-		match := s.calculateMatchScore(scoreMap, profile)
+		match := s.calculateMatchScore(scoreMap, profile, axisWeights)
 		if merged {
-			before = append(before, s.calculateMatchScore(chatOnly, profile).MatchScore)
+			before = append(before, s.calculateMatchScore(chatOnly, profile, axisWeights).MatchScore)
 			after = append(after, match.MatchScore)
 		}
 		match.UserID = userID
 		match.SessionID = sessionID
 		match.CompanyID = company.ID
-		match.Company = mapper.CompanyToEntity(company)
+		match.Company = *company
 
 		// テンプレ理由はここでは作らない。
 		//
@@ -187,7 +202,7 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 // BuildMatchReason でテンプレ理由を作るため、利用者から見える結果は変わらない。
 // 既定オフのときは何もしない（その場合 match_reason は全件空になる）。
 func (s *MatchingService) applyAIReasonsToTopMatches(
-	ctx context.Context, pending []*entity.UserCompanyMatch, userScores []entity.UserWeightScore,
+	ctx context.Context, pending []*models.UserCompanyMatch, userScores []models.UserWeightScore,
 ) {
 	if !matchingReasonUseAI() || s.aiClient == nil {
 		return
@@ -220,11 +235,11 @@ func (s *MatchingService) applyAIReasonsToTopMatches(
 // topMatchesByScore は MatchScore 降順の上位 limit 件を返す。
 // pending の並び順は保存順に影響するため変更せず、スライスだけ複製して並べ替える。
 // 同点時の順序を安定させるため SliceStable を使う。
-func topMatchesByScore(pending []*entity.UserCompanyMatch, limit int) []*entity.UserCompanyMatch {
+func topMatchesByScore(pending []*models.UserCompanyMatch, limit int) []*models.UserCompanyMatch {
 	if limit <= 0 || len(pending) == 0 {
 		return nil
 	}
-	sorted := make([]*entity.UserCompanyMatch, len(pending))
+	sorted := make([]*models.UserCompanyMatch, len(pending))
 	copy(sorted, pending)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		return sorted[i].MatchScore > sorted[j].MatchScore
@@ -264,38 +279,73 @@ func (s *MatchingService) loadAllPublishedCompanies() ([]models.Company, error) 
 	return companies, nil
 }
 
-// calculateMatchScore ユーザースコアと企業プロファイルからマッチングスコアを計算
+// calculateMatchScore ユーザースコアと企業プロファイルからマッチングスコアを計算。
+// axisWeights は #203 のカテゴリ重み（無い軸は 1.0）。総合は加重平均。
 func (s *MatchingService) calculateMatchScore(
 	userScores map[string]float64,
 	companyProfile *models.CompanyWeightProfile,
-) *entity.UserCompanyMatch {
-	match := &entity.UserCompanyMatch{}
+	axisWeights map[string]float64,
+) *models.UserCompanyMatch {
+	match := &models.UserCompanyMatch{}
 	evaluatedCount := 0
-	totalScore := 0.0
+	weightedTotal := 0.0
+	weightSum := 0.0
 
 	// 各カテゴリのマッチ度を計算（0-100のスケールで）
 	// マッチ度 = 100 - |ユーザースコア - 企業重視度|
-	match.TechnicalMatch, evaluatedCount, totalScore = scoredMatch(userScores, "技術志向", float64(companyProfile.TechnicalOrientation), evaluatedCount, totalScore)
-	match.TeamworkMatch, evaluatedCount, totalScore = scoredMatch(userScores, "チームワーク志向", float64(companyProfile.TeamworkOrientation), evaluatedCount, totalScore)
-	match.LeadershipMatch, evaluatedCount, totalScore = scoredMatch(userScores, "リーダーシップ志向", float64(companyProfile.LeadershipOrientation), evaluatedCount, totalScore)
-	match.CreativityMatch, evaluatedCount, totalScore = scoredMatch(userScores, "創造性志向", float64(companyProfile.CreativityOrientation), evaluatedCount, totalScore)
-	match.StabilityMatch, evaluatedCount, totalScore = scoredMatch(userScores, "安定志向", float64(companyProfile.StabilityOrientation), evaluatedCount, totalScore)
-	match.GrowthMatch, evaluatedCount, totalScore = scoredMatch(userScores, "成長志向", float64(companyProfile.GrowthOrientation), evaluatedCount, totalScore)
-	match.WorkLifeMatch, evaluatedCount, totalScore = scoredMatch(userScores, "ワークライフバランス", float64(companyProfile.WorkLifeBalance), evaluatedCount, totalScore)
-	match.ChallengeMatch, evaluatedCount, totalScore = scoredMatch(userScores, "チャレンジ志向", float64(companyProfile.ChallengeSeeking), evaluatedCount, totalScore)
-	match.DetailMatch, evaluatedCount, totalScore = scoredMatch(userScores, "細部志向", float64(companyProfile.DetailOrientation), evaluatedCount, totalScore)
-	match.CommunicationMatch, evaluatedCount, totalScore = scoredMatch(userScores, "コミュニケーション力", float64(companyProfile.CommunicationSkill), evaluatedCount, totalScore)
+	match.TechnicalMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "技術志向", float64(companyProfile.TechnicalOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.TeamworkMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "チームワーク志向", float64(companyProfile.TeamworkOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.LeadershipMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "リーダーシップ志向", float64(companyProfile.LeadershipOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.CreativityMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "創造性志向", float64(companyProfile.CreativityOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.StabilityMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "安定志向", float64(companyProfile.StabilityOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.GrowthMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "成長志向", float64(companyProfile.GrowthOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.WorkLifeMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "ワークライフバランス", float64(companyProfile.WorkLifeBalance), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.ChallengeMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "チャレンジ志向", float64(companyProfile.ChallengeSeeking), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.DetailMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "細部志向", float64(companyProfile.DetailOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.CommunicationMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "コミュニケーション力", float64(companyProfile.CommunicationSkill), axisWeights, evaluatedCount, weightedTotal, weightSum)
 
-	// 総合マッチ度は「計測できた軸だけ」の平均（#1124）。
-	// 何件で算出したかを持たせ、表示側が根拠の薄さを示せるようにする。
+	// 総合マッチ度は「計測できた軸だけ」の加重平均（#1124 + #203）。
 	match.MatchedAxisCount = evaluatedCount
-	if evaluatedCount > 0 {
-		match.MatchScore = totalScore / float64(evaluatedCount)
+	if weightSum > 0 {
+		match.MatchScore = weightedTotal / weightSum
 	} else {
 		match.MatchScore = 0
 	}
 
 	return match
+}
+
+// loadCalibrationAxisWeights は有効な #203 重みを読む。無ければ空（= 全軸1.0）。
+func (s *MatchingService) loadCalibrationAxisWeights() map[string]float64 {
+	out := map[string]float64{}
+	if s.calibration == nil {
+		return out
+	}
+	weights, err := s.calibration.GetLatestCalibrationWeights()
+	if err != nil || len(weights) == 0 {
+		if err != nil {
+			log.Printf("[CalculateMatching] calibration weights unavailable: %v\n", err)
+		}
+		return out
+	}
+	for _, w := range weights {
+		if !w.IsActive || w.Category == "" {
+			continue
+		}
+		out[w.Category] = clampCalibrationWeight(w.Weight)
+	}
+	return out
+}
+
+func clampCalibrationWeight(w float64) float64 {
+	// 暴走を防ぐ。1.0 が中立。極端な倍率はマッチングを一軸に潰す。
+	if w < 0.1 {
+		return 0.1
+	}
+	if w > 3.0 {
+		return 3.0
+	}
+	return w
 }
 
 // scoredMatch はカテゴリ1つ分のマッチ度を返す。
@@ -304,14 +354,26 @@ func (s *MatchingService) calculateMatchScore(
 // 評価対象に数えていたため、企業の重視度が 45〜70 に寄っている実データでは
 // 差が小さくなり、スコアを1つも持たないユーザーでも全企業と97%前後で
 // 一致してしまっていた。計測できていない軸は「一致」ではなく「不明」。
-func scoredMatch(userScores map[string]float64, category string, companyWeight float64, evaluatedCount int, totalScore float64) (float64, int, float64) {
+func scoredMatch(
+	userScores map[string]float64,
+	category string,
+	companyWeight float64,
+	axisWeights map[string]float64,
+	evaluatedCount int,
+	weightedTotal, weightSum float64,
+) (float64, int, float64, float64) {
 	userScore, ok := userScores[category]
 	if !ok {
-		// 未計測。0 を返すが平均には数えない（MatchedAxisCount で件数が分かる）
-		return 0, evaluatedCount, totalScore
+		return 0, evaluatedCount, weightedTotal, weightSum
 	}
 	matchScore := CalculateCategoryMatch(userScore, companyWeight)
-	return matchScore, evaluatedCount + 1, totalScore + matchScore
+	w := 1.0
+	if axisWeights != nil {
+		if aw, ok := axisWeights[category]; ok {
+			w = aw
+		}
+	}
+	return matchScore, evaluatedCount + 1, weightedTotal + matchScore*w, weightSum + w
 }
 
 // CalculateCategoryMatch カテゴリごとのマッチ度を計算する（0-100）。
@@ -339,7 +401,7 @@ func CalculateCategoryMatch(userScore, companyWeight float64) float64 {
 }
 
 // GetTopMatches マッチング度の高い企業を取得
-func (s *MatchingService) GetTopMatches(ctx context.Context, userID uint, sessionID string, limit int) ([]*entity.UserCompanyMatch, error) {
+func (s *MatchingService) GetTopMatches(ctx context.Context, userID uint, sessionID string, limit int) ([]*models.UserCompanyMatch, error) {
 	return s.matchRepo.FindTopMatchesByUserAndSession(userID, sessionID, limit)
 }
 
@@ -395,11 +457,11 @@ func (s *MatchingService) GetDiagnostics(userID uint, sessionID string) (*Matchi
 
 // GenerateMatchReason はマッチング理由を返す。
 // 既定は DB/テンプレのみ（#588）。AI 生成は MATCHING_REASON_USE_AI=true のときだけ。
-func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) (string, error) {
+func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *models.UserCompanyMatch, userScores []models.UserWeightScore) (string, error) {
 	if match == nil {
 		return "", fmt.Errorf("match is nil")
 	}
-	if match.Company == nil {
+	if match.Company.ID == 0 {
 		return "", fmt.Errorf("company is nil")
 	}
 	if !matchingReasonUseAI() || s.aiClient == nil {
@@ -442,7 +504,7 @@ const MatchingReasonTemperature = 0.4
 
 // MatchingReasonPrompts は GenerateMatchReason が LLM へ渡すシステム・ユーザープロンプトを返す。
 // aibench（#1782）が本番と同じプロンプトで測るために公開する。
-func MatchingReasonPrompts(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) (system, user string) {
+func MatchingReasonPrompts(match *models.UserCompanyMatch, userScores []models.UserWeightScore) (system, user string) {
 	return prompts.MatchingReasonSystemPrompt, buildMatchingReasonUserPrompt(match, userScores)
 }
 
@@ -451,13 +513,13 @@ func matchingReasonUseAI() bool {
 	return strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
 }
 
-func buildMatchingReasonUserPrompt(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) string {
+func buildMatchingReasonUserPrompt(match *models.UserCompanyMatch, userScores []models.UserWeightScore) string {
 	return buildMatchingReasonUserPromptWithVersion(
 		match, userScores, prompts.ResolvePromptVersion(prompts.StageMatchingReason),
 	)
 }
 
-func buildMatchingReasonUserPromptWithVersion(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore, version string) string {
+func buildMatchingReasonUserPromptWithVersion(match *models.UserCompanyMatch, userScores []models.UserWeightScore, version string) string {
 	company := match.Company
 	companyInfo := fmt.Sprintf(
 		"- 企業名: %s\n- 業界: %s\n- 主事業: %s\n- 文化: %s\n- 働き方: %s\n- 開発スタイル: %s\n- 技術スタック: %s",
@@ -479,12 +541,12 @@ func buildMatchingReasonUserPromptWithVersion(match *entity.UserCompanyMatch, us
 	)
 }
 
-func formatTopUserScores(scores []entity.UserWeightScore) string {
+func formatTopUserScores(scores []models.UserWeightScore) string {
 	if len(scores) == 0 {
 		return "データなし"
 	}
 
-	sorted := append([]entity.UserWeightScore(nil), scores...)
+	sorted := append([]models.UserWeightScore(nil), scores...)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].Score > sorted[j].Score
 	})
@@ -502,7 +564,7 @@ func formatTopUserScores(scores []entity.UserWeightScore) string {
 	return strings.Join(parts, ", ")
 }
 
-func formatTopMatchAxes(match *entity.UserCompanyMatch) string {
+func formatTopMatchAxes(match *models.UserCompanyMatch) string {
 	axes := []struct {
 		name  string
 		score float64
@@ -539,7 +601,7 @@ func fallbackValue(value, fallback string) string {
 
 // Exported wrappers for testing from external packages.
 
-func FormatTopUserScores(scores []entity.UserWeightScore) string { return formatTopUserScores(scores) }
+func FormatTopUserScores(scores []models.UserWeightScore) string { return formatTopUserScores(scores) }
 
 // NewMatchingServiceForTest returns a MatchingService with no AI client, suitable for unit tests.
 func NewMatchingServiceForTest() *MatchingService {
@@ -565,7 +627,7 @@ func (s *MatchingService) mergeAssessmentScores(userID uint, chat map[string]flo
 
 // ReasonScores は理由文に出す学生の適性を、マッチ度の計算と同じ合流後の値にする（#1678）。
 // チャットだけの値を出すと「マッチ度60」の根拠に「技術志向40」が並び、数値が食い違う。
-func (s *MatchingService) ReasonScores(userID uint, scores []entity.UserWeightScore) []entity.UserWeightScore {
+func (s *MatchingService) ReasonScores(userID uint, scores []models.UserWeightScore) []models.UserWeightScore {
 	chat := make(map[string]float64, len(scores))
 	for _, sc := range scores {
 		chat[sc.WeightCategory] = float64(sc.Score)
@@ -581,11 +643,11 @@ func (s *MatchingService) ReasonScores(userID uint, scores []entity.UserWeightSc
 	return scoresFromMap(userID, sessionID, merged)
 }
 
-func scoresFromMap(userID uint, sessionID string, m map[string]float64) []entity.UserWeightScore {
-	out := make([]entity.UserWeightScore, 0, len(m))
+func scoresFromMap(userID uint, sessionID string, m map[string]float64) []models.UserWeightScore {
+	out := make([]models.UserWeightScore, 0, len(m))
 	for _, c := range valueobject.AllWeightCategories() {
 		if v, ok := m[string(c)]; ok {
-			out = append(out, entity.UserWeightScore{UserID: userID, SessionID: sessionID, WeightCategory: string(c), Score: int(math.Round(v))})
+			out = append(out, models.UserWeightScore{UserID: userID, SessionID: sessionID, WeightCategory: string(c), Score: int(math.Round(v))})
 		}
 	}
 	return out

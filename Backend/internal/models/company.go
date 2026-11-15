@@ -200,6 +200,9 @@ type UserApplicationStatus struct {
 	// withdrawn / rejected
 	Status string `gorm:"type:varchar(50);not null;default:'applied'"`
 	Notes  string `gorm:"type:text"` // メモ・備考
+	// ScoreSnapshot は応募時点のカテゴリ別スコア JSON（#203）。
+	// キャリブレーションが応募後の最新スコアと混ざるのを防ぐ。
+	ScoreSnapshot string `gorm:"type:text;column:score_snapshot"`
 
 	AppliedAt       *time.Time // 応募日
 	StatusUpdatedAt *time.Time // ステータス最終更新日

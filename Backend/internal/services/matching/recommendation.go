@@ -1,7 +1,6 @@
 package matching
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"Backend/internal/services/diagnosis"
 	"encoding/json"
@@ -62,7 +61,7 @@ type RecommendationResponse struct {
 }
 
 // CountEvaluatedCategories はスコアが0でないカテゴリの数を返す。
-func CountEvaluatedCategories(scores []entity.UserWeightScore) int {
+func CountEvaluatedCategories(scores []models.UserWeightScore) int {
 	count := 0
 	for _, score := range scores {
 		if score.Score != 0 {
@@ -74,7 +73,7 @@ func CountEvaluatedCategories(scores []entity.UserWeightScore) int {
 
 // MinMatchedAxisCount は根拠軸数の最小値を返す。
 // 呼び出し側で表示対象の match だけに絞ってから渡す前提。
-func MinMatchedAxisCount(matches []*entity.UserCompanyMatch) int {
+func MinMatchedAxisCount(matches []*models.UserCompanyMatch) int {
 	if len(matches) == 0 {
 		return 0
 	}
@@ -121,10 +120,10 @@ func EmptyRecommendationReason(d *MatchingDiagnostics) string {
 
 // DisplayableMatches は企業を解決できる match だけを返す。
 // 企業を解決できない match は表示されないので、根拠軸数の集計からも外す。
-func DisplayableMatches(matches []*entity.UserCompanyMatch) []*entity.UserCompanyMatch {
-	displayed := make([]*entity.UserCompanyMatch, 0, len(matches))
+func DisplayableMatches(matches []*models.UserCompanyMatch) []*models.UserCompanyMatch {
+	displayed := make([]*models.UserCompanyMatch, 0, len(matches))
 	for _, match := range matches {
-		if match.Company == nil || match.Company.ID == 0 {
+		if match.Company.ID == 0 {
 			continue
 		}
 		displayed = append(displayed, match)
@@ -135,12 +134,17 @@ func DisplayableMatches(matches []*entity.UserCompanyMatch) []*entity.UserCompan
 // BuildRecommendations は表示対象の match を推薦一覧に整形する。
 // 理由文はマッチ度と同じ合流後の適性(reasonScores)で書く。
 // 0件のときは nil を返す(JSON では null)。既存の挙動を保つため。
-func BuildRecommendations(displayed []*entity.UserCompanyMatch, reasonScores []entity.UserWeightScore) []Recommendation {
+func BuildRecommendations(displayed []*models.UserCompanyMatch, reasonScores []models.UserWeightScore) []Recommendation {
 	var items []Recommendation
 	for _, match := range displayed {
 		employeeCount := "未定"
 		if label := models.FormatEmployeeCount(match.Company.EmployeeCount, match.Company.EmployeeCountBasis); label != "" {
 			employeeCount = label
+		}
+
+		jobTitle := ""
+		if match.JobPosition != nil && match.JobPosition.ID != 0 {
+			jobTitle = match.JobPosition.Title
 		}
 
 		items = append(items, Recommendation{
@@ -150,7 +154,7 @@ func BuildRecommendations(displayed []*entity.UserCompanyMatch, reasonScores []e
 			Score:            int(match.MatchScore),
 			Reason:           BuildMatchReason(match, reasonScores),
 			Industry:         match.Company.Industry,
-			JobTitle:         match.JobTitle,
+			JobTitle:         jobTitle,
 			Location:         match.Company.Location,
 			Employees:        employeeCount,
 			TechStack:        SplitTechStack(match.Company.TechStack),

@@ -1,28 +1,52 @@
 package application
 
 import (
-	"Backend/domain/entity"
-	"Backend/domain/mapper"
 	"Backend/domain/repository"
+	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services/notification"
 	"Backend/internal/services/shared"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"slices"
 )
 
+// CollectiveActionRecorder は集合知ログへの書き込み面（#205）。
+// FE 呼び出しに頼ると応募経路が漏れるため、応募・選考更新から直接呼ぶ。
+type CollectiveActionRecorder interface {
+	RecordAction(userID uint, sessionID string, companyID uint, actionType string) error
+}
+
+// ScoreSnapshotReader は応募時点のスコアスナップショット用（#203）。
+type ScoreSnapshotReader interface {
+	FindByUserAndSession(userID uint, sessionID string) ([]models.UserWeightScore, error)
+}
+
 // ApplicationService 応募・選考ステータス管理サービス
 type ApplicationService struct {
-	appRepo   *repositories.UserApplicationStatusRepository
-	matchRepo repository.UserCompanyMatchRepository
-	access    shared.CompanyAccessReader
-	notifier  notification.Notifier
+	appRepo    *repositories.UserApplicationStatusRepository
+	matchRepo  repository.UserCompanyMatchRepository
+	access     shared.CompanyAccessReader
+	notifier   notification.Notifier
+	collective CollectiveActionRecorder
+	scores     ScoreSnapshotReader
 }
 
 // SetNotifier は選考ステータスの更新を学生へ知らせる通知を設定する（#2033）。
 func (s *ApplicationService) SetNotifier(n notification.Notifier) {
 	s.notifier = n
+}
+
+// SetCollectiveInsight は集合知ログ記録を注入する（オプション）。
+func (s *ApplicationService) SetCollectiveInsight(c CollectiveActionRecorder) {
+	s.collective = c
+}
+
+// SetScoreSnapshotReader は応募時スコアスナップショット取得を注入する（#203）。
+func (s *ApplicationService) SetScoreSnapshotReader(r ScoreSnapshotReader) {
+	s.scores = r
 }
 
 func NewApplicationService(
@@ -107,7 +131,7 @@ func CanTransition(current, next string, isAdmin bool) bool {
 // Apply 企業への応募を登録する（#1017）
 // match の所有権・企業一致を検証し、進行中の応募が既にある場合のみ重複エラーとする。
 // 応募作成とマッチの is_applied 更新は、Repository が同一トランザクションで行う。
-func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*models.UserApplicationStatus, error) {
 	// match の所有権・企業一致チェック（ToggleFavorite と同じパターン: #924）
 	match, err := s.matchRepo.FindByID(matchID)
 	if err != nil {
@@ -123,19 +147,68 @@ func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*entity.Use
 		return nil, fmt.Errorf("match_id と company_id が一致しません")
 	}
 
-	m, err := s.appRepo.CreateActive(userID, companyID, matchID, terminalStatusList)
+	m, err := s.appRepo.CreateActive(userID, companyID, matchID, terminalStatusList, s.buildScoreSnapshot(userID, match.SessionID))
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicateActiveApplication) {
 			return nil, shared.ErrDuplicateActiveApplication
 		}
 		return nil, err
 	}
-	return mapper.UserApplicationStatusToEntity(m), nil
+
+	s.recordCollectiveAction(userID, companyID, match.SessionID, "applied")
+	return m, nil
+}
+
+// collectiveActionForStatus は選考ステータスを集合知の action_type へ写す。
+// viewed は一覧閲覧用で応募フロー外。ここは応募・通過・不採用だけ。
+func collectiveActionForStatus(status string) (string, bool) {
+	switch normalizeLegacyStatus(status) {
+	case "applied":
+		return "applied", true
+	case "document_passed", "offered", "accepted":
+		return "passed", true
+	case "rejected":
+		return "rejected", true
+	default:
+		return "", false
+	}
+}
+
+// recordCollectiveAction は集合知ログを best-effort で書く。失敗しても応募本体は成功のまま。
+func (s *ApplicationService) recordCollectiveAction(userID, companyID uint, sessionID, actionType string) {
+	if s.collective == nil || actionType == "" {
+		return
+	}
+	if err := s.collective.RecordAction(userID, sessionID, companyID, actionType); err != nil {
+		log.Printf("[Application] collective insight record failed user=%d company=%d action=%s: %v\n",
+			userID, companyID, actionType, err)
+	}
+}
+
+// buildScoreSnapshot はマッチングに使った session のスコアを JSON にする（#203）。
+// 取れなくても応募自体は通す（空文字）。
+func (s *ApplicationService) buildScoreSnapshot(userID uint, sessionID string) string {
+	if s.scores == nil || sessionID == "" {
+		return ""
+	}
+	rows, err := s.scores.FindByUserAndSession(userID, sessionID)
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	snap := make(map[string]int, len(rows))
+	for _, sc := range rows {
+		snap[sc.WeightCategory] = sc.Score
+	}
+	b, err := json.Marshal(snap)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // UpdateStatus 選考ステータスを更新する
 // isAdmin=true の場合は管理者権限の遷移が許可される（コントローラー側でクライアント入力から isAdmin を取らないこと）
-func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, status string, notes *string, isAdmin bool) (*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, status string, notes *string, isAdmin bool) (*models.UserApplicationStatus, error) {
 	if !isValidStatus(status) {
 		return nil, fmt.Errorf("invalid_status: 無効なステータス %s", status)
 	}
@@ -169,23 +242,29 @@ func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, statu
 	}
 	// 学校・企業が更新したときだけ学生へ知らせる（学生が自分で変えたときは知らせない）（#2033）
 	if isAdmin && s.notifier != nil {
-		companyName := ""
-		if app.Company != nil {
-			companyName = app.Company.Name
-		}
+		companyName := app.Company.Name
 		if n, ok := notification.ApplicationStatusNotice(app.UserID, app.ID, status, companyName); ok {
 			s.notifier.Notify(n)
 		}
 	}
+	if action, ok := collectiveActionForStatus(status); ok {
+		sessionID := ""
+		if app.MatchID != 0 && s.matchRepo != nil {
+			if match, mErr := s.matchRepo.FindByID(app.MatchID); mErr == nil && match != nil {
+				sessionID = match.SessionID
+			}
+		}
+		s.recordCollectiveAction(app.UserID, app.CompanyID, sessionID, action)
+	}
 	return app, nil
 }
 
-func (s *ApplicationService) Withdraw(applicationID, userID uint, isAdmin bool) (*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) Withdraw(applicationID, userID uint, isAdmin bool) (*models.UserApplicationStatus, error) {
 	return s.UpdateStatus(applicationID, userID, "withdrawn", nil, isAdmin)
 }
 
 // Accept 内定を承諾する（§10.4）。offered 以外は application_not_offered を返す。
-func (s *ApplicationService) Accept(applicationID, userID uint, isAdmin bool) (*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) Accept(applicationID, userID uint, isAdmin bool) (*models.UserApplicationStatus, error) {
 	app, err := s.appRepo.FindByID(applicationID)
 	if err != nil {
 		return nil, fmt.Errorf("application_not_found: 応募データが見つかりません: %w", err)
@@ -200,14 +279,14 @@ func (s *ApplicationService) Accept(applicationID, userID uint, isAdmin bool) (*
 }
 
 // GetApplicationsByUser ユーザーの応募一覧を取得する
-func (s *ApplicationService) GetApplicationsByUser(userID uint) ([]*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) GetApplicationsByUser(userID uint) ([]*models.UserApplicationStatus, error) {
 	return s.appRepo.FindByUserID(userID)
 }
 
 // ListForAdmin 管理者向けに条件を指定して応募一覧を取得する（§10.5）。
 // userID/companyID が 0、status が空文字の場合はその条件を絞り込まない。
 // schoolID は担当校を持つ管理者(先生)向けの絞り込み。nil は絞り込みなし(プラットフォーム管理者)。
-func (s *ApplicationService) ListForAdmin(userID, companyID uint, status string, schoolID *uint) ([]*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) ListForAdmin(userID, companyID uint, status string, schoolID *uint) ([]*models.UserApplicationStatus, error) {
 	return s.appRepo.FindAll(userID, companyID, status, schoolID)
 }
 
@@ -218,7 +297,7 @@ func (s *ApplicationService) OwnerSchoolID(applicationID uint) (*uint, error) {
 
 // ListForOwner は企業オーナー向け応募一覧。company_id 必須、所有権がなければ 403。
 // プラットフォーム管理者は /api/admin/applications を使う（HRスコープと混ぜない）。
-func (s *ApplicationService) ListForOwner(userID, companyID uint, status string) ([]*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) ListForOwner(userID, companyID uint, status string) ([]*models.UserApplicationStatus, error) {
 	if err := s.requireCompanyOwner(userID, companyID); err != nil {
 		return nil, err
 	}
@@ -227,7 +306,7 @@ func (s *ApplicationService) ListForOwner(userID, companyID uint, status string)
 
 // UpdateStatusAsOwner は企業オーナーによる選考ステータス更新。
 // 応募の company_id の所有者のみ許可し、遷移表は管理者相当を使う。
-func (s *ApplicationService) UpdateStatusAsOwner(applicationID, userID uint, status string, notes *string) (*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) UpdateStatusAsOwner(applicationID, userID uint, status string, notes *string) (*models.UserApplicationStatus, error) {
 	app, err := s.appRepo.FindByID(applicationID)
 	if err != nil {
 		return nil, fmt.Errorf("application_not_found: 応募データが見つかりません: %w", err)

@@ -9,14 +9,6 @@ package admin_test
 // 実行: cd Backend && go test ./internal/controllers/admin/... -run "AdminAudit|AdminScraper|AdminScore|AdminProfile|AdminUser" -v
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-
-	"Backend/domain/entity"
 	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/controllers/mocks"
 	"Backend/internal/controllers/testsupport"
@@ -24,6 +16,12 @@ import (
 	"Backend/internal/services/admin"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/school"
+	"bytes"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -305,7 +303,7 @@ func TestAdminUserController_List_ServiceError(t *testing.T) {
 
 func TestAdminUserController_List_Success(t *testing.T) {
 	repo := &mocks.UserRepositoryMock{}
-	users := []entity.User{{Email: "user@example.com"}}
+	users := []models.User{{Email: "user@example.com"}}
 	repo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return(users, int64(1), nil)
 
 	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/users", nil), nil)
@@ -350,7 +348,7 @@ func TestAdminUserController_Update_UserNotFound(t *testing.T) {
 
 func TestAdminUserController_Update_InvalidTargetLevel(t *testing.T) {
 	repo := &mocks.UserRepositoryMock{}
-	user := &entity.User{Email: "user@example.com"}
+	user := &models.User{Email: "user@example.com"}
 	repo.On("GetUserByID", uint(1)).Return(user, nil)
 
 	targetLevel := "invalid"
@@ -370,7 +368,7 @@ func TestAdminUserController_Update_InvalidTargetLevel(t *testing.T) {
 func TestAdminUserController_Update_Success(t *testing.T) {
 	repo := &mocks.UserRepositoryMock{}
 	audit := &mocks.AuditLogServiceMock{}
-	user := &entity.User{Email: "user@example.com"}
+	user := &models.User{Email: "user@example.com"}
 	repo.On("GetUserByID", uint(1)).Return(user, nil)
 	repo.On("UpdateUser", mock.Anything).Return(nil)
 	audit.On("Record", "", "user.update", "user", uint(0), mock.Anything).Return()
@@ -394,7 +392,7 @@ func TestAdminUserController_Update_Success(t *testing.T) {
 func TestAdminUserController_Update_SchoolAccessDenied(t *testing.T) {
 	repo := &mocks.UserRepositoryMock{}
 	otherSchoolID := uint(99)
-	user := &entity.User{Email: "user@example.com", SchoolID: &otherSchoolID}
+	user := &models.User{Email: "user@example.com", SchoolID: &otherSchoolID}
 	repo.On("GetUserByID", uint(1)).Return(user, nil)
 
 	schoolRepo := &mocks.SchoolRepositoryMock{}

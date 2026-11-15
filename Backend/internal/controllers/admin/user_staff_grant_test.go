@@ -1,18 +1,16 @@
 package admin_test
 
 import (
-	"bytes"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-
-	"Backend/domain/entity"
 	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/controllers/mocks"
 	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
 	"Backend/internal/services/school"
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/mock"
@@ -44,11 +42,11 @@ func newUpdateCtx(t *testing.T, id string, body map[string]any, adminUserID uint
 func TestUpdate_GrantStaff_Unrestricted(t *testing.T) {
 	schoolID := uint(7)
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("GetUserByID", uint(2)).Return(&entity.User{ID: 2, Email: "s@example.com", SchoolID: &schoolID, Role: entity.UserRoleStudent}, nil)
-	var saved *entity.User
-	userRepo.On("UpdateUser", mock.MatchedBy(func(u *entity.User) bool {
+	userRepo.On("GetUserByID", uint(2)).Return(&models.User{ID: 2, Email: "s@example.com", SchoolID: &schoolID, Role: models.UserRoleStudent}, nil)
+	var saved *models.User
+	userRepo.On("UpdateUser", mock.MatchedBy(func(u *models.User) bool {
 		saved = u
-		return u.ID == 2 && u.Role == entity.UserRoleStaff
+		return u.ID == 2 && u.Role == models.UserRoleStaff
 	})).Return(nil)
 
 	schoolRepo := &mocks.SchoolRepositoryMock{}
@@ -63,7 +61,7 @@ func TestUpdate_GrantStaff_Unrestricted(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if saved == nil || saved.Role != entity.UserRoleStaff {
+	if saved == nil || saved.Role != models.UserRoleStaff {
 		t.Fatalf("role not updated to staff: %+v", saved)
 	}
 	var resp map[string]any
@@ -79,7 +77,7 @@ func TestUpdate_GrantStaff_Unrestricted(t *testing.T) {
 func TestUpdate_GrantStaff_RestrictedDenied(t *testing.T) {
 	schoolID := uint(5)
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("GetUserByID", uint(2)).Return(&entity.User{ID: 2, SchoolID: &schoolID, Role: entity.UserRoleStudent}, nil)
+	userRepo.On("GetUserByID", uint(2)).Return(&models.User{ID: 2, SchoolID: &schoolID, Role: models.UserRoleStudent}, nil)
 
 	schoolRepo := &mocks.SchoolRepositoryMock{}
 	// 担当校あり = 制限admin。対象の学校(5)は担当内なので ensureSchoolAccess は通り、

@@ -1,10 +1,10 @@
 package matching
 
 import (
+	"Backend/internal/models"
 	"errors"
 	"testing"
 
-	"Backend/domain/entity"
 	"Backend/internal/services/shared"
 
 	"gorm.io/gorm"
@@ -12,19 +12,19 @@ import (
 
 // stubToggleFavoriteMatchRepo は ToggleFavorite のテスト用最小モック。
 type stubToggleFavoriteMatchRepo struct {
-	findByIDResult *entity.UserCompanyMatch
+	findByIDResult *models.UserCompanyMatch
 	findByIDErr    error
 	toggleCalled   bool
 }
 
-func (s *stubToggleFavoriteMatchRepo) CreateOrUpdate(*entity.UserCompanyMatch) error { return nil }
-func (s *stubToggleFavoriteMatchRepo) CreateOrUpdateBatch([]*entity.UserCompanyMatch) (int, error) {
+func (s *stubToggleFavoriteMatchRepo) CreateOrUpdate(*models.UserCompanyMatch) error { return nil }
+func (s *stubToggleFavoriteMatchRepo) CreateOrUpdateBatch([]*models.UserCompanyMatch) (int, error) {
 	return 0, nil
 }
-func (s *stubToggleFavoriteMatchRepo) FindTopMatchesByUserAndSession(uint, string, int) ([]*entity.UserCompanyMatch, error) {
+func (s *stubToggleFavoriteMatchRepo) FindTopMatchesByUserAndSession(uint, string, int) ([]*models.UserCompanyMatch, error) {
 	return nil, nil
 }
-func (s *stubToggleFavoriteMatchRepo) FindByID(uint) (*entity.UserCompanyMatch, error) {
+func (s *stubToggleFavoriteMatchRepo) FindByID(uint) (*models.UserCompanyMatch, error) {
 	return s.findByIDResult, s.findByIDErr
 }
 func (s *stubToggleFavoriteMatchRepo) MarkAsViewed(uint) error { return nil }
@@ -53,7 +53,7 @@ func TestToggleFavorite_NotFoundOnMissingMatch(t *testing.T) {
 }
 
 func TestToggleFavorite_ForbiddenOnOtherUsersMatch(t *testing.T) {
-	repo := &stubToggleFavoriteMatchRepo{findByIDResult: &entity.UserCompanyMatch{ID: 1, UserID: 2}}
+	repo := &stubToggleFavoriteMatchRepo{findByIDResult: &models.UserCompanyMatch{ID: 1, UserID: 2}}
 	s := &MatchingService{matchRepo: repo}
 
 	err := s.ToggleFavorite(1, 1)
@@ -63,7 +63,7 @@ func TestToggleFavorite_ForbiddenOnOtherUsersMatch(t *testing.T) {
 }
 
 func TestToggleFavorite_SucceedsForOwner(t *testing.T) {
-	repo := &stubToggleFavoriteMatchRepo{findByIDResult: &entity.UserCompanyMatch{ID: 1, UserID: 1}}
+	repo := &stubToggleFavoriteMatchRepo{findByIDResult: &models.UserCompanyMatch{ID: 1, UserID: 1}}
 	s := &MatchingService{matchRepo: repo}
 
 	if err := s.ToggleFavorite(1, 1); err != nil {

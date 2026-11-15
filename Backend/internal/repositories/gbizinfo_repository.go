@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"errors"
 
 	"gorm.io/gorm"
 )
@@ -21,7 +22,7 @@ func (r *GBizInfoRepository) UpsertProfile(profile *models.GBizCompanyProfile) e
 		profile.ID = existing.ID
 		return r.db.Save(profile).Error
 	}
-	if err != nil && err != gorm.ErrRecordNotFound {
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
 	return r.db.Create(profile).Error
@@ -70,7 +71,7 @@ func (r *GBizInfoRepository) UpsertWorkplace(workplace *models.GBizWorkplace) er
 		workplace.ID = existing.ID
 		return r.db.Save(workplace).Error
 	}
-	if err != nil && err != gorm.ErrRecordNotFound {
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
 	return r.db.Create(workplace).Error

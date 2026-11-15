@@ -151,18 +151,21 @@ frontend/public/live2d/*
 !frontend/public/live2d/interviewers/
 #    interviewers/ の中は、追跡したいものだけを名指しで戻す。書き出し済みモデル
 #    (.moc3 / .model3.json / .cdi3.json / テクスチャ)は Core と同じく配布条件が別で、
-#    置き場所も runtime/ と models/ と直下で揺れているため、「全部除外して素材と
+#    置き場所も runtime/ と models/ と直下で揺れているため、「全部除外して
 #    ドキュメントだけ戻す」にする。runtime/ は置き場所(.gitkeep)だけ残す。
+#    元絵(source/)と取り込み用PNG(cubism-input/)は25MBあり、モデルを描き直す人しか
+#    使わないので S3 へ移した。取得は automation/ops/fetch-live2d-authoring.sh。
 frontend/public/live2d/interviewers/**
 !frontend/public/live2d/interviewers/*.json
 !frontend/public/live2d/interviewers/*.md
-!frontend/public/live2d/interviewers/source/
-!frontend/public/live2d/interviewers/source/**
-!frontend/public/live2d/interviewers/cubism-input/
-!frontend/public/live2d/interviewers/cubism-input/**
 !frontend/public/live2d/interviewers/runtime/
 !frontend/public/live2d/interviewers/runtime/*/
 !frontend/public/live2d/interviewers/runtime/*/.gitkeep
+# Cubism Editor のプロジェクト(.cmo3)も S3 側へ移した。書き出すたびに数MBの
+# 新しいblobが積み上がるため、履歴に入れない。
+# 取得は automation/ops/fetch-live2d-authoring.sh（docs/wiki/live2d-assets.md 参照）。
+docs/avatar/live2d-interviewers/cubism-wip/
+
 # シェーダーは Core/モデルと違い Live2D Open Software License の Framework 付属物で、
 # 再配布可・コミットが前提（無いとビルドしたアプリがそもそも動かない）。
 !frontend/public/live2d/shaders/

@@ -4,22 +4,22 @@ import (
 	"testing"
 	"time"
 
-	"Backend/domain/entity"
+	"Backend/internal/models"
 )
 
 func TestPromotableGuest(t *testing.T) {
 	withdrawn := time.Now()
 	tests := []struct {
 		name string
-		user *entity.User
+		user *models.User
 		ok   bool
 	}{
-		{"ゲストは昇格できる", &entity.User{ID: 1, IsGuest: true}, true},
+		{"ゲストは昇格できる", &models.User{ID: 1, IsGuest: true}, true},
 
 		// 本登録済みを上書きできると、他人のアカウントを乗っ取れる。
-		{"本登録済みは昇格できない", &entity.User{ID: 1, IsGuest: false}, false},
-		{"管理者は昇格できない", &entity.User{ID: 1, IsGuest: true, IsAdmin: true}, false},
-		{"退会済みは昇格できない", &entity.User{ID: 1, IsGuest: true, WithdrawnAt: &withdrawn}, false},
+		{"本登録済みは昇格できない", &models.User{ID: 1, IsGuest: false}, false},
+		{"管理者は昇格できない", &models.User{ID: 1, IsGuest: true, IsAdmin: true}, false},
+		{"退会済みは昇格できない", &models.User{ID: 1, IsGuest: true, WithdrawnAt: &withdrawn}, false},
 		{"nilは昇格できない", nil, false},
 	}
 	for _, tt := range tests {
@@ -42,7 +42,7 @@ func TestPromotableGuest(t *testing.T) {
 func TestApplyRegistrationToGuest_KeepsIdentity(t *testing.T) {
 	created := time.Now().Add(-24 * time.Hour)
 	schoolID := uint(77)
-	guest := &entity.User{
+	guest := &models.User{
 		ID:             42,
 		OrganizationID: 5,
 		CreatedAt:      created,
@@ -90,7 +90,7 @@ func TestApplyRegistrationToGuest_KeepsIdentity(t *testing.T) {
 // 消すと担当校の教員から生徒が見えなくなる。
 func TestApplyRegistrationToGuest_KeepsSchoolWhenBlank(t *testing.T) {
 	schoolID := uint(77)
-	guest := &entity.User{
+	guest := &models.User{
 		ID: 1, IsGuest: true,
 		SchoolName: "既存の学校", SchoolID: &schoolID,
 	}
@@ -118,7 +118,7 @@ func TestRegister_昇格では学校名を既定値で上書きしない(t *test
 	t.Setenv("DEFAULT_SCHOOL_NAME", "学園デフォルト")
 
 	schoolID := uint(77)
-	guest := &entity.User{
+	guest := &models.User{
 		ID:         42,
 		IsGuest:    true,
 		SchoolName: "A専門学校",

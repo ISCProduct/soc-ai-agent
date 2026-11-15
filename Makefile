@@ -1,5 +1,5 @@
 # SOC AI Agent — ローカル開発用ショートカット (#589)
-.PHONY: help rag-up rag-down rag-smoke rag-rebuild core-up migrate-new migrate-hash migrate-lint api-docs api-docs-down api-catalog prod-status prod-logs prod-logs-follow prod-logs-errors test-e2e-up test-e2e-seed test-e2e test-e2e-down
+.PHONY: help rag-up rag-down rag-smoke rag-rebuild core-up migrate-new migrate-hash migrate-lint api-docs api-docs-down api-catalog prod-status prod-logs prod-logs-follow prod-logs-errors test-e2e-up test-e2e-seed test-e2e test-e2e-down live2d-up live2d-authoring
 
 # ローカル統合テスト環境（個人の dev スタックと分離・同時起動可。compose.test.yml）
 TEST_COMPOSE := docker compose -p soc-ai-agent-test -f compose.yml -f compose.test.yml
@@ -24,6 +24,10 @@ help:
 	@echo "  make prod-logs          # 直近ログ (SVC=backend|frontend|rag|chroma|all, SINCE=1h)"
 	@echo "  make prod-logs-follow   # ライブ追尾"
 	@echo "  make prod-logs-errors   # エラー行のみ抽出"
+	@echo ""
+	@echo "Live2D面接官 (資産は非公開S3から取る。docs/wiki/live2d-assets.md):"
+	@echo "  make live2d-up        # 実行時資産を取得し、.env.localのフラグを立てて検査する"
+	@echo "  make live2d-authoring # 制作用の元絵とCubismプロジェクトを取得（描き直す人だけ）"
 	@echo ""
 	@echo "ローカル統合テスト環境 (個人のdevスタックと同時起動可。docs/wiki/getting-started.md):"
 	@echo "  make test-e2e-up    # db/redis/app/frontend を分離した専用スタックで起動"
@@ -114,6 +118,29 @@ rag-smoke:
 	@echo "RAG health:" && curl -sf http://127.0.0.1:9000/health && echo
 	@echo "RAG vector/status:" && curl -sf http://127.0.0.1:9000/vector/status && echo
 	@curl -sf http://127.0.0.1:9000/health | grep -q '"vector_store"' || (echo "旧イメージの可能性: make rag-rebuild" && exit 1)
+
+# ── Live2D面接官の資産 ──────────────────────────────────────────
+# Core とモデルは public リポジトリに置けないため非公開S3から取る。
+# 理由と配り方は docs/wiki/live2d-assets.md。
+LIVE2D_ASSETS_BUCKET ?= soc-build-assets-508897596159
+
+live2d-up:
+	LIVE2D_ASSETS_BUCKET=$(LIVE2D_ASSETS_BUCKET) ./automation/ops/fetch-live2d-assets.sh
+	@# 既存行が false でも true に直す。無いときだけ追記すると、一度無効にした .env.local では面接官が Avatar2D のままになる。
+	@if [ -f frontend/.env.local ] && grep -qs '^NEXT_PUBLIC_LIVE2D_ENABLED=' frontend/.env.local; then \
+		sed -i.bak 's/^NEXT_PUBLIC_LIVE2D_ENABLED=.*/NEXT_PUBLIC_LIVE2D_ENABLED=true/' frontend/.env.local && rm -f frontend/.env.local.bak; \
+	else \
+		printf '\n# Live2D面接官を有効にする（make live2d-up が追記）\nNEXT_PUBLIC_LIVE2D_ENABLED=true\n' >> frontend/.env.local; \
+	fi
+	@grep -n '^NEXT_PUBLIC_LIVE2D_ENABLED=' frontend/.env.local
+	cd frontend && npm run check:live2d -- public/live2d/interviewers/male
+	cd frontend && npm run check:live2d -- public/live2d/interviewers/female
+	@echo ""
+	@echo "準備できました。npm run dev を動かし直してから /interview を開いてください。"
+	@echo "NEXT_PUBLIC_* はビルド時に焼き込まれるので、起動中のdevサーバーには反映されません。"
+
+live2d-authoring:
+	LIVE2D_ASSETS_BUCKET=$(LIVE2D_ASSETS_BUCKET) ./automation/ops/fetch-live2d-authoring.sh
 
 # ── 本番(AWS ECS on Fargate)のログ ──────────────────────────────
 # 実体は aws logs tail のラッパー。詳細は ./scripts/prod-logs.sh --help

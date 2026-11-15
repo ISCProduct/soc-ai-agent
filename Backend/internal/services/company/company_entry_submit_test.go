@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/services/email"
@@ -53,7 +52,7 @@ func (r *entryRepoSpy) MarkInviteEmailSent(id uint, _ time.Time) error {
 func newEntrySubmitService(repo *entryRepoSpy) *CompanyEntryService {
 	return &CompanyEntryService{
 		entryRepo:   repo,
-		userRepo:    entryUserRepoStub{user: &entity.User{ID: 1}}, // 既存ユーザー: 仮登録は作らない
+		userRepo:    entryUserRepoStub{user: &models.User{ID: 1}}, // 既存ユーザー: 仮登録は作らない
 		pendingRepo: entryPendingRepoStub{},
 		email:       &email.EmailService{}, // host が空なので送らずにログだけ出し、成功を返す
 	}

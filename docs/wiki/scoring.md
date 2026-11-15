@@ -64,6 +64,8 @@ UserCompanyMatch（総合マッチ度 0-100）
 
 ### データ構造（`UserWeightScore`）
 
+保存する型は `internal/models.UserWeightScore`（json タグは `id` / `user_id` / `category` …）。API 応答には、キーを Go のフィールド名のまま出す `models.UserWeightScoreResponse` に変換して返す（`api/openapi.yaml` の `UserWeightScore`）。以下は応答の形。
+
 ```go
 type UserWeightScore struct {
     ID             uint
@@ -524,8 +526,11 @@ type UserCompanyMatch struct {
   → 最新のチャット診断 session_id を解決（無ければ interview-{userId}）
   → 面接スコアを移動平均で UserWeightScore に反映
   → チャット session なら CalculateMatching で再マッチング
-職務経歴書レビュー → レビュースコア → UserWeightScore 更新
-（職務経歴書側の自動再マッチは未接続）
+職務経歴書レビュー
+  → 最新のチャット診断 session_id を解決（無ければ interview-{userId}）
+  → レビュースコアを移動平均で UserWeightScore に反映
+  → チャット session なら CalculateMatching で再マッチング
+  → RAG レビュー開始時に候補者プロファイル（スコア要約）を candidate_context として注入
 ```
 
 チャット診断と面接スナップショットを混ぜない。`FindLatestByUser` もチャット session を優先する。

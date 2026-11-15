@@ -1,10 +1,9 @@
 package matching
 
 import (
+	"Backend/internal/models"
 	"strings"
 	"testing"
-
-	"Backend/domain/entity"
 )
 
 // TestBuildMatchReasonScoreWording は、マッチ度に応じて文面が切り替わることを固定する（#1124）。
@@ -71,9 +70,9 @@ func TestBuildMatchReasonScoreWording(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			match := &entity.UserCompanyMatch{
+			match := &models.UserCompanyMatch{
 				CompanyID:      1,
-				Company:        &entity.Company{ID: 1, Name: "テスト株式会社", Industry: "IT"},
+				Company:        models.Company{ID: 1, Name: "テスト株式会社", Industry: "IT"},
 				MatchScore:     tt.score,
 				TechnicalMatch: 70,
 			}
@@ -102,9 +101,9 @@ func TestBuildMatchReasonScoreWording(t *testing.T) {
 // TestBuildMatchReasonExcludesUnmeasuredAxes は、未計測（0%）の軸を
 // 「一致度が高い軸」として挙げないことを固定する（#1124）。
 func TestBuildMatchReasonExcludesUnmeasuredAxes(t *testing.T) {
-	match := &entity.UserCompanyMatch{
+	match := &models.UserCompanyMatch{
 		CompanyID:  1,
-		Company:    &entity.Company{ID: 1, Name: "テスト株式会社", Industry: "IT"},
+		Company:    models.Company{ID: 1, Name: "テスト株式会社", Industry: "IT"},
 		MatchScore: 55,
 		// 測れたのは2軸だけ。残り8軸は未計測で0のまま保存されている。
 		TechnicalMatch: 80,
@@ -135,9 +134,9 @@ func TestBuildMatchReasonExcludesUnmeasuredAxes(t *testing.T) {
 // TestBuildMatchReasonAllAxesUnmeasured は、全軸が未計測のときに
 // 個別軸を挙げずフォールバックすることを確認する。
 func TestBuildMatchReasonAllAxesUnmeasured(t *testing.T) {
-	match := &entity.UserCompanyMatch{
+	match := &models.UserCompanyMatch{
 		CompanyID:  1,
-		Company:    &entity.Company{ID: 1, Name: "テスト株式会社", Industry: "IT"},
+		Company:    models.Company{ID: 1, Name: "テスト株式会社", Industry: "IT"},
 		MatchScore: 0,
 	}
 

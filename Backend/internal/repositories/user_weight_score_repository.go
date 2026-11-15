@@ -1,8 +1,6 @@
 package repositories
 
 import (
-	"Backend/domain/entity"
-	"Backend/domain/mapper"
 	"Backend/domain/valueobject"
 	"Backend/internal/models"
 	"encoding/json"
@@ -113,18 +111,18 @@ func (r *UserWeightScoreRepository) AddScoreWithPromptVersion(
 }
 
 // FindByUserAndSession ユーザーとセッションに紐づく全スコアを取得
-func (r *UserWeightScoreRepository) FindByUserAndSession(userID uint, sessionID string) ([]entity.UserWeightScore, error) {
+func (r *UserWeightScoreRepository) FindByUserAndSession(userID uint, sessionID string) ([]models.UserWeightScore, error) {
 	var ms []models.UserWeightScore
 	err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).
 		Find(&ms).Error
 	if err != nil {
 		return nil, err
 	}
-	return mapper.UserWeightScoresToEntities(ms), nil
+	return ms, nil
 }
 
 // FindTopCategories トップNのカテゴリを取得
-func (r *UserWeightScoreRepository) FindTopCategories(userID uint, sessionID string, limit int) ([]entity.UserWeightScore, error) {
+func (r *UserWeightScoreRepository) FindTopCategories(userID uint, sessionID string, limit int) ([]models.UserWeightScore, error) {
 	var ms []models.UserWeightScore
 	err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).
 		Order("score DESC").
@@ -133,18 +131,18 @@ func (r *UserWeightScoreRepository) FindTopCategories(userID uint, sessionID str
 	if err != nil {
 		return nil, err
 	}
-	return mapper.UserWeightScoresToEntities(ms), nil
+	return ms, nil
 }
 
 // FindByUserSessionAndCategory ユーザー、セッション、カテゴリで検索
-func (r *UserWeightScoreRepository) FindByUserSessionAndCategory(userID uint, sessionID, category string) (*entity.UserWeightScore, error) {
+func (r *UserWeightScoreRepository) FindByUserSessionAndCategory(userID uint, sessionID, category string) (*models.UserWeightScore, error) {
 	var m models.UserWeightScore
 	err := r.db.Where("user_id = ? AND session_id = ? AND weight_category = ?", userID, sessionID, category).
 		First(&m).Error
 	if err != nil {
 		return nil, err
 	}
-	return mapper.UserWeightScoreToEntity(&m), nil
+	return &m, nil
 }
 
 // CountByUserAndSession ユーザーとセッションに紐づくスコア数を取得
@@ -533,7 +531,7 @@ func (r *UserWeightScoreRepository) rollbackSnapshot(snapshot models.UserScoreRe
 // FindLatestByUser ユーザーの最新セッションのスコアを取得する。
 // 面接スナップショット(interview-*)よりチャット診断セッションを優先する。
 // 適性検査の行は「最新セッション」の候補にしない（#1678。合流はマッチング側で行う）。
-func (r *UserWeightScoreRepository) FindLatestByUser(userID uint) ([]entity.UserWeightScore, error) {
+func (r *UserWeightScoreRepository) FindLatestByUser(userID uint) ([]models.UserWeightScore, error) {
 	var latest models.UserWeightScore
 	err := r.db.Where("user_id = ? AND source <> ?", userID, models.ScoreSourceAssessment).
 		Order("CASE WHEN session_id LIKE 'interview-%' THEN 1 ELSE 0 END ASC, updated_at DESC, id DESC").

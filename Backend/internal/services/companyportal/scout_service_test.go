@@ -1,14 +1,12 @@
 package companyportal
 
 import (
+	"Backend/internal/models"
+	"Backend/internal/services/shared"
 	"errors"
 	"sync"
 	"testing"
 	"time"
-
-	"Backend/domain/entity"
-	"Backend/internal/models"
-	"Backend/internal/services/shared"
 
 	"gorm.io/gorm"
 )
@@ -213,9 +211,9 @@ func (n namedVisible) IdentityRevealed(_ uint, userID uint) (bool, error) {
 	return n.revealed[userID], nil
 }
 
-type fakeUserReader struct{ user *entity.User }
+type fakeUserReader struct{ user *models.User }
 
-func (f fakeUserReader) GetUserByID(uint) (*entity.User, error) { return f.user, nil }
+func (f fakeUserReader) GetUserByID(uint) (*models.User, error) { return f.user, nil }
 
 type fakeCompanyReader struct{ company *models.Company }
 
@@ -244,7 +242,7 @@ func TestScoutService_Send_クールダウンとブロック(t *testing.T) {
 	svc := NewScoutService(
 		store,
 		fakeVisible{ok: true},
-		fakeUserReader{user: &entity.User{ID: 101, Name: "山田", Email: "a@example.com"}},
+		fakeUserReader{user: &models.User{ID: 101, Name: "山田", Email: "a@example.com"}},
 		fakeCompanyReader{company: &models.Company{ID: 1, Name: "デモ株式会社"}},
 		mailer,
 		"http://localhost:3000",
@@ -288,7 +286,7 @@ func TestScoutService_Send_並行送信は1件だけ保存してメールも1通
 	svc := NewScoutService(
 		store,
 		fakeVisible{ok: true},
-		fakeUserReader{user: &entity.User{ID: 101, Name: "山田", Email: "a@example.com"}},
+		fakeUserReader{user: &models.User{ID: 101, Name: "山田", Email: "a@example.com"}},
 		fakeCompanyReader{company: &models.Company{ID: 1, Name: "デモ株式会社"}},
 		mailer,
 		"http://localhost:3000",
@@ -403,7 +401,7 @@ func TestScoutService_Send_展開済み本文からも実名を除いて保存�
 	svc := NewScoutService(
 		store,
 		fakeVisible{ok: true},
-		fakeUserReader{user: &entity.User{ID: 101, Name: "山田", Email: "a@example.com"}},
+		fakeUserReader{user: &models.User{ID: 101, Name: "山田", Email: "a@example.com"}},
 		fakeCompanyReader{company: &models.Company{ID: 1, Name: "デモ株式会社"}},
 		mailer,
 		"http://localhost:3000",

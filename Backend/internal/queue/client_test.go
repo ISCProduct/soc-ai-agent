@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"Backend/domain/entity"
+	"Backend/internal/models"
 	"Backend/internal/queue"
 
 	"github.com/alicebob/miniredis/v2"
@@ -19,11 +19,11 @@ type stubEmail struct {
 	verificationCalls atomic.Int32
 }
 
-func (s *stubEmail) SendVerificationEmail(user *entity.User, token, appURL string) error {
+func (s *stubEmail) SendVerificationEmail(user *models.User, token, appURL string) error {
 	s.verificationCalls.Add(1)
 	return nil
 }
-func (s *stubEmail) SendReVerificationEmail(user *entity.User, token, appURL string) error {
+func (s *stubEmail) SendReVerificationEmail(user *models.User, token, appURL string) error {
 	return nil
 }
 func (s *stubEmail) SendRegistrationEmail(email, token string) error { return nil }
