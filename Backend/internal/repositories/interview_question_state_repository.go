@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"errors"
 
 	"gorm.io/gorm"
 )
@@ -46,7 +47,7 @@ func (r *InterviewQuestionStateRepository) FindLatestAsked(sessionID uint) (*mod
 	err := r.db.Where("session_id = ? AND status = ?", sessionID, "asked").
 		Order("id DESC").
 		First(&state).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {

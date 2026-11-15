@@ -470,14 +470,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		return err
 	}
-	hasText := false
-	for _, b := range blocks {
-		if strings.TrimSpace(b.Text) != "" {
-			hasText = true
-			break
-		}
-	}
-	if !hasText {
+	if !hasExtractableText(blocks) {
 		msg := "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"
 		sendEvent(map[string]any{"type": "error", "message": msg})
 		return errors.New(msg)
@@ -488,31 +481,13 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	text := buildResumeText(blocks, reviewTextLimit)
 
 	// RAGレポートをストリーミングしつつ全文を収集する
-	var ragReport string
-	if strings.TrimSpace(companyName) != "" {
-		ragBody, ragErr := s.fetchRAGReportStream(ctx, text, companyName, jobTitle, doc.UserID)
-		if ragErr == nil {
-			ragReport, _ = relaySSEChunks(ragBody, w)
-			ragBody.Close()
-		} else {
-			log.Printf("resume_review_stream: rag stream failed: %v", ragErr)
-		}
-	}
+	ragReport := s.streamRAGReport(ctx, w, text, companyName, jobTitle, doc.UserID)
 
 	// スコア・指摘事項を生成
 	review, items, err := s.buildReviewScoreItems(ctx, blocks, companyName, jobTitle, candidateType, ragReport)
 	if err != nil {
 		log.Printf("resume_review_stream: build score failed: %v", err)
-		var ve *shared.ValidationError
-		switch {
-		case errors.As(err, &ve):
-			sendEvent(map[string]any{"type": "error", "message": ve.Message})
-		case errors.Is(err, openai.ErrAIUnavailable):
-			// 内部設定が学生に見えないよう固定文言にする(#1293)
-			sendEvent(map[string]any{"type": "error", "message": "現在AI機能を利用できません。しばらくしてから再度お試しください。"})
-		default:
-			sendEvent(map[string]any{"type": "error", "message": err.Error()})
-		}
+		sendEvent(map[string]any{"type": "error", "message": reviewScoreErrorMessage(err)})
 		return err
 	}
 
@@ -545,6 +520,46 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		"format_findings":     findings,
 	})
 	return nil
+}
+
+// hasExtractableText は、空白以外の文字を持つブロックが1つでもあるかを返す。
+func hasExtractableText(blocks []models.ResumeTextBlock) bool {
+	for _, b := range blocks {
+		if strings.TrimSpace(b.Text) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// streamRAGReport は RAG レポートを SSE で中継しつつ、全文を集めて返す。
+// 企業名が空、または取得に失敗したときは空文字を返す（レビュー自体は続ける）。
+func (s *ResumeService) streamRAGReport(ctx context.Context, w http.ResponseWriter, text, companyName, jobTitle string, userID uint) string {
+	if strings.TrimSpace(companyName) == "" {
+		return ""
+	}
+	ragBody, err := s.fetchRAGReportStream(ctx, text, companyName, jobTitle, userID)
+	if err != nil {
+		log.Printf("resume_review_stream: rag stream failed: %v", err)
+		return ""
+	}
+	defer ragBody.Close()
+	report, _ := relaySSEChunks(ragBody, w)
+	return report
+}
+
+// reviewScoreErrorMessage は、スコア生成の失敗を学生に見せる文言にする。
+func reviewScoreErrorMessage(err error) string {
+	var ve *shared.ValidationError
+	switch {
+	case errors.As(err, &ve):
+		return ve.Message
+	case errors.Is(err, openai.ErrAIUnavailable):
+		// 内部設定が学生に見えないよう固定文言にする(#1293)
+		return "現在AI機能を利用できません。しばらくしてから再度お試しください。"
+	default:
+		return err.Error()
+	}
 }
 
 // flushSSE はバッファを送出する。Echo の Response.Flush は WrapMiddleware 配下で
@@ -637,13 +652,7 @@ func (s *ResumeService) buildReviewScoreItems(ctx context.Context, blocks []mode
 	// プロンプト側の「重視傾向があれば不足を指摘してよい」という条件が
 	// 通常経路では一度も成立していなかった。
 	if strings.TrimSpace(companyName) != "" {
-		if brief := s.lookupCompanyBriefFromCache(companyName); brief != "" {
-			if strings.TrimSpace(companyInfo) == "" {
-				companyInfo = brief
-			} else {
-				companyInfo = brief + "\n\n" + companyInfo
-			}
-		}
+		companyInfo = prependCompanyBrief(s.lookupCompanyBriefFromCache(companyName), companyInfo)
 	}
 
 	prompt := buildReviewPrompt(text, companyName, jobTitle, companyInfo, candidateType)
@@ -677,44 +686,75 @@ func (s *ResumeService) buildReviewScoreItems(ctx context.Context, blocks []mode
 
 	items := mapReviewItems(blocks, response.Items)
 	log.Printf("resume_review: items mapped=%d raw=%d", len(items), len(response.Items))
-	// スコアだけが不正なときもやり直す。面接（#795）と同じく作り直しは1度だけ。
 	if len(items) < 3 || scoreErr != nil {
-		blocksForRetry := selectReviewBlocks(blocks, 40)
-		blockList := buildBlockList(blocksForRetry)
-		retryPrompt := buildReviewRetryPrompt(blockList, companyName, jobTitle, companyInfo, candidateType)
-		rawRetry, retryReqErr := s.requestReviewJSON(ctx, reviewRetrySystemPrompt, retryPrompt, modelOverride)
-		if retryReqErr != nil {
-			log.Printf("resume_review: やり直しの生成に失敗: %v", retryReqErr)
-		}
-		if retryReqErr == nil {
-			responseRetry := aiReviewResponse{}
-			if decodeJSON(rawRetry, &responseRetry) == nil {
-				retryItems := mapReviewItems(blocks, responseRetry.Items)
-				log.Printf("resume_review: retry items mapped=%d raw=%d", len(retryItems), len(responseRetry.Items))
-				// 指摘の差し替えは「初回が3件未満」のときだけ。スコアだけが不正で
-				// 初回の指摘が足りているなら、本文に紐づいた初回の指摘を守る。
-				// やり直しはブロック一覧ベースの別プロンプトで、件数は増えても
-				// 紐づきの質が上がる保証が無い（採点のやり直しに指摘を賭けない）。
-				if len(items) < 3 {
-					items = adoptRetryItems(items, retryItems)
-				}
-				// スコアが不正だったときだけ差し替える。初回が正当なら上書きしない
-				// （やり直しは指摘の紐づけを増やすためのもので、採点のやり直しではない）。
-				if scoreErr != nil {
-					if retryScore, retryErr := ComputeResumeOverallScore(responseRetry.Scores, candidateType); retryErr == nil {
-						overall, scoreErr = retryScore, nil
-					} else {
-						log.Printf("resume_review: やり直してもルーブリック違反: %v", retryErr)
-					}
-				}
-			}
-		}
+		items, overall, scoreErr = s.retryReviewGeneration(ctx, blocks, companyName, jobTitle, candidateType, companyInfo, modelOverride, items, overall, scoreErr)
 	}
 	if len(items) == 0 {
 		log.Println("resume_review: no items could be mapped after retry")
 		return nil, nil, fmt.Errorf("AIが生成した指摘内容を履歴書ブロックに紐づけられませんでした。再度お試しください")
 	}
 
+	review := newResumeReview(response, overall, scoreErr, candidateType)
+	return review, items, nil
+}
+
+// prependCompanyBrief は企業 brief を companyInfo の前に置く。brief が空ならそのまま返す。
+func prependCompanyBrief(brief, companyInfo string) string {
+	if brief == "" {
+		return companyInfo
+	}
+	if strings.TrimSpace(companyInfo) == "" {
+		return brief
+	}
+	return brief + "\n\n" + companyInfo
+}
+
+// retryReviewGeneration は、初回の指摘が3件未満、またはスコアがルーブリック違反のときに
+// 1度だけ作り直し、採用する指摘とスコアを返す。やり直しに失敗したら初回の結果をそのまま返す。
+func (s *ResumeService) retryReviewGeneration(
+	ctx context.Context,
+	blocks []models.ResumeTextBlock,
+	companyName, jobTitle, candidateType, companyInfo, modelOverride string,
+	items []models.ResumeReviewItem,
+	overall int,
+	scoreErr error,
+) ([]models.ResumeReviewItem, int, error) {
+	// スコアだけが不正なときもやり直す。面接（#795）と同じく作り直しは1度だけ。
+	blocksForRetry := selectReviewBlocks(blocks, 40)
+	blockList := buildBlockList(blocksForRetry)
+	retryPrompt := buildReviewRetryPrompt(blockList, companyName, jobTitle, companyInfo, candidateType)
+	rawRetry, retryReqErr := s.requestReviewJSON(ctx, reviewRetrySystemPrompt, retryPrompt, modelOverride)
+	if retryReqErr != nil {
+		log.Printf("resume_review: やり直しの生成に失敗: %v", retryReqErr)
+	}
+	if retryReqErr == nil {
+		responseRetry := aiReviewResponse{}
+		if decodeJSON(rawRetry, &responseRetry) == nil {
+			retryItems := mapReviewItems(blocks, responseRetry.Items)
+			log.Printf("resume_review: retry items mapped=%d raw=%d", len(retryItems), len(responseRetry.Items))
+			// 指摘の差し替えは「初回が3件未満」のときだけ。スコアだけが不正で
+			// 初回の指摘が足りているなら、本文に紐づいた初回の指摘を守る。
+			// やり直しはブロック一覧ベースの別プロンプトで、件数は増えても
+			// 紐づきの質が上がる保証が無い（採点のやり直しに指摘を賭けない）。
+			if len(items) < 3 {
+				items = adoptRetryItems(items, retryItems)
+			}
+			// スコアが不正だったときだけ差し替える。初回が正当なら上書きしない
+			// （やり直しは指摘の紐づけを増やすためのもので、採点のやり直しではない）。
+			if scoreErr != nil {
+				if retryScore, retryErr := ComputeResumeOverallScore(responseRetry.Scores, candidateType); retryErr == nil {
+					overall, scoreErr = retryScore, nil
+				} else {
+					log.Printf("resume_review: やり直してもルーブリック違反: %v", retryErr)
+				}
+			}
+		}
+	}
+	return items, overall, scoreErr
+}
+
+// newResumeReview は AI の応答から ResumeReview を組み立てる。
+func newResumeReview(response aiReviewResponse, overall int, scoreErr error, candidateType string) *models.ResumeReview {
 	review := &models.ResumeReview{Summary: response.Summary}
 	// スコア無しのときは Score / ItemScoresJSON をどちらも nil のままにする。
 	// 片方だけ残すと画面の総合スコアと内訳が食い違う。
@@ -730,7 +770,7 @@ func (s *ResumeService) buildReviewScoreItems(ctx context.Context, blocks []mode
 		review.Score = &overall
 		log.Printf("resume_review: 総合スコア=%d 候補者区分=%q 内訳=%v", overall, candidateType, response.Scores)
 	}
-	return review, items, nil
+	return review
 }
 
 // buildRubricJSONHint はプロンプトの出力例に入れる scores のキー列を作る。

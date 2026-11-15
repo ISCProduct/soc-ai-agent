@@ -39,6 +39,9 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
   const [loading, setLoading] = useState(false)
   // 新規登録: メール送信完了状態
   const [registrationEmailSent, setRegistrationEmailSent] = useState(false)
+  // ログイン: 未認証エラー時に再送ボタンを出す / 再送後の案内
+  const [canResend, setCanResend] = useState(false)
+  const [resendNotice, setResendNotice] = useState('')
 
   const emailInvalid = emailTouched && email !== '' && !EMAIL_PATTERN.test(email)
 
@@ -49,6 +52,8 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    setCanResend(false)
+    setResendNotice('')
     setLoading(true)
     try {
       const response = await authService.login(email, password)
@@ -57,12 +62,28 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       if (msg === 'email_not_verified') {
-        setError('メールアドレスが未確認です。登録時に送信された確認メールをご確認ください。')
+        setError('メールアドレスが未確認です。登録時に送信された確認メールをご確認ください。リンクの期限（24時間）が切れた場合は、再送できます。')
+        setCanResend(true)
       } else if (msg === 're_verification_required') {
         setError('10日以上ログインがなかったため、再認証メールを送信しました。メールをご確認ください。')
       } else {
         setError(msg)
       }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResendVerification = async () => {
+    setResendNotice('')
+    setLoading(true)
+    try {
+      await authService.resendVerification(email)
+      setError('')
+      setResendNotice('該当するアカウントがある場合は、認証メールを送信しました。届かない場合は、迷惑メールフォルダもご確認ください。')
+      setCanResend(false)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
@@ -125,8 +146,23 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
           </Typography>
 
           {error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
+            <Alert
+              severity="error"
+              sx={{ mb: 2 }}
+              action={
+                canResend ? (
+                  <Button color="inherit" size="small" disabled={loading || !EMAIL_PATTERN.test(email)} onClick={handleResendVerification}>
+                    認証メールを再送
+                  </Button>
+                ) : undefined
+              }
+            >
               {error}
+            </Alert>
+          )}
+          {resendNotice && (
+            <Alert severity="success" sx={{ mb: 2 }}>
+              {resendNotice}
             </Alert>
           )}
 
