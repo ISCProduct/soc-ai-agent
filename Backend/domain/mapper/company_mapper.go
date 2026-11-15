@@ -112,6 +112,9 @@ func UserCompanyMatchToEntity(m *models.UserCompanyMatch) *entity.UserCompanyMat
 		CreatedAt:                m.CreatedAt,
 		UpdatedAt:                m.UpdatedAt,
 	}
+	if m.JobPosition != nil && m.JobPosition.ID != 0 {
+		e.JobTitle = m.JobPosition.Title
+	}
 	e.Company = CompanyToEntity(&m.Company)
 	return e
 }

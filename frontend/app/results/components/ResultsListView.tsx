@@ -1,6 +1,6 @@
 'use client'
 
-import type { MouseEvent } from 'react'
+import { useState, type MouseEvent } from 'react'
 import {
   Box,
   Typography,
@@ -28,6 +28,7 @@ import {
 import type { AnalysisScores, Company, SnackbarState, SuggestedRole } from '../types'
 import { buildEsRewriteQuery, buildInterviewQuery, getTopCategoryScores } from '../utils'
 import AnalysisScoreCard from './AnalysisScoreCard'
+import FavoritesCompareList from './FavoritesCompareList'
 import {
   GUEST_REGISTER_CTA_LABEL,
   GUEST_REGISTER_PATH,
@@ -103,8 +104,14 @@ export default function ResultsListView({
   const guestEmailProps = getGuestEmailButtonProps(isGuestUser)
   const guestApplicationsProps = getGuestApplicationsButtonProps(isGuestUser)
   const applyClosedProps = getApplyClosedButtonProps(applyEnabled)
-  // 一覧全体の幅。各社の位置はこの中で示す
-  const band = scaleBand(companies.map((c) => c.matchScore))
+  // お気に入りは今開いている診断の結果だけを見る。別セッションへ広げるかは未決。
+  const [favoritesOnly, setFavoritesOnly] = useState(false)
+  const favoriteCount = companies.filter((company) => company.isFavorited).length
+  const listedCompanies = favoritesOnly
+    ? companies.filter((company) => company.isFavorited)
+    : companies
+  // 一覧全体の幅。各社の位置はこの中で示す。並び順は渡されたまま（適合度順）。
+  const band = scaleBand(listedCompanies.map((c) => c.matchScore))
   // 一覧の中で最も多い根拠軸数。これを下回る行だけ印を出す
   const maxAxisCount = Math.max(
     0,
@@ -180,19 +187,37 @@ export default function ResultsListView({
               mb: 0.5,
             }}
           >
-            あなたに近い{companies.length}社
+            {favoritesOnly ? `お気に入りにした${listedCompanies.length}社` : `あなたに近い${companies.length}社`}
           </Typography>
           <Typography sx={{ fontSize: 15, color: UI.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 1.5 }}>
-            {isProvisional
-              ? 'ここまでの回答で並べています。会話を続けると根拠が増え、順番も変わります。'
-              : '回答の傾向と、企業が重視する人物像を突き合わせた順に並べています。'}
+            {favoritesOnly
+              ? '今回の診断でお気に入りにした企業です。並びは適合度の高い順のままです。'
+              : isProvisional
+                ? 'ここまでの回答で並べています。会話を続けると根拠が増え、順番も変わります。'
+                : '回答の傾向と、企業が重視する人物像を突き合わせた順に並べています。'}
           </Typography>
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" role="group" aria-label="表示する企業" sx={{ mb: 1.5 }}>
+            <Button
+              variant={favoritesOnly ? 'text' : 'contained'}
+              aria-pressed={!favoritesOnly}
+              onClick={() => setFavoritesOnly(false)}
+            >
+              すべて
+            </Button>
+            <Button
+              variant={favoritesOnly ? 'contained' : 'text'}
+              aria-pressed={favoritesOnly}
+              onClick={() => setFavoritesOnly(true)}
+            >
+              お気に入りだけ（{favoriteCount}）
+            </Button>
+          </Stack>
           {/*
             適合度の幅を一度だけ述べる。実測では候補が狭い帯に密集しており、
             78 と 71 の差は見た目ほど大きくない。各行に目盛りを並べるより、
             ここで一度「差は小さい」と言うほうが正直で、読む手間も少ない。
           */}
-          {companies.length > 1 && band.max - band.min <= 15 && (
+          {listedCompanies.length > 1 && band.max - band.min <= 15 && (
             <Typography sx={{ fontSize: 14, color: UI.inkSoft, mb: 1.5 }}>
               適合度は{band.min}〜{band.max}に収まっています。順位の差はわずかなので、
               上から順に決める必要はありません。
@@ -285,6 +310,26 @@ export default function ResultsListView({
             学生の用途は「見比べて絞る」ことなので、1社ずつ箱に入れると
             隣と比べにくく、どれも同じ重みに見える。
           */}
+          {favoritesOnly && listedCompanies.length === 0 ? (
+            <Box sx={{ py: 3 }}>
+              <Typography sx={{ fontSize: 16, fontWeight: 700, color: UI.ink, mb: 1 }}>
+                この診断でお気に入りにした企業はまだありません
+              </Typography>
+              <Typography sx={{ fontSize: 15, color: UI.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 2 }}>
+                すべての企業に戻って、残しておきたい企業のハートを押してください。ここに並びます。
+              </Typography>
+              <Button variant="outlined" onClick={() => setFavoritesOnly(false)}>
+                すべての企業を見る
+              </Button>
+            </Box>
+          ) : favoritesOnly ? (
+            <FavoritesCompareList
+              companies={listedCompanies}
+              favoritingId={favoritingId}
+              onSelectCompany={onSelectCompany}
+              onToggleFavorite={onToggleFavorite}
+            />
+          ) : (
           <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0 }}>
             {companies.map((company, index) => (
               <Box
@@ -480,6 +525,7 @@ export default function ResultsListView({
               </Box>
             ))}
           </Box>
+          )}
 
           <Box sx={{ textAlign: 'center', mt: 4, mb: 4 }}>
             <Stack direction="row" spacing={2} justifyContent="center" flexWrap="wrap" useFlexGap>

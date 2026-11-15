@@ -34,6 +34,7 @@ type Recommendation struct {
 	Score          int            `json:"score"`         // マッチスコア
 	Reason         string         `json:"reason"`        // マッチ理由
 	Industry       string         `json:"industry"`
+	JobTitle       string         `json:"job_title,omitempty"`
 	Location       string         `json:"location"`
 	Employees      string         `json:"employees"`
 	TechStack      []string       `json:"tech_stack"`
@@ -149,6 +150,7 @@ func BuildRecommendations(displayed []*entity.UserCompanyMatch, reasonScores []e
 			Score:            int(match.MatchScore),
 			Reason:           BuildMatchReason(match, reasonScores),
 			Industry:         match.Company.Industry,
+			JobTitle:         match.JobTitle,
 			Location:         match.Company.Location,
 			Employees:        employeeCount,
 			TechStack:        SplitTechStack(match.Company.TechStack),

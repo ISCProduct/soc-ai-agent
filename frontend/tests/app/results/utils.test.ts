@@ -61,6 +61,11 @@ describe('mapRecommendationToCompany', () => {
     expect(company.categoryScores?.communication).toBe(0)
   })
 
+  it('職種名があるときだけ jobTitle を載せる', () => {
+    expect(mapRecommendationToCompany({ job_title: '生産管理' }, 0).jobTitle).toBe('生産管理')
+    expect(mapRecommendationToCompany({}, 0).jobTitle).toBeUndefined()
+  })
+
   it('欠落フィールドにフォールバックを適用する', () => {
     const company = mapRecommendationToCompany({}, 2)
 

@@ -37,6 +37,7 @@ export function mapRecommendationToCompany(
     matchId: rec.match_id || undefined,
     name: rec.category_name || rec.name || `企業 ${index + 1}`,
     industry: rec.industry || 'IT・ソフトウェア',
+    jobTitle: rec.job_title || undefined,
     location: rec.location || '東京都',
     employees: rec.employees || '未定',
     description: rec.reason || '詳細情報は準備中です',

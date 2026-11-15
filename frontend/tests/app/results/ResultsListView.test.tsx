@@ -170,4 +170,52 @@ describe('ResultsListView', () => {
     expect(screen.getByRole('button', { name: '応募済み' })).toBeDisabled()
     expect(screen.queryByText('応募は準備中')).not.toBeInTheDocument()
   })
+
+  it('お気に入りだけを選ぶと、お気に入りの企業を業界と職種で並べる', () => {
+    renderList({
+      companies: [
+        sampleCompany,
+        {
+          ...sampleCompany,
+          id: '2',
+          matchId: 11,
+          name: 'お気に入り株式会社',
+          industry: '製造',
+          jobTitle: '生産管理',
+          matchScore: 70,
+          isFavorited: true,
+        },
+        {
+          ...sampleCompany,
+          id: '3',
+          matchId: 12,
+          name: '職種なし株式会社',
+          isFavorited: true,
+          matchScore: 60,
+        },
+      ],
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'お気に入りだけ（2）' }))
+
+    expect(screen.queryByText('サンプル株式会社')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'お気に入り株式会社' })).toBeInTheDocument()
+    expect(screen.getByText('製造')).toBeInTheDocument()
+    expect(screen.getByText('生産管理')).toBeInTheDocument()
+    expect(screen.getByText('職種なし株式会社')).toBeInTheDocument()
+    expect(screen.getByText('未設定')).toBeInTheDocument()
+    // 渡された順のまま。適合度の高いお気に入りが先。
+    const names = screen.getAllByRole('button', { name: /株式会社$/ }).map((node) => node.textContent)
+    expect(names).toEqual(['お気に入り株式会社', '職種なし株式会社'])
+  })
+
+  it('お気に入りが無いときは、すべての企業へ戻れる', () => {
+    renderList()
+
+    fireEvent.click(screen.getByRole('button', { name: 'お気に入りだけ（0）' }))
+    expect(screen.getByText('この診断でお気に入りにした企業はまだありません')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'すべての企業を見る' }))
+    expect(screen.getByText('サンプル株式会社')).toBeInTheDocument()
+  })
 })

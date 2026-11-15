@@ -106,6 +106,8 @@ type UserCompanyMatch struct {
 	IsViewed                 bool
 	IsFavorited              bool
 	IsApplied                bool
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
+	// JobTitle は比較表示用の職種名。紐づく求人が無いマッチは空で、保存しない。
+	JobTitle  string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }

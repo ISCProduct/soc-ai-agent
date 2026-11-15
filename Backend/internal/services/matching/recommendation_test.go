@@ -126,3 +126,19 @@ func TestDisplayableMatches_DropsUnresolvedCompany(t *testing.T) {
 		t.Fatal("0件は nil（JSON で null）のまま。挙動を変えない")
 	}
 }
+
+func TestBuildRecommendations_JobTitle(t *testing.T) {
+	got := BuildRecommendations([]*entity.UserCompanyMatch{
+		{JobTitle: "生産管理", Company: &entity.Company{ID: 1, Name: "A", Industry: "製造"}},
+		{Company: &entity.Company{ID: 2, Name: "B", Industry: "IT"}},
+	}, nil)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].JobTitle != "生産管理" {
+		t.Fatalf("JobTitle = %q, want 生産管理", got[0].JobTitle)
+	}
+	if got[1].JobTitle != "" {
+		t.Fatalf("求人が無いマッチの職種は空のまま。got %q", got[1].JobTitle)
+	}
+}
