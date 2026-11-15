@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 
 import SessionScreen from '@/app/interview/components/SessionScreen'
 import { UTTERANCE_SAVE_FAILED_MESSAGE } from '@/app/interview/utteranceSave'
@@ -58,23 +58,90 @@ describe('SessionScreen', () => {
     )
   }
 
-  it('企業名と面接官ラベルを表示する', () => {
+  it('面接官の名札を表示する', () => {
     renderScreen()
-
-    expect(screen.getByText('テスト株式会社')).toBeInTheDocument()
     expect(screen.getByText('テスト株式会社 面接官')).toBeInTheDocument()
   })
 
   it('status=connecting の場合は接続中オーバーレイを表示する', () => {
     renderScreen({ status: 'connecting', isConnected: false })
-
     expect(screen.getByText('接続中...')).toBeInTheDocument()
   })
 
-  it('接続済みの場合は「話す」ボタンを表示する', () => {
-    renderScreen()
+  it('エラー時はメッセージと「再接続する」を出し、押すと onJoin が呼ばれる', () => {
+    const onJoin = jest.fn()
+    renderScreen({ status: 'error', isConnected: false, errorMessage: '接続に失敗しました', onJoin })
+    expect(screen.getByText('接続に失敗しました')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '再接続する' }))
+    expect(onJoin).toHaveBeenCalledTimes(1)
+  })
 
-    expect(screen.getByRole('button', { name: '話す' })).toBeInTheDocument()
+  it('接続済みの場合は「話す」ボタンを表示し、押すと録音を始める', () => {
+    const onStartRecording = jest.fn()
+    renderScreen({ onStartRecording })
+    fireEvent.click(screen.getByRole('button', { name: '話す' }))
+    expect(onStartRecording).toHaveBeenCalledTimes(1)
+  })
+
+  it('録音中は「話し終わった」になり、押すと録音を止める', () => {
+    const onStopRecording = jest.fn()
+    renderScreen({ isRecording: true, onStopRecording })
+    expect(screen.queryByRole('button', { name: '話す' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '話し終わった' }))
+    expect(onStopRecording).toHaveBeenCalledTimes(1)
+  })
+
+  it('面接官が話している間は録音ボタンを押せない', () => {
+    renderScreen({ aiSpeaking: true })
+    expect(screen.getByRole('button', { name: '質問を聞いています' })).toBeDisabled()
+  })
+
+  it('面接官が考えている間は録音ボタンを押せない', () => {
+    renderScreen({ turnPending: true })
+    expect(screen.getByRole('button', { name: '考えています' })).toBeDisabled()
+  })
+
+  it('終了ボタンは確認を挟み、確認して初めて onStop(false) が呼ばれる', () => {
+    const onStop = jest.fn()
+    renderScreen({ onStop })
+    fireEvent.click(screen.getByRole('button', { name: '終了' }))
+    expect(onStop).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: '面接を終了しますか？' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '終了してレポートを見る' }))
+    expect(onStop).toHaveBeenCalledWith(false)
+  })
+
+  it('確認ダイアログで「面接を続ける」を選ぶと onStop は呼ばれない', () => {
+    const onStop = jest.fn()
+    renderScreen({ onStop })
+    fireEvent.click(screen.getByRole('button', { name: '終了' }))
+    fireEvent.click(screen.getByRole('button', { name: '面接を続ける' }))
+    expect(onStop).not.toHaveBeenCalled()
+  })
+
+  it('transcriptEndRef が DOM に付く（useInterviewSession の自動スクロール先）', () => {
+    const transcriptEndRef = { current: null as HTMLDivElement | null }
+    renderScreen({ transcriptEndRef })
+    expect(transcriptEndRef.current).toBeInstanceOf(HTMLDivElement)
+  })
+
+  it('aiAudioRef の audio と、自分の映像の video ref が付く', () => {
+    const aiAudioRef = { current: null as HTMLAudioElement | null }
+    const sessionVideoCallbackRef = jest.fn()
+    renderScreen({ aiAudioRef, sessionVideoCallbackRef })
+    expect(aiAudioRef.current).toBeInstanceOf(HTMLAudioElement)
+    expect(sessionVideoCallbackRef).toHaveBeenCalledWith(expect.any(HTMLVideoElement))
+  })
+
+  it('深掘り質問のときはその旨を表示する', () => {
+    renderScreen({ isDeepeningQuestion: true })
+    expect(screen.getByText('深掘り質問')).toBeInTheDocument()
+  })
+
+  it('字幕オフでも質問文だけを隠し、状況行は残す', () => {
+    renderScreen({ captionsVisible: false, utterances: [{ role: 'ai', text: '強みは？' }] })
+    expect(screen.queryByText('強みは？')).not.toBeInTheDocument()
+    expect(screen.getByText(/あなたの番です/)).toBeInTheDocument()
   })
 
   // #1476: 保存に失敗したまま無言で面接が続くと、ユーザーは空のレポートを受け取るまで気づけない
@@ -104,103 +171,49 @@ describe('SessionScreen', () => {
     expect(flag.result.current).toBe(false)
   })
 
-  // 2D化(#2D化)に伴うレイアウト再構築: 専用の「現在の質問」枠を新設し、
-  // 既存の発話ストリーム(utterances/partialAi)から導出する。新規データは持たない。
-  describe('現在の質問・ライブ回答パネル', () => {
-    it('確定済みのAI発話を「現在の質問」として表示する', () => {
+  describe('現在の質問', () => {
+    it('確定済みのAI発話を現在の質問として表示する', () => {
       renderScreen({ utterances: [{ role: 'ai', text: 'あなたの強みを教えてください' }] })
       expect(screen.getByText('あなたの強みを教えてください')).toBeInTheDocument()
     })
 
     it('読み上げ中(partialAi)があればそちらを優先して表示する', () => {
-      renderScreen({
-        utterances: [{ role: 'ai', text: '前の質問' }],
-        partialAi: '読み上げ中の質問です',
-      })
+      renderScreen({ utterances: [{ role: 'ai', text: '前の質問' }], partialAi: '読み上げ中の質問です' })
       expect(screen.getByText('読み上げ中の質問です')).toBeInTheDocument()
       expect(screen.queryByText('前の質問')).not.toBeInTheDocument()
     })
-
-    it('認識中(partialUser)の発話をライブ回答として表示する', () => {
-      renderScreen({
-        utterances: [{ role: 'ai', text: '質問' }],
-        partialUser: '話している途中の内容',
-      })
-      expect(screen.getByText('話している途中の内容')).toBeInTheDocument()
-    })
-
-    // CodeRabbit指摘: 次の質問が確定した直後(まだ何も話していない間)、末尾の
-    // user発話をそのまま使うと前の質問への回答が「現在の質問の回答」として
-    // 表示され続けてしまっていた。
-    it('次の質問が確定したら、前の質問への回答をライブ回答に出さずプレースホルダーに戻す', () => {
-      renderScreen({
-        utterances: [
-          { role: 'ai', text: '質問1' },
-          { role: 'user', text: '質問1への回答' },
-          { role: 'ai', text: '質問2' },
-        ],
-        partialUser: '',
-      })
-      expect(screen.getByText('質問2')).toBeInTheDocument()
-      // 「これまでの質問・回答」は既定で折りたたまれているため、ここに
-      // '質問1への回答' が見えるとすればライブ回答パネル側の表示漏れバグ
-      expect(screen.queryByText('質問1への回答')).not.toBeInTheDocument()
-      expect(screen.getByText('「話す」ボタンを押して回答してください')).toBeInTheDocument()
-    })
   })
 
-  describe('STAR回答フレームワーク思考ガイド', () => {
-    it('既定で表示されており、クリックで折りたためる', () => {
-      renderScreen({ utterances: [{ role: 'ai', text: '質問' }] })
-
-      expect(screen.getByText(/Situation/)).toBeVisible()
-
-      fireEvent.click(screen.getByText('STAR回答フレームワーク思考ガイド'))
-      expect(screen.queryByText(/Situation/)).not.toBeInTheDocument()
+  describe('サイドパネル', () => {
+    it('既定では閉じている', () => {
+      renderScreen()
+      expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
     })
 
-    // キーボード操作(Tab+Enter/Space)でも開閉できること。role="button"の自前実装のため、
-    // クリック操作だけでなくキーボード操作の回帰も防ぐ(テスター指摘)。
-    it('キーボード操作(Enter/Space)でも折りたためる', () => {
-      renderScreen({ utterances: [{ role: 'ai', text: '質問' }] })
-      const toggle = screen.getByText('STAR回答フレームワーク思考ガイド').closest('[role="button"]')!
-
-      fireEvent.keyDown(toggle, { key: 'Enter' })
-      expect(screen.queryByText(/Situation/)).not.toBeInTheDocument()
-
-      fireEvent.keyDown(toggle, { key: ' ' })
-      expect(screen.getByText(/Situation/)).toBeVisible()
+    it('「ヒント」でSTARの4項目を表示し、閉じるで消える', () => {
+      renderScreen()
+      fireEvent.click(screen.getByRole('button', { name: 'ヒント' }))
+      const panel = screen.getByRole('complementary', { name: 'ヒント' })
+      for (const label of ['状況', '課題', '行動', '結果']) expect(within(panel).getByText(label)).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: '閉じる' }))
+      expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
     })
-  })
 
-  describe('これまでの質問・回答', () => {
-    it('既定では折りたたまれており、過去の発話は表示しない', () => {
+    it('「記録」でこれまでの質問・回答を表示する', () => {
       renderScreen({
-        utterances: [
-          { role: 'ai', text: '1つ目の質問' },
-          { role: 'user', text: '1つ目の回答' },
-          { role: 'ai', text: '2つ目の質問（現在）' },
-        ],
+        utterances: [{ role: 'ai', text: '1つ目の質問' }, { role: 'user', text: '1つ目の回答' }],
       })
-      // 「現在の質問」枠には最新のAI発話のみ表示され、過去分は折りたたみの中
-      expect(screen.getByText('2つ目の質問（現在）')).toBeInTheDocument()
-      expect(screen.queryByText('1つ目の質問')).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: '記録' }))
+      const panel = screen.getByRole('complementary', { name: '会話の記録' })
+      expect(within(panel).getByText('1つ目の質問')).toBeInTheDocument()
+      expect(within(panel).getByText('1つ目の回答')).toBeInTheDocument()
     })
 
-    it('開くと過去の質問・回答が表示される', () => {
-      renderScreen({
-        utterances: [
-          { role: 'ai', text: '1つ目の質問' },
-          { role: 'user', text: '1つ目の回答' },
-          { role: 'ai', text: '2つ目の質問（現在）' },
-        ],
-      })
-
-      fireEvent.click(screen.getByText(/これまでの質問・回答/))
-      expect(screen.getByText('1つ目の質問')).toBeInTheDocument()
-      // 「1つ目の回答」は「あなたの回答」ライブパネル（直近の確定発話へのフォールバック）
-      // と履歴の両方に出るため、複数件の存在だけを確認する
-      expect(screen.getAllByText('1つ目の回答').length).toBeGreaterThanOrEqual(1)
+    it('開いているパネルのボタンをもう一度押すと閉じる', () => {
+      renderScreen()
+      fireEvent.click(screen.getByRole('button', { name: '記録' }))
+      fireEvent.click(screen.getByRole('button', { name: '記録' }))
+      expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
     })
   })
 })
