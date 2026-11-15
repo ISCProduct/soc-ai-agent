@@ -6,22 +6,47 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/services/notification"
 	"Backend/internal/services/shared"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"slices"
 )
 
+// CollectiveActionRecorder は集合知ログへの書き込み面（#205）。
+// FE 呼び出しに頼ると応募経路が漏れるため、応募・選考更新から直接呼ぶ。
+type CollectiveActionRecorder interface {
+	RecordAction(userID uint, sessionID string, companyID uint, actionType string) error
+}
+
+// ScoreSnapshotReader は応募時点のスコアスナップショット用（#203）。
+type ScoreSnapshotReader interface {
+	FindByUserAndSession(userID uint, sessionID string) ([]models.UserWeightScore, error)
+}
+
 // ApplicationService 応募・選考ステータス管理サービス
 type ApplicationService struct {
-	appRepo   *repositories.UserApplicationStatusRepository
-	matchRepo repository.UserCompanyMatchRepository
-	access    shared.CompanyAccessReader
-	notifier  notification.Notifier
+	appRepo    *repositories.UserApplicationStatusRepository
+	matchRepo  repository.UserCompanyMatchRepository
+	access     shared.CompanyAccessReader
+	notifier   notification.Notifier
+	collective CollectiveActionRecorder
+	scores     ScoreSnapshotReader
 }
 
 // SetNotifier は選考ステータスの更新を学生へ知らせる通知を設定する（#2033）。
 func (s *ApplicationService) SetNotifier(n notification.Notifier) {
 	s.notifier = n
+}
+
+// SetCollectiveInsight は集合知ログ記録を注入する（オプション）。
+func (s *ApplicationService) SetCollectiveInsight(c CollectiveActionRecorder) {
+	s.collective = c
+}
+
+// SetScoreSnapshotReader は応募時スコアスナップショット取得を注入する（#203）。
+func (s *ApplicationService) SetScoreSnapshotReader(r ScoreSnapshotReader) {
+	s.scores = r
 }
 
 func NewApplicationService(
@@ -122,14 +147,63 @@ func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*models.Use
 		return nil, fmt.Errorf("match_id と company_id が一致しません")
 	}
 
-	m, err := s.appRepo.CreateActive(userID, companyID, matchID, terminalStatusList)
+	m, err := s.appRepo.CreateActive(userID, companyID, matchID, terminalStatusList, s.buildScoreSnapshot(userID, match.SessionID))
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicateActiveApplication) {
 			return nil, shared.ErrDuplicateActiveApplication
 		}
 		return nil, err
 	}
+
+	s.recordCollectiveAction(userID, companyID, match.SessionID, "applied")
 	return m, nil
+}
+
+// collectiveActionForStatus は選考ステータスを集合知の action_type へ写す。
+// viewed は一覧閲覧用で応募フロー外。ここは応募・通過・不採用だけ。
+func collectiveActionForStatus(status string) (string, bool) {
+	switch normalizeLegacyStatus(status) {
+	case "applied":
+		return "applied", true
+	case "document_passed", "offered", "accepted":
+		return "passed", true
+	case "rejected":
+		return "rejected", true
+	default:
+		return "", false
+	}
+}
+
+// recordCollectiveAction は集合知ログを best-effort で書く。失敗しても応募本体は成功のまま。
+func (s *ApplicationService) recordCollectiveAction(userID, companyID uint, sessionID, actionType string) {
+	if s.collective == nil || actionType == "" {
+		return
+	}
+	if err := s.collective.RecordAction(userID, sessionID, companyID, actionType); err != nil {
+		log.Printf("[Application] collective insight record failed user=%d company=%d action=%s: %v\n",
+			userID, companyID, actionType, err)
+	}
+}
+
+// buildScoreSnapshot はマッチングに使った session のスコアを JSON にする（#203）。
+// 取れなくても応募自体は通す（空文字）。
+func (s *ApplicationService) buildScoreSnapshot(userID uint, sessionID string) string {
+	if s.scores == nil || sessionID == "" {
+		return ""
+	}
+	rows, err := s.scores.FindByUserAndSession(userID, sessionID)
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	snap := make(map[string]int, len(rows))
+	for _, sc := range rows {
+		snap[sc.WeightCategory] = sc.Score
+	}
+	b, err := json.Marshal(snap)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // UpdateStatus 選考ステータスを更新する
@@ -172,6 +246,15 @@ func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, statu
 		if n, ok := notification.ApplicationStatusNotice(app.UserID, app.ID, status, companyName); ok {
 			s.notifier.Notify(n)
 		}
+	}
+	if action, ok := collectiveActionForStatus(status); ok {
+		sessionID := ""
+		if app.MatchID != 0 && s.matchRepo != nil {
+			if match, mErr := s.matchRepo.FindByID(app.MatchID); mErr == nil && match != nil {
+				sessionID = match.SessionID
+			}
+		}
+		s.recordCollectiveAction(app.UserID, app.CompanyID, sessionID, action)
 	}
 	return app, nil
 }

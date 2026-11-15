@@ -185,7 +185,7 @@ class TestReviewEndpoint:
              patch("main.ALLOW_WEB_SEARCH_FALLBACK", True), \
              patch("main._run_async", return_value="企業の採用情報: チームワークを重視"), \
              patch("main.set_cached_context"), \
-             patch("main.run_crewai", return_value="【企業別レビュー報告書】\nレポート内容"):
+             patch("routers.resume.generate_resume_report", return_value="【企業別レビュー報告書】\nレポート内容"):
 
             client = _auth_client()
             resp = client.post("/resume/review", json={
@@ -204,7 +204,7 @@ class TestReviewEndpoint:
         cached_docs = ["企業の採用価値観: チームワーク重視"]
 
         with patch("main.get_cached_context", return_value=cached_docs), \
-             patch("main.run_crewai", return_value="キャッシュヒット時のレポート") as mock_crewai:
+             patch("routers.resume.generate_resume_report", return_value="キャッシュヒット時のレポート") as mock_crewai:
 
             client = _auth_client()
             resp = client.post("/resume/review", json={
@@ -215,8 +215,8 @@ class TestReviewEndpoint:
 
         assert resp.status_code == 200
         call_kwargs = mock_crewai.call_args
-        assert call_kwargs.kwargs.get("context_source") == "cache"
-        assert call_kwargs.kwargs.get("context_docs") == cached_docs
+        assert call_kwargs.args[2] == "cache"
+        assert call_kwargs.args[1] == cached_docs
 
     def test_review_no_context_fallback(self):
         """Deep Research・Web Search 両方無効時もコンテキストなしでレポートを返す。"""
@@ -224,7 +224,7 @@ class TestReviewEndpoint:
         with patch("main.get_cached_context", return_value=[]), \
              patch("main.USE_DEEP_RESEARCH", False), \
              patch("main.ALLOW_WEB_SEARCH_FALLBACK", False), \
-             patch("main.run_crewai", return_value="外部コンテキストなしのレポート") as mock_crewai:
+             patch("routers.resume.generate_resume_report", return_value="外部コンテキストなしのレポート") as mock_crewai:
 
             client = _auth_client()
             resp = client.post("/resume/review", json={
@@ -234,7 +234,7 @@ class TestReviewEndpoint:
 
         assert resp.status_code == 200
         call_kwargs = mock_crewai.call_args
-        assert call_kwargs.kwargs.get("context_source") == "none"
+        assert call_kwargs.args[2] == "none"
 
     def test_review_prefers_company_context_over_web_search(self):
         """Backend brief（company_context）があるとき Search しない。"""
@@ -244,7 +244,7 @@ class TestReviewEndpoint:
              patch("main.ALLOW_WEB_SEARCH_FALLBACK", True), \
              patch("main._run_async") as mock_async, \
              patch("main.set_cached_context"), \
-             patch("main.run_crewai", return_value="brief利用レポート") as mock_crewai:
+             patch("routers.resume.generate_resume_report", return_value="brief利用レポート") as mock_crewai:
 
             client = _auth_client()
             resp = client.post("/resume/review", json={
@@ -257,8 +257,8 @@ class TestReviewEndpoint:
         mock_async.assert_not_called()
         mock_cache.assert_not_called()
         call_kwargs = mock_crewai.call_args
-        assert call_kwargs.kwargs.get("context_source") == "company_brief"
-        assert call_kwargs.kwargs.get("context_docs") == ["企業名: テスト企業\n事業: SaaS"]
+        assert call_kwargs.args[2] == "company_brief"
+        assert call_kwargs.args[1] == ["企業名: テスト企業\n事業: SaaS"]
 
     def test_review_missing_resume_text(self):
         client = _auth_client()
@@ -336,7 +336,7 @@ class TestCrossFeatureWebSearchCacheSharing:
              patch("main.USE_DEEP_RESEARCH", False), \
              patch("main.ALLOW_WEB_SEARCH_FALLBACK", True), \
              patch("main._run_async", return_value=f"{company_name}の採用情報: チームワークを重視"), \
-             patch("main.run_crewai", return_value="レポート"):
+             patch("routers.resume.generate_resume_report", return_value="レポート"):
 
             client = _auth_client()
             resp = client.post("/resume/review", json={
@@ -404,7 +404,7 @@ class TestCrossFeatureWebSearchCacheSharing:
              patch("main.USE_DEEP_RESEARCH", False), \
              patch("main.ALLOW_WEB_SEARCH_FALLBACK", True), \
              patch("main._run_async") as mock_async, \
-             patch("main.run_crewai", return_value="レポート") as mock_crewai:
+             patch("routers.resume.generate_resume_report", return_value="レポート") as mock_crewai:
 
             client = _auth_client()
             resp = client.post("/resume/review", json={
@@ -415,7 +415,7 @@ class TestCrossFeatureWebSearchCacheSharing:
         assert resp.status_code == 200
         mock_async.assert_not_called()
         call_kwargs = mock_crewai.call_args
-        assert call_kwargs.kwargs.get("context_source") == "cache"
+        assert call_kwargs.args[2] == "cache"
 
 
 class TestFailureCases:
@@ -423,7 +423,7 @@ class TestFailureCases:
         """ChromaDB 接続で例外が出てもエンドポイントが 200 を返すことを確認する。"""
 
         with patch("main.get_cached_context", side_effect=Exception("ChromaDB connection failed")), \
-             patch("main.run_crewai", return_value="外部依存失敗時のレポート") as mock_crewai:
+             patch("routers.resume.generate_resume_report", return_value="外部依存失敗時のレポート") as mock_crewai:
 
             client = _auth_client()
             resp = client.post("/resume/review", json={

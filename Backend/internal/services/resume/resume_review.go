@@ -2,6 +2,8 @@ package resume
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/repositories"
+	"Backend/internal/safego"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"bufio"
@@ -79,7 +81,7 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 	}
 
 	findings := formatFindingsFor(blocks)
-	review, items, err := s.buildResumeReviewWithAI(ctx, blocks, companyName, jobTitle, candidateType)
+	review, items, err := s.buildResumeReviewWithAI(ctx, blocks, companyName, jobTitle, candidateType, doc.UserID)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -202,18 +204,27 @@ type aiReviewItem struct {
 }
 
 type ragReviewRequest struct {
-	ResumeText     string `json:"resume_text"`
-	CompanyName    string `json:"company_name"`
-	JobTitle       string `json:"job_title"`
-	CompanyContext string `json:"company_context,omitempty"`
+	ResumeText       string `json:"resume_text"`
+	CompanyName      string `json:"company_name"`
+	JobTitle         string `json:"job_title"`
+	CompanyContext   string `json:"company_context,omitempty"`
+	CandidateContext string `json:"candidate_context,omitempty"`
 }
 
 type ragReviewResponse struct {
 	Report string `json:"report"`
 }
 
+// candidateContextForRAG はチャット診断スコアの要約を RAG へ渡す文言にする。
+func (s *ResumeService) candidateContextForRAG(userID uint) string {
+	if s.crossFeature == nil || userID == 0 {
+		return ""
+	}
+	return s.crossFeature.BuildResumeContextFromUser(userID)
+}
+
 // ctx はリクエストIDを RAG へ伝播させるために受け取る(#1188)
-func (s *ResumeService) fetchRAGReport(ctx context.Context, resumeText, companyName, jobTitle string) (string, error) {
+func (s *ResumeService) fetchRAGReport(ctx context.Context, resumeText, companyName, jobTitle string, userID uint) (string, error) {
 	baseURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
 	if baseURL == "" {
 		return "", errors.New("RAG_REVIEW_URL is not set")
@@ -222,10 +233,11 @@ func (s *ResumeService) fetchRAGReport(ctx context.Context, resumeText, companyN
 	log.Printf("resume_review: rag request company=%q job_title=%q", companyName, jobTitle)
 
 	payload := ragReviewRequest{
-		ResumeText:     resumeText,
-		CompanyName:    companyName,
-		JobTitle:       jobTitle,
-		CompanyContext: s.lookupCompanyBriefFromCache(companyName),
+		ResumeText:       resumeText,
+		CompanyName:      companyName,
+		JobTitle:         jobTitle,
+		CompanyContext:   s.lookupCompanyBriefFromCache(companyName),
+		CandidateContext: s.candidateContextForRAG(userID),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -268,17 +280,18 @@ func (s *ResumeService) fetchRAGReport(ctx context.Context, resumeText, companyN
 
 // fetchRAGReportStream は FastAPI ストリーミングエンドポイントを呼び出し、
 // SSE レスポンスボディ (io.ReadCloser) を返す。呼び出し元がクローズする責務を持つ。
-func (s *ResumeService) fetchRAGReportStream(ctx context.Context, resumeText, companyName, jobTitle string) (io.ReadCloser, error) {
+func (s *ResumeService) fetchRAGReportStream(ctx context.Context, resumeText, companyName, jobTitle string, userID uint) (io.ReadCloser, error) {
 	baseURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
 	if baseURL == "" {
 		return nil, errors.New("RAG_REVIEW_URL is not set")
 	}
 
 	payload := ragReviewRequest{
-		ResumeText:     resumeText,
-		CompanyName:    companyName,
-		JobTitle:       jobTitle,
-		CompanyContext: s.lookupCompanyBriefFromCache(companyName),
+		ResumeText:       resumeText,
+		CompanyName:      companyName,
+		JobTitle:         jobTitle,
+		CompanyContext:   s.lookupCompanyBriefFromCache(companyName),
+		CandidateContext: s.candidateContextForRAG(userID),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -363,10 +376,28 @@ func (s *ResumeService) persistReview(doc *models.ResumeDocument, review *models
 	}
 
 	// スコア連携の失敗はレビュー保存を巻き戻すほどではない。ログに残して続ける。
+	// 書き込み先は FE の session_id ではなく診断セッション（面接/ES と同じ）。
+	// FE 依存だと空・古い session に書いてマッチングが回らない。
 	if s.crossFeature != nil {
-		if err := s.crossFeature.UpdateScoresFromResumeReview(doc.UserID, doc.SessionID, review, items); err != nil {
-			log.Printf("[Resume] crossFeature score update failed: %v\n", err)
+		targetSession, err := s.crossFeature.ResolveDiagnosisSessionID(doc.UserID)
+		if err != nil {
+			log.Printf("[Resume] diagnosis session resolve failed user=%d: %v\n", doc.UserID, err)
+			return nil
 		}
+		if err := s.crossFeature.UpdateScoresFromResumeReview(doc.UserID, targetSession, review, items); err != nil {
+			log.Printf("[Resume] crossFeature score update failed: %v\n", err)
+			return nil
+		}
+		// スコアが無いレビューは反映していないので再マッチしない。
+		if review.Score == nil || s.matchingRunner == nil || repositories.IsInterviewSnapshotSession(targetSession) {
+			return nil
+		}
+		userID, sessionID, orgID := doc.UserID, targetSession, doc.OrganizationID
+		safego.Go(func() {
+			if err := s.matchingRunner.CalculateMatching(s.rematchContext(userID, orgID), userID, sessionID); err != nil {
+				log.Printf("[Resume] rematch after review failed user=%d session=%s: %v\n", userID, sessionID, err)
+			}
+		})
 	}
 	return nil
 }
@@ -450,7 +481,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	text := buildResumeText(blocks, reviewTextLimit)
 
 	// RAGレポートをストリーミングしつつ全文を収集する
-	ragReport := s.streamRAGReport(ctx, w, text, companyName, jobTitle)
+	ragReport := s.streamRAGReport(ctx, w, text, companyName, jobTitle, doc.UserID)
 
 	// スコア・指摘事項を生成
 	review, items, err := s.buildReviewScoreItems(ctx, blocks, companyName, jobTitle, candidateType, ragReport)
@@ -503,11 +534,11 @@ func hasExtractableText(blocks []models.ResumeTextBlock) bool {
 
 // streamRAGReport は RAG レポートを SSE で中継しつつ、全文を集めて返す。
 // 企業名が空、または取得に失敗したときは空文字を返す（レビュー自体は続ける）。
-func (s *ResumeService) streamRAGReport(ctx context.Context, w http.ResponseWriter, text, companyName, jobTitle string) string {
+func (s *ResumeService) streamRAGReport(ctx context.Context, w http.ResponseWriter, text, companyName, jobTitle string, userID uint) string {
 	if strings.TrimSpace(companyName) == "" {
 		return ""
 	}
-	ragBody, err := s.fetchRAGReportStream(ctx, text, companyName, jobTitle)
+	ragBody, err := s.fetchRAGReportStream(ctx, text, companyName, jobTitle, userID)
 	if err != nil {
 		log.Printf("resume_review_stream: rag stream failed: %v", err)
 		return ""
@@ -587,7 +618,7 @@ func relaySSEChunks(body io.Reader, w http.ResponseWriter) (string, error) {
 	return accum.String(), scanner.Err()
 }
 
-func (s *ResumeService) buildResumeReviewWithAI(ctx context.Context, blocks []models.ResumeTextBlock, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (s *ResumeService) buildResumeReviewWithAI(ctx context.Context, blocks []models.ResumeTextBlock, companyName string, jobTitle string, candidateType string, userID uint) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	text := buildResumeText(blocks, reviewTextLimit)
 	if strings.TrimSpace(text) == "" {
 		return nil, nil, &shared.ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
@@ -598,7 +629,7 @@ func (s *ResumeService) buildResumeReviewWithAI(ctx context.Context, blocks []mo
 
 	var companyInfo string
 	if strings.TrimSpace(companyName) != "" {
-		if ragReport, err := s.fetchRAGReport(ctx, text, companyName, jobTitle); err == nil {
+		if ragReport, err := s.fetchRAGReport(ctx, text, companyName, jobTitle, userID); err == nil {
 			companyInfo = ragReport
 		} else {
 			log.Printf("resume_review: rag report failed: %v", err)

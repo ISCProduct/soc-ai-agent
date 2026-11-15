@@ -19,6 +19,7 @@ def run_crewai(
         job_title: str,
         context_docs: List[str],
         context_source: str = "none",
+        candidate_context: str = "",
 ) -> str:
     """CrewAI を実行し、構造化されたレポートを試みる。
     crewai は依存衝突のため requirements.txt に含めず、このIssueでも復活させない。
@@ -90,6 +91,12 @@ def run_crewai(
         agent=researcher,
     )
 
+    candidate_block = (candidate_context or "").strip()
+    candidate_section = (
+        f"Candidate profile (from chat diagnosis):\n{candidate_block}\n\n"
+        if candidate_block
+        else ""
+    )
     task_review = Task(
         description=(
             "Write the final report in Japanese, following this format exactly:\n"
@@ -114,10 +121,12 @@ def run_crewai(
             "Keep it concise and practical.\n\n"
             "Company: {company}\n"
             "Role: {role}\n"
+            "{candidate}"
             "Resume:\n{resume}\n"
         ).format(
             company=wrapped_company,
             role=wrapped_role,
+            candidate=candidate_section,
             resume=_wrap_untrusted_text(resume_text, "履歴書テキスト"),
             source=source_label,
         ),

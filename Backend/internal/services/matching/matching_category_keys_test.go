@@ -34,7 +34,7 @@ func TestCalculateMatchScore_UsesCanonicalKeys(t *testing.T) {
 	}
 
 	svc := &MatchingService{}
-	full := svc.calculateMatchScore(userScores, profile)
+	full := svc.calculateMatchScore(userScores, profile, nil)
 
 	// 1カテゴリずつ抜いて、必ず算出軸数が減ることを確認する。
 	// 減らないキーがあれば、そのカテゴリは calculateMatchScore から
@@ -46,7 +46,7 @@ func TestCalculateMatchScore_UsesCanonicalKeys(t *testing.T) {
 				partial[k] = v
 			}
 		}
-		got := svc.calculateMatchScore(partial, profile)
+		got := svc.calculateMatchScore(partial, profile, nil)
 		// 未計測カテゴリは平均から除外されるため MatchScore は変わらない（#1124）。
 		// キーが引けているかは「算出に使えた軸の数」が減るかで判定する。
 		if got.MatchedAxisCount >= full.MatchedAxisCount {
@@ -63,20 +63,20 @@ func TestScoredMatch_MissingCategoryIsExcluded(t *testing.T) {
 	// 未計測カテゴリは平均に含めない（#1124）。
 	// 以前は中立値(50)で埋めて評価件数に数えていたため、スコアを1つも持たない
 	// ユーザーでも企業の重視度(45〜92)と近くなり、全社97%前後に固まっていた。
-	score, count, total := scoredMatch(map[string]float64{}, "技術志向", 50, 0, 0)
+	score, count, total, wsum := scoredMatch(map[string]float64{}, "技術志向", 50, nil, 0, 0, 0)
 	if score != 0 {
 		t.Errorf("未計測カテゴリのスコア = %.2f, want 0", score)
 	}
 	if count != 0 {
 		t.Errorf("未計測カテゴリが評価件数に数えられている: got %d, want 0", count)
 	}
-	if total != 0 {
-		t.Errorf("未計測カテゴリが合計に加算されている: got %.2f, want 0", total)
+	if total != 0 || wsum != 0 {
+		t.Errorf("未計測カテゴリが合計に加算されている: total=%.2f wsum=%.2f, want 0", total, wsum)
 	}
 
 	// 計測済みなら従来どおり数える
-	score2, count2, total2 := scoredMatch(map[string]float64{"技術志向": 50}, "技術志向", 50, 0, 0)
-	if score2 != 100 || count2 != 1 || total2 != 100 {
-		t.Errorf("計測済み = (%.2f, %d, %.2f), want (100, 1, 100)", score2, count2, total2)
+	score2, count2, total2, wsum2 := scoredMatch(map[string]float64{"技術志向": 50}, "技術志向", 50, nil, 0, 0, 0)
+	if score2 != 100 || count2 != 1 || total2 != 100 || wsum2 != 1 {
+		t.Errorf("計測済み = (%.2f, %d, %.2f, %.2f), want (100, 1, 100, 1)", score2, count2, total2, wsum2)
 	}
 }
