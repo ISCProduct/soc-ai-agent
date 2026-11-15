@@ -220,7 +220,7 @@ export default function ReportScreen({
 
         {/* Video upload status */}
         {videoUploadStatus !== 'idle' && (
-          <Paper sx={{ bgcolor: UI.nightPanel, border: '1px solid rgba(255,255,255,0.1)', p: 2, borderRadius: 2 }}>
+          <Paper sx={{ bgcolor: UI.nightPanel, border: '1px solid rgba(255,255,255,0.1)', p: 2, borderRadius: 2, mt: 2 }}>
             {videoSizeWarning && (
               <Typography variant="caption" sx={{ color: '#fdd663', display: 'block', mb: 1 }}>
                 ⚠ {videoSizeWarning}
@@ -266,9 +266,11 @@ function ReportProgressCard({ view }: { view: ReportProgressView }) {
           const active = i === current
           return (
             <Box component="li" key={step.stage} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              {done ? <CheckCircleIcon fontSize="small" sx={{ color: '#34a853' }} />
-                : active ? <CircularProgress size={18} sx={{ color: UI.mark, mx: '1px' }} />
-                : <RadioButtonUncheckedIcon fontSize="small" sx={{ color: UI.nightMuted }} />}
+              <Box sx={{ width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {done ? <CheckCircleIcon fontSize="small" sx={{ color: '#34a853' }} />
+                  : active ? <CircularProgress size={18} sx={{ color: UI.mark }} />
+                  : <RadioButtonUncheckedIcon fontSize="small" sx={{ color: UI.nightMuted }} />}
+              </Box>
               <Typography variant="body2" sx={{ color: active ? UI.nightInk : UI.nightSoft, flex: 1 }}>{step.label}</Typography>
               <Typography variant="caption" sx={{ color: UI.nightMuted }}>{done ? '完了' : active ? '進行中' : '待機中'}</Typography>
             </Box>
