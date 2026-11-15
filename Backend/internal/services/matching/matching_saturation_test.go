@@ -69,7 +69,7 @@ func TestCalculateMatchScore_ExcludesUnmeasured(t *testing.T) {
 	svc := &MatchingService{}
 
 	t.Run("スコアが1つも無ければ算出できない", func(t *testing.T) {
-		got := svc.calculateMatchScore(map[string]float64{}, profile)
+		got := svc.calculateMatchScore(map[string]float64{}, profile, nil)
 		if got.MatchedAxisCount != 0 {
 			t.Errorf("MatchedAxisCount = %d, want 0", got.MatchedAxisCount)
 		}
@@ -81,7 +81,7 @@ func TestCalculateMatchScore_ExcludesUnmeasured(t *testing.T) {
 
 	t.Run("計測済みの軸だけで平均する", func(t *testing.T) {
 		// 技術志向だけ計測済み。差20 -> 80点
-		got := svc.calculateMatchScore(map[string]float64{"技術志向": 80}, profile)
+		got := svc.calculateMatchScore(map[string]float64{"技術志向": 80}, profile, nil)
 		if got.MatchedAxisCount != 1 {
 			t.Errorf("MatchedAxisCount = %d, want 1", got.MatchedAxisCount)
 		}
@@ -99,7 +99,7 @@ func TestCalculateMatchScore_ExcludesUnmeasured(t *testing.T) {
 	t.Run("2軸計測ならその平均", func(t *testing.T) {
 		// 技術志向: 差20 -> 80 / コミュニケーション力: 差0 -> 100
 		got := svc.calculateMatchScore(
-			map[string]float64{"技術志向": 80, "コミュニケーション力": 60}, profile)
+			map[string]float64{"技術志向": 80, "コミュニケーション力": 60}, profile, nil)
 		if got.MatchedAxisCount != 2 {
 			t.Errorf("MatchedAxisCount = %d, want 2", got.MatchedAxisCount)
 		}
@@ -120,8 +120,8 @@ func TestCalculateMatchScore_SpreadsAcrossCompanies(t *testing.T) {
 	balanceDriven := &models.CompanyWeightProfile{TechnicalOrientation: 30, WorkLifeBalance: 85}
 
 	svc := &MatchingService{}
-	good := svc.calculateMatchScore(user, techDriven).MatchScore
-	bad := svc.calculateMatchScore(user, balanceDriven).MatchScore
+	good := svc.calculateMatchScore(user, techDriven, nil).MatchScore
+	bad := svc.calculateMatchScore(user, balanceDriven, nil).MatchScore
 
 	if spread := good - bad; spread < 30 {
 		t.Errorf("合う企業と合わない企業の差 = %.1f ポイントしかない（飽和している）: good=%.1f bad=%.1f",
