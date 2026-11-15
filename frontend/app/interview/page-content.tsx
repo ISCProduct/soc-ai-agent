@@ -345,6 +345,8 @@ function InterviewContent() {
       <LobbyScreen
         userName={user.name}
         companyName={companyName}
+        positionTitle={selectedPosition.title}
+        totalQuestionCount={totalQuestionCount}
         interviewCompany={interviewCompany}
         fromMatchingResults={Boolean(searchParams.get('company_name'))}
         lobbyPermissionError={media.lobbyPermissionError}
@@ -355,8 +357,9 @@ function InterviewContent() {
         onToggleCamera={media.toggleCamera}
         lobbyVideoRef={media.lobbyVideoRef}
         onBack={handleBackToSelection}
-        onJoinWithConsent={session.handleJoinWithConsent}
-        consentDialog={consentDialog}
+        consentGiven={session.consentGiven}
+        onConsentChange={session.setConsentGiven}
+        onJoin={session.handleJoin}
       />
     )
   }
@@ -367,7 +370,12 @@ function InterviewContent() {
   if (status === 'finished') {
     return (
       <ReportScreen
-        onBack={() => router.push('/')}
+        onPracticeAgain={handleBackToSelection}
+        reportStartedAt={session.reportStartedAt}
+        questionCount={session.currentQuestionIndex}
+        durationSeconds={session.elapsedSeconds}
+        companyName={interviewCompany?.name}
+        positionTitle={selectedPosition.title}
         errorMessage={session.errorMessage}
         reportStatus={session.reportStatus}
         report={session.report}

@@ -14,7 +14,7 @@ describe('ReportScreen', () => {
   ) {
     render(
       <ReportScreen
-        onBack={noop}
+        onPracticeAgain={noop}
         errorMessage={null}
         reportStatus="pending"
         report={null}
@@ -50,25 +50,82 @@ describe('ReportScreen', () => {
     expect(screen.queryByText(UTTERANCE_SAVE_FAILED_MESSAGE)).not.toBeInTheDocument()
   })
 
-  it('タイトル「面接レポート」を表示する', () => {
-    renderScreen()
+  it('見出し「面接おつかれさまでした」と、取れた項目だけの概要行を出す', () => {
+    renderScreen({ questionCount: 8, companyName: '港南システムズ' })
 
-    expect(screen.getByText('面接レポート')).toBeInTheDocument()
+    expect(screen.getByText('面接おつかれさまでした')).toBeInTheDocument()
+    // 時間・職種は取れていないので出さない（捏造しない）
+    expect(screen.getByText('質問8問 港南システムズ')).toBeInTheDocument() // 全角空白は照合時に正規化される
   })
 
   it('面接履歴への導線を表示する（#1011: レポート画面から/interview/historyへ遷移できる）', () => {
     renderScreen()
 
-    expect(screen.getByRole('link', { name: /面接履歴を見る/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '面接履歴へ' })).toHaveAttribute(
       'href',
       '/interview/history',
     )
   })
 
-  it('pending の場合はレポート生成中の文言を表示する', () => {
-    renderScreen({ reportStatus: 'pending' })
+  it('進捗が null（旧バックエンド）なら段階リスト無しの不定表示にする', () => {
+    renderScreen({ reportStatus: 'pending', reportProgress: null })
 
-    expect(screen.getByText('レポートを生成中です...')).toBeInTheDocument()
+    expect(screen.getByText('レポートを作っています')).toBeInTheDocument()
+    expect(screen.queryByText('順番待ち')).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar', { name: 'レポート作成の進み具合' })).not.toBeInTheDocument()
+  })
+
+  it('作成中は%と段階を出し、「レポートを見る」は無効', () => {
+    renderScreen({ reportProgress: { stage: 'generating', percent: 42, stalled: false } })
+
+    expect(screen.getByText('42%')).toBeInTheDocument()
+    expect(screen.getByRole('progressbar', { name: 'レポート作成の進み具合' })).toHaveAttribute('aria-valuenow', '42')
+    expect(screen.getByText('回答の分析')).toBeInTheDocument()
+    expect(screen.getByText('進行中')).toBeInTheDocument()
+    expect(screen.getByText('分析中の%は、進み具合の目安です')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'レポートを見る' })).toBeDisabled()
+  })
+
+  it('停滞中は見出しと案内が変わる', () => {
+    renderScreen({ reportProgress: { stage: 'generating', percent: 42, stalled: true } })
+
+    expect(screen.getByText('時間がかかっています')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('いつもより時間がかかっています')
+  })
+
+  it('動画アップロードは進捗カードの中の1行で出す', () => {
+    renderScreen({
+      reportProgress: { stage: 'queued', percent: 0, stalled: false },
+      videoUploadStatus: 'uploading',
+      videoUploadProgress: 60,
+    })
+
+    expect(screen.getByText('動画のアップロード')).toBeInTheDocument()
+    expect(screen.getByText('60%')).toBeInTheDocument()
+  })
+
+  it('サーバー失敗なら「もう一度試す」が出て、押すと onRetryReport が呼ばれる', () => {
+    const onRetryReport = jest.fn()
+    renderScreen({ reportStatus: 'error', reportFailedByServer: true, onRetryReport })
+
+    expect(screen.getByText('レポートを作れませんでした')).toBeInTheDocument()
+    expect(screen.getByText(/回答はすべて保存されています/)).toBeInTheDocument()
+    screen.getByRole('button', { name: 'もう一度試す' }).click()
+    expect(onRetryReport).toHaveBeenCalledTimes(1)
+  })
+
+  it('「もう一度練習する」で onPracticeAgain が呼ばれる', () => {
+    const onPracticeAgain = jest.fn()
+    renderScreen({ onPracticeAgain })
+
+    screen.getByRole('button', { name: 'もう一度練習する' }).click()
+    expect(onPracticeAgain).toHaveBeenCalledTimes(1)
+  })
+
+  it('動画サイズ警告を表示する', () => {
+    renderScreen({ videoSizeWarning: '動画が大きいです' })
+
+    expect(screen.getByText('動画が大きいです')).toBeInTheDocument()
   })
 
   it('timeout の場合はタイムアウト文言と再試行ボタンを表示する', () => {
@@ -135,6 +192,45 @@ describe('ReportScreen', () => {
   })
 })
 
+describe('ReportScreen レポート完成', () => {
+  it('レポート本体と「レポートを見る」（有効）を出す', () => {
+    render(
+      <ReportScreen
+        onPracticeAgain={() => {}}
+        errorMessage={null}
+        reportStatus="ready"
+        report={{
+          session_id: 1,
+          summary_text: '結論から話せています。次は数字を入れましょう。',
+          scores_json: '{}',
+          evidence_json: '{}',
+          created_at: '2026-09-07',
+          updated_at: '2026-09-07',
+        }}
+        scoresBefore={null}
+        scoresAfter={null}
+        session={null}
+        emailSending={false}
+        emailSent={false}
+        emailError=""
+        onSendEmail={() => {}}
+        isGuest
+        onRegisterClick={() => {}}
+        videoUploadStatus="idle"
+        videoUploadProgress={0}
+        videoSizeWarning={null}
+      />,
+    )
+
+    expect(screen.getByText('レポートができました')).toBeInTheDocument()
+    expect(screen.getByText('結論から話せています。')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'レポートを見る' })).toHaveAttribute('href', '#interview-report-body')
+    // ゲストはメール送信不可＋登録導線
+    expect(screen.getByRole('button', { name: 'レポートをメールで受け取る' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'アカウント登録して機能を解放' })).toBeInTheDocument()
+  })
+})
+
 describe('ReportScreen メール送信エラー表示 (#1056)', () => {
   const noop = () => {}
 
@@ -151,7 +247,7 @@ describe('ReportScreen メール送信エラー表示 (#1056)', () => {
   function renderWithEmailError(emailError: string) {
     render(
       <ReportScreen
-        onBack={noop}
+        onPracticeAgain={noop}
         errorMessage={null}
         reportStatus="ready"
         report={READY_REPORT}

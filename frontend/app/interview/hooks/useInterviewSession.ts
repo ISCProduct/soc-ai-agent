@@ -90,6 +90,8 @@ export function useInterviewSession({
   /** レポート生成の進捗表示（バックエンドが返さない間は null で従来表示）。SOCAIAGENT-652 */
   const [reportProgress, setReportProgress] = useState<ReportProgressView | null>(null)
   const [reportFailedByServer, setReportFailedByServer] = useState(false)
+  /** 経過時間表示の基準（ポーリング開始時刻 ms） */
+  const [reportStartedAt, setReportStartedAt] = useState<number | null>(null)
   const progressTrackerRef = useRef<ProgressTracker>(INITIAL_PROGRESS_TRACKER)
   /** レポート生成の再投入API(regenerateReport)が失敗したときのメッセージ(#1476) */
   const [reportRetryError, setReportRetryError] = useState('')
@@ -607,6 +609,7 @@ export function useInterviewSession({
     const generation = ++pollGenerationRef.current
     pollSessionRef.current = { sessionId, userId }
     pollStartedAtRef.current = Date.now()
+    setReportStartedAt(pollStartedAtRef.current)
     pollFailureCountRef.current = 0
     progressTrackerRef.current = INITIAL_PROGRESS_TRACKER
     setReportProgress(null)
@@ -889,6 +892,7 @@ export function useInterviewSession({
     reportStatus,
     reportProgress,
     reportFailedByServer,
+    reportStartedAt,
     reportRetryError,
     retryReportPolling,
     emailSending,

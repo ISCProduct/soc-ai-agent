@@ -17,8 +17,16 @@ export const CALL = {
   ink: '#e8eaed',
   soft: '#bdc1c6',
   muted: '#9aa0a6',
-  /** 終了ボタンなど、取り消せない操作の赤 */
+  /** 終了ボタンなど、取り消せない操作の赤（Figma status/err） */
   danger: '#c0392b',
+  /**
+   * 録音中の赤（Figma status/rec）。
+   * テーマの error は色覚配慮で黒に設定されているため、通話画面では使わずこちらを使う。
+   * 録音中は必ず「録音中」の文言と点の両方で示し、色だけに頼らない。
+   */
+  rec: '#e84d3d',
+  /** 録音中・安全域の緑（Figma status/ok） */
+  ok: '#009e73',
   /** 面接官タイルの縁取り（UI.mark と同じ青） */
   accent: '#0072b2',
 } as const
