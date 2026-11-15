@@ -118,7 +118,7 @@ func (r *SessionValidationRepository) claimSessionOwnershipTransaction(sessionID
 func (r *SessionValidationRepository) GetOrCreate(sessionID string) (*models.SessionValidation, error) {
 	var validation models.SessionValidation
 	err := r.db.Where("session_id = ?", sessionID).First(&validation).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		validation = models.SessionValidation{
 			SessionID:          sessionID,
 			InvalidAnswerCount: 0,
