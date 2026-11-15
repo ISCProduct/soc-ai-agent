@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -122,7 +123,7 @@ func (r *CompanyQueryRepository) GetMarketInfoByCompanyID(companyID uint) (*mode
 		Where("company_id = ?", companyID).
 		Where(guestEntryVisibilityGuard("company_id")).
 		First(&marketInfo).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {

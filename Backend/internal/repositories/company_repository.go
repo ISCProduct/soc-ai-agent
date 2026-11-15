@@ -4,6 +4,7 @@ import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/companyfields"
 	"Backend/internal/models"
+	"errors"
 	"strings"
 	"time"
 
@@ -311,7 +312,7 @@ func (r *CompanyRepository) CreateOrUpdateWeightProfile(profile *models.CompanyW
 	}
 
 	err := query.First(&existing).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		// 新規作成
 		return r.db.Create(profile).Error
 	} else if err != nil {
