@@ -57,6 +57,14 @@ func (r *CollectiveInsightRepository) GetPassedCompaniesBySimilarUsers(
 		return nil, nil
 	}
 
+	// 除外する企業があるときだけ NOT IN を足す。SQL本体を二重に持たない。
+	excludeClause := ""
+	args := []any{len(similarUserHashes), similarUserHashes}
+	if len(excludeCompanyIDs) > 0 {
+		excludeClause = "AND cil.company_id NOT IN ?"
+		args = append(args, excludeCompanyIDs)
+	}
+
 	rows := []SimilarUserPassedCompaniesRow{}
 	query := r.db.Raw(`
 		SELECT
@@ -69,29 +77,11 @@ func (r *CollectiveInsightRepository) GetPassedCompaniesBySimilarUsers(
 		INNER JOIN companies c ON c.id = cil.company_id
 		WHERE cil.anonymous_user_id IN ?
 		  AND cil.action_type IN ('passed', 'applied')
+		  `+excludeClause+`
 		GROUP BY cil.company_id, c.name
 		ORDER BY pass_count DESC
 		LIMIT 20
-	`, len(similarUserHashes), similarUserHashes)
-
-	if len(excludeCompanyIDs) > 0 {
-		query = r.db.Raw(`
-			SELECT
-				cil.company_id,
-				c.name AS company_name,
-				COUNT(*) AS pass_count,
-				'' AS avg_passer_scores,
-				CAST(COUNT(*) AS FLOAT) / ? AS collective_score
-			FROM collective_insight_logs cil
-			INNER JOIN companies c ON c.id = cil.company_id
-			WHERE cil.anonymous_user_id IN ?
-			  AND cil.action_type IN ('passed', 'applied')
-			  AND cil.company_id NOT IN ?
-			GROUP BY cil.company_id, c.name
-			ORDER BY pass_count DESC
-			LIMIT 20
-		`, len(similarUserHashes), similarUserHashes, excludeCompanyIDs)
-	}
+	`, args...)
 
 	err := query.Scan(&rows).Error
 	return rows, err
