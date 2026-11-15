@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"errors"
 
 	"gorm.io/gorm"
 )
@@ -21,7 +22,7 @@ func (r *GraduateEmploymentRepository) Create(entry *models.GraduateEmployment) 
 func (r *GraduateEmploymentRepository) FindByID(id uint) (*models.GraduateEmployment, error) {
 	var entry models.GraduateEmployment
 	err := r.db.Preload("Company").Preload("JobPosition").First(&entry, id).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &entry, err

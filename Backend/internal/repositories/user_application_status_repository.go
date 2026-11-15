@@ -32,7 +32,7 @@ func (r *UserApplicationStatusRepository) FindByUserAndCompany(userID, companyID
 	err := r.db.Where("user_id = ? AND company_id = ?", userID, companyID).
 		Preload("Company").
 		First(&m).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {

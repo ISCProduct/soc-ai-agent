@@ -191,7 +191,7 @@ func TestSharedSearchPrompt_URLが無くても壊れない(t *testing.T) {
 // テキストを読み直すだけになり、補完が丸ごと無意味になる。
 // コスト削減のつもりで品質だけ落ちるので、ここで固定しておく。
 func TestEnrichTransactionDescriptions_共有検索を使わない(t *testing.T) {
-	src, err := os.ReadFile("company_relations_fetcher.go")
+	src, err := os.ReadFile("company_relations_ai.go")
 	if err != nil {
 		t.Fatalf("読めない: %v", err)
 	}
