@@ -20,7 +20,7 @@ export function jobTitleLabel(company: Company): string {
 }
 
 /**
- * 今回の診断でお気に入りにした企業を、業界・職種・適合度の列で見比べる。
+ * 診断をまたいだお気に入りを、業界・職種・適合度の列で見比べる。
  * 並びは呼び出し側が渡した順のまま。課金などの別基準では並べ替えない。
  */
 export default function FavoritesCompareList({

@@ -145,9 +145,13 @@ func (s *matchingMatchRepo) CreateOrUpdateBatch(matches []*models.UserCompanyMat
 func (s *matchingMatchRepo) FindTopMatchesByUserAndSession(uint, string, int) ([]*models.UserCompanyMatch, error) {
 	return nil, nil
 }
+func (s *matchingMatchRepo) FindFavoritedByUser(uint) ([]*models.UserCompanyMatch, error) {
+	return nil, nil
+}
 func (s *matchingMatchRepo) FindByID(uint) (*models.UserCompanyMatch, error) { return nil, nil }
 func (s *matchingMatchRepo) MarkAsViewed(uint) error                         { return nil }
 func (s *matchingMatchRepo) ToggleFavorite(uint) error                       { return nil }
+func (s *matchingMatchRepo) UnfavoriteCompany(uint, uint) error              { return nil }
 func (s *matchingMatchRepo) MarkAsApplied(uint) error                        { return nil }
 func (s *matchingMatchRepo) GetMatchStatistics(uint, string) (map[string]any, error) {
 	return nil, nil

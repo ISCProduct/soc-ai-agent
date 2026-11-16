@@ -27,6 +27,10 @@ describe('ResultsListView', () => {
     return render(
       <ResultsListView
         companies={[sampleCompany]}
+        favoriteCompanies={[]}
+        favoritesLoading={false}
+        favoritesError={null}
+        onRetryFavorites={noop}
         isProvisional={false}
         analysisScores={null}
         scoreComment=""
@@ -46,6 +50,7 @@ describe('ResultsListView', () => {
         onSendEmail={noop}
         onSelectCompany={noop}
         onToggleFavorite={noop}
+        onUnfavoriteCompany={noop}
         onApply={noop}
         onNavigate={noop}
         {...overrides}
@@ -171,29 +176,28 @@ describe('ResultsListView', () => {
     expect(screen.queryByText('応募は準備中')).not.toBeInTheDocument()
   })
 
-  it('お気に入りだけを選ぶと、お気に入りの企業を業界と職種で並べる', () => {
+  it('お気に入りだけを選ぶと、診断をまたいだ企業を業界と職種で並べる', () => {
+    const favorited = {
+      ...sampleCompany,
+      id: '2',
+      matchId: 11,
+      name: 'お気に入り株式会社',
+      industry: '製造',
+      jobTitle: '生産管理',
+      matchScore: 70,
+      isFavorited: true,
+    }
+    const noJob = {
+      ...sampleCompany,
+      id: '3',
+      matchId: 12,
+      name: '職種なし株式会社',
+      isFavorited: true,
+      matchScore: 60,
+    }
     renderList({
-      companies: [
-        sampleCompany,
-        {
-          ...sampleCompany,
-          id: '2',
-          matchId: 11,
-          name: 'お気に入り株式会社',
-          industry: '製造',
-          jobTitle: '生産管理',
-          matchScore: 70,
-          isFavorited: true,
-        },
-        {
-          ...sampleCompany,
-          id: '3',
-          matchId: 12,
-          name: '職種なし株式会社',
-          isFavorited: true,
-          matchScore: 60,
-        },
-      ],
+      companies: [sampleCompany],
+      favoriteCompanies: [favorited, noJob],
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'お気に入りだけ（2）' }))
@@ -213,7 +217,7 @@ describe('ResultsListView', () => {
     renderList()
 
     fireEvent.click(screen.getByRole('button', { name: 'お気に入りだけ（0）' }))
-    expect(screen.getByText('この診断でお気に入りにした企業はまだありません')).toBeInTheDocument()
+    expect(screen.getByText('お気に入りにした企業はまだありません')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'すべての企業を見る' }))
     expect(screen.getByText('サンプル株式会社')).toBeInTheDocument()

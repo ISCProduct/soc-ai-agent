@@ -1119,6 +1119,39 @@ paths:
         "400": { description: match_id が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/chat/favorites:
+    get:
+      tags: [chat]
+      summary: お気に入り企業を診断をまたいで1社1行で返す
+      description: 同じ企業は更新がいちばん新しい診断の行を残す。並びは適合度の高い順。
+      security: [{ userToken: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, maximum: 100 }
+      responses:
+        "200": { description: お気に入り企業 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/chat/favorites/remove:
+    post:
+      tags: [chat]
+      summary: 企業のお気に入りを診断をまたいで外す
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [company_id]
+              properties:
+                company_id: { type: integer }
+      responses:
+        "200": { description: 外した }
+        "400": { description: company_id が無い }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   # ── questions ──────────────────────────────────────
   /api/questions/generate:
     post:

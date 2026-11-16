@@ -4,6 +4,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services/diagnosis"
 	"encoding/json"
+	"slices"
 	"strings"
 )
 
@@ -129,6 +130,70 @@ func DisplayableMatches(matches []*models.UserCompanyMatch) []*models.UserCompan
 		displayed = append(displayed, match)
 	}
 	return displayed
+}
+
+// DedupedFavorites はお気に入りを企業ごとに1行へまとめる。
+// 同じ企業は更新がいちばん新しい行を残す。並びは適合度の高い順で、同点は企業IDの昇順。
+// 課金などで順位を上げない。limit を超えた分は捨てる。
+func DedupedFavorites(matches []*models.UserCompanyMatch, limit int) []*models.UserCompanyMatch {
+	ordered := append([]*models.UserCompanyMatch(nil), matches...)
+	slices.SortStableFunc(ordered, func(a, b *models.UserCompanyMatch) int {
+		if a == nil || b == nil {
+			if a == b {
+				return 0
+			}
+			if a == nil {
+				return 1
+			}
+			return -1
+		}
+		if !a.UpdatedAt.Equal(b.UpdatedAt) {
+			if a.UpdatedAt.After(b.UpdatedAt) {
+				return -1
+			}
+			return 1
+		}
+		if a.ID == b.ID {
+			return 0
+		}
+		if a.ID > b.ID {
+			return -1
+		}
+		return 1
+	})
+
+	seen := map[uint]struct{}{}
+	picked := make([]*models.UserCompanyMatch, 0)
+	for _, match := range ordered {
+		if match == nil || match.CompanyID == 0 {
+			continue
+		}
+		if _, ok := seen[match.CompanyID]; ok {
+			continue
+		}
+		seen[match.CompanyID] = struct{}{}
+		picked = append(picked, match)
+	}
+
+	slices.SortStableFunc(picked, func(a, b *models.UserCompanyMatch) int {
+		if a.MatchScore == b.MatchScore {
+			if a.CompanyID == b.CompanyID {
+				return 0
+			}
+			if a.CompanyID < b.CompanyID {
+				return -1
+			}
+			return 1
+		}
+		if a.MatchScore > b.MatchScore {
+			return -1
+		}
+		return 1
+	})
+	if limit >= 0 && len(picked) > limit {
+		picked = picked[:limit]
+	}
+	return picked
 }
 
 // BuildRecommendations は表示対象の match を推薦一覧に整形する。

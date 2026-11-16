@@ -42,6 +42,11 @@ import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
 
 export interface ResultsListViewProps {
   companies: Company[]
+  /** 診断をまたいで1社にまとめたお気に入り。並びは適合度の高い順 */
+  favoriteCompanies: Company[]
+  favoritesLoading: boolean
+  favoritesError: string | null
+  onRetryFavorites: () => void
   isProvisional: boolean
   diagnosisSummary?: string | null
   evaluatedCategories?: number | null
@@ -66,6 +71,7 @@ export interface ResultsListViewProps {
   onSendEmail: () => void
   onSelectCompany: (company: Company) => void
   onToggleFavorite: (e: MouseEvent, company: Company) => void
+  onUnfavoriteCompany: (e: MouseEvent, company: Company) => void
   onApply: (e: MouseEvent, company: Company) => void
   onNavigate: (path: string) => void
 }
@@ -75,6 +81,10 @@ export interface ResultsListViewProps {
  */
 export default function ResultsListView({
   companies,
+  favoriteCompanies,
+  favoritesLoading,
+  favoritesError,
+  onRetryFavorites,
   isProvisional,
   diagnosisSummary = null,
   evaluatedCategories = null,
@@ -98,18 +108,17 @@ export default function ResultsListView({
   onSendEmail,
   onSelectCompany,
   onToggleFavorite,
+  onUnfavoriteCompany,
   onApply,
   onNavigate,
 }: ResultsListViewProps) {
   const guestEmailProps = getGuestEmailButtonProps(isGuestUser)
   const guestApplicationsProps = getGuestApplicationsButtonProps(isGuestUser)
   const applyClosedProps = getApplyClosedButtonProps(applyEnabled)
-  // お気に入りは今開いている診断の結果だけを見る。別セッションへ広げるかは未決。
+  // お気に入りは過去の診断も含め、同じ企業は1行。中身は呼び出し側がまとめて渡す。
   const [favoritesOnly, setFavoritesOnly] = useState(false)
-  const favoriteCount = companies.filter((company) => company.isFavorited).length
-  const listedCompanies = favoritesOnly
-    ? companies.filter((company) => company.isFavorited)
-    : companies
+  const favoriteCount = favoriteCompanies.length
+  const listedCompanies = favoritesOnly ? favoriteCompanies : companies
   // 一覧全体の幅。各社の位置はこの中で示す。並び順は渡されたまま（適合度順）。
   const band = scaleBand(listedCompanies.map((c) => c.matchScore))
   // 一覧の中で最も多い根拠軸数。これを下回る行だけ印を出す
@@ -191,7 +200,7 @@ export default function ResultsListView({
           </Typography>
           <Typography sx={{ fontSize: 15, color: UI.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 1.5 }}>
             {favoritesOnly
-              ? '今回の診断でお気に入りにした企業です。並びは適合度の高い順のままです。'
+              ? '今までの診断でお気に入りにした企業です。同じ企業は1社にまとめています。適合度は、いちばん新しく更新した診断のものです。'
               : isProvisional
                 ? 'ここまでの回答で並べています。会話を続けると根拠が増え、順番も変わります。'
                 : '回答の傾向と、企業が重視する人物像を突き合わせた順に並べています。'}
@@ -310,13 +319,26 @@ export default function ResultsListView({
             学生の用途は「見比べて絞る」ことなので、1社ずつ箱に入れると
             隣と比べにくく、どれも同じ重みに見える。
           */}
-          {favoritesOnly && listedCompanies.length === 0 ? (
+          {favoritesOnly && favoritesLoading && listedCompanies.length === 0 ? (
+            <Typography sx={{ fontSize: 15, color: UI.inkSoft, py: 3 }}>
+              お気に入りを読み込んでいます
+            </Typography>
+          ) : favoritesOnly && favoritesError && listedCompanies.length === 0 ? (
             <Box sx={{ py: 3 }}>
               <Typography sx={{ fontSize: 16, fontWeight: 700, color: UI.ink, mb: 1 }}>
-                この診断でお気に入りにした企業はまだありません
+                {favoritesError}
+              </Typography>
+              <Button variant="outlined" onClick={onRetryFavorites}>
+                再読み込み
+              </Button>
+            </Box>
+          ) : favoritesOnly && listedCompanies.length === 0 ? (
+            <Box sx={{ py: 3 }}>
+              <Typography sx={{ fontSize: 16, fontWeight: 700, color: UI.ink, mb: 1 }}>
+                お気に入りにした企業はまだありません
               </Typography>
               <Typography sx={{ fontSize: 15, color: UI.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 2 }}>
-                すべての企業に戻って、残しておきたい企業のハートを押してください。ここに並びます。
+                すべての企業に戻って、残しておきたい企業のハートを押してください。ここに残ります。
               </Typography>
               <Button variant="outlined" onClick={() => setFavoritesOnly(false)}>
                 すべての企業を見る
@@ -327,7 +349,7 @@ export default function ResultsListView({
               companies={listedCompanies}
               favoritingId={favoritingId}
               onSelectCompany={onSelectCompany}
-              onToggleFavorite={onToggleFavorite}
+              onToggleFavorite={onUnfavoriteCompany}
             />
           ) : (
           <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0 }}>

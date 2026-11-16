@@ -32,12 +32,16 @@ func (s *stubApplyMatchRepo) CreateOrUpdateBatch([]*models.UserCompanyMatch) (in
 func (s *stubApplyMatchRepo) FindTopMatchesByUserAndSession(uint, string, int) ([]*models.UserCompanyMatch, error) {
 	return nil, nil
 }
+func (s *stubApplyMatchRepo) FindFavoritedByUser(uint) ([]*models.UserCompanyMatch, error) {
+	return nil, nil
+}
 func (s *stubApplyMatchRepo) FindByID(uint) (*models.UserCompanyMatch, error) {
 	return s.findByIDResult, s.findByIDErr
 }
-func (s *stubApplyMatchRepo) MarkAsViewed(uint) error   { return nil }
-func (s *stubApplyMatchRepo) ToggleFavorite(uint) error { return nil }
-func (s *stubApplyMatchRepo) MarkAsApplied(uint) error  { return nil }
+func (s *stubApplyMatchRepo) MarkAsViewed(uint) error            { return nil }
+func (s *stubApplyMatchRepo) ToggleFavorite(uint) error          { return nil }
+func (s *stubApplyMatchRepo) UnfavoriteCompany(uint, uint) error { return nil }
+func (s *stubApplyMatchRepo) MarkAsApplied(uint) error           { return nil }
 func (s *stubApplyMatchRepo) GetMatchStatistics(uint, string) (map[string]any, error) {
 	return nil, nil
 }

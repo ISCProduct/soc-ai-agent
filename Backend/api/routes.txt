@@ -178,6 +178,8 @@ POST /api/auth/verify-registration
 POST /api/chat
 GET /api/chat/analysis
 POST /api/chat/favorite
+GET /api/chat/favorites
+POST /api/chat/favorites/remove
 GET /api/chat/history
 GET /api/chat/recommendations
 GET /api/chat/scores

@@ -49,6 +49,10 @@ function ResultsContent() {
     userId,
     sessionId,
     companies,
+    favoriteCompanies,
+    favoritesLoading,
+    favoritesError,
+    retryFavorites,
     loading,
     error,
     isProvisional,
@@ -80,6 +84,7 @@ function ResultsContent() {
     handleBack,
     handleReset,
     handleToggleFavorite,
+    handleUnfavoriteCompany,
     handleApply,
     lowMatchTarget,
     cancelLowMatchApply,
@@ -148,6 +153,10 @@ function ResultsContent() {
     <>
     <ResultsListView
       companies={companies}
+      favoriteCompanies={favoriteCompanies}
+      favoritesLoading={favoritesLoading}
+      favoritesError={favoritesError}
+      onRetryFavorites={retryFavorites}
       isProvisional={isProvisional}
       diagnosisSummary={diagnosisSummary}
       evaluatedCategories={evaluatedCategories}
@@ -171,6 +180,7 @@ function ResultsContent() {
       onSendEmail={handleSendEmail}
       onSelectCompany={setSelectedCompany}
       onToggleFavorite={handleToggleFavorite}
+      onUnfavoriteCompany={handleUnfavoriteCompany}
       onApply={handleApply}
       onNavigate={navigate}
     />

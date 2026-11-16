@@ -19,6 +19,8 @@ func SetupChatRoutes(api *echo.Group, chatController *chatcontrollers.ChatContro
 	chat.GET("/sessions", chatController.GetSessions)
 	chat.POST("/send-report", chatController.SendReport, budget.Immediate)
 	chat.POST("/favorite", chatController.ToggleFavorite)
+	chat.GET("/favorites", chatController.GetFavorites)
+	chat.POST("/favorites/remove", chatController.RemoveFavoriteCompany)
 
 	// 質問管理エンドポイント（認証必須）
 	questions := api.Group("/questions", EchoUserAuth(userSecret, access, orgs))

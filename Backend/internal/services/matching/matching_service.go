@@ -421,6 +421,23 @@ func (s *MatchingService) ToggleFavorite(matchID uint, userID uint) error {
 	return s.matchRepo.ToggleFavorite(matchID)
 }
 
+// ListFavoriteCompanies は過去の診断を含め、お気に入り企業を1社1行で返す。
+func (s *MatchingService) ListFavoriteCompanies(userID uint, limit int) ([]*models.UserCompanyMatch, error) {
+	rows, err := s.matchRepo.FindFavoritedByUser(userID)
+	if err != nil {
+		return nil, err
+	}
+	return DedupedFavorites(rows, limit), nil
+}
+
+// UnfavoriteCompany はそのユーザーの、その企業のお気に入りを診断をまたいで外す。
+func (s *MatchingService) UnfavoriteCompany(userID uint, companyID uint) error {
+	if companyID == 0 {
+		return shared.ErrNotFound
+	}
+	return s.matchRepo.UnfavoriteCompany(userID, companyID)
+}
+
 type MatchingDiagnostics struct {
 	UserScoreCount     int64 `json:"user_score_count"`
 	ActiveCompanyCount int64 `json:"active_company_count"`

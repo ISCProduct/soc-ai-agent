@@ -121,6 +121,32 @@ func (r *UserCompanyMatchRepository) FindTopMatchesByUserAndSession(
 	return ms, nil
 }
 
+// favoriteScanCap はお気に入り集計で読む行の上限。
+// 同じ企業を診断ごとに持つので、1社にまとめる前の行数で頭打ちにする。
+const favoriteScanCap = 1000
+
+// FindFavoritedByUser はお気に入りのマッチを更新が新しい順に返す。
+func (r *UserCompanyMatchRepository) FindFavoritedByUser(userID uint) ([]*models.UserCompanyMatch, error) {
+	var ms []*models.UserCompanyMatch
+	err := r.db.Where("user_id = ? AND is_favorited = ?", userID, true).
+		Order("updated_at DESC, id DESC").
+		Limit(favoriteScanCap).
+		Preload("Company").
+		Preload("JobPosition").
+		Find(&ms).Error
+	if err != nil {
+		return nil, err
+	}
+	return ms, nil
+}
+
+// UnfavoriteCompany はそのユーザーの、その企業のお気に入りをすべて外す。
+func (r *UserCompanyMatchRepository) UnfavoriteCompany(userID uint, companyID uint) error {
+	return r.db.Model(&models.UserCompanyMatch{}).
+		Where("user_id = ? AND company_id = ? AND is_favorited = ?", userID, companyID, true).
+		Update("is_favorited", false).Error
+}
+
 // FindByID IDでマッチング結果を取得
 func (r *UserCompanyMatchRepository) FindByID(id uint) (*models.UserCompanyMatch, error) {
 	var m models.UserCompanyMatch
