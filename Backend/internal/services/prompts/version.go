@@ -1,11 +1,10 @@
 package prompts
 
 import (
+	"Backend/internal/config"
 	"context"
 	"log/slog"
-	"os"
 	"regexp"
-	"strings"
 	"sync"
 
 	"Backend/internal/usagectx"
@@ -53,14 +52,14 @@ func promptVersionForStage(stage Stage) string {
 		return defaultPromptVersion
 	}
 
-	stageVersion := strings.TrimSpace(os.Getenv("PROMPT_VERSION_" + strings.ToUpper(string(stage))))
+	stageVersion := config.PromptVersion(string(stage))
 	if stageVersion != "" {
 		if ValidPromptVersion(stageVersion) {
 			return stageVersion
 		}
 		warnPromptVersionOnce(stage, "invalid stage version")
 	}
-	globalVersion := strings.TrimSpace(os.Getenv("PROMPT_VERSION"))
+	globalVersion := config.GlobalPromptVersion()
 	if globalVersion != "" {
 		if ValidPromptVersion(globalVersion) {
 			return globalVersion
@@ -90,7 +89,7 @@ func knownPromptStage(stage Stage) bool {
 }
 
 func warnPromptVersionOnce(stage Stage, reason string) {
-	key := string(stage) + ":" + reason + ":" + strings.TrimSpace(os.Getenv("PROMPT_VERSION_"+strings.ToUpper(string(stage))))
+	key := string(stage) + ":" + reason + ":" + config.PromptVersion(string(stage))
 	if _, loaded := warnedPromptSettings.LoadOrStore(key, struct{}{}); !loaded {
 		slog.Warn("プロンプト版設定を無視します", "stage", stage, "reason", reason)
 	}

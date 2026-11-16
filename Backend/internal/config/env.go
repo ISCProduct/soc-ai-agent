@@ -65,3 +65,27 @@ func CompanySearchBudgetEnforce() bool { return boolEnv("COMPANY_SEARCH_BUDGET_E
 
 // InterviewBudgetEnforce は面接の月次上限を強制するか(既定 false = 監視のみ)。
 func InterviewBudgetEnforce() bool { return boolEnv("INTERVIEW_BUDGET_ENFORCE", false) }
+
+// --- プロンプト版・A/B ---
+
+// PromptVersion は工程ごとのプロンプト版(PROMPT_VERSION_<STAGE>)。未設定なら空文字。
+func PromptVersion(stage string) string {
+	return firstEnv("PROMPT_VERSION_" + strings.ToUpper(stage))
+}
+
+// GlobalPromptVersion は全工程共通のプロンプト版(PROMPT_VERSION)。
+func GlobalPromptVersion() string { return firstEnv("PROMPT_VERSION") }
+
+// PromptABSpec は工程の A/B 設定(PROMPT_AB_<STAGE>)の生の文字列。
+func PromptABSpec(stage string) string { return firstEnv("PROMPT_AB_" + strings.ToUpper(stage)) }
+
+// --- OpenAI モデル名の上書き(空なら呼び出し側の既定値を使う) ---
+
+func OpenAIWhisperModel() string { return os.Getenv("OPENAI_WHISPER_MODEL") }
+func OpenAITTSModel() string     { return os.Getenv("OPENAI_TTS_MODEL") }
+
+// MatchingReasonUseAI はマッチング理由を AI で生成するか(true / 1 / yes。既定 false)。
+func MatchingReasonUseAI() bool {
+	v := firstEnv("MATCHING_REASON_USE_AI")
+	return strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
+}

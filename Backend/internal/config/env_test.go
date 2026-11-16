@@ -66,3 +66,30 @@ func TestBudgetEnforce(t *testing.T) {
 		})
 	}
 }
+
+func TestPromptEnv(t *testing.T) {
+	t.Setenv("PROMPT_VERSION_ES_REVIEW", " v2 ")
+	t.Setenv("PROMPT_VERSION", "v1")
+	t.Setenv("PROMPT_AB_ES_REVIEW", " v1:50,v2:50 ")
+	if got := PromptVersion("es_review"); got != "v2" {
+		t.Errorf("PromptVersion = %q, 工程名は大文字化され空白は除かれるべき", got)
+	}
+	if got := GlobalPromptVersion(); got != "v1" {
+		t.Errorf("GlobalPromptVersion = %q", got)
+	}
+	if got := PromptABSpec("es_review"); got != "v1:50,v2:50" {
+		t.Errorf("PromptABSpec = %q", got)
+	}
+	if got := PromptVersion("other"); got != "" {
+		t.Errorf("未設定の工程は空文字のはず: %q", got)
+	}
+}
+
+func TestMatchingReasonUseAI(t *testing.T) {
+	for val, want := range map[string]bool{"": false, "true": true, "TRUE": true, "1": true, " yes ": true, "0": false, "no": false} {
+		t.Setenv("MATCHING_REASON_USE_AI", val)
+		if got := MatchingReasonUseAI(); got != want {
+			t.Errorf("MATCHING_REASON_USE_AI=%q: got %v, want %v", val, got, want)
+		}
+	}
+}
