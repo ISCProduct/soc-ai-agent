@@ -3,8 +3,18 @@
 import type { MouseEvent } from 'react'
 import { Box, IconButton, Tooltip, Typography } from '@mui/material'
 import { Favorite } from '@mui/icons-material'
-import type { Company } from '../types'
+import type { CategoryScores, Company } from '../types'
+import { CATEGORY_SCORE_LABELS } from '../utils'
 import { UI } from '@/lib/design/tokens'
+
+const AXIS_KEYS = Object.keys(CATEGORY_SCORE_LABELS) as (keyof CategoryScores)[]
+
+/** 軸の値が無いときは、0と決めつけない。 */
+export function axisScoreLabel(company: Company, key: keyof CategoryScores): string {
+  const value = company.categoryScores?.[key]
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '未設定'
+  return String(Math.round(value))
+}
 
 export interface FavoritesCompareListProps {
   companies: Company[]
@@ -20,7 +30,7 @@ export function jobTitleLabel(company: Company): string {
 }
 
 /**
- * 診断をまたいだお気に入りを、業界・職種・適合度の列で見比べる。
+ * 診断をまたいだお気に入りを、業界・職種・総合の適合度と10軸で見比べる。
  * 並びは呼び出し側が渡した順のまま。課金などの別基準では並べ替えない。
  */
 export default function FavoritesCompareList({
@@ -30,11 +40,19 @@ export default function FavoritesCompareList({
   onToggleFavorite,
 }: FavoritesCompareListProps) {
   return (
+    <Box sx={{ overflowX: 'auto' }}>
     <Box
       component="table"
       sx={{
         width: '100%',
+        minWidth: { sm: 1080 },
         borderCollapse: 'collapse',
+        '& th:first-of-type, & td:first-of-type': {
+          position: { sm: 'sticky' },
+          left: 0,
+          backgroundColor: UI.paper,
+          zIndex: 1,
+        },
         '& th, & td': {
           textAlign: 'left',
           verticalAlign: 'baseline',
@@ -65,7 +83,7 @@ export default function FavoritesCompareList({
           '& td::before': {
             content: 'attr(data-label)',
             display: 'inline-block',
-            minWidth: '4.5em',
+            minWidth: '9em',
             marginRight: '0.75em',
             color: UI.inkSoft,
             fontSize: 13,
@@ -76,7 +94,7 @@ export default function FavoritesCompareList({
     >
       <caption style={{ captionSide: 'top', textAlign: 'left', paddingBottom: 8 }}>
         <Typography component="span" sx={{ fontSize: 14, color: UI.inkSoft }}>
-          業界・職種・適合度を揃えています。企業名を押すと詳細を開けます。
+          業界・職種・総合の適合度と、10軸の適合度を揃えています。企業名を押すと詳細を開けます。
         </Typography>
       </caption>
       <Box component="thead">
@@ -85,6 +103,9 @@ export default function FavoritesCompareList({
           <Box component="th" scope="col">業界</Box>
           <Box component="th" scope="col">職種</Box>
           <Box component="th" scope="col">適合度</Box>
+          {AXIS_KEYS.map((key) => (
+            <Box component="th" scope="col" key={key}>{CATEGORY_SCORE_LABELS[key]}</Box>
+          ))}
           <Box component="th" scope="col">
             <Box component="span" sx={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>
               お気に入り
@@ -127,6 +148,13 @@ export default function FavoritesCompareList({
                 {company.matchScore}
               </Typography>
             </Box>
+            {AXIS_KEYS.map((key) => (
+              <Box component="td" data-label={CATEGORY_SCORE_LABELS[key]} key={key}>
+                <Typography sx={{ fontSize: 14, color: UI.ink, fontVariantNumeric: 'tabular-nums' }}>
+                  {axisScoreLabel(company, key)}
+                </Typography>
+              </Box>
+            ))}
             <Box component="td" data-label="">
               <Tooltip title="お気に入りから外す">
                 <IconButton
@@ -143,6 +171,7 @@ export default function FavoritesCompareList({
           </Box>
         ))}
       </Box>
+    </Box>
     </Box>
   )
 }

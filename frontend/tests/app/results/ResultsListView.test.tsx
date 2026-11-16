@@ -186,6 +186,18 @@ describe('ResultsListView', () => {
       jobTitle: '生産管理',
       matchScore: 70,
       isFavorited: true,
+      categoryScores: {
+        technical: 81.2,
+        teamwork: 0,
+        leadership: 0,
+        creativity: 0,
+        stability: 0,
+        growth: 0,
+        work_life: 0,
+        challenge: 0,
+        detail: 0,
+        communication: 0,
+      },
     }
     const noJob = {
       ...sampleCompany,
@@ -207,7 +219,9 @@ describe('ResultsListView', () => {
     expect(screen.getByText('製造')).toBeInTheDocument()
     expect(screen.getByText('生産管理')).toBeInTheDocument()
     expect(screen.getByText('職種なし株式会社')).toBeInTheDocument()
-    expect(screen.getByText('未設定')).toBeInTheDocument()
+    expect(screen.getByText('技術力')).toBeInTheDocument()
+    expect(screen.getByText('81')).toBeInTheDocument()
+    expect(screen.getAllByText('未設定').length).toBeGreaterThan(0)
     // 渡された順のまま。適合度の高いお気に入りが先。
     const names = screen.getAllByRole('button', { name: /株式会社$/ }).map((node) => node.textContent)
     expect(names).toEqual(['お気に入り株式会社', '職種なし株式会社'])
