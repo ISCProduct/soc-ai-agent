@@ -15,13 +15,14 @@
  * 常に「どれも現在地ではない」にしかならない。現在地ハイライトは GlobalNavMenu（ホーム以外の
  * 全ページで表示される共通メニュー）側で既に実装・テスト済み（global-nav-menu.test.tsx）。
  */
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
+import { useRouter } from 'next/navigation'
 import { AnalysisSidebar } from '@/components/home/AnalysisSidebar'
 import { SIDEBAR_NAV_ITEMS } from '@/lib/sidebar-nav'
 import type { User } from '@/lib/auth'
 
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({ push: jest.fn(), replace: jest.fn(), refresh: jest.fn() }),
+  useRouter: jest.fn(() => ({ push: jest.fn(), replace: jest.fn(), refresh: jest.fn() })),
 }))
 
 const user = { user_id: 1, name: '山田太郎', email: 'student@example.com' } as unknown as User
@@ -36,6 +37,14 @@ describe('AnalysisSidebar のナビ項目', () => {
     for (const item of SIDEBAR_NAV_ITEMS) {
       expect(screen.getAllByRole('button', { name: new RegExp(item.label) }).length).toBeGreaterThan(0)
     }
+  })
+
+  it('お気に入りは診断セッションが無くても /favorites へ進む', () => {
+    const push = jest.fn()
+    ;(useRouter as jest.Mock).mockReturnValue({ push, replace: jest.fn(), refresh: jest.fn() })
+    render(<AnalysisSidebar user={user} onLogout={jest.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'お気に入り' }))
+    expect(push).toHaveBeenCalledWith('/favorites')
   })
 
   it('ゲストは選考管理にTooltipで「ログインが必要です」と出る（既存挙動の回帰確認）', () => {

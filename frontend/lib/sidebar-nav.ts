@@ -17,6 +17,7 @@ export const SIDEBAR_NAV_ITEMS = [
   { href: '/interview/history', label: t('sidebar.interviewHistory') },
   { href: '/es-rewrite', label: t('sidebar.esRewrite') },
   { href: '/schedule', label: t('sidebar.schedule') },
+  { href: '/favorites', label: t('sidebar.favorites') },
   { href: '/applications', label: t('sidebar.applications') },
   { href: '/scout', label: t('sidebar.scout') },
   { href: '/profile', label: t('sidebar.profile') },

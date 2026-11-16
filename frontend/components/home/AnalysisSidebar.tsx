@@ -40,6 +40,7 @@ import {
     CalendarMonth,
     Business,
     Assignment,
+    Favorite,
     MailOutline,
     NewReleases,
     Assessment,
@@ -471,6 +472,15 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                     label={t('home.results')}
                     onClick={() => {
                         router.push(getResultsPathOrChat())
+                        onMobileClose?.()
+                    }}
+                />
+
+                <SidebarNavButton
+                    icon={<Favorite color="primary"/>}
+                    label={t('sidebar.favorites')}
+                    onClick={() => {
+                        router.push('/favorites')
                         onMobileClose?.()
                     }}
                 />
