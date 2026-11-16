@@ -1,6 +1,7 @@
 package es
 
 import (
+	"Backend/internal/config"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
@@ -15,7 +16,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -253,7 +253,7 @@ func withPrevious(body []byte, previous *models.ESReview) []byte {
 // ES添削・ESリライトの唯一の生成経路。プロンプトとインジェクション対策は RAG 側の
 // services/es_review.py に一本化してあるので、ここでプロンプトを組み立てないこと。
 func postESReview(ctx echo.Context, payload esReviewRAGRequest, cli *openai.Client, feature string) (int, []byte, error) {
-	ragURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
+	ragURL := config.RAGReviewURL()
 	if ragURL == "" {
 		return 0, nil, echo.NewHTTPError(http.StatusServiceUnavailable, "RAG_REVIEW_URL is not configured")
 	}
