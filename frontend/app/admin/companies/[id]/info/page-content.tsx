@@ -13,6 +13,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { formatDateTime } from '@/lib/i18n/format'
 import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import { infoFieldEnabled, resolveIndustryFieldProfile } from '@/lib/admin/company-field-profile'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
@@ -272,7 +273,7 @@ export default function PageContent() {
   const formatTs = (v: string | null) => {
     if (!v) return '未取得'
     const d = new Date(v)
-    return Number.isNaN(d.getTime()) ? v : d.toLocaleString('ja-JP')
+    return Number.isNaN(d.getTime()) ? v : formatDateTime(d)
   }
 
   const profile = useMemo(() => resolveIndustryFieldProfile(industry), [industry])

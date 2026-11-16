@@ -1,6 +1,7 @@
 'use client'
 
 import { memo, Suspense, useMemo, useState } from 'react'
+import { formatDate } from '@/lib/i18n/format'
 import FormatFindingsSection, { type FormatFinding } from '@/components/feedback/FormatFindingsSection'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
@@ -297,7 +298,7 @@ function ScoreDelta({ current, previous }: { current: number; previous: number |
 function formatPreviousDate(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '前回'
-  return d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'numeric', day: 'numeric' })
+  return formatDate(d, { year: 'numeric', month: 'numeric', day: 'numeric' })
 }
 
 function CharCountNote({ result, charLimit }: { result: CharLimitResult; charLimit: number | null }) {
