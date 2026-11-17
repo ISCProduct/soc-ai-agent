@@ -11,13 +11,14 @@ import {
   Chip,
   LinearProgress,
   MenuItem,
-  Paper,
   Stack,
   TextField,
   Typography,
 } from '@mui/material'
 import type { CompanyCandidate } from '../types'
 import { companySourceLabel } from '../utils'
+import { UI } from '@/lib/design/tokens'
+import { ResumeReviewStatus } from './ResumeReviewStatus'
 
 type ResumeReviewFormProps = {
   companyQuery: string
@@ -70,10 +71,8 @@ export function ResumeReviewForm({
 }: ResumeReviewFormProps) {
   const [jobTitleTouched, setJobTitleTouched] = useState(false)
   return (
-    <Paper sx={{ p: 3 }} elevation={2}>
-      <Stack spacing={2}>
-        <Typography variant="h6">レビュー実行</Typography>
-        <Typography variant="body2" color="text.secondary">
+    <Stack spacing={2}>
+        <Typography variant="body2" sx={{ color: UI.inkSoft }}>
           企業を指定する場合は、「掲載企業から探す」または「Webから探す」で候補を選んでください（入力しただけではレビューできません）。
           企業なしで職種のみの一般レビューも可能です。
         </Typography>
@@ -168,37 +167,28 @@ export function ResumeReviewForm({
           <MenuItem value="new_grad">新卒</MenuItem>
           <MenuItem value="mid_career">中途</MenuItem>
         </TextField>
-        <Button variant="contained" onClick={onReview} disabled={reviewLoading || !documentId}>
-          レビューを生成
+        <Button
+          variant="contained"
+          onClick={onReview}
+          disabled={reviewLoading || !documentId}
+          sx={{ width: { xs: '100%', sm: 'auto' }, alignSelf: { sm: 'flex-start' } }}
+        >
+          {reviewLoading ? 'レビューを作成中...' : 'レビューを生成'}
         </Button>
-        {reviewLoading && (
-          <Box>
-            <LinearProgress />
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              {ragReport ? '企業別レビューレポートを生成中...' : 'PDFを解析中...（通常30〜60秒かかります）'}
-            </Typography>
-          </Box>
+        {!documentId && (
+          <Typography variant="caption" sx={{ color: UI.inkSoft }}>
+            先に「書類を選ぶ」でアップロードすると押せるようになります。
+          </Typography>
         )}
-        {reviewError && (
-          <Alert severity="error">{reviewError}</Alert>
-        )}
-        {reviewInterrupted && !reviewLoading && (
-          <Alert
-            severity="warning"
-            role="alert"
-            action={
-              <Button color="inherit" size="small" onClick={onReview} disabled={!documentId}>
-                もう一度試す
-              </Button>
-            }
-          >
-            中断されました。もう一度お試しください。
-          </Alert>
-        )}
-        {reviewCompleted && !reviewLoading && (
-          <Alert severity="success">レビューが完了しました。下の指摘事項をご確認ください。</Alert>
-        )}
-      </Stack>
-    </Paper>
+        <ResumeReviewStatus
+          loading={reviewLoading}
+          hasReport={!!ragReport}
+          error={reviewError}
+          interrupted={reviewInterrupted}
+          completed={reviewCompleted}
+          canRetry={!!documentId}
+          onRetry={onReview}
+        />
+    </Stack>
   )
 }

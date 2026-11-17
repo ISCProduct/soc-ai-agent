@@ -6,7 +6,6 @@ import {
   Button,
   LinearProgress,
   MenuItem,
-  Paper,
   Stack,
   TextField,
   Typography,
@@ -38,8 +37,7 @@ export function ResumeUploadForm({
   onUpload,
 }: ResumeUploadFormProps) {
   return (
-    <Paper sx={{ p: 3, mb: 3 }} elevation={2}>
-      <Stack spacing={2}>
+    <Stack spacing={2}>
         <TextField
           select
           label="提出形式"
@@ -58,7 +56,7 @@ export function ResumeUploadForm({
           placeholder="https://... (PDFエクスポートURL)"
           fullWidth
         />
-        <Button variant="outlined" component="label">
+        <Button variant="outlined" component="label" sx={{ width: { xs: '100%', sm: 'auto' }, alignSelf: { sm: 'flex-start' } }}>
           ファイルを選択
           <input
             type="file"
@@ -72,7 +70,7 @@ export function ResumeUploadForm({
             選択ファイル: {file.name}
           </Typography>
         )}
-        <Button variant="contained" onClick={onUpload} disabled={loading}>
+        <Button variant="contained" onClick={onUpload} disabled={loading} sx={{ width: { xs: '100%', sm: 'auto' }, alignSelf: { sm: 'flex-start' } }}>
           アップロード
         </Button>
         {loading && (
@@ -87,11 +85,10 @@ export function ResumeUploadForm({
           <Alert severity="error">{uploadError}</Alert>
         )}
         {documentId !== null && (
-          <Alert severity="success">
-            アップロード完了！下のフォームでレビューを実行してください。
-          </Alert>
+          <Typography role="status" fontWeight={700}>
+            ✓ 書類を受け取りました。次は「レビューの条件」を決めてください。
+          </Typography>
         )}
-      </Stack>
-    </Paper>
+    </Stack>
   )
 }

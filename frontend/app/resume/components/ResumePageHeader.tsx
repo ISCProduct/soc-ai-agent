@@ -3,6 +3,7 @@
 import { Box, IconButton, Typography } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { useRouter } from 'next/navigation'
+import { UI } from '@/lib/design/tokens'
 
 type ResumePageHeaderProps = {
   prefilledCompany: string
@@ -20,7 +21,7 @@ export function ResumePageHeader({ prefilledCompany, prefilledIndustry }: Resume
           onClick={() => router.back()}
           size="small"
           aria-label="前のページに戻る"
-          sx={{ bgcolor: '#f1f5f9', color: '#475569', width: 44, height: 44 }}
+          sx={{ bgcolor: UI.tint, color: UI.inkSoft, width: 44, height: 44 }}
         >
           <ArrowBackIcon />
         </IconButton>
@@ -29,14 +30,14 @@ export function ResumePageHeader({ prefilledCompany, prefilledIndustry }: Resume
         </Typography>
       </Box>
       <Typography variant="body1" color="text.secondary" sx={{ mb: prefilledCompany ? 1.5 : 3 }}>
-        PDF/DOCX/Google Docsをアップロードして、注釈付きPDFを生成します。
+        PDF・DOCX・Google Docs を出すと、AIが指摘と書き直し案を返します。注釈付きPDFも作れます。
       </Typography>
       {prefilledCompany && (
-        <Box sx={{ mb: 3, px: 2, py: 1.5, bgcolor: '#e8f5e9', borderRadius: 1, border: '1px solid #a5d6a7' }}>
-          <Typography sx={{ fontSize: 14, color: '#2e7d32', fontWeight: 600 }}>
-            {prefilledCompany}{prefilledIndustry ? `（${prefilledIndustry}）` : ''}向けに最適化されたフィードバックを提供します
+        <Box sx={{ mb: 3, px: 2, py: 1.5, bgcolor: UI.tint, borderRadius: 1, border: `1px solid ${UI.rule}`, borderLeft: `4px solid ${UI.mark}` }}>
+          <Typography sx={{ fontWeight: 700, color: UI.ink }}>
+            {prefilledCompany}{prefilledIndustry ? `（${prefilledIndustry}）` : ''}向けのレビューです
           </Typography>
-          <Typography sx={{ fontSize: 12, color: '#388e3c', mt: 0.5 }}>
+          <Typography variant="caption" sx={{ color: UI.inkSoft }}>
             企業の求める人材像を踏まえたアドバイスが反映されます
           </Typography>
         </Box>

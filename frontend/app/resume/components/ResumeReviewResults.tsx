@@ -55,7 +55,7 @@ export function ResumeReviewResults({
         </Box>
       )}
 
-      <Paper sx={{ p: 3, mt: 4 }} elevation={2}>
+      <Paper sx={{ p: 3, mt: 4 }} variant="outlined">
         <Typography variant="h5" fontWeight="bold" gutterBottom>
           指摘事項
         </Typography>
