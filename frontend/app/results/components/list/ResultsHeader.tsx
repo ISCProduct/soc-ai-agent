@@ -23,7 +23,7 @@ const NARROW_BAND_SPAN = 15
 
 export function ResultsHeader({ companyCount, isProvisional, diagnosisSummary, band, isGuestUser, emailAction, onBack, onNavigate }: Props) {
   return (
-    <Box component="header" sx={{ px: { xs: 2, md: 4 }, pt: { xs: 1.5, md: 3 }, pb: { xs: 2.5, md: 3.5 }, backgroundColor: UI.field, borderBottom: `1px solid ${UI.rule}`, flexShrink: 0 }}>
+    <Box component="header" sx={{ px: { xs: 2, md: 4 }, pt: { xs: 1.5, md: 3.5 }, pb: { xs: 2.5, md: 3.25 }, backgroundColor: UI.field, borderBottom: `1px solid ${UI.rule}`, flexShrink: 0 }}>
       <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: { xs: 1, md: 2 } }}>
           <Button startIcon={<ArrowBack />} onClick={onBack} sx={{ color: UI.inkSoft, ml: -1, minHeight: 44 }}>
@@ -38,19 +38,19 @@ export function ResultsHeader({ companyCount, isProvisional, diagnosisSummary, b
             今の診断結果はそのまま引き継がれます。
           </Alert>
         )}
-        <Typography component="h1" sx={{ fontSize: { xs: 24, md: 30 }, fontWeight: 700, color: UI.ink, mb: 1 }}>
+        <Typography component="h1" sx={{ fontSize: { xs: 24, md: 28 }, fontWeight: 700, color: UI.ink, lineHeight: 1.35, mb: 1.5 }}>
           あなたに近い{companyCount}社
         </Typography>
-        <Typography sx={{ fontSize: 15, color: UI.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 1 }}>
-          {isProvisional
-            ? 'ここまでの回答で並べています。会話を続けると根拠が増え、順番も変わります。'
-            : '回答の傾向と、企業が重視する人物像を突き合わせた順に並べています。'}
-        </Typography>
-        {companyCount > 1 && band.max - band.min <= NARROW_BAND_SPAN && (
-          <Typography sx={{ fontSize: 14, color: UI.inkSoft }}>
-            適合度は{band.min}〜{band.max}に収まっています。順位の差はわずかなので、上から順に決める必要はありません。
+        <Box sx={{ display: 'grid', gap: 0.5, maxWidth: { md: 780 } }}>
+          <Typography sx={{ fontSize: { xs: 15, md: 16 }, color: UI.inkSoft, lineHeight: { xs: 1.85, md: '28px' } }}>
+            回答の傾向と、企業が重視する点を突き合わせた順に並べています。順位はAIが回答から推定したもので、企業の良し悪しを決めるものではありません。
           </Typography>
-        )}
+          {companyCount > 1 && band.max - band.min <= NARROW_BAND_SPAN && (
+            <Typography sx={{ fontSize: { xs: 15, md: 16 }, color: UI.inkSoft, lineHeight: { xs: 1.85, md: '28px' } }}>
+              適合度は{band.min}〜{band.max}に収まっていて差はわずかです。上から順に決める必要はありません。
+            </Typography>
+          )}
+        </Box>
         {isProvisional && (
           <Alert severity="warning" icon={false}
             sx={{ mt: 1.5, maxWidth: '68ch', backgroundColor: 'transparent', border: `1px solid ${UI.flag}`, borderRadius: 0.5, color: UI.ink, py: 1.25 }}>

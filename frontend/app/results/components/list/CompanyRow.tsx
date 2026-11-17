@@ -7,8 +7,8 @@ import type { Company } from '../../types'
 import { leadSentences, UI } from '@/lib/design/tokens'
 import { buildMetaLine, isThinEvidence } from './companyRules'
 import { CompanyActions } from './CompanyActions'
-import { FitScore } from './FitBand'
-import { MatchedAxisChips } from './MatchedAxisChips'
+import { FitScore } from './FitScore'
+import { MatchedAxisLine } from './MatchedAxisLine'
 import type { CompanyRowContext } from './rowContext'
 
 /** 企業1行。箱は作らず、罫線で区切る親（CompanyList）の中に置く。 */
@@ -16,81 +16,65 @@ export function CompanyRow({ company, rank, ctx }: { company: Company; rank: num
   const { isDesktop } = ctx
   const thin = isThinEvidence(company, ctx.maxAxisCount, ctx.isProvisional)
 
-  const title = (
-    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: { xs: 1.5, md: 2 }, minWidth: 0 }}>
-      <Typography aria-hidden sx={{ fontSize: 26, fontWeight: 700, color: UI.inkFaint, width: 30, flexShrink: 0, lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
-        {rank}
-      </Typography>
-      <Box sx={{ minWidth: 0 }}>
-        <Typography component="h2" sx={{ fontSize: { xs: 18, md: 20 }, fontWeight: 700, lineHeight: 1.4 }}>
-          <Box
-            component="button"
-            type="button"
-            onClick={(e: MouseEvent) => { e.stopPropagation(); ctx.onSelectCompany(company) }}
-            sx={{
-              font: 'inherit', color: UI.ink, textAlign: 'left', cursor: 'pointer', p: 0, border: 0, background: 'none',
-              '&:focus-visible': { outline: `3px solid ${UI.mark}`, outlineOffset: 2 },
-            }}
-          >
-            {company.name}
-          </Box>
-        </Typography>
-        <Typography sx={{ fontSize: 13, color: UI.inkSoft, mt: 0.25 }}>{buildMetaLine(company)}</Typography>
-      </Box>
-    </Box>
-  )
   const favorite = (
     <Tooltip title={company.isFavorited ? 'お気に入りから外す' : 'お気に入りに入れる'}>
-      <span onClick={(e) => e.stopPropagation()}>
+      <span>
         <IconButton
-          onClick={(e) => ctx.onToggleFavorite(e, company)}
-          aria-label="お気に入りの切り替え"
+          onClick={(e: MouseEvent) => ctx.onToggleFavorite(e, company)}
+          aria-label={`${company.name}をお気に入りに入れる・外す`}
           aria-pressed={company.isFavorited === true}
           disabled={ctx.favoritingId === company.matchId}
           sx={{ color: company.isFavorited ? UI.flag : UI.inkFaint, width: 44, height: 44 }}
         >
-          {company.isFavorited ? <Favorite fontSize="small" /> : <FavoriteBorder fontSize="small" />}
+          {company.isFavorited ? <Favorite sx={{ fontSize: 22 }} /> : <FavoriteBorder sx={{ fontSize: 22 }} />}
         </IconButton>
       </span>
     </Tooltip>
   )
+
   return (
     <Box
       component="li"
-      onClick={() => ctx.onSelectCompany(company)}
-      sx={{
-        cursor: 'pointer',
-        px: { xs: 2, md: 3 },
-        py: { xs: 2, md: 3 },
-        borderTop: `1px solid ${UI.ruleSoft}`,
-        '&:first-of-type': { borderTop: 'none' },
-        '&:hover': { backgroundColor: UI.paper },
-      }}
+      sx={{ px: { xs: 2.25, md: 3.5 }, pt: { xs: 2.5, md: 3 }, pb: { xs: 2.25, md: 2.75 }, borderTop: `1px solid ${UI.rule}`, '&:first-of-type': { borderTop: 'none' } }}
     >
-      {isDesktop ? (
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, mb: 2 }}>
-          {title}
-          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, flexShrink: 0 }}>
-            {favorite}
-            <FitScore score={company.matchScore} band={ctx.band} isDesktop />
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1.5 }}>
+        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: { xs: 1.5, md: 1.75 }, minWidth: 0 }}>
+          <Typography aria-hidden sx={{ fontSize: 22, lineHeight: '30px', fontWeight: 700, color: UI.inkFaint, width: 28, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+            {rank}
+          </Typography>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography component="h2" sx={{ fontSize: { xs: 18, md: 20 }, lineHeight: '30px', fontWeight: 700 }}>
+              <Box
+                component="button"
+                type="button"
+                onClick={() => ctx.onSelectCompany(company)}
+                sx={{ font: 'inherit', color: UI.ink, textAlign: 'left', cursor: 'pointer', p: 0, border: 0, background: 'none', '&:focus-visible': { outline: `3px solid ${UI.mark}`, outlineOffset: 2 } }}
+              >
+                {company.name}
+              </Box>
+            </Typography>
+            <Typography sx={{ fontSize: 14, lineHeight: '22px', color: UI.inkSoft }}>{buildMetaLine(company)}</Typography>
           </Box>
         </Box>
-      ) : (
-        <Box sx={{ mb: 1.5 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
-            {title}
-            {favorite}
-          </Box>
-          <Box sx={{ mt: 1 }}>
-            <FitScore score={company.matchScore} band={ctx.band} isDesktop={false} />
-          </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0, md: 1.75 }, flexShrink: 0, mt: { xs: -0.5, md: 0 } }}>
+          {favorite}
+          {isDesktop && <FitScore score={company.matchScore} />}
         </Box>
-      )}
-      <Typography sx={{ fontSize: { xs: 14, md: 15 }, lineHeight: { xs: 1.9, md: '28px' }, color: UI.ink, mb: 2 }}>
-        {leadSentences(company.description)}
-      </Typography>
-      <MatchedAxisChips categoryScores={company.categoryScores} thinAxisCount={thin ? (company.matchedAxisCount ?? null) : null} />
-      <CompanyActions company={company} ctx={ctx} />
+      </Box>
+
+      <Box sx={{ pl: { xs: 5, md: 5.25 }, display: 'grid', gap: 1.25, mt: { xs: 0.5, md: 1.25 } }}>
+        {!isDesktop && <FitScore score={company.matchScore} />}
+        <Typography sx={{ fontSize: { xs: 15, md: 16 }, lineHeight: { xs: 1.85, md: '28px' }, color: UI.ink }}>
+          {leadSentences(company.description)}
+        </Typography>
+        {thin && (
+          <Typography sx={{ fontSize: 14, lineHeight: '22px', fontWeight: 700, color: UI.flag }}>
+            △ 根拠にできた項目が{company.matchedAxisCount}つです（他の候補より少なめ）
+          </Typography>
+        )}
+        <MatchedAxisLine categoryScores={company.categoryScores} />
+        <CompanyActions company={company} ctx={ctx} />
+      </Box>
     </Box>
   )
 }

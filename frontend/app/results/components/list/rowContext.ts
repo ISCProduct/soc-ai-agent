@@ -3,10 +3,9 @@ import type { Company } from '../../types'
 
 /** 企業行が親から受け取る共通の状態・ハンドラ */
 export interface CompanyRowContext {
-  band: { min: number; max: number }
+  isDesktop: boolean
   maxAxisCount: number
   isProvisional: boolean
-  isDesktop: boolean
   isGuestUser: boolean
   applyEnabled: boolean
   favoritingId: number | null

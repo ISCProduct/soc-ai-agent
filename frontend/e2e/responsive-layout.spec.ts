@@ -144,13 +144,16 @@ test.describe('レスポンシブ: 結果画面の列揃え', () => {
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RECOMMENDATIONS) }),
     )
 
-    const scoreHeading = page.getByText('どこまで聞けているか', { exact: true })
+    // 一覧ではこのカードは PC で右の列に移ったので、一覧側は「画面の列の左端」(見出し h1)と比べる。
+    // エラー・0件の画面でも、カードの左端がその列に揃うこと。
+    const coverageCard = page.getByRole('region', { name: 'いまの回答でわかっていること' })
+    const columnLeft = page.getByRole('heading', { level: 1 })
     // sm の余白 32px と xs の余白 16px。縦を十分に取り、一覧側のスクロールバーで幅が減らないようにする。
     for (const width of [2000, 500]) {
       await page.setViewportSize({ width, height: 2400 })
       await page.goto('/results?user_id=1&session_id=layout-check')
-      await expect(scoreHeading).toBeVisible()
-      const listBox = await scoreHeading.boundingBox()
+      await expect(columnLeft).toBeVisible()
+      const listBox = await columnLeft.boundingBox()
 
       await page.unroute('**/api/chat/recommendations*')
       await page.route('**/api/chat/recommendations*', (route) =>
@@ -158,14 +161,14 @@ test.describe('レスポンシブ: 結果画面の列揃え', () => {
       )
       await page.goto('/results?user_id=1&session_id=layout-check')
       await expect(page.getByText('企業データの取得に失敗しました')).toBeVisible()
-      await expect(scoreHeading).toBeVisible()
-      const errorBox = await scoreHeading.boundingBox()
+      await expect(coverageCard).toBeVisible()
+      const errorBox = await coverageCard.boundingBox()
 
-      expect(listBox, `${width}px: 一覧の分析カードが取得できない`).not.toBeNull()
+      expect(listBox, `${width}px: 一覧の列(見出し)が取得できない`).not.toBeNull()
       expect(errorBox, `${width}px: エラー時の分析カードが取得できない`).not.toBeNull()
       expect(
         Math.abs((listBox?.x ?? 0) - (errorBox?.x ?? 0)),
-        `${width}px で一覧(x=${listBox?.x})とエラー(x=${errorBox?.x})の分析カード左端がずれている`,
+        `${width}px で一覧の列(x=${listBox?.x})とエラー画面の分析カード(x=${errorBox?.x})の左端がずれている`,
       ).toBeLessThanOrEqual(1)
 
       await page.unroute('**/api/chat/recommendations*')

@@ -1,21 +1,19 @@
 'use client'
 
-import { useState } from 'react'
 import type { MouseEvent } from 'react'
 import { Alert, Box, Button, Snackbar, useMediaQuery, useTheme } from '@mui/material'
 import type { AnalysisScores, Company, SnackbarState, SuggestedRole } from '../types'
 import { CONTENT_MAX_WIDTH, UI, scaleBand } from '@/lib/design/tokens'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
-import { AnalysisAccordion } from './list/AnalysisAccordion'
-import { AnalysisSidePanel } from './list/AnalysisSidePanel'
+import { AnalysisErrorAlert } from './list/AnalysisErrorAlert'
+import { AnswerCoveragePanel } from './list/AnswerCoveragePanel'
 import { CompanyList } from './list/CompanyList'
-import { countByTab, matchesTab, maxMatchedAxisCount } from './list/companyRules'
-import type { ResultsTab } from './list/companyRules'
+import { maxMatchedAxisCount } from './list/companyRules'
 import { EmailButton } from './list/EmailButton'
+import { NextStepBar } from './list/NextStepBar'
 import { ResultsFooterLinks } from './list/ResultsFooterLinks'
 import { ResultsHeader } from './list/ResultsHeader'
-import { ResultsToolbar } from './list/ResultsToolbar'
 import { RolesPanel } from './list/RolesPanel'
 import type { CompanyRowContext } from './list/rowContext'
 
@@ -51,7 +49,8 @@ export interface ResultsListViewProps {
 
 /**
  * マッチング結果一覧。部品を並べるだけにし、判定は list/ 配下の純関数に置く。
- * PC は 本文+右サイドの2カラム、SP は「どこまで聞けているか」を折りたたみカードにして縦積み。
+ * 並びは Figma「診断結果 改善案」v4。PC は 企業一覧（左）と「わかっていること」「向いていそうな職種」（右）の2カラム、
+ * SP は 次にやること → わかっていること → 企業一覧 → 向いていそうな職種 → メール・リンク の縦積み。
  */
 export default function ResultsListView({
   companies,
@@ -61,7 +60,7 @@ export default function ResultsListView({
   evaluatedCategories: _evaluatedCategories = null,
   diagnosisConfidence: _diagnosisConfidence = null,
   analysisScores,
-  scoreComment,
+  scoreComment: _scoreComment = '',
   analysisError,
   onRetryAnalysis,
   jobSuitabilityComment,
@@ -82,18 +81,15 @@ export default function ResultsListView({
   onNavigate,
 }: ResultsListViewProps) {
   const isDesktop = useMediaQuery(useTheme().breakpoints.up('md'), { noSsr: true })
-  const [tab, setTab] = useState<ResultsTab>('all')
 
   const band = scaleBand(companies.map((c) => c.matchScore))
-  const items = companies
-    .map((company, i) => ({ company, rank: i + 1 }))
-    .filter(({ company }) => matchesTab(company, tab))
   const ctx: CompanyRowContext = {
-    band, maxAxisCount: maxMatchedAxisCount(companies), isProvisional, isDesktop, isGuestUser, applyEnabled,
+    isDesktop, maxAxisCount: maxMatchedAxisCount(companies), isProvisional, isGuestUser, applyEnabled,
     favoritingId, applyingId, onSelectCompany, onToggleFavorite, onApply, onNavigate,
   }
   const email = <EmailButton isGuestUser={isGuestUser} emailSending={emailSending} onSendEmail={onSendEmail} fullWidth={!isDesktop} />
-  const analysis = { analysisScores, scoreComment, analysisError, onRetryAnalysis, onBack }
+  const coverage = analysisScores ? <AnswerCoveragePanel scores={analysisScores} layout={isDesktop ? 'list' : 'row'} /> : null
+  const roles = <RolesPanel jobSuitabilityComment={jobSuitabilityComment} suggestedRoles={suggestedRoles} />
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: UI.paper }}>
@@ -107,18 +103,20 @@ export default function ResultsListView({
         onBack={onBack}
         onNavigate={onNavigate}
       />
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', px: { xs: 2, md: 4 }, py: { xs: 2, md: 4 } }}>
+      <NextStepBar analysisScores={analysisScores} isProvisional={isProvisional} onBack={onBack} />
+      <Box sx={{ flexGrow: 1, overflowY: 'auto', px: { xs: 2, md: 4 }, pt: { xs: 2, md: 4 }, pb: { xs: 2, md: 7 } }}>
         <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            {!isDesktop && <AnalysisAccordion {...analysis} jobSuitabilityComment={jobSuitabilityComment} suggestedRoles={suggestedRoles} />}
-            <ResultsToolbar tab={tab} counts={countByTab(companies)} onChange={setTab} />
-            <CompanyList items={items} tab={tab} ctx={ctx} />
+          <Box sx={{ flex: 1, minWidth: 0, display: 'grid', gap: { xs: 2, md: 2.5 } }}>
+            <AnalysisErrorAlert analysisError={analysisError} onRetryAnalysis={onRetryAnalysis} />
+            {!isDesktop && coverage}
+            <CompanyList companies={companies} ctx={ctx} />
+            {!isDesktop && roles}
             <ResultsFooterLinks isGuestUser={isGuestUser} emailAction={isDesktop ? null : email} onReset={onReset} onNavigate={onNavigate} />
           </Box>
           {isDesktop && (
             <Box sx={{ width: 340, flexShrink: 0, display: 'grid', gap: 2 }}>
-              <AnalysisSidePanel {...analysis} />
-              <RolesPanel jobSuitabilityComment={jobSuitabilityComment} suggestedRoles={suggestedRoles} />
+              {coverage}
+              {roles}
             </Box>
           )}
         </Box>

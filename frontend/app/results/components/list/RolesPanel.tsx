@@ -8,27 +8,28 @@ import { panelSx } from './panelStyles'
 interface Props {
   jobSuitabilityComment: string
   suggestedRoles: SuggestedRole[]
-  /** true なら外枠なし（SP の開閉カード内で使う） */
-  bare?: boolean
 }
 
-/** 「向いていそうな職種」。コメントも職種も無ければ出さない。 */
-export function RolesPanel({ jobSuitabilityComment, suggestedRoles, bare = false }: Props) {
-  if (!jobSuitabilityComment && suggestedRoles.length === 0) return null
+/** 「向いていそうな職種」。職種が無いときだけ、全体のコメントを代わりに出す。どちらも無ければ出さない。 */
+export function RolesPanel({ jobSuitabilityComment, suggestedRoles }: Props) {
+  if (suggestedRoles.length === 0 && !jobSuitabilityComment) return null
   return (
-    <Box sx={bare ? { mt: 2 } : panelSx}>
-      <Typography component="h2" sx={{ fontSize: 17, fontWeight: 700, color: UI.ink, mb: 1 }}>向いていそうな職種</Typography>
-      {jobSuitabilityComment && (
-        <Typography sx={{ fontSize: 14, lineHeight: 1.85, color: UI.inkSoft, mb: 1 }}>{jobSuitabilityComment}</Typography>
+    <Box component="section" aria-labelledby="roles-title" sx={{ ...panelSx, p: { xs: 2.5, md: 2.75 }, pt: { md: 2.5 } }}>
+      <Typography id="roles-title" component="h2" sx={{ fontSize: 17, lineHeight: '24px', fontWeight: 700, color: UI.ink, mb: 1.75 }}>
+        向いていそうな職種
+      </Typography>
+      {suggestedRoles.length === 0 ? (
+        <Typography sx={{ fontSize: 14, lineHeight: 1.85, color: UI.inkSoft }}>{jobSuitabilityComment}</Typography>
+      ) : (
+        <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0 }}>
+          {suggestedRoles.map((role, i) => (
+            <Box component="li" key={i} sx={{ pt: i === 0 ? 0 : 1.75, pb: 1.75, '&:last-of-type': { pb: 0 }, borderTop: i === 0 ? 'none' : `1px solid ${UI.ruleSoft}` }}>
+              <Typography sx={{ fontSize: 16, lineHeight: '24px', fontWeight: 700, color: UI.ink }}>{role.title}</Typography>
+              {role.reason && <Typography sx={{ fontSize: 14, lineHeight: '23px', color: UI.inkSoft, mt: 0.5 }}>{role.reason}</Typography>}
+            </Box>
+          ))}
+        </Box>
       )}
-      <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0 }}>
-        {suggestedRoles.map((role, i) => (
-          <Box component="li" key={i} sx={{ py: 1.5, borderTop: i === 0 ? 'none' : `1px solid ${UI.ruleSoft}` }}>
-            <Typography sx={{ fontSize: 15, fontWeight: 700, color: UI.ink }}>{role.title}</Typography>
-            {role.reason && <Typography sx={{ fontSize: 13, lineHeight: 1.8, color: UI.inkSoft, mt: 0.25 }}>{role.reason}</Typography>}
-          </Box>
-        ))}
-      </Box>
     </Box>
   )
 }

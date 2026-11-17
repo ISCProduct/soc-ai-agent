@@ -1,10 +1,23 @@
 /**
- * 「どこまで聞けているか」4軸の判定（React 非依存の純関数）。
+ * 「いまの回答でわかっていること」4軸の判定（React 非依存の純関数）。
  */
 import type { AnalysisScores } from '../../types'
 
-/** この値を下回る軸は「まだ聞けていない」として強調する */
-export const LOW_AXIS_THRESHOLD = 50
+/** この値以上なら「よく聞けています」 */
+export const GOOD_AXIS_MIN = 80
+/** この値以上、GOOD 未満なら「やや少ない」。これ未満は「まだ少ない」 */
+export const SOME_AXIS_MIN = 40
+
+export type AxisLevel = 'good' | 'some' | 'few'
+
+export const AXIS_LEVEL_LABEL: Record<AxisLevel, string> = {
+  good: 'よく聞けています',
+  some: 'やや少ない',
+  few: 'まだ少ない',
+}
+
+/** SP は列が狭いので、「よく聞けています」を短くする（Figma v4 SP）。 */
+export const AXIS_LEVEL_LABEL_SHORT: Record<AxisLevel, string> = { ...AXIS_LEVEL_LABEL, good: 'よく聞けた' }
 
 export interface AxisItem {
   key: keyof AnalysisScores
@@ -21,18 +34,26 @@ export function buildAxisItems(scores: AnalysisScores): AxisItem[] {
   ]
 }
 
-export function isLowAxis(value: number): boolean {
-  return value < LOW_AXIS_THRESHOLD
+export function axisLevel(value: number): AxisLevel {
+  if (value >= GOOD_AXIS_MIN) return 'good'
+  if (value >= SOME_AXIS_MIN) return 'some'
+  return 'few'
 }
 
-/** 50未満の軸のうち最も低いもの。無ければ null（同値は並びの先頭を優先）。 */
-export function findLowestLowAxis(items: AxisItem[]): AxisItem | null {
-  const lows = items.filter((i) => isLowAxis(i.value))
-  if (lows.length === 0) return null
-  return lows.reduce((min, cur) => (cur.value < min.value ? cur : min))
+/** 「よく聞けています」に届いていない軸のうち、最も低いもの。全て届いていれば null（同値は並びの先頭を優先）。 */
+export function findWeakestAxis(items: AxisItem[]): AxisItem | null {
+  const weak = items.filter((i) => axisLevel(i.value) !== 'good')
+  if (weak.length === 0) return null
+  return weak.reduce((min, cur) => (cur.value < min.value ? cur : min))
 }
 
-/** 棒の幅（%）。範囲外は 0〜100 に丸める。 */
-export function barWidthPercent(value: number): number {
-  return Math.max(0, Math.min(100, value))
+/** 「次にやること」の文と、チャットへ戻る導線を出すか。 */
+export function buildNextStep(weakest: AxisItem | null, isProvisional: boolean): { message: string; showChatAction: boolean } {
+  if (isProvisional) {
+    return { message: 'ここまでの回答で並べています。会話を続けると根拠が増え、順番も変わります。', showChatAction: true }
+  }
+  if (weakest) {
+    return { message: `${weakest.label}の話がまだ少ないため、チャットで続けると順位が変わることがあります。`, showChatAction: true }
+  }
+  return { message: '回答はひととおり聞けています。気になる企業を「詳しく見る」で確認しましょう。', showChatAction: false }
 }

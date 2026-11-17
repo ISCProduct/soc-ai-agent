@@ -82,12 +82,20 @@ describe('ResultsListView', () => {
     expect(screen.getByText(/あなたに近い1社/)).toBeInTheDocument()
   })
 
-  it('企業カードクリックで onSelectCompany を呼ぶ', () => {
+  it('「詳しく見る」と企業名のどちらからも詳細を開ける', () => {
     const onSelectCompany = jest.fn()
     renderList({ onSelectCompany })
 
+    fireEvent.click(screen.getByRole('button', { name: 'サンプル株式会社の詳細を見る' }))
     fireEvent.click(screen.getByText('サンプル株式会社'))
+    expect(onSelectCompany).toHaveBeenCalledTimes(2)
     expect(onSelectCompany).toHaveBeenCalledWith(sampleCompany)
+  })
+
+  it('絞り込みのタブや位置バーは出さない（Figma v4）', () => {
+    renderList()
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: /候補全体の幅の中での位置/ })).not.toBeInTheDocument()
   })
 
   // チップは廃止した。同じことを注意書きが書いており、
@@ -108,9 +116,9 @@ describe('ResultsListView', () => {
         { ...sampleCompany, id: '2', name: '根拠が薄い株式会社', matchedAxisCount: 6, categoryScores: axisScores },
       ],
     })
-    expect(screen.getByText(/根拠 6軸/)).toBeInTheDocument()
+    expect(screen.getByText(/根拠にできた項目が6つです（他の候補より少なめ）/)).toBeInTheDocument()
     // 同じ値が並ぶだけの行には印を出さない
-    expect(screen.queryByText(/根拠 9軸/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/根拠にできた項目が9つ/)).not.toBeInTheDocument()
   })
 
   it('分析データ取得失敗時に警告と再読み込みボタンを表示する', () => {
@@ -152,54 +160,53 @@ describe('ResultsListView', () => {
     expect(onSelectCompany).not.toHaveBeenCalled()
   })
 
-  it('タブで お気に入り / 応募済み に絞り込める。0件なら案内を出す', () => {
-    renderList({
-      companies: [
-        { ...sampleCompany, name: 'A社', isFavorited: true },
-        { ...sampleCompany, id: '2', name: 'B社', isApplied: true },
-        { ...sampleCompany, id: '3', name: 'C社' },
-      ],
+  it('一致している項目を、上位3つの名前と点数で出す。categoryScores が無ければ出さない', () => {
+    const { unmount } = renderList({ companies: [{ ...sampleCompany, categoryScores: axisScores }] })
+    expect(screen.getByText('一致している項目')).toBeInTheDocument()
+    expect(screen.getByText(/成長意欲 97\s+チームワーク 95\s+挑戦意欲 77/)).toBeInTheDocument()
+    unmount()
+
+    renderList()
+    expect(screen.queryByText('一致している項目')).not.toBeInTheDocument()
+  })
+
+  describe('次にやること', () => {
+    it('いちばん聞けていない軸を挙げ、チャットで続ける導線を出す', () => {
+      const onBack = jest.fn()
+      renderList({ analysisScores: { job: 100, interest: 100, aptitude: 55, future: 20 }, onBack })
+
+      expect(screen.getByText('将来の話がまだ少ないため、チャットで続けると順位が変わることがあります。')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'チャットで続きを話す' }))
+      expect(onBack).toHaveBeenCalledTimes(1)
     })
-    expect(screen.getByRole('tab', { name: 'すべて 3' })).toHaveAttribute('aria-selected', 'true')
 
-    fireEvent.click(screen.getByRole('tab', { name: 'お気に入り 1' }))
-    expect(screen.getByText('A社')).toBeInTheDocument()
-    expect(screen.queryByText('B社')).not.toBeInTheDocument()
+    it('全軸が「よく聞けています」なら、続ける導線は出さず企業の確認を促す', () => {
+      renderList({ analysisScores: { job: 80, interest: 90, aptitude: 100, future: 80 } })
+      expect(screen.getByText(/気になる企業を「詳しく見る」で確認しましょう/)).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'チャットで続きを話す' })).not.toBeInTheDocument()
+    })
 
-    fireEvent.click(screen.getByRole('tab', { name: '応募済み 1' }))
-    expect(screen.getByText('B社')).toBeInTheDocument()
-    expect(screen.queryByText('A社')).not.toBeInTheDocument()
+    it('暫定評価なら、会話を続けると順位が変わることを伝える', () => {
+      renderList({ isProvisional: true, analysisScores: { job: 100, interest: 100, aptitude: 100, future: 100 } })
+      expect(screen.getAllByText(/会話を続けると根拠が増え、順番も変わります/).length).toBeGreaterThan(0)
+      expect(screen.getByRole('button', { name: 'チャットで続きを話す' })).toBeInTheDocument()
+    })
+
+    it('分析を取得できていなくて暫定評価でもなければ、出さない', () => {
+      renderList()
+      expect(screen.queryByText('次にやること')).not.toBeInTheDocument()
+    })
   })
 
-  it('絞り込み結果が0件のとき「該当する企業がありません」を出す', () => {
-    renderList()
-    fireEvent.click(screen.getByRole('tab', { name: 'お気に入り 0' }))
-    expect(screen.getByText('該当する企業がありません')).toBeInTheDocument()
-  })
+  it('「いまの回答でわかっていること」を、字形とことばで4軸とも示す', () => {
+    renderList({ analysisScores: { job: 100, interest: 85, aptitude: 55, future: 20 } })
 
-  it('噛み合った軸を上位3つ表示する。categoryScores が無ければ出さない', () => {
-    renderList({ companies: [{ ...sampleCompany, categoryScores: axisScores }] })
-    expect(screen.getByText('噛み合った軸')).toBeInTheDocument()
-    expect(screen.getByText('成長意欲 97')).toBeInTheDocument()
-    expect(screen.getByText('チームワーク 95')).toBeInTheDocument()
-    expect(screen.getByText('挑戦意欲 77')).toBeInTheDocument()
-  })
-
-  it('categoryScores が無い行には「噛み合った軸」を出さない', () => {
-    renderList()
-    expect(screen.queryByText('噛み合った軸')).not.toBeInTheDocument()
-  })
-
-  it('50未満の軸があるとき、最低の軸名でチャットへ戻る導線を出す', () => {
-    const onBack = jest.fn()
-    renderList({ analysisScores: { job: 100, interest: 100, aptitude: 55, future: 20 }, scoreComment: 'コメント', onBack })
-    fireEvent.click(screen.getByRole('button', { name: /チャットで将来の話を続ける/ }))
-    expect(onBack).toHaveBeenCalledTimes(1)
-  })
-
-  it('全軸が50以上なら続ける導線を出さない', () => {
-    renderList({ analysisScores: { job: 80, interest: 80, aptitude: 80, future: 80 }, scoreComment: 'コメント' })
-    expect(screen.queryByRole('button', { name: /の話を続ける/ })).not.toBeInTheDocument()
+    const panel = screen.getByRole('region', { name: 'いまの回答でわかっていること' })
+    expect(within(panel).getAllByText('よく聞けています')).toHaveLength(2)
+    expect(within(panel).getByText('やや少ない')).toBeInTheDocument()
+    expect(within(panel).getByText('まだ少ない')).toBeInTheDocument()
+    // 棒グラフの数値は出さない
+    expect(within(panel).queryByText('20')).not.toBeInTheDocument()
   })
 
   it('向いていそうな職種は、コメントも職種も無ければ出さない', () => {
@@ -218,20 +225,23 @@ describe('ResultsListView', () => {
   describe('SP', () => {
     beforeEach(() => setDesktop(false))
 
-    it('「どこまで聞けているか」は閉じており、開閉でき、閉じていても軸の値が見える', () => {
+    it('わかっていること → 企業 → 向いていそうな職種 の順に縦に並ぶ', () => {
       renderList({
         analysisScores: { job: 100, interest: 100, aptitude: 55, future: 20 },
-        scoreComment: 'コメント',
         suggestedRoles: [{ title: 'データ基盤エンジニア', reason: '粘り強さ' }],
       })
-      const toggle = screen.getByRole('button', { name: 'どこまで聞けているか' })
-      expect(toggle).toHaveAttribute('aria-expanded', 'false')
-      expect(screen.getByText('将来 20')).toBeInTheDocument()
-      expect(screen.queryByText('データ基盤エンジニア')).not.toBeInTheDocument()
+      const coverage = screen.getByRole('region', { name: 'いまの回答でわかっていること' })
+      const roles = screen.getByRole('region', { name: '向いていそうな職種' })
+      const list = screen.getByRole('region', { name: 'あなたに近い企業' })
+      expect(coverage.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(list.compareDocumentPosition(roles) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
 
-      fireEvent.click(toggle)
-      expect(toggle).toHaveAttribute('aria-expanded', 'true')
-      expect(screen.getByText('データ基盤エンジニア')).toBeInTheDocument()
+    it('「わかっていること」は4軸を横に並べ、狭い列に合わせて短い文言にする', () => {
+      renderList({ analysisScores: { job: 100, interest: 100, aptitude: 55, future: 20 } })
+      const panel = screen.getByRole('region', { name: 'いまの回答でわかっていること' })
+      expect(within(panel).getAllByText('よく聞けた')).toHaveLength(2)
+      expect(within(panel).queryByText('よく聞けています')).not.toBeInTheDocument()
     })
 
     it('メール送信ボタンは1つだけ出る', () => {

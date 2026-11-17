@@ -1,21 +1,8 @@
-import { barWidthPercent, buildAxisItems, findLowestLowAxis, isLowAxis } from '@/app/results/components/list/axisStatus'
-import { buildMetaLine, countByTab, isThinEvidence, matchesTab, maxMatchedAxisCount } from '@/app/results/components/list/companyRules'
+import { AXIS_LEVEL_LABEL, axisLevel, buildAxisItems, buildNextStep, findWeakestAxis } from '@/app/results/components/list/axisStatus'
+import { buildMetaLine, isThinEvidence, maxMatchedAxisCount } from '@/app/results/components/list/companyRules'
 
 describe('companyRules', () => {
-  const list = [
-    { isFavorited: true, isApplied: false, matchedAxisCount: 9 },
-    { isFavorited: false, isApplied: true, matchedAxisCount: 6 },
-    { matchedAxisCount: undefined },
-  ]
-
-  it.each([
-    ['all', 3],
-    ['favorite', 1],
-    ['applied', 1],
-  ] as const)('%s タブの件数と絞り込みが一致する', (tab, n) => {
-    expect(countByTab(list)[tab]).toBe(n)
-    expect(list.filter((c) => matchesTab(c, tab))).toHaveLength(n)
-  })
+  const list = [{ matchedAxisCount: 9 }, { matchedAxisCount: 6 }, { matchedAxisCount: undefined }]
 
   it('最大根拠軸数は未設定を0として数える', () => {
     expect(maxMatchedAxisCount(list)).toBe(9)
@@ -37,21 +24,32 @@ describe('companyRules', () => {
 })
 
 describe('axisStatus', () => {
+  it('80以上は「よく聞けています」、40以上は「やや少ない」、それ未満は「まだ少ない」', () => {
+    expect(axisLevel(80)).toBe('good')
+    expect(axisLevel(79)).toBe('some')
+    expect(axisLevel(40)).toBe('some')
+    expect(axisLevel(39)).toBe('few')
+    expect(AXIS_LEVEL_LABEL.some).toBe('やや少ない')
+  })
+
   const items = buildAxisItems({ job: 100, interest: 40, aptitude: 55, future: 20 })
 
-  it('50未満だけを低い軸とする（50は含まない）', () => {
-    expect(isLowAxis(49)).toBe(true)
-    expect(isLowAxis(50)).toBe(false)
+  it('「よく聞けています」に届いていない軸のうち最低のものを選ぶ。全て届いていれば null', () => {
+    expect(findWeakestAxis(items)?.label).toBe('将来')
+    expect(findWeakestAxis(buildAxisItems({ job: 80, interest: 90, aptitude: 100, future: 80 }))).toBeNull()
   })
 
-  it('最低の軸を選ぶ。全軸50以上なら null', () => {
-    expect(findLowestLowAxis(items)?.label).toBe('将来')
-    expect(findLowestLowAxis(buildAxisItems({ job: 50, interest: 60, aptitude: 70, future: 80 }))).toBeNull()
+  it('同じ値なら並びの先頭を選ぶ', () => {
+    expect(findWeakestAxis(buildAxisItems({ job: 60, interest: 60, aptitude: 90, future: 90 }))?.label).toBe('職種')
   })
 
-  it('棒の幅は0〜100に丸める', () => {
-    expect(barWidthPercent(-5)).toBe(0)
-    expect(barWidthPercent(130)).toBe(100)
-    expect(barWidthPercent(42)).toBe(42)
+  it('次にやることの文と導線', () => {
+    const weakest = findWeakestAxis(items)
+    expect(buildNextStep(weakest, false)).toEqual({
+      message: '将来の話がまだ少ないため、チャットで続けると順位が変わることがあります。',
+      showChatAction: true,
+    })
+    expect(buildNextStep(null, false).showChatAction).toBe(false)
+    expect(buildNextStep(null, true).showChatAction).toBe(true) // 暫定評価は、軸が揃っていても続けてもらう
   })
 })
