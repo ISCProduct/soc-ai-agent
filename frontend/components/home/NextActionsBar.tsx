@@ -6,23 +6,38 @@ import { Box, Button, Skeleton, Typography } from '@mui/material'
 import EventIcon from '@mui/icons-material/Event'
 import { authService } from '@/lib/auth'
 import { fetchWithTimeout } from '@/lib/fetch-timeout'
-import { pickNextActions, type NextAction } from '@/lib/next-actions'
+import { pickNextActions, type GrowthStatus, type NextAction } from '@/lib/next-actions'
+import { fetchPortfolio } from '@/lib/portfolio'
 
 type State =
   | { kind: 'loading' }
   | { kind: 'error' }
   | { kind: 'ready'; actions: NextAction[] }
 
+/**
+ * 診断と面接の状況（SOCAIAGENT-614）。既存の /api/portfolio から取る。
+ * 取れなくても予定・応募は出したいので、失敗は null にする（改善の提案を出さないだけ）。
+ */
+async function loadGrowthStatus(): Promise<GrowthStatus | null> {
+  try {
+    const p = await fetchPortfolio(['diagnosis', 'interview'])
+    return { diagnosis: p.diagnosis?.scores ?? [], interviewCount: p.interviews?.length ?? 0 }
+  } catch {
+    return null
+  }
+}
+
 async function loadNextActions(): Promise<NextAction[]> {
   const headers = authService.getUserFetchHeaders()
-  const [schedule, applications] = await Promise.all([
+  const [schedule, applications, growth] = await Promise.all([
     fetchWithTimeout('/api/schedule', { headers, cache: 'no-store' }),
     fetchWithTimeout('/api/applications', { headers, cache: 'no-store' }),
+    loadGrowthStatus(),
   ])
   if (!schedule.ok || !applications.ok) throw new Error('next actions fetch failed')
   const events = await schedule.json()
   const apps = await applications.json()
-  return pickNextActions(Array.isArray(events) ? events : [], apps?.applications ?? [], new Date())
+  return pickNextActions(Array.isArray(events) ? events : [], apps?.applications ?? [], new Date(), growth)
 }
 
 /**
@@ -84,11 +99,11 @@ export function NextActionsBar() {
       ) : state.kind === 'ready' ? (
         state.actions.length === 0 ? (
           <Button size="small" variant="outlined" component={NextLink} href="/schedule">予定を登録</Button>
-        ) : (
+        ) : state.actions[0].href ? (
           <Button size="small" variant="contained" component={NextLink} href={state.actions[0].href}>
             {state.actions[0].actionLabel}
           </Button>
-        )
+        ) : null
       ) : null}
     </Box>
   )
