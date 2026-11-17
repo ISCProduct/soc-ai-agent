@@ -361,6 +361,10 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 	if err := cli.ensureText(); err != nil {
 		return "", err
 	}
+	input, err := guardInput(ctx, input)
+	if err != nil {
+		return "", err
+	}
 
 	model := cli.DefaultModel
 	if len(modelOverride) > 0 && modelOverride[0] != "" {
@@ -433,6 +437,10 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 }
 func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, userPrompt string, temperature float32, modelOverride ...string) (string, error) {
 	if err := cli.ensureText(); err != nil {
+		return "", err
+	}
+	userPrompt, err := guardInput(ctx, userPrompt)
+	if err != nil {
 		return "", err
 	}
 
@@ -602,6 +610,10 @@ func truncateErrForLog(err error) string {
 
 func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, jsonMode bool, modelOverride ...string) (string, error) {
 	if err := cli.ensureText(); err != nil {
+		return "", err
+	}
+	userPrompt, err := guardInput(ctx, userPrompt)
+	if err != nil {
 		return "", err
 	}
 

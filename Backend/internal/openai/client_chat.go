@@ -112,6 +112,10 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 	if err := cli.ensureText(); err != nil {
 		return "", err
 	}
+	userPrompt, err := guardInput(ctx, userPrompt)
+	if err != nil {
+		return "", err
+	}
 	callCtx, cancelCall := context.WithTimeout(ctx, chatCompletionCallTimeout)
 	defer cancelCall()
 
@@ -274,6 +278,10 @@ func webSearchContextSize() string {
 // Chat Completions の search-preview / gpt-5-search-api は使わない（高トークン・高額）。
 func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxTokens int, modelOverride ...string) (string, error) {
 	if err := cli.ensureText(); err != nil {
+		return "", err
+	}
+	userPrompt, err := guardInput(ctx, userPrompt)
+	if err != nil {
 		return "", err
 	}
 	callCtx, cancelCall := context.WithTimeout(ctx, webSearchCallTimeout)
