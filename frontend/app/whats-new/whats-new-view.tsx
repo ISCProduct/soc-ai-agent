@@ -1,4 +1,5 @@
 import { Box, Container, Typography, Divider } from '@mui/material'
+import { formatDate } from '@/lib/i18n/format'
 import type { WhatsNewEntry } from '@/lib/whats-new-data'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 
@@ -28,7 +29,7 @@ export function WhatsNewView({ entries, error }: WhatsNewViewProps) {
           {entries.map((entry) => (
             <Box key={entry.merged_at + entry.title}>
               <Typography variant="caption" color="text.secondary">
-                {new Date(entry.merged_at).toLocaleDateString('ja-JP')}
+                {formatDate(entry.merged_at)}
               </Typography>
               <Typography variant="h6" fontWeight="bold">
                 {entry.title}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { formatDateTime } from '@/lib/i18n/format'
 import {
   Alert,
   Button,
@@ -315,7 +316,7 @@ export default function PageContent() {
                       <TableCell>{h.company_id}</TableCell>
                       <TableCell>{h.trigger}</TableCell>
                       <TableCell>{h.sample_count}</TableCell>
-                      <TableCell>{new Date(h.created_at).toLocaleString('ja-JP')}</TableCell>
+                      <TableCell>{formatDateTime(h.created_at)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

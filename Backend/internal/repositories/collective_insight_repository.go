@@ -21,6 +21,16 @@ func (r *CollectiveInsightRepository) LogAction(log *models.CollectiveInsightLog
 	return r.db.Create(log).Error
 }
 
+// HasAction は、同じ匿名ユーザーが同じ企業に対して同じ種別の行動をすでに記録しているかを返す。
+// 通過率（passed / applied）が 100% を超えないよう、1人1企業1種別につき1行にするために使う。
+func (r *CollectiveInsightRepository) HasAction(anonymousUserID string, companyID uint, actionType string) (bool, error) {
+	var n int64
+	err := r.db.Model(&models.CollectiveInsightLog{}).
+		Where("anonymous_user_id = ? AND company_id = ? AND action_type = ?", anonymousUserID, companyID, actionType).
+		Limit(1).Count(&n).Error
+	return n > 0, err
+}
+
 // IsConsentGiven ユーザーが集合知参加に同意しているか確認する
 func (r *CollectiveInsightRepository) IsConsentGiven(userID uint) (bool, error) {
 	var user models.User
@@ -57,6 +67,14 @@ func (r *CollectiveInsightRepository) GetPassedCompaniesBySimilarUsers(
 		return nil, nil
 	}
 
+	// 除外する企業があるときだけ NOT IN を足す。SQL本体を二重に持たない。
+	excludeClause := ""
+	args := []any{len(similarUserHashes), similarUserHashes}
+	if len(excludeCompanyIDs) > 0 {
+		excludeClause = "AND cil.company_id NOT IN ?"
+		args = append(args, excludeCompanyIDs)
+	}
+
 	rows := []SimilarUserPassedCompaniesRow{}
 	query := r.db.Raw(`
 		SELECT
@@ -69,29 +87,11 @@ func (r *CollectiveInsightRepository) GetPassedCompaniesBySimilarUsers(
 		INNER JOIN companies c ON c.id = cil.company_id
 		WHERE cil.anonymous_user_id IN ?
 		  AND cil.action_type IN ('passed', 'applied')
+		  `+excludeClause+`
 		GROUP BY cil.company_id, c.name
 		ORDER BY pass_count DESC
 		LIMIT 20
-	`, len(similarUserHashes), similarUserHashes)
-
-	if len(excludeCompanyIDs) > 0 {
-		query = r.db.Raw(`
-			SELECT
-				cil.company_id,
-				c.name AS company_name,
-				COUNT(*) AS pass_count,
-				'' AS avg_passer_scores,
-				CAST(COUNT(*) AS FLOAT) / ? AS collective_score
-			FROM collective_insight_logs cil
-			INNER JOIN companies c ON c.id = cil.company_id
-			WHERE cil.anonymous_user_id IN ?
-			  AND cil.action_type IN ('passed', 'applied')
-			  AND cil.company_id NOT IN ?
-			GROUP BY cil.company_id, c.name
-			ORDER BY pass_count DESC
-			LIMIT 20
-		`, len(similarUserHashes), similarUserHashes, excludeCompanyIDs)
-	}
+	`, args...)
 
 	err := query.Scan(&rows).Error
 	return rows, err

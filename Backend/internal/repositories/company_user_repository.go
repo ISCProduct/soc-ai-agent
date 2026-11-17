@@ -30,7 +30,7 @@ func (r *CompanyUserRepository) Update(user *models.CompanyUser) error {
 func (r *CompanyUserRepository) FindByID(id uint) (*models.CompanyUser, error) {
 	var m models.CompanyUser
 	err := r.db.First(&m, id).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -42,7 +42,7 @@ func (r *CompanyUserRepository) FindByID(id uint) (*models.CompanyUser, error) {
 func (r *CompanyUserRepository) FindByEmail(email string) (*models.CompanyUser, error) {
 	var m models.CompanyUser
 	err := r.db.Where("email = ?", strings.ToLower(strings.TrimSpace(email))).First(&m).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -56,7 +56,7 @@ func (r *CompanyUserRepository) FindByEmail(email string) (*models.CompanyUser, 
 func (r *CompanyUserRepository) FindByInviteTokenHash(hash string) (*models.CompanyUser, error) {
 	var m models.CompanyUser
 	err := r.db.Where("invite_token_hash = ?", hash).First(&m).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -69,7 +69,7 @@ func (r *CompanyUserRepository) FindByInviteTokenHash(hash string) (*models.Comp
 func (r *CompanyUserRepository) FindByPasswordResetTokenHash(hash string) (*models.CompanyUser, error) {
 	var m models.CompanyUser
 	err := r.db.Where("password_reset_token_hash = ?", hash).First(&m).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {

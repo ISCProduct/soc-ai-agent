@@ -254,6 +254,57 @@ def test_resume_stream_without_context_keeps_placeholder(monkeypatch):
     assert not _end_delimiter_pattern("企業情報").search(prompt)
 
 
+def test_resume_stream_includes_candidate_context(monkeypatch):
+    """チャット診断スコア要約がプロンプトに入り、企業情報ブロックとは分離される。"""
+    from routers.resume import review_resume_stream
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = iter([])
+
+    request = ReviewRequest(
+        resume_text="経歴: エンジニア",
+        company_name="テスト株式会社",
+        candidate_context="【候補者の強み傾向（チャット診断より）】\n- 技術志向: 85点",
+    )
+    with patch("main._gather_context", return_value=(["企業の説明"], "cache")), \
+         patch("main.RESUME_REVIEW_INPUT_CHAR_LIMIT", 10000), \
+         patch("routers.resume.OpenAI", return_value=mock_client):
+        _drain(review_resume_stream(request))
+
+    prompt = _user_message(mock_client.chat.completions.create.call_args)
+    assert "【候補者プロファイル（チャット診断）】" in prompt
+    assert "技術志向: 85点" in prompt
+    _assert_inside_untrusted_block(prompt, "企業情報", "企業の説明")
+
+
+def test_resume_nonstream_includes_candidate_context(monkeypatch):
+    """非streamも stream と同じ OpenAI 経路で candidate_context をプロンプトへ入れる。"""
+    from routers.resume import review_resume
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.choices = [MagicMock(message=MagicMock(content="【企業別レビュー報告書】ok"))]
+    mock_client.chat.completions.create.return_value = mock_resp
+
+    request = ReviewRequest(
+        resume_text="経歴: エンジニア",
+        company_name="テスト株式会社",
+        candidate_context="【候補者の強み傾向（チャット診断より）】\n- 技術志向: 85点",
+    )
+    with patch("main._gather_context", return_value=(["企業の説明"], "cache")), \
+         patch("main.RESUME_REVIEW_INPUT_CHAR_LIMIT", 10000), \
+         patch("services.resume_report.OpenAI", return_value=mock_client):
+        resp = review_resume(request)
+
+    assert resp.report.startswith("【企業別レビュー報告書】")
+    prompt = _user_message(mock_client.chat.completions.create.call_args)
+    assert "【候補者プロファイル（チャット診断）】" in prompt
+    assert "技術志向: 85点" in prompt
+    _assert_inside_untrusted_block(prompt, "企業情報", "企業の説明")
+
+
 # --- 経路3: 履歴書レビュー(CrewAI) (services/crew.py) -----------------------
 
 

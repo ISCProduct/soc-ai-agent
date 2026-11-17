@@ -32,7 +32,7 @@ func (r *UserApplicationStatusRepository) FindByUserAndCompany(userID, companyID
 	err := r.db.Where("user_id = ? AND company_id = ?", userID, companyID).
 		Preload("Company").
 		First(&m).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -332,7 +332,7 @@ func (r *UserApplicationStatusRepository) CountGroupedByStatus(companyID uint) (
 // 進行中とは、terminalStatuses 以外のステータス。既にあれば ErrDuplicateActiveApplication。
 // 並行リクエストによる競合は、DB の一意制約(active_dedup_key)が最終防御になり、
 // その違反も ErrDuplicateActiveApplication で返す。
-func (r *UserApplicationStatusRepository) CreateActive(userID, companyID, matchID uint, terminalStatuses []string) (*models.UserApplicationStatus, error) {
+func (r *UserApplicationStatusRepository) CreateActive(userID, companyID, matchID uint, terminalStatuses []string, scoreSnapshot string) (*models.UserApplicationStatus, error) {
 	var created *models.UserApplicationStatus
 	err := r.db.Transaction(func(tx *gorm.DB) error {
 		// 進行中（終了状態でない）の応募が既にあるか確認
@@ -355,6 +355,8 @@ func (r *UserApplicationStatusRepository) CreateActive(userID, companyID, matchI
 			MatchID:   matchID,
 			Status:    "applied",
 			AppliedAt: &now,
+
+			ScoreSnapshot: scoreSnapshot, // 応募時点のカテゴリ別スコア JSON（#203）
 		}
 		if createErr := tx.Create(m).Error; createErr != nil {
 			if isDuplicateEntryErr(createErr) {

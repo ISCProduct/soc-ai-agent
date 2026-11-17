@@ -37,6 +37,8 @@ class ReviewRequest(BaseModel):
     job_title: str = Field(default="")
     # Backend 共有キャッシュの brief（Search なし）。あればキャッシュ/Searchより優先
     company_context: str = Field(default="")
+    # Backend がチャット診断スコアから組み立てた候補者プロファイル（企業キャッシュには混ぜない）
+    candidate_context: str = Field(default="", max_length=2000)
 
     @field_validator("job_title")
     @classmethod
@@ -47,6 +49,11 @@ class ReviewRequest(BaseModel):
     @classmethod
     def normalize_company_context(cls, v: str) -> str:
         return _normalize_company_context(v, "review")
+
+    @field_validator("candidate_context")
+    @classmethod
+    def normalize_candidate_context(cls, v: str) -> str:
+        return (v or "").strip()
 
 
 class ReviewResponse(BaseModel):

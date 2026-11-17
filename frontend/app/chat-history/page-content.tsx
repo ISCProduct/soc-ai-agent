@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { formatDateTime } from '@/lib/i18n/format'
 import { Box, Container, Typography, Paper, List, ListItem, ListItemButton, ListItemText, Divider, Button, Stack } from '@mui/material'
 import { useRouter } from 'next/navigation'
 import { authService } from '@/lib/auth'
@@ -57,13 +58,13 @@ export default function PageContent() {
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr)
-    return date.toLocaleString('ja-JP', {
+    return formatDateTime(date, {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-      timeZone: 'Asia/Tokyo'
+      timeZone: 'Asia/Tokyo',
     })
   }
 
