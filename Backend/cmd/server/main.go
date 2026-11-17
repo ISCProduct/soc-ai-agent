@@ -14,6 +14,7 @@ import (
 	insightcontrollers "Backend/internal/controllers/insight"
 	interviewcontrollers "Backend/internal/controllers/interview"
 	notificationcontrollers "Backend/internal/controllers/notification"
+	portfoliocontrollers "Backend/internal/controllers/portfolio"
 	releasecontrollers "Backend/internal/controllers/release"
 	resumecontrollers "Backend/internal/controllers/resume"
 	schedulecontrollers "Backend/internal/controllers/schedule"
@@ -51,6 +52,7 @@ import (
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/oauth"
 	"Backend/internal/services/organization"
+	portfoliosvc "Backend/internal/services/portfolio"
 	"Backend/internal/services/refreshtoken"
 	"Backend/internal/services/release"
 	"Backend/internal/services/resume"
@@ -603,6 +605,8 @@ func main() {
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupESRoutes(api, esRewriteController, esReviewController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
+	// 自己分析ポートフォリオ（#2030）。本人の診断・面接・ES・適性検査をまとめる
+	routes.SetupPortfolioRoutes(api, portfoliocontrollers.NewController(portfoliosvc.NewService(repositories.NewPortfolioRepository(db), repositories.NewUserWeightScoreRepository(db))), cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupNotificationRoutes(api, notificationcontrollers.NewController(notificationService), cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)

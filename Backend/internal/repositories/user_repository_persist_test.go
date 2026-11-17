@@ -52,11 +52,13 @@ func persistedUser() (*models.User, map[string]time.Time) {
 // UpdateUser は Save によるフルロー更新。ユーザーの項目が1つでも書き込みから落ちると、
 // プロフィール更新や再ログインのたびにその値が初期値へ戻る。
 // 失効時刻(#1155)・同意フラグ(#2180)・メール認証の期限(#330)を、書き込みの引数で固定する。
+// ただし学習利用の同意（allow_training_use）は書かない（#2168。古い値で書き戻して取り消しを無効にしないため。
+// 同意は SetTrainingUse で履歴と一緒にだけ変える。user_save_omits_training_consent_test.go も参照）。
 func TestUpdateUser_全カラムを書き込む(t *testing.T) {
 	db, mock := newMockDB(t)
 	u, times := persistedUser()
 
-	cols := userColumnsInSaveOrder(t, db)
+	cols := userColumnsForUpdate(t, db)
 	var got []driver.Value
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE `users` SET").
@@ -75,9 +77,11 @@ func TestUpdateUser_全カラムを書き込む(t *testing.T) {
 		tv, ok := byCol[col].(time.Time)
 		require.Truef(t, ok && tv.Equal(want), "%s が書き込まれていない: %v", col, byCol[col])
 	}
-	for _, col := range []string{"allow_collective_insight", "allow_scout_visibility", "allow_training_use"} {
+	for _, col := range []string{"allow_collective_insight", "allow_scout_visibility"} {
 		require.Equalf(t, true, byCol[col], "%s が書き込まれていない", col)
 	}
+	_, written := byCol["allow_training_use"]
+	require.False(t, written, "allow_training_use を UpdateUser で書いている（#2168）")
 	require.Equal(t, models.UserRoleStaff, byCol["role"])
 	require.EqualValues(t, 7, got[len(cols)], "WHERE id")
 }
@@ -89,7 +93,7 @@ func TestUpdateUser_引数の構造体を書き換えない(t *testing.T) {
 	var got []driver.Value
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE `users` SET").
-		WithArgs(captureArgs(len(userColumnsInSaveOrder(t, db))+1, &got)...).
+		WithArgs(captureArgs(len(userColumnsForUpdate(t, db))+1, &got)...).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
@@ -145,6 +149,19 @@ func userColumnsInSaveOrder(t *testing.T, db *gorm.DB) []string {
 	var cols []string
 	for _, c := range stmt.Schema.DBNames {
 		if c != "id" {
+			cols = append(cols, c)
+		}
+	}
+	return cols
+}
+
+// userColumnsForUpdate は UpdateUser が書くカラム（userColumnsInSaveOrder から allow_training_use を除いたもの）。
+// UpdateUser は学習利用の同意を書かない（#2168）。
+func userColumnsForUpdate(t *testing.T, db *gorm.DB) []string {
+	t.Helper()
+	var cols []string
+	for _, c := range userColumnsInSaveOrder(t, db) {
+		if c != "allow_training_use" {
 			cols = append(cols, c)
 		}
 	}
