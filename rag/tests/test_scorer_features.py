@@ -30,11 +30,11 @@ def test_fnv1a32_matches_reference_vectors(data, expected):
         ("ＡＢＣ１２３", "abc123"),
         ("ｶﾀｶﾅ", "カタカナ"),
         ("㍿", "株式会社"),
-        ("a　b\tc\n\nd", "a b c d"),
-        (" 前後 ", "前後"),
+        ("a\u3000b\tc\n\nd", "a b c d"),
+        ("\u00a0前後\u2003", "前後"),
         ("İSTANBUL", "İstanbul"),
         ("x\x1fy", "x\x1fy"),
-        ("\ud800あ", "�あ"),
+        ("\ud800あ", "\ufffdあ"),
     ],
 )
 def test_normalize(text, expected):
@@ -67,7 +67,7 @@ def test_feature_index_uses_namespace_and_low_bits():
 
 @pytest.mark.parametrize(
     "turns",
-    [[], [{"q": "", "a": ""}], [{"q": " 　", "a": "\t\n"}]],
+    [[], [{"q": "", "a": ""}], [{"q": " \u3000", "a": "\t\n"}]],
     ids=["no_turns", "empty_strings", "whitespace_only"],
 )
 def test_extract_returns_empty_when_no_ngrams(turns):

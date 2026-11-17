@@ -36,8 +36,8 @@ NORMALIZE_INPUTS = (
     "ＡＢＣ１２３",  # 全角英数 → 半角、さらに小文字
     "ｶﾀｶﾅ",  # 半角カナ → 全角
     "㍿",  # 互換文字 → 「株式会社」
-    "a　b\tc\n\nd",  # 全角空白・タブ・改行の連続 → 半角スペース1つ
-    " 前後の空白 ",
+    "a\u3000b\tc\n\nd",  # 全角空白・タブ・改行の連続 → 半角スペース1つ
+    "\u00a0前後の空白\u2003",
     "İSTANBUL",  # 「İ」（U+0130）は ASCII ではないので小文字にしない（str.lower() なら「i̇」になる）
     "x\x1fy",  # U+001F は Go の unicode.IsSpace では空白ではないので残す
     "😀👍",
@@ -49,11 +49,11 @@ NORMALIZE_INPUTS = (
 FEATURE_CASES: tuple[tuple[str, list[dict[str, str]]], ...] = (
     ("empty_turns", []),
     ("empty_strings", [{"q": "", "a": ""}]),
-    ("whitespace_only", [{"q": " 　", "a": "\t\n"}]),
+    ("whitespace_only", [{"q": " \u3000", "a": "\t\n"}]),
     ("single_char", [{"q": "", "a": "a"}]),
     ("japanese", [{"q": "自己紹介をお願いします。", "a": "私は大学でサークルの代表をしていました。"}]),
     ("ascii_and_fullwidth", [{"q": "Why?", "a": "ＡＩ と AI で 100 件"}]),
-    ("emoji_and_zwj", [{"q": "趣味は？", "a": "料理です😀 家族👨‍👩‍👧と作ります"}]),
+    ("emoji_and_zwj", [{"q": "趣味は？", "a": "料理です😀 家族👨\u200d👩\u200d👧と作ります"}]),
     ("repeated", [{"q": "", "a": "ああああ"}]),
     (
         "multi_turn",
