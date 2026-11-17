@@ -178,6 +178,8 @@ export function NotificationBell() {
           aria-haspopup="dialog"
           sx={{
             position: 'fixed',
+            // 印刷（ポートフォリオの PDF など）に載せない
+            '@media print': { display: 'none' },
             top: 8,
             right: 8,
             zIndex: (theme) => theme.zIndex.appBar + 1,
