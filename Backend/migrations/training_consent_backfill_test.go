@@ -7,12 +7,12 @@ import (
 	"Backend/internal/models"
 )
 
-// #2262 のレビュー: 000075 の up は、履歴の記録を始める前から同意していた人に履歴を1行ずつ作る。
+// #2262 のレビュー: 20261117104108 の up は、履歴の記録を始める前から同意していた人に履歴を1行ずつ作る。
 // その行の版は models.TrainingConsentLegacyTextVersion と同じ値で、同意済み（allow_training_use = 1）の人だけが対象。
 // SQL とコードの定数がずれると、「記録の前からの同意」の行をアプリ側で見分けられなくなる。
 // （実際の MySQL での up→down→up と、行ができることは PR で確かめている。ここではずれだけを見る。）
 func TestTrainingConsentBackfill_UsesLegacyVersion(t *testing.T) {
-	data, err := migrationFiles.ReadFile("000075_create_training_consent_events.up.sql")
+	data, err := migrationFiles.ReadFile("20261117104108_create_training_consent_events.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestTrainingConsentBackfill_UsesLegacyVersion(t *testing.T) {
 		"WHERE `allow_training_use` = 1",
 	} {
 		if !strings.Contains(sql, want) {
-			t.Errorf("000075 の up に %q が無い", want)
+			t.Errorf("20261117104108 の up に %q が無い", want)
 		}
 	}
 	if models.TrainingConsentLegacyTextVersion == models.TrainingConsentTextVersion {

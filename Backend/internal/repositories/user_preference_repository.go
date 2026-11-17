@@ -90,7 +90,7 @@ func (r *UserPreferenceRepository) SetTrainingUse(userID uint, allow bool, textV
 
 // TrainingConsentState は、学習利用の同意の現在値と、最後に変更した日時（#2168）。
 // ChangedAt は同意の履歴の最後の行の日時で、行が無ければ nil（一度も変更していない初期値の「同意しない」）。
-// 履歴の記録を始める前から同意していた人は、マイグレーション（000075）で作った行の日時（適用時刻）になる。
+// 履歴の記録を始める前から同意していた人は、マイグレーション（20261117104108）で作った行の日時（適用時刻）になる。
 type TrainingConsentState struct {
 	AllowTrainingUse bool
 	ChangedAt        *time.Time

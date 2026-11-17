@@ -1,4 +1,4 @@
-h1:vv25gM6qYSMzwrD0ss0hF7nMVUMAYnnyo04KnH1f7J0=
+h1:slvwYzRgdOLUwjaE3tw37lChSrSrmtZWVAj79taru08=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -74,3 +74,4 @@ h1:vv25gM6qYSMzwrD0ss0hF7nMVUMAYnnyo04KnH1f7J0=
 000073_user_score_recalculation_jobs.up.sql h1:3j2q8xYkosAgiEeNiJeTjfryHBF2Xf6DsX5dR1CaDjA=
 000074_user_score_recalculation_snapshots.up.sql h1:NU4uBlVRMXRAhUjmsPS+nPaY+LkC5fwGJ4Fiysqehxo=
 20261115225754_application_score_snapshot.up.sql h1:PABCvkB1CkKdFYjNe+Nr97SuEWGYfiojCmqWD0Beza8=
+20261117104108_create_training_consent_events.up.sql h1:7DzTJC5wFRGYFsRQgHK+STIK3G04c6Kp7CG/CIL51Ac=

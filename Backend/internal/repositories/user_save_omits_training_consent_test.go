@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"Backend/domain/entity"
 	"Backend/internal/models"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -90,7 +89,7 @@ func TestUpdateUser_DoesNotWriteTrainingConsent(t *testing.T) {
 	mock.ExpectCommit()
 
 	// 読み込んだ時点では同意済み（true）。この値で書き戻すと、その後の取り消しが消える。
-	err := NewUserRepository(db).UpdateUser(&entity.User{ID: 9, Email: "a@example.com", Name: "a", AllowTrainingUse: true})
+	err := NewUserRepository(db).UpdateUser(&models.User{ID: 9, Email: "a@example.com", Name: "a", AllowTrainingUse: true})
 	if err != nil {
 		t.Fatalf("UpdateUser: %v", err)
 	}
