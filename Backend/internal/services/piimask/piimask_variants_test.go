@@ -76,3 +76,13 @@ func TestIsBareContactLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestStripTokens(t *testing.T) {
+	got := StripTokens("<NAME>さん、<SCHOOL>での経験を教えてください。<URL>")
+	if want := "さん、での経験を教えてください。"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	if got := StripTokens("a < b かつ c > d、<div>"); got != "a < b かつ c > d、<div>" {
+		t.Fatalf("通常の山括弧を消した: %q", got)
+	}
+}

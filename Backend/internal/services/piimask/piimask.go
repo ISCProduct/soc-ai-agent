@@ -387,3 +387,10 @@ func IsContactFieldLine(line string) bool {
 	}
 	return contactLabel.MatchString(line)
 }
+
+// tokenPattern は置き換えの記号（<NAME> など）にだけ一致する。
+var tokenPattern = regexp.MustCompile(`<(?:NAME|EMAIL|PHONE|ADDRESS|SCHOOL|BIRTHDATE|POSTAL|URL|HANDLE|ID)>`)
+
+// StripTokens は、AI の応答に残った伏字の記号を取り除く。
+// 伏字にした発話を受けた AI が記号をそのまま返すと、画面表示や読み上げに出てしまう。
+func StripTokens(s string) string { return tokenPattern.ReplaceAllString(s, "") }

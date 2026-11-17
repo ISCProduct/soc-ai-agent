@@ -273,17 +273,10 @@ func buildInterviewSystemPrompt(
 	return strings.TrimSpace(base)
 }
 
-// buildStudentNameContext は応募者の登録氏名を、聞き間違いに左右されない
-// 正の情報としてシステムプロンプトへ渡すブロックを作る。
-func buildStudentNameContext(name string) string {
-	if strings.TrimSpace(name) == "" {
-		return ""
-	}
-	return fmt.Sprintf(
-		"【応募者氏名（登録情報・正）】\n%s\n自己紹介で聞こえた名前がこれと違っていても、音声認識の誤りの可能性が高いため、呼びかけには必ずこちらの氏名を使ってください。\n",
-		strings.TrimSpace(name),
-	)
-}
+// studentNameInstruction は、応募者の氏名を外部の AI へ送らない代わりに渡す指示。
+// 発話は送る前に伏字になる（<NAME> など）ので、氏名は呼びかけに使えない。
+// 伏字の記号をそのまま読み上げ・表示してしまわないよう、使わせない。
+const studentNameInstruction = "【呼びかけ】応募者の氏名は個人情報のため伝えられていません。氏名では呼ばず、「あなた」などで呼びかけてください。発話に含まれる <NAME> のような山括弧の記号は伏字なので、応答に書かないでください。\n"
 
 // isEngineerPosition は職種名がエンジニア系かどうかを判定する
 func isEngineerPosition(position string) bool {
