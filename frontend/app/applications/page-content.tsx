@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, Suspense, useCallback } from 'react'
+import { formatDate } from '@/lib/i18n/format'
 import { useRouter } from 'next/navigation'
 import {
   Box,
@@ -180,7 +181,7 @@ function ApplicationsContent() {
                     </Typography>
                     {app.applied_at && (
                       <Typography variant="caption" color="text.secondary">
-                        応募日: {new Date(app.applied_at).toLocaleDateString('ja-JP')}
+                        応募日: {formatDate(app.applied_at)}
                       </Typography>
                     )}
                   </Box>

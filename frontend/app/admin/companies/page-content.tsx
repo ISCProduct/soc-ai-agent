@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { formatNumber } from '@/lib/i18n/format'
 import Link from 'next/link'
 import {
   Accordion,
@@ -856,8 +857,8 @@ export default function PageContent() {
         title="企業情報の管理"
         description={
           filterSummary
-            ? `${filterSummary} の結果 ${total.toLocaleString()} 件`
-            : `学生課の先生が、学生に見せる企業情報を登録・確認・公開するための画面です。登録 ${total.toLocaleString()} 社`
+            ? `${filterSummary} の結果 ${formatNumber(total)} 件`
+            : `学生課の先生が、学生に見せる企業情報を登録・確認・公開するための画面です。登録 ${formatNumber(total)} 社`
         }
         backHref={busy ? undefined : '/admin'}
         actions={

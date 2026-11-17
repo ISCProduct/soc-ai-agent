@@ -136,10 +136,9 @@ async function joinInterview(page: Page) {
   await page.getByRole('button', { name: COMPANY.name }).click({ timeout: 30000 })
   await page.getByRole('button', { name: '面接を開始する' }).click()
 
-  await page.getByRole('button', { name: '面接に参加' }).click({ timeout: 30000 })
-  const consent = page.getByRole('dialog')
-  await consent.getByLabel('上記の内容に同意して面接練習を始める').check()
-  await consent.getByRole('button', { name: '面接に参加' }).click()
+  // ロビーは同意のチェックを画面内に持つ。同意するまで「面接を始める」は押せない
+  await page.getByRole('checkbox', { name: /録画と会話の記録を/ }).check({ timeout: 30000 })
+  await page.getByRole('button', { name: '面接を始める' }).click()
 
   await expect(page.getByText(QUESTION_1).first()).toBeVisible({ timeout: 30000 })
 }
@@ -149,10 +148,17 @@ async function answerOnce(page: Page) {
   const talk = page.getByRole('button', { name: /話す/ })
   await expect(talk).toBeEnabled({ timeout: 30000 })
   await talk.click()
-  await expect(page.getByRole('button', { name: /録音中/ })).toBeVisible()
+  // 録音中は、ボタンが「話し終わった」に変わり、面接官タイルに「録音中」の表示が出る
+  await expect(page.getByText('録音中', { exact: true })).toBeVisible()
   // 偽のマイクの音声が録音に溜まるのを待つ（録音が空だと送信しない）
   await page.waitForTimeout(1500)
-  await page.getByRole('button', { name: /録音中/ }).click()
+  await page.getByRole('button', { name: '話し終わった' }).click()
+}
+
+/** 「終了」を押し、確認ダイアログで「終了してレポートを見る」を選ぶ。 */
+async function endInterview(page: Page) {
+  await page.getByRole('button', { name: '終了' }).first().click()
+  await page.getByRole('button', { name: '終了してレポートを見る' }).click()
 }
 
 test.describe('AI 面接の本編フロー', () => {
@@ -182,18 +188,16 @@ test.describe('AI 面接の本編フロー', () => {
 
     await answerOnce(page)
     await expect(page.getByText(QUESTION_2).first()).toBeVisible({ timeout: 30000 })
-    // 発話ログには、最初の質問・サーバーが文字起こしした回答・次の質問の3件が積まれる
-    const log = page.getByRole('button', { name: 'これまでの質問・回答（3）' })
-    await expect(log).toBeVisible()
-    await log.click()
+    // 「記録」には、最初の質問・サーバーが文字起こしした回答・次の質問が積まれる
+    await page.getByRole('button', { name: '記録' }).click()
     await expect(page.getByText(ANSWER_1).first()).toBeVisible()
     expect(calls.turn).toBe(1)
 
-    await page.getByRole('button', { name: '終了' }).first().click()
+    await endInterview(page)
     // 終了 API を待たずにレポート画面へ進み、生成中を出す
-    await expect(page.getByText('レポートを生成中です...')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByText('レポートを作っています')).toBeVisible({ timeout: 15000 })
     // ポーリング（3秒ごと）で2回目にレポートが届く
-    await expect(page.getByText(REPORT.summary_text)).toBeVisible({ timeout: 20000 })
+    await expect(page.getByText(REPORT.summary_text).first()).toBeVisible({ timeout: 20000 })
     expect(calls.finish).toBe(1)
   })
 
@@ -201,11 +205,11 @@ test.describe('AI 面接の本編フロー', () => {
     // 3回続けて失敗するとエラー（REPORT_POLL_MAX_CONSECUTIVE_FAILURES）。4回目以降は成功する
     await mockInterviewApis(page, { failedPolls: 3 })
     await joinInterview(page)
-    await page.getByRole('button', { name: '終了' }).first().click()
+    await endInterview(page)
 
     await expect(page.getByText('レポート生成に失敗しました。')).toBeVisible({ timeout: 30000 })
     await page.getByRole('button', { name: '再試行' }).click()
-    await expect(page.getByText(REPORT.summary_text)).toBeVisible({ timeout: 20000 })
+    await expect(page.getByText(REPORT.summary_text).first()).toBeVisible({ timeout: 20000 })
   })
 
   test('回答の送信が失敗したら、面接を止めずにエラーを知らせる', async ({ page }) => {
@@ -218,7 +222,9 @@ test.describe('AI 面接の本編フロー', () => {
     // 面接は続けられる（もう一度話せる）
     await expect(page.getByRole('button', { name: /話す/ })).toBeEnabled({ timeout: 15000 })
     await expect(page.getByText(QUESTION_2)).toHaveCount(0)
-    // 発話ログは最初の質問だけ（失敗したターンの発話は積まない）
-    await expect(page.getByRole('button', { name: 'これまでの質問・回答（1）' })).toBeVisible()
+    // 「記録」は最初の質問だけ（失敗したターンの発話は積まない）
+    await page.getByRole('button', { name: '記録' }).click()
+    await expect(page.getByText(QUESTION_1).first()).toBeVisible()
+    await expect(page.getByText(ANSWER_1)).toHaveCount(0)
   })
 })

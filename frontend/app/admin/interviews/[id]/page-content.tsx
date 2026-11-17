@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { formatDateTime } from '@/lib/i18n/format'
 import { useParams } from 'next/navigation'
 import {
   Alert,
@@ -204,7 +205,7 @@ export default function PageContent() {
                         </TableCell>
                         <TableCell>
                           {video.uploaded_at
-                            ? new Date(video.uploaded_at).toLocaleString('ja-JP')
+                            ? formatDateTime(video.uploaded_at)
                             : '—'}
                         </TableCell>
                         <TableCell align="right">

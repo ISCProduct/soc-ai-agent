@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"errors"
 	"fmt"
 	"time"
 
@@ -23,7 +24,7 @@ func (r *PendingRegistrationRepository) Create(p *models.PendingRegistration) er
 func (r *PendingRegistrationRepository) FindByToken(token string) (*models.PendingRegistration, error) {
 	var m models.PendingRegistration
 	err := r.db.Where("token = ? AND expires_at > ?", token, time.Now()).First(&m).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { formatDateTime } from '@/lib/i18n/format'
 import Link from 'next/link'
 import {
   Button,
@@ -152,11 +153,11 @@ export default function PageContent() {
                           </TableCell>
                           <TableCell>
                             {session.started_at
-                              ? new Date(session.started_at).toLocaleString('ja-JP')
+                              ? formatDateTime(session.started_at)
                               : '—'}
                           </TableCell>
                           <TableCell>
-                            {new Date(session.created_at).toLocaleString('ja-JP')}
+                            {formatDateTime(session.created_at)}
                           </TableCell>
                           <TableCell align="right">
                             <Button

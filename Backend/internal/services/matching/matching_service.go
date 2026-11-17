@@ -28,6 +28,8 @@ type MatchingService struct {
 	aiClient            *openai.Client
 	// 適性検査の結果（#1678）。未注入なら合流しない。
 	assessmentScores AssessmentScoreReader
+	// キャリブレーション重み（#203）。未注入・未アクティブなら全軸 1.0。
+	calibration CalibrationWeightReader
 }
 
 // AssessmentScoreReader は最新の標準適性検査のカテゴリ別スコアを返す。未受検なら nil。
@@ -35,9 +37,19 @@ type AssessmentScoreReader interface {
 	LatestStandardScores(userID uint) (map[string]float64, error)
 }
 
+// CalibrationWeightReader は有効なカテゴリ重みを返す（#203）。
+type CalibrationWeightReader interface {
+	GetLatestCalibrationWeights() ([]models.ScoreCalibrationWeight, error)
+}
+
 // SetAssessmentScoreReader は適性検査スコアの合流を有効にする（#1678、オプション）。
 func (s *MatchingService) SetAssessmentScoreReader(r AssessmentScoreReader) {
 	s.assessmentScores = r
+}
+
+// SetCalibrationWeightReader は #203 のキャリブレーション重み適用を有効にする。
+func (s *MatchingService) SetCalibrationWeightReader(r CalibrationWeightReader) {
+	s.calibration = r
 }
 
 func NewMatchingService(
@@ -101,6 +113,11 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 	}
 	log.Printf("[CalculateMatching] Loaded %d weight profiles\n", len(profiles))
 
+	axisWeights := s.loadCalibrationAxisWeights()
+	if len(axisWeights) > 0 {
+		log.Printf("[CalculateMatching] applying calibration axis weights (%d categories)\n", len(axisWeights))
+	}
+
 	// 3. 各企業とのマッチングを計算（プロファイルはメモリ上で参照）
 	pending := make([]*models.UserCompanyMatch, 0, len(companies))
 	skippedNoProfile := 0
@@ -122,9 +139,9 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 			continue
 		}
 
-		match := s.calculateMatchScore(scoreMap, profile)
+		match := s.calculateMatchScore(scoreMap, profile, axisWeights)
 		if merged {
-			before = append(before, s.calculateMatchScore(chatOnly, profile).MatchScore)
+			before = append(before, s.calculateMatchScore(chatOnly, profile, axisWeights).MatchScore)
 			after = append(after, match.MatchScore)
 		}
 		match.UserID = userID
@@ -262,38 +279,73 @@ func (s *MatchingService) loadAllPublishedCompanies() ([]models.Company, error) 
 	return companies, nil
 }
 
-// calculateMatchScore ユーザースコアと企業プロファイルからマッチングスコアを計算
+// calculateMatchScore ユーザースコアと企業プロファイルからマッチングスコアを計算。
+// axisWeights は #203 のカテゴリ重み（無い軸は 1.0）。総合は加重平均。
 func (s *MatchingService) calculateMatchScore(
 	userScores map[string]float64,
 	companyProfile *models.CompanyWeightProfile,
+	axisWeights map[string]float64,
 ) *models.UserCompanyMatch {
 	match := &models.UserCompanyMatch{}
 	evaluatedCount := 0
-	totalScore := 0.0
+	weightedTotal := 0.0
+	weightSum := 0.0
 
 	// 各カテゴリのマッチ度を計算（0-100のスケールで）
 	// マッチ度 = 100 - |ユーザースコア - 企業重視度|
-	match.TechnicalMatch, evaluatedCount, totalScore = scoredMatch(userScores, "技術志向", float64(companyProfile.TechnicalOrientation), evaluatedCount, totalScore)
-	match.TeamworkMatch, evaluatedCount, totalScore = scoredMatch(userScores, "チームワーク志向", float64(companyProfile.TeamworkOrientation), evaluatedCount, totalScore)
-	match.LeadershipMatch, evaluatedCount, totalScore = scoredMatch(userScores, "リーダーシップ志向", float64(companyProfile.LeadershipOrientation), evaluatedCount, totalScore)
-	match.CreativityMatch, evaluatedCount, totalScore = scoredMatch(userScores, "創造性志向", float64(companyProfile.CreativityOrientation), evaluatedCount, totalScore)
-	match.StabilityMatch, evaluatedCount, totalScore = scoredMatch(userScores, "安定志向", float64(companyProfile.StabilityOrientation), evaluatedCount, totalScore)
-	match.GrowthMatch, evaluatedCount, totalScore = scoredMatch(userScores, "成長志向", float64(companyProfile.GrowthOrientation), evaluatedCount, totalScore)
-	match.WorkLifeMatch, evaluatedCount, totalScore = scoredMatch(userScores, "ワークライフバランス", float64(companyProfile.WorkLifeBalance), evaluatedCount, totalScore)
-	match.ChallengeMatch, evaluatedCount, totalScore = scoredMatch(userScores, "チャレンジ志向", float64(companyProfile.ChallengeSeeking), evaluatedCount, totalScore)
-	match.DetailMatch, evaluatedCount, totalScore = scoredMatch(userScores, "細部志向", float64(companyProfile.DetailOrientation), evaluatedCount, totalScore)
-	match.CommunicationMatch, evaluatedCount, totalScore = scoredMatch(userScores, "コミュニケーション力", float64(companyProfile.CommunicationSkill), evaluatedCount, totalScore)
+	match.TechnicalMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "技術志向", float64(companyProfile.TechnicalOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.TeamworkMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "チームワーク志向", float64(companyProfile.TeamworkOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.LeadershipMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "リーダーシップ志向", float64(companyProfile.LeadershipOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.CreativityMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "創造性志向", float64(companyProfile.CreativityOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.StabilityMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "安定志向", float64(companyProfile.StabilityOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.GrowthMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "成長志向", float64(companyProfile.GrowthOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.WorkLifeMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "ワークライフバランス", float64(companyProfile.WorkLifeBalance), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.ChallengeMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "チャレンジ志向", float64(companyProfile.ChallengeSeeking), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.DetailMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "細部志向", float64(companyProfile.DetailOrientation), axisWeights, evaluatedCount, weightedTotal, weightSum)
+	match.CommunicationMatch, evaluatedCount, weightedTotal, weightSum = scoredMatch(userScores, "コミュニケーション力", float64(companyProfile.CommunicationSkill), axisWeights, evaluatedCount, weightedTotal, weightSum)
 
-	// 総合マッチ度は「計測できた軸だけ」の平均（#1124）。
-	// 何件で算出したかを持たせ、表示側が根拠の薄さを示せるようにする。
+	// 総合マッチ度は「計測できた軸だけ」の加重平均（#1124 + #203）。
 	match.MatchedAxisCount = evaluatedCount
-	if evaluatedCount > 0 {
-		match.MatchScore = totalScore / float64(evaluatedCount)
+	if weightSum > 0 {
+		match.MatchScore = weightedTotal / weightSum
 	} else {
 		match.MatchScore = 0
 	}
 
 	return match
+}
+
+// loadCalibrationAxisWeights は有効な #203 重みを読む。無ければ空（= 全軸1.0）。
+func (s *MatchingService) loadCalibrationAxisWeights() map[string]float64 {
+	out := map[string]float64{}
+	if s.calibration == nil {
+		return out
+	}
+	weights, err := s.calibration.GetLatestCalibrationWeights()
+	if err != nil || len(weights) == 0 {
+		if err != nil {
+			log.Printf("[CalculateMatching] calibration weights unavailable: %v\n", err)
+		}
+		return out
+	}
+	for _, w := range weights {
+		if !w.IsActive || w.Category == "" {
+			continue
+		}
+		out[w.Category] = clampCalibrationWeight(w.Weight)
+	}
+	return out
+}
+
+func clampCalibrationWeight(w float64) float64 {
+	// 暴走を防ぐ。1.0 が中立。極端な倍率はマッチングを一軸に潰す。
+	if w < 0.1 {
+		return 0.1
+	}
+	if w > 3.0 {
+		return 3.0
+	}
+	return w
 }
 
 // scoredMatch はカテゴリ1つ分のマッチ度を返す。
@@ -302,14 +354,26 @@ func (s *MatchingService) calculateMatchScore(
 // 評価対象に数えていたため、企業の重視度が 45〜70 に寄っている実データでは
 // 差が小さくなり、スコアを1つも持たないユーザーでも全企業と97%前後で
 // 一致してしまっていた。計測できていない軸は「一致」ではなく「不明」。
-func scoredMatch(userScores map[string]float64, category string, companyWeight float64, evaluatedCount int, totalScore float64) (float64, int, float64) {
+func scoredMatch(
+	userScores map[string]float64,
+	category string,
+	companyWeight float64,
+	axisWeights map[string]float64,
+	evaluatedCount int,
+	weightedTotal, weightSum float64,
+) (float64, int, float64, float64) {
 	userScore, ok := userScores[category]
 	if !ok {
-		// 未計測。0 を返すが平均には数えない（MatchedAxisCount で件数が分かる）
-		return 0, evaluatedCount, totalScore
+		return 0, evaluatedCount, weightedTotal, weightSum
 	}
 	matchScore := CalculateCategoryMatch(userScore, companyWeight)
-	return matchScore, evaluatedCount + 1, totalScore + matchScore
+	w := 1.0
+	if axisWeights != nil {
+		if aw, ok := axisWeights[category]; ok {
+			w = aw
+		}
+	}
+	return matchScore, evaluatedCount + 1, weightedTotal + matchScore*w, weightSum + w
 }
 
 // CalculateCategoryMatch カテゴリごとのマッチ度を計算する（0-100）。
