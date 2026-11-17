@@ -554,6 +554,7 @@ func main() {
 	userPreferenceRepo := repositories.NewUserPreferenceRepository(db)
 	// 希望条件の保存とプロフィール更新の両方から同じ同期処理を呼ぶ (#1094)
 	scoutIndexSyncer := hr.NewStudentIndexSyncer(userPreferenceRepo, studentSemanticClient)
+	scoutIndexSyncer.SetSubjectReader(subjectReader) // 自己PRなどの自由記述を、外の埋め込み API へ送る前に伏字にする
 	authService.SetScoutIndexSyncer(scoutIndexSyncer)
 	// 退会時のベクトル削除と、日次のリコンサイル(ReconcileScoutIndex)も同じ同期処理を使う（#1094, #1204）。
 	userDeletionService.SetScoutIndexSyncer(scoutIndexSyncer)
