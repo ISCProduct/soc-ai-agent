@@ -30,6 +30,9 @@ func (b llmBlocks) list() []models.ResumeTextBlock { return b.items }
 // 長ければ本文なので残す（伏字にはかける）。
 const maxValueAfterLabelRunes = 40
 
+// maxContinuationBlocks は、住所・電話・メールの欄の行のあとに続けて除く、続きのブロックの数の上限。
+const maxContinuationBlocks = 2
+
 // errMaskUnavailable は、伏字の準備ができなかったときのエラー。このとき本文を外へ送ってはならない。
 var errMaskUnavailable = errors.New("個人情報を安全に処理できなかったため、レビューできませんでした。しばらくしてからもう一度お試しください")
 
@@ -61,21 +64,42 @@ func (s *ResumeService) maskBlocksForLLM(userID uint, blocks []models.ResumeText
 // ページ番号・ブロックの番号・位置（BBox）・認識スコアは変えない。指摘は番号で元のブロックに対応づく。
 func maskBlocksWith(m *piimask.Masker, blocks []models.ResumeTextBlock) llmBlocks {
 	out := make([]models.ResumeTextBlock, 0, len(blocks))
-	// OCR が「氏名」と値を別のブロックに分けたとき、見出しだけの行の次のブロック（値）も除く。
-	// 辞書にない書き方（ふりがな・ローマ字など）の値を残さないため。
+	// OCR は行ごとにブロックを分けるので、1つの値が複数のブロックにまたがることがある。
+	//   - 見出しだけの行（「氏名」）の次のブロックは値。辞書にない書き方（ふりがな・ローマ字）も残さず除く。
+	//   - 住所・電話・メールの欄の行の次に、番地・建物名・電話やメールの続きが来たら、それも除く（最大2ブロック）。
+	//   - 「…@」で終わるブロックの次の先頭は、メールのドメインの続き。
 	afterBareLabel := false
+	continuations := 0
+	prevEndsWithAt := false
 	for _, b := range blocks {
-		if piimask.IsContactFieldLine(b.Text) {
-			afterBareLabel = piimask.IsBareContactLabel(b.Text)
+		text := strings.TrimSpace(b.Text)
+		if piimask.IsContactFieldLine(text) {
+			afterBareLabel = piimask.IsBareContactLabel(text)
+			continuations = 0
+			if piimask.IsContinuationLabelLine(text) {
+				continuations = maxContinuationBlocks
+			}
+			prevEndsWithAt = false
 			continue
 		}
 		if afterBareLabel {
 			afterBareLabel = false
-			if utf8.RuneCountInString(strings.TrimSpace(b.Text)) <= maxValueAfterLabelRunes {
+			if utf8.RuneCountInString(text) <= maxValueAfterLabelRunes {
 				continue
 			}
 		}
-		b.Text = m.Mask(strings.TrimSpace(b.Text))
+		if continuations > 0 {
+			if piimask.IsContactContinuation(text) {
+				continuations--
+				continue
+			}
+			continuations = 0
+		}
+		if prevEndsWithAt {
+			text = piimask.MaskLeadingDomain(text)
+		}
+		b.Text = m.Mask(text)
+		prevEndsWithAt = piimask.EndsWithAt(b.Text)
 		out = append(out, b)
 	}
 	return llmBlocks{items: out}

@@ -33,16 +33,18 @@ const (
 )
 
 const (
-	keyBirthdate  = "birthdate"
-	keyPostal     = "postal"
-	keyURL        = "url"
-	keyHandle     = "handle"
-	keyPhoneSp    = "phone_spaced"
-	keyAddrNoPref = "address_no_pref"
-	keyObfEmail   = "email_obfuscated"
-	keyAccount    = "account"
-	keyIDNumber   = "id_number"
-	keyKnownEmail = "known_email"
+	keyBirthdate      = "birthdate"
+	keyPostal         = "postal"
+	keyURL            = "url"
+	keyHandle         = "handle"
+	keyPhoneSp        = "phone_spaced"
+	keyAddrNoPref     = "address_no_pref"
+	keySpacedDigits   = "phone_spaced_digits"
+	keyDomainFragment = "email_domain_fragment"
+	keyObfEmail       = "email_obfuscated"
+	keyAccount        = "account"
+	keyIDNumber       = "id_number"
+	keyKnownEmail     = "known_email"
 )
 
 // Subject は辞書を作るための、その学生の登録情報。出力には書かない。
@@ -111,6 +113,8 @@ func rules() []masking.Rule {
 		masking.Rule{Key: keyHandle, Token: TokenHandle, Method: masking.MethodPattern, Pattern: handlePattern, Accept: acceptHandle},
 		masking.Rule{Key: keyPhoneSp, Token: masking.TokenPhone, Method: masking.MethodPattern, Pattern: phoneSpacedPattern, Accept: notInsideDigits},
 		masking.Rule{Key: keyAddrNoPref, Token: masking.TokenAddress, Method: masking.MethodPattern, Pattern: addressNoPrefPattern},
+		masking.Rule{Key: keySpacedDigits, Token: masking.TokenPhone, Method: masking.MethodPattern, Pattern: spacedDigitsPhonePattern, Accept: acceptSpacedDigitsPhone},
+		masking.Rule{Key: keyDomainFragment, Token: masking.TokenEmail, Method: masking.MethodPattern, Pattern: domainFragmentPattern},
 		masking.Rule{Key: keyObfEmail, Token: masking.TokenEmail, Method: masking.MethodPattern, Pattern: obfuscatedEmailPattern},
 		masking.Rule{Key: keyAccount, Token: TokenHandle, Method: masking.MethodPattern, Pattern: accountPattern},
 		masking.Rule{Key: keyIDNumber, Token: TokenID, Method: masking.MethodPattern, Pattern: idNumberPattern},
@@ -164,6 +168,40 @@ var addressNoPrefPattern = regexp.MustCompile(
 		`[\p{Han}々〆ヶケァ-ヴーが]{0,8}?[0-9０-９〇一二三四五六七八九十]+(?:丁目|番地|番|号|条|[-‐‑–—−－ー][0-9０-９]+)` +
 		`(?:[-‐‑–—−－ー]?[0-9０-９]+(?:丁目|番地|番|号)?)*`,
 )
+
+// spacedDigitsPhonePattern は、OCR が数字の間に空白を入れた電話番号（「0 9 0 1 2 3 4 5 6 7 8」）。
+// 数字の合計が 10〜11桁のものだけ採る（acceptSpacedDigitsPhone）。短い数字の並びは拾わない。
+var spacedDigitsPhonePattern = regexp.MustCompile(`[0０](?:[ 　]?[-‐‑–—−－ー]?[ 　]?[0-9０-９]){9,12}`)
+
+func acceptSpacedDigitsPhone(text string, start, end int) bool {
+	if !notInsideDigits(text, start, end) {
+		return false
+	}
+	digits := 0
+	for _, r := range text[start:end] {
+		if unicode.IsDigit(r) {
+			digits++
+		}
+	}
+	return digits == 10 || digits == 11
+}
+
+// domainFragmentPattern は、メールが2行に分かれたときの、ドメインだけの断片（行頭の「@example.com」）。
+var domainFragmentPattern = regexp.MustCompile(`^[ 　]*[@＠][A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+`)
+
+// leadingDomainPattern は行頭のドメイン（「example.com」）。直前のブロックが「@」で終わるときだけ使う。
+var leadingDomainPattern = regexp.MustCompile(`^[ 　]*[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+`)
+
+// EndsWithAt は、メールの途中（「…@」）で行が終わっているかを返す。次のブロックの先頭はドメインの続き。
+func EndsWithAt(text string) bool {
+	t := strings.TrimRight(text, " 　")
+	return strings.HasSuffix(t, "@") || strings.HasSuffix(t, "＠")
+}
+
+// MaskLeadingDomain は、行頭のドメイン（メールの続き）を伏字にする。EndsWithAt の次のブロックに使う。
+func MaskLeadingDomain(text string) string {
+	return leadingDomainPattern.ReplaceAllString(text, masking.TokenEmail)
+}
 
 // obfuscatedEmailPattern は、「taro (at) example.com」のようにメールの「@」を書き換えたもの。
 var obfuscatedEmailPattern = regexp.MustCompile(
@@ -242,6 +280,40 @@ var contactLabel = regexp.MustCompile(
 		`|(?:電[ 　]*話|携帯(?:電話)?|TEL|Tel|FAX)[+＋(（0-9０-９]` +
 		`)`,
 )
+
+// continuationLabel は、値が複数のブロックにまたがりやすい欄の見出し（住所・連絡先・電話・メール）。
+// 氏名・年齢・性別などは、続きのブロックが無いので含めない（次の学歴の行を巻き込まないため）。
+var continuationLabel = regexp.MustCompile(
+	`^[ 　]*(?:現?住[ 　]*所|連絡先|帰省先|住居|電[ 　]*話|携帯(?:電話)?|TEL|Tel|FAX|E-?mail|Ｅ-?ｍａｉｌ|メール(?:アドレス)?)(?:[ 　]*[:：][ 　]*|[ 　]+|$)`,
+)
+
+// IsContinuationLabelLine は、住所・電話・メールの欄の行かを返す。この行の次のブロックは、値の続きかもしれない。
+func IsContinuationLabelLine(line string) bool {
+	return continuationLabel.MatchString(strings.TrimSpace(line))
+}
+
+// 続きのブロックとみなす条件。
+var (
+	startsWithDateYear = regexp.MustCompile(`^[ 　]*(?:(?:19|20)[0-9０-９]{2}[年/.\-]|(?:昭和|平成|令和)[0-9０-９元])`)
+	buildingWord       = regexp.MustCompile(`マンション|ビル|アパート|ハイツ|コーポ|レジデンス|ハウス|荘|号室|棟|階|丁目|番地`)
+	emailLike          = regexp.MustCompile(`^[A-Za-z0-9._%+\-@＠]+$`)
+)
+
+// maxContinuationRunes は、続きのブロックとみなす長さの上限。
+const maxContinuationRunes = 40
+
+// IsContactContinuation は、住所・電話・メールの続きのブロックらしいかを返す（番地・建物名・電話の続き・メールの断片）。
+// 年月日で始まる行（「2020年4月 入学」）は、学歴・職歴の行なので続きとみなさない。
+func IsContactContinuation(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" || utf8.RuneCountInString(line) > maxContinuationRunes || startsWithDateYear.MatchString(line) {
+		return false
+	}
+	if r, _ := utf8.DecodeRuneInString(line); unicode.IsDigit(r) {
+		return true
+	}
+	return buildingWord.MatchString(line) || emailLike.MatchString(line)
+}
 
 // IsBareContactLabel は、見出しだけの行（値が次のブロックにある）かを返す。
 // OCR は「氏名」と「山田 太郎」を別のブロックに分けることがある。見出しだけの行の次のブロックは値なので、
