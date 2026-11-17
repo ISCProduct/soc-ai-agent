@@ -215,6 +215,7 @@ Referer に user_id が残るだけです。
 | POST | `/api/resume/{id}/review` | レビュー実行（スコア更新も実施） |
 | GET | `/api/resume/{id}/review/stream` | レビューSSEストリーミング |
 | GET | `/api/resume/{id}/annotated` | 注釈済みPDF取得 |
+| GET | `/api/resume/document?document_id=` | レビュー画面が描く、PDFに揃えた元の書類（本人のみ・`Cache-Control: private, no-store`。レビュー前は404） |
 | GET | `/api/resume/status` | 自分の履歴書の対応要否（リマインダー用、#1030） |
 
 ---

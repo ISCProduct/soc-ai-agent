@@ -1767,6 +1767,28 @@ paths:
         "200": { description: 注釈付きデータ }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/resume/document:
+    get:
+      tags: [resume]
+      summary: レビュー画面が描く、PDFに揃えた元の書類を取得する
+      description: |
+        DOCX・Google Docs もレビュー時に PDF へ変換してあるので、どれも PDF で返す。
+        注釈PDFと違い、指摘の強調は入っていない（画面が番号つきで重ねる）。
+        本人の書類だけ返し、共有キャッシュには残さない（`Cache-Control: private, no-store`）。
+      security: [{ userToken: [] }]
+      parameters:
+        - { name: document_id, in: query, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "400": { description: document_id が無い・不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: 他の利用者の書類 }
+        "404": { description: レビュー前で、まだ書類が用意できていない }
+
   # ── es（認証なし。レート制限のみ）────────────────────
   /api/es/rewrite:
     post:
