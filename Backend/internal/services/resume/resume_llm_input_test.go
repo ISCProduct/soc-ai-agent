@@ -198,3 +198,38 @@ func TestBuildReviewScoreItems_RequestHasNoPII_AndItemsMapToOriginalBlocks(t *te
 		assertNoPII(t, "指摘の引用", it.Quote)
 	}
 }
+
+// OCR は「氏名」と値を別のブロックに分けることがある。見出しだけの行の次のブロック（値）も除く。
+// 辞書にない書き方（ふりがな・ローマ字）の値が残らないこと。本文は残る。
+func TestMaskBlocksForLLM_DropsValueBlockAfterBareLabel(t *testing.T) {
+	svc := NewResumeService(&resumeRepoStub{}, t.TempDir(), nil)
+	svc.SetSubjectReader(subjectStub{subj: testSubject})
+	texts := []string{
+		"ふりがな", "やまだ たろう", // ふりがな（辞書にない書き方）
+		"氏名", "Yamada Taro", // ローマ字
+		"生年月日", "1999年4月1日",
+		"住所", "港区六本木1-2-3 〇〇マンション101",
+		"志望動機", // 見出しだけだが、欄ではない（値を除かない）
+		"チームで10名のWeb開発を進めた経験を活かします。", // 本文は残る
+	}
+	blocks := make([]models.ResumeTextBlock, 0, len(texts))
+	for i, tx := range texts {
+		blocks = append(blocks, models.ResumeTextBlock{PageNumber: 1, BlockIndex: i + 1, Text: tx, BBox: `[0,0,1,1]`})
+	}
+
+	masked, err := svc.maskBlocksForLLM(1, blocks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := buildResumeText(masked, 100000)
+	for _, leak := range []string{"やまだ", "たろう", "Yamada", "Taro", "1999", "六本木", "マンション"} {
+		if strings.Contains(text, leak) {
+			t.Errorf("%q が残っている:\n%s", leak, text)
+		}
+	}
+	for _, keep := range []string{"志望動機", "チームで10名のWeb開発を進めた経験を活かします"} {
+		if !strings.Contains(text, keep) {
+			t.Errorf("本文の %q が消えた:\n%s", keep, text)
+		}
+	}
+}

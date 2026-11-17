@@ -29,6 +29,7 @@ const (
 	TokenPostal    = "<POSTAL>"
 	TokenURL       = "<URL>"
 	TokenHandle    = "<HANDLE>"
+	TokenID        = "<ID>"
 )
 
 const (
@@ -36,6 +37,11 @@ const (
 	keyPostal     = "postal"
 	keyURL        = "url"
 	keyHandle     = "handle"
+	keyPhoneSp    = "phone_spaced"
+	keyAddrNoPref = "address_no_pref"
+	keyObfEmail   = "email_obfuscated"
+	keyAccount    = "account"
+	keyIDNumber   = "id_number"
 	keyKnownEmail = "known_email"
 )
 
@@ -74,7 +80,7 @@ func ForLLM(subj Subject) (*Masker, error) {
 		}
 	}
 	dict := masking.Dictionary{
-		masking.KeyName:   masking.NameTerms(subj.Name),
+		masking.KeyName:   append(masking.NameTerms(subj.Name), romajiHints(subj.Email)...),
 		masking.KeySchool: {strings.TrimSpace(subj.SchoolName)},
 		keyKnownEmail:     emails,
 	}
@@ -103,6 +109,11 @@ func rules() []masking.Rule {
 		masking.Rule{Key: keyPostal, Token: TokenPostal, Method: masking.MethodPattern, Pattern: postalPattern, Accept: notInsideDigits},
 		masking.Rule{Key: keyURL, Token: TokenURL, Method: masking.MethodPattern, Pattern: urlPattern},
 		masking.Rule{Key: keyHandle, Token: TokenHandle, Method: masking.MethodPattern, Pattern: handlePattern, Accept: acceptHandle},
+		masking.Rule{Key: keyPhoneSp, Token: masking.TokenPhone, Method: masking.MethodPattern, Pattern: phoneSpacedPattern, Accept: notInsideDigits},
+		masking.Rule{Key: keyAddrNoPref, Token: masking.TokenAddress, Method: masking.MethodPattern, Pattern: addressNoPrefPattern},
+		masking.Rule{Key: keyObfEmail, Token: masking.TokenEmail, Method: masking.MethodPattern, Pattern: obfuscatedEmailPattern},
+		masking.Rule{Key: keyAccount, Token: TokenHandle, Method: masking.MethodPattern, Pattern: accountPattern},
+		masking.Rule{Key: keyIDNumber, Token: TokenID, Method: masking.MethodPattern, Pattern: idNumberPattern},
 	)
 }
 
@@ -114,20 +125,89 @@ func rules() []masking.Rule {
 // 卒業年月（「令和4年3月 卒業」）のように、日が無い日付や、生年月日ではない日付は拾わない。
 // 学歴・職歴の年月は、レビューに必要なので残す。
 var birthdatePattern = regexp.MustCompile(
-	`(?:生年月日|誕生日|Birth(?:day| ?date)?)[ 　]*[:：]?[ 　]*(?:(?:昭和|平成|令和|西暦)?[0-9０-９元]{1,4}[年/.\-．][ 　]*[0-9０-９]{1,2}[月/.\-．][ 　]*[0-9０-９]{1,2}日?)` +
-		`|(?:(?:昭和|平成|令和|西暦)?[0-9０-９元]{1,4}[年/.\-．][ 　]*[0-9０-９]{1,2}[月/.\-．][ 　]*[0-9０-９]{1,2}日?[ 　]*生(?:まれ)?)` +
-		`|満[ 　]*[0-9０-９]{1,2}[ 　]*歳`,
+	`(?:生年月日|誕生日|Birth(?:day| ?date)?)[ 　]*[:：]?[ 　]*(?:` + dateBody + `)` +
+		`|(?:` + dateBody + `)[ 　]*生(?:まれ)?` +
+		`|(?:` + dateBody + `)[ 　]*[（(][ 　]*(?:満[ 　]*)?[0-9０-９]{1,2}[ 　]*歳[ 　]*[）)]` +
+		`|満[ 　]*[0-9０-９]{1,2}[ 　]*歳` +
+		`|[0-9０-９]{1,2}/[0-9０-９]{1,2}/(?:19|20)[0-9０-９]{2}`,
 )
+
+// dateBody は日付の本体。西暦・和暦（漢数字も）・区切りの違い（年月日・スラッシュ・ハイフン・ドット）を拾う。
+const dateBody = `(?:(?:昭和|平成|令和|西暦|[SHRshr])?[0-9０-９〇一二三四五六七八九十元]{1,4}[年/.\-．][ 　]*[0-9０-９〇一二三四五六七八九十]{1,3}[月/.\-．][ 　]*[0-9０-９〇一二三四五六七八九十]{1,3}日?)`
 
 // postalPattern は郵便番号（〒の有無によらず、3桁-4桁）。前後が数字のときは拾わない（Accept）。
 // 空白は「〒」の直後だけ許す。前の空白まで拾うと、電話番号（空白のあとの 090-1234-5678）より先に始まり、郵便番号として採られる。
-var postalPattern = regexp.MustCompile(`(?:〒[ 　]?)?[0-9０-９]{3}[-‐‑–—−－ー][0-9０-９]{4}`)
+var postalPattern = regexp.MustCompile(`(?:〒[ 　]?)?[0-9０-９]{3}[-‐‑–—−－ー][0-9０-９]{4}|〒[ 　]?[0-9０-９]{7}`)
 
 // urlPattern は URL。ポートフォリオや SNS の URL は、本人にたどり着けるため伏字にする。
-var urlPattern = regexp.MustCompile(`https?://[^\s　<>"'）)」』]+`)
+var urlPattern = regexp.MustCompile(
+	`https?://[^\s　<>"'）)」』]+` +
+		// スキームの無い書き方。SNS・開発系サービスのアカウントや、www. から始まるもの
+		`|(?:\bwww\.[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+|\b(?:github|gitlab|bitbucket|twitter|x|facebook|instagram|linkedin|qiita|zenn|note|wantedly|youtube|tiktok|bsky|medium|speakerdeck|slideshare|hatenablog|hatena|pixiv|behance|dribbble|atcoder|paiza|connpass)\.(?:com|dev|jp|co\.jp|app|social|me|io|net))` +
+		`(?:/[^\s　<>"'）)」』]*)?`,
+)
 
 // handlePattern は SNS のアカウント名（@ のあとに英数字と下線）。メールの「@」は、メールの規則が先に採る。
 var handlePattern = regexp.MustCompile(`@[A-Za-z0-9_]{3,30}`)
+
+// phoneSpacedPattern は、ハイフンの前後に空白がある電話番号（「090 - 1234 - 5678」）。
+// masking の電話の規則は、区切りを数字の間に1つしか許さないため拾えない。
+var phoneSpacedPattern = regexp.MustCompile(
+	`[0０][0-9０-９]{1,4}[ 　]*[-‐‑–—−－ー][ 　]*[0-9０-９]{1,4}[ 　]*[-‐‑–—−－ー][ 　]*[0-9０-９]{3,4}`,
+)
+
+// addressNoPrefPattern は、都道府県を省いた住所（「港区六本木1-2-3」「大阪市北区梅田1-1」）。
+// 市区町村に加えて、番地（数字＋丁目・番・号・ハイフン）が続くものだけを拾う。数字が無い地名の話題
+// （「港区の会社」）は残す。町名だけでは個人を絞れないが、番地まで書くと住所になる。
+var addressNoPrefPattern = regexp.MustCompile(
+	`(?:[\p{Han}々〆ヶケァ-ヴー]{1,6}[市区町村郡]){1,2}` +
+		`[\p{Han}々〆ヶケァ-ヴーが]{0,8}?[0-9０-９〇一二三四五六七八九十]+(?:丁目|番地|番|号|条|[-‐‑–—−－ー][0-9０-９]+)` +
+		`(?:[-‐‑–—−－ー]?[0-9０-９]+(?:丁目|番地|番|号)?)*`,
+)
+
+// obfuscatedEmailPattern は、「taro (at) example.com」のようにメールの「@」を書き換えたもの。
+var obfuscatedEmailPattern = regexp.MustCompile(
+	`[A-Za-z0-9._%+\-]+[ 　]*[(（\[][ 　]*(?:at|AT|アット|＠)[ 　]*[)）\]][ 　]*[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`,
+)
+
+// accountPattern は、「LINE ID: taro123」「Instagram: taro_dev」のように、サービス名とアカウント名が並ぶもの。
+var accountPattern = regexp.MustCompile(
+	`(?:` + accountServices + `)[ 　]*(?:ID|id|Id|アカウント|ユーザー名)[ 　]*[:：]?[ 　]*@?[A-Za-z0-9_.\-]{3,40}` +
+		// 「ID」などの語が無いときは、値に数字か記号（_ . -）を含むものだけ。「GitHub: Docker」のような一覧を拾わない
+		`|(?:` + accountServices + `)[ 　]*[:：][ 　]*@?[A-Za-z0-9_.\-]*[0-9_.\-][A-Za-z0-9_.\-]*`,
+)
+
+const accountServices = `LINE|ライン|Instagram|インスタ(?:グラム)?|Twitter|ツイッター|X|エックス|Facebook|フェイスブック|TikTok|Discord|Skype|スカイプ|GitHub|ギットハブ|Qiita|Zenn|Slack`
+
+// idNumberPattern は、本人に結びつく番号の見出しと値（学籍番号・受験番号・マイナンバーなど）。
+var idNumberPattern = regexp.MustCompile(
+	`(?:学籍番号|学生番号|受験番号|受講番号|社員番号|会員番号|マイナンバー|個人番号|パスポート番号|運転免許証?番号|保険者番号|被保険者番号)` +
+		`[ 　]*[:：]?[ 　]*[A-Za-z0-9０-９\-－ー]+(?:[ 　][0-9０-９]{3,4}){0,3}`,
+)
+
+// romajiHints は、メールのローカル部（「taro.yamada」）から、氏名のローマ字の候補を取り出す。
+// 登録は漢字でも、履歴書の「Taro Yamada」のようなローマ字表記を伏字にするため。3文字以上の英字だけを使い、
+// 一般的な語（info・admin など）は除く。ラテン文字は単語の途中には一致しない（masking の規則）。
+func romajiHints(email string) []string {
+	local, _, ok := strings.Cut(strings.TrimSpace(email), "@")
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, part := range regexp.MustCompile(`[._\-+0-9]+`).Split(local, -1) {
+		part = strings.ToLower(part)
+		if len(part) < 3 || genericLocalPart[part] {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
+}
+
+var genericLocalPart = map[string]bool{
+	"info": true, "admin": true, "mail": true, "contact": true, "support": true, "test": true, "user": true,
+	"office": true, "sales": true, "noreply": true, "hello": true, "gmail": true, "email": true, "me": true,
+}
 
 // acceptHandle は、直前が英数字でないときだけ採る（「taro@example」の途中を拾わないため）。
 func acceptHandle(text string, start, _ int) bool {
@@ -162,6 +242,18 @@ var contactLabel = regexp.MustCompile(
 		`|(?:電[ 　]*話|携帯(?:電話)?|TEL|Tel|FAX)[+＋(（0-9０-９]` +
 		`)`,
 )
+
+// IsBareContactLabel は、見出しだけの行（値が次のブロックにある）かを返す。
+// OCR は「氏名」と「山田 太郎」を別のブロックに分けることがある。見出しだけの行の次のブロックは値なので、
+// 辞書にない書き方（ふりがな・ローマ字など）でも残さず、あわせて除く。
+func IsBareContactLabel(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" || utf8.RuneCountInString(line) > 12 {
+		return false
+	}
+	loc := contactLabel.FindStringIndex(line)
+	return loc != nil && strings.TrimSpace(strings.Trim(line[loc[1]:], ":：")) == ""
+}
 
 // maxContactLabelRunes は、見出しから始まる行を「連絡先の欄」とみなす長さの上限。
 // 長い行は本文（志望動機など）が見出しの語で始まっただけかもしれないので、欄とはみなさない。

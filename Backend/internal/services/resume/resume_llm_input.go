@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"Backend/internal/models"
 	"Backend/internal/services/piimask"
@@ -24,6 +25,10 @@ type llmBlocks struct {
 
 // list は伏字済みのブロックを返す（位置・番号の照合に使う）。
 func (b llmBlocks) list() []models.ResumeTextBlock { return b.items }
+
+// maxValueAfterLabelRunes は、見出しだけの行の次のブロックを「値」とみなす長さの上限。
+// 長ければ本文なので残す（伏字にはかける）。
+const maxValueAfterLabelRunes = 40
 
 // errMaskUnavailable は、伏字の準備ができなかったときのエラー。このとき本文を外へ送ってはならない。
 var errMaskUnavailable = errors.New("個人情報を安全に処理できなかったため、レビューできませんでした。しばらくしてからもう一度お試しください")
@@ -56,9 +61,19 @@ func (s *ResumeService) maskBlocksForLLM(userID uint, blocks []models.ResumeText
 // ページ番号・ブロックの番号・位置（BBox）・認識スコアは変えない。指摘は番号で元のブロックに対応づく。
 func maskBlocksWith(m *piimask.Masker, blocks []models.ResumeTextBlock) llmBlocks {
 	out := make([]models.ResumeTextBlock, 0, len(blocks))
+	// OCR が「氏名」と値を別のブロックに分けたとき、見出しだけの行の次のブロック（値）も除く。
+	// 辞書にない書き方（ふりがな・ローマ字など）の値を残さないため。
+	afterBareLabel := false
 	for _, b := range blocks {
 		if piimask.IsContactFieldLine(b.Text) {
+			afterBareLabel = piimask.IsBareContactLabel(b.Text)
 			continue
+		}
+		if afterBareLabel {
+			afterBareLabel = false
+			if utf8.RuneCountInString(strings.TrimSpace(b.Text)) <= maxValueAfterLabelRunes {
+				continue
+			}
 		}
 		b.Text = m.Mask(strings.TrimSpace(b.Text))
 		out = append(out, b)
