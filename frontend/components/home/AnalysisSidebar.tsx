@@ -24,6 +24,7 @@ import
     from '@mui/material'
 import {
     BorderAll,
+    Search,
     CheckCircle,
     RadioButtonUnchecked,
     Work,
@@ -80,6 +81,7 @@ const REST_NAV: SidebarDestination[] = [
     { href: '/interview/history', labelKey: 'sidebar.interviewHistory', icon: <Assessment color="primary"/> },
     { href: '/es-rewrite', labelKey: 'sidebar.esRewrite', icon: <EditNote color="primary"/> },
     { href: '/schedule', labelKey: 'sidebar.schedule', icon: <CalendarMonth color="primary"/> },
+    { href: '/companies', labelKey: 'sidebar.companySearch', icon: <Search color="primary"/> },
     { href: '/scout', labelKey: 'sidebar.scout', icon: <MailOutline color="primary"/> },
     { href: '/profile', labelKey: 'sidebar.profile', icon: <ManageAccounts color="primary"/> },
 ]
