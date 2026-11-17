@@ -14,6 +14,11 @@ import {
 
 const REVIEW_FAILED_MESSAGE = 'レビューに失敗しました。時間をおいてもう一度お試しください。'
 
+function userFacingMessage(message: unknown): string {
+  const text = typeof message === 'string' ? message.trim() : ''
+  return text !== '' && text.length <= 200 ? text : REVIEW_FAILED_MESSAGE
+}
+
 /**
  * 履歴書レビューページの state・副作用・イベントハンドラ。
  */
@@ -49,6 +54,8 @@ export function useResumePage() {
   const [scoresBefore, setScoresBefore] = useState<WeightScore[] | null>(null)
   const [scoresAfter, setScoresAfter] = useState<WeightScore[] | null>(null)
   const reviewAbortRef = useRef<AbortController | null>(null)
+  // 企業検索の世代。遅れて届いた古い応答で、新しい結果や選択を上書きしない
+  const searchSeqRef = useRef(0)
 
   const prefilledCompany = searchParams.get('company_name') || ''
   const prefilledIndustry = searchParams.get('industry') || ''
@@ -127,6 +134,8 @@ export function useResumePage() {
       setCompanySearchError('企業名を入力してください')
       return
     }
+    const seq = ++searchSeqRef.current
+    const stale = () => seq !== searchSeqRef.current
     setCompanySearchLoading(true)
     setCompanySearchError('')
     setCompanyCandidates([])
@@ -138,6 +147,7 @@ export function useResumePage() {
           throw new Error(parseApiErrorMessage(errText, '企業の検索に失敗しました'))
         }
         const data = await res.json()
+        if (stale()) return
         const list = mapDbCompanyResults(data)
         setCompanyCandidates(list)
         if (list.length === 0) {
@@ -149,6 +159,7 @@ export function useResumePage() {
       // WEB: 候補一覧 API（DB優先 + WEB補完）。単体 validate より候補選択しやすい
       const res = await fetch(`/api/companies/web-search?q=${encodeURIComponent(q)}`, { cache: 'no-store' })
       const data = await res.json().catch(() => ({}))
+      if (stale()) return
       if (!res.ok) {
         throw new Error(parseApiErrorMessage(JSON.stringify(data), 'Web検索に失敗しました'))
       }
@@ -161,9 +172,10 @@ export function useResumePage() {
         setCompanySearchError('候補が見つかりませんでした。企業名を変えて再検索するか、職種のみでレビューしてください')
       }
     } catch (err) {
+      if (stale()) return
       setCompanySearchError(err instanceof Error ? err.message : '企業検索に失敗しました')
     } finally {
-      setCompanySearchLoading(false)
+      if (!stale()) setCompanySearchLoading(false)
     }
   }
 
@@ -404,8 +416,8 @@ export function useResumePage() {
             setAnnotateError(String(data.message ?? ''))
           } else if (data.type === 'error') {
             sawTerminal = true
-            // 上流の文言は画面に出さない
-            throw new Error(REVIEW_FAILED_MESSAGE)
+            // Backend は利用者向けの文言だけを送る（内部の例外文は固定文言にしてある）。空のときだけ固定文言にする
+            throw new Error(userFacingMessage(data.message))
           }
         }
       }

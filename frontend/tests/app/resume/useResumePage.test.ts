@@ -235,14 +235,21 @@ describe('useResumePage handleReview のストリーム中断 (SOCAIAGENT-664)',
     expect(result.current.review).not.toBeNull()
   })
 
-  it('error を受け取ったら上流の文言は出さず固定文言にし、中断表示にはしない', async () => {
-    const result = await setup(() => sse({ type: 'error', message: 'openai.RateLimitError: sk-secret' }))
+  it('error を受け取ったら Backend が返した利用者向けの文言を出し、中断表示にはしない', async () => {
+    const result = await setup(() => sse({ type: 'error', message: '履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください' }))
+    await act(async () => {
+      await result.current.handleReview()
+    })
+    expect(result.current.reviewError).toBe('履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください')
+    expect(result.current.reviewInterrupted).toBe(false)
+  })
+
+  it('error の文言が空や長すぎるときは固定文言にする', async () => {
+    const result = await setup(() => sse({ type: 'error', message: 'x'.repeat(500) }))
     await act(async () => {
       await result.current.handleReview()
     })
     expect(result.current.reviewError).toBe('レビューに失敗しました。時間をおいてもう一度お試しください。')
-    expect(result.current.reviewError).not.toContain('sk-secret')
-    expect(result.current.reviewInterrupted).toBe(false)
   })
 
   it('再試行を始めたら中断表示を消す', async () => {
@@ -263,5 +270,47 @@ describe('useResumePage handleReview のストリーム中断 (SOCAIAGENT-664)',
     })
     expect(result.current.reviewInterrupted).toBe(false)
     expect(result.current.review).not.toBeNull()
+  })
+})
+
+describe('useResumePage 企業検索の古い応答', () => {
+  const originalFetch = global.fetch
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  it('先に出した遅い検索の応答が後から届いても、新しい検索の結果を上書きしない', async () => {
+    let releaseFirst: (res: unknown) => void = () => {}
+    const first = new Promise((resolve) => {
+      releaseFirst = resolve
+    })
+    const reply = (names: string[]) => ({ ok: true, json: async () => ({ companies: names.map((name, i) => ({ id: i + 1, name })) }) })
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('name=A')) return first
+      return Promise.resolve(reply(['Bの会社']))
+    }) as unknown as typeof fetch
+
+    const { result } = renderHook(() => useResumePage())
+    await act(async () => {})
+
+    act(() => result.current.handleCompanyQueryChange('A'))
+    let slow: Promise<void> = Promise.resolve()
+    act(() => {
+      slow = Promise.resolve(result.current.handleSearchCompanies(false))
+    })
+
+    act(() => result.current.handleCompanyQueryChange('B'))
+    await act(async () => {
+      await result.current.handleSearchCompanies(false)
+    })
+    expect(result.current.companyCandidates.map((c) => c.name)).toEqual(['Bの会社'])
+
+    // 遅れて A の応答が届く
+    await act(async () => {
+      releaseFirst(reply(['Aの会社']))
+      await slow
+    })
+    expect(result.current.companyCandidates.map((c) => c.name)).toEqual(['Bの会社'])
   })
 })

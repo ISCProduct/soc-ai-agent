@@ -36,7 +36,7 @@ func TestReviewScoreErrorMessage(t *testing.T) {
 		{"検証エラーは本文を見せる", &shared.ValidationError{Message: "企業が見つかりません"}, "企業が見つかりません"},
 		{"ラップされた検証エラーも見せる", fmt.Errorf("x: %w", &shared.ValidationError{Message: "入力不備"}), "入力不備"},
 		{"AI不可は内部設定を隠す", fmt.Errorf("provider key missing: %w", openai.ErrAIUnavailable), "現在AI機能を利用できません。しばらくしてから再度お試しください。"},
-		{"それ以外はそのまま", errors.New("boom"), "boom"},
+		{"それ以外は内部の文言を隠す", errors.New("open /data/secret.pdf: permission denied"), "レビューを作成できませんでした。時間をおいてもう一度お試しください。"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

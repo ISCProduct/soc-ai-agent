@@ -23,6 +23,11 @@ function renderView(review: ReviewResult, extra: Partial<React.ComponentProps<ty
 }
 
 describe('ResumeResultView', () => {
+  // jsdom には scrollIntoView が無い
+  beforeAll(() => {
+    Element.prototype.scrollIntoView = jest.fn()
+  })
+
   // スコア無しのとき BE は user_weight_scores へ何も書かない（#1529）。
   // 画面が「反映されました」と出すと、既存スコア行があるユーザーに虚偽の主張をすることになる。
   it('スコア無しならプロフィール反映バナーを出さず、指摘は届ける', () => {
@@ -134,6 +139,36 @@ describe('ResumeResultView', () => {
     fireEvent.click(screen.getByRole('button', { name: /次の指摘/ }))
 
     expect(screen.getByText('2 / 2 ページ')).toBeInTheDocument()
+    expect(screen.getByText('指摘 2 / 2 を表示中')).toBeInTheDocument()
+  })
+
+  it('絞り込み中にページを移しても、選択が絞り込みの外に出ない', () => {
+    const review = buildReview()
+    review.items = [
+      { id: 1, page_number: 1, severity: 'critical', message: '1ページ目の重大' },
+      { id: 2, page_number: 2, severity: 'warning', message: '2ページ目の注意' },
+    ]
+    renderView(review)
+
+    fireEvent.click(screen.getByRole('button', { name: '重大 1' }))
+    fireEvent.click(screen.getByRole('button', { name: '次のページ' }))
+
+    // 2ページ目に「重大」は無いので、選択は動かず、一覧も「0 / n」にならない
+    expect(screen.getByText('指摘 1 / 1 を表示中')).toBeInTheDocument()
+    expect(screen.getByText('2 / 2 ページ')).toBeInTheDocument()
+  })
+
+  it('絞り込みから外れた指摘を書類で選ぶと、絞り込みを解く', () => {
+    const review = buildReview()
+    review.items = [
+      { id: 1, page_number: 1, severity: 'critical', message: '重大な指摘', quote: '重大の原文' },
+      { id: 2, page_number: 1, severity: 'warning', message: '注意の指摘', quote: '注意の原文' },
+    ]
+    renderView(review)
+
+    fireEvent.click(screen.getByRole('button', { name: '重大 1' }))
+    fireEvent.click(screen.getByRole('button', { name: /指摘2を選ぶ/ }))
+
     expect(screen.getByText('指摘 2 / 2 を表示中')).toBeInTheDocument()
   })
 

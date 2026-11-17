@@ -32,7 +32,7 @@ export function ResumeSegmented<T extends string>({ label, options, value, onCha
             onClick={() => onChange(o.value)}
             sx={{
               flex: 1,
-              minHeight: 42,
+              minHeight: 44,
               px: 1.5,
               py: '9px',
               cursor: 'pointer',

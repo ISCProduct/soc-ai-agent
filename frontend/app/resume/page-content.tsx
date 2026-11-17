@@ -78,7 +78,7 @@ function ResumeContent() {
 
   // 状態が変わったら先頭へ戻す（結果が画面の途中から始まらないように）
   useEffect(() => {
-    if (typeof window !== 'undefined' && !navigator.userAgent.includes('jsdom')) window.scrollTo(0, 0)
+    window.scrollTo(0, 0)
   }, [phase])
 
   return (

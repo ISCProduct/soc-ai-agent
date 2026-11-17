@@ -18,8 +18,8 @@ type ResumeDocumentViewerProps = {
 }
 
 const navButtonSx = {
-  width: 36,
-  height: 36,
+  width: { xs: 44, md: 36 },
+  height: { xs: 44, md: 36 },
   borderRadius: '6px',
   border: `1.5px solid ${UI.inkFaint}`,
   bgcolor: UI.field,

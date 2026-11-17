@@ -46,6 +46,8 @@ export function ResumeResultView({ review, scoresBefore, scoresAfter, annotateEr
   const select = (no: number) => {
     const f = findings.find((x) => x.no === no)
     if (!f) return
+    // 絞り込みから外れた指摘を選んだら、見失わないよう絞り込みを解く
+    if (filter !== 'all' && f.severity !== filter) setFilter('all')
     setSelectedNo(no)
     setPage(f.page)
   }
@@ -56,7 +58,8 @@ export function ResumeResultView({ review, scoresBefore, scoresAfter, annotateEr
   }
   const changePage = (next: number) => {
     setPage(next)
-    const first = findings.find((f) => f.page === next)
+    // 絞り込み中は、絞り込みの中にあるその先頭を選ぶ。無ければ選択は変えない
+    const first = visible.find((f) => f.page === next)
     if (first) setSelectedNo(first.no)
   }
   const move = (delta: number) => {

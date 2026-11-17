@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Alert, Box, ButtonBase, InputAdornment, LinearProgress, Stack, TextField, Typography } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
 import type { CompanyCandidate } from '../types'
@@ -28,9 +28,10 @@ type ResumeTargetCardProps = {
 }
 
 const linkSx = {
-  display: 'inline',
+  display: 'inline-flex',
+  alignItems: 'center',
   p: 0,
-  minHeight: 24,
+  minHeight: 44,
   font: 'inherit',
   fontSize: 14,
   fontWeight: 700,
@@ -40,6 +41,8 @@ const linkSx = {
   verticalAlign: 'baseline',
   borderRadius: '2px',
 } as const
+
+const rowSx = { display: 'flex', alignItems: 'center', flexWrap: 'wrap', columnGap: 0.75 } as const
 
 function sourceText(source: string) {
   return source === 'db' ? '掲載企業' : 'Web で見つかった企業'
@@ -65,12 +68,15 @@ export function ResumeTargetCard({
   onCandidateTypeChange,
 }: ResumeTargetCardProps) {
   const [jobTouched, setJobTouched] = useState(false)
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 入力が止まったら、掲載企業から自動で探す。選び終わったあとは探し直さない
   useEffect(() => {
     if (mode !== 'company' || companyValidated || !companyQuery.trim()) return
-    const t = setTimeout(() => void onSearchCompanies(false), 400)
-    return () => clearTimeout(t)
+    searchTimer.current = setTimeout(() => void onSearchCompanies(false), 400)
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current)
+    }
   }, [companyQuery, mode, companyValidated])
 
   return (
@@ -93,6 +99,8 @@ export function ResumeTargetCard({
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault()
+                // Enter で今すぐ探すときは、入力待ちの自動検索を止めて二重に走らせない
+                if (searchTimer.current) clearTimeout(searchTimer.current)
                 void onSearchCompanies(false)
               }
             }}
@@ -164,19 +172,19 @@ export function ResumeTargetCard({
             </Stack>
           )}
 
-          {companyCandidates.length > 0 || companyName ? (
-            <Box sx={{ fontSize: 14, color: UI.inkSoft }}>
-              候補にない場合は{' '}
+          {companyQuery.trim() ? (
+            <Box sx={{ ...rowSx, fontSize: 14, color: UI.inkSoft }}>
+              候補にない場合は
               <ButtonBase onClick={() => void onSearchCompanies(true)} disabled={!companyQuery.trim()} sx={linkSx}>
                 Web から探す
               </ButtonBase>
             </Box>
           ) : (
-            <Box sx={{ fontSize: 14, color: UI.inkSoft }}>
-              企業を決めずに{' '}
+            <Box sx={{ ...rowSx, fontSize: 14, color: UI.inkSoft }}>
+              企業を決めずに
               <ButtonBase onClick={() => onModeChange('job')} sx={linkSx}>
                 職種だけで見る
-              </ButtonBase>{' '}
+              </ButtonBase>
               こともできます
             </Box>
           )}

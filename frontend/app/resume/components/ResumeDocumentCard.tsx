@@ -19,9 +19,11 @@ type ResumeDocumentCardProps = {
 }
 
 const linkSx = {
-  display: 'inline',
+  display: 'inline-flex',
+  alignItems: 'center',
   p: 0,
-  minHeight: 24,
+  minHeight: 44,
+  minWidth: 44,
   font: 'inherit',
   textDecoration: 'underline',
   textUnderlinePosition: 'from-font',
@@ -128,7 +130,7 @@ export function ResumeDocumentCard({
       {uploadError && <Alert severity="error">{uploadError}</Alert>}
 
       {documentId === null && (
-        <Box sx={{ fontSize: 14, color: UI.inkSoft }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', columnGap: 0.75, fontSize: 14, color: UI.inkSoft }}>
           {urlOpen ? (
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
               <TextField
@@ -145,7 +147,7 @@ export function ResumeDocumentCard({
             </Stack>
           ) : (
             <>
-              Google Docs の場合は{' '}
+              Google Docs の場合は
               <ButtonBase onClick={() => setUrlOpen(true)} sx={{ ...linkSx, fontSize: 14, fontWeight: 700, color: UI.mark, verticalAlign: 'baseline' }}>
                 URL から読み込む
               </ButtonBase>

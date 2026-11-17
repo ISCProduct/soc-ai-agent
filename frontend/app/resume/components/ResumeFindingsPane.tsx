@@ -34,7 +34,7 @@ type ResumeFindingsPaneProps = {
 const pillBase = {
   px: 1.5,
   py: 0.75,
-  minHeight: 36,
+  minHeight: { xs: 44, md: 36 },
   borderRadius: '16px',
   fontSize: 14,
   lineHeight: '20px',
@@ -42,7 +42,7 @@ const pillBase = {
 } as const
 
 const navBtnSx = {
-  minHeight: 36,
+  minHeight: { xs: 44, md: 36 },
   px: 1.25,
   py: 0.75,
   gap: 0.5,
@@ -72,7 +72,7 @@ export function ResumeFindingsPane({
 }: ResumeFindingsPaneProps) {
   const selectedRef = useRef<HTMLLIElement | null>(null)
   useEffect(() => {
-    selectedRef.current?.scrollIntoView?.({ block: 'nearest' })
+    selectedRef.current?.scrollIntoView({ block: 'nearest' })
   }, [selectedNo])
 
   const index = findings.findIndex((f) => f.no === selectedNo)
