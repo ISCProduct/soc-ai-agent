@@ -5,10 +5,10 @@ import "testing"
 func TestEnvGetters(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("RAG_REVIEW_URL", "  http://rag:9000 \n")
-	t.Setenv("USER_SECRET", "u")
-	t.Setenv("ADMIN_SECRET", "a")
-	t.Setenv("TOKEN_ENCRYPTION_KEY", "k")
-	t.Setenv("FRONTEND_URL", "http://fe")
+	t.Setenv("USER_SECRET", " u\n")
+	t.Setenv("ADMIN_SECRET", " a\n")
+	t.Setenv("TOKEN_ENCRYPTION_KEY", " k\n")
+	t.Setenv("FRONTEND_URL", " http://fe\n")
 
 	if !IsProduction() {
 		t.Error("APP_ENV=production で IsProduction が false")
