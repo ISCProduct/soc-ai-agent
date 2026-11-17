@@ -143,6 +143,19 @@ def extract(turns: Iterable[Mapping[str, str]]) -> SparseFeatures:
     return SparseFeatures(indices=indices, counts=counts, values=values)
 
 
+def unicode_version() -> str:
+    """NFKC に使った Unicode の版（実行している Python の unicodedata の版）。
+
+    NFKC の結果は Unicode の版で変わる（例：U+A7F2 は Unicode 13 では未割り当てでそのまま残り、
+    Unicode 14 以降は「C」になる）。Python の版ごとに Unicode の版が違い（3.10 は 13.0.0、3.12 は 15.0.0）、
+    Go の golang.org/x/text/unicode/norm も Go の版で変わる（Go 1.26 までは 15.0.0、1.27 からは 17.0.0）。
+    そのため、学習したときの版をモデルのヘッダ（features.unicode_version）に書き、Go は norm.Version と
+    一致しなければモデルを使わない（#2326 のレビュー）。ゴールデンには版で変わらない文字だけを入れているので、
+    この値は spec() には入れない（spec() はゴールデンにも書くため）。
+    """
+    return unicodedata.unidata_version
+
+
 def spec() -> dict[str, object]:
     """モデルのヘッダに書く、特徴量の設定。Go はこれが自分の実装と一致するかを確かめてから読む。"""
     return {

@@ -175,9 +175,14 @@ def test_load_export_requires_manifest(tmp_path):
         ({"files": ["../outside.jsonl"]}, "不正なパス"),
         ({"files": ["/etc/passwd"]}, "不正なパス"),
         ({"files": ["subjects/missing.jsonl"]}, "ありません"),
+        ({"run_id": None}, "run_id"),
+        ({"run_id": ""}, "run_id"),
+        ({"run_id": "  "}, "run_id"),
+        ({"run_id": 20261117}, "run_id"),
     ],
     ids=["format_version", "label_source", "empty_rubric", "duplicate_rubric", "files_not_list",
-         "parent_path", "absolute_path", "missing_file"],
+         "parent_path", "absolute_path", "missing_file", "run_id_missing", "run_id_empty", "run_id_blank",
+         "run_id_not_string"],
 )
 def test_load_export_rejects_bad_manifest(tmp_path, override, match):
     run_dir = _write_export(tmp_path, {"subj-a": [_line()]}, manifest_override=override)
@@ -320,6 +325,11 @@ def test_saved_file_layout_and_header(tmp_path):
     assert header["label_source"] == "llm"
     assert header["features"]["hash"] == "fnv1a32" and header["features"]["dim"] == 65536
     assert header["features"]["ngram_min"] == 1 and header["features"]["ngram_max"] == 3
+    # NFKC の Unicode の版を書く（Go は norm.Version と比べる）。それ以外は features.spec() と同じ。
+    import unicodedata
+
+    assert header["features"]["unicode_version"] == unicodedata.unidata_version
+    assert {k: v for k, v in header["features"].items() if k != "unicode_version"} == features.spec()
     assert set(header["thresholds"]) == set(RUBRIC_KEYS)
     # 軸の順・添字の順に並んでいる（2軸目の 10 番目の重み）
     w = np.frombuffer(blob, dtype="<f2").reshape(5, 65536)
@@ -369,9 +379,14 @@ def _rewrite_header(raw: bytes, mutate) -> bytes:
         (lambda h: h.pop("thresholds"), "必要な項目"),
         (lambda h: h["rubric"].update(keys=[]), "軸が空"),
         (lambda h: h["rubric"].update(score_max=6), "値域"),
+        (lambda h: h["features"].update(unicode_version="13.0.0" if features.unicode_version() != "13.0.0" else "15.0.0"),
+         "Unicode の版"),
+        (lambda h: h["features"].pop("unicode_version"), "Unicode の版"),
+        (lambda h: h.update(features="x"), "必要な項目"),
     ],
     ids=["format", "format_version", "dim", "ngram", "dtype", "byte_length", "threshold_count",
-         "threshold_not_number", "threshold_nan", "no_thresholds", "empty_rubric", "score_range"],
+         "threshold_not_number", "threshold_nan", "no_thresholds", "empty_rubric", "score_range",
+         "unicode_version_differs", "unicode_version_missing", "features_not_object"],
 )
 def test_load_rejects_bad_header(tmp_path, mutate, match):
     path = tmp_path / "scorer.bin"
@@ -586,3 +601,37 @@ def test_main_returns_2_on_bad_input(tmp_path, setup, extra):
     )
     assert rc == 2
     assert not (tmp_path / "m.bin").exists()
+
+
+# ── #2326 のレビューを受けた追加 ─────────────────────────────
+
+
+def test_load_export_skips_invalid_utf8_lines_without_replacing(tmp_path):
+    """不正な UTF-8 の行は U+FFFD に置き換えて読まず、壊れた行として数える。同じファイルのほかの行は読む。"""
+    run_dir = _write_export(tmp_path, {"subj-a": [_line("s-1", "subj-a")]})
+    path = run_dir / "subjects" / "subj-a.jsonl"
+    broken = json.dumps(_line("s-2", "subj-a")).encode("utf-8").replace(b"subj-a", b"subj-\xff", 1)
+    assert b"\xff" in broken
+    path.write_bytes(path.read_bytes() + broken + b"\n" + json.dumps(_line("s-3", "subj-a")).encode("utf-8") + b"\n")
+    ds = data.load_export(run_dir)
+    assert [s.sample_id for s in ds.samples] == ["s-1", "s-3"]
+    assert ds.skipped == Counter({"invalid_utf8": 1})
+    assert all("\ufffd" not in s.subject for s in ds.samples)
+
+
+@pytest.mark.parametrize("same", ["identical", "via_dotdot"])
+def test_run_rejects_same_model_and_report_path(tmp_path, same):
+    """--model-out と --report-out が同じファイルなら、何も書かずにエラーにする（モデルをレポートで上書きしない）。"""
+    run_dir = _synthetic_export(tmp_path / "export", n_subjects=3, per_subject=2)
+    out = tmp_path / "out.bin"
+    other = out if same == "identical" else tmp_path / "export" / ".." / "out.bin"
+    with pytest.raises(ValueError, match="同じパス"):
+        train.run(run_dir, out, other, FAST)
+    assert not out.exists()
+
+
+def test_main_returns_2_when_model_and_report_are_same(tmp_path):
+    run_dir = _synthetic_export(tmp_path / "export", n_subjects=3, per_subject=2)
+    out = str(tmp_path / "out.bin")
+    assert train.main(["--input", str(run_dir), "--model-out", out, "--report-out", out]) == 2
+    assert not (tmp_path / "out.bin").exists()

@@ -209,7 +209,8 @@ def build_model(
             "score_min": SCORE_MIN,
             "score_max": SCORE_MAX,
         },
-        "features": features.spec(),
+        # unicode_version は学習した環境の NFKC の版。Go は norm.Version と一致しなければ使わない。
+        "features": {**features.spec(), "unicode_version": features.unicode_version()},
         "model": {
             "type": "linear_ordinal_all_threshold",
             "predict": "score = score_min + count(w·x > thresholds[k])",
@@ -283,9 +284,19 @@ def decode(data: bytes) -> ScorerModel:
         thresholds = np.asarray(raw_thresholds, dtype=np.float64)
     except (TypeError, ValueError) as exc:
         raise ModelFormatError(f"閾値の値が不正です: {exc}") from exc
-    if header["features"] != features.spec():
+    feats = header["features"]
+    if not isinstance(feats, dict):
+        raise ModelFormatError("特徴量の設定が、この実装と一致しません")
+    feats = dict(feats)
+    model_unicode = feats.pop("unicode_version", None)
+    if feats != features.spec():
         # 特徴量の手順が違うモデルは、同じ入力から別の特徴量を作るので使えない。
         raise ModelFormatError("特徴量の設定が、この実装と一致しません")
+    if model_unicode != features.unicode_version():
+        # NFKC の Unicode の版が違うと、同じ入力から別の特徴量を作ることがある（#2326 のレビュー）。
+        raise ModelFormatError(
+            f"モデルの Unicode の版 {model_unicode!r} が、この実行環境の版 {features.unicode_version()!r} と一致しません"
+        )
     if wmeta.get("dtype") != "float16" or wmeta.get("byte_order") != "little" or wmeta.get("layout") != "axis_major":
         raise ModelFormatError("重みの形式に対応していません")
     blob = data[start + head_len :]

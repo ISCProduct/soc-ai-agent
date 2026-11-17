@@ -40,6 +40,9 @@ python -m training.scorer \
   - `subject`・`sample_id` が無い（`missing_id`）、`sample_id` の重複（`duplicate_sample_id`）
   - ラベルが Go の `ValidateRubricScores` と同じ条件を満たさない（軸の過不足・整数でない・0〜5 の外。`invalid_labels`）
   - `turns` が空か形が違う（`invalid_turns`）
+  - 不正な UTF-8 のバイトを含む（`invalid_utf8`。置き換えて読むと、改変された回答や壊れた `subject` を学習してしまうため）
+- マニフェストの `run_id` は空でない文字列であること（モデルのヘッダとレポートに書き、モデルを元の書き出しまでたどるため）。
+- `--model-out` と `--report-out` に同じパスは指定できません。
 
 ## 特徴量の手順
 
@@ -68,6 +71,18 @@ FNV-1a の既知の値・正規化の結果・特徴の添字・面接1回ぶん
   （既存の `rag/testdata/char_limit_cases.json` と同じ置き方です）。
 - 手順を変えたら `FEATURE_SPEC_VERSION` を上げ、`python -m training.scorer.golden --write` で作り直します。
 - NFKC の結果は Unicode の版で変わりうるため、ゴールデンには版によって変わらない文字だけを入れています。
+
+### Unicode の版をそろえる
+
+NFKC の結果は Unicode の版で変わります（例：U+A7F2 は Unicode 13 ではそのまま、14 以降は `C`）。
+版は Python の版で決まり（3.10 は 13.0.0、3.12 は 15.0.0）、Go の `golang.org/x/text/unicode/norm` も
+Go の版で変わります（今の x/text v0.43.0 では Go 1.26 までが 15.0.0、Go 1.27 からが 17.0.0）。
+
+- 学習したときの版（`unicodedata.unidata_version`）を、ヘッダの `features.unicode_version` に書きます。
+- Go の推論は `norm.Version` と一致しなければモデルを使いません。Python の `model.load` も、実行環境の版と違えばエラーにします。
+- **学習は、Go の版に合う Python で行います。** 今のバックエンド（Go 1.26）は 15.0.0 なので、
+  RAG のイメージと同じ Python 3.12 で学習します（CI のテストは 3.10 で動きますが、テストで作るモデルはその場で読むだけです）。
+  Go を 1.27 以降に上げるときは、学習に使う Python の版も合わせて見直します。
 - 対になっていないサロゲートは、Go では JSON を読む時点で U+FFFD になり同じ入力を作れないので、ゴールデンには入れず、
   Python のテスト（`test_normalize`）だけで確かめています。
 
@@ -99,13 +114,13 @@ N バイト       ヘッダ（JSON、UTF-8）
   | `format` / `format_version` | `"soc-interview-scorer"` / `1` |
   | `rubric.version` | ルーブリックの版。`strings.Join(RubricKeys(), ",") + "\|0-5"`（例：`logic,specificity,ownership,communication,enthusiasm\|0-5`）の UTF-8 の SHA-256 の先頭16桁に `sha256:` を付けたもの |
   | `rubric.keys` / `score_min` / `score_max` | 軸の一覧（重みの並び順）と値域 |
-  | `features` | 特徴量の設定（`spec_version`・`hash: "fnv1a32"`・`dim`・`ngram_min`/`ngram_max`・正規化の手順など） |
+  | `features` | 特徴量の設定（`spec_version`・`hash: "fnv1a32"`・`dim`・`ngram_min`/`ngram_max`・正規化の手順など）と、NFKC に使った Unicode の版 `unicode_version` |
   | `thresholds` | 軸ごとの閾値 5 つ（float64、昇順とは限らない） |
   | `weights` | `dtype: "float16"`・`byte_order: "little"`・`layout: "axis_major"`・`shape`・`byte_length`・`sha256`（重みのバイト列の SHA-256） |
   | `label_source` | `"llm"` |
   | `training` | 学習・評価の件数と人数、読み飛ばした行の数、書き出しの実行 ID、種、学習の設定 |
 
-- **読み込み**（`model.load`）は、先頭のバイト列・形式の版・特徴量の設定・重みの長さ・**重みの SHA-256** を確かめ、
+- **読み込み**（`model.load`）は、先頭のバイト列・形式の版・特徴量の設定・Unicode の版・重みの長さ・**重みの SHA-256** を確かめ、
   合わなければエラーにします。Go も同じ確認をしてから使います。
 - **推論**：x を上の手順の特徴量として、軸ごとに `z = Σ value × float64(weight[axis][index])`（添字の昇順に足す）。
   スコアは `0 + (z > θ_k となる k の数)`、確信度の目安には期待値 `Σ σ(z − θ_k)` を使えます。

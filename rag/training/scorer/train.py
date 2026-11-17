@@ -41,6 +41,10 @@ def run(
 
     評価は、保存したファイルを読み直したモデル（float16 の重み）で行う。Go が読むのと同じ中身で測るため。
     """
+    # 同じパスだと、保存して読み直したモデルをレポートで上書きし、成功と SHA-256 を出したのに
+    # モデルが残らない（#2326 のレビュー）。何かを読み書きする前に確かめる。
+    if Path(model_out).resolve() == Path(report_out).resolve():
+        raise ValueError("--model-out と --report-out に同じパスは指定できません")
     ds = load_export(input_dir)
     if not ds.samples:
         raise ValueError("学習に使える行がありません（書き出しが空か、すべての行が読み飛ばされました）")

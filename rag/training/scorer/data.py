@@ -131,6 +131,11 @@ def _read_manifest(run_dir: Path) -> dict[str, Any]:
     files = manifest.get("files")
     if not isinstance(files, list) or not all(isinstance(f, str) for f in files):
         raise ExportFormatError("files の形が違います")
+    # run_id はモデルのヘッダとレポートに書き、モデルを元の書き出しまでたどる唯一の手がかりなので、
+    # 欠けた・空・文字列でないマニフェストは読まない（#2326 のレビュー）。
+    run_id = manifest.get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ExportFormatError("run_id が無いか、空でない文字列ではありません")
     return manifest
 
 
@@ -151,17 +156,25 @@ def load_export(run_dir: str | Path) -> Dataset:
     run_dir = Path(run_dir)
     manifest = _read_manifest(run_dir)
     rubric_keys: list[str] = list(manifest["rubric_keys"])
-    ds = Dataset(run_id=str(manifest.get("run_id", "")), rubric_keys=rubric_keys, samples=[])
+    ds = Dataset(run_id=manifest["run_id"], rubric_keys=rubric_keys, samples=[])
     seen_ids: set[str] = set()
     for name in manifest["files"]:
         path = _resolve_file(run_dir, name)
         if not path.is_file():
             raise ExportFormatError(f"マニフェストにある {name} がありません")
-        with path.open(encoding="utf-8", errors="replace") as fh:
-            for lineno, line in enumerate(fh, start=1):
-                if not line.strip():
-                    continue
-                sample, reason = parse_line(line, rubric_keys)
+        # バイトのまま1行ずつ読み、行ごとに厳密に UTF-8 として解釈する。不正なバイトを U+FFFD に置き換えて
+        # 読むと、改変された回答や、壊れた subject（同じ人が別人として学習用と評価用に分かれる）を
+        # 正しい行として学習してしまうため、壊れた行として数える（#2326 のレビュー）。
+        with path.open("rb") as fh:
+            for lineno, raw in enumerate(fh, start=1):
+                try:
+                    line = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    line, sample, reason = "", None, "invalid_utf8"
+                else:
+                    if not line.strip():
+                        continue
+                    sample, reason = parse_line(line, rubric_keys)
                 if sample is not None and sample.sample_id in seen_ids:
                     sample, reason = None, "duplicate_sample_id"
                 if sample is None:

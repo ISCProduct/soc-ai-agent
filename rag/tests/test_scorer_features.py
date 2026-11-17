@@ -144,3 +144,11 @@ def test_golden_covers_required_inputs():
     assert any(ord(ch) >= 0x1F300 for ch in joined)  # 絵文字
     cases_with_features = [c for c in _load_golden()["cases"] if c["features"]]
     assert len(cases_with_features) >= 5
+
+
+def test_unicode_version_is_runtime_unidata_version_and_not_in_spec():
+    """NFKC の Unicode の版は実行環境の unicodedata の版。ゴールデンにも書く spec() には入れない（#2326 のレビュー）。"""
+    import unicodedata
+
+    assert features.unicode_version() == unicodedata.unidata_version
+    assert "unicode_version" not in features.spec()
