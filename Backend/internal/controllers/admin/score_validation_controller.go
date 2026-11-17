@@ -55,6 +55,9 @@ func (c *AdminScoreValidationController) GetCalibration(ctx echo.Context) error 
 func (c *AdminScoreValidationController) RunCalibration(ctx echo.Context) error {
 	result, err := c.svc.RunCalibration()
 	if err != nil {
+		if errors.Is(err, admin.ErrCalibrationUnchanged) {
+			return ctx.JSON(http.StatusOK, map[string]string{"message": err.Error()})
+		}
 		if errors.Is(err, admin.ErrInsufficientSamples) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}

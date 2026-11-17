@@ -174,9 +174,18 @@ func (c *GitHubController) SummarizeRepo(ctx echo.Context) error {
 		if errors.Is(err, github.ErrInvalidRepoFullName) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		// トークンの失効（401）と、レート制限以外の 403（SSO 未承認・権限不足）は、利用者が再連携・権限の付与で
+		// 直せるので 403 にし、サービスの文言（何をすればよいか）をそのまま返す（#2231 のレビュー）。
 		var reauthErr *github.GitHubReauthRequiredError
 		if errors.As(err, &reauthErr) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		// モデルの出力が不正なのは上流（AI）の応答の問題で、サーバーの不具合ではないので 502 にする。
+		// 保存はしていないので、もう一度頼めば作り直される。そのことを利用者向けの文言で伝える（#2228 のレビュー）。
+		if errors.Is(err, github.ErrInvalidRepoSummaryOutput) {
+			httpapi.LogError(err)
+			return httpapi.NewAPIError(http.StatusBadGateway, httpapi.ErrCodeBadGateway,
+				"AIの要約をうまく作れませんでした。時間をおいてもう一度お試しください。")
 		}
 		return httpapi.InternalError(err)
 	}

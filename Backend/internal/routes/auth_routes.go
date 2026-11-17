@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	echomw "github.com/labstack/echo/v4/middleware"
 )
 
 // SetupAuthRoutes 認証関連のルーティング設定
@@ -22,6 +23,7 @@ func SetupAuthRoutes(api *echo.Group, authController *authcontrollers.AuthContro
 	auth.POST("/guest", authController.CreateGuest)
 	auth.GET("/verify-email", authController.VerifyEmail)
 	auth.POST("/forgot-password", authController.RequestPasswordReset, echoPasswordResetRateLimit())
+	auth.POST("/resend-verification", authController.ResendVerification, echoResendVerificationRateLimit(), echomw.BodyLimit("4K"))
 	auth.POST("/reset-password", authController.ResetPassword)
 	// トークンリフレッシュ・ログアウト（リフレッシュトークン自体が認証情報 #616）
 	auth.POST("/refresh", authController.Refresh)
@@ -50,6 +52,19 @@ func echoLoginRateLimit() echo.MiddlewareFunc {
 			ip := middleware.GetClientIP(c.Request())
 			if !middleware.LoginRateLimiter.Allow(ip) {
 				return echo.NewHTTPError(http.StatusTooManyRequests, "Too Many Requests: お試し回数の上限に達しました。しばらく待ってから再試行してください。")
+			}
+			return next(c)
+		}
+	}
+}
+
+// echoResendVerificationRateLimit は認証メール再送エンドポイント用のレート制限ミドルウェア
+func echoResendVerificationRateLimit() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ip := middleware.GetClientIP(c.Request())
+			if !middleware.VerificationResendRateLimiter.Allow(ip) {
+				return echo.NewHTTPError(http.StatusTooManyRequests, "Too Many Requests: リクエスト上限に達しました。しばらく待ってから再試行してください。")
 			}
 			return next(c)
 		}

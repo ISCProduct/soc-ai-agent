@@ -1,4 +1,4 @@
-import type { FormatFinding } from '@/components/FormatFindingsSection'
+import type { FormatFinding } from '@/components/feedback/FormatFindingsSection'
 
 /**
  * 履歴書レビューページ向けの共有型。

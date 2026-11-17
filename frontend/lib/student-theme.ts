@@ -150,7 +150,7 @@ export function createStudentMuiTheme(mode: StudentThemeMode) {
       fontFamily: FONT_FAMILY,
       // #1572: 本文の既定サイズ。以前は MUI 既定の14pxのままだった。
       // fontSize だけでなく body1/body2 も明示し、計算係数のズレで意図せず
-      // ぶれないようにする（企業ポータル側 company-theme.ts と同じ考え方）。
+      // ぶれないようにする（企業ポータル側 lib/company/theme.ts と同じ考え方）。
       fontSize: BODY_FONT_SIZE,
       body1: { fontSize: '1rem', lineHeight: 1.6 },
       body2: { fontSize: '1rem', lineHeight: 1.6 },

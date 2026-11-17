@@ -1,6 +1,7 @@
 package assessment
 
 import (
+	"Backend/domain/repository"
 	"errors"
 	"fmt"
 	"sort"
@@ -13,7 +14,6 @@ import (
 	"Backend/internal/repositories"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // 学校独自テンプレートの入力上限。問題数が多すぎると学生が離脱するため上限を置く。
@@ -131,7 +131,7 @@ func (s *SchoolService) CreateTemplate(schoolID, createdBy uint, in CreateTempla
 		return nil, err
 	}
 	orgID, err := s.repo.FindSchoolOrganizationID(schoolID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -209,7 +209,7 @@ func statusRank(st StudentStatus) int {
 // StudentStatuses は指定校の独自テンプレートの受検状況。他校のテンプレートは ErrNotFound。
 func (s *SchoolService) StudentStatuses(schoolID, templateID uint) (*StudentStatusList, error) {
 	t, err := s.repo.FindSchoolTemplate(templateID, schoolID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrNotFound
 	}
 	if err != nil {

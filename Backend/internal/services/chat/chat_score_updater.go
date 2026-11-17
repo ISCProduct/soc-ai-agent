@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"Backend/domain/repository"
 	"Backend/domain/valueobject"
 	"Backend/internal/models"
 	"context"
@@ -9,9 +10,34 @@ import (
 	"log"
 	"math"
 	"strings"
-
-	"gorm.io/gorm"
 )
+
+// scoreAnswer は回答を選択肢と文章に振り分けて採点し、スコアを更新する。
+// 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
+func (s *ChatService) scoreAnswer(ctx context.Context, userID uint, sessionID, answer string, jobCategoryID uint, history []models.ChatMessage) bool {
+	trimmedAnswer := strings.TrimSpace(answer)
+	lastAssistantQuestion := findLastAssistantQuestion(history)
+	resolved := ResolveChoiceAnswer(lastAssistantQuestion, trimmedAnswer)
+	log.Printf("[ProcessChat] Checking answer: raw=%q resolved_choice=%v letter=%q reason=%q free_text=%v\n",
+		trimmedAnswer, resolved.IsChoice, resolved.Letter, resolved.Reason, resolved.IsFreeText)
+	isQualityAnswer := false
+	if resolved.IsChoice && s.isChoiceAnswer(resolved.Letter) {
+		log.Printf("[ProcessChat] Processing as choice answer\n")
+		var err error
+		isQualityAnswer, err = s.processChoiceAnswer(ctx, userID, sessionID, resolved.Letter, resolved.Reason, history, jobCategoryID)
+		if err != nil {
+			log.Printf("Warning: failed to process choice answer: %v\n", err)
+		}
+	} else {
+		log.Printf("[ProcessChat] Processing as text answer\n")
+		var err error
+		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, userID, sessionID, resolved.Text, jobCategoryID, history)
+		if err != nil {
+			log.Printf("Warning: failed to update weights: %v\n", err)
+		}
+	}
+	return isQualityAnswer
+}
 
 // analyzeAndUpdateWeights ユーザーの回答を分析し重み係数を更新する。
 // 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
@@ -182,7 +208,7 @@ func (s *ChatService) inferCategoryFromQuestion(question string) string {
 func (s *ChatService) updateCategoryScore(userID uint, sessionID, category string, score int, promptVersion string) error {
 	// 既存のスコアを取得
 	existingScore, err := s.userWeightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, category)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return fmt.Errorf("failed to get existing score: %w", err)
 	}
 
@@ -208,6 +234,106 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 	}
 
 	return nil
+}
+
+// RecalculateChatSession は保存済みの質問・回答だけからチャットスコアを再構築する。
+// 書き込みは呼び出し側が同一トランザクションで置き換える。
+//
+// ライブ採点（scoreAnswer）とは別の実装なので、同じ入力で同じ値になることを
+// chat_score_recalculation_test.go で突き合わせている。職種の選択状態（jobRoleSet）は
+// 履歴から復元できないので false を渡す。precheckHuman が現状未使用なので値は変わらない。
+func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, sessionID string) (map[string]int, error) {
+	messages, err := s.chatMessageRepo.FindBySessionIDForUser(sessionID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load chat session for recalculation: %w", err)
+	}
+	// 保存軸が無い質問は、ライブ採点（processChoiceAnswer）と同じく AI 生成の質問のテンプレートから軸を引く（B2）
+	var aiQuestions []models.AIGeneratedQuestion
+	if s.aiGeneratedQuestionRepo != nil {
+		if aiQuestions, err = s.aiGeneratedQuestionRepo.FindByUserAndSession(userID, sessionID); err != nil {
+			return nil, fmt.Errorf("failed to load ai questions for recalculation: %w", err)
+		}
+	}
+
+	scores := make(map[string]int)
+	for i, message := range messages {
+		if message.Role != "user" {
+			continue
+		}
+		if i+1 < len(messages) && messages[i+1].Role == "assistant" &&
+			isValidationFeedbackMessage(messages[i+1].Content) {
+			continue
+		}
+		question, category := lastQuestionForScoring(messages[:i+1])
+		if strings.TrimSpace(question) == "" || (category == "" && s.isJobSelectionQuestion(question)) {
+			continue
+		}
+		if category == "" {
+			category = templateCategoryForQuestion(aiQuestions, question)
+		}
+		if category == "" {
+			// 軸が決まらない回答は推測しない（B2）。推測が外れると、置換で元の軸のスコアが消える。
+			// 回答だけ飛ばしても、置換でセッションのチャット行が入れ替わるので元のスコアが消える。
+			// セッションごと再計算しない（呼び出し側がスコアを残して計算版だけ進める）。
+			return nil, ErrRecalculationAxisUnknown
+		}
+
+		resolved := ResolveChoiceAnswer(question, message.Content)
+		var result HumanScoreResult
+		scoreInput := message.Content
+		if resolved.IsChoice && s.isChoiceAnswer(resolved.Letter) {
+			result = s.answerEvaluator.EvaluateHumanScoring(question, resolved.Letter, true, false, nil)
+			if result.Action != PrecheckScore {
+				continue
+			}
+			result.Score, _ = AdjustChoiceAxisScore(result.Score, resolved.Reason)
+			scoreInput = resolved.Letter
+		} else {
+			if resolved.IsFreeText {
+				scoreInput = resolved.Text
+			}
+			result = s.answerEvaluator.EvaluateHumanScoringWithContext(ctx, question, scoreInput, false, false, nil)
+			if result.LLMUnavailable {
+				// LLM 障害中の値で確定させない（B3）。呼び出し側は保存せず、計算版も進めない
+				return nil, ErrRecalculationLLMUnavailable
+			}
+			if result.Action == PrecheckSkip || result.Action == PrecheckIgnore {
+				continue
+			}
+			result = floorEngagedShortScore(scoreInput, result)
+		}
+		if result.Score <= 0 {
+			continue
+		}
+
+		if current, exists := scores[category]; exists {
+			scores[category] = int(math.Round(float64(current)*0.7 + float64(result.Score)*0.3))
+		} else {
+			scores[category] = result.Score
+		}
+	}
+	return scores, nil
+}
+
+// ErrRecalculationAxisUnknown は、保存軸もテンプレートの軸も無い回答があり、再計算できないこと（#1770 B2）。
+var ErrRecalculationAxisUnknown = errors.New("answer axis is unknown for recalculation")
+
+// ErrRecalculationLLMUnavailable は、再計算で LLM の評価が必要な回答があったのに LLM が使えなかったこと（#1770 B3）。
+var ErrRecalculationLLMUnavailable = errors.New("llm unavailable during recalculation")
+
+// templateCategoryForQuestion は、質問文に一致する AI 生成の質問のテンプレートの軸を返す。
+// ライブ採点（processChoiceAnswer）と同じ照合（後ろから探し、含む・含まれる）。見つからなければ空。
+func templateCategoryForQuestion(aiQuestions []models.AIGeneratedQuestion, question string) string {
+	head := strings.Split(question, "\n")[0]
+	for i := len(aiQuestions) - 1; i >= 0; i-- {
+		if strings.Contains(question, aiQuestions[i].QuestionText) || strings.Contains(aiQuestions[i].QuestionText, head) {
+			if aiQuestions[i].Template != nil {
+				return aiQuestions[i].Template.Category
+			}
+			return ""
+		}
+	}
+	return ""
 }
 
 // isChoiceAnswer 選択肢回答かどうかを判定

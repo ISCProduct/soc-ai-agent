@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -65,6 +64,23 @@ func NewChatService(
 	}
 }
 
+// RecalculationModel はチャットスコア再計算の概算に使うモデルと課金有無を返す。
+func (s *ChatService) RecalculationModel() (string, bool) {
+	if s.aiClient == nil {
+		return "", false
+	}
+	provider, _, _ := s.aiClient.Providers()
+	if provider == "openai" {
+		return s.aiClient.DefaultModel, true
+	}
+	// ローカル推論先でも、障害時は OpenAI へ再送されて課金される。
+	// 管理者が承認する金額を超えないよう、全件が再送された場合で見積もる。
+	if model, ok := s.aiClient.TextFallbackModel(); ok {
+		return model, true
+	}
+	return s.aiClient.DefaultModel, false
+}
+
 // ChatRequest チャットリクエスト
 type ChatRequest struct {
 	UserID        uint   `json:"user_id"`
@@ -76,21 +92,21 @@ type ChatRequest struct {
 
 // ChatResponse チャットレスポンス
 type ChatResponse struct {
-	Response            string                   `json:"response"`
-	QuestionWeightID    uint                     `json:"question_weight_id,omitempty"`
-	CurrentScores       []entity.UserWeightScore `json:"current_scores,omitempty"`
-	CurrentPhase        *PhaseProgress           `json:"current_phase,omitempty"`
-	AllPhases           []PhaseProgress          `json:"all_phases,omitempty"`
-	IsComplete          bool                     `json:"is_complete"`
-	IsTerminated        bool                     `json:"is_terminated,omitempty"`
-	SuggestRestart      bool                     `json:"suggest_restart,omitempty"`
-	InvalidAnswerCount  int                      `json:"invalid_answer_count,omitempty"`
-	TotalQuestions      int                      `json:"total_questions"`
-	AnsweredQuestions   int                      `json:"answered_questions"`
-	EvaluatedCategories int                      `json:"evaluated_categories"`
-	TotalCategories     int                      `json:"total_categories"`
-	Summary             *SessionSummary          `json:"summary,omitempty"`
-	JobCategoryID       uint                     `json:"job_category_id,omitempty"`
+	Response            string                           `json:"response"`
+	QuestionWeightID    uint                             `json:"question_weight_id,omitempty"`
+	CurrentScores       []models.UserWeightScoreResponse `json:"current_scores,omitempty"`
+	CurrentPhase        *PhaseProgress                   `json:"current_phase,omitempty"`
+	AllPhases           []PhaseProgress                  `json:"all_phases,omitempty"`
+	IsComplete          bool                             `json:"is_complete"`
+	IsTerminated        bool                             `json:"is_terminated,omitempty"`
+	SuggestRestart      bool                             `json:"suggest_restart,omitempty"`
+	InvalidAnswerCount  int                              `json:"invalid_answer_count,omitempty"`
+	TotalQuestions      int                              `json:"total_questions"`
+	AnsweredQuestions   int                              `json:"answered_questions"`
+	EvaluatedCategories int                              `json:"evaluated_categories"`
+	TotalCategories     int                              `json:"total_categories"`
+	Summary             *SessionSummary                  `json:"summary,omitempty"`
+	JobCategoryID       uint                             `json:"job_category_id,omitempty"`
 }
 
 // PhaseProgress フェーズ進捗情報
@@ -195,7 +211,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		log.Printf("Warning: failed to get phases: %v\n", err)
 	}
 	completedProgresses, _ := s.progressRepo.FindByUserAndSession(req.UserID, req.SessionID)
-	phaseByID := make(map[uint]*entity.AnalysisPhase, len(allPhases))
+	phaseByID := make(map[uint]*models.AnalysisPhase, len(allPhases))
 	for i := range allPhases {
 		phaseByID[allPhases[i].ID] = &allPhases[i]
 	}

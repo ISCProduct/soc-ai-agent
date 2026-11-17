@@ -3,20 +3,20 @@
 package graduateoutcome
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
-	"Backend/internal/repositories"
 	svc "Backend/internal/services/graduateoutcome"
 
 	"github.com/labstack/echo/v4"
 )
 
 type Service interface {
-	List(userID uint, f repositories.GraduateOutcomeFilter) (*svc.List, error)
+	List(userID uint, f svc.Filter) (*svc.List, error)
 	Company(userID, companyID uint) (*svc.CompanyDetail, error)
 }
 
@@ -42,7 +42,7 @@ func (c *Controller) List(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
-	var f repositories.GraduateOutcomeFilter
+	var f svc.Filter
 	if raw := ctx.QueryParam("year"); raw != "" {
 		y, err := strconv.Atoi(raw)
 		if err != nil || y < 1900 || y > 2100 {
@@ -53,7 +53,7 @@ func (c *Controller) List(ctx echo.Context) error {
 	f.Industry = strings.TrimSpace(ctx.QueryParam("industry"))
 	out, err := c.svc.List(userID, f)
 	if err != nil {
-		return httpapi.InternalError(err)
+		return toHTTPError(err)
 	}
 	return ctx.JSON(http.StatusOK, out)
 }
@@ -70,7 +70,19 @@ func (c *Controller) Company(ctx echo.Context) error {
 	}
 	out, err := c.svc.Company(userID, uint(id))
 	if err != nil {
-		return httpapi.InternalError(err)
+		return toHTTPError(err)
 	}
 	return ctx.JSON(http.StatusOK, out)
+}
+
+// toHTTPError は、学生が存在しない（退会済みを含む）なら 401、企業が無いなら 404、それ以外は 500 にする。
+func toHTTPError(err error) error {
+	switch {
+	case errors.Is(err, svc.ErrUserNotFound):
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
+	case errors.Is(err, svc.ErrCompanyNotFound):
+		return httpapi.NewAPIError(http.StatusNotFound, httpapi.ErrCodeNotFound, "企業が見つかりません")
+	default:
+		return httpapi.InternalError(err)
+	}
 }

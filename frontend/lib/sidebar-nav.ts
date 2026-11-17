@@ -18,6 +18,8 @@ export const SIDEBAR_NAV_ITEMS = [
   { href: '/es-rewrite', label: t('sidebar.esRewrite') },
   { href: '/schedule', label: t('sidebar.schedule') },
   { href: '/applications', label: t('sidebar.applications') },
+  // 卒業生の進路実績（#2032）。ほかに入口が無いので共通メニューから行けるようにする
+  { href: '/graduate-outcomes', label: t('sidebar.graduateOutcomes') },
   { href: '/scout', label: t('sidebar.scout') },
   { href: '/profile', label: t('sidebar.profile') },
 ] as const

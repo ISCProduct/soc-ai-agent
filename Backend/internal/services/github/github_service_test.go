@@ -3,6 +3,7 @@ package github_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -122,6 +123,46 @@ func TestCheckRateLimit_403WithRemainingZero(t *testing.T) {
 	err := github.CheckRateLimit(resp)
 	require.Error(t, err)
 	assert.True(t, github.IsRateLimitError(err))
+}
+
+// 二次レート制限は、残り回数が 0 でなくても 403 か 429 と Retry-After で返る。権限不足の 403 と取り違えないよう、
+// Retry-After があればレート制限として扱う（#2231 のレビュー）。Retry-After が数値でなければ扱わない。
+func TestCheckRateLimit_RetryAfter(t *testing.T) {
+	cases := []struct {
+		name       string
+		status     int
+		retryAfter string
+		want       bool
+	}{
+		{"403 + Retry-After 60 はレート制限", http.StatusForbidden, "60", true},
+		{"403 + Retry-After 0 もレート制限", http.StatusForbidden, "0", true},
+		{"403 + Retry-After が数値でなければレート制限にしない", http.StatusForbidden, "abc", false},
+		{"403 + Retry-After が負ならレート制限にしない", http.StatusForbidden, "-1", false},
+		{"403 で Retry-After が無ければレート制限にしない", http.StatusForbidden, "", false},
+		{"404 + Retry-After はレート制限にしない", http.StatusNotFound, "60", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := make(http.Header)
+			h.Set("X-RateLimit-Remaining", "4000")
+			if tc.retryAfter != "" {
+				h.Set("Retry-After", tc.retryAfter)
+			}
+			err := github.CheckRateLimit(&http.Response{StatusCode: tc.status, Header: h})
+			assert.Equal(t, tc.want, github.IsRateLimitError(err), "err = %v", err)
+		})
+	}
+}
+
+// 呼び出し元で %w で包まれても、レート制限と判定できる（doRequestWithRetry がリトライを止める判定に使う）。
+func TestIsRateLimitError_Wrapped(t *testing.T) {
+	h := make(http.Header)
+	h.Set("X-RateLimit-Remaining", "0")
+	err := github.CheckRateLimit(&http.Response{StatusCode: http.StatusForbidden, Header: h})
+	require.Error(t, err)
+	assert.True(t, github.IsRateLimitError(fmt.Errorf("fetch: %w", err)))
+	assert.False(t, github.IsRateLimitError(errors.New("github rate limit exceeded")))
+	assert.False(t, github.IsRateLimitError(nil))
 }
 
 func TestCheckRateLimit_403WithRemainingNonZero(t *testing.T) {

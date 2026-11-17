@@ -53,6 +53,13 @@ var expiredDeleteCases = []struct {
 		},
 		wantSQL: "DELETE FROM `user_refresh_tokens` WHERE expires_at < ? ORDER BY expires_at LIMIT ?",
 	},
+	{
+		name: "企業ユーザーのリフレッシュトークン",
+		del: func(db *gorm.DB, cutoff time.Time, limit int) (int64, error) {
+			return NewCompanyUserRefreshTokenRepository(db).DeleteExpired(cutoff, limit)
+		},
+		wantSQL: "DELETE FROM `company_user_refresh_tokens` WHERE expires_at < ? ORDER BY expires_at LIMIT ?",
+	},
 }
 
 func TestDeleteExpired_古い順に上限件数だけ消して件数を返す(t *testing.T) {

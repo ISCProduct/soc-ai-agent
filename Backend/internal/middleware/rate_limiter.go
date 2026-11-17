@@ -179,6 +179,16 @@ var LoginRateLimiter KeyRateLimiter = NewRateLimiter(time.Minute, 20)
 // IP単位: 1時間に5回まで
 var PasswordResetRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, 5)
 
+// VerificationResendRateLimiter は認証メール再送のIP単位の制限器。
+// 未認証で叩けるうえ、メールが出るので、連打でメール爆撃の踏み台にされないための上限。
+// 上限は環境変数で調整できる(正規利用の大半が BFF 経由で、IP が収束する場合を考慮)。
+// ponytail: インメモリのため、ECS のタスクごとに数える。厳密にしたい場合は Redis 版(NewRedisRateLimiter)に差し替える。
+var VerificationResendRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("VERIFICATION_RESEND_RATE_LIMIT_PER_IP", 10))
+
+// VerificationResendEmailRateLimiter は認証メール再送の、メールアドレス単位の制限器。
+// 同じ人のメールボックスに、短時間に何通も送らないための上限(サービス層が使う)。
+var VerificationResendEmailRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("VERIFICATION_RESEND_RATE_LIMIT_PER_EMAIL", 3))
+
 // ConfigureRateLimiters は外部 KeyRateLimiter でグローバル制限器を差し替える（#617）。
 func ConfigureRateLimiters(login, passwordReset KeyRateLimiter) {
 	if login != nil {

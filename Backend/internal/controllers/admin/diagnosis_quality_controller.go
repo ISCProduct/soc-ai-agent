@@ -1,12 +1,12 @@
 package admin
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/repositories"
 	"net/http"
 	"strconv"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 )
 
 // AdminDiagnosisQualityController は診断妥当性レポートの参照API。
@@ -30,7 +30,7 @@ func (c *AdminDiagnosisQualityController) GetBySession(ctx echo.Context) error {
 	}
 	report, err := c.repo.FindByUserAndSession(uint(userID64), sessionID)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if err == repository.ErrNotFound {
 			return ctx.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
 		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})

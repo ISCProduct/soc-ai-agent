@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log"
 
-	"Backend/domain/entity"
+	"Backend/internal/models"
 
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
@@ -15,8 +15,8 @@ import (
 
 // EmailSender はキューワーカーが使うメール送信面。
 type EmailSender interface {
-	SendVerificationEmail(user *entity.User, token, appURL string) error
-	SendReVerificationEmail(user *entity.User, token, appURL string) error
+	SendVerificationEmail(user *models.User, token, appURL string) error
+	SendReVerificationEmail(user *models.User, token, appURL string) error
 	SendRegistrationEmail(email, token string) error
 	SendPasswordResetEmail(email, token, appURL string) error
 }
@@ -96,7 +96,7 @@ func handleEmailVerification(email EmailSender) asynq.HandlerFunc {
 		if err := json.Unmarshal(t.Payload(), &p); err != nil {
 			return fmt.Errorf("decode payload: %w", err)
 		}
-		user := &entity.User{ID: p.UserID, Email: p.Email, Name: p.Name}
+		user := &models.User{ID: p.UserID, Email: p.Email, Name: p.Name}
 		if err := email.SendVerificationEmail(user, p.Token, p.AppURL); err != nil {
 			return err
 		}
@@ -110,7 +110,7 @@ func handleEmailReVerification(email EmailSender) asynq.HandlerFunc {
 		if err := json.Unmarshal(t.Payload(), &p); err != nil {
 			return fmt.Errorf("decode payload: %w", err)
 		}
-		user := &entity.User{ID: p.UserID, Email: p.Email, Name: p.Name}
+		user := &models.User{ID: p.UserID, Email: p.Email, Name: p.Name}
 		return email.SendReVerificationEmail(user, p.Token, p.AppURL)
 	}
 }

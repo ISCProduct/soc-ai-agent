@@ -4,7 +4,7 @@
 
 1. [デプロイ手順](#1-デプロイ手順)
    - [停止日の本番デプロイ](#11-停止日の本番デプロイ-1518)
-   - [staging の自動停止とデプロイの競合](#12-staging-の自動停止とデプロイの競合-1693)
+   - [staging は常時起動](#12-staging-は常時起動デプロイ後の自動停止は廃止)
 2. [定期バッチ作業](#2-定期バッチ作業)
 3. [監視項目](#3-監視項目)
    - [リクエストIDでサービス横断追跡](#31-リクエストidでサービス横断追跡-1188)
@@ -240,41 +240,23 @@ index+attestation の分だけ減らしている（provenance は誰も参照し
 
 ---
 
-## 1.2 staging の自動停止とデプロイの競合 (#1693)
+## 1.2 staging は常時起動（デプロイ後の自動停止は廃止）
 
-staging はコスト削減のため、デプロイから1時間で自動停止する（`deployment.yml` の
-`staging-auto-stop` ジョブが `sleep 3600` の後に ASG を desired=0、RDS を停止する）。
-1時間以内に次のデプロイが来れば、同じ concurrency group `staging-auto-stop` で
-前回分がキャンセルされ、実質タイマーがリセットされる。
+以前はコスト削減のため、デプロイから1時間で ASG(desired=0) と RDS を止める
+`staging-auto-stop` ジョブがあった（#1693 で次のデプロイとの競合対策も入れていた）。
+停止後は次のデプロイか手動の起動操作まで staging が落ちたままになり、
+「staging が起動していない」状態が日常的に起きていたため廃止した。
 
-**キャンセルはデプロイの開始時点で行う。** auto-stop は `deploy-staging` の後続なので、
-デプロイ成功後にしかキャンセルが掛からないようにすると、デプロイ中（や失敗時）に
-前回の auto-stop が発火して起動中の staging を落とす。これを避けるため、
-`deploy-staging` と並んで走る空ジョブ `cancel-staging-auto-stop` が
-同じ group を先に押さえる。
+起動/停止は SSM `/soc-app/staging-uptime`（`on` / `off`）だけで決まる。
 
-それでもキャンセルの取り合いには数秒〜数十秒の隙があるため、
-`Wait for staging infra ready` は待機ループの中で ASG の `DesiredCapacity` を
-毎回読み、0 に戻っていたら 1 へ上げ直す（自己修復）。
-**desired が 0 の周回では EC2 の state を見ない。** desired=0 の直後でも
-終了処理が始まるまでインスタンスは `running` のままで、そこで待機を抜けると
-これから落とされる台へデプロイしてしまう。
+- 既定は `on`。`staging-uptime-scheduler.yml` が毎時 ASG(min=1,desired=1) と RDS を起動状態に保つ。
+- 止めたいときは Discord の `/staging state:off`。戻すときは `/staging state:on`。
+  反映は次のスケジューラ実行（最大1時間後）。すぐ反映したいときは
+  `staging-uptime-scheduler.yml` を `workflow_dispatch` で手動実行する。
+- GitHub の `schedule` は遅延・欠落することがある（実測で4〜8時間空いた）。止まっていたら
+  同じく手動実行する。
+- `deploy-staging` の `Wait for staging infra ready` は、止まっていたら起動し直す自己修復を残している。
 
-### 失敗したときの読み方
-
-末尾の `desired:` を先に見る。
-
-- `desired: 0` — 5分間 0 のままだった。上げ直しが効いていないので、前回の auto-stop が
-  まだ生きているか、ASG の min/max や権限を疑う。desired が 0 の周回では state を
-  読まないため `state: unread` と出る（インスタンスの有無は分からない）。
-- `desired: 1` かつ `state: None` — desired は戻っているがインスタンスが現れない
-  （`None` = 該当インスタンスなし）。AZ の容量不足や launch template の不備を疑う。
-- `desired: unknown` — ASG を読めていない。権限か API 障害。
-
-いずれも再実行で復帰することが多いが、`desired: 0` が続くなら
-auto-stop のキャンセルが効いていない。
-
-判定ロジックは `automation/test/staging-infra-wait-test.sh` が固定している。
 
 ---
 

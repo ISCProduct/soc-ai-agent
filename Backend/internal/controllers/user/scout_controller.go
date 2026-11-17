@@ -16,6 +16,7 @@ import (
 type studentScoutService interface {
 	ListStudentScouts(userID uint, limit, offset int) ([]companyportal.StudentScoutView, int64, error)
 	MarkViewed(userID, scoutID uint) (*models.Scout, error)
+	Accept(userID, scoutID uint) (*models.Scout, error)
 	Decline(userID, scoutID uint) (*models.Scout, error)
 	BlockCompany(userID, companyID uint) error
 	ListBlockedCompanyIDs(userID uint) ([]uint, error)
@@ -99,6 +100,27 @@ func (c *StudentScoutController) View(ctx echo.Context) error {
 		"message":    scout.Message,
 		"company_id": scout.CompanyID,
 		"created_at": scout.CreatedAt.Format(time.RFC3339),
+	})
+}
+
+// Accept POST /api/user/scouts/:id/accept
+// 承諾すると、その企業の学生検索・スカウト一覧に氏名が見えるようになる。
+func (c *StudentScoutController) Accept(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
+	}
+	id, apiErr := httpapi.UintParam(ctx, "id")
+	if apiErr != nil {
+		return apiErr
+	}
+	scout, err := c.scouts.Accept(userID, id)
+	if err != nil {
+		return mapStudentScoutError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"id":     scout.ID,
+		"status": scout.Status,
 	})
 }
 

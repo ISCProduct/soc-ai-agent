@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -58,7 +57,7 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint, force boo
 		}
 		// 無効・失効トークンは再連携を促す
 		if isGitHubAuthError(err) {
-			return &GitHubReauthRequiredError{Reason: "GitHubアクセストークンが無効です。GitHubアカウントを再連携してください。"}
+			return &GitHubReauthRequiredError{Reason: reauthMessageTokenInvalid}
 		}
 		return err
 	}
@@ -108,13 +107,22 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint, force boo
 	return nil
 }
 
+// isGitHubNotFoundError は、GitHub API が 404 を返したかを、doGet が返す GitHubAPIError のステータスで判定する。
+// README の取得では、404 は「README が無い」という正常な結果として扱う（#2226）。
+func isGitHubNotFoundError(err error) bool {
+	return githubAPIStatus(err) == http.StatusNotFound
+}
+
+// isGitHubAuthError は、トークンが無効・失効している（GitHub API が 401 を返した）かを判定する。
+// 以前は「bad credentials」「requires authentication」など 401 の本文の文言も見ていたが、
+// どちらも GitHub が 401 で返す本文なので、ステータスだけで同じ範囲を判定できる。
+// 復号の失敗は loadAccessToken が GitHubReauthRequiredError で返すので、ここでは見ない。
 func isGitHubAuthError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "status 401") ||
-		strings.Contains(msg, "bad credentials") ||
-		strings.Contains(msg, "requires authentication") ||
-		strings.Contains(msg, "access token decrypt failed")
+	return githubAPIStatus(err) == http.StatusUnauthorized
+}
+
+// isGitHubForbiddenError は、レート制限以外の 403（組織の SAML SSO が未承認、リポジトリの権限が無い、など）かを判定する。
+// レート制限の 403 は CheckRateLimit が rateLimitError で返し、GitHubAPIError にはならない。
+func isGitHubForbiddenError(err error) bool {
+	return githubAPIStatus(err) == http.StatusForbidden
 }

@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Alert, Box, Button, Card, CardContent, Divider, Skeleton, Stack, Typography } from '@mui/material'
 import { authService } from '@/lib/auth'
 import { getAdminSchoolAccess } from '@/lib/admin/school-access'
-import { INACTIVE_DAYS, type StudentTendencyResponse } from '@/lib/student-insights'
+import { INACTIVE_DAYS, type StudentTendencyResponse } from '@/lib/admin/student-insights'
 import { LOW_MATCH_THRESHOLD } from '@/lib/low-match'
 
 type Row = {

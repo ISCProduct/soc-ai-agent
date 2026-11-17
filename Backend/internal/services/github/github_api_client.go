@@ -448,15 +448,66 @@ func (s *GitHubService) doGet(ctx context.Context, client *http.Client, token, u
 	defer resp.Body.Close()
 
 	if err := CheckRateLimit(resp); err != nil {
+		drainBody(resp.Body)
 		return nil, err
 	}
 
 	if resp.StatusCode >= 400 {
-		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("github api error: status %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		// 応答の本文はエラーに入れない。エラーはログにそのまま出るため、GitHub の応答本文（利用者の
+		// リポジトリ名・組織名などを含みうる）がログに残るのを避ける。判定はステータスだけで行う。
+		// 本文は二次レート制限の判別にだけ読み、上限付きで読み切ってから捨てる（下の drainBody）。
+		head, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		drainBody(resp.Body)
+		if resp.StatusCode == http.StatusForbidden && isSecondaryRateLimitBody(head) {
+			return nil, &rateLimitError{resetAt: time.Now().Add(secondaryRateLimitWait)}
+		}
+		return nil, &GitHubAPIError{StatusCode: resp.StatusCode}
 	}
 
 	return io.ReadAll(resp.Body)
+}
+
+// maxErrorBodyBytes は、エラー応答の本文を読み切るときの上限。HTTP/1.x では本文を読み切らずに
+// Close すると接続を再利用できず、README が無いリポジトリでは 404 の直後の確認（checkRepoAccessible）で
+// 毎回新しい TCP/TLS 接続になる（#2266 のレビュー）。巨大な本文を読み続けないよう上限を設ける。
+const maxErrorBodyBytes = 64 << 10
+
+// drainBody は、本文の残りを上限付きで読み捨てる（接続の再利用のため）。Close は呼び出し元の defer で行う。
+func drainBody(body io.Reader) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxErrorBodyBytes))
+}
+
+// secondaryRateLimitWait は、Retry-After の無い二次レート制限で待つ時間。GitHub のドキュメントでは、
+// Retry-After も X-RateLimit-Remaining=0 も無い場合は少なくとも1分待つよう定めている。
+const secondaryRateLimitWait = time.Minute
+
+// isSecondaryRateLimitBody は、403 の本文が二次レート制限の応答かを返す。
+// 二次レート制限は Retry-After を付けずに返ることがあり、ヘッダーだけでは権限不足の 403 と区別できない
+// （#2266 のレビュー）。GitHub は本文の message に "secondary rate limit" を含めて返すので、それで判別する。
+// 本文はこの判別にだけ使い、エラーやログには入れない。
+func isSecondaryRateLimitBody(body []byte) bool {
+	return bytes.Contains(bytes.ToLower(body), []byte("secondary rate limit"))
+}
+
+// GitHubAPIError GitHub API が 4xx・5xx を返したことを表す（レート制限は rateLimitError で別に返す）。
+// 404・401・403 などの判定は、エラーの文字列ではなく StatusCode で行う。
+// 以前は本文を含む文字列の部分一致で判定していたため、本文に「status 404」を含む 5xx を 404 と
+// 取り違えるおそれがあった（#2231 のレビュー）。
+type GitHubAPIError struct {
+	StatusCode int
+}
+
+func (e *GitHubAPIError) Error() string {
+	return fmt.Sprintf("github api error: status %d", e.StatusCode)
+}
+
+// githubAPIStatus は err が GitHubAPIError（包まれていてもよい）なら、そのステータスを返す。違えば 0。
+func githubAPIStatus(err error) int {
+	var apiErr *GitHubAPIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode
+	}
+	return 0
 }
 
 // rateLimitError レート制限エラー型
@@ -468,21 +519,27 @@ func (e *rateLimitError) Error() string {
 	return fmt.Sprintf("github rate limit exceeded, resets at %s", e.resetAt.Format(time.RFC3339))
 }
 
+// IsRateLimitError err がレート制限のエラーかを返す。呼び出し元で %w で包まれていても判定できるよう errors.As を使う。
 func IsRateLimitError(err error) bool {
-	_, ok := err.(*rateLimitError)
-	return ok
+	var rlErr *rateLimitError
+	return errors.As(err, &rlErr)
 }
 
 // CheckRateLimit レスポンスヘッダーからレート制限を確認する
 func CheckRateLimit(resp *http.Response) error {
-	if resp.StatusCode != 403 && resp.StatusCode != 429 {
+	if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusTooManyRequests {
 		return nil
 	}
 	remaining := resp.Header.Get("X-RateLimit-Remaining")
-	if remaining == "0" || resp.StatusCode == 429 {
+	if remaining == "0" || resp.StatusCode == http.StatusTooManyRequests {
 		resetUnix, _ := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64)
 		resetAt := time.Unix(resetUnix, 0)
 		return &rateLimitError{resetAt: resetAt}
+	}
+	// 二次レート制限（短時間の連続アクセスなど）は、残り回数が 0 でなくても 403 と Retry-After で返る。
+	// これをレート制限として扱わないと、権限不足の 403 と区別できず、利用者に再連携を促してしまう（#2231 のレビュー）。
+	if retryAfter, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && retryAfter >= 0 {
+		return &rateLimitError{resetAt: time.Now().Add(time.Duration(retryAfter) * time.Second)}
 	}
 	return nil
 }

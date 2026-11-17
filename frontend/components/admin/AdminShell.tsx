@@ -22,7 +22,7 @@ import { authService } from '@/lib/auth'
 import { adminTokenNeedsRefresh } from '@/lib/auth/admin-token'
 import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import { ADMIN_COLORS } from '@/lib/design-tokens'
-import { activeAdminNavItem, visibleAdminNav } from '@/lib/admin-nav'
+import { activeAdminNavItem, visibleAdminNav } from '@/lib/admin/nav'
 
 const SIDEBAR_WIDTH = 248
 const MAIN_ID = 'admin-main'

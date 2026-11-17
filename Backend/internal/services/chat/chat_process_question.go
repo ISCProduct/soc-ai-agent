@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"Backend/domain/entity"
 	"Backend/internal/models"
 	"context"
 	"fmt"
@@ -14,10 +13,10 @@ type processQuestionInput struct {
 	history             []models.ChatMessage
 	jobCategoryID       uint
 	jobJustResolved     bool
-	currentPhase        *entity.UserAnalysisProgress
-	allPhases           []entity.AnalysisPhase
-	completedProgresses []entity.UserAnalysisProgress
-	phaseByID           map[uint]*entity.AnalysisPhase
+	currentPhase        *models.UserAnalysisProgress
+	allPhases           []models.AnalysisPhase
+	completedProgresses []models.UserAnalysisProgress
+	phaseByID           map[uint]*models.AnalysisPhase
 }
 
 func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input processQuestionInput) (*ChatResponse, error) {
@@ -32,27 +31,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 
 	// 3. ユーザーの回答から重み係数を判定・更新し、回答品質に応じてフェーズ進捗を更新
 	// isQualityAnswer: スキップフレーズ・極短回答・スコア0でなければ true（進捗カウント対象）
-	trimmedAnswer := strings.TrimSpace(req.Message)
-	lastAssistantQuestion := findLastAssistantQuestion(history)
-	resolved := ResolveChoiceAnswer(lastAssistantQuestion, trimmedAnswer)
-	log.Printf("[ProcessChat] Checking answer: raw=%q resolved_choice=%v letter=%q reason=%q free_text=%v\n",
-		trimmedAnswer, resolved.IsChoice, resolved.Letter, resolved.Reason, resolved.IsFreeText)
-	isQualityAnswer := false
-	if resolved.IsChoice && s.isChoiceAnswer(resolved.Letter) {
-		log.Printf("[ProcessChat] Processing as choice answer\n")
-		var err error
-		isQualityAnswer, err = s.processChoiceAnswer(ctx, req.UserID, req.SessionID, resolved.Letter, resolved.Reason, history, jobCategoryID)
-		if err != nil {
-			log.Printf("Warning: failed to process choice answer: %v\n", err)
-		}
-	} else {
-		log.Printf("[ProcessChat] Processing as text answer\n")
-		var err error
-		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, resolved.Text, jobCategoryID, history)
-		if err != nil {
-			log.Printf("Warning: failed to update weights: %v\n", err)
-		}
-	}
+	isQualityAnswer := s.scoreAnswer(ctx, req.UserID, req.SessionID, req.Message, jobCategoryID, history)
 
 	// 品質回答のみ valid_answers をインクリメントして進捗を進める。
 	// 職種選択に答えたこの回答は resolveJobCategoryForChat 内の
@@ -258,7 +237,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	return &ChatResponse{
 		Response:            aiResponse,
 		QuestionWeightID:    questionWeightID,
-		CurrentScores:       finalScores,
+		CurrentScores:       models.NewUserWeightScoreResponses(finalScores),
 		CurrentPhase:        currentPhaseInfo,
 		AllPhases:           allPhasesInfo,
 		IsComplete:          isComplete,

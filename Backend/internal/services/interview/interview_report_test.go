@@ -1,14 +1,12 @@
 package interview
 
 import (
-	"context"
-	"errors"
-	"testing"
-
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
+	"context"
+	"errors"
+	"testing"
 
 	"gorm.io/gorm"
 )
@@ -145,8 +143,8 @@ func TestGenerateReport_NoUtterances(t *testing.T) {
 // 未実装メソッドは埋め込んだインターフェース経由（呼ばれたら nil panic で気付ける）。
 type nonAdminUserRepoStub struct{ repository.UserRepository }
 
-func (nonAdminUserRepoStub) GetUserByID(id uint) (*entity.User, error) {
-	return &entity.User{ID: id, IsAdmin: false}, nil
+func (nonAdminUserRepoStub) GetUserByID(id uint) (*models.User, error) {
+	return &models.User{ID: id, IsAdmin: false}, nil
 }
 
 // TestRegenerateReport は #1476 のレビュー指摘「未生成レポートを実際に再生成できる経路」の回帰テスト。

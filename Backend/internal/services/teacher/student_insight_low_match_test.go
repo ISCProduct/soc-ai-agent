@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"testing"
 
-	"Backend/domain/entity"
+	"Backend/internal/models"
 	"Backend/internal/repositories"
 )
 
@@ -28,7 +28,7 @@ func (s *stubLowMatch) FindLowMatchApplicationsByUsers(userIDs []uint, threshold
 	return s.byUser, s.err
 }
 
-func lowMatchService(low *stubLowMatch, students ...entity.User) *StudentInsightService {
+func lowMatchService(low *stubLowMatch, students ...models.User) *StudentInsightService {
 	svc := NewStudentInsightService(
 		&stubLister{students: students, total: int64(len(students))},
 		&stubScores{scores: map[uint]map[string]float64{}},
@@ -41,7 +41,7 @@ func lowMatchService(low *stubLowMatch, students ...entity.User) *StudentInsight
 	return svc
 }
 
-var threeStudents = []entity.User{
+var threeStudents = []models.User{
 	{ID: 1, Name: "山田", Email: "y@example.com"},
 	{ID: 2, Name: "鈴木", Email: "s@example.com"},
 	{ID: 3, Name: "田中", Email: "t@example.com"},

@@ -9,8 +9,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 var (
@@ -253,7 +251,7 @@ func (s *OrganizationService) RemoveMember(organizationID, userID uint) error {
 		return ErrMembershipNotFound
 	}
 	if err := s.repo.RemoveMemberTransactional(organizationID, userID); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return ErrMembershipNotFound
 		}
 		return err

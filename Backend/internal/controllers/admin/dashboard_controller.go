@@ -26,6 +26,7 @@ type AdminDashboardController struct {
 	reportRepo  ifaces.DashboardReportRepo
 	schools     *school.SchoolService
 	orgs        *organization.OrganizationService
+	funnel      FunnelSource
 }
 
 func NewAdminDashboardController(

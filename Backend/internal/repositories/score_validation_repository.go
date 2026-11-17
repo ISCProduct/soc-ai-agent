@@ -2,6 +2,8 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -217,15 +219,141 @@ func (r *ScoreValidationRepository) SaveCalibrationWeights(weights []models.Scor
 	})
 }
 
-// CategoryPassStats キャリブレーション計算用の生データ
+// CategoryPassStats キャリブレーション計算用の生データ。
+// Signal は「通過側の平均特徴量 − 不採用側の平均特徴量」（特徴量は応募時点スコア）。
+// 正ならそのカテゴリの高スコアが通過と共起しやすい。
 type CategoryPassStats struct {
 	Category string
 	AvgScore float64
 	PassRate float64
 	SampleN  int
+	Signal   float64
+	PassN    int
+	FailN    int
 }
 
+// calibrationMinDecided はカテゴリあたりの確定結果（通過+不採用）の下限。
+const calibrationMinDecided = 10
+
+// calibrationMinPerClass は通過・不採用それぞれに必要な下限（片方に偏ると信号が取れない）。
+const calibrationMinPerClass = 2
+
 func (r *ScoreValidationRepository) GetCategoryPassStats() ([]CategoryPassStats, error) {
+	// 応募時点スナップショット＋確定結果（通過/不採用）を優先。
+	// 無い／足りない場合のみ従来の user_id 結合へフォールバックする。
+	if rows, err := r.getCategoryPassStatsFromSnapshots(); err != nil {
+		return nil, err
+	} else if len(rows) > 0 {
+		return rows, nil
+	}
+	return r.getCategoryPassStatsLegacy()
+}
+
+func parseScoreSnapshot(raw string) (map[string]float64, bool) {
+	snap := map[string]float64{}
+	if err := json.Unmarshal([]byte(raw), &snap); err == nil {
+		return snap, len(snap) > 0
+	}
+	intSnap := map[string]int{}
+	if err := json.Unmarshal([]byte(raw), &intSnap); err != nil {
+		return nil, false
+	}
+	for k, v := range intSnap {
+		snap[k] = float64(v)
+	}
+	return snap, len(snap) > 0
+}
+
+func isCalibrationPassStatus(status string) bool {
+	for _, s := range models.FlywheelPassedStatusFilter() {
+		if s == status {
+			return true
+		}
+	}
+	return false
+}
+
+func isCalibrationFailStatus(status string) bool {
+	return status == "rejected"
+}
+
+func (r *ScoreValidationRepository) getCategoryPassStatsFromSnapshots() ([]CategoryPassStats, error) {
+	type appRow struct {
+		Status        string
+		ScoreSnapshot string
+	}
+	var apps []appRow
+	// 確定結果だけ使う。進行中・辞退は通過でも不採用でもないので混ぜない。
+	if err := r.db.Model(&models.UserApplicationStatus{}).
+		Select("status, score_snapshot").
+		Where("score_snapshot IS NOT NULL AND score_snapshot != ''").
+		Where("status IN ? OR status = ?", models.FlywheelPassedStatusFilter(), "rejected").
+		Find(&apps).Error; err != nil {
+		return nil, err
+	}
+	if len(apps) == 0 {
+		return nil, nil
+	}
+
+	type agg struct {
+		sumAll  float64
+		n       int
+		passSum float64
+		passN   int
+		failSum float64
+		failN   int
+	}
+	byCat := map[string]*agg{}
+	for _, app := range apps {
+		snap, ok := parseScoreSnapshot(app.ScoreSnapshot)
+		if !ok {
+			continue
+		}
+		pass := isCalibrationPassStatus(app.Status)
+		fail := isCalibrationFailStatus(app.Status)
+		if !pass && !fail {
+			continue
+		}
+		for cat, score := range snap {
+			a := byCat[cat]
+			if a == nil {
+				a = &agg{}
+				byCat[cat] = a
+			}
+			a.sumAll += score
+			a.n++
+			if pass {
+				a.passSum += score
+				a.passN++
+			} else {
+				a.failSum += score
+				a.failN++
+			}
+		}
+	}
+
+	out := make([]CategoryPassStats, 0, len(byCat))
+	for cat, a := range byCat {
+		if a.n < calibrationMinDecided || a.passN < calibrationMinPerClass || a.failN < calibrationMinPerClass {
+			continue
+		}
+		passAvg := a.passSum / float64(a.passN)
+		failAvg := a.failSum / float64(a.failN)
+		out = append(out, CategoryPassStats{
+			Category: cat,
+			AvgScore: a.sumAll / float64(a.n),
+			PassRate: float64(a.passN) / float64(a.n) * 100,
+			SampleN:  a.n,
+			Signal:   passAvg - failAvg,
+			PassN:    a.passN,
+			FailN:    a.failN,
+		})
+	}
+	return out, nil
+}
+
+func (r *ScoreValidationRepository) getCategoryPassStatsLegacy() ([]CategoryPassStats, error) {
+	// スナップショットが無い古いデータの最終手段。通過率比しか取れないので Signal=0。
 	rows := []CategoryPassStats{}
 	err := r.db.Raw(flywheelPassedSQL(`
 		SELECT
@@ -239,8 +367,9 @@ func (r *ScoreValidationRepository) GetCategoryPassStats() ([]CategoryPassStats,
 			COUNT(DISTINCT uas.id) AS sample_n
 		FROM user_weight_scores uws
 		INNER JOIN user_application_statuses uas ON uas.user_id = uws.user_id
+		WHERE uas.status IN (%[1]s) OR uas.status = 'rejected'
 		GROUP BY uws.weight_category
-		HAVING COUNT(DISTINCT uas.id) >= 5
+		HAVING COUNT(DISTINCT uas.id) >= 10
 	`)).Scan(&rows).Error
 	return rows, err
 }
@@ -264,11 +393,14 @@ func (r *ScoreValidationRepository) ListCalibrationHistory(limit int) ([]models.
 	return weights, err
 }
 
-// LastCalibrationAt 最後にキャリブレーションが実行された日時
+// LastCalibrationAt 最後にキャリブレーションが実行された日時。未実行なら nil, nil。
 func (r *ScoreValidationRepository) LastCalibrationAt() (*time.Time, error) {
 	var w models.ScoreCalibrationWeight
 	err := r.db.Order("created_at DESC").First(&w).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &w.CreatedAt, nil

@@ -1,7 +1,7 @@
 package flywheel
 
 import (
-	"Backend/domain/entity"
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"encoding/json"
@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-
-	"gorm.io/gorm"
 )
 
 // CrossFeatureIntegrationService 機能間データ連携サービス
@@ -70,12 +68,12 @@ func (s *CrossFeatureIntegrationService) ResolveDiagnosisSessionID(userID uint) 
 }
 
 // PickDiagnosisSessionID は診断セッション選定の純関数（テスト用にも公開）。
-// 「診断が無い」(gorm.ErrRecordNotFound) だけをフォールバック条件にし、
+// 「診断が無い」(repository.ErrNotFound) だけをフォールバック条件にし、
 // 接続断などの一時エラーは呼び出し元へ返す。
 func PickDiagnosisSessionID(userID uint, latestChatSession string, err error) (string, error) {
 	fallback := fmt.Sprintf("interview-%d", userID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return fallback, nil
 		}
 		return "", err
@@ -244,7 +242,7 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromESReview(userID uint, r
 // （反映側はエラーをログに流すので、書き込みの有無だけでは検証が効かない）。
 func (s *CrossFeatureIntegrationService) esTargetSession(userID uint) (string, bool, error) {
 	sessionID, err := s.weightScoreRepo.FindLatestDiagnosisSessionID(userID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return "", false, nil
 	}
 	if err != nil {
@@ -376,11 +374,11 @@ func (s *CrossFeatureIntegrationService) BuildResumeContextFromScores(
 
 // UserIntegratedProfile ユーザーの統合プロファイル
 type UserIntegratedProfile struct {
-	UserID        uint                     `json:"user_id"`
-	ChatSessionID string                   `json:"chat_session_id"`
-	WeightScores  []entity.UserWeightScore `json:"weight_scores"`
-	TopCategories []entity.UserWeightScore `json:"top_categories"`
-	SourceSummary ProfileSourceSummary     `json:"source_summary"`
+	UserID        uint                             `json:"user_id"`
+	ChatSessionID string                           `json:"chat_session_id"`
+	WeightScores  []models.UserWeightScoreResponse `json:"weight_scores"`
+	TopCategories []models.UserWeightScoreResponse `json:"top_categories"`
+	SourceSummary ProfileSourceSummary             `json:"source_summary"`
 }
 
 // ProfileSourceSummary 各機能からのデータ取得状況
@@ -407,8 +405,8 @@ func (s *CrossFeatureIntegrationService) BuildIntegratedProfile(
 	return &UserIntegratedProfile{
 		UserID:        userID,
 		ChatSessionID: chatSessionID,
-		WeightScores:  scores,
-		TopCategories: top,
+		WeightScores:  models.NewUserWeightScoreResponses(scores),
+		TopCategories: models.NewUserWeightScoreResponses(top),
 		SourceSummary: ProfileSourceSummary{
 			HasChatScores:    len(scores) > 0,
 			InterviewCount:   interviewCount,
@@ -429,7 +427,7 @@ func (s *CrossFeatureIntegrationService) applyMovingAverage(
 	newValue = clampInt(newValue, 0, 100)
 
 	existing, err := s.weightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, category)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return fmt.Errorf("スコア取得エラー: %w", err)
 	}
 	if existing == nil {
@@ -445,11 +443,11 @@ func (s *CrossFeatureIntegrationService) applyMovingAverage(
 }
 
 // extractTopBottom スコア上位3件と下位3件を返す
-func extractTopBottom(scores []entity.UserWeightScore) (top, bottom []entity.UserWeightScore) {
+func extractTopBottom(scores []models.UserWeightScore) (top, bottom []models.UserWeightScore) {
 	if len(scores) == 0 {
 		return nil, nil
 	}
-	sorted := make([]entity.UserWeightScore, len(scores))
+	sorted := make([]models.UserWeightScore, len(scores))
 	copy(sorted, scores)
 
 	// バブルソート（降順）

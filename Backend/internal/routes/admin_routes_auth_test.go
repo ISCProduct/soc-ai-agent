@@ -66,7 +66,7 @@ func registerAdminRoutesWithNilControllers(api *echo.Group, userRepo *repositori
 	routes.SetupAdminRoutes(
 		api,
 		nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil, nil,
 		nil, nil,
 		userRepo, schools,

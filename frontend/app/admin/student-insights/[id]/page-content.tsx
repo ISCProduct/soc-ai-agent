@@ -1,6 +1,7 @@
 'use client'
 
 import { Suspense, useCallback, useEffect, useState } from 'react'
+import { formatDateTime as formatLocaleDateTime } from '@/lib/i18n/format'
 import NextLink from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import {
@@ -45,7 +46,7 @@ const SCORE_LABELS: { key: ScoreKey; label: string }[] = [
 function formatDateTime(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleString('ja-JP', {
+  return formatLocaleDateTime(d, {
     year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
   })
 }

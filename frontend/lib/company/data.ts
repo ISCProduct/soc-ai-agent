@@ -1,3 +1,5 @@
+import { formatNumber } from '@/lib/i18n/format'
+
 export type MarketType = 'prime' | 'standard' | 'growth' | 'unlisted'
 export type RelationType = 'subsidiary' | 'affiliate' // 子会社 or 関連会社
 
@@ -122,7 +124,7 @@ export function formatEmployeeCount(
   basis?: string | null,
 ): string {
   if (count == null || count <= 0) return ''
-  const n = count.toLocaleString()
+  const n = formatNumber(count)
   if (basis === 'consolidated') return `${n}名（連結）`
   if (basis === 'standalone') return `${n}名（単体）`
   return `${n}名`

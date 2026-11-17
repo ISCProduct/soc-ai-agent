@@ -1,7 +1,7 @@
 package email
 
 import (
-	"Backend/domain/entity"
+	"Backend/internal/models"
 	"Backend/internal/services/analysis"
 	"bytes"
 	"fmt"
@@ -270,7 +270,7 @@ const reportEmailTemplate = `<!DOCTYPE html>
 // SendAnalysisReport はAI就活分析レポートをユーザーのメールアドレスへ送信する。
 // summary にはスコア・進捗・AIコメント、companies にはおすすめ企業リストを渡す。
 // SMTP未設定時はログ出力のみでエラーを返さない（開発環境フォールバック）。
-func (s *EmailService) SendAnalysisReport(user *entity.User, summary *analysis.AnalysisSummary, companies []EmailReportCompany, sessionID string) error {
+func (s *EmailService) SendAnalysisReport(user *models.User, summary *analysis.AnalysisSummary, companies []EmailReportCompany, sessionID string) error {
 	tmpl, err := template.New("report").Parse(reportEmailTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to parse email template: %w", err)
@@ -307,7 +307,7 @@ func (s *EmailService) SendAnalysisReport(user *entity.User, summary *analysis.A
 }
 
 // SendVerificationEmail メール認証用のメールを送信
-func (s *EmailService) SendVerificationEmail(user *entity.User, token, appURL string) error {
+func (s *EmailService) SendVerificationEmail(user *models.User, token, appURL string) error {
 	verifyURL := appURL + "/verify-email?token=" + token
 	safeName := template.HTMLEscapeString(user.Name)
 	body := fmt.Sprintf(`<!DOCTYPE html>
@@ -326,7 +326,7 @@ func (s *EmailService) SendVerificationEmail(user *entity.User, token, appURL st
 }
 
 // SendReVerificationEmail 再認証メールを送信
-func (s *EmailService) SendReVerificationEmail(user *entity.User, token, appURL string) error {
+func (s *EmailService) SendReVerificationEmail(user *models.User, token, appURL string) error {
 	verifyURL := appURL + "/verify-email?token=" + token
 	safeName := template.HTMLEscapeString(user.Name)
 	body := fmt.Sprintf(`<!DOCTYPE html>
@@ -459,7 +459,7 @@ func (s *EmailService) SendPasswordResetEmail(email, token, appURL string) error
 }
 
 // SendInterviewReport 面接練習レポートをメールで送信
-func (s *EmailService) SendInterviewReport(user *entity.User, data InterviewReportEmailData) error {
+func (s *EmailService) SendInterviewReport(user *models.User, data InterviewReportEmailData) error {
 	jst := time.FixedZone("Asia/Tokyo", 9*60*60)
 	data.SentAt = time.Now().In(jst).Format("2006年01月02日 15:04")
 	data.UserName = user.Name

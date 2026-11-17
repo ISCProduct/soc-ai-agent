@@ -12,7 +12,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { StudentThemeToggle } from '@/components/StudentThemeToggle'
+import { StudentThemeToggle } from '@/components/layout/StudentThemeToggle'
 import {
   COMPANY_PASSWORD_MIN_LENGTH,
   companyAuthService,

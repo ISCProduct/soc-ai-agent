@@ -31,7 +31,8 @@ func (f *fakeDeleter) DeleteExpired(cutoff time.Time, limit int) (int64, error) 
 	if i >= len(f.results) {
 		return 0, nil
 	}
-	return f.results[i].n, f.results[i].err
+	// 本物と同じく、limit を超えて消さない（上限の後の確認は limit=1）
+	return min(f.results[i].n, int64(limit)), f.results[i].err
 }
 
 func repeat(r fakeResult, n int) []fakeResult {
@@ -67,6 +68,16 @@ func parseLogs(t *testing.T, buf *bytes.Buffer) []logRecord {
 
 var testNow = time.Date(2026, 11, 11, 3, 0, 0, 0, time.UTC)
 
+// newTestPurger は待ちを記録だけするようにした ExpiredTokenPurger を返す。
+func newTestPurger(pending, refresh, company ExpiredDeleter, logger *slog.Logger) (*ExpiredTokenPurger, *[]time.Duration) {
+	p := NewExpiredTokenPurger(pending, refresh, company, logger)
+	var sleeps []time.Duration
+	p.sleep = func(d time.Duration) { sleeps = append(sleeps, d) }
+	return p, &sleeps
+}
+
+var wantTargets = [3]string{"pending_registrations", "user_refresh_tokens", "company_user_refresh_tokens"}
+
 func TestExpiredTokenPurger_Run(t *testing.T) {
 	errDB := errors.New("db down")
 
@@ -74,84 +85,101 @@ func TestExpiredTokenPurger_Run(t *testing.T) {
 		name    string
 		pending []fakeResult
 		refresh []fakeResult
-		// 期待する結果（仮登録・リフレッシュトークンの順）
-		wantDeleted      [2]int64
-		wantLimitReached [2]bool
-		wantErr          [2]error
-		wantCalls        [2]int
+		company []fakeResult
+		// 期待する結果（仮登録・学生のリフレッシュトークン・企業ユーザーのリフレッシュトークンの順）
+		wantDeleted      [3]int64
+		wantLimitReached [3]bool
+		wantErr          [3]error
+		wantCalls        [3]int
 		// 期待するログ（level と target の組。出ない場合は空）
 		wantLogs [][2]string
 	}{
 		{
-			name:        "期限切れが無いときは何も消さずログも出さない",
-			wantDeleted: [2]int64{0, 0},
-			wantCalls:   [2]int{1, 1},
-			wantLogs:    nil,
+			name:      "期限切れが無いときは何も消さずログも出さない",
+			wantCalls: [3]int{1, 1, 1},
+			wantLogs:  nil,
 		},
 		{
 			name:        "1バッチに収まる件数を消して件数をログに出す",
 			pending:     []fakeResult{{n: 3}},
 			refresh:     []fakeResult{{n: 5}},
-			wantDeleted: [2]int64{3, 5},
-			wantCalls:   [2]int{1, 1},
-			wantLogs:    [][2]string{{"INFO", "pending_registrations"}, {"INFO", "user_refresh_tokens"}},
+			company:     []fakeResult{{n: 7}},
+			wantDeleted: [3]int64{3, 5, 7},
+			wantCalls:   [3]int{1, 1, 1},
+			wantLogs:    [][2]string{{"INFO", "pending_registrations"}, {"INFO", "user_refresh_tokens"}, {"INFO", "company_user_refresh_tokens"}},
 		},
 		{
 			name:        "バッチが上限ちょうどなら次のバッチを流し、上限未満で止める",
 			pending:     []fakeResult{{n: purgeBatchSize}, {n: purgeBatchSize}, {n: 10}},
-			wantDeleted: [2]int64{2*purgeBatchSize + 10, 0},
-			wantCalls:   [2]int{3, 1},
+			wantDeleted: [3]int64{2*purgeBatchSize + 10, 0, 0},
+			wantCalls:   [3]int{3, 1, 1},
 			wantLogs:    [][2]string{{"INFO", "pending_registrations"}},
 		},
 		{
 			name:        "ちょうどバッチサイズの件数なら、次のバッチが0件で止める",
 			refresh:     []fakeResult{{n: purgeBatchSize}},
-			wantDeleted: [2]int64{0, purgeBatchSize},
-			wantCalls:   [2]int{1, 2},
+			wantDeleted: [3]int64{0, purgeBatchSize, 0},
+			wantCalls:   [3]int{1, 2, 1},
 			wantLogs:    [][2]string{{"INFO", "user_refresh_tokens"}},
 		},
 		{
-			name:             "1回の上限まで消したら残りを翌日に回し警告を出す",
+			// 最後に1件だけ消してみて、消えたら残りがあるとみなす
+			name:             "1回の上限まで消してまだ残っていたら、残りを翌日に回し警告を出す",
 			pending:          repeat(fakeResult{n: purgeBatchSize}, purgeMaxBatches+5),
-			wantDeleted:      [2]int64{purgeBatchSize * purgeMaxBatches, 0},
-			wantLimitReached: [2]bool{true, false},
-			wantCalls:        [2]int{purgeMaxBatches, 1},
+			wantDeleted:      [3]int64{purgeBatchSize*purgeMaxBatches + 1, 0, 0},
+			wantLimitReached: [3]bool{true, false, false},
+			wantCalls:        [3]int{purgeMaxBatches + 1, 1, 1},
 			wantLogs:         [][2]string{{"WARN", "pending_registrations"}},
 		},
 		{
-			name:        "仮登録の削除が失敗してもリフレッシュトークンの削除は続ける",
-			pending:     []fakeResult{{n: purgeBatchSize}, {err: errDB}},
-			refresh:     []fakeResult{{n: 2}},
-			wantDeleted: [2]int64{purgeBatchSize, 2},
-			wantErr:     [2]error{errDB, nil},
-			// 失敗したら同じ対象の次のバッチは流さない
-			wantCalls: [2]int{2, 1},
-			wantLogs:  [][2]string{{"ERROR", "pending_registrations"}, {"INFO", "user_refresh_tokens"}},
+			// #2179 のレビュー：最後のバッチがちょうど上限で残りが0件なら、消し切っているので警告しない
+			name:        "1回の上限ちょうどで消し切ったら、警告を出さない",
+			company:     repeat(fakeResult{n: purgeBatchSize}, purgeMaxBatches),
+			wantDeleted: [3]int64{0, 0, purgeBatchSize * purgeMaxBatches},
+			wantCalls:   [3]int{1, 1, purgeMaxBatches + 1},
+			wantLogs:    [][2]string{{"INFO", "company_user_refresh_tokens"}},
 		},
 		{
-			name:        "リフレッシュトークンの削除が失敗したらログに残す",
+			name:        "上限の後の確認で失敗したら、エラーとして残す",
+			refresh:     append(repeat(fakeResult{n: purgeBatchSize}, purgeMaxBatches), fakeResult{err: errDB}),
+			wantDeleted: [3]int64{0, purgeBatchSize * purgeMaxBatches, 0},
+			wantErr:     [3]error{nil, errDB, nil},
+			wantCalls:   [3]int{1, purgeMaxBatches + 1, 1},
+			wantLogs:    [][2]string{{"ERROR", "user_refresh_tokens"}},
+		},
+		{
+			name:        "仮登録の削除が失敗しても、残りの対象の削除は続ける",
+			pending:     []fakeResult{{n: purgeBatchSize}, {err: errDB}},
+			refresh:     []fakeResult{{n: 2}},
+			company:     []fakeResult{{n: 4}},
+			wantDeleted: [3]int64{purgeBatchSize, 2, 4},
+			wantErr:     [3]error{errDB, nil, nil},
+			// 失敗したら同じ対象の次のバッチは流さない
+			wantCalls: [3]int{2, 1, 1},
+			wantLogs:  [][2]string{{"ERROR", "pending_registrations"}, {"INFO", "user_refresh_tokens"}, {"INFO", "company_user_refresh_tokens"}},
+		},
+		{
+			name:        "企業ユーザーのリフレッシュトークンの削除が失敗したらログに残す",
 			pending:     []fakeResult{{n: 1}},
-			refresh:     []fakeResult{{err: errDB}},
-			wantDeleted: [2]int64{1, 0},
-			wantErr:     [2]error{nil, errDB},
-			wantCalls:   [2]int{1, 1},
-			wantLogs:    [][2]string{{"INFO", "pending_registrations"}, {"ERROR", "user_refresh_tokens"}},
+			company:     []fakeResult{{err: errDB}},
+			wantDeleted: [3]int64{1, 0, 0},
+			wantErr:     [3]error{nil, nil, errDB},
+			wantCalls:   [3]int{1, 1, 1},
+			wantLogs:    [][2]string{{"INFO", "pending_registrations"}, {"ERROR", "company_user_refresh_tokens"}},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			pending := &fakeDeleter{results: tc.pending}
-			refresh := &fakeDeleter{results: tc.refresh}
+			deleters := [3]*fakeDeleter{{results: tc.pending}, {results: tc.refresh}, {results: tc.company}}
 			logger, buf := newTestLogger()
+			p, _ := newTestPurger(deleters[0], deleters[1], deleters[2], logger)
 
-			results := NewExpiredTokenPurger(pending, refresh, logger).Run(testNow)
+			results := p.Run(testNow)
 
-			if len(results) != 2 {
-				t.Fatalf("結果の件数 = %d, want 2", len(results))
+			if len(results) != 3 {
+				t.Fatalf("結果の件数 = %d, want 3", len(results))
 			}
-			wantTargets := [2]string{"pending_registrations", "user_refresh_tokens"}
-			deleters := [2]*fakeDeleter{pending, refresh}
 			for i, r := range results {
 				if r.Target != wantTargets[i] {
 					t.Errorf("results[%d].Target = %q, want %q", i, r.Target, wantTargets[i])
@@ -186,25 +214,69 @@ func TestExpiredTokenPurger_Run(t *testing.T) {
 }
 
 // TestExpiredTokenPurger_Cutoff は、各対象に渡す時刻と1バッチの件数を固定する。
-// 仮登録は実行時刻ちょうどまでを、リフレッシュトークンは猶予を引いた時刻より前を消す。
+// 仮登録は実行時刻ちょうどまでを、リフレッシュトークン（学生・企業ユーザー）は猶予を引いた時刻より前を消す。
 func TestExpiredTokenPurger_Cutoff(t *testing.T) {
-	pending := &fakeDeleter{}
-	refresh := &fakeDeleter{}
+	pending, refresh, company := &fakeDeleter{}, &fakeDeleter{}, &fakeDeleter{}
 	logger, _ := newTestLogger()
+	p, _ := newTestPurger(pending, refresh, company, logger)
 
-	NewExpiredTokenPurger(pending, refresh, logger).Run(testNow)
+	p.Run(testNow)
 
 	if len(pending.cutoffs) != 1 || !pending.cutoffs[0].Equal(testNow) {
 		t.Errorf("仮登録の cutoff = %v, want [%v]", pending.cutoffs, testNow)
 	}
 	wantRefresh := testNow.Add(-7 * 24 * time.Hour)
-	if len(refresh.cutoffs) != 1 || !refresh.cutoffs[0].Equal(wantRefresh) {
-		t.Errorf("リフレッシュトークンの cutoff = %v, want [%v]", refresh.cutoffs, wantRefresh)
+	for name, f := range map[string]*fakeDeleter{"学生": refresh, "企業ユーザー": company} {
+		if len(f.cutoffs) != 1 || !f.cutoffs[0].Equal(wantRefresh) {
+			t.Errorf("%sのリフレッシュトークンの cutoff = %v, want [%v]", name, f.cutoffs, wantRefresh)
+		}
 	}
-	for _, f := range []*fakeDeleter{pending, refresh} {
+	for _, f := range []*fakeDeleter{pending, refresh, company} {
 		if !slices.Equal(f.limits, []int{1000}) {
 			t.Errorf("limit = %v, want [1000]", f.limits)
 		}
+	}
+}
+
+// TestExpiredTokenPurger_ProbeAfterLimit は、上限の後の確認では1件だけ消すことを固定する。
+func TestExpiredTokenPurger_ProbeAfterLimit(t *testing.T) {
+	pending := &fakeDeleter{results: repeat(fakeResult{n: purgeBatchSize}, purgeMaxBatches)}
+	logger, _ := newTestLogger()
+	p, _ := newTestPurger(pending, &fakeDeleter{}, &fakeDeleter{}, logger)
+
+	p.Run(testNow)
+
+	if got := pending.limits[len(pending.limits)-1]; got != 1 {
+		t.Errorf("確認の limit = %d, want 1", got)
+	}
+}
+
+// TestExpiredTokenPurger_PauseBetweenBatches は、バッチの間にだけ待ちを入れることを固定する（#2179 のレビュー）。
+// 1バッチで終わる対象では待たない。上限の後の確認（1件だけ消す）の前にも待つ。
+func TestExpiredTokenPurger_PauseBetweenBatches(t *testing.T) {
+	cases := []struct {
+		name      string
+		results   []fakeResult
+		wantSleep int
+	}{
+		{"1バッチで終われば待たない", []fakeResult{{n: 3}}, 0},
+		{"3バッチなら間の2回だけ待つ", []fakeResult{{n: purgeBatchSize}, {n: purgeBatchSize}, {n: 1}}, 2},
+		{"上限まで流したら、確認の前も待つ", repeat(fakeResult{n: purgeBatchSize}, purgeMaxBatches), purgeMaxBatches},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logger, _ := newTestLogger()
+			p, sleeps := newTestPurger(&fakeDeleter{results: tc.results}, &fakeDeleter{}, &fakeDeleter{}, logger)
+			p.Run(testNow)
+			if len(*sleeps) != tc.wantSleep {
+				t.Fatalf("待ちの回数 = %d, want %d", len(*sleeps), tc.wantSleep)
+			}
+			for _, d := range *sleeps {
+				if d != 100*time.Millisecond {
+					t.Errorf("待ち = %v, want 100ms", d)
+				}
+			}
+		})
 	}
 }
 
@@ -214,8 +286,9 @@ func TestExpiredTokenPurger_LogFields(t *testing.T) {
 	pending := &fakeDeleter{results: []fakeResult{{n: 1}}}
 	refresh := &fakeDeleter{results: []fakeResult{{err: errors.New("db down")}}}
 	logger, buf := newTestLogger()
+	p, _ := newTestPurger(pending, refresh, &fakeDeleter{}, logger)
 
-	NewExpiredTokenPurger(pending, refresh, logger).Run(testNow)
+	p.Run(testNow)
 
 	allowed := []string{"time", "level", "msg", "target", "deleted", "error"}
 	records := parseLogs(t, buf)

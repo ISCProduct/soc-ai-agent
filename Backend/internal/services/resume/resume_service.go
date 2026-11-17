@@ -6,8 +6,9 @@ import (
 	"Backend/internal/netsafe"
 	"Backend/internal/openai"
 	"Backend/internal/services/company"
-	"Backend/internal/services/flywheel"
+	"Backend/internal/services/costs"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"bytes"
 	"context"
 	"errors"
@@ -21,8 +22,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 // allowedMIMETypes はアップロード可能なファイルタイプ
@@ -111,17 +110,32 @@ func validatePathInDir(path, dir string) error {
 	return nil
 }
 
+// resumeCrossFeature は履歴書レビューがフライホイールへ繋ぐ面。
+// 具象は flywheel.CrossFeatureIntegrationService。テストではスタブを差し込む。
+type resumeCrossFeature interface {
+	ResolveDiagnosisSessionID(userID uint) (string, error)
+	UpdateScoresFromResumeReview(userID uint, chatSessionID string, review *models.ResumeReview, items []models.ResumeReviewItem) error
+	BuildResumeContextFromUser(userID uint) string
+}
+
+// MatchingRunner は履歴書スコア反映後の再マッチング面（面接側と同型）。
+type MatchingRunner interface {
+	CalculateMatching(ctx context.Context, userID uint, sessionID string) error
+}
+
 type ResumeService struct {
-	repo         repository.ResumeRepository
-	storageDir   string
-	aiClient     *openai.Client
-	s3           *s3Storage
-	s3Err        error
-	crossFeature *flywheel.CrossFeatureIntegrationService
-	validator    *company.CompanyValidationService
-	companyRepo  shared.CompanyBriefReader
-	persona      PersonaEnsurer
-	provisioner  CompanyProvisioner
+	repo           repository.ResumeRepository
+	storageDir     string
+	aiClient       *openai.Client
+	s3             *s3Storage
+	s3Err          error
+	crossFeature   resumeCrossFeature
+	matchingRunner MatchingRunner
+	aiBudget       costs.AIBudgetStatusProvider
+	validator      *company.CompanyValidationService
+	companyRepo    shared.CompanyBriefReader
+	persona        PersonaEnsurer
+	provisioner    CompanyProvisioner
 
 	// personaFailures は求める人材像の生成に失敗した企業の記録。
 	// 記録しないとレビューのたびに再試行する（1レビューで最大2回）。
@@ -184,8 +198,24 @@ func (s *ResumeService) SetPersonaEnsurer(p PersonaEnsurer) {
 }
 
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）
-func (s *ResumeService) SetCrossFeatureService(cf *flywheel.CrossFeatureIntegrationService) {
+func (s *ResumeService) SetCrossFeatureService(cf resumeCrossFeature) {
 	s.crossFeature = cf
+}
+
+// SetMatchingRunner は履歴書→スコア反映後の再マッチングを注入する（オプション）。
+func (s *ResumeService) SetMatchingRunner(m MatchingRunner) {
+	s.matchingRunner = m
+}
+
+// SetAIBudget は履歴書後の再マッチングで AI 理由を作る前の予算判定を設定する。
+func (s *ResumeService) SetAIBudget(p costs.AIBudgetStatusProvider) {
+	s.aiBudget = p
+}
+
+// rematchContext は履歴書後の再マッチング用 context（面接側と同じ配賦）。
+func (s *ResumeService) rematchContext(userID, organizationID uint) context.Context {
+	ctx := usagectx.WithActor(context.Background(), userID, organizationID)
+	return costs.WithUserAIBudgetCheck(ctx, s.aiBudget, userID)
 }
 
 // SetCompanyValidator 企業実在確認サービスを注入する（オプション）
@@ -258,7 +288,7 @@ type ResumeUploadResult struct {
 
 func (s *ResumeService) EnsureDocumentOwner(documentID uint, requestingUserID uint) error {
 	if _, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return shared.ErrForbidden
 		}
 		return err

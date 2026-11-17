@@ -1,229 +1,89 @@
 'use client'
 
-import Link from 'next/link'
-import {
-  Box,
-  Button,
-  IconButton,
-  LinearProgress,
-  Paper,
-  Stack,
-  Tooltip,
-  Typography,
-} from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import HistoryIcon from '@mui/icons-material/History'
-import { InterviewReport, InterviewSession } from '@/lib/interview'
-import InterviewSummary from './InterviewSummary'
-import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
-import { ErrorAlert } from '@/components/common/ErrorAlert'
-
-import { UTTERANCE_SAVE_FAILED_MESSAGE } from '../utteranceSave'
+import { Box } from '@mui/material'
+import type { InterviewReport, InterviewSession } from '@/lib/interview'
+import type { WeightScore } from '@/components/feedback/ScoreUpdateBanner'
 import type { ReportStatus } from '../hooks/useInterviewSession'
-import {
-  GUEST_EMAIL_DISABLED_REASON,
-  GUEST_REGISTER_CTA_LABEL,
-  getGuestEmailButtonProps,
-} from '@/lib/guest-limits'
-import { UI } from '@/lib/design/tokens'
+import type { ReportProgressView } from '../reportProgress'
+import ActionButtons, { type ActionButtonsProps } from './report/ActionButtons'
+import CompletionHeader from './report/CompletionHeader'
+import FailedView from './report/FailedView'
+import ProgressCard from './report/ProgressCard'
+import { ReadyCard, ReportBody, type ReportBodyProps } from './report/ReportReadyView'
+import UploadRow, { type VideoUploadStatus } from './report/UploadRow'
+import WarningBanners from './report/WarningBanners'
+import { buildMetaLine, resolveFailureDetail, resolveReportView, resolveRetryLabel } from './report/resolveReportView'
+import { columnSx, pageSx, REPORT_BODY_MAX_WIDTH } from './report/reportStyles'
 
-export interface ReportScreenProps {
-  onBack: () => void
+export interface ReportScreenProps extends Pick<ReportBodyProps, 'userId' | 'emailSending' | 'emailSent' | 'emailError' | 'onSendEmail' | 'isGuest' | 'onRegisterClick' | 'scoresBefore' | 'scoresAfter'> {
+  /** 「もう一度練習する」。面接選択へ戻る */
+  onPracticeAgain: () => void
   errorMessage: string | null
   reportStatus: ReportStatus
+  /** 生成の段階・%。バックエンドが返さない間は null（従来の不定表示） */
+  reportProgress?: ReportProgressView | null
+  /** サーバーが「失敗」と確定したか（タイムアウト・通信失敗とは文言を分ける） */
+  reportFailedByServer?: boolean
   report: InterviewReport | null
-  scoresBefore: WeightScore[] | null
-  scoresAfter: WeightScore[] | null
-  /** メール送信・レポート紐付け先のセッション（現状 UI では onSendEmail 側で保持） */
   session: InterviewSession | null
-  userId?: number
-  emailSending: boolean
-  emailSent: boolean
-  emailError: string
-  onSendEmail: () => void
-  /** タイムアウト / エラー時の再ポーリング */
+  /** レポート生成のポーリング開始時刻（ms）。経過時間の基準 */
+  reportStartedAt?: number | null
+  /** 見出しの「質問N問・M分S秒　企業名／職種」。取れた項目だけ出す */
+  questionCount?: number
+  durationSeconds?: number
+  companyName?: string
+  positionTitle?: string
   onRetryReport?: () => void
-  /** 再生成API(regenerateReport)自体が失敗したときのメッセージ。握り潰さず即座に出す(#1476) */
+  /** 再生成API自体が失敗したときのメッセージ。握り潰さず即座に出す(#1476) */
   reportRetryError?: string
   /** 面接終了API(finishSession)が失敗したか(#1015) */
   finishFailed?: boolean
-  /** finishSession失敗時の再試行 */
   onRetryFinish?: () => void
-  /** 発話保存が再試行しても失敗したか。レポートが欠ける理由として必ず出す（#1476） */
   utteranceSaveFailed?: boolean
-  /** ゲストユーザーはメール送信不可 */
-  isGuest: boolean
-  /** ゲスト向け登録導線への遷移 */
-  onRegisterClick: () => void
-  videoUploadStatus: 'idle' | 'uploading' | 'done' | 'error'
+  videoUploadStatus: VideoUploadStatus
   videoUploadProgress: number
   videoSizeWarning: string | null
 }
 
 /**
- * REPORT SCREEN (finished)
- * 面接終了後のレポート表示・メール送信・動画アップロード状況を表示する画面。
- * データ取得（レポートポーリング・動画アップロード）は親コンポーネント側で行い、
- * このコンポーネントは受け取った props をそのまま描画する presentational component。
+ * 面接後画面。ここは「状態に応じて部品を選ぶ」だけで、
+ * 状態の判定は resolveReportView、見た目は report/ 配下の部品が持つ。
+ * データ取得（ポーリング・動画アップロード）は親側。
  */
-export default function ReportScreen({
-  onBack,
-  errorMessage,
-  reportStatus,
-  report,
-  scoresBefore,
-  scoresAfter,
-  userId,
-  emailSending,
-  emailSent,
-  emailError,
-  onSendEmail,
-  onRetryReport,
-  reportRetryError,
-  finishFailed,
-  onRetryFinish,
-  utteranceSaveFailed,
-  isGuest,
-  onRegisterClick,
-  videoUploadStatus,
-  videoUploadProgress,
-  videoSizeWarning,
-}: ReportScreenProps) {
+export default function ReportScreen(props: ReportScreenProps) {
+  const { reportStatus, reportProgress, report, reportFailedByServer = false, onRetryReport, onPracticeAgain } = props
+  const view = resolveReportView({ reportStatus, reportProgress, report })
+  const metaLine = buildMetaLine(props)
+  const showsCard = view === 'fallback' || view === 'progress' || view === 'stalled'
+
+  const primary: ActionButtonsProps['primary'] =
+    view === 'ready' ? { kind: 'view', enabled: true }
+    : showsCard ? { kind: 'view', enabled: false }
+    : view === 'failed' && onRetryReport ? { kind: 'retry', label: resolveRetryLabel(reportFailedByServer), onClick: onRetryReport }
+    : null
+
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: UI.nightBg, color: UI.nightInk, overflowY: 'auto', p: { xs: 2, md: 4 } }}>
-      <Box sx={{ maxWidth: 720, mx: 'auto' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 4 }}>
-          <IconButton sx={{ color: UI.nightSoft }} onClick={onBack} aria-label="前の画面へ戻る">
-            <ArrowBackIcon />
-          </IconButton>
-          <Typography variant="h5" sx={{ fontWeight: 700, color: UI.nightInk, flex: 1 }}>面接レポート</Typography>
-          <Button
-            component={Link}
-            href="/interview/history"
-            size="small"
-            startIcon={<HistoryIcon />}
-            sx={{ color: UI.nightSoft, textTransform: 'none' }}
-          >
-            面接履歴を見る
-          </Button>
-        </Box>
-
-        {errorMessage && (
-          <Paper sx={{ bgcolor: 'rgba(234,67,53,0.15)', border: '1px solid rgba(234,67,53,0.4)', p: 2, mb: 2, borderRadius: 2 }}>
-            <Typography variant="body2" sx={{ color: '#f28b82', mb: finishFailed && onRetryFinish ? 1.5 : 0 }}>{errorMessage}</Typography>
-            {finishFailed && onRetryFinish && (
-              <Button
-                variant="contained"
-                onClick={onRetryFinish}
-                sx={{ bgcolor: UI.mark, '&:hover': { bgcolor: '#d14f10' } }}
-              >
-                再試行
-              </Button>
-            )}
-          </Paper>
+    <Box sx={pageSx}>
+      <Box sx={columnSx(view === 'ready' ? REPORT_BODY_MAX_WIDTH : undefined)}>
+        <CompletionHeader metaLine={metaLine} />
+        <WarningBanners {...props} />
+        {showsCard && (
+          <ProgressCard
+            view={reportProgress ?? null}
+            stalled={view === 'stalled'}
+            startedAtMs={props.reportStartedAt ?? null}
+            uploadStatus={props.videoUploadStatus}
+            uploadProgress={props.videoUploadProgress}
+          />
         )}
-
-        {/* 発話が保存できていないなら、レポートが欠ける・生成されない理由をここで明示する（#1476） */}
-        {utteranceSaveFailed && (
-          <Paper role="alert" sx={{ bgcolor: 'rgba(251,188,5,0.15)', border: '1px solid rgba(251,188,5,0.4)', p: 2, mb: 2, borderRadius: 2 }}>
-            <Typography variant="body2" sx={{ color: '#fdd663' }}>{UTTERANCE_SAVE_FAILED_MESSAGE}</Typography>
-          </Paper>
+        {view === 'failed' && <FailedView detail={resolveFailureDetail(reportStatus, reportFailedByServer)} retryError={props.reportRetryError} />}
+        {view === 'ready' && report && <ReadyCard report={report} />}
+        {/* 進捗カードの外では、完了済みの動画アップロードは出さない（進行中・失敗だけ知らせる） */}
+        {!showsCard && props.videoUploadStatus !== 'done' && (
+          <UploadRow status={props.videoUploadStatus} progress={props.videoUploadProgress} />
         )}
-
-        {reportStatus === 'pending' && (
-          <Paper sx={{ bgcolor: UI.nightPanel, border: '1px solid rgba(255,255,255,0.08)', p: 3, borderRadius: 2 }}>
-            <Typography sx={{ color: UI.nightInk, mb: 1.5 }}>レポートを生成中です...</Typography>
-            <LinearProgress sx={{ bgcolor: '#3c4043', '& .MuiLinearProgress-bar': { bgcolor: '#4285f4' } }} />
-          </Paper>
-        )}
-
-        {reportStatus === 'ready' && report && (
-          <Stack spacing={2}>
-            <ScoreUpdateBanner
-              beforeScores={scoresBefore}
-              afterScores={scoresAfter}
-              title="面接結果がプロフィールスコアに反映されました"
-            />
-            <InterviewSummary report={report} userId={userId} theme="dark" />
-            {(() => {
-              const guestEmailProps = getGuestEmailButtonProps(isGuest)
-              return (
-                <Stack spacing={1}>
-                  <Tooltip title={guestEmailProps.title} disableHoverListener={!guestEmailProps.disabled}>
-                    <span>
-                      <Button
-                        variant="outlined"
-                        fullWidth
-                        disabled={emailSending || emailSent || guestEmailProps.disabled}
-                        onClick={onSendEmail}
-                        sx={{ color: emailSent ? '#34a853' : UI.mark, borderColor: emailSent ? '#34a853' : UI.mark, '&:hover': { borderColor: UI.mark, bgcolor: 'rgba(236,91,19,0.08)' } }}
-                      >
-                        {emailSent ? '✓ メールを送信しました' : emailSending ? '送信中...' : 'レポートをメールで受け取る'}
-                      </Button>
-                    </span>
-                  </Tooltip>
-                  <ErrorAlert error={emailError} sx={{ mb: 0 }} />
-                  {isGuest && (
-                    <Typography variant="caption" sx={{ color: UI.nightMuted, textAlign: 'center' }}>
-                      {GUEST_EMAIL_DISABLED_REASON}{' '}
-                      <Button
-                        size="small"
-                        onClick={onRegisterClick}
-                        sx={{ color: UI.mark, textTransform: 'none', p: 0, minWidth: 0, verticalAlign: 'baseline' }}
-                      >
-                        {GUEST_REGISTER_CTA_LABEL}
-                      </Button>
-                    </Typography>
-                  )}
-                </Stack>
-              )
-            })()}
-          </Stack>
-        )}
-
-        {(reportStatus === 'error' || reportStatus === 'timeout') && (
-          <Paper sx={{ bgcolor: UI.nightPanel, border: '1px solid rgba(234,67,53,0.3)', p: 3, borderRadius: 2 }}>
-            <Typography variant="body2" sx={{ color: '#f28b82', mb: onRetryReport ? 2 : 0 }}>
-              {reportStatus === 'timeout'
-                ? 'レポート生成がタイムアウトしました。時間をおいて再試行してください。'
-                : 'レポート生成に失敗しました。'}
-            </Typography>
-            {onRetryReport && (
-              <Button
-                variant="contained"
-                onClick={onRetryReport}
-                sx={{ bgcolor: UI.mark, '&:hover': { bgcolor: '#d14f10' } }}
-              >
-                再試行
-              </Button>
-            )}
-            {/* 再試行そのものが失敗したなら、生成中に戻さずここで知らせる（#1476） */}
-            <ErrorAlert error={reportRetryError ?? ''} sx={{ mt: 2, mb: 0 }} />
-          </Paper>
-        )}
-
-        {/* Video upload status */}
-        {videoUploadStatus !== 'idle' && (
-          <Paper sx={{ bgcolor: UI.nightPanel, border: '1px solid rgba(255,255,255,0.1)', p: 2, borderRadius: 2 }}>
-            {videoSizeWarning && (
-              <Typography variant="caption" sx={{ color: '#fdd663', display: 'block', mb: 1 }}>
-                ⚠ {videoSizeWarning}
-              </Typography>
-            )}
-            <Typography variant="body2" sx={{ color: videoUploadStatus === 'done' ? '#34a853' : videoUploadStatus === 'error' ? '#f28b82' : UI.nightMuted, mb: videoUploadStatus === 'uploading' ? 1 : 0 }}>
-              {videoUploadStatus === 'uploading' && `動画をアップロード中... ${videoUploadProgress}%`}
-              {videoUploadStatus === 'done' && '✓ 動画のアップロードが完了しました'}
-              {videoUploadStatus === 'error' && '動画のアップロードに失敗しました。ネットワーク接続を確認してください'}
-            </Typography>
-            {videoUploadStatus === 'uploading' && (
-              <LinearProgress
-                variant="determinate"
-                value={videoUploadProgress}
-                sx={{ height: 6, borderRadius: 3, bgcolor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { bgcolor: UI.mark } }}
-              />
-            )}
-          </Paper>
-        )}
+        <ActionButtons primary={primary} onPracticeAgain={onPracticeAgain} />
+        {view === 'ready' && report && <ReportBody {...props} report={report} />}
       </Box>
     </Box>
   )

@@ -1,6 +1,7 @@
 package ability
 
 import (
+	"Backend/domain/repository"
 	"errors"
 	"time"
 
@@ -8,7 +9,6 @@ import (
 	"Backend/internal/repositories"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 var (
@@ -152,14 +152,14 @@ func (s *Service) List(userID uint) ([]TemplateStatus, error) {
 // 制限時間を過ぎた受検中は再開させない（ErrDeadlinePassed）。
 func (s *Service) Start(userID, templateID uint) (*SessionView, error) {
 	t, err := s.repo.FindTemplate(templateID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
 	sess, err := s.repo.FindInProgressSession(userID, templateID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		now := s.now()
 		sess = &models.AbilitySession{
 			PublicID: uuid.NewString(), UserID: userID, TemplateID: t.ID,
@@ -315,7 +315,7 @@ func (s *Service) Result(userID uint, publicID string) (*ResultView, error) {
 		return nil, ErrNotFound
 	}
 	raw, err := s.repo.FindResult(sess.ID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -348,7 +348,7 @@ func (s *Service) Result(userID uint, publicID string) (*ResultView, error) {
 
 func (s *Service) session(userID uint, publicID string) (*models.AbilitySession, error) {
 	sess, err := s.repo.FindSessionByPublicID(userID, publicID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrNotFound
 	}
 	return sess, err

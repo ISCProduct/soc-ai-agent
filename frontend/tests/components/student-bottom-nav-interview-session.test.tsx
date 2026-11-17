@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import { act, render } from '@testing-library/react'
-import { StudentBottomNav } from '@/components/StudentBottomNav'
+import { StudentBottomNav } from '@/components/layout/StudentBottomNav'
 import { setInterviewSessionActive } from '@/app/interview/sessionChrome'
 
 /**

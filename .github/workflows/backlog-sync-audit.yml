@@ -67,6 +67,8 @@ jobs:
           BACKLOG_DOMAIN: ${{ secrets.BACKLOG_DOMAIN }}
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
+          # 定期実行と、dry_run=false の手動実行だけ Backlog を書き換える。
+          AUTO_FIX: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)) && 'true' || 'false' }}
         run: python3 .github/scripts/backlog_sync_audit.py "$RUNNER_TEMP/backlog-sync-audit.txt"
 
       # ズレが無ければ本文は空。そのときは投稿しない。

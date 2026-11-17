@@ -21,3 +21,8 @@ coverage
 *.pem
 .idea
 .vscode
+
+# 制作用の Live2D 資産（元絵・取り込み用 PNG）。make live2d-authoring で復元するが
+# 実行時には不要。public/ ごと COPY されると本番 URL から取れてしまう。
+public/live2d/interviewers/source
+public/live2d/interviewers/cubism-input

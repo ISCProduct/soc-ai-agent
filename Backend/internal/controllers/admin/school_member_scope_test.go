@@ -1,18 +1,16 @@
 package admin_test
 
 import (
-	"bytes"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-
-	"Backend/domain/entity"
 	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/controllers/mocks"
 	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
 	"Backend/internal/services/school"
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/mock"
@@ -54,9 +52,9 @@ func TestAdminSchoolController_AddMember_OtherSchoolDenied(t *testing.T) {
 
 // stubUserReader は担当校割当の学園一致チェック用。
 // 引数の ID で引く。無視すると AddMember が誤った ID を渡しても気づけない。
-type stubUserReader struct{ user *entity.User }
+type stubUserReader struct{ user *models.User }
 
-func (s stubUserReader) GetUserByID(id uint) (*entity.User, error) {
+func (s stubUserReader) GetUserByID(id uint) (*models.User, error) {
 	if s.user == nil || s.user.ID != id {
 		return nil, nil
 	}
@@ -83,7 +81,7 @@ func TestAdminSchoolController_AddMember_OwnSchoolAllowed(t *testing.T) {
 
 	// 担当校割当は対象ユーザーの学園と学校の学園が一致することを要求する（#1675）。
 	ctrl := admincontrollers.NewAdminSchoolController(
-		school.NewSchoolService(repo, stubUserReader{user: &entity.User{ID: 2, OrganizationID: 7}}))
+		school.NewSchoolService(repo, stubUserReader{user: &models.User{ID: 2, OrganizationID: 7}}))
 	testsupport.AssertStatus(t, ctrl.AddMember, ctx, http.StatusCreated)
 	repo.AssertExpectations(t)
 }
@@ -108,7 +106,7 @@ func TestAdminSchoolController_AddMember_UnrestrictedBootstrap(t *testing.T) {
 
 	// 担当校割当は対象ユーザーの学園と学校の学園が一致することを要求する（#1675）。
 	ctrl := admincontrollers.NewAdminSchoolController(
-		school.NewSchoolService(repo, stubUserReader{user: &entity.User{ID: 50, OrganizationID: 7}}))
+		school.NewSchoolService(repo, stubUserReader{user: &models.User{ID: 50, OrganizationID: 7}}))
 	testsupport.AssertStatus(t, ctrl.AddMember, ctx, http.StatusCreated)
 	repo.AssertExpectations(t)
 }
@@ -222,7 +220,7 @@ func TestAdminUserController_Update_RestrictedCannotGrantAdmin(t *testing.T) {
 	userRepo := &mocks.UserRepositoryMock{}
 	schoolID := uint(5)
 	userRepo.On("GetUserByID", uint(20)).
-		Return(&entity.User{ID: 20, SchoolID: &schoolID}, nil)
+		Return(&models.User{ID: 20, SchoolID: &schoolID}, nil)
 	// 対象ユーザーの学園と一致する学校を返す（#1675 の学園一致検査を通す）。
 	// 403 の理由は is_admin 付与の禁止であり、学園不一致ではない。
 	schoolRepo.On("FindByID", schoolID).Return(&models.School{ID: schoolID}, nil)

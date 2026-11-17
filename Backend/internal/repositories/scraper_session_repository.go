@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"errors"
 
 	"gorm.io/gorm"
 )
@@ -32,7 +33,7 @@ func (r *ScraperSessionRepository) GetBySiteKey(siteKey string) (*models.Scraper
 func (r *ScraperSessionRepository) Upsert(session *models.ScraperSession) error {
 	var existing models.ScraperSession
 	err := r.db.Where("site_key = ?", session.SiteKey).First(&existing).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return r.db.Create(session).Error
 	}
 	if err != nil {

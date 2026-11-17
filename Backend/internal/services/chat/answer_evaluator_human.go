@@ -27,6 +27,9 @@ type HumanScoreResult struct {
 	Boosts          []string
 	Reason          string
 	PromptVersion   string
+	// LLMUnavailable は LLM で評価するはずだったが、LLM の失敗でルール採点の値のままになったこと。
+	// ライブ採点はそのまま使うが、再計算はこの値で確定させない（#1770 B3）。
+	LLMUnavailable bool
 }
 
 type questionMeta struct {
@@ -96,6 +99,7 @@ func (e *AnswerEvaluator) EvaluateHumanScoringWithContext(
 
 	llmResult, promptVersion := e.llmEvaluateWithPromptVersion(ctx, question, answer)
 	if llmResult == nil {
+		rule.LLMUnavailable = true
 		return rule
 	}
 	rule.PromptVersion = promptVersion

@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -27,7 +28,7 @@ func (r *UserRefreshTokenRepository) Create(token *models.UserRefreshToken) erro
 func (r *UserRefreshTokenRepository) FindByHash(hash string) (*models.UserRefreshToken, error) {
 	var m models.UserRefreshToken
 	err := r.db.Where("token_hash = ?", hash).First(&m).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {

@@ -1,10 +1,14 @@
 package company
 
 import (
+	"Backend/internal/companyfetch"
 	"Backend/internal/models"
+	"Backend/internal/openai"
 	"Backend/internal/services/shared"
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -112,27 +116,128 @@ func TestCompanyValidationService_RejectsEmpty(t *testing.T) {
 	}
 }
 
-func TestCompanyValidationService_NoOpenAIReturnsNotExists(t *testing.T) {
+func TestCompanyValidationService_NoOpenAIReturnsUnavailable(t *testing.T) {
 	svc := NewCompanyValidationService(&fakeCompanyLookup{exact: map[string]*models.Company{}}, nil)
 	result, err := svc.Validate(context.Background(), "架空株式会社XYZ999")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Exists {
-		t.Fatalf("expected not exists without openai: %+v", result)
-	}
-	if result.Source != "web_search" {
-		t.Fatalf("source=%q", result.Source)
+	if !errors.Is(err, openai.ErrAIUnavailable) {
+		t.Fatalf("want ErrAIUnavailable, got result=%+v err=%v", result, err)
 	}
 }
 
-func TestCompanyValidationService_SearchCandidatesWebFailureReturnsEmpty(t *testing.T) {
+func TestCompanyValidationService_SearchCandidatesNoOpenAIReturnsUnavailable(t *testing.T) {
 	svc := NewCompanyValidationService(&fakeCompanyLookup{exact: map[string]*models.Company{}}, nil)
 	results, err := svc.SearchCandidates(context.Background(), "未知企業ABC", true)
-	if err != nil {
-		t.Fatalf("WEB補完失敗でもエラーにしない: %v", err)
+	if !errors.Is(err, openai.ErrAIUnavailable) {
+		t.Fatalf("want ErrAIUnavailable, got results=%+v err=%v", results, err)
 	}
-	if len(results) != 0 {
-		t.Fatalf("候補なしを期待: %+v", results)
+}
+
+type denyValidationSearchBudget struct{}
+
+func (denyValidationSearchBudget) AllowSearch() error {
+	return companyfetch.ErrSearchBudgetExceeded
+}
+
+func TestCompanyValidationService_SearchCandidatesPropagatesWebSearchFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream down", http.StatusBadRequest)
+	}))
+	t.Cleanup(srv.Close)
+
+	svc := NewCompanyValidationService(
+		&fakeCompanyLookup{exact: map[string]*models.Company{}},
+		openai.NewWithBaseURL(srv.URL, "gpt-4o-mini"),
+	)
+	_, err := svc.SearchCandidates(context.Background(), "未知企業ABC", true)
+	if err == nil {
+		t.Fatal("WEB検索の失敗をエラーとして返す")
+	}
+	if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
+		t.Fatal("上流の失敗を予算超過にしてはいけない")
+	}
+	var ve *shared.ValidationError
+	if errors.As(err, &ve) {
+		t.Fatalf("上流の失敗を入力エラーにしてはいけない: %v", err)
+	}
+}
+
+func TestCompanyValidationService_SearchCandidatesBudgetExceeded(t *testing.T) {
+	svc := NewCompanyValidationService(
+		&fakeCompanyLookup{exact: map[string]*models.Company{}},
+		openai.NewWithBaseURL("http://127.0.0.1:1", "gpt-4o-mini"),
+	)
+	svc.SetSearchBudget(denyValidationSearchBudget{})
+	_, err := svc.SearchCandidates(context.Background(), "未知企業ABC", true)
+	if !errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
+		t.Fatalf("want ErrSearchBudgetExceeded, got %v", err)
+	}
+}
+
+func TestCompanyValidationService_SearchCandidatesSkipsWebWhenDBHits(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		http.Error(w, "should not be called", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	svc := NewCompanyValidationService(
+		&fakeCompanyLookup{partial: []models.CompanyName{{ID: 1, Name: "登録済み株式会社"}}},
+		openai.NewWithBaseURL(srv.URL, "gpt-4o-mini"),
+	)
+	out, err := svc.SearchCandidates(context.Background(), "登録済み", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) == 0 || out[0].Source != "db" {
+		t.Fatalf("DB候補を返す: %+v", out)
+	}
+	if hits != 0 {
+		t.Fatalf("DBに当たっているのに web_search を %d 回呼んだ", hits)
+	}
+}
+
+func TestCompanyValidationService_WebSearchSuccess(t *testing.T) {
+	const body = `{"output_text":"{\"exists\":true,\"canonical_name\":\"架空電機\",\"evidence_urls\":[\"https://example.com\"],\"confidence\":\"high\",\"description\":\"電機\"}"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	svc := NewCompanyValidationService(
+		&fakeCompanyLookup{exact: map[string]*models.Company{}},
+		openai.NewWithBaseURL(srv.URL, "gpt-4o-mini"),
+	)
+	result, err := svc.Validate(context.Background(), "架空電機")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Exists || result.CanonicalName != "架空電機" || result.Source != "web_search" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestCompanyValidationService_ParseFailureIsErrorAndNotRetriedImmediately(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = w.Write([]byte(`{"output_text":"not-json"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	svc := NewCompanyValidationService(
+		&fakeCompanyLookup{exact: map[string]*models.Company{}},
+		openai.NewWithBaseURL(srv.URL, "gpt-4o-mini"),
+	)
+	_, err := svc.SearchCandidates(context.Background(), "読めない企業", true)
+	if err == nil {
+		t.Fatal("パース失敗を成功にしてはいけない")
+	}
+	_, err = svc.SearchCandidates(context.Background(), "読めない企業", true)
+	if err == nil {
+		t.Fatal("クールダウン中も失敗のまま返す")
+	}
+	if hits != 1 {
+		t.Fatalf("失敗の直後に web_search を再課金した: hits=%d", hits)
 	}
 }

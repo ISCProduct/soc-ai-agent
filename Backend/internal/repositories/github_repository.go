@@ -101,10 +101,11 @@ func (r *GitHubRepository) GetRepoSummary(userID uint, fullName string) (*models
 	return &s, nil
 }
 
-// ListRepoSummaries ユーザーの全AI要約を取得
-func (r *GitHubRepository) ListRepoSummaries(userID uint) ([]models.GitHubRepoSummary, error) {
+// ListRepoSummaries ユーザーのAI要約のうち、promptVersion の版で作られたものを取得する。
+// 古い版の要約は注入で作られた虚偽の実績を含みうるので、一覧にも出さない（#2185）。
+func (r *GitHubRepository) ListRepoSummaries(userID uint, promptVersion string) ([]models.GitHubRepoSummary, error) {
 	var summaries []models.GitHubRepoSummary
-	if err := r.db.Where("user_id = ?", userID).Order("updated_at desc").Find(&summaries).Error; err != nil {
+	if err := r.db.Where("user_id = ? AND prompt_version = ?", userID, promptVersion).Order("updated_at desc").Find(&summaries).Error; err != nil {
 		return nil, err
 	}
 	return summaries, nil
@@ -113,7 +114,8 @@ func (r *GitHubRepository) ListRepoSummaries(userID uint) ([]models.GitHubRepoSu
 // UpsertRepoSummary AI要約を保存/更新
 func (r *GitHubRepository) UpsertRepoSummary(s *models.GitHubRepoSummary) error {
 	return r.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_id"}, {Name: "full_name"}},
-		DoUpdates: clause.AssignmentColumns([]string{"summary_text", "tech_reason", "challenge", "achievement", "updated_at"}),
+		Columns: []clause.Column{{Name: "user_id"}, {Name: "full_name"}},
+		// prompt_version も更新しないと、作り直した後も古い版のままになり、毎回作り直してしまう（#2185）
+		DoUpdates: clause.AssignmentColumns([]string{"summary_text", "tech_reason", "challenge", "achievement", "prompt_version", "updated_at"}),
 	}).Create(s).Error
 }
