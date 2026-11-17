@@ -73,6 +73,8 @@ export type InterviewReport = {
   strengths_json?: string
   improvements_json?: string
   teacher_report_json?: string  // 教員のみ返却
+  /** 質問の種類ごとの評価（SOCAIAGENT-610）。この機能より前のレポートは null */
+  category_breakdown_json?: string | null
   created_at: string
   updated_at: string
 }

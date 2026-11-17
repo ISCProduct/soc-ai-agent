@@ -24,7 +24,7 @@ type interviewTarget struct {
 // ここを本番と違う値にすると、破損率も再現性も別物を測ることになる。
 const (
 	interviewTemperature = 0.4
-	interviewMaxTokens   = 2000
+	interviewMaxTokens   = interview.InterviewReportMaxTokens
 )
 
 func newInterviewTarget(modelOverride string) Target {
