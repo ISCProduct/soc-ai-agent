@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"Backend/internal/repositories"
 	"Backend/internal/services/training/scorerexport"
@@ -37,9 +38,11 @@ func main() {
 		res.Students, res.Sessions, res.SkippedSessions, res.Destination)
 }
 
-// export は Ctrl+C で取り消せる ctx で書き出しを1回行う。取り消して失敗した回も、監査ログには「失敗」が残る。
+// export は Ctrl+C・SIGTERM で取り消せる ctx で書き出しを1回行う。取り消して失敗した回も、監査ログには「失敗」が残る。
 func export() (scorerexport.Result, error) {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// コンテナのタスクの停止・タイムアウトでは SIGTERM が送られる。SIGTERM でも取り消して、
+	// 監査ログに「失敗」を残してから終わる（#2325 のレビュー）。
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return scorerexport.RunFromEnv(ctx, os.Getenv, connectStore, newS3Writer)
 }

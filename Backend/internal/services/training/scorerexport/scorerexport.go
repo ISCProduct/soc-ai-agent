@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -125,6 +126,8 @@ var _ Store = (*repositories.TrainingScorerExportRepository)(nil)
 // ObjectWriter は出力先への書き込み。本番は S3（NewS3Writer）、テストでは差し替える。
 type ObjectWriter interface {
 	PutObject(ctx context.Context, key string, body []byte, contentType string) error
+	// DeleteObject は書いたオブジェクトを消す。書いた後に同意の取り消しが分かったときに使う（#2325 のレビュー）。
+	DeleteObject(ctx context.Context, key string) error
 }
 
 // Turn は AI の質問1つと、それに対する学生の回答。どちらもマスキング済み。
@@ -176,6 +179,19 @@ type Job struct {
 	store  Store
 	writer ObjectWriter
 	now    func() time.Time
+	// runSuffix は実行 ID の末尾に付けるランダムな値。テストで差し替える。
+	runSuffix func() string
+}
+
+// randomRunSuffix は実行 ID の末尾に付ける 8 桁の16進。同じ秒に二重に起動しても（スケジューラの重複実行・
+// 即時のリトライなど）出力先が衝突し、互いのファイルやマニフェストを上書きしないようにする（#2325 のレビュー）。
+func randomRunSuffix() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand が失敗するのは OS の乱数源が使えないときだけ。時刻のナノ秒で代える（衝突はまず起きない）。
+		return fmt.Sprintf("%08x", uint32(time.Now().UnixNano()))
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // NewJob はジョブを作る。設定が不正ならエラーにする（ジョブを動かさない）。
@@ -186,14 +202,14 @@ func NewJob(cfg Config, store Store, writer ObjectWriter) (*Job, error) {
 	if store == nil || writer == nil {
 		return nil, errors.New("scorerexport: store と writer は必須です")
 	}
-	return &Job{cfg: cfg, store: store, writer: writer, now: time.Now}, nil
+	return &Job{cfg: cfg, store: store, writer: writer, now: time.Now, runSuffix: randomRunSuffix}, nil
 }
 
 // Run は書き出しを1回行い、監査ログに結果を残す。
 // 監査ログを作れなければ何も書き出さない（記録の無い書き出しを作らないため）。
 func (j *Job) Run(ctx context.Context) (Result, error) {
 	startedAt := j.now()
-	runID := startedAt.UTC().Format("20060102T150405Z")
+	runID := startedAt.UTC().Format("20060102T150405Z") + "-" + j.runSuffix()
 	runPrefix := j.cfg.Prefix + "/runs/" + runID + "/"
 	res := Result{RunID: runID, Destination: "s3://" + j.cfg.Bucket + "/" + runPrefix}
 
@@ -257,6 +273,20 @@ func (j *Job) export(ctx context.Context, runPrefix, runID string, startedAt tim
 		key := runPrefix + "subjects/" + j.hash("user", subj.UserID) + ".jsonl"
 		if err := j.writer.PutObject(ctx, key, bytes.Join(lines, nil), "application/x-ndjson"); err != nil {
 			return fmt.Errorf("scorerexport: 書き込みに失敗しました: %w", err)
+		}
+		// 書く直前の判定と書き込みの間に同意を取り消した（または退会した）学生のファイルを残さないよう、
+		// 書いた後にもう一度判定し、外れていれば消す（#2325 のレビュー）。消せなければ実行を失敗にする。
+		// それでも残る「判定し直した後の取り消し」は、取り消し・退会のときに書き出し済みのデータを
+		// 消す処理（#2168 の次の PR）が拾う。
+		ok, err = j.store.IsTrainingEligible(ctx, subj.UserID)
+		if err != nil || !ok {
+			if delErr := j.writer.DeleteObject(ctx, key); delErr != nil {
+				return fmt.Errorf("scorerexport: 同意を取り消した学生のファイルを消せませんでした: %w", delErr)
+			}
+			if err != nil {
+				return fmt.Errorf("scorerexport: 学習に使ってよいかを判定できませんでした: %w", err)
+			}
+			continue
 		}
 		files = append(files, strings.TrimPrefix(key, runPrefix))
 		res.Students++

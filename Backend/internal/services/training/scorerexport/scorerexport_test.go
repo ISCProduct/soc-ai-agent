@@ -53,12 +53,25 @@ type fakeStore struct {
 	startedDest string
 	finished    []finishCall
 	eligCalls   []uint
+	// eligSeq を設定すると、その学生の判定は呼ばれるたびに先頭から順に返す（書く前と書いた後で変えるため）。
+	eligSeq map[uint][]bool
+	eligErr map[uint][]error
 }
 
 var _ Store = (*fakeStore)(nil)
 
 func (f *fakeStore) IsTrainingEligible(_ context.Context, userID uint) (bool, error) {
 	f.eligCalls = append(f.eligCalls, userID)
+	if errs := f.eligErr[userID]; len(errs) > 0 {
+		f.eligErr[userID] = errs[1:]
+		if errs[0] != nil {
+			return false, errs[0]
+		}
+	}
+	if seq := f.eligSeq[userID]; len(seq) > 0 {
+		f.eligSeq[userID] = seq[1:]
+		return seq[0], nil
+	}
 	return f.eligible[userID], nil
 }
 
@@ -106,8 +119,18 @@ var errDB = errors.New("db down")
 
 // fakeWriter は ObjectWriter の差し替え。failOn を含むキーへの書き込みを失敗させる。
 type fakeWriter struct {
-	puts   []putCall
-	failOn string
+	puts      []putCall
+	failOn    string
+	deletes   []string
+	deleteErr error
+}
+
+func (w *fakeWriter) DeleteObject(_ context.Context, key string) error {
+	if w.deleteErr != nil {
+		return w.deleteErr
+	}
+	w.deletes = append(w.deletes, key)
+	return nil
 }
 
 var _ ObjectWriter = (*fakeWriter)(nil)
@@ -149,6 +172,7 @@ func newTestJob(t *testing.T, store Store, writer ObjectWriter) *Job {
 		t.Fatal(err)
 	}
 	j.now = func() time.Time { return fixedNow }
+	j.runSuffix = func() string { return "a1b2c3d4" }
 	return j
 }
 
@@ -259,7 +283,7 @@ func TestRun_WritesSamplesAndManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runPrefix := "scorer/private/runs/20261117T010203Z/"
+	runPrefix := "scorer/private/runs/20261117T010203Z-a1b2c3d4/"
 	wantDest := "s3://train-bucket/" + runPrefix
 	if res.Destination != wantDest || store.startedDest != wantDest {
 		t.Errorf("出力先 = %q（監査ログ %q）, want %q", res.Destination, store.startedDest, wantDest)
@@ -310,7 +334,7 @@ func TestRun_WritesSamplesAndManifest(t *testing.T) {
 	if m.LabelSource != "llm" || !strings.Contains(m.LabelNote, "LLM ラベルで学習") {
 		t.Errorf("マニフェストにラベルの出どころが無い: %+v", m)
 	}
-	if m.RunID != "20261117T010203Z" || m.StudentCount != 1 || m.SessionCount != 2 ||
+	if m.RunID != "20261117T010203Z-a1b2c3d4" || m.StudentCount != 1 || m.SessionCount != 2 ||
 		len(m.Files) != 1 || m.Files[0] != "subjects/"+subject+".jsonl" || !m.ExportedAt.Equal(fixedNow) {
 		t.Errorf("マニフェスト = %+v", m)
 	}
@@ -411,8 +435,8 @@ func TestRun_SkipsUnusableSessions(t *testing.T) {
 			t.Errorf("面接の無い学生のファイルがあります: %s", k)
 		}
 	}
-	// 面接が無い学生は判定し直さない（書くものが無いため）。
-	if fmt.Sprint(store.eligCalls) != "[1]" {
+	// 面接が無い学生は判定し直さない（書くものが無いため）。書いた学生は、書く前と書いた後の2回判定する。
+	if fmt.Sprint(store.eligCalls) != "[1 1]" {
 		t.Errorf("判定の呼び出し = %v", store.eligCalls)
 	}
 }
@@ -777,5 +801,73 @@ func TestRun_MasksOwnSchoolNotInTerms(t *testing.T) {
 	samples := decodeSamples(t, w.find(t, ".jsonl").body)
 	if got := samples[0].Turns[0].A; got != "<SCHOOL>でネットワークを学んでいます。" {
 		t.Errorf("回答 = %q", got)
+	}
+}
+
+// TestRun_DeletesWhenRevokedDuringWrite は、書く直前の判定と書き込みの間に同意を取り消した学生のファイルを、
+// 書いた後の判定で見つけて消し、件数にもマニフェストにも入れないことを確かめる（#2325 のレビュー）。
+func TestRun_DeletesWhenRevokedDuringWrite(t *testing.T) {
+	store := leakFixture()
+	store.eligSeq = map[uint][]bool{7: {true, false}}
+	w := &fakeWriter{}
+	res, err := newTestJob(t, store, w).Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjectKey := "scorer/private/runs/20261117T010203Z-a1b2c3d4/subjects/" + wantHMAC("user", 7) + ".jsonl"
+	if fmt.Sprint(w.deletes) != "["+subjectKey+"]" {
+		t.Fatalf("消したもの = %v, want [%s]", w.deletes, subjectKey)
+	}
+	if res.Students != 0 || res.Sessions != 0 {
+		t.Errorf("Result = %+v, want 0人・0件", res)
+	}
+	var m Manifest
+	if err := json.Unmarshal(w.find(t, "manifest.json").body, &m); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Files) != 0 || m.StudentCount != 0 {
+		t.Errorf("マニフェスト = %+v, want ファイルなし", m)
+	}
+}
+
+// TestRun_FailsWhenDeleteAfterRevokeFails は、取り消した学生のファイルを消せなければ、実行を失敗にして
+// 監査ログに残すことを確かめる（取り消し後のデータが残ったまま成功扱いにしない）。
+func TestRun_FailsWhenDeleteAfterRevokeFails(t *testing.T) {
+	store := leakFixture()
+	store.eligSeq = map[uint][]bool{7: {true, false}}
+	errDel := errors.New("delete denied")
+	w := &fakeWriter{deleteErr: errDel}
+	_, err := newTestJob(t, store, w).Run(context.Background())
+	if !errors.Is(err, errDel) {
+		t.Fatalf("err = %v, want %v", err, errDel)
+	}
+	if len(store.finished) != 1 || store.finished[0].status != models.TrainingScorerExportFailed {
+		t.Fatalf("監査ログ = %+v, want 失敗", store.finished)
+	}
+}
+
+// TestRun_DeletesWhenRecheckErrors は、書いた後の判定がエラーなら、ファイルを消してから実行を失敗にすることを
+// 確かめる（使ってよいか分からないデータを残さない）。
+func TestRun_DeletesWhenRecheckErrors(t *testing.T) {
+	store := leakFixture()
+	store.eligErr = map[uint][]error{7: {nil, errDB}}
+	w := &fakeWriter{}
+	_, err := newTestJob(t, store, w).Run(context.Background())
+	if !errors.Is(err, errDB) {
+		t.Fatalf("err = %v, want %v", err, errDB)
+	}
+	if len(w.deletes) != 1 {
+		t.Fatalf("消したもの = %v, want 1件", w.deletes)
+	}
+}
+
+// TestRandomRunSuffix は、実行 ID の末尾が 8 桁の16進で、呼ぶたびに変わることを確かめる（二重起動での衝突を防ぐ）。
+func TestRandomRunSuffix(t *testing.T) {
+	a, b := randomRunSuffix(), randomRunSuffix()
+	if len(a) != 8 || len(b) != 8 || a == b {
+		t.Fatalf("randomRunSuffix = %q, %q", a, b)
+	}
+	if _, err := hex.DecodeString(a); err != nil {
+		t.Fatalf("16進でない: %q", a)
 	}
 }

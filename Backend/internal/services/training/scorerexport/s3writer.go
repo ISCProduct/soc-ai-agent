@@ -38,6 +38,19 @@ func NewS3Writer(ctx context.Context, bucket string) (*S3Writer, error) {
 
 // PutObject は body を key に書く。サーバー側の暗号化を必ず指定する（バケットの既定の設定に頼らない）。
 // 公開の ACL は付けない。
+// DeleteObject は key のオブジェクトを消す。存在しなくてもエラーにしない（S3 の DeleteObject と同じ）。
+func (w *S3Writer) DeleteObject(ctx context.Context, key string) error {
+	_, err := w.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(w.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		// PutObject と同じく、キー（subject を含む）はエラーに含めない。
+		return fmt.Errorf("s3 delete: %w", err)
+	}
+	return nil
+}
+
 func (w *S3Writer) PutObject(ctx context.Context, key string, body []byte, contentType string) error {
 	_, err := w.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:               aws.String(w.bucket),
