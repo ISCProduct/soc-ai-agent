@@ -63,6 +63,8 @@ export function StudentBottomNav() {
       elevation={8}
       sx={{
         position: 'fixed',
+        // 印刷（ポートフォリオの PDF など）に載せない
+        '@media print': { display: 'none' },
         bottom: 0,
         left: 0,
         right: 0,

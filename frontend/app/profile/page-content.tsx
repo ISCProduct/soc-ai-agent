@@ -255,6 +255,22 @@ function ProfilePageContent() {
             <StudentThemeToggle />
           </CardContent>
         </Card>
+        {/* 自己分析ポートフォリオ（#2030）。診断・面接・ES・適性検査をまとめて PDF にできる */}
+        {!isGuest && (
+          <Card sx={{ mb: 3, borderRadius: 2 }}>
+            <CardContent sx={{ p: 3, display: 'flex', alignItems: { sm: 'center' }, justifyContent: 'space-between', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
+              <Box>
+                <Typography variant="subtitle1" component="h2" fontWeight="bold">自己分析ポートフォリオ</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  診断・面接・ES 添削・適性検査の結果を1つにまとめ、PDF で保存できます
+                </Typography>
+              </Box>
+              <Button variant="outlined" onClick={() => router.push('/portfolio')} sx={{ flexShrink: 0 }}>
+                ポートフォリオを作る
+              </Button>
+            </CardContent>
+          </Card>
+        )}
         {/* ユーザーヘッダーカード */}
         <Card sx={{ mb: 3, borderRadius: 2 }}>
           <CardContent sx={{ p: 3 }}>
