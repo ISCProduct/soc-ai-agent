@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { formatNumber } from '@/lib/i18n/format'
 import Link from 'next/link'
 import {
   Alert,
@@ -228,7 +229,7 @@ export default function PageContent() {
                     総ドキュメント数
                   </Typography>
                   <Typography variant="h4">
-                    {stats.total_documents.toLocaleString()}
+                    {formatNumber(stats.total_documents)}
                   </Typography>
                 </CardContent>
               </Card>

@@ -1,7 +1,7 @@
 package matching
 
 import (
-	"Backend/domain/entity"
+	"Backend/internal/models"
 	"reflect"
 	"testing"
 )
@@ -11,13 +11,13 @@ import (
 func TestMinMatchedAxisCount(t *testing.T) {
 	tests := []struct {
 		name    string
-		matches []*entity.UserCompanyMatch
+		matches []*models.UserCompanyMatch
 		want    int
 	}{
 		{name: "空なら0", want: 0},
 		{
 			name: "最小値を返す",
-			matches: []*entity.UserCompanyMatch{
+			matches: []*models.UserCompanyMatch{
 				{MatchedAxisCount: 6},
 				{MatchedAxisCount: 2},
 				{MatchedAxisCount: 4},
@@ -60,7 +60,7 @@ func TestIsRecommendationProvisional_EvaluatedCategories(t *testing.T) {
 }
 
 func TestCountEvaluatedCategories(t *testing.T) {
-	scores := []entity.UserWeightScore{{Score: 3}, {Score: 0}, {Score: -1}, {Score: 5}}
+	scores := []models.UserWeightScore{{Score: 3}, {Score: 0}, {Score: -1}, {Score: 5}}
 	if got := CountEvaluatedCategories(scores); got != 3 {
 		t.Fatalf("CountEvaluatedCategories() = %d, want 3（0だけ数えない）", got)
 	}
@@ -110,10 +110,10 @@ func TestSplitTechStack(t *testing.T) {
 // TestDisplayableMatches_DropsUnresolvedCompany は企業を解決できない match が
 // 表示にも根拠軸数の集計にも入らないことを見る。
 func TestDisplayableMatches_DropsUnresolvedCompany(t *testing.T) {
-	matches := []*entity.UserCompanyMatch{
+	matches := []*models.UserCompanyMatch{
 		{MatchedAxisCount: 1}, // Company 無し
-		{MatchedAxisCount: 8, Company: &entity.Company{ID: 7}},
-		{MatchedAxisCount: 2, Company: &entity.Company{}}, // ID 0
+		{MatchedAxisCount: 8, Company: models.Company{ID: 7}},
+		{MatchedAxisCount: 2, Company: models.Company{}}, // ID 0
 	}
 	got := DisplayableMatches(matches)
 	if len(got) != 1 || got[0].Company.ID != 7 {

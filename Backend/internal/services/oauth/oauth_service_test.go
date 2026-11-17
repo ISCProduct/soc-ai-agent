@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/config"
 	"Backend/internal/middleware"
+	"Backend/internal/models"
 
 	"golang.org/x/oauth2"
 )
@@ -105,24 +105,24 @@ const bodySecret = "secret-in-error-body"
 
 type oauthUserRepoStub struct {
 	repository.UserRepository
-	byOAuth map[string]*entity.User
-	byEmail map[string]*entity.User
-	created []*entity.User
-	updated []*entity.User
+	byOAuth map[string]*models.User
+	byEmail map[string]*models.User
+	created []*models.User
+	updated []*models.User
 }
 
-func (r *oauthUserRepoStub) GetUserByOAuth(provider, id string) (*entity.User, error) {
+func (r *oauthUserRepoStub) GetUserByOAuth(provider, id string) (*models.User, error) {
 	return r.byOAuth[provider+":"+id], nil
 }
-func (r *oauthUserRepoStub) GetUserByEmail(email string) (*entity.User, error) {
+func (r *oauthUserRepoStub) GetUserByEmail(email string) (*models.User, error) {
 	return r.byEmail[email], nil
 }
-func (r *oauthUserRepoStub) CreateUser(u *entity.User) error {
+func (r *oauthUserRepoStub) CreateUser(u *models.User) error {
 	u.ID = 100
 	r.created = append(r.created, u)
 	return nil
 }
-func (r *oauthUserRepoStub) UpdateUser(u *entity.User) error {
+func (r *oauthUserRepoStub) UpdateUser(u *models.User) error {
 	r.updated = append(r.updated, u)
 	return nil
 }
@@ -139,8 +139,8 @@ func newOAuthTestService(repo *oauthUserRepoStub) *OAuthService {
 type wantLogin struct {
 	userID    uint
 	email     string
-	created   *entity.User // 新規作成したユーザーの期待値（nil なら作成しない）
-	linked    *entity.User // メール一致の既存ユーザーへ紐付けたときの更新後の期待値（nil なら更新しない）
+	created   *models.User // 新規作成したユーザーの期待値（nil なら作成しない）
+	linked    *models.User // メール一致の既存ユーザーへ紐付けたときの更新後の期待値（nil なら更新しない）
 	wantAdmin bool         // 管理者トークンも出すか
 }
 
@@ -207,7 +207,7 @@ func TestHandleGoogleCallback(t *testing.T) {
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, verified}},
 			repo:      &oauthUserRepoStub{},
 			tenant:    7,
-			want: wantLogin{userID: 100, email: "new@example.com", created: &entity.User{
+			want: wantLogin{userID: 100, email: "new@example.com", created: &models.User{
 				Email: "new@example.com", Name: "新規", OAuthProvider: "google", OAuthID: "g-1",
 				AvatarURL: "https://img/p.png", OrganizationID: 7,
 			}},
@@ -215,70 +215,70 @@ func TestHandleGoogleCallback(t *testing.T) {
 		{
 			name:      "メールが一致する既存ユーザーに紐付け、名前は空のときだけ補う",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, verified}},
-			repo: &oauthUserRepoStub{byEmail: map[string]*entity.User{
+			repo: &oauthUserRepoStub{byEmail: map[string]*models.User{
 				"new@example.com": {ID: 5, Email: "new@example.com", Name: "", OrganizationID: 7},
 			}},
 			tenant: 7,
-			want: wantLogin{userID: 5, email: "new@example.com", linked: &entity.User{
+			want: wantLogin{userID: 5, email: "new@example.com", linked: &models.User{
 				ID: 5, OAuthProvider: "google", OAuthID: "g-1", AvatarURL: "https://img/p.png", Name: "新規",
 			}},
 		},
 		{
 			name:      "紐付けでは、既存ユーザーの名前を上書きしない",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, verified}},
-			repo: &oauthUserRepoStub{byEmail: map[string]*entity.User{
+			repo: &oauthUserRepoStub{byEmail: map[string]*models.User{
 				"new@example.com": {ID: 5, Email: "new@example.com", Name: "元の名前"},
 			}},
-			want: wantLogin{userID: 5, email: "new@example.com", linked: &entity.User{
+			want: wantLogin{userID: 5, email: "new@example.com", linked: &models.User{
 				ID: 5, OAuthProvider: "google", OAuthID: "g-1", AvatarURL: "https://img/p.png", Name: "元の名前",
 			}},
 		},
 		{
 			name:      "テナント指定なし（0）なら、別組織の既存ユーザーにも紐付ける",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, verified}},
-			repo: &oauthUserRepoStub{byEmail: map[string]*entity.User{
+			repo: &oauthUserRepoStub{byEmail: map[string]*models.User{
 				"new@example.com": {ID: 5, Email: "new@example.com", Name: "元の名前", OrganizationID: 2},
 			}},
 			tenant: 0,
-			want: wantLogin{userID: 5, email: "new@example.com", linked: &entity.User{
+			want: wantLogin{userID: 5, email: "new@example.com", linked: &models.User{
 				ID: 5, OAuthProvider: "google", OAuthID: "g-1", AvatarURL: "https://img/p.png", Name: "元の名前",
 			}},
 		},
 		{
 			name:      "管理者は別テナントの既存ユーザーでも紐付ける（テナント制約の例外）",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, verified}},
-			repo: &oauthUserRepoStub{byEmail: map[string]*entity.User{
+			repo: &oauthUserRepoStub{byEmail: map[string]*models.User{
 				"new@example.com": {ID: 5, Email: "new@example.com", Name: "管理者", OrganizationID: 2, IsAdmin: true},
 			}},
 			tenant: 7,
-			want: wantLogin{userID: 5, email: "new@example.com", wantAdmin: true, linked: &entity.User{
+			want: wantLogin{userID: 5, email: "new@example.com", wantAdmin: true, linked: &models.User{
 				ID: 5, OAuthProvider: "google", OAuthID: "g-1", AvatarURL: "https://img/p.png", Name: "管理者",
 			}},
 		},
 		{
 			name:      "別テナントの既存ユーザー（非管理者）には紐付けない",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, verified}},
-			repo:      &oauthUserRepoStub{byEmail: map[string]*entity.User{"new@example.com": {ID: 5, Email: "new@example.com", OrganizationID: 2}}},
+			repo:      &oauthUserRepoStub{byEmail: map[string]*models.User{"new@example.com": {ID: 5, Email: "new@example.com", OrganizationID: 2}}},
 			tenant:    7,
 			wantErr:   "tenant mismatch",
 		},
 		{
 			name:      "既存の OAuth ユーザーが別テナント（非管理者）ならログインさせない",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, verified}},
-			repo:      &oauthUserRepoStub{byOAuth: map[string]*entity.User{"google:g-1": {ID: 6, Email: "new@example.com", OrganizationID: 2}}},
+			repo:      &oauthUserRepoStub{byOAuth: map[string]*models.User{"google:g-1": {ID: 6, Email: "new@example.com", OrganizationID: 2}}},
 			tenant:    7,
 			wantErr:   "tenant mismatch",
 		},
 		{
 			name:      "既存の管理者には管理者トークンも出す",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, `{"id":"g-9","email":"admin@example.com","verified_email":true}`}},
-			repo:      &oauthUserRepoStub{byOAuth: map[string]*entity.User{"google:g-9": {ID: 9, Email: "admin@example.com", IsAdmin: true}}},
+			repo:      &oauthUserRepoStub{byOAuth: map[string]*models.User{"google:g-9": {ID: 9, Email: "admin@example.com", IsAdmin: true}}},
 			want:      wantLogin{userID: 9, email: "admin@example.com", wantAdmin: true},
 		},
 		{
 			name:      "職員（is_admin=false）にも管理者トークンを出す",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, `{"id":"g-8","email":"staff@example.com","verified_email":true}`}},
-			repo:      &oauthUserRepoStub{byOAuth: map[string]*entity.User{"google:g-8": {ID: 8, Email: "staff@example.com", Role: entity.UserRoleStaff}}},
+			repo:      &oauthUserRepoStub{byOAuth: map[string]*models.User{"google:g-8": {ID: 8, Email: "staff@example.com", Role: models.UserRoleStaff}}},
 			want:      wantLogin{userID: 8, email: "staff@example.com", wantAdmin: true},
 		},
 		{
@@ -311,7 +311,7 @@ func TestHandleGoogleCallback(t *testing.T) {
 			// #2225：id が無いと、別々のアカウントが同じ空の OAuthID に紐付く
 			name:      "id が無いユーザー情報は拒否し、メールが一致する既存ユーザーにも紐付けない",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, `{"email":"new@example.com","verified_email":true}`}},
-			repo:      &oauthUserRepoStub{byEmail: map[string]*entity.User{"new@example.com": {ID: 5, Email: "new@example.com"}}},
+			repo:      &oauthUserRepoStub{byEmail: map[string]*models.User{"new@example.com": {ID: 5, Email: "new@example.com"}}},
 			wantErr:   "missing user id",
 		},
 		{
@@ -319,7 +319,7 @@ func TestHandleGoogleCallback(t *testing.T) {
 			name:      "id の前後の空白は、照合にも保存にも除いた値を使う",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {200, `{"id":"  g-1  ","email":"new@example.com","verified_email":true,"name":"新規"}`}},
 			repo:      &oauthUserRepoStub{},
-			want: wantLogin{userID: 100, email: "new@example.com", created: &entity.User{
+			want: wantLogin{userID: 100, email: "new@example.com", created: &models.User{
 				Email: "new@example.com", Name: "新規", OAuthProvider: "google", OAuthID: "g-1",
 			}},
 		},
@@ -351,7 +351,7 @@ func TestHandleGoogleCallback(t *testing.T) {
 		{
 			name:      "500 は、メールが一致する既存ユーザーがいても紐付け（更新）しない",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {500, verifiedWithSecret}},
-			repo:      &oauthUserRepoStub{byEmail: map[string]*entity.User{"new@example.com": {ID: 5, Email: "new@example.com"}}},
+			repo:      &oauthUserRepoStub{byEmail: map[string]*models.User{"new@example.com": {ID: 5, Email: "new@example.com"}}},
 			wantErr:   "failed to get user info: unexpected status 500",
 		},
 		{
@@ -376,7 +376,7 @@ func TestHandleGoogleCallback(t *testing.T) {
 			name:      "境界：299（2xx の上端）はステータスでは拒否せず、ログインできる",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, googleUserInfoURL: {299, verified}},
 			repo:      &oauthUserRepoStub{},
-			want: wantLogin{userID: 100, email: "new@example.com", created: &entity.User{
+			want: wantLogin{userID: 100, email: "new@example.com", created: &models.User{
 				Email: "new@example.com", Name: "新規", OAuthProvider: "google", OAuthID: "g-1", AvatarURL: "https://img/p.png",
 			}},
 		},
@@ -434,7 +434,7 @@ func TestHandleGitHubCallback(t *testing.T) {
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {200, publicEmail}},
 			repo:      &oauthUserRepoStub{},
 			tenant:    7,
-			want: wantLogin{userID: 100, email: "octo@example.com", created: &entity.User{
+			want: wantLogin{userID: 100, email: "octo@example.com", created: &models.User{
 				Email: "octo@example.com", Name: "octo", OAuthProvider: "github", OAuthID: "42",
 				AvatarURL: "https://img/octo.png", OrganizationID: 7,
 			}},
@@ -447,7 +447,7 @@ func TestHandleGitHubCallback(t *testing.T) {
 				githubEmailsURL: {200, `[{"email":"old@example.com","primary":false,"verified":true},{"email":"main@example.com","primary":true,"verified":true}]`},
 			},
 			repo: &oauthUserRepoStub{},
-			want: wantLogin{userID: 100, email: "main@example.com", created: &entity.User{
+			want: wantLogin{userID: 100, email: "main@example.com", created: &models.User{
 				Email: "main@example.com", Name: "Octo", OAuthProvider: "github", OAuthID: "42",
 			}},
 		},
@@ -459,50 +459,50 @@ func TestHandleGitHubCallback(t *testing.T) {
 				githubEmailsURL: {200, `[{"email":"unverified@example.com","primary":true,"verified":false},{"email":"ok@example.com","primary":false,"verified":true}]`},
 			},
 			repo: &oauthUserRepoStub{},
-			want: wantLogin{userID: 100, email: "ok@example.com", created: &entity.User{
+			want: wantLogin{userID: 100, email: "ok@example.com", created: &models.User{
 				Email: "ok@example.com", Name: "octo", OAuthProvider: "github", OAuthID: "42",
 			}},
 		},
 		{
 			name:      "メールが一致する既存ユーザーに紐付け、名前が空なら name → login の順で補う",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {200, publicEmail}},
-			repo: &oauthUserRepoStub{byEmail: map[string]*entity.User{
+			repo: &oauthUserRepoStub{byEmail: map[string]*models.User{
 				"octo@example.com": {ID: 5, Email: "octo@example.com", Name: "", OrganizationID: 7},
 			}},
 			tenant: 7,
-			want: wantLogin{userID: 5, email: "octo@example.com", linked: &entity.User{
+			want: wantLogin{userID: 5, email: "octo@example.com", linked: &models.User{
 				ID: 5, OAuthProvider: "github", OAuthID: "42", AvatarURL: "https://img/octo.png", Name: "octo",
 			}},
 		},
 		{
 			name:      "管理者は別テナントの既存ユーザーでも紐付ける（テナント制約の例外）",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {200, publicEmail}},
-			repo: &oauthUserRepoStub{byEmail: map[string]*entity.User{
+			repo: &oauthUserRepoStub{byEmail: map[string]*models.User{
 				"octo@example.com": {ID: 5, Email: "octo@example.com", Name: "管理者", OrganizationID: 2, IsAdmin: true},
 			}},
 			tenant: 7,
-			want: wantLogin{userID: 5, email: "octo@example.com", wantAdmin: true, linked: &entity.User{
+			want: wantLogin{userID: 5, email: "octo@example.com", wantAdmin: true, linked: &models.User{
 				ID: 5, OAuthProvider: "github", OAuthID: "42", AvatarURL: "https://img/octo.png", Name: "管理者",
 			}},
 		},
 		{
 			name:      "既存の管理者の OAuth ユーザーは別テナントでもログインできる",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {200, publicEmail}},
-			repo:      &oauthUserRepoStub{byOAuth: map[string]*entity.User{"github:42": {ID: 3, Email: "octo@example.com", OrganizationID: 2, IsAdmin: true}}},
+			repo:      &oauthUserRepoStub{byOAuth: map[string]*models.User{"github:42": {ID: 3, Email: "octo@example.com", OrganizationID: 2, IsAdmin: true}}},
 			tenant:    7,
 			want:      wantLogin{userID: 3, email: "octo@example.com", wantAdmin: true},
 		},
 		{
 			name:      "別テナントの既存の OAuth ユーザー（非管理者）はログインさせない",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {200, publicEmail}},
-			repo:      &oauthUserRepoStub{byOAuth: map[string]*entity.User{"github:42": {ID: 3, Email: "octo@example.com", OrganizationID: 2}}},
+			repo:      &oauthUserRepoStub{byOAuth: map[string]*models.User{"github:42": {ID: 3, Email: "octo@example.com", OrganizationID: 2}}},
 			tenant:    7,
 			wantErr:   "tenant mismatch",
 		},
 		{
 			name:      "別テナントの既存ユーザー（非管理者）にはメールで紐付けない",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {200, publicEmail}},
-			repo:      &oauthUserRepoStub{byEmail: map[string]*entity.User{"octo@example.com": {ID: 5, Email: "octo@example.com", OrganizationID: 2}}},
+			repo:      &oauthUserRepoStub{byEmail: map[string]*models.User{"octo@example.com": {ID: 5, Email: "octo@example.com", OrganizationID: 2}}},
 			tenant:    7,
 			wantErr:   "tenant mismatch",
 		},
@@ -536,7 +536,7 @@ func TestHandleGitHubCallback(t *testing.T) {
 		{
 			name:      "/user の 500 は、メールが一致する既存ユーザーがいても紐付け（更新）しない",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {500, publicEmailWithSecret}},
-			repo:      &oauthUserRepoStub{byEmail: map[string]*entity.User{"octo@example.com": {ID: 5, Email: "octo@example.com"}}},
+			repo:      &oauthUserRepoStub{byEmail: map[string]*models.User{"octo@example.com": {ID: 5, Email: "octo@example.com"}}},
 			wantErr:   "failed to get user info: unexpected status 500",
 		},
 		{
@@ -555,7 +555,7 @@ func TestHandleGitHubCallback(t *testing.T) {
 			name:      "境界：/user の 299 はステータスでは拒否せず、ログインできる",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {299, publicEmail}},
 			repo:      &oauthUserRepoStub{},
-			want: wantLogin{userID: 100, email: "octo@example.com", created: &entity.User{
+			want: wantLogin{userID: 100, email: "octo@example.com", created: &models.User{
 				Email: "octo@example.com", Name: "octo", OAuthProvider: "github", OAuthID: "42", AvatarURL: "https://img/octo.png",
 			}},
 		},
@@ -607,7 +607,7 @@ func TestHandleGitHubCallback(t *testing.T) {
 				githubEmailsURL: {299, `[{"email":"main@example.com","primary":true,"verified":true}]`},
 			},
 			repo: &oauthUserRepoStub{},
-			want: wantLogin{userID: 100, email: "main@example.com", created: &entity.User{
+			want: wantLogin{userID: 100, email: "main@example.com", created: &models.User{
 				Email: "main@example.com", Name: "octo", OAuthProvider: "github", OAuthID: "42",
 			}},
 		},
@@ -627,7 +627,7 @@ func TestHandleGitHubCallback(t *testing.T) {
 			// #2225：id が無いと "0" に紐付く。メール一覧を取りに行く前に弾く
 			name:      "id が無いユーザー情報は拒否し、メールが一致する既存ユーザーにも紐付けない",
 			responses: map[string]fakeResponse{fakeTokenURL: okToken, githubUserURL: {200, `{"login":"octo","email":"octo@example.com"}`}},
-			repo:      &oauthUserRepoStub{byEmail: map[string]*entity.User{"octo@example.com": {ID: 5, Email: "octo@example.com"}}},
+			repo:      &oauthUserRepoStub{byEmail: map[string]*models.User{"octo@example.com": {ID: 5, Email: "octo@example.com"}}},
 			wantErr:   "missing user id",
 		},
 		{

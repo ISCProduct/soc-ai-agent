@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"errors"
 	"strings"
 
 	"Backend/internal/models"
@@ -22,7 +23,7 @@ func NewUserPreferenceRepository(db *gorm.DB) *UserPreferenceRepository {
 func (r *UserPreferenceRepository) FindByUserID(userID uint) (*models.UserPreference, error) {
 	var m models.UserPreference
 	err := r.db.Where("user_id = ?", userID).First(&m).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {

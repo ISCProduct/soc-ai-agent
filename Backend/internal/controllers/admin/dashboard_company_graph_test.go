@@ -5,14 +5,6 @@ package admin_test
 // 実行: cd Backend && go test ./internal/controllers/admin/... -run "AdminDashboard|AdminCompanyGraph" -v
 
 import (
-	"encoding/json"
-	"errors"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-	"time"
-
-	"Backend/domain/entity"
 	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/controllers/mocks"
 	"Backend/internal/controllers/testsupport"
@@ -20,6 +12,12 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/services/organization"
 	"Backend/internal/services/school"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -54,7 +52,7 @@ func TestAdminDashboardController_UserSessions_SessionRepoError(t *testing.T) {
 	c.SetParamValues("1")
 
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("GetUserByID", uint(1)).Return(&entity.User{Email: "user@example.com"}, nil)
+	userRepo.On("GetUserByID", uint(1)).Return(&models.User{Email: "user@example.com"}, nil)
 	sessRepo := &mocks.DashboardSessionRepoMock{}
 	sessRepo.On("ListFinishedSessionIDsByUser", uint(1)).Return([]uint{}, errors.New("db error"))
 	ctrl := newAdminDashboardController(userRepo, sessRepo, nil)
@@ -72,7 +70,7 @@ func TestAdminDashboardController_UserSessions_Success(t *testing.T) {
 
 	now := time.Now()
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("GetUserByID", uint(2)).Return(&entity.User{Email: "user2@example.com"}, nil)
+	userRepo.On("GetUserByID", uint(2)).Return(&models.User{Email: "user2@example.com"}, nil)
 	sessRepo := &mocks.DashboardSessionRepoMock{}
 	repRepo := &mocks.DashboardReportRepoMock{}
 	sessRepo.On("ListFinishedSessionIDsByUser", uint(2)).Return([]uint{10, 11}, nil)
@@ -105,7 +103,7 @@ func TestAdminDashboardController_UserSessions_SchoolAccessDenied(t *testing.T) 
 
 	otherSchoolID := uint(99)
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "user3@example.com", SchoolID: &otherSchoolID}, nil)
+	userRepo.On("GetUserByID", uint(3)).Return(&models.User{Email: "user3@example.com", SchoolID: &otherSchoolID}, nil)
 	schoolRepo := &mocks.SchoolRepositoryMock{}
 	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
 	// 対象学生の学園と一致する学校を返す（#1675 の学園一致検査を通す）。
@@ -126,7 +124,7 @@ func TestAdminDashboardController_UserSessions_ReportRepoError(t *testing.T) {
 	c.SetParamValues("3")
 
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "user3@example.com"}, nil)
+	userRepo.On("GetUserByID", uint(3)).Return(&models.User{Email: "user3@example.com"}, nil)
 	sessRepo := &mocks.DashboardSessionRepoMock{}
 	repRepo := &mocks.DashboardReportRepoMock{}
 	sessRepo.On("ListFinishedSessionIDsByUser", uint(3)).Return([]uint{20}, nil)
@@ -143,7 +141,7 @@ func TestAdminDashboardController_ListUsers_UserRepoError(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return([]entity.User{}, int64(0), errors.New("db error"))
+	userRepo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return([]models.User{}, int64(0), errors.New("db error"))
 	testsupport.AssertStatus(t, newAdminDashboardController(userRepo, nil, nil).ListUsers, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	userRepo.AssertExpectations(t)
 }
@@ -152,7 +150,7 @@ func TestAdminDashboardController_ListUsers_Success(t *testing.T) {
 	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users?limit=10&page=1", nil), nil)
 	rec := httptest.NewRecorder()
 
-	users := []entity.User{{ID: 1, Name: "テストユーザー", Email: "test@example.com"}}
+	users := []models.User{{ID: 1, Name: "テストユーザー", Email: "test@example.com"}}
 	userRepo := &mocks.UserRepositoryMock{}
 	sessRepo := &mocks.DashboardSessionRepoMock{}
 	repRepo := &mocks.DashboardReportRepoMock{}
@@ -176,7 +174,7 @@ func TestAdminDashboardController_ListUsers_SessionStatError(t *testing.T) {
 	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users", nil), nil)
 	rec := httptest.NewRecorder()
 
-	users := []entity.User{{ID: 1, Name: "ユーザー"}}
+	users := []models.User{{ID: 1, Name: "ユーザー"}}
 	userRepo := &mocks.UserRepositoryMock{}
 	sessRepo := &mocks.DashboardSessionRepoMock{}
 
@@ -210,7 +208,7 @@ func TestAdminDashboardController_ListUsers_ClampsLimit(t *testing.T) {
 			userRepo := &mocks.UserRepositoryMock{}
 			sessRepo := &mocks.DashboardSessionRepoMock{}
 			repRepo := &mocks.DashboardReportRepoMock{}
-			userRepo.On("ListUsersPaged", tt.wantLimit, tt.wantOffset, "", mock.Anything).Return([]entity.User{}, int64(0), nil)
+			userRepo.On("ListUsersPaged", tt.wantLimit, tt.wantOffset, "", mock.Anything).Return([]models.User{}, int64(0), nil)
 			sessRepo.On("GetUserStatsBatch", []uint{}).Return(map[uint]repositories.UserSessionStat{}, nil)
 			repRepo.On("FindBySessionIDs", []uint(nil)).Return([]models.InterviewReport{}, nil)
 
@@ -251,7 +249,7 @@ func TestAdminDashboardController_ExportCSV_OrgUnassigned_UsesGlobalDefault(t *t
 	orgRepo.On("FindMembershipByUserID", uint(42)).Return(nil, nil)
 	orgRepo.On("GetUserOrganizationID", uint(42)).Return(uint(0), nil)
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("ListUsersPaged", 10000, 0, "", mock.Anything).Return([]entity.User{}, int64(0), errors.New("unrelated db error"))
+	userRepo.On("ListUsersPaged", 10000, 0, "", mock.Anything).Return([]models.User{}, int64(0), errors.New("unrelated db error"))
 	ctrl := newAdminDashboardController(userRepo, nil, nil)
 	ctrl.SetOrganizationService(organization.NewOrganizationService(orgRepo))
 
@@ -269,7 +267,7 @@ func TestAdminDashboardController_ExportCSV_UserRepoError(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("ListUsersPaged", 10000, 0, "", mock.Anything).Return([]entity.User{}, int64(0), errors.New("db error"))
+	userRepo.On("ListUsersPaged", 10000, 0, "", mock.Anything).Return([]models.User{}, int64(0), errors.New("db error"))
 	testsupport.AssertStatus(t, newAdminDashboardController(userRepo, nil, nil).ExportCSV, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 }
 
@@ -277,7 +275,7 @@ func TestAdminDashboardController_ExportCSV_Success(t *testing.T) {
 	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), nil)
 	rec := httptest.NewRecorder()
 
-	users := []entity.User{
+	users := []models.User{
 		{ID: 1, Name: "田中 太郎", Email: "tanaka@example.com", TargetLevel: "新卒"},
 	}
 	userRepo := &mocks.UserRepositoryMock{}

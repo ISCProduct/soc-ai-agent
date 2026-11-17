@@ -16,6 +16,13 @@ import {
   REPORT_POLL_INTERVAL_MS,
   REPORT_POLL_TIMEOUT_MS,
 } from '../reportPolling'
+import {
+  advanceProgress,
+  INITIAL_PROGRESS_TRACKER,
+  parseReportProgress,
+  type ProgressTracker,
+  type ReportProgressView,
+} from '../reportProgress'
 import { resolveFinishOutcomeMessage } from '../finishOutcome'
 import { applyCompanyReadingResponse } from '../companyReadingContext'
 import { nextQuestionIndex } from '../questionEvents'
@@ -80,6 +87,12 @@ export function useInterviewSession({
   const [session, setSession] = useState<InterviewSession | null>(null)
   const [report, setReport] = useState<InterviewReport | null>(null)
   const [reportStatus, setReportStatus] = useState<ReportStatus>('idle')
+  /** レポート生成の進捗表示（バックエンドが返さない間は null で従来表示）。SOCAIAGENT-652 */
+  const [reportProgress, setReportProgress] = useState<ReportProgressView | null>(null)
+  const [reportFailedByServer, setReportFailedByServer] = useState(false)
+  /** 経過時間表示の基準（ポーリング開始時刻 ms） */
+  const [reportStartedAt, setReportStartedAt] = useState<number | null>(null)
+  const progressTrackerRef = useRef<ProgressTracker>(INITIAL_PROGRESS_TRACKER)
   /** レポート生成の再投入API(regenerateReport)が失敗したときのメッセージ(#1476) */
   const [reportRetryError, setReportRetryError] = useState('')
   const [emailSending, setEmailSending] = useState(false)
@@ -436,7 +449,7 @@ export function useInterviewSession({
     setErrorMessage(null)
     setUtterances([])
     setPartialUser(''); setPartialAi('')
-    setReport(null); setReportStatus('idle'); setReportRetryError('')
+    setReport(null); setReportStatus('idle'); setReportRetryError(''); setReportProgress(null); setReportFailedByServer(false)
     setRemainingSeconds(interviewLimits.maxMinutes * 60)
     setElapsedSeconds(0)
     setCurrentQuestionIndex(1)
@@ -596,7 +609,11 @@ export function useInterviewSession({
     const generation = ++pollGenerationRef.current
     pollSessionRef.current = { sessionId, userId }
     pollStartedAtRef.current = Date.now()
+    setReportStartedAt(pollStartedAtRef.current)
     pollFailureCountRef.current = 0
+    progressTrackerRef.current = INITIAL_PROGRESS_TRACKER
+    setReportProgress(null)
+    setReportFailedByServer(false)
     setReportStatus('pending')
 
     const tick = async () => {
@@ -605,6 +622,7 @@ export function useInterviewSession({
       const startedAt = pollStartedAtRef.current ?? Date.now()
       let hasReport = false
       let reportPayload: InterviewReport | null = null
+      let serverFailed = false
 
       try {
         const detail = await interviewApi.getDetail(sessionId, userId)
@@ -613,6 +631,16 @@ export function useInterviewSession({
         if (detail.report) {
           hasReport = true
           reportPayload = detail.report
+        }
+        const progress = parseReportProgress(detail.session)
+        if (progress && !detail.report) {
+          if (progress.stage === 'failed') {
+            serverFailed = true
+          } else {
+            const next = advanceProgress(progressTrackerRef.current, progress, Date.now())
+            progressTrackerRef.current = next.tracker
+            if (generation === pollGenerationRef.current) setReportProgress(next.view)
+          }
         }
       } catch {
         pollFailureCountRef.current += 1
@@ -633,6 +661,13 @@ export function useInterviewSession({
         setReportStatus('ready')
         stopReportPolling()
         await loadScoresAfter(userId)
+        return
+      }
+      // サーバーが失敗と確定した場合は、タイムアウトを待たずに失敗表示へ（最終リトライ後にだけ書かれる）
+      if (serverFailed && outcome !== 'ready') {
+        setReportFailedByServer(true)
+        setReportStatus('error')
+        stopReportPolling()
         return
       }
       if (outcome === 'error') {
@@ -855,6 +890,9 @@ export function useInterviewSession({
     session,
     report,
     reportStatus,
+    reportProgress,
+    reportFailedByServer,
+    reportStartedAt,
     reportRetryError,
     retryReportPolling,
     emailSending,

@@ -4,6 +4,7 @@ package chat
 // 実行: cd Backend && go test ./internal/controllers/... -run TestRunBackgroundMatching -v
 
 import (
+	"Backend/internal/models"
 	"context"
 	"errors"
 	"sync"
@@ -11,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"Backend/domain/entity"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/matching"
 	"Backend/internal/usagectx"
@@ -44,7 +44,7 @@ func (s *stubMatchingService) CalculateMatching(ctx context.Context, userID uint
 	return nil
 }
 
-func (s *stubMatchingService) GetTopMatches(context.Context, uint, string, int) ([]*entity.UserCompanyMatch, error) {
+func (s *stubMatchingService) GetTopMatches(context.Context, uint, string, int) ([]*models.UserCompanyMatch, error) {
 	return nil, nil
 }
 func (s *stubMatchingService) ToggleFavorite(uint, uint) error { return nil }
@@ -52,7 +52,7 @@ func (s *stubMatchingService) GetDiagnostics(uint, string) (*matching.MatchingDi
 	return nil, nil
 }
 
-func (s *stubMatchingService) ReasonScores(_ uint, scores []entity.UserWeightScore) []entity.UserWeightScore {
+func (s *stubMatchingService) ReasonScores(_ uint, scores []models.UserWeightScore) []models.UserWeightScore {
 	return scores
 }
 

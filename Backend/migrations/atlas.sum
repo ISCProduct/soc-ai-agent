@@ -1,4 +1,4 @@
-h1:V64Z2Zz4OEbUoIxuwz+04MJHMCib/kh6px7skkZdHxc=
+h1:YqofAKUj8gdzF2xwH3EJbq4gSWKlI5WEHUr2IUu+plU=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -73,4 +73,5 @@ h1:V64Z2Zz4OEbUoIxuwz+04MJHMCib/kh6px7skkZdHxc=
 000072_backfill_assessment_calculation_version.up.sql h1:frspr5ZXvYIngf9ZhhaKvR3imZ1/aQuKda2d1E73lpw=
 000073_user_score_recalculation_jobs.up.sql h1:3j2q8xYkosAgiEeNiJeTjfryHBF2Xf6DsX5dR1CaDjA=
 000074_user_score_recalculation_snapshots.up.sql h1:NU4uBlVRMXRAhUjmsPS+nPaY+LkC5fwGJ4Fiysqehxo=
-20261114010508_guidance_messages.up.sql h1:cYyJXEbHDxWB6Ru6Q9vaZGwJKvE5BcJjCaiFUdf0hj0=
+20261115225754_application_score_snapshot.up.sql h1:PABCvkB1CkKdFYjNe+Nr97SuEWGYfiojCmqWD0Beza8=
+20261117125522_guidance_messages.up.sql h1:9S8g+veNcOdku0qFn9AcsEmJtDgvw6aVQoWI2CNTay8=

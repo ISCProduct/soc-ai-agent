@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Box, Button, CircularProgress, Stack, TextField, Typography } from '@mui/material'
-import { MAX_CONSULTATION_LENGTH, type ConsultationThread as Thread } from '@/lib/consultation'
+import { MAX_CONSULTATION_LENGTH, countConsultationChars, type ConsultationThread as Thread } from '@/lib/consultation'
 
 type Props = {
   /** 自分の側。自分の発言を右に寄せる */
   me: 'student' | 'teacher'
   load: () => Promise<Thread>
-  send: (body: string) => Promise<Thread>
+  /** lastSeenId は、送信時に画面に出ていた最後の発言の ID（先生の既読の範囲に使う） */
+  send: (body: string, lastSeenId: number | undefined) => Promise<Thread>
   /** 送信・読み込みのあとに呼ぶ（未読数の取り直しなど） */
   onChanged?: () => void
 }
@@ -34,17 +35,22 @@ export function ConsultationThread({ me, load, send, onChanged }: Props) {
   useEffect(() => {
     onChangedRef.current = onChanged
   }, [onChanged])
+  // 別のスレッドに切り替わったあとに、前のスレッドの遅い応答で表示を上書きしない
+  const requestSeq = useRef(0)
 
   const reload = useCallback(async () => {
+    const seq = ++requestSeq.current
     setLoading(true)
     setError('')
     try {
-      setThread(await load())
+      const result = await load()
+      if (seq !== requestSeq.current) return
+      setThread(result)
       onChangedRef.current?.()
     } catch (e) {
-      setError(e instanceof Error ? e.message : '相談を読み込めませんでした')
+      if (seq === requestSeq.current) setError(e instanceof Error ? e.message : '相談を読み込めませんでした')
     } finally {
-      setLoading(false)
+      if (seq === requestSeq.current) setLoading(false)
     }
   }, [load])
 
@@ -54,13 +60,20 @@ export function ConsultationThread({ me, load, send, onChanged }: Props) {
 
   const submit = async () => {
     const body = draft.trim()
-    if (!body) return
+    if (!body || !thread) return
     setSending(true)
     setSendError('')
     try {
-      setThread(await send(body))
+      const result = await send(body, thread.messages.at(-1)?.id)
+      // 送信中は入力欄を止めているので、ここで消すのは送った文章だけ
       setDraft('')
-      onChangedRef.current?.()
+      if (result.stale) {
+        // 保存はできたが、スレッドの読み直しに失敗した。送信は成功なので読み直す（再送させない）
+        void reload()
+      } else {
+        setThread(result)
+        onChangedRef.current?.()
+      }
     } catch (e) {
       // 失敗しても入力は残す（書き直しをさせない）
       setSendError(e instanceof Error ? e.message : '送れませんでした')
@@ -78,7 +91,8 @@ export function ConsultationThread({ me, load, send, onChanged }: Props) {
   const opener = thread.kind === 'question' ? 'student' : 'teacher'
   // 学生の質問は最初の発言と本文が同じなので、本文を重ねて出さない
   const showOpener = thread.kind !== 'question'
-  const tooLong = draft.length > MAX_CONSULTATION_LENGTH
+  const length = countConsultationChars(draft)
+  const tooLong = length > MAX_CONSULTATION_LENGTH
 
   return (
     <Stack spacing={1.5}>
@@ -100,8 +114,9 @@ export function ConsultationThread({ me, load, send, onChanged }: Props) {
         minRows={2}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
+        disabled={sending}
         error={tooLong}
-        helperText={tooLong ? `${MAX_CONSULTATION_LENGTH}文字以内にしてください（${draft.length}文字）` : `${draft.length} / ${MAX_CONSULTATION_LENGTH}`}
+        helperText={tooLong ? `${MAX_CONSULTATION_LENGTH}文字以内にしてください（${length}文字）` : `${length} / ${MAX_CONSULTATION_LENGTH}`}
       />
       {sendError && <Alert severity="error">{sendError}</Alert>}
       <Box sx={{ textAlign: 'right' }}>

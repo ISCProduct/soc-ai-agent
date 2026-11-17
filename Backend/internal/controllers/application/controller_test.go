@@ -5,6 +5,7 @@ package application_test
 // 実行: cd Backend && go test ./internal/controllers/application/... -run Application -v
 
 import (
+	"Backend/internal/models"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -13,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"Backend/domain/entity"
 	applicationcontrollers "Backend/internal/controllers/application"
 	"Backend/internal/controllers/mocks"
 	"Backend/internal/controllers/testsupport"
@@ -97,7 +97,7 @@ func TestApplicationController_Apply_ServiceError(t *testing.T) {
 func TestApplicationController_Apply_Success(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
 	now := time.Now()
-	app := &entity.UserApplicationStatus{UserID: 1, CompanyID: 2, MatchID: 3, Status: "applied", AppliedAt: &now}
+	app := &models.UserApplicationStatus{UserID: 1, CompanyID: 2, MatchID: 3, Status: "applied", AppliedAt: &now}
 	svc.On("Apply", uint(1), uint(2), uint(3)).Return(app, nil)
 
 	// body の user_id は無視され、認証ユーザーIDが使われる
@@ -159,7 +159,7 @@ func TestApplicationController_UpdateStatus_MissingFields(t *testing.T) {
 
 func TestApplicationController_UpdateStatus_Success(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	app := &entity.UserApplicationStatus{Status: "interview_in_progress", Notes: "通過"}
+	app := &models.UserApplicationStatus{Status: "interview_in_progress", Notes: "通過"}
 	svc.On("UpdateStatus", uint(1), uint(1), "interview_in_progress", (*string)(nil), false).Return(app, nil)
 
 	body, _ := json.Marshal(map[string]any{"user_id": 999, "status": "interview_in_progress", "notes": "通過"})
@@ -214,7 +214,7 @@ func TestApplicationController_UpdateStatus_ClosedConflict(t *testing.T) {
 
 func TestApplicationController_UpdateStatus_IgnoresClientIsAdmin(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	app := &entity.UserApplicationStatus{Status: "document_screening", Notes: "書類選考開始"}
+	app := &models.UserApplicationStatus{Status: "document_screening", Notes: "書類選考開始"}
 	// is_admin=true を送ってもサービスには false が渡る
 	svc.On("UpdateStatus", uint(1), uint(1), "document_screening", (*string)(nil), false).Return(app, nil)
 
@@ -234,7 +234,7 @@ func TestApplicationController_UpdateStatus_IgnoresClientIsAdmin(t *testing.T) {
 
 func TestApplicationController_AdminUpdateStatus_Success(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	app := &entity.UserApplicationStatus{Status: "document_screening"}
+	app := &models.UserApplicationStatus{Status: "document_screening"}
 	// 管理者ルートは isAdmin=true 固定、userID は所有権チェック対象外のため 0 を渡す
 	svc.On("UpdateStatus", uint(1), uint(0), "document_screening", mock.Anything, true).Return(app, nil)
 	svc.On("OwnerSchoolID", uint(1)).Return(uintPtr(5), nil)
@@ -363,7 +363,7 @@ func TestApplicationController_Withdraw_Unauthorized(t *testing.T) {
 
 func TestApplicationController_Withdraw_Success(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	app := &entity.UserApplicationStatus{Status: "withdrawn"}
+	app := &models.UserApplicationStatus{Status: "withdrawn"}
 	svc.On("Withdraw", uint(1), uint(1), false).Return(app, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/applications/1/withdraw", nil)
@@ -413,7 +413,7 @@ func TestApplicationController_Accept_Unauthorized(t *testing.T) {
 
 func TestApplicationController_Accept_Success(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	app := &entity.UserApplicationStatus{Status: "accepted"}
+	app := &models.UserApplicationStatus{Status: "accepted"}
 	svc.On("Accept", uint(1), uint(1), false).Return(app, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/applications/1/accept", nil)
@@ -474,7 +474,7 @@ func TestApplicationController_Withdraw_Forbidden_HasCode(t *testing.T) {
 
 func TestApplicationController_AdminList_Success(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	apps := []*entity.UserApplicationStatus{
+	apps := []*models.UserApplicationStatus{
 		{UserID: 1, CompanyID: 2, Status: "document_screening"},
 	}
 	svc.On("ListForAdmin", uint(1), uint(2), "document_screening", (*uint)(nil)).Return(apps, nil)
@@ -491,7 +491,7 @@ func TestApplicationController_AdminList_Success(t *testing.T) {
 
 func TestApplicationController_AdminList_NoFilters(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	svc.On("ListForAdmin", uint(0), uint(0), "", (*uint)(nil)).Return([]*entity.UserApplicationStatus{}, nil)
+	svc.On("ListForAdmin", uint(0), uint(0), "", (*uint)(nil)).Return([]*models.UserApplicationStatus{}, nil)
 
 	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/applications", nil), nil)
 	rec := httptest.NewRecorder()
@@ -509,7 +509,7 @@ func TestApplicationController_AdminList_InvalidUserID(t *testing.T) {
 // 先生が他校の生徒の user_id を指定しても、学校で絞り込まれたクエリになるため他校のデータは返らない。
 func TestApplicationController_AdminList_ScopedToSchool(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	svc.On("ListForAdmin", uint(42), uint(0), "", uintPtr(5)).Return([]*entity.UserApplicationStatus{}, nil)
+	svc.On("ListForAdmin", uint(42), uint(0), "", uintPtr(5)).Return([]*models.UserApplicationStatus{}, nil)
 
 	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/applications?user_id=42", nil), uintPtr(5))
 	rec := httptest.NewRecorder()
@@ -548,7 +548,7 @@ func TestApplicationController_List_ServiceError(t *testing.T) {
 
 func TestApplicationController_List_Success(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	apps := []*entity.UserApplicationStatus{
+	apps := []*models.UserApplicationStatus{
 		{UserID: 1, CompanyID: 10, Status: "applied"},
 		{UserID: 1, CompanyID: 20, Status: "interview"},
 	}

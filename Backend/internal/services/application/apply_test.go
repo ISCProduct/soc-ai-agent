@@ -5,13 +5,15 @@ package application
 // 実行: cd Backend && go test ./internal/services/application/... -run Apply -v
 
 import (
+	"Backend/internal/models"
 	"errors"
 	"testing"
 
-	"Backend/domain/entity"
+	"Backend/internal/repositories"
 	"Backend/internal/services/shared"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -19,18 +21,18 @@ import (
 
 // stubApplyMatchRepo は Apply のテスト用最小モック（ToggleFavorite用スタブと同じパターン）。
 type stubApplyMatchRepo struct {
-	findByIDResult *entity.UserCompanyMatch
+	findByIDResult *models.UserCompanyMatch
 	findByIDErr    error
 }
 
-func (s *stubApplyMatchRepo) CreateOrUpdate(*entity.UserCompanyMatch) error { return nil }
-func (s *stubApplyMatchRepo) CreateOrUpdateBatch([]*entity.UserCompanyMatch) (int, error) {
+func (s *stubApplyMatchRepo) CreateOrUpdate(*models.UserCompanyMatch) error { return nil }
+func (s *stubApplyMatchRepo) CreateOrUpdateBatch([]*models.UserCompanyMatch) (int, error) {
 	return 0, nil
 }
-func (s *stubApplyMatchRepo) FindTopMatchesByUserAndSession(uint, string, int) ([]*entity.UserCompanyMatch, error) {
+func (s *stubApplyMatchRepo) FindTopMatchesByUserAndSession(uint, string, int) ([]*models.UserCompanyMatch, error) {
 	return nil, nil
 }
-func (s *stubApplyMatchRepo) FindByID(uint) (*entity.UserCompanyMatch, error) {
+func (s *stubApplyMatchRepo) FindByID(uint) (*models.UserCompanyMatch, error) {
 	return s.findByIDResult, s.findByIDErr
 }
 func (s *stubApplyMatchRepo) MarkAsViewed(uint) error   { return nil }
@@ -70,7 +72,7 @@ func TestApply_NotFoundOnMissingMatch(t *testing.T) {
 }
 
 func TestApply_ForbiddenOnOtherUsersMatch(t *testing.T) {
-	repo := &stubApplyMatchRepo{findByIDResult: &entity.UserCompanyMatch{ID: 5, UserID: 2, CompanyID: 10}}
+	repo := &stubApplyMatchRepo{findByIDResult: &models.UserCompanyMatch{ID: 5, UserID: 2, CompanyID: 10}}
 	s := &ApplicationService{matchRepo: repo}
 
 	// userID=1 だが match の所有者は userID=2
@@ -81,7 +83,7 @@ func TestApply_ForbiddenOnOtherUsersMatch(t *testing.T) {
 }
 
 func TestApply_BadRequestOnCompanyMismatch(t *testing.T) {
-	repo := &stubApplyMatchRepo{findByIDResult: &entity.UserCompanyMatch{ID: 5, UserID: 1, CompanyID: 10}}
+	repo := &stubApplyMatchRepo{findByIDResult: &models.UserCompanyMatch{ID: 5, UserID: 1, CompanyID: 10}}
 	s := &ApplicationService{matchRepo: repo}
 
 	// body の company_id(999) が match.CompanyID(10) と不一致
@@ -96,8 +98,8 @@ func TestApply_BadRequestOnCompanyMismatch(t *testing.T) {
 
 func TestApply_DuplicateActiveApplication(t *testing.T) {
 	db, mock := newSQLMockDB(t)
-	repo := &stubApplyMatchRepo{findByIDResult: &entity.UserCompanyMatch{ID: 5, UserID: 1, CompanyID: 10}}
-	s := &ApplicationService{matchRepo: repo, db: db}
+	repo := &stubApplyMatchRepo{findByIDResult: &models.UserCompanyMatch{ID: 5, UserID: 1, CompanyID: 10}}
+	s := &ApplicationService{matchRepo: repo, appRepo: repositories.NewUserApplicationStatusRepository(db)}
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT \\* FROM `user_application_statuses` WHERE user_id = \\? AND company_id = \\? AND status NOT IN \\(\\?,\\?,\\?\\)").
@@ -117,8 +119,8 @@ func TestApply_DuplicateActiveApplication(t *testing.T) {
 
 func TestApply_SucceedsAndMarksApplied(t *testing.T) {
 	db, mock := newSQLMockDB(t)
-	repo := &stubApplyMatchRepo{findByIDResult: &entity.UserCompanyMatch{ID: 5, UserID: 1, CompanyID: 10}}
-	s := &ApplicationService{matchRepo: repo, db: db}
+	repo := &stubApplyMatchRepo{findByIDResult: &models.UserCompanyMatch{ID: 5, UserID: 1, CompanyID: 10}}
+	s := &ApplicationService{matchRepo: repo, appRepo: repositories.NewUserApplicationStatusRepository(db)}
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT \\* FROM `user_application_statuses` WHERE user_id = \\? AND company_id = \\? AND status NOT IN \\(\\?,\\?,\\?\\)").
@@ -147,8 +149,8 @@ func TestApply_SucceedsAndMarksApplied(t *testing.T) {
 // 中途半端な状態（応募だけ作られてis_appliedが更新されない）が残らないことを確認する。
 func TestApply_RollsBackWhenMarkAppliedFails(t *testing.T) {
 	db, mock := newSQLMockDB(t)
-	repo := &stubApplyMatchRepo{findByIDResult: &entity.UserCompanyMatch{ID: 5, UserID: 1, CompanyID: 10}}
-	s := &ApplicationService{matchRepo: repo, db: db}
+	repo := &stubApplyMatchRepo{findByIDResult: &models.UserCompanyMatch{ID: 5, UserID: 1, CompanyID: 10}}
+	s := &ApplicationService{matchRepo: repo, appRepo: repositories.NewUserApplicationStatusRepository(db)}
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT \\* FROM `user_application_statuses` WHERE user_id = \\? AND company_id = \\? AND status NOT IN \\(\\?,\\?,\\?\\)").
@@ -195,5 +197,47 @@ func TestTerminalStatusListMatchesTerminalStatusesMap(t *testing.T) {
 		if wantTerminal != gotInList {
 			t.Errorf("%s: terminalStatuses=%v だが terminalStatusList 含有=%v", status, wantTerminal, gotInList)
 		}
+	}
+}
+
+// 並行リクエストで、先に確認した時点では進行中の応募が無かったのに、INSERT の時点で
+// DB の一意制約(active_dedup_key)に弾かれた場合も、重複として返す(500 にしない)。
+// これが最終防御なので、確認のクエリが空振りした後の経路を固定する。
+func TestApply_UniqueConstraintRaceIsDuplicate(t *testing.T) {
+	db, mock := newSQLMockDB(t)
+	repo := &stubApplyMatchRepo{findByIDResult: &models.UserCompanyMatch{ID: 5, UserID: 1, CompanyID: 10}}
+	s := &ApplicationService{matchRepo: repo, appRepo: repositories.NewUserApplicationStatusRepository(db)}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT \\* FROM `user_application_statuses` WHERE user_id = \\? AND company_id = \\? AND status NOT IN").
+		WillReturnError(gorm.ErrRecordNotFound)
+	mock.ExpectExec("INSERT INTO `user_application_statuses`").
+		WillReturnError(&mysqldriver.MySQLError{Number: 1062, Message: "Duplicate entry for key 'active_dedup_key'"})
+	mock.ExpectRollback()
+
+	_, err := s.Apply(1, 10, 5)
+	if !errors.Is(err, shared.ErrDuplicateActiveApplication) {
+		t.Fatalf("got %v want shared.ErrDuplicateActiveApplication", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql: %v", err)
+	}
+}
+
+// 一意制約以外の INSERT の失敗は、重複にせず、そのまま返す。
+func TestApply_InsertFailureIsNotDuplicate(t *testing.T) {
+	db, mock := newSQLMockDB(t)
+	repo := &stubApplyMatchRepo{findByIDResult: &models.UserCompanyMatch{ID: 5, UserID: 1, CompanyID: 10}}
+	s := &ApplicationService{matchRepo: repo, appRepo: repositories.NewUserApplicationStatusRepository(db)}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT \\* FROM `user_application_statuses`").WillReturnError(gorm.ErrRecordNotFound)
+	mock.ExpectExec("INSERT INTO `user_application_statuses`").
+		WillReturnError(&mysqldriver.MySQLError{Number: 1213, Message: "Deadlock found"})
+	mock.ExpectRollback()
+
+	_, err := s.Apply(1, 10, 5)
+	if err == nil || errors.Is(err, shared.ErrDuplicateActiveApplication) {
+		t.Fatalf("got %v, 重複以外のエラーとして返すこと", err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
 	"Backend/internal/safego"
+	"Backend/internal/services/admin"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/company"
 	"Backend/internal/services/maintenance"
@@ -143,7 +144,7 @@ func newEchoServer(sentryOn bool, organizationService *organization.Organization
 }
 
 // startMaintenanceJobs は定期実行ジョブを safego 経由で起動する。
-func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionService *auth.UserDeletionService, notificationService *notificationsvc.Service, pendingRegistrationRepo *repositories.PendingRegistrationRepository, refreshTokenRepo *repositories.UserRefreshTokenRepository, companyUserRefreshRepo *repositories.CompanyUserRefreshTokenRepository) {
+func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionService *auth.UserDeletionService, notificationService *notificationsvc.Service, pendingRegistrationRepo *repositories.PendingRegistrationRepository, refreshTokenRepo *repositories.UserRefreshTokenRepository, companyUserRefreshRepo *repositories.CompanyUserRefreshTokenRepository, scoreValidationService *admin.ScoreValidationService) {
 	// 以下の定期実行は safego 経由で起動する。素の go だと 1 回の panic で
 	// Backend プロセスが丸ごと落ち、全ユーザーが 502 になる(#1405, #1446)。
 	// Every は各回を個別に recover するので、1 回落ちても次の回は走る。
@@ -185,6 +186,22 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 	safego.Every(24*time.Hour, true, func() {
 		expiredTokenPurger.Run(time.Now().UTC())
 	})
+
+	// #203 スコアキャリブレーション自動適用（1日1回）。
+	// 確定選考（通過/不採用）と応募時点スナップショットが揃ったカテゴリだけ重みを更新し、
+	// 次の CalculateMatching から軸重みとして効く。サンプル不足・変化なしは静かにスキップ。
+	if scoreValidationService != nil {
+		safego.Every(24*time.Hour, true, func() {
+			res, err := scoreValidationService.AutoCalibrateIfDue(time.Now().UTC())
+			if err != nil {
+				slog.Error("auto score calibration failed", "error", err)
+				return
+			}
+			if res != nil {
+				slog.Info("auto score calibration applied", "version", res.Version, "categories", len(res.Weights), "message", res.Message)
+			}
+		})
+	}
 }
 
 // startServer は HTTP サーバーを起動する。戻るのは異常終了時のみ。

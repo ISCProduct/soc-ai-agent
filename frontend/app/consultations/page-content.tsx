@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert,
   Badge,
@@ -20,48 +20,85 @@ import {
   Typography,
 } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
-import { fetchActiveGuidances, type StudentGuidance } from '@/lib/teacher-guidance'
 import {
   MAX_CONSULTATION_LENGTH,
   askTeacher,
+  countConsultationChars,
+  fetchStudentConsultations,
   fetchStudentThread,
   fetchStudentUnread,
   replyAsStudent,
+  type StudentConsultationItem,
 } from '@/lib/consultation'
 import { ConsultationThread } from '@/components/consultation/ConsultationThread'
 
 /**
  * 先生への相談（#2028）。先生からの案内に返信したり、自分から質問したりできる。
- * 担当校の先生だけが読める。
+ * 担当校の先生だけが読める。一覧は相談専用の API から取り、閉じた案内や古い相談も「さらに読み込む」で辿れる。
  */
 export default function ConsultationsPage() {
-  const [threads, setThreads] = useState<StudentGuidance[]>([])
+  const [threads, setThreads] = useState<StudentConsultationItem[]>([])
+  const [nextCursor, setNextCursor] = useState('')
   const [unread, setUnread] = useState<Record<string, number>>({})
+  const [unreadError, setUnreadError] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
   const [openId, setOpenId] = useState<number | null>(null)
   const [question, setQuestion] = useState('')
   const [asking, setAsking] = useState(false)
   const [askError, setAskError] = useState('')
 
-  const refreshUnread = useCallback(() => {
-    fetchStudentUnread().then((u) => setUnread(u.by_guidance)).catch(() => {
-      // 未読の印は補助なので、取れなくても一覧は出す
-    })
+  // 未読の取得は、スレッドを開いたあとなどに並行して走る。最後に始めた取得の結果だけを使う
+  const unreadSeq = useRef(0)
+  const refreshUnread = useCallback(async () => {
+    const seq = ++unreadSeq.current
+    try {
+      const u = await fetchStudentUnread()
+      if (seq !== unreadSeq.current) return
+      setUnread(u.by_guidance)
+      setUnreadError(false)
+    } catch {
+      // 未読の印は補助なので一覧は出したまま、取れなかったことだけ知らせる
+      if (seq === unreadSeq.current) setUnreadError(true)
+    }
   }, [])
 
+  const listSeq = useRef(0)
   const load = useCallback(async () => {
+    const seq = ++listSeq.current
     setLoading(true)
     setError('')
     try {
-      setThreads(await fetchActiveGuidances())
-      refreshUnread()
+      const page = await fetchStudentConsultations()
+      if (seq !== listSeq.current) return
+      setThreads(page.items)
+      setNextCursor(page.next_cursor)
+      setUnread(Object.fromEntries(page.items.map((t) => [String(t.guidance_id), t.unread])))
+      setUnreadError(false)
     } catch {
-      setError('相談を読み込めませんでした。通信状況を確認して、もう一度お試しください')
+      if (seq === listSeq.current) setError('相談を読み込めませんでした。通信状況を確認して、もう一度お試しください')
     } finally {
-      setLoading(false)
+      if (seq === listSeq.current) setLoading(false)
     }
-  }, [refreshUnread])
+  }, [])
+
+  const loadMore = async () => {
+    if (!nextCursor) return
+    const seq = listSeq.current
+    setLoadingMore(true)
+    try {
+      const page = await fetchStudentConsultations(nextCursor)
+      if (seq !== listSeq.current) return
+      setThreads((prev) => [...prev, ...page.items.filter((t) => !prev.some((p) => p.guidance_id === t.guidance_id))])
+      setNextCursor(page.next_cursor)
+      setUnread((prev) => ({ ...prev, ...Object.fromEntries(page.items.map((t) => [String(t.guidance_id), t.unread])) }))
+    } catch {
+      setError('続きを読み込めませんでした。もう一度お試しください')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   useEffect(() => {
     void load()
@@ -77,8 +114,9 @@ export default function ConsultationsPage() {
     setAskError('')
     try {
       const thread = await askTeacher(body)
+      // 送信中は入力欄を止めているので、ここで消すのは送った文章だけ
       setQuestion('')
-      await load()
+      void load()
       setOpenId(thread.guidance_id)
     } catch (e) {
       setAskError(e instanceof Error ? e.message : '質問を送れませんでした')
@@ -89,7 +127,8 @@ export default function ConsultationsPage() {
 
   const loadOpen = useCallback(() => fetchStudentThread(openId ?? 0), [openId])
   const sendOpen = useCallback((body: string) => replyAsStudent(openId ?? 0, body), [openId])
-  const tooLong = question.length > MAX_CONSULTATION_LENGTH
+  const length = countConsultationChars(question)
+  const tooLong = length > MAX_CONSULTATION_LENGTH
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
@@ -109,8 +148,9 @@ export default function ConsultationsPage() {
               fullWidth
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
+              disabled={asking}
               error={tooLong}
-              helperText={tooLong ? `${MAX_CONSULTATION_LENGTH}文字以内にしてください（${question.length}文字）` : `${question.length} / ${MAX_CONSULTATION_LENGTH}`}
+              helperText={tooLong ? `${MAX_CONSULTATION_LENGTH}文字以内にしてください（${length}文字）` : `${length} / ${MAX_CONSULTATION_LENGTH}`}
             />
             {askError && <Alert severity="error" sx={{ mt: 1 }}>{askError}</Alert>}
             <Box sx={{ textAlign: 'right', mt: 1 }}>
@@ -123,7 +163,12 @@ export default function ConsultationsPage() {
 
         <Typography variant="subtitle1" component="h2" fontWeight="bold" gutterBottom>やり取り</Typography>
         {error && (
-          <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => void load()}>再読み込み</Button>}>{error}</Alert>
+          <Alert severity="error" sx={{ mb: 1 }} action={<Button color="inherit" size="small" onClick={() => void load()}>再読み込み</Button>}>{error}</Alert>
+        )}
+        {unreadError && (
+          <Alert severity="warning" sx={{ mb: 1 }} action={<Button color="inherit" size="small" onClick={() => void refreshUnread()}>再取得</Button>}>
+            未読の数を読み込めませんでした。
+          </Alert>
         )}
         {loading && threads.length === 0 && (
           <Stack spacing={1} aria-label="相談を読み込み中">
@@ -135,11 +180,11 @@ export default function ConsultationsPage() {
         )}
         <Stack component="ul" spacing={1} sx={{ listStyle: 'none', p: 0, m: 0 }}>
           {threads.map((t) => {
-            const n = unread[String(t.id)] ?? 0
+            const n = unread[String(t.guidance_id)] ?? 0
             return (
-              <Box component="li" key={t.id}>
+              <Box component="li" key={t.guidance_id}>
                 <Card variant="outlined">
-                  <CardActionArea onClick={() => setOpenId(t.id)} aria-label={`${t.kind === 'question' ? 'あなたの質問' : '先生からの案内'}を開く${n > 0 ? `（未読 ${n} 件）` : ''}`}>
+                  <CardActionArea onClick={() => setOpenId(t.guidance_id)} aria-label={`${t.kind === 'question' ? 'あなたの質問' : '先生からの案内'}を開く${n > 0 ? `（未読 ${n} 件）` : ''}`}>
                     <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                       <Badge color="error" badgeContent={n} invisible={n === 0}>
                         <Typography variant="caption" color="primary" sx={{ minWidth: 72 }}>
@@ -154,6 +199,11 @@ export default function ConsultationsPage() {
             )
           })}
         </Stack>
+        {nextCursor && (
+          <Box sx={{ textAlign: 'center', mt: 2 }}>
+            <Button onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? '読み込み中…' : 'さらに読み込む'}</Button>
+          </Box>
+        )}
       </Container>
 
       <Dialog open={openId !== null} onClose={() => setOpenId(null)} fullWidth maxWidth="sm">
@@ -164,7 +214,7 @@ export default function ConsultationsPage() {
           </IconButton>
         </DialogTitle>
         <DialogContent dividers>
-          {openId !== null && <ConsultationThread me="student" load={loadOpen} send={sendOpen} onChanged={refreshUnread} />}
+          {openId !== null && <ConsultationThread me="student" load={loadOpen} send={sendOpen} onChanged={() => void refreshUnread()} />}
         </DialogContent>
       </Dialog>
     </Box>

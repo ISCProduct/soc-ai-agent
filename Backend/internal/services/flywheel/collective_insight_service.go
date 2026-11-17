@@ -33,6 +33,17 @@ func (s *CollectiveInsightService) RecordAction(userID uint, sessionID string, c
 		return nil // 未同意は黙って無視
 	}
 
+	// 閲覧(viewed)以外は、1人1企業1種別につき1行だけ記録する。
+	// 選考が進むたびに passed を足すと、通過人数が応募人数を超えて通過率が 100% を超える。
+	anonID := anonymizeUserID(userID)
+	if actionType != "viewed" {
+		if exists, err := s.repo.HasAction(anonID, companyID, actionType); err != nil {
+			return err
+		} else if exists {
+			return nil
+		}
+	}
+
 	// スコアスナップショット取得
 	scores, _ := s.weightScoreRepo.FindByUserAndSession(userID, sessionID)
 	snapshot := map[string]int{}
@@ -42,7 +53,7 @@ func (s *CollectiveInsightService) RecordAction(userID uint, sessionID string, c
 	snapJSON, _ := json.Marshal(snapshot)
 
 	log := &models.CollectiveInsightLog{
-		AnonymousUserID: anonymizeUserID(userID),
+		AnonymousUserID: anonID,
 		CompanyID:       companyID,
 		ActionType:      actionType,
 		ScoreSnapshot:   string(snapJSON),

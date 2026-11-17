@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"Backend/domain/entity"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
@@ -50,7 +49,7 @@ type fakePortalApps struct {
 	listedStatus    string
 	listedLimit     int
 	listedOffset    int
-	apps            []*entity.UserApplicationStatus
+	apps            []*models.UserApplicationStatus
 	total           int64
 
 	pending int64
@@ -61,7 +60,7 @@ type fakePortalApps struct {
 	updateErr        error
 }
 
-func (f *fakePortalApps) ListForCompanyPortal(companyID uint, status string, limit, offset int) ([]*entity.UserApplicationStatus, int64, error) {
+func (f *fakePortalApps) ListForCompanyPortal(companyID uint, status string, limit, offset int) ([]*models.UserApplicationStatus, int64, error) {
 	f.listedCompanyID, f.listedStatus, f.listedLimit, f.listedOffset = companyID, status, limit, offset
 	return f.apps, f.total, nil
 }
@@ -79,12 +78,12 @@ func (f *fakePortalApps) CountStatusesForCompanyPortal(companyID uint) (map[stri
 	return f.counts, nil
 }
 
-func (f *fakePortalApps) UpdateStatusForCompanyPortal(applicationID, companyID uint, status string, notes *string) (*entity.UserApplicationStatus, error) {
+func (f *fakePortalApps) UpdateStatusForCompanyPortal(applicationID, companyID uint, status string, notes *string) (*models.UserApplicationStatus, error) {
 	f.updatedID, f.updatedCompanyID = applicationID, companyID
 	if f.updateErr != nil {
 		return nil, f.updateErr
 	}
-	return &entity.UserApplicationStatus{ID: applicationID, CompanyID: companyID, Status: status}, nil
+	return &models.UserApplicationStatus{ID: applicationID, CompanyID: companyID, Status: status}, nil
 }
 
 type fakePortalJobs struct{ n int64 }
@@ -320,7 +319,7 @@ func TestCompanyPortalApplication_UpdateStatus_statusが空なら400(t *testing.
 // 同意していない学生の氏名が企業に渡る。
 func TestCompanyPortalApplication_List_同意した学生の氏名だけ出す(t *testing.T) {
 	apps := &fakePortalApps{
-		apps: []*entity.UserApplicationStatus{
+		apps: []*models.UserApplicationStatus{
 			{ID: 1, UserID: 10, CompanyID: 5, Status: "applied"},
 			{ID: 2, UserID: 11, CompanyID: 5, Status: "applied"},
 		},

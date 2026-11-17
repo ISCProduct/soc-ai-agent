@@ -214,6 +214,14 @@ func hardDeleteUserData(tx *gorm.DB, userID uint, collectiveAnonymousID string) 
 			return err
 		}
 	}
+	// 相談の発言（#2028）。本文を持ち、案内・ユーザーへの FK が無いので、案内より先に明示的に消す。
+	// 本人が書いた発言と、本人が生徒・送信教員である案内のスレッドの発言を両方消す。
+	if err := tx.Where(
+		"author_user_id = ? OR guidance_id IN (SELECT id FROM teacher_student_guidances WHERE student_user_id = ? OR teacher_user_id = ?)",
+		userID, userID, userID,
+	).Delete(&models.GuidanceMessage{}).Error; err != nil {
+		return err
+	}
 	// 教員案内は生徒・送信教員のどちらとして退会しても本文が残らないよう両側で消す
 	if err := tx.Where("student_user_id = ? OR teacher_user_id = ?", userID, userID).Delete(&models.TeacherStudentGuidance{}).Error; err != nil {
 		return err

@@ -1,18 +1,16 @@
 package teacher
 
 import (
-	"time"
-
-	"Backend/domain/entity"
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services/resume"
+	"time"
 )
 
 // StudentLister は生徒一覧の取得面。テストで差し替えられるよう最小の面に絞る。
 type StudentLister interface {
-	ListStudentsPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error)
+	ListStudentsPaged(limit, offset int, query string, schoolID *uint) ([]models.User, int64, error)
 }
 
 // ScoreBatchReader は複数生徒のスコアを一括で読む面。
@@ -208,7 +206,7 @@ func (s *StudentInsightService) listTendencies(limit, offset int, query string, 
 }
 
 // buildTendencies は生徒群のスコア・低マッチ・履歴書事実を一括で読み、filters に合う生徒だけ返す。
-func (s *StudentInsightService) buildTendencies(students []entity.User, filters tendencyFilters) ([]StudentTendency, error) {
+func (s *StudentInsightService) buildTendencies(students []models.User, filters tendencyFilters) ([]StudentTendency, error) {
 	// 担当生徒が0人でも空一覧を返す（PRD 境界値）。
 	if len(students) == 0 {
 		return []StudentTendency{}, nil

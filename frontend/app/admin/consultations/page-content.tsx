@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert,
   Badge,
@@ -30,41 +30,91 @@ function formatTime(iso: string): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+type ScopeState = 'pending' | 'ready' | 'failed'
+
 /**
  * 学生からの相談の受信一覧（#2028）。担当校の学生の、案内への返信と質問を新しい順に出す。
  * 未読（まだ読んでいない学生の発言）がある相談に印を付ける。
+ *
+ * 担当校の解決（SchoolFilterSelect）が終わるまでは一覧を取らない（school_id 無しで弾かれるため）。
+ * 解決に失敗したらエラーと再試行を出し、取得に成功して 0 件のときだけ「まだありません」を出す。
  */
 export default function AdminConsultationsPage() {
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
+  const [scope, setScope] = useState<ScopeState>('pending')
+  const [scopeError, setScopeError] = useState('')
+  const [scopeKey, setScopeKey] = useState(0)
   const [items, setItems] = useState<ConsultationInboxItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const [nextBeforeId, setNextBeforeId] = useState<number | undefined>(undefined)
+  const [loaded, setLoaded] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
   const [openId, setOpenId] = useState<number | null>(null)
 
+  // 学校を切り替えたあとに、前の学校の遅い応答で一覧を上書きしない
+  const requestSeq = useRef(0)
+
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current
     setLoading(true)
     setError('')
     try {
-      setItems(await fetchTeacherInbox(schoolId))
+      const page = await fetchTeacherInbox(schoolId)
+      if (seq !== requestSeq.current) return
+      setItems(page.items)
+      setNextBeforeId(page.next_before_id)
+      setLoaded(true)
     } catch (e) {
-      const message = e instanceof Error ? e.message : ''
-      // 担当校の先生は、学校の選択が決まるまで school_id 無しで弾かれる。エラーとして見せない
-      if (schoolId === undefined && /school_id/.test(message)) {
-        setItems([])
-      } else {
-        setError(message || '相談の一覧を読み込めませんでした')
-      }
+      if (seq !== requestSeq.current) return
+      // 取得の失敗を、0 件の一覧に見せない
+      setItems([])
+      setNextBeforeId(undefined)
+      setLoaded(false)
+      setError(e instanceof Error && e.message ? e.message : '相談の一覧を読み込めませんでした')
     } finally {
-      setLoading(false)
+      if (seq === requestSeq.current) setLoading(false)
     }
   }, [schoolId])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    if (scope === 'ready') void load()
+  }, [scope, load])
+
+  const loadMore = async () => {
+    if (!nextBeforeId) return
+    const seq = requestSeq.current
+    setLoadingMore(true)
+    try {
+      const page = await fetchTeacherInbox(schoolId, nextBeforeId)
+      if (seq !== requestSeq.current) return
+      setItems((prev) => [...prev, ...page.items.filter((it) => !prev.some((p) => p.guidance_id === it.guidance_id))])
+      setNextBeforeId(page.next_before_id)
+    } catch {
+      if (seq === requestSeq.current) setError('続きを読み込めませんでした。もう一度お試しください')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  const handleScopeResolved = useCallback((failure?: string) => {
+    if (failure) {
+      setScope('failed')
+      setScopeError(failure)
+    } else {
+      setScope('ready')
+      setScopeError('')
+    }
+  }, [])
+
+  const retryScope = () => {
+    setScope('pending')
+    setScopeError('')
+    setScopeKey((k) => k + 1)
+  }
 
   const loadOpen = useCallback(() => fetchTeacherThread(openId ?? 0), [openId])
-  const sendOpen = useCallback((body: string) => replyAsTeacher(openId ?? 0, body), [openId])
+  const sendOpen = useCallback((body: string, lastSeenId: number | undefined) => replyAsTeacher(openId ?? 0, body, lastSeenId), [openId])
 
   return (
     <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
@@ -73,12 +123,17 @@ export default function AdminConsultationsPage() {
         <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
           担当校の学生からの、案内への返信と質問です。未読がある相談に印が付きます。
         </Typography>
-        <SchoolFilterSelect value={schoolId} onChange={setSchoolId} />
+        <SchoolFilterSelect key={scopeKey} value={schoolId} onChange={setSchoolId} onResolved={handleScopeResolved} />
       </Stack>
 
+      {scope === 'failed' && (
+        <Alert severity="error" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={retryScope}>再試行</Button>}>
+          担当校の情報を読み込めませんでした。{scopeError}
+        </Alert>
+      )}
       {error && <Alert severity="error" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={() => void load()}>再読み込み</Button>}>{error}</Alert>}
-      {loading && items.length === 0 && <ListSkeleton rows={3} />}
-      {!loading && !error && items.length === 0 && (
+      {(scope === 'pending' || (loading && items.length === 0)) && scope !== 'failed' && <ListSkeleton rows={3} />}
+      {scope === 'ready' && loaded && !loading && !error && items.length === 0 && (
         <EmptyState title="相談はまだありません" description="学生が案内に返信したり質問したりすると、ここに表示されます。" />
       )}
 
@@ -102,6 +157,11 @@ export default function AdminConsultationsPage() {
           </Box>
         ))}
       </Stack>
+      {nextBeforeId && (
+        <Box sx={{ textAlign: 'center', mt: 2 }}>
+          <Button onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? '読み込み中…' : 'さらに読み込む'}</Button>
+        </Box>
+      )}
 
       <Dialog open={openId !== null} onClose={() => setOpenId(null)} fullWidth maxWidth="sm">
         <DialogTitle sx={{ pr: 6 }}>

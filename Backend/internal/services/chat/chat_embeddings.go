@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/usagectx"
@@ -56,7 +55,7 @@ func (s *ChatService) ensureUserEmbedding(ctx context.Context, userID uint, sess
 		return fmt.Errorf("load chat history: %w", err)
 	}
 
-	var user *entity.User
+	var user *models.User
 	if s.userRepo != nil {
 		user, err = s.userRepo.GetUserByID(userID)
 		if err != nil {
@@ -128,7 +127,7 @@ func (s *ChatService) ensureJobCategoryEmbedding(ctx context.Context, jobCategor
 	return s.jobEmbeddingRepo.Upsert(jobCategoryID, text, embeddingJSON)
 }
 
-func buildUserEmbeddingText(user *entity.User, history []models.ChatMessage) string {
+func buildUserEmbeddingText(user *models.User, history []models.ChatMessage) string {
 	var b strings.Builder
 	hasContent := false
 	b.WriteString("User profile\n")

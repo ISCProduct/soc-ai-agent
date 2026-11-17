@@ -34,7 +34,7 @@ func newCompanyAuthControllerWithMock(t *testing.T) (*companycontrollers.Company
 	require.NoError(t, err)
 
 	svc := companyauth.NewCompanyUserService(
-		db,
+		repositories.NewCompanyRepository(db),
 		repositories.NewCompanyUserRepository(db),
 		repositories.NewCompanyUserRefreshTokenRepository(db),
 		nil,

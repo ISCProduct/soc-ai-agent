@@ -293,7 +293,7 @@ components:
         10カテゴリの重みスコア。
 
         **キーが Go のフィールド名のままになっている。**
-        `domain/entity.UserWeightScore` を直接 JSON 化しており、同型に json タグが
+        応答用の型 `models.UserWeightScoreResponse` を JSON 化しており、同型に json タグが
         無いため `id` や `user_id` ではなく `ID` / `UserID` が返る。
         snake_case を前提に生成したクライアントは値を取得できない。
       properties:
@@ -765,6 +765,32 @@ paths:
       responses:
         "200": { description: 確認した }
         "400": { description: トークンが無効か期限切れ }
+
+  /api/auth/resend-verification:
+    post:
+      tags: [auth]
+      summary: メール認証のメールを再送する
+      description: |
+        メール認証の期限（24 時間）が切れた、またはメールが届かなかったときに、未認証のユーザーが新しいトークンを受け取る。
+        新しいトークンを発行して、前のトークンは使えなくなる。
+        アカウントの有無・認証済みか否かにかかわらず、常に同じ 200 を返す（存在を伏せる）。
+        IP 単位とメールアドレス単位のレート制限がかかる。メールアドレス単位の上限を超えたときも 200 を返し、メールは送らない。
+        メールアドレスの形式が不正、または 254 文字を超える場合も、200 を返し、何もしない。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      security: []
+      responses:
+        "200": { description: 受け付けた（該当するアカウントがある場合だけ、メールが届く） }
+        "400": { description: リクエストボディが不正 }
+        "413": { description: リクエストボディが 4KB を超えている }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/auth/forgot-password:
     post:
@@ -1774,10 +1800,28 @@ paths:
 
   # ── schedule ───────────────────────────────────────
   /api/user/consultations:
+    get:
+      tags: [schedule]
+      summary: 自分の相談（先生からの案内と自分の質問）の一覧
+      description: |
+        #2028。新しく動いた順（`updated_at`, `id` の降順）。閉じた案内も含む（ホームの案内一覧とは別）。
+        続きは、前のページの `next_cursor` を `cursor` に渡して取る（空なら最後のページ）。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: limit, description: 件数（既定30・上限100）, schema: { type: integer } }
+        - { in: query, name: cursor, description: 前のページの next_cursor, schema: { type: string } }
+      responses:
+        "200": { description: "`items`（スレッドごとの未読数を含む）と `next_cursor`" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
     post:
       tags: [schedule]
       summary: 学生から先生への質問のスレッドを作る
-      description: "#2028。学生は `X-User-Token` から決まる。本文は1000文字まで。"
+      description: |
+        #2028。学生は `X-User-Token` から決まる。本文は前後の空白を除いて1000文字（Unicode のコードポイント）まで。
+        学生でない（ゲスト・管理者・職員）なら 403。学校が未登録・学校の学園が本人と違うなら 400（どの先生にも届かないため）。
+        先生がまだ答えていない質問が5件あれば 429。
+        保存のあとのスレッドの読み直しに失敗しても 201 で `stale: true` を返す（再送で二重にしない）。
       security: [{ userToken: [] }]
       requestBody:
         required: true
@@ -1788,6 +1832,8 @@ paths:
         "201": { description: 作成したスレッド }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/user/consultations/unread:
     get:
@@ -1801,8 +1847,8 @@ paths:
   /api/user/consultations/{id}:
     get:
       tags: [schedule]
-      summary: 自分のスレッド（案内または質問）と発言。先生の発言を既読にする
-      description: 他人の案内は 404。
+      summary: 自分のスレッド（案内または質問）と発言。表示した先生の発言を既読にする
+      description: 他人の案内は 404。既読にするのは、この応答に含めた最後の発言の ID まで。
       security: [{ userToken: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -1835,33 +1881,42 @@ paths:
       summary: 先生の受信一覧（学生の発言があるスレッド）
       description: |
         担当校スコープが掛かる（#2028）。担当校を持つ管理者・職員は `school_id` が必須で、担当校以外は 403。
+        学生（学生ロール・管理者でない・ゲストでない・退会していない）の相談だけを、最後の発言の新しい順に返す。
+        続きは、前のページの `next_before_id` を `before_id` に渡して取る（無ければ最後のページ）。
       security: [{ adminAuth: [] }]
       parameters:
         - { in: query, name: school_id, schema: { type: integer } }
+        - { in: query, name: limit, description: 件数（既定30・上限100）, schema: { type: integer } }
+        - { in: query, name: before_id, description: 前のページの next_before_id, schema: { type: integer } }
       responses:
-        "200": { description: 受信一覧 }
+        "200": { description: "`items` と `next_before_id`" }
+        "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/admin/teacher/consultations/{id}:
     get:
       tags: [admin-analytics]
-      summary: スレッドを見る（学生の発言を既読にする）
-      description: スレッドの学生の学校が担当校でなければ 403。
+      summary: スレッドを見る（表示した学生の発言を既読にする）
+      description: |
+        スレッドの学生の学校が担当校でなければ、存在しない ID と同じく 404（他校の相談の有無を探らせない）。
+        既読にするのは、この応答に含めた最後の発言の ID まで。
       security: [{ adminAuth: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
         "200": { description: スレッド }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { description: 相談が見つからない }
+        "404": { description: 相談が見つからない（担当校以外を含む） }
 
   /api/admin/teacher/consultations/{id}/messages:
     post:
       tags: [admin-analytics]
       summary: スレッドに先生が返信する
-      description: スレッドの学生の学校が担当校でなければ 403。
+      description: |
+        スレッドの学生の学校が担当校でなければ 404。`seen_message_id`（返信を書いた画面に出ていた最後の発言の ID）までの
+        学生の発言を、返信と同じトランザクションで既読にする（省略・0 なら既読にしない）。
+        保存のあとのスレッドの読み直しに失敗しても 201 で `stale: true` を返す（再送で二重にしない）。
       security: [{ adminAuth: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -1869,13 +1924,18 @@ paths:
         required: true
         content:
           application/json:
-            schema: { type: object, required: [body], properties: { body: { type: string, maxLength: 1000 } } }
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, maxLength: 1000 }
+                seen_message_id: { type: integer }
       responses:
         "201": { description: 返信後のスレッド }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { description: 相談が見つからない }
+        "404": { description: 相談が見つからない（担当校以外を含む） }
+
   /api/notifications:
     get:
       tags: [notifications]

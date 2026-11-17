@@ -3,10 +3,14 @@ import { proxyAdminBackend, jsonFromProxyResult, proxyErrorResponse, adminProxyH
 
 export const dynamic = 'force-dynamic'
 
-// 先生の相談の受信一覧（#2028）。担当校スコープは Backend が検証する
+// 先生の相談の受信一覧（#2028）。担当校スコープは Backend が検証する。続きは before_id で取る
 export async function GET(request: NextRequest) {
-  const schoolId = request.nextUrl.searchParams.get('school_id')
-  const qs = schoolId && /^\d+$/.test(schoolId) ? `?school_id=${schoolId}` : ''
+  const params = new URLSearchParams()
+  for (const key of ['school_id', 'before_id', 'limit']) {
+    const v = request.nextUrl.searchParams.get(key)
+    if (v && /^\d+$/.test(v)) params.set(key, v)
+  }
+  const qs = params.size ? `?${params}` : ''
   try {
     const result = await proxyAdminBackend('GET', `/api/admin/teacher/consultations${qs}`, {
       headers: adminProxyHeaders(request.headers),
