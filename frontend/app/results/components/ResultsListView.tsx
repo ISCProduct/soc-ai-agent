@@ -1,6 +1,6 @@
 'use client'
 
-import type { MouseEvent } from 'react'
+import { useState, type MouseEvent } from 'react'
 import {
   Box,
   Typography,
@@ -28,6 +28,8 @@ import {
 import type { AnalysisScores, Company, SnackbarState, SuggestedRole } from '../types'
 import { buildEsRewriteQuery, buildInterviewQuery, getTopCategoryScores } from '../utils'
 import AnalysisScoreCard from './AnalysisScoreCard'
+import MyCategoryScoresCard from './MyCategoryScoresCard'
+import AxisBreakdownPanel from './AxisBreakdownPanel'
 import {
   GUEST_REGISTER_CTA_LABEL,
   GUEST_REGISTER_PATH,
@@ -41,6 +43,8 @@ import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
 
 export interface ResultsListViewProps {
   companies: Company[]
+  /** 診断のセッション。あなたの10の傾向（SOCAIAGENT-611）の取得に使う。無ければ傾向を出さない */
+  sessionId?: string
   isProvisional: boolean
   diagnosisSummary?: string | null
   evaluatedCategories?: number | null
@@ -74,6 +78,7 @@ export interface ResultsListViewProps {
  */
 export default function ResultsListView({
   companies,
+  sessionId,
   isProvisional,
   diagnosisSummary = null,
   evaluatedCategories = null,
@@ -100,6 +105,16 @@ export default function ResultsListView({
   onApply,
   onNavigate,
 }: ResultsListViewProps) {
+  // 軸ごとの内訳を開いている推薦（match_id）。開いたときだけ取りに行く
+  const [openAxes, setOpenAxes] = useState<ReadonlySet<number>>(new Set())
+  const toggleAxes = (matchId: number) => {
+    setOpenAxes((prev) => {
+      const next = new Set(prev)
+      if (next.has(matchId)) next.delete(matchId)
+      else next.add(matchId)
+      return next
+    })
+  }
   const guestEmailProps = getGuestEmailButtonProps(isGuestUser)
   const guestApplicationsProps = getGuestApplicationsButtonProps(isGuestUser)
   const applyClosedProps = getApplyClosedButtonProps(applyEnabled)
@@ -240,6 +255,8 @@ export default function ResultsListView({
             analysisError={analysisError}
             onRetryAnalysis={onRetryAnalysis}
           />
+
+          {sessionId && <MyCategoryScoresCard sessionId={sessionId} />}
 
           {/*
             緑の枠とピルと「→」をやめた。職種名は見出しの重さで足り、
@@ -408,6 +425,33 @@ export default function ResultsListView({
                         .map(({ label, score }) => `${label} ${Math.round(score)}`)
                         .join('　')}
                     </Typography>
+                  )}
+
+                  {/*
+                    軸ごとの内訳（SOCAIAGENT-611）。行全体が企業詳細を開くので、この中のクリック・キー操作は行へ伝えない。
+                  */}
+                  {company.matchId !== undefined && (
+                    <Box
+                      sx={{ mb: 2 }}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <Button
+                        size="small"
+                        variant="text"
+                        aria-expanded={openAxes.has(company.matchId)}
+                        aria-controls={`axes-${company.matchId}`}
+                        onClick={() => toggleAxes(company.matchId as number)}
+                        sx={{ px: 0, minWidth: 0 }}
+                      >
+                        {openAxes.has(company.matchId) ? '軸ごとの内訳を閉じる' : '軸ごとの内訳を見る'}
+                      </Button>
+                      {openAxes.has(company.matchId) && (
+                        <Box id={`axes-${company.matchId}`}>
+                          <AxisBreakdownPanel matchId={company.matchId} />
+                        </Box>
+                      )}
+                    </Box>
                   )}
 
                   {/*

@@ -148,6 +148,7 @@ function ResultsContent() {
     <>
     <ResultsListView
       companies={companies}
+      sessionId={sessionId}
       isProvisional={isProvisional}
       diagnosisSummary={diagnosisSummary}
       evaluatedCategories={evaluatedCategories}

@@ -19,6 +19,8 @@ func SetupChatRoutes(api *echo.Group, chatController *chatcontrollers.ChatContro
 	chat.GET("/sessions", chatController.GetSessions)
 	chat.POST("/send-report", chatController.SendReport, budget.Immediate)
 	chat.POST("/favorite", chatController.ToggleFavorite)
+	// 推薦1件の軸別のマッチの内訳（SOCAIAGENT-611）
+	chat.GET("/matches/:id/axes", chatController.GetAxisBreakdown)
 
 	// 質問管理エンドポイント（認証必須）
 	questions := api.Group("/questions", EchoUserAuth(userSecret, access, orgs))

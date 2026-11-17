@@ -1135,6 +1135,25 @@ paths:
         "400": { description: match_id が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/chat/matches/{id}/axes:
+    get:
+      tags: [chat]
+      summary: 推薦1件の、軸別のマッチの内訳（あなたのスコア・企業の重視度・一致度）
+      description: |
+        SOCAIAGENT-611。`id` は推薦の `match_id`（`UserCompanyMatch` の ID）。本人の推薦だけを返し、
+        他人の推薦・存在しない推薦・企業のプロファイルが無い推薦は 404。
+        10軸ごとに `user_score`（まだ診断で測れていない軸は null）・`company_weight`・`match`（100 - 差）を返す。
+        `strengths`（あなたも企業も60以上で差が15以内）と `gaps`（企業が60以上で、あなたが20以上下回る）は
+        決まった規則で作る文章で、それぞれ3件まで。推薦順位は変えない（自己理解のための説明）。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: 軸別の内訳 }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 推薦が見つからない }
+
   # ── questions ──────────────────────────────────────
   /api/questions/generate:
     post:

@@ -28,6 +28,8 @@ type MatchingService interface {
 	ToggleFavorite(matchID uint, userID uint) error
 	GetDiagnostics(userID uint, sessionID string) (*matching.MatchingDiagnostics, error)
 	ReasonScores(userID uint, scores []models.UserWeightScore) []models.UserWeightScore
+	// GetAxisBreakdown は本人の推薦1件の、軸別のマッチの内訳（SOCAIAGENT-611）。
+	GetAxisBreakdown(matchID, userID uint) (*matching.AxisBreakdown, error)
 }
 
 // AnalysisScoringService 分析・スコアリングサービスのインターフェース
