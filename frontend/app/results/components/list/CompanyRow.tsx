@@ -1,6 +1,6 @@
 'use client'
 
-import type { KeyboardEvent } from 'react'
+import type { MouseEvent } from 'react'
 import { Box, IconButton, Tooltip, Typography } from '@mui/material'
 import { Favorite, FavoriteBorder } from '@mui/icons-material'
 import type { Company } from '../../types'
@@ -22,8 +22,18 @@ export function CompanyRow({ company, rank, ctx }: { company: Company; rank: num
         {rank}
       </Typography>
       <Box sx={{ minWidth: 0 }}>
-        <Typography component="h2" sx={{ fontSize: { xs: 18, md: 20 }, fontWeight: 700, color: UI.ink, lineHeight: 1.4 }}>
-          {company.name}
+        <Typography component="h2" sx={{ fontSize: { xs: 18, md: 20 }, fontWeight: 700, lineHeight: 1.4 }}>
+          <Box
+            component="button"
+            type="button"
+            onClick={(e: MouseEvent) => { e.stopPropagation(); ctx.onSelectCompany(company) }}
+            sx={{
+              font: 'inherit', color: UI.ink, textAlign: 'left', cursor: 'pointer', p: 0, border: 0, background: 'none',
+              '&:focus-visible': { outline: `3px solid ${UI.mark}`, outlineOffset: 2 },
+            }}
+          >
+            {company.name}
+          </Box>
         </Typography>
         <Typography sx={{ fontSize: 13, color: UI.inkSoft, mt: 0.25 }}>{buildMetaLine(company)}</Typography>
       </Box>
@@ -31,7 +41,7 @@ export function CompanyRow({ company, rank, ctx }: { company: Company; rank: num
   )
   const favorite = (
     <Tooltip title={company.isFavorited ? 'お気に入りから外す' : 'お気に入りに入れる'}>
-      <span>
+      <span onClick={(e) => e.stopPropagation()}>
         <IconButton
           onClick={(e) => ctx.onToggleFavorite(e, company)}
           aria-label="お気に入りの切り替え"
@@ -44,19 +54,10 @@ export function CompanyRow({ company, rank, ctx }: { company: Company; rank: num
       </span>
     </Tooltip>
   )
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
-      e.preventDefault()
-      ctx.onSelectCompany(company)
-    }
-  }
-
   return (
     <Box
       component="li"
-      tabIndex={0}
       onClick={() => ctx.onSelectCompany(company)}
-      onKeyDown={onKeyDown}
       sx={{
         cursor: 'pointer',
         px: { xs: 2, md: 3 },
@@ -64,7 +65,6 @@ export function CompanyRow({ company, rank, ctx }: { company: Company; rank: num
         borderTop: `1px solid ${UI.ruleSoft}`,
         '&:first-of-type': { borderTop: 'none' },
         '&:hover': { backgroundColor: UI.paper },
-        '&:focus-visible': { outline: `3px solid ${UI.mark}`, outlineOffset: -3 },
       }}
     >
       {isDesktop ? (

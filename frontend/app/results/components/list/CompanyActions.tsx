@@ -37,7 +37,7 @@ export function CompanyActions({ company, ctx }: { company: Company; ctx: Compan
   const apply = (
     <Tooltip title={guest.title || (company.isApplied ? '' : closed.title)}
       disableHoverListener={!guest.disabled && (company.isApplied || !closed.disabled)}>
-      <Box component="span" sx={{ display: 'block' }}>
+      <Box component="span" onClick={(e: MouseEvent) => e.stopPropagation()} sx={{ display: 'block' }}>
         <Button variant="outlined" fullWidth={full}
           disabled={company.isApplied || applying || guest.disabled || closed.disabled}
           onClick={(e) => ctx.onApply(e, company)}
