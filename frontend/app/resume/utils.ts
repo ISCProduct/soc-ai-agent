@@ -1,7 +1,7 @@
 /**
  * 履歴書レビューページ向けの純粋ヘルパー（React state 非依存）。
  */
-import type { CompanyCandidate } from './types'
+import type { CompanyCandidate, ReviewResult } from './types'
 
 // 重要度の表示は形式チェック（#1530）と共通なので lib/severity.ts に置き、ここからも使えるようにする
 export { getSeverityConfig, severityConfig } from '@/lib/severity'
@@ -141,4 +141,83 @@ export function isAnnotatedPdfResponse(
 export function companySourceLabel(source?: string): string {
   if (!source) return ''
   return source === 'db' ? '掲載企業' : 'Web'
+}
+
+export type FindingSeverity = 'critical' | 'warning' | 'info'
+
+/** 画面に並べる指摘1件。AIの指摘（items）とルールの形式チェック（format_findings）を同じ形にそろえる。 */
+export type Finding = {
+  /** ページ順に振った通し番号（1始まり）。書類の強調と一覧で同じ番号を使う */
+  no: number
+  page: number
+  severity: FindingSeverity
+  source: 'ai' | 'rule'
+  message: string
+  /** 指摘が指している原文 */
+  quote: string
+  /** AIの書き換え案。読み取りが不確かなときは空 */
+  rewrite: string
+  /** 読み取りが不確かで、書き換え案を出していない */
+  withheld: boolean
+  /** 書き換え案と別に伝える補足 */
+  supplement: string
+}
+
+export const FINDING_SEVERITY_LABEL: Record<FindingSeverity, string> = {
+  critical: '重大',
+  warning: '注意',
+  info: '情報',
+}
+
+function normalizeSeverity(severity: string): FindingSeverity {
+  return severity === 'critical' || severity === 'info' ? severity : 'warning'
+}
+
+/**
+ * 結果を、ページ順（同じページではAI→ルールの順）に並べて番号を振る。
+ * 書類側の番号付き強調と、指摘の一覧で同じ番号を指すため。
+ */
+export function buildFindings(review: Pick<ReviewResult, 'items' | 'format_findings'>): Finding[] {
+  const ai = (review.items ?? []).map((item) => {
+    const withheld = item.rewrite_withheld === 'low_ocr_confidence'
+    const rewrite = withheld ? '' : (item.rewrite?.trim() ?? '')
+    const suggestion = item.suggestion?.trim() ?? ''
+    return {
+      page: item.page_number > 0 ? item.page_number : 1,
+      severity: normalizeSeverity(item.severity),
+      source: 'ai' as const,
+      message: item.message?.trim() ?? '',
+      quote: item.quote?.trim() ?? '',
+      rewrite,
+      withheld,
+      // 書き換え案と同じ文は繰り返さない
+      supplement: suggestion !== '' && suggestion !== rewrite ? suggestion : '',
+    }
+  })
+  const rule = (review.format_findings ?? []).map((f) => ({
+    page: f.page_hint && f.page_hint > 0 ? f.page_hint : 1,
+    severity: normalizeSeverity(f.severity),
+    source: 'rule' as const,
+    message: f.message?.trim() ?? '',
+    quote: f.excerpt?.trim() ?? '',
+    rewrite: '',
+    withheld: false,
+    supplement: f.fix?.trim() ?? '',
+  }))
+  const sourceRank = { ai: 0, rule: 1 }
+  return [...ai, ...rule]
+    .map((f, i) => ({ f, i }))
+    .sort((a, b) => a.f.page - b.f.page || sourceRank[a.f.source] - sourceRank[b.f.source] || a.i - b.i)
+    .map(({ f }, idx) => ({ ...f, no: idx + 1 }))
+}
+
+export function countBySeverity(findings: Finding[]): Record<FindingSeverity, number> {
+  const counts: Record<FindingSeverity, number> = { critical: 0, warning: 0, info: 0 }
+  for (const f of findings) counts[f.severity]++
+  return counts
+}
+
+/** 指摘があるページの最大値。指摘が無ければ1ページとみなす */
+export function pageCountOf(findings: Finding[]): number {
+  return Math.max(1, ...findings.map((f) => f.page))
 }
