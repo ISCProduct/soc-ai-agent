@@ -214,6 +214,12 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 #### 履歴書（段2後半）
 
 - `POST /api/resume/review` の応答と、`/api/resume/review/stream` の `complete` イベントに `format_findings` を載せる。保存はしない（#1531）。
+
+### ストリーム中断の扱い（SOCAIAGENT-664）
+
+- `/resume/review/stream` の失敗時、`error` イベントの `message` は例外文ではなく固定文言（`REVIEW_STREAM_ERROR_MESSAGE`）にする。例外の中身はログにだけ残す。
+- フロント（`useResumePage`）は `complete` / `error` を受け取らずに接続が閉じたら「中断されました」と「もう一度試す」を出す。再試行は LLM を再度呼ぶ。
+- Next.js の `app/api/resume/review/stream/route.ts` は、利用者が画面を離れたら上流の接続も閉じる（`request.signal`）。上流が5xxのときは本文を出さず固定文言の 502 を返す。
 - ブロックを改行でつないだ全文にルールをかけ（文体の混在は履歴書全体で見る）、指摘をブロックに戻す。`start`/`end` はそのブロックの `text` の中の位置（UTF-16）。`page_hint` と `block_index`（0 から）は必ず含む。
   - 指摘は、終わりの文字（文体の混在なら文末）があるブロックに割り当てる。句点の無い見出しブロックの直後の文が、見出しを指さないようにするため。
   - 画面はブロックの本文を持たないので、該当箇所の文字列を `excerpt` で返す（空白は1つにまとめ、30字を超えたら「…」で切る）。

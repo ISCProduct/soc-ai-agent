@@ -46,6 +46,7 @@ function ResumeContent() {
     setCandidateType,
     reviewLoading,
     reviewError,
+    reviewInterrupted,
     review,
     ragReport,
     handleReview,
@@ -95,6 +96,7 @@ function ResumeContent() {
         reviewLoading={reviewLoading}
         ragReport={ragReport}
         reviewError={reviewError}
+        reviewInterrupted={reviewInterrupted}
         reviewCompleted={!!review}
         onReview={handleReview}
       />

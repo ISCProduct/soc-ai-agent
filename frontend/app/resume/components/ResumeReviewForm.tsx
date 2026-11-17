@@ -39,6 +39,7 @@ type ResumeReviewFormProps = {
   reviewLoading: boolean
   ragReport: string
   reviewError: string
+  reviewInterrupted: boolean
   reviewCompleted: boolean
   onReview: () => void
 }
@@ -63,6 +64,7 @@ export function ResumeReviewForm({
   reviewLoading,
   ragReport,
   reviewError,
+  reviewInterrupted,
   reviewCompleted,
   onReview,
 }: ResumeReviewFormProps) {
@@ -179,6 +181,19 @@ export function ResumeReviewForm({
         )}
         {reviewError && (
           <Alert severity="error">{reviewError}</Alert>
+        )}
+        {reviewInterrupted && !reviewLoading && (
+          <Alert
+            severity="warning"
+            role="alert"
+            action={
+              <Button color="inherit" size="small" onClick={onReview} disabled={!documentId}>
+                もう一度試す
+              </Button>
+            }
+          >
+            中断されました。もう一度お試しください。
+          </Alert>
         )}
         {reviewCompleted && !reviewLoading && (
           <Alert severity="success">レビューが完了しました。下の指摘事項をご確認ください。</Alert>

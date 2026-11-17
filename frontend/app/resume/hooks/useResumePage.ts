@@ -12,6 +12,8 @@ import {
   parseApiErrorMessage,
 } from '../utils'
 
+const REVIEW_FAILED_MESSAGE = 'レビューに失敗しました。時間をおいてもう一度お試しください。'
+
 /**
  * 履歴書レビューページの state・副作用・イベントハンドラ。
  */
@@ -36,6 +38,7 @@ export function useResumePage() {
   const [reviewLoading, setReviewLoading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [reviewError, setReviewError] = useState('')
+  const [reviewInterrupted, setReviewInterrupted] = useState(false)
   const [annotateError, setAnnotateError] = useState('')
   const [review, setReview] = useState<ReviewResult | null>(null)
   const [ragReport, setRagReport] = useState('')
@@ -181,6 +184,7 @@ export function useResumePage() {
     setScoresAfter(null)
     setAnnotateError('')
     setReviewError('')
+    setReviewInterrupted(false)
     setReviewLoading(false)
     setLoading(true)
     try {
@@ -237,6 +241,7 @@ export function useResumePage() {
     reviewAbortRef.current = abortController
 
     setReviewError('')
+    setReviewInterrupted(false)
     setAnnotateError('')
     setReview(null)
     setRagReport('')
@@ -279,6 +284,8 @@ export function useResumePage() {
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      // complete / error を受け取らずに閉じたら中断として扱う
+      let sawTerminal = false
 
       while (true) {
         if (abortController.signal.aborted) {
@@ -315,6 +322,7 @@ export function useResumePage() {
           if (data.type === 'chunk') {
             setRagReport((prev) => prev + (data.text ?? ''))
           } else if (data.type === 'complete') {
+            sawTerminal = true
             const backendAnnotated = data.annotated_available === true
             const annotatedAvailable = backendAnnotated || (documentId ? await checkAnnotatedPdfAvailable(documentId) : false)
             if (abortController.signal.aborted) return
@@ -341,9 +349,15 @@ export function useResumePage() {
           } else if (data.type === 'annotate_error') {
             setAnnotateError(String(data.message ?? ''))
           } else if (data.type === 'error') {
-            throw new Error(String(data.message ?? 'Review failed'))
+            sawTerminal = true
+            // 上流の文言は画面に出さない
+            throw new Error(REVIEW_FAILED_MESSAGE)
           }
         }
+      }
+
+      if (!sawTerminal && !abortController.signal.aborted) {
+        setReviewInterrupted(true)
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
@@ -412,6 +426,7 @@ export function useResumePage() {
     setCandidateType,
     reviewLoading,
     reviewError,
+    reviewInterrupted,
     review,
     ragReport,
     handleReview,
