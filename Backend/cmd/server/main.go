@@ -349,6 +349,7 @@ func main() {
 		aiClient,
 		nil,
 	)
+	analysisService.SetSubjectReader(subjectReader) // 直近の発言を外の LLM へ送る前に、同じ辞書で伏字にする
 	interviewService := interview.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
 	// 面接1回ごとに STT / LLM / TTS を叩くため、セッション数がそのまま費用に効く。
 	// 既定は監視のみで、止めるのは INTERVIEW_BUDGET_ENFORCE を明示したときだけ。
@@ -366,6 +367,7 @@ func main() {
 		matchRepo,
 		aiClient,
 	)
+	diagnosisQualityService.SetSubjectReader(subjectReader) // 会話の抜粋を外の LLM へ送る前に、同じ辞書で伏字にする
 
 	if rdb != nil {
 		queueServer = queue.NewServer(rdb)

@@ -62,6 +62,7 @@ func (s *InterviewService) Turn(
 ) (*TurnResult, error) {
 	ctx, cancelBudget := s.withTurnBudget(ctx)
 	defer cancelBudget()
+	ctx = s.withPIIGuard(ctx, userID) // 学生の発話を外部 AI へ送る前に伏字にする
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -316,6 +317,7 @@ func (s *InterviewService) StartTurn(
 ) (*TurnResult, error) {
 	ctx, cancelBudget := s.withTurnBudget(ctx)
 	defer cancelBudget()
+	ctx = s.withPIIGuard(ctx, userID) // 学生の発話を外部 AI へ送る前に伏字にする
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err

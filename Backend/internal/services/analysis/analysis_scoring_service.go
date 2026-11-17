@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/piimask"
 	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
@@ -154,7 +155,13 @@ type AnalysisScoringService struct {
 	matchRepo               repository.UserCompanyMatchRepository
 	futureAnalyzer          FutureAnalyzer
 	aiClient                *openai.Client
+	// subjects は、LLM へ送る直前の伏字に使う、学生の登録情報（氏名・学校名・メール）の読み取り。
+	// 未設定なら、登録情報なしの規則だけで伏字にする。
+	subjects piimask.SubjectReader
 }
+
+// SetSubjectReader は、伏字に使う登録情報の読み取りを設定する。
+func (s *AnalysisScoringService) SetSubjectReader(r piimask.SubjectReader) { s.subjects = r }
 
 func NewAnalysisScoringService(
 	userWeightScoreRepo repository.UserWeightScoreRepository,
@@ -247,7 +254,9 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 			// リクエストの ctx を引き継ぐ。誰も受け取らない要約に課金しないよう、クライアントが
 			// 切断したら LLM 呼び出しも止める。その場合 LLM 要約なしで返り、保存もしないので、
 			// 次回のリクエストで生成し直される。
-			aiCtx, cancel := context.WithTimeout(usagectx.WithFeature(ctx, usagectx.FeatureAnalysisScoring), analysisSummaryLLMTimeout)
+			// 直近のユーザー発言を外部 AI へ送る前に、個人を特定できる語を伏字にする（作れなければ送らない）
+			guarded := openai.WithInputGuard(ctx, piimask.GuardFor(s.subjects, userID))
+			aiCtx, cancel := context.WithTimeout(usagectx.WithFeature(guarded, usagectx.FeatureAnalysisScoring), analysisSummaryLLMTimeout)
 			raw, err := s.aiClient.ChatCompletionWithSchema(aiCtx, systemPrompt, userPrompt, 0.2, 400, analysisSummaryResponseSchema())
 			cancel()
 			if err == nil && strings.TrimSpace(raw) != "" {

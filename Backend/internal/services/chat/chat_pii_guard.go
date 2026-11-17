@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	internalOpenAI "Backend/internal/openai"
 	"Backend/internal/services/piimask"
@@ -15,30 +14,17 @@ import (
 // 辞書は最初に使うときに一度だけ作る。作れなかったら（登録情報を読めないなど）、外部へ送らない（fail-closed）。
 // 未ログイン（userID==0）や userRepo が無いときは、登録情報なしの規則だけで伏字にする。
 func (s *ChatService) withPIIGuard(ctx context.Context, userID uint) context.Context {
-	var (
-		once   sync.Once
-		masker *piimask.Masker
-		merr   error
-	)
-	return internalOpenAI.WithInputGuard(ctx, func(text string) (string, error) {
-		once.Do(func() { masker, merr = s.piiMaskerFor(userID) })
-		if merr != nil {
-			return "", merr
+	return internalOpenAI.WithInputGuard(ctx, piimask.LazyGuard(func() (piimask.Subject, bool, error) {
+		if s.userRepo == nil || userID == 0 {
+			return piimask.Subject{}, false, nil
 		}
-		return masker.Mask(text), nil
-	})
-}
-
-func (s *ChatService) piiMaskerFor(userID uint) (*piimask.Masker, error) {
-	var subj piimask.Subject
-	if s.userRepo != nil && userID != 0 {
 		u, err := s.userRepo.GetUserByID(userID)
 		if err != nil {
-			return nil, fmt.Errorf("load user for masking: %w", err)
+			return piimask.Subject{}, false, fmt.Errorf("load user for masking: %w", err)
 		}
-		if u != nil {
-			subj = piimask.Subject{Name: u.Name, Email: u.Email, SchoolName: u.SchoolName}
+		if u == nil {
+			return piimask.Subject{}, false, nil
 		}
-	}
-	return piimask.ForLLM(subj)
+		return piimask.Subject{Name: u.Name, Email: u.Email, SchoolName: u.SchoolName}, true, nil
+	}))
 }

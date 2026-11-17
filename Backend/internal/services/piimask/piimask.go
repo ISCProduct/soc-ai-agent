@@ -17,6 +17,7 @@ package piimask
 import (
 	"regexp"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -91,6 +92,52 @@ func ForLLM(subj Subject) (*Masker, error) {
 		return nil, err
 	}
 	return &Masker{m: m}, nil
+}
+
+// LazyGuard は、最初に使うときに一度だけ登録情報を読んで辞書を作り、以後その辞書で伏字にする関数を返す。
+// 外部 AI 呼び出しの入力ガード（openai.WithInputGuard）に渡す形。読めない・作れないときは毎回エラーを返す（fail-closed）。
+// load が nil、または subj を返さないとき（未ログインなど）は、登録情報なしの規則だけで伏字にする。
+func LazyGuard(load func() (Subject, bool, error)) func(string) (string, error) {
+	var (
+		once sync.Once
+		m    *Masker
+		merr error
+	)
+	return func(text string) (string, error) {
+		once.Do(func() {
+			var subj Subject
+			if load != nil {
+				got, ok, err := load()
+				if err != nil {
+					merr = err
+					return
+				}
+				if ok {
+					subj = got
+				}
+			}
+			m, merr = ForLLM(subj)
+		})
+		if merr != nil {
+			return "", merr
+		}
+		return m.Mask(text), nil
+	}
+}
+
+// GuardFor は、userID の登録情報（r から読む）で辞書を作る入力ガードを返す。r が nil、または userID==0 のときは、
+// 登録情報なしの規則だけで伏字にする。読めないときは外部へ送らない（LazyGuard 参照）。
+func GuardFor(r SubjectReader, userID uint) func(string) (string, error) {
+	return LazyGuard(func() (Subject, bool, error) {
+		if r == nil || userID == 0 {
+			return Subject{}, false, nil
+		}
+		subj, err := r.SubjectFor(userID)
+		if err != nil {
+			return Subject{}, false, err
+		}
+		return subj, true, nil
+	})
 }
 
 // Mask は text の個人を特定できる語を、置き換えの記号にして返す。
