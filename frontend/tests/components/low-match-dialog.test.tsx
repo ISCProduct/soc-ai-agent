@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen } from '@testing-library/react'
-import { LowMatchConfirmDialog } from '@/components/LowMatchConfirmDialog'
+import { LowMatchConfirmDialog } from '@/app/results/components/LowMatchConfirmDialog'
 
 // 応募をブロックする機能ではない（#1028 のガードレール）。
 // 「このまま応募する」が必ず選べること、「やめる」で応募が走らないことを固定する。

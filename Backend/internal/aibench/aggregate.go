@@ -62,6 +62,12 @@ type Observation struct {
 	// 測定に使う。ラベルと文字数が相関しているセットでは、弁別力が高いことと
 	// 「内容の質を測れている」ことが同じ数字になり区別できない（#1593）。
 	InputChars int `json:"input_chars"`
+
+	// ImprovedChars / ImprovedTextRatio は改善文の長さ（#1606）。
+	// 違反の有無だけでは「10,000字が360字になった」が見えない。
+	// 入力長ごとの分布は observations を input_chars で並べて読む。
+	ImprovedChars     int     `json:"improved_chars,omitempty"`
+	ImprovedTextRatio float64 `json:"improved_text_ratio,omitempty"`
 }
 
 // CaseSummary はケース単位の集計。再現性（同一入力のばらつき）をここで見る。

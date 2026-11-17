@@ -1,8 +1,6 @@
 package repositories
 
 import (
-	"Backend/domain/entity"
-	"Backend/domain/mapper"
 	"Backend/internal/models"
 
 	"gorm.io/gorm"
@@ -41,8 +39,8 @@ var upsertAssignments = clause.AssignmentColumns([]string{
 })
 
 // CreateOrUpdate マッチング結果を作成または更新
-func (r *UserCompanyMatchRepository) CreateOrUpdate(match *entity.UserCompanyMatch) error {
-	_, err := r.CreateOrUpdateBatch([]*entity.UserCompanyMatch{match})
+func (r *UserCompanyMatchRepository) CreateOrUpdate(match *models.UserCompanyMatch) error {
+	_, err := r.CreateOrUpdateBatch([]*models.UserCompanyMatch{match})
 	return err
 }
 
@@ -51,7 +49,7 @@ func (r *UserCompanyMatchRepository) CreateOrUpdate(match *entity.UserCompanyMat
 // 一意キー uniq_user_session_company で衝突を検出し、1回の INSERT ... ON DUPLICATE KEY UPDATE
 // で作成と更新をまとめる（#1166）。既存の閲覧/お気に入り/応募フラグは upsertAssignments に
 // 含めないことで保持される。保存に失敗した場合はエラーを呼び出し元へ返す。
-func (r *UserCompanyMatchRepository) CreateOrUpdateBatch(matches []*entity.UserCompanyMatch) (int, error) {
+func (r *UserCompanyMatchRepository) CreateOrUpdateBatch(matches []*models.UserCompanyMatch) (int, error) {
 	if len(matches) == 0 {
 		return 0, nil
 	}
@@ -63,10 +61,11 @@ func (r *UserCompanyMatchRepository) CreateOrUpdateBatch(matches []*entity.UserC
 		if match == nil || match.UserID != userID || match.SessionID != sessionID {
 			continue
 		}
-		m := mapper.UserCompanyMatchFromEntity(match)
-		// 既存行のIDは分からないので主キーは空にし、衝突検出は一意キーに任せる
+		// 呼び出し元の値を書き換えないよう、写しの主キーを空にする
+		// (既存行のIDは分からないので、衝突検出は一意キーに任せる)
+		m := *match
 		m.ID = 0
-		rows = append(rows, m)
+		rows = append(rows, &m)
 	}
 	if len(rows) == 0 {
 		return 0, nil
@@ -75,7 +74,9 @@ func (r *UserCompanyMatchRepository) CreateOrUpdateBatch(matches []*entity.UserC
 	// MySQL ドライバは OnConflict.Columns を無視して ON DUPLICATE KEY UPDATE を書くだけなので
 	// 衝突検出は一意キー uniq_user_session_company（migration 000023）に依存する。
 	// 将来この表に別の一意キーを足すと、そちらでも衝突して同じ列が更新される点に注意。
-	err := r.db.Clauses(clause.OnConflict{DoUpdates: upsertAssignments}).
+	// Company/User/JobPosition は関連の書き込みを避けるため、保存対象から外す。
+	err := r.db.Omit(clause.Associations).
+		Clauses(clause.OnConflict{DoUpdates: upsertAssignments}).
 		CreateInBatches(rows, 100).Error
 	if err != nil {
 		return 0, err
@@ -103,7 +104,7 @@ func CompanyHasWeightProfileSQL(companyIDColumn string) string {
 // FindTopMatchesByUserAndSession マッチング度の高い順に企業を取得
 func (r *UserCompanyMatchRepository) FindTopMatchesByUserAndSession(
 	userID uint, sessionID string, limit int,
-) ([]*entity.UserCompanyMatch, error) {
+) ([]*models.UserCompanyMatch, error) {
 	var ms []*models.UserCompanyMatch
 	err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).
 		Where(CompanyHasWeightProfileSQL("user_company_matches.company_id")).
@@ -117,15 +118,11 @@ func (r *UserCompanyMatchRepository) FindTopMatchesByUserAndSession(
 		return nil, err
 	}
 
-	result := make([]*entity.UserCompanyMatch, len(ms))
-	for i, m := range ms {
-		result[i] = mapper.UserCompanyMatchToEntity(m)
-	}
-	return result, nil
+	return ms, nil
 }
 
 // FindByID IDでマッチング結果を取得
-func (r *UserCompanyMatchRepository) FindByID(id uint) (*entity.UserCompanyMatch, error) {
+func (r *UserCompanyMatchRepository) FindByID(id uint) (*models.UserCompanyMatch, error) {
 	var m models.UserCompanyMatch
 	err := r.db.Preload("Company").
 		Preload("JobPosition").
@@ -133,7 +130,7 @@ func (r *UserCompanyMatchRepository) FindByID(id uint) (*entity.UserCompanyMatch
 	if err != nil {
 		return nil, err
 	}
-	return mapper.UserCompanyMatchToEntity(&m), nil
+	return &m, nil
 }
 
 // MarkAsViewed 閲覧済みにする

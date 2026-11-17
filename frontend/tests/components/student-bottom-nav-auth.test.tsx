@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import { render } from '@testing-library/react'
-import { StudentBottomNav } from '@/components/StudentBottomNav'
+import { StudentBottomNav } from '@/components/layout/StudentBottomNav'
 
 /**
  * 未ログインの訪問者に学生用ナビを出さないこと（#1653）。

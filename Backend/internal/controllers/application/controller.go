@@ -1,8 +1,9 @@
 package application
 
 import (
-	"Backend/domain/entity"
+	"Backend/domain/repository"
 	"Backend/internal/controllers/httpapi"
+	"Backend/internal/models"
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/school"
 	"Backend/internal/services/shared"
@@ -12,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 )
 
 // ApplicationController 応募・選考ステータス管理コントローラー
@@ -156,7 +156,7 @@ func (c *ApplicationController) AdminUpdateStatus(ctx echo.Context) error {
 
 	// 担当校を持つ管理者(先生)が他校の生徒の選考ステータスを書き換えられないようにする(#1157)
 	ownerSchoolID, err := c.appService.OwnerSchoolID(id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return echo.NewHTTPError(http.StatusNotFound, "応募データが見つかりません")
 	} else if err != nil {
 		// DB障害を404で隠すとログも残らず追跡できない
@@ -310,7 +310,7 @@ func (c *ApplicationController) HRUpdateStatus(ctx echo.Context) error {
 	})
 }
 
-func jsonAdminApplicationList(ctx echo.Context, apps []*entity.UserApplicationStatus) error {
+func jsonAdminApplicationList(ctx echo.Context, apps []*models.UserApplicationStatus) error {
 	type AdminAppResponse struct {
 		ID          uint   `json:"id"`
 		UserID      uint   `json:"user_id"`
@@ -323,10 +323,7 @@ func jsonAdminApplicationList(ctx echo.Context, apps []*entity.UserApplicationSt
 
 	resp := make([]AdminAppResponse, len(apps))
 	for i, app := range apps {
-		name := ""
-		if app.Company != nil {
-			name = app.Company.Name
-		}
+		name := app.Company.Name
 		resp[i] = AdminAppResponse{
 			ID:          app.ID,
 			UserID:      app.UserID,
@@ -370,12 +367,8 @@ func (c *ApplicationController) List(ctx echo.Context) error {
 
 	resp := make([]AppResponse, len(apps))
 	for i, app := range apps {
-		name := ""
-		industry := ""
-		if app.Company != nil {
-			name = app.Company.Name
-			industry = app.Company.Industry
-		}
+		name := app.Company.Name
+		industry := app.Company.Industry
 		resp[i] = AppResponse{
 			ID:              app.ID,
 			CompanyID:       app.CompanyID,

@@ -7,10 +7,24 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"time"
 )
 
 // ErrInsufficientSamples サンプル数不足でキャリブレーションが実行できない場合
-var ErrInsufficientSamples = errors.New("キャリブレーションに必要なサンプル数が不足しています（各カテゴリ5件以上必要）")
+var ErrInsufficientSamples = errors.New("キャリブレーションに必要なサンプル数が不足しています（確定結果がカテゴリあたり通過・不採用各2件以上かつ合計10件以上必要）")
+
+// ErrCalibrationUnchanged 算出重みが現行と実質同じで保存をスキップした場合
+var ErrCalibrationUnchanged = errors.New("キャリブレーション重みに有意な変化がないため保存をスキップしました")
+
+const (
+	calibrationShrinkK      = 20.0 // サンプルが少ないほど 1.0 へ縮む
+	calibrationSignalScale  = 50.0 // Signal ±50 → 生重み 0..2
+	calibrationMaxStep      = 0.3  // 1回の自動適用で動かす上限
+	calibrationMinChange    = 0.05 // これ未満の差分は「変化なし」
+	autoCalibrationInterval = 24 * time.Hour
+	calibrationWeightMin    = 0.1
+	calibrationWeightMax    = 3.0
+)
 
 // ScoreValidationService チャット分析スコアの精度検証・改善サービス
 type ScoreValidationService struct {
@@ -208,17 +222,73 @@ type CalibrationResult struct {
 	Message string                          `json:"message"`
 }
 
-// RunCalibration 実績データからスコア重みを再計算して保存する
 // correlationApprox は重みから相関係数の簡易近似を返す。
-// weight=1.0 が平均的なカテゴリ、1.0超が正の相関、1.0未満が負の相関を示す。
-//
-// 下限のクランプは #313 の修正。math.Min だけだと weight が負のときに
-// -1 を下回る値を返していた。
+// weight=1.0 が中立、1.0超が正の信号、1.0未満が負の信号。
 func correlationApprox(weight float64) float64 {
 	return math.Max(-1.0, math.Min(weight-1.0, 1.0))
 }
 
+// WeightFromPassFailSignal は通過/不採用のスコア差から軸重みを作る。
+// Signal = avg(score|pass) - avg(score|fail)。サンプルが少ないほど 1.0 へ縮む。
+func WeightFromPassFailSignal(signal float64, sampleN int) float64 {
+	raw := 1.0 + signal/calibrationSignalScale
+	shrink := 1.0
+	if sampleN > 0 {
+		shrink = float64(sampleN) / (float64(sampleN) + calibrationShrinkK)
+	}
+	w := 1.0 + (raw-1.0)*shrink
+	return clampCalibrationWeight(w)
+}
+
+func clampCalibrationWeight(w float64) float64 {
+	if w < calibrationWeightMin {
+		return calibrationWeightMin
+	}
+	if w > calibrationWeightMax {
+		return calibrationWeightMax
+	}
+	return w
+}
+
+func stepToward(prev, next, maxStep float64) float64 {
+	d := next - prev
+	if d > maxStep {
+		return prev + maxStep
+	}
+	if d < -maxStep {
+		return prev - maxStep
+	}
+	return next
+}
+
+// RunCalibration 実績データからスコア重みを再計算して保存する。
+// 通過側と不採用側の応募時点スコア差（Signal）を軸の重要度にし、
+// マッチングのカテゴリ重みとして保存する。
 func (s *ScoreValidationService) RunCalibration() (*CalibrationResult, error) {
+	return s.runCalibration(true)
+}
+
+// AutoCalibrateIfDue は間隔が空いていれば自動キャリブレーションする。
+// サンプル不足・変化なしはエラーにせずスキップ（定期ジョブ用）。
+func (s *ScoreValidationService) AutoCalibrateIfDue(now time.Time) (*CalibrationResult, error) {
+	last, err := s.repo.LastCalibrationAt()
+	if err != nil {
+		return nil, err
+	}
+	if last != nil && now.Sub(*last) < autoCalibrationInterval {
+		return nil, nil
+	}
+	result, err := s.runCalibration(true)
+	if err != nil {
+		if errors.Is(err, ErrInsufficientSamples) || errors.Is(err, ErrCalibrationUnchanged) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *ScoreValidationService) runCalibration(stepCap bool) (*CalibrationResult, error) {
 	stats, err := s.repo.GetCategoryPassStats()
 	if err != nil {
 		return nil, fmt.Errorf("統計取得エラー: %w", err)
@@ -227,14 +297,11 @@ func (s *ScoreValidationService) RunCalibration() (*CalibrationResult, error) {
 		return nil, ErrInsufficientSamples
 	}
 
-	// 全体の平均通過率を基準にして重みを計算
-	totalPassRate := 0.0
-	for _, s := range stats {
-		totalPassRate += s.PassRate
-	}
-	avgPassRate := totalPassRate / float64(len(stats))
-	if avgPassRate == 0 {
-		avgPassRate = 1 // ゼロ除算防止
+	prevByCat := map[string]float64{}
+	if prev, err := s.repo.GetLatestCalibrationWeights(); err == nil {
+		for _, w := range prev {
+			prevByCat[w.Category] = w.Weight
+		}
 	}
 
 	nextVersion, err := s.repo.GetNextVersion()
@@ -243,22 +310,34 @@ func (s *ScoreValidationService) RunCalibration() (*CalibrationResult, error) {
 	}
 
 	weights := make([]models.ScoreCalibrationWeight, 0, len(stats))
+	maxDelta := 0.0
 	for _, stat := range stats {
-		// 重み = カテゴリの通過率 / 全体平均通過率（1.0が平均）
-		weight := stat.PassRate / avgPassRate
-		weight = math.Round(weight*100) / 100
-
-		correlation := correlationApprox(weight)
-
+		target := WeightFromPassFailSignal(stat.Signal, stat.SampleN)
+		prev := 1.0
+		if p, ok := prevByCat[stat.Category]; ok {
+			prev = p
+		}
+		weight := target
+		if stepCap {
+			weight = stepToward(prev, target, calibrationMaxStep)
+		}
+		weight = math.Round(clampCalibrationWeight(weight)*100) / 100
+		if d := math.Abs(weight - prev); d > maxDelta {
+			maxDelta = d
+		}
 		weights = append(weights, models.ScoreCalibrationWeight{
 			Category:    stat.Category,
 			Version:     nextVersion,
 			Weight:      weight,
 			SampleCount: stat.SampleN,
 			PassRate:    math.Round(stat.PassRate*10) / 10,
-			Correlation: math.Round(correlation*100) / 100,
+			Correlation: math.Round(correlationApprox(weight)*100) / 100,
 			IsActive:    true,
 		})
+	}
+
+	if maxDelta < calibrationMinChange {
+		return nil, ErrCalibrationUnchanged
 	}
 
 	if err := s.repo.SaveCalibrationWeights(weights); err != nil {
@@ -268,7 +347,8 @@ func (s *ScoreValidationService) RunCalibration() (*CalibrationResult, error) {
 	return &CalibrationResult{
 		Version: nextVersion,
 		Weights: weights,
-		Message: fmt.Sprintf("キャリブレーション完了: %d カテゴリ、サンプル合計 %d 件", len(weights), totalSampleCount(stats)),
+		Message: fmt.Sprintf("キャリブレーション完了: %d カテゴリ、確定サンプル合計 %d 件（通過/不採用スコア差ベース）",
+			len(weights), totalSampleCount(stats)),
 	}, nil
 }
 

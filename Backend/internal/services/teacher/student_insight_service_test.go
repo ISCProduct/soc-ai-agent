@@ -1,17 +1,15 @@
 package teacher
 
 import (
+	"Backend/internal/models"
+	"Backend/internal/repositories"
 	"errors"
 	"fmt"
 	"testing"
-
-	"Backend/domain/entity"
-	"Backend/internal/models"
-	"Backend/internal/repositories"
 )
 
 type stubLister struct {
-	students []entity.User
+	students []models.User
 	total    int64
 	err      error
 	// 呼び出し引数の記録（ページングと担当校が渡ることの検証用）
@@ -20,7 +18,7 @@ type stubLister struct {
 	gotSchoolID         *uint
 }
 
-func (s *stubLister) ListStudentsPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
+func (s *stubLister) ListStudentsPaged(limit, offset int, query string, schoolID *uint) ([]models.User, int64, error) {
 	s.gotLimit, s.gotOffset, s.gotQuery, s.gotSchoolID = limit, offset, query, schoolID
 	return s.students, s.total, s.err
 }
@@ -60,10 +58,10 @@ func (s *stubProfiles) ListAll() ([]models.IndustryWeightProfile, error) {
 	return s.items, s.err
 }
 
-func students(n int) []entity.User {
-	out := make([]entity.User, 0, n)
+func students(n int) []models.User {
+	out := make([]models.User, 0, n)
 	for i := 1; i <= n; i++ {
-		out = append(out, entity.User{ID: uint(i), Name: fmt.Sprintf("生徒%d", i), Email: fmt.Sprintf("s%d@example.com", i)})
+		out = append(out, models.User{ID: uint(i), Name: fmt.Sprintf("生徒%d", i), Email: fmt.Sprintf("s%d@example.com", i)})
 	}
 	return out
 }

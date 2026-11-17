@@ -1,4 +1,4 @@
-import { createCompanyMuiTheme } from '@/lib/company-theme'
+import { createCompanyMuiTheme } from '@/lib/company/theme'
 
 describe('company-theme', () => {
   it('学生の青とも管理画面の藍とも違う緑を主操作にする', () => {

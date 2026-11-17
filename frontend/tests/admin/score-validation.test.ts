@@ -1,4 +1,4 @@
-import { correlationLabel, correlationColor, formatPercent } from '@/lib/score-validation-utils'
+import { correlationLabel, correlationColor, formatPercent } from '@/lib/admin/score-validation'
 
 describe('correlationLabel', () => {
   it('強い相関を返す (|r| >= 0.7)', () => {

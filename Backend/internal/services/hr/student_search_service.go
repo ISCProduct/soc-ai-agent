@@ -46,6 +46,7 @@ type semanticSearcher interface {
 type studentSearcher interface {
 	Search(companyID uint, f repositories.StudentSearchFilters) ([]repositories.StudentSearchRow, int64, error)
 	IsVisible(userID uint) (bool, error)
+	IdentityRevealed(companyID, userID uint) (bool, error)
 }
 
 type studentTagStore interface {
@@ -71,6 +72,11 @@ func NewStudentSearchService(
 	semantic semanticSearcher,
 ) *StudentSearchService {
 	return &StudentSearchService{students: students, tags: tags, semantic: semantic}
+}
+
+// IdentityRevealed は、その学生が自社のスカウトを承諾済みか。
+func (s *StudentSearchService) IdentityRevealed(companyID, userID uint) (bool, error) {
+	return s.students.IdentityRevealed(companyID, userID)
 }
 
 // Search はフィルタ条件で学生を絞り込み、自社タグを付けて返す。

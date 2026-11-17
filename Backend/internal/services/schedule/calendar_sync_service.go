@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
-	"gorm.io/gorm"
 )
 
 // CalendarSyncService はGoogleカレンダーとの同期を管理するサービス。
@@ -90,7 +89,7 @@ func (s *CalendarSyncService) Disconnect(userID uint) error {
 func (s *CalendarSyncService) getOAuthClient(ctx context.Context, userID uint) (*http.Client, string, error) {
 	rec, err := s.tokenRepo.FindByUserID(userID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, "", errors.New("google calendar not connected")
 		}
 		return nil, "", fmt.Errorf("failed to get token: %w", err)

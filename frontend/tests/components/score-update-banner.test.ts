@@ -1,5 +1,5 @@
-import { computeScoreDeltas } from '@/components/ScoreUpdateBanner'
-import type { WeightScore } from '@/components/ScoreUpdateBanner'
+import { computeScoreDeltas } from '@/components/feedback/ScoreUpdateBanner'
+import type { WeightScore } from '@/components/feedback/ScoreUpdateBanner'
 
 describe('computeScoreDeltas', () => {
   const before: WeightScore[] = [

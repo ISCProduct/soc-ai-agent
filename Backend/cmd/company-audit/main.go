@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"Backend/internal/models"
+	"Backend/internal/repositories"
 	"Backend/internal/services/company"
 
 	mysqldrv "github.com/go-sql-driver/mysql"
@@ -91,7 +92,7 @@ func main() {
 		fmt.Printf("  %5d  %q\n", d.Count, company.DisplayValue(d.Value))
 	}
 
-	var changes []company.AuditChange
+	var changes []repositories.CompanyAuditChange
 	unmapped := map[string]int{}
 	for _, r := range rows {
 		plan, ok := company.PlanFix(r)
@@ -104,7 +105,7 @@ func main() {
 		if len(plan.Changes) == 0 {
 			continue
 		}
-		changes = append(changes, company.AuditChange{ID: plan.ID, Name: plan.Name, Before: beforeValues(r, plan.Changes), After: plan.Changes})
+		changes = append(changes, repositories.CompanyAuditChange{ID: plan.ID, Name: plan.Name, Before: beforeValues(r, plan.Changes), After: plan.Changes})
 	}
 
 	fmt.Printf("\n== 修正対象 %d 社 ==\n", len(changes))
@@ -140,7 +141,7 @@ func main() {
 	}
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		return company.ApplyAuditChanges(tx, changes, false)
+		return repositories.ApplyCompanyAuditChanges(tx, changes, false)
 	}); err != nil {
 		log.Fatalf("適用失敗(全件ロールバック済み): %v", err)
 	}
@@ -170,7 +171,7 @@ func runRestore(db *gorm.DB, path string) {
 		log.Fatal(err)
 	}
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		return company.ApplyAuditChanges(tx, changes, true)
+		return repositories.ApplyCompanyAuditChanges(tx, changes, true)
 	}); err != nil {
 		log.Fatalf("戻し失敗(全件ロールバック済み): %v", err)
 	}
@@ -181,8 +182,8 @@ func runRestore(db *gorm.DB, path string) {
 //
 // --apply は修正対象が空のとき backup を作らないので、空の backup(null / [])は入力として
 // 成立しない。黙って成功扱いにすると「戻した」と誤解する。
-func parseBackup(b []byte) ([]company.AuditChange, error) {
-	var changes []company.AuditChange
+func parseBackup(b []byte) ([]repositories.CompanyAuditChange, error) {
+	var changes []repositories.CompanyAuditChange
 	if err := json.Unmarshal(b, &changes); err != nil {
 		return nil, fmt.Errorf("backup の形式が不正です: %w", err)
 	}

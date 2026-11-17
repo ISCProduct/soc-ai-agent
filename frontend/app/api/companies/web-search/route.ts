@@ -22,19 +22,36 @@ export async function GET(request: NextRequest) {
         ...extractUserAuthHeaders(request),
       },
       cache: 'no-store',
+      // ブラウザが諦めたあとも課金済みの検索を続けない
+      signal: request.signal,
     })
 
     if (!response.ok) {
-      const errorBody: unknown = await response.json().catch(() => null)
-      return NextResponse.json(
-        { results: [], message: aiBudgetExceededMessage(errorBody) ?? '企業検索に失敗しました。しばらくしてから再度お試しください' },
-        { status: response.status },
-      )
+      const text = await response.text()
+      let data: unknown
+      try {
+        data = JSON.parse(text)
+      } catch {
+        data = { results: [], message: '企業検索に失敗しました。しばらくしてから再度お試しください' }
+      }
+      // 予算超過は code 付きの error で返る。message だけ見る画面にも同じ文言を載せる。
+      // それ以外の本文は素通しし、失敗を0件の成功に見せない。
+      const budgetMessage = aiBudgetExceededMessage(data)
+      if (budgetMessage && data && typeof data === 'object' && !Array.isArray(data)) {
+        const body = data as Record<string, unknown>
+        if (typeof body.message !== 'string' || body.message.trim() === '') {
+          data = { ...body, message: budgetMessage }
+        }
+      }
+      return NextResponse.json(data, { status: response.status })
     }
 
     const data = await response.json()
     return NextResponse.json(data)
   } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      return new NextResponse(null, { status: 499 })
+    }
     console.error('[API] Web search error:', error)
     return NextResponse.json(
       { results: [], message: 'バックエンドに接続できません。BACKEND_URL を確認してください' },

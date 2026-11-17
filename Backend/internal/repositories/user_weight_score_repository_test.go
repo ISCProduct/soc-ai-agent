@@ -4,6 +4,7 @@ package repositories_test
 // 実行: cd Backend && go test ./internal/repositories/... -run TestUserWeightScore -v
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -127,7 +128,8 @@ func TestAddScore_UpdatesExistingRecord(t *testing.T) {
 			AddRow(10, 1, "session-1", "技術志向", 70))
 
 	mock.ExpectBegin()
-	mock.ExpectExec("UPDATE `user_weight_scores`").
+	mock.ExpectExec("UPDATE `user_weight_scores` SET `score`=GREATEST\\(0, LEAST\\(100, score \\+ \\?\\)\\),`updated_at`=\\? WHERE `id` = \\?").
+		WithArgs(5, sqlmock.AnyArg(), 10).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -215,5 +217,54 @@ func TestAddScore_ClampsToZeroOneHundred(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectations not met: %v", err)
+	}
+}
+
+func TestRecalculationQueriesScopeCrossFeatureExclusionsToAppliedSession(t *testing.T) {
+	repo, mock := newScoreRepoTestDB(t)
+
+	// 除外条件が消えると加点が戻せない形で失われるので、枝を1つずつ固定する。
+	const exclusions = `.*rr\.score IS NOT NULL.*uws\.session_id = \(.*prior\.updated_at <= er\.scored_at.*touched\.updated_at >= er\.scored_at.*uws\.session_id = \(.*prior\.updated_at <= ir\.scores_applied_at.*touched\.updated_at >= ir\.scores_applied_at`
+	mock.ExpectQuery(`(?s)SELECT COALESCE\(MAX\(uws\.id\)` + exclusions + `.*WHERE uws\.calculation_version <> \?`).
+		WithArgs("v2").
+		WillReturnRows(sqlmock.NewRows([]string{"max_score_id", "eligible_sessions", "unsupported_sessions"}).
+			AddRow(100, 2, 1))
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\)` + exclusions).
+		WithArgs("v2").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(5))
+	mock.ExpectQuery(`(?s)SELECT MIN\(uws\.id\)`+exclusions).
+		WithArgs("v2", uint(100), uint(0), 10).
+		WillReturnRows(sqlmock.NewRows([]string{"score_id", "user_id", "session_id"}))
+
+	if _, err := repo.RecalculationStats("v2"); err != nil {
+		t.Fatalf("RecalculationStats returned error: %v", err)
+	}
+	if _, err := repo.FindNextRecalculationTargets("v2", 100, 0, 10); err != nil {
+		t.Fatalf("FindNextRecalculationTargets returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+// 対象を選んだ後で加点が反映されたセッションは、ロックしてから確かめ直して置換しない。
+func TestReplaceChatSessionScores_RechecksEligibilityUnderLock(t *testing.T) {
+	repo, mock := newScoreRepoTestDB(t)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT `id` FROM `user_weight_scores` WHERE .* FOR UPDATE").
+		WithArgs(uint(7), "session-1", "chat").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\).*touched\.updated_at >= ir\.scores_applied_at`).
+		WithArgs(uint(7), "session-1", "v2").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectRollback()
+
+	err := repo.ReplaceChatSessionScores(1, 7, "session-1", map[string]int{"技術志向": 80}, "v2")
+	if !errors.Is(err, repositories.ErrRecalculationTargetChanged) {
+		t.Fatalf("err = %v, want ErrRecalculationTargetChanged", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
 	}
 }

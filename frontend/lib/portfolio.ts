@@ -15,15 +15,14 @@ export type CategoryScore = { category: string; score: number }
 export type PortfolioData = {
   generated_at: string
   sections: PortfolioSection[]
-  diagnosis?: { updated_at?: string; scores: CategoryScore[] }
+  diagnosis?: { updated_at?: string; scores: CategoryScore[] } | null
   interviews?: {
     session_id: number
     created_at: string
     summary_text: string
-    scores: Record<string, number>
     strengths: string[]
     improvements: string[]
-  }[]
+  }[] | null
   es_reviews?: {
     id: number
     created_at: string
@@ -34,8 +33,8 @@ export type PortfolioData = {
     length_balance_score: number
     company_fit_score?: number
     feedback: string
-  }[]
-  assessments?: { created_at: string; title: string; scores: CategoryScore[] }[]
+  }[] | null
+  assessments?: { created_at: string; title: string; scores: CategoryScore[] }[] | null
 }
 
 export async function fetchPortfolio(sections: PortfolioSection[]): Promise<PortfolioData> {

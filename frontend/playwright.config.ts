@@ -33,6 +33,8 @@ export default defineConfig({
     'tap-targets.spec.ts',
     // 企業ポータルの業務フロー（求人・応募・スカウト・学生検索。SOCAIAGENT-591）
     'company-portal-flows.spec.ts',
+    // AI 面接の本編フロー（開始→Q&A→提出→レポート。SOCAIAGENT-592）
+    'interview-flow.spec.ts',
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

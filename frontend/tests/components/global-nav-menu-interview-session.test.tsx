@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import { act, render } from '@testing-library/react'
-import { GlobalNavMenu } from '@/components/GlobalNavMenu'
+import { GlobalNavMenu } from '@/components/layout/GlobalNavMenu'
 import { setInterviewSessionActive } from '@/app/interview/sessionChrome'
 
 /**

@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 )
 
 // AdminCompanyGraphController exposes the multi-source scraping pipeline via HTTP.
@@ -251,7 +250,7 @@ func (c *AdminCompanyGraphController) syncRelationsFromNodes(nodes map[string]*s
 			for _, name := range names {
 				// 既存企業を名前で検索、なければプロビジョナル企業として登録
 				toCompany, err := c.companyRepo.FindByName(name)
-				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				if err != nil && !errors.Is(err, repository.ErrNotFound) {
 					continue
 				}
 				if toCompany == nil {
@@ -301,7 +300,7 @@ func (c *AdminCompanyGraphController) upsertNodes(nodes map[string]*scraper.Comp
 		}
 
 		existing, err := c.companyRepo.FindByCorporateNumber(node.CorporateNumber)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		if err != nil && !errors.Is(err, repository.ErrNotFound) {
 			skipped++
 			continue
 		}
@@ -311,7 +310,7 @@ func (c *AdminCompanyGraphController) upsertNodes(nodes map[string]*scraper.Comp
 			sourceURL = node.SourceURLs[0]
 		}
 
-		if existing == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+		if existing == nil || errors.Is(err, repository.ErrNotFound) {
 			company := &models.Company{
 				Name:             node.OfficialName,
 				CorporateNumber:  node.CorporateNumber,
@@ -438,7 +437,7 @@ func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
 				continue
 			}
 			toCompany, findErr := c.companyRepo.FindByName(name)
-			if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
+			if findErr != nil && !errors.Is(findErr, repository.ErrNotFound) {
 				continue
 			}
 			if toCompany == nil {

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"Backend/internal/repositories"
 	"bytes"
 	"errors"
 	"log"
@@ -113,7 +114,7 @@ func TestPurgeOne_PendingRegistrationDeleteFails_RollsBack(t *testing.T) {
 	p.mock.ExpectRollback()
 	p.allowRest()
 
-	err := NewUserDeletionService(p.db, nil, nil).purgeOne(purgeTarget)
+	err := NewUserDeletionService(repositories.NewUserWithdrawalRepository(p.db), nil, nil).purgeOne(purgeTarget)
 
 	if err == nil || !strings.Contains(err.Error(), "db down") {
 		t.Fatalf("仮登録を消せなかったので失敗を返すべき: err=%v", err)
@@ -136,7 +137,7 @@ func TestPurgeOne_Normal_DeletesUserAndRecordsPurgedAt(t *testing.T) {
 	p.mock.ExpectCommit()
 	p.allowRest()
 
-	if err := NewUserDeletionService(p.db, nil, nil).purgeOne(purgeTarget); err != nil {
+	if err := NewUserDeletionService(repositories.NewUserWithdrawalRepository(p.db), nil, nil).purgeOne(purgeTarget); err != nil {
 		t.Fatalf("purgeOne: %v", err)
 	}
 	for _, want := range []string{"DELETE FROM `pending_registrations`", "DELETE FROM `users`", "UPDATE `withdrawn_users`"} {
@@ -160,7 +161,7 @@ func TestPurgeOne_PurgedAtUpdateFails_StillSucceedsAndLogged(t *testing.T) {
 	p.mock.ExpectRollback()
 	p.allowRest()
 
-	if err := NewUserDeletionService(p.db, nil, nil).purgeOne(purgeTarget); err != nil {
+	if err := NewUserDeletionService(repositories.NewUserWithdrawalRepository(p.db), nil, nil).purgeOne(purgeTarget); err != nil {
 		t.Fatalf("物理削除はコミット済みなので成功を返すべき: %v", err)
 	}
 	if !p.executed("DELETE FROM `users`") {
@@ -196,7 +197,7 @@ func TestDeleteUser_PendingRegistrationDeleteFails_RollsBack(t *testing.T) {
 		WillReturnError(errors.New("db down"))
 	mock.ExpectRollback()
 
-	err = NewUserDeletionService(db, nil, nil).DeleteUser(9, UserDeletionActor{Kind: "self"})
+	err = NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), nil, nil).DeleteUser(9, UserDeletionActor{Kind: "self"})
 
 	if err == nil || !strings.Contains(err.Error(), "delete pending registrations") {
 		t.Fatalf("仮登録を消せなかったので退会を失敗として返すべき: %v", err)

@@ -1,10 +1,13 @@
 package repositories
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
+	"errors"
 	"strings"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -27,7 +30,7 @@ func (r *CompanyUserRepository) Update(user *models.CompanyUser) error {
 func (r *CompanyUserRepository) FindByID(id uint) (*models.CompanyUser, error) {
 	var m models.CompanyUser
 	err := r.db.First(&m, id).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -39,7 +42,7 @@ func (r *CompanyUserRepository) FindByID(id uint) (*models.CompanyUser, error) {
 func (r *CompanyUserRepository) FindByEmail(email string) (*models.CompanyUser, error) {
 	var m models.CompanyUser
 	err := r.db.Where("email = ?", strings.ToLower(strings.TrimSpace(email))).First(&m).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -53,7 +56,7 @@ func (r *CompanyUserRepository) FindByEmail(email string) (*models.CompanyUser, 
 func (r *CompanyUserRepository) FindByInviteTokenHash(hash string) (*models.CompanyUser, error) {
 	var m models.CompanyUser
 	err := r.db.Where("invite_token_hash = ?", hash).First(&m).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -66,7 +69,7 @@ func (r *CompanyUserRepository) FindByInviteTokenHash(hash string) (*models.Comp
 func (r *CompanyUserRepository) FindByPasswordResetTokenHash(hash string) (*models.CompanyUser, error) {
 	var m models.CompanyUser
 	err := r.db.Where("password_reset_token_hash = ?", hash).First(&m).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -118,4 +121,31 @@ func (r *CompanyUserRepository) ListByCompanyID(companyID uint) ([]models.Compan
 	var users []models.CompanyUser
 	err := r.db.Where("company_id = ?", companyID).Order("id ASC").Find(&users).Error
 	return users, err
+}
+
+// CreateOwnerWithCompany は、企業とその最初の担当者（オーナー）を、1トランザクションで作る。
+// 企業を作ってから、その ID を担当者に入れて保存する。片方が失敗したら両方を巻き戻す。
+//
+// 事前のメール検索と INSERT の間に同じアドレスが登録されると、一意制約（1062）になる。
+// TranslateError が無いのでここで ErrCompanyUserEmailTaken に正規化する。
+func (r *CompanyUserRepository) CreateOwnerWithCompany(company *models.Company, user *models.CompanyUser) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(company).Error; err != nil {
+			return err
+		}
+		user.CompanyID = company.ID
+		if err := tx.Create(user).Error; err != nil {
+			if isUniqueConstraintErr(err) {
+				return repository.ErrCompanyUserEmailTaken
+			}
+			return err
+		}
+		return nil
+	})
+}
+
+// isUniqueConstraintErr は MySQL の一意制約違反 (Error 1062) かどうか。
+func isUniqueConstraintErr(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }

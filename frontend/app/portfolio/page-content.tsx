@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Alert,
@@ -44,7 +44,11 @@ export default function PortfolioPage() {
     setName(authService.getStoredUser()?.name ?? '')
   }, [])
 
+  // チェックを続けて切り替えたとき、古い応答で表示を上書きしない（外した内容が印刷に載らないように）
+  const requestSeq = useRef(0)
+
   const load = useCallback(async (sections: PortfolioSection[]) => {
+    const seq = ++requestSeq.current
     if (sections.length === 0) {
       setData(null)
       setLoading(false)
@@ -52,13 +56,16 @@ export default function PortfolioPage() {
     }
     setLoading(true)
     setError('')
+    setData(null)
     try {
-      setData(await fetchPortfolio(sections))
+      const result = await fetchPortfolio(sections)
+      if (seq === requestSeq.current) setData(result)
     } catch {
+      if (seq !== requestSeq.current) return
       setData(null)
       setError('ポートフォリオを読み込めませんでした。通信状況を確認して、もう一度お試しください')
     } finally {
-      setLoading(false)
+      if (seq === requestSeq.current) setLoading(false)
     }
   }, [])
 
@@ -134,6 +141,10 @@ export default function PortfolioPage() {
               <Typography variant="h5" component="h2" fontWeight="bold">自己分析ポートフォリオ</Typography>
               <Typography variant="body2" color="text.secondary">
                 {name && `${name}　`}作成日 {formatDate(data.generated_at)}
+              </Typography>
+              {/* 印刷物を受け取った人にも、確定した評価ではないことが分かるようにする */}
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                ※ 診断のスコア、面接の講評、ES のフィードバックは、AI が整理・生成した参考情報です。確定した評価ではありません。
               </Typography>
             </Box>
 

@@ -82,20 +82,27 @@
 
 ### #203 スコア精度検証・改善基盤
 
-**現状:** 既存の相関・キャリブレーション集計は `user_id` だけでスコアと応募結果を結合し、応募時点のスコアを保証しない。保存されるカテゴリ重み・correlation は通過率比とその近似であり、実測相関や較正済み重みではない。ローカルDBの調査ではスコア・応募結果がともに0件、staging / production は未確認。根拠が揃うまでは係数を変更しない。
+**現状（自動ループ接続済み）:**
+- 応募時に `user_application_statuses.score_snapshot` へ診断セッションのカテゴリ別スコアを JSON 保存する。
+- 日次ジョブ `AutoCalibrateIfDue` が確定結果（通過/不採用）とスナップショットからカテゴリ軸重みを更新する。
+- 重みは「通過側平均スコア − 不採用側平均スコア」を縮小・ステップ制限したもの（0.1〜3.0）。
+- 有効な `ScoreCalibrationWeight` は次の `CalculateMatching` で軸重みとして適用される。
+- 詳細・制約は[スコアキャリブレーション調査・手順](./score-calibration.md)。
 
-**必要なデータフロー（未実装）:**
+**データフロー:**
 ```
-マッチング時点のスコア・ソース・ロジック版を応募（match_id）に紐づけて保存
-→ 確定した選考結果と時点整合した応募単位データを作成
-→ 事前に定めた検定力・評価指標で学習とホールドアウト検証
-→ レビュー・承認後に較正バージョンを記録し、段階適用
+応募 → score_snapshot 保存
+    → 選考が通過/不採用で確定
+    → 日次 AutoCalibrateIfDue（サンプル充足時）
+    → ScoreCalibrationWeight 保存（is_active）
+    → CalculateMatching が軸重みとして適用 → 精度がデータに追従
 ```
-
-必要条件と実施手順は[スコアキャリブレーション調査・手順](./score-calibration.md)を参照。
 
 **実装ファイル:**
+- `migrations/000075_application_score_snapshot.*`
 - `models/score_validation.go` — QuestionVariant / VariantAssignment / ScoreCalibrationWeight
+- `services/matching` — `SetCalibrationWeightReader` / `loadCalibrationAxisWeights`
+- `services/application` — `SetScoreSnapshotReader` / `buildScoreSnapshot`
 - `services/score_validation_service.go`
 - `controllers/admin_score_validation_controller.go`
 
@@ -122,7 +129,12 @@
   「強み傾向: 技術志向(85点)、チームワーク(72点)」
 
 職務経歴書レビュー開始時:
-  UserWeightScore（最新セッション）→ RAGコンテキストに注入
+  UserWeightScore（最新セッション）→ RAG の candidate_context に注入
+  （企業 brief の company_context とは分離。キャッシュ汚染を避ける）
+
+職務経歴書レビュー保存後の再マッチ:
+  診断セッションへスコア反映後、面接と同じく CalculateMatching を非同期実行
+  （interview-{userId} スナップショットには再マッチしない）
 ```
 
 **移動平均の計算式:**
@@ -144,6 +156,9 @@ UpdateScore(delta)  // 加算式で更新
 **データフロー:**
 ```
 ユーザー行動発生（同意済みのみ）:
+  ApplicationService.Apply / UpdateStatus から自動 RecordAction
+  （applied / document_passed|offered|accepted→passed / rejected）
+  手動 API POST /api/collective-insights/actions も併用可（viewed 等）
   userID → SHA-256ハッシュ化（匿名化）
   スコアスナップショット（JSON）と共に CollectiveInsightLog に保存
 

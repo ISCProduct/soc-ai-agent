@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { authService } from '@/lib/auth'
-import type { WeightScore } from '@/components/ScoreUpdateBanner'
+import type { WeightScore } from '@/components/feedback/ScoreUpdateBanner'
 import type { CompanyCandidate, ReviewResult } from '../types'
 import {
   isAnnotatedPdfResponse,

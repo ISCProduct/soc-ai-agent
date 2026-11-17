@@ -1,13 +1,13 @@
 package company
 
 import (
+	"Backend/internal/repositories"
 	"bytes"
 	"errors"
 	"log"
 	"strings"
 	"testing"
 
-	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/services/email"
@@ -44,10 +44,10 @@ func companyEntryLines(buf *bytes.Buffer) []string {
 
 type entryUserRepoStub struct {
 	repository.UserRepository
-	user *entity.User
+	user *models.User
 }
 
-func (s entryUserRepoStub) GetUserByEmail(string) (*entity.User, error) { return s.user, nil }
+func (s entryUserRepoStub) GetUserByEmail(string) (*models.User, error) { return s.user, nil }
 
 type entryPendingRepoStub struct {
 	repository.PendingRegistrationRepository
@@ -55,13 +55,13 @@ type entryPendingRepoStub struct {
 }
 
 func (s entryPendingRepoStub) DeleteByEmail(string) error               { return s.deleteErr }
-func (s entryPendingRepoStub) Create(*entity.PendingRegistration) error { return s.createErr }
+func (s entryPendingRepoStub) Create(*models.PendingRegistration) error { return s.createErr }
 
-func newInviteTestService(t *testing.T, user *entity.User, pending entryPendingRepoStub) (*CompanyEntryService, sqlmock.Sqlmock) {
+func newInviteTestService(t *testing.T, user *models.User, pending entryPendingRepoStub) (*CompanyEntryService, sqlmock.Sqlmock) {
 	t.Helper()
 	db, mock := newCompanyEntryTestDB(t)
 	return &CompanyEntryService{
-		db:          db,
+		entryRepo:   repositories.NewCompanyEntryRepository(db),
 		userRepo:    entryUserRepoStub{user: user},
 		pendingRepo: pending,
 		email:       &email.EmailService{}, // host が空なので送らずにログだけ出し、成功を返す
@@ -70,7 +70,7 @@ func newInviteTestService(t *testing.T, user *entity.User, pending entryPendingR
 
 func TestSendInviteEmail_StatusUpdateFails_StillSentAndLogged(t *testing.T) {
 	buf := captureCompanyEntryLog(t)
-	svc, mock := newInviteTestService(t, &entity.User{ID: 1}, entryPendingRepoStub{})
+	svc, mock := newInviteTestService(t, &models.User{ID: 1}, entryPendingRepoStub{})
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE `company_entry_submissions`").WillReturnError(errors.New("db down"))
 	mock.ExpectRollback()
@@ -94,7 +94,7 @@ func TestSendInviteEmail_StatusUpdateFails_StillSentAndLogged(t *testing.T) {
 
 func TestSendInviteEmail_Normal_NoExtraLog(t *testing.T) {
 	buf := captureCompanyEntryLog(t)
-	svc, mock := newInviteTestService(t, &entity.User{ID: 1}, entryPendingRepoStub{})
+	svc, mock := newInviteTestService(t, &models.User{ID: 1}, entryPendingRepoStub{})
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE `company_entry_submissions`").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -145,7 +145,7 @@ func TestSendInviteEmail_PendingAndFailureRecordFail_Logged(t *testing.T) {
 func TestClaimOwnershipOnRegister_StatusUpdateFails_Logged(t *testing.T) {
 	buf := captureCompanyEntryLog(t)
 	db, mock := newCompanyEntryTestDB(t)
-	svc := &CompanyEntryService{db: db}
+	svc := &CompanyEntryService{entryRepo: repositories.NewCompanyEntryRepository(db)}
 	companyID, submissionID, userID := uint(11), uint(21), uint(42)
 
 	mock.ExpectQuery("SELECT \\* FROM `company_ownerships`").
@@ -172,7 +172,7 @@ func TestClaimOwnershipOnRegister_StatusUpdateFails_Logged(t *testing.T) {
 func TestClaimOwnershipOnRegister_Normal_NoExtraLog(t *testing.T) {
 	buf := captureCompanyEntryLog(t)
 	db, mock := newCompanyEntryTestDB(t)
-	svc := &CompanyEntryService{db: db}
+	svc := &CompanyEntryService{entryRepo: repositories.NewCompanyEntryRepository(db)}
 	companyID, submissionID := uint(11), uint(21)
 
 	mock.ExpectQuery("SELECT \\* FROM `company_ownerships`").

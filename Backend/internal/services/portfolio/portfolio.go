@@ -6,11 +6,13 @@ package portfolio
 
 import (
 	"encoding/json"
+	"errors"
 	"sort"
 	"strings"
 	"time"
 
-	"Backend/domain/entity"
+	"Backend/domain/repository"
+	"Backend/internal/models"
 	"Backend/internal/repositories"
 )
 
@@ -61,7 +63,7 @@ type Store interface {
 
 // LatestScores は最新の診断のスコアを返す（repositories.UserWeightScoreRepository が満たす）。
 type LatestScores interface {
-	FindLatestByUser(userID uint) ([]entity.UserWeightScore, error)
+	FindLatestByUser(userID uint) ([]models.UserWeightScore, error)
 }
 
 type CategoryScore struct {
@@ -75,12 +77,11 @@ type Diagnosis struct {
 }
 
 type Interview struct {
-	SessionID    uint           `json:"session_id"`
-	CreatedAt    time.Time      `json:"created_at"`
-	SummaryText  string         `json:"summary_text"`
-	Scores       map[string]int `json:"scores"`
-	Strengths    []string       `json:"strengths"`
-	Improvements []string       `json:"improvements"`
+	SessionID    uint      `json:"session_id"`
+	CreatedAt    time.Time `json:"created_at"`
+	SummaryText  string    `json:"summary_text"`
+	Strengths    []string  `json:"strengths"`
+	Improvements []string  `json:"improvements"`
 }
 
 type Assessment struct {
@@ -89,14 +90,15 @@ type Assessment struct {
 	Scores    []CategoryScore `json:"scores"`
 }
 
-// Portfolio はまとめた結果。選ばなかったセクションは nil（JSON では省く）。
+// Portfolio はまとめた結果。選ばなかったセクションは null、選んで0件のセクションは空の配列にする。
+// omitempty は付けない（0件のスライスまで省かれ、画面の「まだありません」が出なくなるため）。
 type Portfolio struct {
 	GeneratedAt time.Time                  `json:"generated_at"`
 	Sections    []string                   `json:"sections"`
-	Diagnosis   *Diagnosis                 `json:"diagnosis,omitempty"`
-	Interviews  []Interview                `json:"interviews,omitempty"`
-	ESReviews   []repositories.PortfolioES `json:"es_reviews,omitempty"`
-	Assessments []Assessment               `json:"assessments,omitempty"`
+	Diagnosis   *Diagnosis                 `json:"diagnosis"`
+	Interviews  []Interview                `json:"interviews"`
+	ESReviews   []repositories.PortfolioES `json:"es_reviews"`
+	Assessments []Assessment               `json:"assessments"`
 }
 
 type Service struct {
@@ -116,11 +118,19 @@ func (s *Service) Build(userID uint, sections []string) (*Portfolio, error) {
 		switch section {
 		case SectionDiagnosis:
 			rows, err := s.scores.FindLatestByUser(userID)
+			if errors.Is(err, repository.ErrNotFound) {
+				// 診断が未実施なら空の診断にする（500 にしない）
+				rows, err = nil, nil
+			}
 			if err != nil {
 				return nil, err
 			}
 			d := &Diagnosis{Scores: []CategoryScore{}}
 			for _, r := range rows {
+				// 面接だけで決まったスコア（interview-*）は、AI 診断の結果としては出さない
+				if strings.HasPrefix(r.SessionID, "interview-") {
+					continue
+				}
 				d.Scores = append(d.Scores, CategoryScore{Category: r.WeightCategory, Score: r.Score})
 				if d.UpdatedAt == nil || r.UpdatedAt.After(*d.UpdatedAt) {
 					t := r.UpdatedAt
@@ -140,7 +150,6 @@ func (s *Service) Build(userID uint, sections []string) (*Portfolio, error) {
 					SessionID:    r.SessionID,
 					CreatedAt:    r.CreatedAt,
 					SummaryText:  r.SummaryText,
-					Scores:       parseIntMap(r.ScoresJSON),
 					Strengths:    parseStrings(r.StrengthsJSON),
 					Improvements: parseStrings(r.ImprovementsJSON),
 				})

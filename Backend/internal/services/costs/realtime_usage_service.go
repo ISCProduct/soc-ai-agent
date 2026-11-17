@@ -1,6 +1,7 @@
 package costs
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services/email"
@@ -15,8 +16,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"gorm.io/gorm"
 
 	"Backend/internal/safego"
 )
@@ -174,7 +173,7 @@ func (s *RealtimeUsageService) EnsureSessionStarted(userID, sessionID uint) erro
 func (s *RealtimeUsageService) CloseSession(sessionID uint, endedAt time.Time, tokens *TokenUsage) (durationSec int64, costUSD float64, err error) {
 	entry, err := s.repo.FindActiveBySessionID(sessionID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return -1, 0, nil
 		}
 		return 0, 0, err

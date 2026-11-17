@@ -1,13 +1,12 @@
 package teacher
 
 import (
+	"Backend/internal/models"
+	"Backend/internal/services/notification"
 	"errors"
 	"strings"
 	"testing"
 	"time"
-
-	"Backend/domain/entity"
-	"Backend/internal/models"
 )
 
 type stubGuidanceStore struct {
@@ -45,11 +44,11 @@ func (s *stubGuidanceStore) Dismiss(id, studentUserID uint) error {
 }
 
 type stubStudentByID struct {
-	user *entity.User
+	user *models.User
 	err  error
 }
 
-func (s *stubStudentByID) GetUserByID(uint) (*entity.User, error) {
+func (s *stubStudentByID) GetUserByID(uint) (*models.User, error) {
 	return s.user, s.err
 }
 
@@ -87,7 +86,7 @@ func TestGuidanceService_RejectsBadKind(t *testing.T) {
 func TestGuidanceService_ResolveStudentSchool(t *testing.T) {
 	schoolID := uint(7)
 	svc := NewGuidanceService(&stubGuidanceStore{}, &stubStudentByID{
-		user: &entity.User{ID: 3, Role: "student", OrganizationID: 4, SchoolID: &schoolID},
+		user: &models.User{ID: 3, Role: "student", OrganizationID: 4, SchoolID: &schoolID},
 	})
 	// 学園も返す。school_id を単体で返すと、呼び出し元が学園一致を検査せずに
 	// 担当校スコープの判定へ渡せてしまう（#1675）。
@@ -105,12 +104,12 @@ func TestGuidanceService_ResolveStudentSchool_RejectsNonStudents(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
 		name string
-		user entity.User
+		user models.User
 	}{
-		{"教員", entity.User{Role: "teacher", SchoolID: &schoolID}},
-		{"管理者", entity.User{Role: "student", IsAdmin: true, SchoolID: &schoolID}},
-		{"ゲスト", entity.User{Role: "student", IsGuest: true, SchoolID: &schoolID}},
-		{"退会済み", entity.User{Role: "student", WithdrawnAt: &now, SchoolID: &schoolID}},
+		{"教員", models.User{Role: "teacher", SchoolID: &schoolID}},
+		{"管理者", models.User{Role: "student", IsAdmin: true, SchoolID: &schoolID}},
+		{"ゲスト", models.User{Role: "student", IsGuest: true, SchoolID: &schoolID}},
+		{"退会済み", models.User{Role: "student", WithdrawnAt: &now, SchoolID: &schoolID}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -130,5 +129,22 @@ func TestGuidanceService_CreateWithoutIndustriesStoresNull(t *testing.T) {
 	}
 	if got := store.created[0].SuggestedIndustries; got != nil {
 		t.Fatalf("SuggestedIndustries = %q, want nil (JSON カラムに空文字は書けない)", *got)
+	}
+}
+
+type recordingNotifier struct{ got []notification.Notice }
+
+func (r *recordingNotifier) Notify(n notification.Notice) { r.got = append(r.got, n) }
+
+// #2033: 先生の案内を出したら、学生へアプリ内通知も届く。
+func TestGuidanceService_CreateNotifiesStudent(t *testing.T) {
+	n := &recordingNotifier{}
+	svc := NewGuidanceService(&stubGuidanceStore{}, &stubStudentByID{})
+	svc.SetNotifier(n)
+	if _, err := svc.Create(CreateGuidanceInput{TeacherUserID: 9, StudentUserID: 3, Kind: models.GuidanceKindLowMatch, Message: "面談しましょう"}); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(n.got) != 1 || n.got[0].UserID != 3 || n.got[0].Kind != models.NotificationKindGuidance || n.got[0].Body != "面談しましょう" {
+		t.Fatalf("通知 = %+v", n.got)
 	}
 }

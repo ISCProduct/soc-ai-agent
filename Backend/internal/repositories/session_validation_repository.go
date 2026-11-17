@@ -1,8 +1,8 @@
 package repositories
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/services/shared"
 	"errors"
 	"math/rand/v2"
 	"time"
@@ -53,7 +53,7 @@ func (r *SessionValidationRepository) claimSessionOwnershipTransaction(sessionID
 				return err
 			}
 			if count > 0 {
-				return shared.ErrForbidden
+				return repository.ErrForbidden
 			}
 			return nil
 		}
@@ -91,7 +91,7 @@ func (r *SessionValidationRepository) claimSessionOwnershipTransaction(sessionID
 						return tx.Model(&existing).Update("user_id", userID).Error
 					}
 					if *existing.UserID != userID {
-						return shared.ErrForbidden
+						return repository.ErrForbidden
 					}
 					return nil
 				}
@@ -108,7 +108,7 @@ func (r *SessionValidationRepository) claimSessionOwnershipTransaction(sessionID
 			return tx.Model(&existing).Update("user_id", userID).Error
 		}
 		if *existing.UserID != userID {
-			return shared.ErrForbidden
+			return repository.ErrForbidden
 		}
 		return nil
 	})
@@ -118,7 +118,7 @@ func (r *SessionValidationRepository) claimSessionOwnershipTransaction(sessionID
 func (r *SessionValidationRepository) GetOrCreate(sessionID string) (*models.SessionValidation, error) {
 	var validation models.SessionValidation
 	err := r.db.Where("session_id = ?", sessionID).First(&validation).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		validation = models.SessionValidation{
 			SessionID:          sessionID,
 			InvalidAnswerCount: 0,

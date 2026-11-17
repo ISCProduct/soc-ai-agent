@@ -1,6 +1,7 @@
 package assessment
 
 import (
+	"Backend/domain/repository"
 	"context"
 	"errors"
 	"log"
@@ -12,7 +13,6 @@ import (
 	"Backend/internal/repositories"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 var (
@@ -177,14 +177,14 @@ func (s *Service) Start(userID, templateID uint) (*SessionView, error) {
 	}
 	// 他校の独自テンプレートは存在しない扱い（404）。
 	t, err := s.repo.FindVisibleTemplate(templateID, schoolID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
 	sess, err := s.repo.FindInProgressSession(userID, templateID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		sess = &models.AssessmentSession{
 			PublicID: uuid.NewString(), UserID: userID, TemplateID: t.ID,
 			TemplateVersion: t.Version, Status: models.AssessmentStatusInProgress,
@@ -346,14 +346,14 @@ func (s *Service) Result(userID uint, publicID string) (*ResultView, error) {
 // 現在の所属校と一致しない学校独自テンプレートは存在しない扱い（#1675）。
 func (s *Service) session(userID uint, publicID string) (*models.AssessmentSession, error) {
 	sess, err := s.repo.FindSessionByPublicID(userID, publicID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
 	t, err := s.repo.FindTemplate(sess.TemplateID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrNotFound
 	}
 	if err != nil {

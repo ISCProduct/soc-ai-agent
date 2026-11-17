@@ -1,18 +1,16 @@
 package teacher
 
 import (
-	"time"
-
-	"Backend/domain/entity"
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services/resume"
+	"time"
 )
 
 // StudentLister は生徒一覧の取得面。テストで差し替えられるよう最小の面に絞る。
 type StudentLister interface {
-	ListStudentsPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error)
+	ListStudentsPaged(limit, offset int, query string, schoolID *uint) ([]models.User, int64, error)
 }
 
 // ScoreBatchReader は複数生徒のスコアを一括で読む面。
@@ -68,7 +66,7 @@ const LowMatchThreshold = 40.0
 
 // MinMatchedAxesForLowMatch はマッチ度を信用するのに最低限必要な軸の数（#1124）。
 // 学生側の frontend/lib/low-match.ts の MIN_MATCHED_AXES_FOR_LOW_MATCH と揃える。
-// 値は chat_controller.go の minEvaluatedCategoriesForFinal（暫定評価の判定）と同じ 4。
+// 値は services/matching の MinEvaluatedCategoriesForFinal（暫定評価の判定）と同じ 4。
 // 「この件数を下回るとスコアを確定扱いにしない」という既存の基準に合わせている。
 //
 // マッチ度は「計測できた軸だけ」の平均なので、軸が少ない学生は実力ではなく
@@ -208,7 +206,7 @@ func (s *StudentInsightService) listTendencies(limit, offset int, query string, 
 }
 
 // buildTendencies は生徒群のスコア・低マッチ・履歴書事実を一括で読み、filters に合う生徒だけ返す。
-func (s *StudentInsightService) buildTendencies(students []entity.User, filters tendencyFilters) ([]StudentTendency, error) {
+func (s *StudentInsightService) buildTendencies(students []models.User, filters tendencyFilters) ([]StudentTendency, error) {
 	// 担当生徒が0人でも空一覧を返す（PRD 境界値）。
 	if len(students) == 0 {
 		return []StudentTendency{}, nil

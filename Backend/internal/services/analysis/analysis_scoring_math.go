@@ -1,7 +1,7 @@
 package analysis
 
 import (
-	"Backend/domain/entity"
+	"Backend/internal/models"
 	"encoding/json"
 	"math"
 	"strings"
@@ -69,7 +69,7 @@ func averageCategoryScore(scoreMap map[string]float64, categories []string) floa
 // Exported wrappers for testing from external packages.
 
 func BuildScoreComment(scores AnalysisScores) string { return buildScoreComment(scores) }
-func BuildJobSuitabilityComment(scores []entity.UserWeightScore) (string, []JobSuitabilityRole) {
+func BuildJobSuitabilityComment(scores []models.UserWeightScore) (string, []JobSuitabilityRole) {
 	return buildJobSuitabilityComment(scores)
 }
 func ParseEmbedding(raw string) ([]float64, error) { return parseEmbedding(raw) }

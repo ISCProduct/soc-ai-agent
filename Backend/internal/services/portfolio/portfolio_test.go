@@ -1,11 +1,14 @@
 package portfolio
 
 import (
+	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
-	"Backend/domain/entity"
+	"Backend/domain/repository"
+	"Backend/internal/models"
 	"Backend/internal/repositories"
 )
 
@@ -47,10 +50,10 @@ func (f *fakeStore) RecentAssessments(userID uint, limit int) ([]repositories.Po
 
 type fakeScores struct{ calledUser uint }
 
-func (f *fakeScores) FindLatestByUser(userID uint) ([]entity.UserWeightScore, error) {
+func (f *fakeScores) FindLatestByUser(userID uint) ([]models.UserWeightScore, error) {
 	f.calledUser = userID
 	t := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-	return []entity.UserWeightScore{
+	return []models.UserWeightScore{
 		{WeightCategory: "安定志向", Score: 40, UpdatedAt: t},
 		{WeightCategory: "技術志向", Score: 80, UpdatedAt: t.Add(time.Hour)},
 	}, nil
@@ -71,7 +74,7 @@ func TestBuild(t *testing.T) {
 		t.Fatalf("diagnosis = %+v", p.Diagnosis)
 	}
 	iv := p.Interviews[0]
-	if iv.Scores["logic"] != 4 || len(iv.Strengths) != 1 || len(iv.Improvements) != 0 {
+	if len(iv.Strengths) != 1 || len(iv.Improvements) != 0 {
 		t.Fatalf("interview = %+v（壊れた JSON は空にして全体は止めない）", iv)
 	}
 	if p.ESReviews == nil || len(p.ESReviews) != 0 {
@@ -94,4 +97,60 @@ func TestBuild_選んだセクションだけ(t *testing.T) {
 	if scores.calledUser != 0 || len(store.calledUser) != 1 {
 		t.Fatalf("選ばなかった内容の材料まで引いている")
 	}
+}
+
+type notFoundScores struct{}
+
+func (notFoundScores) FindLatestByUser(uint) ([]models.UserWeightScore, error) {
+	return nil, repository.ErrNotFound
+}
+
+// 診断が未実施（スコア0件）でも 500 にせず、空の診断を返す。
+func TestBuild_診断が未実施でも止めない(t *testing.T) {
+	p, err := NewService(&fakeStore{}, notFoundScores{}).Build(7, AllSections)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if p.Diagnosis == nil || len(p.Diagnosis.Scores) != 0 {
+		t.Fatalf("diagnosis = %+v", p.Diagnosis)
+	}
+}
+
+type interviewOnlyScores struct{}
+
+func (interviewOnlyScores) FindLatestByUser(uint) ([]models.UserWeightScore, error) {
+	return []models.UserWeightScore{{SessionID: "interview-7", WeightCategory: "技術志向", Score: 60}}, nil
+}
+
+// 面接だけで決まったスコアは、AI 診断の結果として出さない。
+func TestBuild_面接由来のスコアは診断に出さない(t *testing.T) {
+	p, err := NewService(&fakeStore{}, interviewOnlyScores{}).Build(7, []string{SectionDiagnosis})
+	if err != nil || len(p.Diagnosis.Scores) != 0 {
+		t.Fatalf("diagnosis = %+v err = %v", p.Diagnosis, err)
+	}
+}
+
+// 選んで0件のセクションは [] で、選ばなかったセクションは null で返す（画面の「まだありません」を出すため）。
+func TestBuild_JSONで空と未選択を区別する(t *testing.T) {
+	p, err := NewService(&emptyStore{}, notFoundScores{}).Build(7, []string{SectionES, SectionInterview})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	b, _ := json.Marshal(p)
+	got := string(b)
+	for _, want := range []string{`"es_reviews":[]`, `"interviews":[]`, `"assessments":null`, `"diagnosis":null`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%s が無い: %s", want, got)
+		}
+	}
+}
+
+type emptyStore struct{}
+
+func (emptyStore) RecentInterviews(uint, int) ([]repositories.PortfolioInterview, error) {
+	return nil, nil
+}
+func (emptyStore) RecentESReviews(uint, int) ([]repositories.PortfolioES, error) { return nil, nil }
+func (emptyStore) RecentAssessments(uint, int) ([]repositories.PortfolioAssessment, error) {
+	return nil, nil
 }

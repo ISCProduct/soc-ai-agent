@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { LoginContent } from '@/components/LoginContent'
+import { LoginContent } from '@/components/auth/LoginContent'
 import { PageLoading } from '@/components/common/PageLoading'
 
 export default function Login() {

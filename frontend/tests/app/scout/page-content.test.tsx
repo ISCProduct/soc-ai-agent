@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import PageContent from '@/app/scout/page-content'
 import { studentScoutService } from '@/lib/scout/api'
 
@@ -21,6 +21,7 @@ jest.mock('@/lib/scout/api', () => ({
   studentScoutService: {
     list: jest.fn(),
     view: jest.fn(),
+    accept: jest.fn(),
     decline: jest.fn(),
     blockCompany: jest.fn(),
   },
@@ -28,6 +29,7 @@ jest.mock('@/lib/scout/api', () => ({
 
 const list = studentScoutService.list as jest.Mock
 const view = studentScoutService.view as jest.Mock
+const accept = studentScoutService.accept as jest.Mock
 const decline = studentScoutService.decline as jest.Mock
 const blockCompany = studentScoutService.blockCompany as jest.Mock
 
@@ -46,6 +48,7 @@ describe('学生のスカウト受信箱', () => {
   beforeEach(() => {
     list.mockReset()
     view.mockReset()
+    accept.mockReset()
     decline.mockReset()
     blockCompany.mockReset()
     list.mockImplementation(async (params?: { offset?: number }) => ({
@@ -54,6 +57,7 @@ describe('学生のスカウト受信箱', () => {
       blocked_company_ids: [],
     }))
     view.mockResolvedValue({ id: 1, company_id: 8, status: 'viewed', message: '本文' })
+    accept.mockResolvedValue({ id: 1, status: 'accepted' })
     decline.mockResolvedValue({ id: 1, status: 'declined' })
     blockCompany.mockResolvedValue(undefined)
   })
@@ -76,13 +80,43 @@ describe('学生のスカウト受信箱', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '内容を確認' }))
     expect(view).toHaveBeenCalledWith(1)
+    fireEvent.click(await screen.findByRole('button', { name: '閉じる' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'このスカウトを承諾' }))
+    await waitFor(() => expect(accept).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'このスカウトを辞退' })).toBeEnabled())
 
     fireEvent.click(screen.getByRole('button', { name: 'このスカウトを辞退' }))
-    expect(decline).toHaveBeenCalledWith(1)
+    await waitFor(() => expect(decline).toHaveBeenCalledWith(1))
 
     fireEvent.click(screen.getByRole('button', { name: 'この企業をブロック' }))
     fireEvent.click(await screen.findByRole('button', { name: 'ブロックする' }))
-    expect(blockCompany).toHaveBeenCalledWith(8)
+    await waitFor(() => expect(blockCompany).toHaveBeenCalledWith(8))
+  })
+
+  it('処理中の行は承諾と辞退を同時に押せない', async () => {
+    let resolveAccept: (value: { id: number; status: string }) => void = () => {}
+    accept.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveAccept = resolve
+        }),
+    )
+
+    render(<PageContent />)
+    expect(await screen.findByText('デモ株式会社')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'このスカウトを承諾' }))
+    expect(accept).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'このスカウトを辞退' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'このスカウトを辞退' }))
+    expect(decline).not.toHaveBeenCalled()
+
+    resolveAccept({ id: 1, status: 'accepted' })
+    expect(await screen.findByText('承諾', { selector: '.MuiChip-label' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'このスカウトを承諾' })).not.toBeInTheDocument()
   })
 
   it('スカウトが0件のとき理由と次の操作を表示する（SOCAIAGENT-401）', async () => {

@@ -153,6 +153,39 @@ func TestLocalCostBasisExcludesCompute(t *testing.T) {
 	}
 }
 
+// OpenAI のモデルは、本番の記録と同じ分単価の表（services/costs）で見積もる。表に無いモデルは単価不明（#2224）。
+// STT_COST_PER_MINUTE_USD の上書きは公表価格の見積もりに混ぜない。
+func TestRunModel_OpenAICostUsesSharedPriceTable(t *testing.T) {
+	clearAudioProviderEnv(t)
+	t.Setenv("AI_AUDIO_PROVIDER", "openai")
+	t.Setenv("STT_COST_PER_MINUTE_USD", "0.5")
+	orig := transcribeFn
+	transcribeFn = func(_, _ string, _ Audio) (string, int64, error) {
+		return "ok", 1, nil
+	}
+	t.Cleanup(func() { transcribeFn = orig })
+
+	tests := []struct {
+		model     string
+		wantBasis string
+		wantCost  float64
+	}{
+		{"gpt-transcribe", "openai_published_price", 0.0045},
+		// トークン課金のモデルは、分単価が公式の概算なので目安として分ける（#2229 のレビュー）
+		{"gpt-4o-mini-transcribe", "openai_estimated_price", 0.003},
+		{"gpt-4o-transcribe-diarize", "openai_estimated_price", 0.006},
+		{"sttbench-unknown-model", "unknown_model_price", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			s := RunModel(tt.model, nil, nil, "")
+			if s.CostBasis != tt.wantBasis || s.EstCostPerMinUSD != tt.wantCost {
+				t.Errorf("RunModel(%q) cost basis/estimate = %q/%v, want %q/%v", tt.model, s.CostBasis, s.EstCostPerMinUSD, tt.wantBasis, tt.wantCost)
+			}
+		})
+	}
+}
+
 func TestPrintComparisonLabelsLocalCostAsAPIOnly(t *testing.T) {
 	var output bytes.Buffer
 	PrintComparison(&output, []string{"whisper-local"}, Report{

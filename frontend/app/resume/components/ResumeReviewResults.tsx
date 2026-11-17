@@ -13,10 +13,10 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
-import ScoreUpdateBanner, { type WeightScore } from '@/components/ScoreUpdateBanner'
+import ScoreUpdateBanner, { type WeightScore } from '@/components/feedback/ScoreUpdateBanner'
 import type { ReviewResult } from '../types'
 import { getSeverityConfig, parseItemScores, RUBRIC_SCORE_MAX } from '../utils'
-import FormatFindingsSection from '@/components/FormatFindingsSection'
+import FormatFindingsSection from '@/components/feedback/FormatFindingsSection'
 
 type ResumeReviewResultsProps = {
   review: ReviewResult | null

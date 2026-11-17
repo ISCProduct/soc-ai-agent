@@ -1,6 +1,7 @@
 package release
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/shared"
@@ -12,8 +13,6 @@ import (
 	"log"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 var ErrReleaseNoteLLMClientNil = errors.New("openai client is nil")
@@ -165,12 +164,12 @@ func containsDeveloperOnlyNeedle(lowerText string) bool {
 }
 
 func (s *ReleaseNoteService) deleteByPRNumber(ctx context.Context, prNumber uint) error {
-	return s.db.WithContext(ctx).Where("pr_number = ?", prNumber).Delete(&models.ReleaseNote{}).Error
+	return s.repo.DeleteByPRNumber(ctx, prNumber)
 }
 
 func (s *ReleaseNoteService) purgeStoredDeveloperOnlyNotes(ctx context.Context) error {
-	var notes []models.ReleaseNote
-	if err := s.db.WithContext(ctx).Find(&notes).Error; err != nil {
+	notes, err := s.repo.ListAll(ctx)
+	if err != nil {
 		return fmt.Errorf("list release notes for purge: %w", err)
 	}
 	for _, note := range notes {
@@ -188,7 +187,7 @@ func (s *ReleaseNoteService) purgeStoredDeveloperOnlyNotes(ctx context.Context) 
 		if reason == "" {
 			continue
 		}
-		if err := s.db.WithContext(ctx).Delete(&note).Error; err != nil {
+		if err := s.repo.Delete(ctx, &note); err != nil {
 			return fmt.Errorf("purge release note pr=%d: %w", note.PRNumber, err)
 		}
 		log.Printf("[ReleaseNote] PR #%d を削除しました(%s): %s", note.PRNumber, reason, note.Title)
@@ -211,12 +210,12 @@ type releaseNoteSummaryResult struct {
 }
 
 type ReleaseNoteService struct {
-	db  *gorm.DB
-	llm *openai.Client
+	repo repository.ReleaseNoteRepository
+	llm  *openai.Client
 }
 
-func NewReleaseNoteService(db *gorm.DB, llm *openai.Client) *ReleaseNoteService {
-	return &ReleaseNoteService{db: db, llm: llm}
+func NewReleaseNoteService(repo repository.ReleaseNoteRepository, llm *openai.Client) *ReleaseNoteService {
+	return &ReleaseNoteService{repo: repo, llm: llm}
 }
 
 // IngestMergedPRs は未取り込みのPRのみAIで要約しDBへ保存する（pr_numberでべき等）。
@@ -238,11 +237,11 @@ func (s *ReleaseNoteService) IngestMergedPRs(ctx context.Context, sources []Rele
 			continue
 		}
 
-		var count int64
-		if err := s.db.Model(&models.ReleaseNote{}).Where("pr_number = ?", src.PRNumber).Count(&count).Error; err != nil {
+		exists, err := s.repo.ExistsByPRNumber(ctx, src.PRNumber)
+		if err != nil {
 			return saved, fmt.Errorf("check existing release note: %w", err)
 		}
-		if count > 0 {
+		if exists {
 			continue
 		}
 
@@ -275,7 +274,7 @@ func (s *ReleaseNoteService) IngestMergedPRs(ctx context.Context, sources []Rele
 			Audience: audience,
 			MergedAt: src.MergedAt,
 		}
-		if err := s.db.Create(&note).Error; err != nil {
+		if err := s.repo.Create(ctx, &note); err != nil {
 			return saved, fmt.Errorf("save release note for PR #%d: %w", src.PRNumber, err)
 		}
 		saved++
@@ -319,11 +318,8 @@ func (s *ReleaseNoteService) List(ctx context.Context, limit int, role string, i
 	if limit <= 0 {
 		limit = 20
 	}
-	var notes []models.ReleaseNote
-	audiences := audienceForRole(role, isAdmin)
-	if err := s.db.WithContext(ctx).
-		Where("audience IN ?", audiences).
-		Order("merged_at DESC").Limit(limit).Find(&notes).Error; err != nil {
+	notes, err := s.repo.ListByAudiences(ctx, audienceForRole(role, isAdmin), limit)
+	if err != nil {
 		return nil, fmt.Errorf("list release notes: %w", err)
 	}
 	return notes, nil

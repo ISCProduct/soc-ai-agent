@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"Backend/internal/repositories"
 	"Backend/internal/services/training"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -61,7 +62,7 @@ func TestOutcomeStatuses_RAG側と揃っていること(t *testing.T) {
 
 func TestExport_ユーザー発話だけを集める(t *testing.T) {
 	db, mock := newMockDB(t)
-	svc := training.NewService(db)
+	svc := training.NewService(repositories.NewTrainingExportRepository(db))
 
 	mock.ExpectQuery(`SELECT s.id AS session_id, a.status AS status FROM .*interview_sessions`).
 		WillReturnRows(sqlmock.NewRows([]string{"session_id", "status"}).
@@ -104,7 +105,7 @@ func TestExport_ユーザー発話だけを集める(t *testing.T) {
 
 func TestExport_発話が無いセッションは落とす(t *testing.T) {
 	db, mock := newMockDB(t)
-	svc := training.NewService(db)
+	svc := training.NewService(repositories.NewTrainingExportRepository(db))
 
 	mock.ExpectQuery(`SELECT s.id AS session_id`).
 		WillReturnRows(sqlmock.NewRows([]string{"session_id", "status"}).AddRow(1, "offered"))
@@ -124,7 +125,7 @@ func TestExport_発話が無いセッションは落とす(t *testing.T) {
 
 func TestExport_該当ゼロなら空を返す(t *testing.T) {
 	db, mock := newMockDB(t)
-	svc := training.NewService(db)
+	svc := training.NewService(repositories.NewTrainingExportRepository(db))
 
 	mock.ExpectQuery(`SELECT s.id AS session_id`).
 		WillReturnRows(sqlmock.NewRows([]string{"session_id", "status"}))
@@ -141,7 +142,7 @@ func TestExport_該当ゼロなら空を返す(t *testing.T) {
 // 発行されるSQLが結論の出た応募だけに絞っていることを確認する。
 func TestExport_結論が出た応募だけを対象にする(t *testing.T) {
 	db, mock := newMockDB(t)
-	svc := training.NewService(db)
+	svc := training.NewService(repositories.NewTrainingExportRepository(db))
 
 	var captured string
 	mock.ExpectQuery(`SELECT s.id AS session_id`).

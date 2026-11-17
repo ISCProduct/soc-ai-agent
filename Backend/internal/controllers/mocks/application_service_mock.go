@@ -1,7 +1,7 @@
 package mocks
 
 import (
-	"Backend/domain/entity"
+	"Backend/internal/models"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -10,68 +10,68 @@ type ApplicationServiceMock struct {
 	mock.Mock
 }
 
-func (m *ApplicationServiceMock) Apply(userID, companyID, matchID uint) (*entity.UserApplicationStatus, error) {
+func (m *ApplicationServiceMock) Apply(userID, companyID, matchID uint) (*models.UserApplicationStatus, error) {
 	args := m.Called(userID, companyID, matchID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*entity.UserApplicationStatus), args.Error(1)
+	return args.Get(0).(*models.UserApplicationStatus), args.Error(1)
 }
 
-func (m *ApplicationServiceMock) UpdateStatus(applicationID uint, userID uint, status string, notes *string, isAdmin bool) (*entity.UserApplicationStatus, error) {
+func (m *ApplicationServiceMock) UpdateStatus(applicationID uint, userID uint, status string, notes *string, isAdmin bool) (*models.UserApplicationStatus, error) {
 	args := m.Called(applicationID, userID, status, notes, isAdmin)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*entity.UserApplicationStatus), args.Error(1)
+	return args.Get(0).(*models.UserApplicationStatus), args.Error(1)
 }
 
-func (m *ApplicationServiceMock) Withdraw(applicationID, userID uint, isAdmin bool) (*entity.UserApplicationStatus, error) {
+func (m *ApplicationServiceMock) Withdraw(applicationID, userID uint, isAdmin bool) (*models.UserApplicationStatus, error) {
 	args := m.Called(applicationID, userID, isAdmin)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*entity.UserApplicationStatus), args.Error(1)
+	return args.Get(0).(*models.UserApplicationStatus), args.Error(1)
 }
 
-func (m *ApplicationServiceMock) Accept(applicationID, userID uint, isAdmin bool) (*entity.UserApplicationStatus, error) {
+func (m *ApplicationServiceMock) Accept(applicationID, userID uint, isAdmin bool) (*models.UserApplicationStatus, error) {
 	args := m.Called(applicationID, userID, isAdmin)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*entity.UserApplicationStatus), args.Error(1)
+	return args.Get(0).(*models.UserApplicationStatus), args.Error(1)
 }
 
-func (m *ApplicationServiceMock) ListForAdmin(userID, companyID uint, status string, schoolID *uint) ([]*entity.UserApplicationStatus, error) {
+func (m *ApplicationServiceMock) ListForAdmin(userID, companyID uint, status string, schoolID *uint) ([]*models.UserApplicationStatus, error) {
 	args := m.Called(userID, companyID, status, schoolID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]*entity.UserApplicationStatus), args.Error(1)
+	return args.Get(0).([]*models.UserApplicationStatus), args.Error(1)
 }
 
-func (m *ApplicationServiceMock) ListForOwner(userID, companyID uint, status string) ([]*entity.UserApplicationStatus, error) {
+func (m *ApplicationServiceMock) ListForOwner(userID, companyID uint, status string) ([]*models.UserApplicationStatus, error) {
 	args := m.Called(userID, companyID, status)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]*entity.UserApplicationStatus), args.Error(1)
+	return args.Get(0).([]*models.UserApplicationStatus), args.Error(1)
 }
 
-func (m *ApplicationServiceMock) UpdateStatusAsOwner(applicationID, userID uint, status string, notes *string) (*entity.UserApplicationStatus, error) {
+func (m *ApplicationServiceMock) UpdateStatusAsOwner(applicationID, userID uint, status string, notes *string) (*models.UserApplicationStatus, error) {
 	args := m.Called(applicationID, userID, status, notes)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*entity.UserApplicationStatus), args.Error(1)
+	return args.Get(0).(*models.UserApplicationStatus), args.Error(1)
 }
 
-func (m *ApplicationServiceMock) GetApplicationsByUser(userID uint) ([]*entity.UserApplicationStatus, error) {
+func (m *ApplicationServiceMock) GetApplicationsByUser(userID uint) ([]*models.UserApplicationStatus, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]*entity.UserApplicationStatus), args.Error(1)
+	return args.Get(0).([]*models.UserApplicationStatus), args.Error(1)
 }
 
 func (m *ApplicationServiceMock) GetCorrelation(userID, companyID uint) ([]map[string]any, error) {

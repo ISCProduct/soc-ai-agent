@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"Backend/internal/repositories"
 	"context"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestDeleteUser_SyncsScoutIndex(t *testing.T) {
 	}
 
 	spy := &scoutSyncerRecorder{}
-	svc := NewUserDeletionService(db, &mockObjectDeleter{}, nil)
+	svc := NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), &mockObjectDeleter{}, nil)
 	svc.SetScoutIndexSyncer(spy)
 
 	mock.ExpectBegin()
@@ -85,7 +86,7 @@ func TestDeleteUser_WithoutScoutSyncer(t *testing.T) {
 		t.Fatalf("gorm: %v", err)
 	}
 
-	svc := NewUserDeletionService(db, &mockObjectDeleter{}, nil)
+	svc := NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), &mockObjectDeleter{}, nil)
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT \\* FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").

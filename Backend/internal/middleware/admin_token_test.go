@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"Backend/domain/entity"
+	"Backend/internal/models"
 )
 
 const testAdminSecret = "test-admin-secret"
@@ -169,7 +169,7 @@ func TestAdminTokenTTLFromEnv(t *testing.T) {
 // 期限切れだけを区別して返すことを確認する。
 func TestValidateAdminTokenForUser(t *testing.T) {
 	now := time.Now()
-	user := &entity.User{ID: 7, Email: "admin@example.com", IsAdmin: true}
+	user := &models.User{ID: 7, Email: "admin@example.com", IsAdmin: true}
 	token := generateAdminTokenAt(user.ID, user.Email, testAdminSecret, now)
 
 	if err := ValidateAdminTokenForUser(token, user, testAdminSecret); err != nil {
@@ -190,7 +190,7 @@ func TestValidateAdminTokenForUser(t *testing.T) {
 	}
 
 	// 他の管理者は影響を受けない
-	other := &entity.User{ID: 8, Email: "other@example.com", IsAdmin: true}
+	other := &models.User{ID: 8, Email: "other@example.com", IsAdmin: true}
 	otherToken := generateAdminTokenAt(other.ID, other.Email, testAdminSecret, now)
 	if err := ValidateAdminTokenForUser(otherToken, other, testAdminSecret); err != nil {
 		t.Fatalf("失効指定のない別管理者のトークンまで無効になっている: %v", err)
@@ -209,7 +209,7 @@ func TestValidateAdminTokenForUser(t *testing.T) {
 func TestValidateAdminTokenForUser_ExpiredIsDistinguishable(t *testing.T) {
 	// 実行環境で TTL を伸ばしていると期限切れにならないため固定する
 	t.Setenv("ADMIN_TOKEN_TTL_HOURS", "")
-	user := &entity.User{ID: 7, Email: "admin@example.com", IsAdmin: true}
+	user := &models.User{ID: 7, Email: "admin@example.com", IsAdmin: true}
 	old := time.Now().Add(-defaultAdminTokenTTL - time.Hour)
 	token := generateAdminTokenAt(user.ID, user.Email, testAdminSecret, old)
 

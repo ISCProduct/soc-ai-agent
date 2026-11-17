@@ -11,10 +11,9 @@
 package training
 
 import (
+	"Backend/domain/repository"
 	"context"
 	"fmt"
-
-	"gorm.io/gorm"
 )
 
 // OutcomeStatuses は教師ラベルになりうる選考ステータス。
@@ -50,69 +49,47 @@ type Stats struct {
 }
 
 type Service struct {
-	db *gorm.DB
+	repo repository.TrainingExportRepository
 }
 
-func NewService(db *gorm.DB) *Service {
-	return &Service{db: db}
+func NewService(repo repository.TrainingExportRepository) *Service {
+	return &Service{repo: repo}
 }
 
 // Count は学習データになりうる件数を数える。エクスポート前の実態把握に使う。
 func (s *Service) Count(ctx context.Context) (*Stats, error) {
-	if s == nil || s.db == nil {
+	if s == nil || s.repo == nil {
 		return nil, fmt.Errorf("training: db is nil")
 	}
-	db := s.db.WithContext(ctx)
 
 	stats := &Stats{ByStatus: map[string]int{}}
 
-	var outcomeApps int64
-	if err := db.Table("user_application_statuses").
-		Where("status IN ?", OutcomeStatuses).
-		Count(&outcomeApps).Error; err != nil {
+	outcomeApps, err := s.repo.CountOutcomeApplications(ctx, OutcomeStatuses)
+	if err != nil {
 		return nil, fmt.Errorf("training: 応募の集計に失敗しました: %w", err)
 	}
-	stats.OutcomeApplications = int(outcomeApps)
+	stats.OutcomeApplications = outcomeApps
 
-	type statusRow struct {
-		Status string
-		N      int
-	}
-	var rows []statusRow
-	if err := db.Table("user_application_statuses AS a").
-		Select("a.status AS status, COUNT(DISTINCT s.id) AS n").
-		Joins("JOIN interview_sessions AS s ON s.user_id = a.user_id AND s.company_id = a.company_id").
-		Where("a.status IN ?", OutcomeStatuses).
-		Group("a.status").
-		Scan(&rows).Error; err != nil {
+	byStatus, err := s.repo.CountSessionsByStatus(ctx, OutcomeStatuses)
+	if err != nil {
 		return nil, fmt.Errorf("training: ステータス別集計に失敗しました: %w", err)
 	}
-	for _, r := range rows {
-		stats.ByStatus[r.Status] = r.N
-		stats.SessionsWithOutcome += r.N
+	for status, n := range byStatus {
+		stats.ByStatus[status] = n
+		stats.SessionsWithOutcome += n
 	}
 
-	// ユーザー発話が無いセッションは prompt を作れないので学習対象にならない。
-	var exportable int64
-	if err := db.Table("interview_sessions AS s").
-		Joins("JOIN user_application_statuses AS a ON s.user_id = a.user_id AND s.company_id = a.company_id").
-		Joins("JOIN interview_utterances AS u ON u.session_id = s.id AND u.role = ?", "user").
-		Where("a.status IN ?", OutcomeStatuses).
-		Distinct("s.id").
-		Count(&exportable).Error; err != nil {
+	exportable, err := s.repo.CountExportableSessions(ctx, OutcomeStatuses)
+	if err != nil {
 		return nil, fmt.Errorf("training: 出力可能件数の集計に失敗しました: %w", err)
 	}
-	stats.ExportableSessions = int(exportable)
+	stats.ExportableSessions = exportable
 
-	var utterances int64
-	if err := db.Table("interview_utterances AS u").
-		Joins("JOIN interview_sessions AS s ON s.id = u.session_id").
-		Joins("JOIN user_application_statuses AS a ON s.user_id = a.user_id AND s.company_id = a.company_id").
-		Where("a.status IN ? AND u.role = ?", OutcomeStatuses, "user").
-		Count(&utterances).Error; err != nil {
+	utterances, err := s.repo.CountUserUtterances(ctx, OutcomeStatuses)
+	if err != nil {
 		return nil, fmt.Errorf("training: 発話数の集計に失敗しました: %w", err)
 	}
-	stats.TotalUserUtterances = int(utterances)
+	stats.TotalUserUtterances = utterances
 
 	return stats, nil
 }
@@ -122,26 +99,12 @@ func (s *Service) Count(ctx context.Context) (*Stats, error) {
 // ユーザー発話のみを含める。AI発話を prompt に混ぜると、モデルの出力を
 // 教師信号にすることになり蒸留にあたる。
 func (s *Service) Export(ctx context.Context, limit int) ([]Session, error) {
-	if s == nil || s.db == nil {
+	if s == nil || s.repo == nil {
 		return nil, fmt.Errorf("training: db is nil")
 	}
-	db := s.db.WithContext(ctx)
 
-	type sessionRow struct {
-		SessionID uint
-		Status    string
-	}
-	q := db.Table("interview_sessions AS s").
-		Select("s.id AS session_id, a.status AS status").
-		Joins("JOIN user_application_statuses AS a ON s.user_id = a.user_id AND s.company_id = a.company_id").
-		Where("a.status IN ?", OutcomeStatuses).
-		Order("s.id")
-	if limit > 0 {
-		q = q.Limit(limit)
-	}
-
-	var rows []sessionRow
-	if err := q.Scan(&rows).Error; err != nil {
+	rows, err := s.repo.ListOutcomeSessions(ctx, OutcomeStatuses, limit)
+	if err != nil {
 		return nil, fmt.Errorf("training: セッションの取得に失敗しました: %w", err)
 	}
 	if len(rows) == 0 {
@@ -155,17 +118,8 @@ func (s *Service) Export(ctx context.Context, limit int) ([]Session, error) {
 		statusByID[r.SessionID] = r.Status
 	}
 
-	type uttRow struct {
-		SessionID uint
-		Text      string
-	}
-	var utts []uttRow
-	// created_at は並び順にだけ使う。取り出す必要はない。
-	if err := db.Table("interview_utterances").
-		Select("session_id, text").
-		Where("session_id IN ? AND role = ?", ids, "user").
-		Order("session_id, created_at, id").
-		Scan(&utts).Error; err != nil {
+	utts, err := s.repo.ListUserUtterances(ctx, ids)
+	if err != nil {
 		return nil, fmt.Errorf("training: 発話の取得に失敗しました: %w", err)
 	}
 

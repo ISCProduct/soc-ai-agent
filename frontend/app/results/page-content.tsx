@@ -13,7 +13,7 @@ import {
 } from './components/ResultsStatusViews'
 import ResultsListView from './components/ResultsListView'
 import AnalysisScoreCard from './components/AnalysisScoreCard'
-import { LowMatchConfirmDialog } from '@/components/LowMatchConfirmDialog'
+import { LowMatchConfirmDialog } from '@/app/results/components/LowMatchConfirmDialog'
 
 /** ReactFlow 依存の詳細ビューは一覧表示では不要のため遅延ロード */
 const CompanyDetailView = dynamic(() => import('./components/CompanyDetailView'), {

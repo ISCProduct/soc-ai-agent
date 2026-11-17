@@ -1,10 +1,8 @@
 package teacher
 
 import (
-	"testing"
-
-	"Backend/domain/entity"
 	"Backend/internal/models"
+	"testing"
 )
 
 type stubResumeFacts struct {
@@ -20,7 +18,7 @@ func (s *stubResumeFacts) FindLatestResumeFactsByUsers(userIDs []uint) (map[uint
 	return s.byUser, s.err
 }
 
-func resumeService(facts *stubResumeFacts, students ...entity.User) *StudentInsightService {
+func resumeService(facts *stubResumeFacts, students ...models.User) *StudentInsightService {
 	svc := NewStudentInsightService(
 		&stubLister{students: students, total: int64(len(students))},
 		&stubScores{scores: map[uint]map[string]float64{}},
@@ -144,9 +142,9 @@ func TestListTendencies_ResumeDisabledWithoutReader(t *testing.T) {
 func TestListTendencies_ResumeFilterPagesAfterMatch(t *testing.T) {
 	t.Setenv("RESUME_COMPLETENESS_THRESHOLD", "60")
 
-	students := make([]entity.User, 0, 26)
+	students := make([]models.User, 0, 26)
 	for i := 1; i <= 26; i++ {
-		students = append(students, entity.User{
+		students = append(students, models.User{
 			ID:    uint(i),
 			Name:  "生徒",
 			Email: "s@example.com",
@@ -187,12 +185,12 @@ func TestListTendencies_ResumeFilterScansBeyondTenThousand(t *testing.T) {
 
 	const n = 12500
 	targets := map[uint]bool{10001: true, 12345: true}
-	students := make([]entity.User, 0, n)
+	students := make([]models.User, 0, n)
 	ok := 80
 	facts := map[uint]models.ResumeLatestFact{}
 	for i := 1; i <= n; i++ {
 		id := uint(i)
-		students = append(students, entity.User{ID: id, Name: "生徒", Email: "s@example.com"})
+		students = append(students, models.User{ID: id, Name: "生徒", Email: "s@example.com"})
 		if !targets[id] {
 			facts[id] = models.ResumeLatestFact{HasDocument: true, LatestScore: &ok}
 		}
@@ -219,11 +217,11 @@ func TestListTendencies_ResumeFilterScansBeyondTenThousand(t *testing.T) {
 
 // pagingLister は limit/offset を実際に切る。ページ後絞り込みバグの再現用。
 type pagingLister struct {
-	students            []entity.User
+	students            []models.User
 	gotLimit, gotOffset int
 }
 
-func (s *pagingLister) ListStudentsPaged(limit, offset int, _ string, _ *uint) ([]entity.User, int64, error) {
+func (s *pagingLister) ListStudentsPaged(limit, offset int, _ string, _ *uint) ([]models.User, int64, error) {
 	s.gotLimit, s.gotOffset = limit, offset
 	total := int64(len(s.students))
 	if offset >= len(s.students) {

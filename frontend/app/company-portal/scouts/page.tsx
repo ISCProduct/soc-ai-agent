@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { formatDateTime } from '@/lib/i18n/format'
 import { useRouter } from 'next/navigation'
 import { Alert, Box, Button, Paper, Stack, Typography } from '@mui/material'
 import { MarkLabel } from '@/components/company-portal/MarkLabel'
@@ -16,7 +17,7 @@ const PAGE_SIZE = 30
 function formatWhen(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString('ja-JP')
+  return formatDateTime(d)
 }
 
 export default function CompanyPortalScoutsPage() {
@@ -108,7 +109,7 @@ export default function CompanyPortalScoutsPage() {
             <Paper key={s.id} variant="outlined" sx={{ p: 2 }}>
               <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={1} flexWrap="wrap">
                 <Typography fontWeight="bold">
-                  {s.student_name ? `${s.student_name}さん` : `学生 #${s.user_id}`}
+                  {s.status === 'accepted' && s.student_name ? `${s.student_name}さん` : '氏名非公開'}
                 </Typography>
                 <MarkLabel {...scoutMark(s.status)} />
               </Stack>

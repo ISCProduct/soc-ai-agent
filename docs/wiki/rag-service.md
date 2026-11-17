@@ -174,15 +174,27 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 - 字数の数え方は `services/es_review.py` の **`count_es_chars` が唯一の定義**: 改行と前後の空白は数えず、それ以外（全角・半角・記号・文中の空白）は1文字。プロンプトの指示・生成後の検査・`length_balance_score` の採点基準・FEの表示はすべてこの値に揃える（FEで数え直さない）
 - 目標レンジは `_CHAR_LIMIT_RANGE`: `within` = 指定字数の85〜100%、`around` = 90〜110%
 - 生成後にサーバ側で字数を検査し、許容上限を超えていたら**改善文だけ**を最大2回（`_MAX_CHAR_LIMIT_RETRIES`）作り直す。再生成プロンプトには「直前は N 字で、目標の M 字を超えた」と実測値を入れる（モデルの自己申告には頼らない）。評価（第1呼び出し）は作り直さない
-- 再生成は**開始から45秒（`_CHAR_LIMIT_RETRY_DEADLINE_SEC`）を超えたら打ち切る**。手前のALB / CloudFront が60秒で切るため(#1556)、跨ぐと 422 の案内文も生成済みの本文も利用者へ届かない。打ち切りは失敗ではなく `char_limit_satisfied: false` として返す
+- 再生成は**開始から45秒（`_CHAR_LIMIT_RETRY_DEADLINE_SEC`）を超えたら、次の呼び出しを始めない**。#1556 で CloudFront / ALB は90秒、Backend は85秒。45は境界が60秒だった頃の数字のまま。すでに走っている呼び出しは最大60秒（SDKの再試行でさらに伸びる）なので、このゲートは全体を85秒以内に収める保証ではない。始めなければ、生成済みの本文は `char_limit_satisfied: false` として届く
 - それでも収まらない場合は**切り詰めず**、`char_limit_satisfied: false` と `improved_text_length` を返す。FEは字数を出し、収まらなかったことを警告で明示する
 - `char_limit` 指定時の改善文の出力予算は、入力長ではなく指定字数から見積もる（長いESを短く直す指定が通常ケース）。**`char_limit` が無いときは `max_tokens` を渡さない**（#1564。入力長へ比例させると天井で飽和して無駄な再試行を1回挟み、定数を常に渡すと出力上限4,096のモデルへ差し替えた瞬間に全リクエストが400になる）
+
+### 長文で改善文が縮むとき（#1606）
+
+- プロンプト版は `es_review_v6`。`char_limit` が無いときの字数指示は「110〜130%を目安」ではなく、`count_es_chars` で数えた元の字数と目標レンジ（切り上げた110〜130%）を書く。要約して短くしないことも書く
+- 生成後、改善文が元の文章（100%）を下回っていても**追加の呼び出しはしない**。2026-11-05 の gpt-4o 実測（6,000字・1本）では、作り直しが 349字から 369字までしか伸びず、目標の 6,600〜7,800字に届かなかった。効果の無い呼び出しへ課金しない
+- 短いまま `improved_length_satisfied: false` と `improved_length_issue: short` で返す。FEは「生成された文章が元の文章より短くなりました」と出し、このまま提出せず元の文章と見比べるよう案内する。100%はハーネスの `improved_text_ratio` の下限と同じ。ハーネスの `runeLen` は改行を数えるので、改行のある文章ではここの `count_es_chars` と値は一致しない
+- 目標上限（切り上げた130%）を超えたときも追加の呼び出しはせず、`improved_length_satisfied: false` と `improved_length_issue: long` で返す。FEは「元の文章の130%を超えています」と出し、残す内容を選んで短くするよう案内する。130%はプロンプトの目標上限で、ハーネスの上限 1.45 より手前で警告する。理由を分けているので、長い文章に「短くなりました」とは出さない
+- 上限なしの最初の改善文がモデルの出力上限で切れても 422 にしない。読めた文、または空を短いまま返し、警告を残す
+- `improved_text` が文字列でない応答は空として扱う。`null` を `"None"` として採用しない
+- 2026-11-05 の実測は、評価 5.16秒 / completion 333、改善文 3.98秒 / 349字 / completion 387、作り直し 4.41秒 / 369字 / completion 389。合計 13.6秒。60秒には掛からなかった。作り直しをやめたあとも、モデルが指示どおり長く書いた場合のコスト上限（約2.2倍、月10,000件で +$527）は残る
+- `char_limit` があるときはこの検査をしない（短くする指定が目的。字数は `char_limit_satisfied` で見る）
+- 公開APIの入力上限は 6,000字のまま（#1564）。10,000字はここで拒否する。6,000字の130%はトークン見積もり上 `_MAX_OUTPUT_TOKENS` に収まるが、モデルが実際にその長さを書くかはハーネスの `improved_chars` / `improved_text_ratio` で入力長ごとに見る
 
 ### ES添削とESリライトの統合（#1533）
 
 - ESの評価・書き換えの実装は `services/es_review.py` のみ。Backend の `/api/es/review`（ES添削タブ）と `/api/es/rewrite`（ESリライトタブ）はどちらも RAG の `/es/review` を呼ぶ
 - 旧実装では `/api/es/rewrite` が Backend 内の独自プロンプト（gpt-4o-mini・**インジェクション対策なし**・字数指示120〜150%）で生成していたため、同じESでも添削タブと違う書き換え案が返っていた。統合でプロンプト・出力スキーマ・インジェクション対策が1箇所になった
-- `/api/es/rewrite` のレスポンスは従来互換（`rewritten_text` / `star`）。`improved_text` を `rewritten_text` に詰め替えて返し、`improved_text_length` / `char_limit_satisfied` を追加している
+- `/api/es/rewrite` のレスポンスは従来互換（`rewritten_text` / `star`）。`improved_text` を `rewritten_text` に詰め替えて返し、`improved_text_length` / `char_limit_satisfied` / `improved_length_satisfied` / `improved_length_issue` を追加している
 - ESリライトは評価根拠を表示しないため、内部フラグで `feedback_items` の生成を省略し、評価段の出力予算も縮める（#1532）
 - STAR分解（`star`）は改善文と同じ第2呼び出しで生成する。ES添削タブは `star_score`、ESリライトタブは `star` の内訳を同じレスポンスから表示する
 - **デプロイ順は rag-review を backend より先**にする（`.github/workflows/deployment.yml`）。Backend の ES 経路は生成を RAG へ委譲しており、旧 RAG は Pydantic の `extra=ignore` で `char_limit` / `tech_stack` を**黙って捨てる**ため、逆順だとロール中の数分だけ「字数上限を指定しても無視され、画面に手がかりも出ない」窓ができる
@@ -271,9 +283,8 @@ ES添削が全滅する。ローカルLLM（#1124 / #775 / #1131）でも vLLM /
   HTTPリクエスト内で前に直列実行されるぶんも引かれる）ので、上限は「モデルが受け付ける値」の話に
   留め、長さの制御は #1523 の字数上限で行う
 - 実測した振る舞い（2026-09-29 / gpt-4o・企業名なし）: 8,000字・10,000字の入力はいずれも
-  **7〜8秒で成功**する。モデルはプロンプトの「110〜130%」を長文では守らず改善文を220〜400字しか
-  書かないため、上限到達そのものが起きない。この「長いESほど改善文が短くなる（10,000字 → 約360字
-  ＝入力の4%）」品質の問題は別Issueで扱う（成功を装って無価値な出力を返すため 422 より重い）
+  **7〜8秒で成功**する。モデルは「110〜130%を目安」だけでは長文を220〜400字しか書かないため、
+  上限到達そのものが起きない。この品質の問題は #1606 で、目標字数の明示と生成後の検査に移した
 - テストで固定している不変条件（`tests/test_es_review_split_calls.py`）
   - `test_improved_text_budget_does_not_depend_on_input_length`: 1字 / 800字 / 7,304字 / 7,305字 /
     入力上限ちょうど / 上限+1字 のいずれでも改善文の呼び出しに `max_tokens` を渡さない

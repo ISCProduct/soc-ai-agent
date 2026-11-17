@@ -1,6 +1,7 @@
 package company
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
@@ -10,8 +11,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type jobListingExtraction struct {
@@ -54,10 +53,10 @@ func (s *CrawlService) executeJobListingCrawl(source *models.CrawlSource) error 
 
 	now := time.Now()
 	company, err := s.companyRepo.FindByName(extracted.CompanyName)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return err
 	}
-	if company == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+	if company == nil || errors.Is(err, repository.ErrNotFound) {
 		newCompany := &models.Company{
 			Name:            extracted.CompanyName,
 			SourceType:      source.SourceType,
@@ -78,10 +77,10 @@ func (s *CrawlService) executeJobListingCrawl(source *models.CrawlSource) error 
 			continue
 		}
 		existing, err := s.companyRepo.FindJobPositionByCompanyAndTitle(company.ID, title)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		if err != nil && !errors.Is(err, repository.ErrNotFound) {
 			return err
 		}
-		if existing == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+		if existing == nil || errors.Is(err, repository.ErrNotFound) {
 			remote := false
 			if p.RemoteOption != nil {
 				remote = *p.RemoteOption

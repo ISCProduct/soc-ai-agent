@@ -98,3 +98,28 @@ func TestUnevaluatedModels(t *testing.T) {
 		})
 	}
 }
+
+// 分単価が公式の概算（est.）のモデルも費用を出し、目安であることを説明に書く（#2229 のレビュー）。
+func TestPrintReport_公開単価の目安(t *testing.T) {
+	s := &ModelSummary{
+		Cases:            []CaseResult{{ID: "a", CER: 0.1}},
+		MeanCER:          0.1,
+		KeywordAccuracy:  -1,
+		NumberAccuracy:   -1,
+		Provider:         "openai",
+		CostBasis:        "openai_estimated_price",
+		EstCostPerMinUSD: 0.003,
+	}
+	var b strings.Builder
+	PrintSummary(&b, "gpt-4o-mini-transcribe", s)
+	if !strings.Contains(b.String(), "OpenAI 公開単価の目安") {
+		t.Errorf("目安であることが説明に無い:\n%s", b.String())
+	}
+
+	var c strings.Builder
+	PrintComparison(&c, []string{"gpt-4o-mini-transcribe"}, Report{Models: map[string]*ModelSummary{"gpt-4o-mini-transcribe": s}})
+	// 発話10分ぶん × $0.003/分
+	if !strings.Contains(c.String(), "0.0300") {
+		t.Errorf("目安の単価でも面接1回の費用を出す:\n%s", c.String())
+	}
+}

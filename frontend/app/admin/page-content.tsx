@@ -14,7 +14,7 @@ import {
 import Grid from '@mui/material/Grid'
 import { authService } from '@/lib/auth'
 import { getAdminSchoolAccess } from '@/lib/admin/school-access'
-import { visibleAdminNav } from '@/lib/admin-nav'
+import { visibleAdminNav } from '@/lib/admin/nav'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { StudentsNeedingAttention } from '@/components/admin/StudentsNeedingAttention'

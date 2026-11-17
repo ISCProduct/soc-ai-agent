@@ -1,7 +1,7 @@
 package chat
 
 import (
-	"Backend/domain/entity"
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/usagectx"
 	"context"
@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 const (
@@ -48,7 +46,7 @@ func (s *ChatService) ensureUserEmbedding(ctx context.Context, userID uint, sess
 	}
 	if _, err := s.userEmbeddingRepo.FindByUserAndSession(userID, sessionID); err == nil {
 		return nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+	} else if !errors.Is(err, repository.ErrNotFound) {
 		return err
 	}
 
@@ -57,7 +55,7 @@ func (s *ChatService) ensureUserEmbedding(ctx context.Context, userID uint, sess
 		return fmt.Errorf("load chat history: %w", err)
 	}
 
-	var user *entity.User
+	var user *models.User
 	if s.userRepo != nil {
 		user, err = s.userRepo.GetUserByID(userID)
 		if err != nil {
@@ -96,7 +94,7 @@ func (s *ChatService) ensureJobCategoryEmbedding(ctx context.Context, jobCategor
 	}
 	if _, err := s.jobEmbeddingRepo.FindByJobCategoryID(jobCategoryID); err == nil {
 		return nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+	} else if !errors.Is(err, repository.ErrNotFound) {
 		return err
 	}
 
@@ -129,7 +127,7 @@ func (s *ChatService) ensureJobCategoryEmbedding(ctx context.Context, jobCategor
 	return s.jobEmbeddingRepo.Upsert(jobCategoryID, text, embeddingJSON)
 }
 
-func buildUserEmbeddingText(user *entity.User, history []models.ChatMessage) string {
+func buildUserEmbeddingText(user *models.User, history []models.ChatMessage) string {
 	var b strings.Builder
 	hasContent := false
 	b.WriteString("User profile\n")

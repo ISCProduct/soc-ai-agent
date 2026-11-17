@@ -18,7 +18,7 @@ const DATA = {
   generated_at: '2026-11-13T05:00:00Z',
   sections: ['diagnosis', 'interview', 'es', 'assessment'],
   diagnosis: { updated_at: '2026-11-01T00:00:00Z', scores: [{ category: '技術志向', score: 82 }] },
-  interviews: [{ session_id: 3, created_at: '2026-11-10T00:00:00Z', summary_text: '結論から話せています', scores: {}, strengths: ['具体例がある'], improvements: [] }],
+  interviews: [{ session_id: 3, created_at: '2026-11-10T00:00:00Z', summary_text: '結論から話せています', strengths: ['具体例がある'], improvements: [] }],
   es_reviews: [],
   assessments: [{ created_at: '2026-10-01T00:00:00Z', title: '適性検査A', scores: [{ category: '主体性', score: 70 }] }],
 }
@@ -50,6 +50,24 @@ test('内容を外すと、その内容を除いて取り直す。全部外す�
   for (const label of ['適性の診断', 'AI 面接', '適性検査']) fireEvent.click(screen.getByLabelText(label))
   expect(await screen.findByText('出力する内容を1つ以上選んでください。')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '印刷・PDFで保存' })).toBeDisabled()
+})
+
+test('外す前の遅い応答が後から届いても、外した内容は表示しない', async () => {
+  const pending: ((body: unknown) => void)[] = []
+  global.fetch = jest.fn(
+    () => new Promise((resolve) => pending.push((body) => resolve({ ok: true, status: 200, json: async () => body }))),
+  ) as unknown as typeof fetch
+  render(<PortfolioPage />)
+  await waitFor(() => expect(pending).toHaveLength(1))
+  fireEvent.click(screen.getByLabelText('ES 添削'))
+  await waitFor(() => expect(pending).toHaveLength(2))
+
+  // 新しい要求（ES なし）が先に返り、古い要求（ES あり）が後から返る
+  pending[1]({ ...DATA, sections: ['diagnosis', 'interview', 'assessment'], es_reviews: null })
+  expect(await screen.findByText('結論から話せています')).toBeInTheDocument()
+  pending[0](DATA)
+  await new Promise((r) => setTimeout(r, 0))
+  expect(screen.queryByText('ES 添削（最新5件）')).not.toBeInTheDocument()
 })
 
 test('読み込みに失敗したらエラーと再読み込みを出す', async () => {

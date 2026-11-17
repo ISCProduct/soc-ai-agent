@@ -52,7 +52,7 @@ func TestWriteNewFileDoesNotOverwrite(t *testing.T) {
 
 // 空の backup は「戻す対象がある」入力として成立しない。
 // --apply は修正0件のとき backup を作らないので、null / [] は作られ得ない形。
-// 受け付けると ApplyAuditChanges が何もせず成功し、「戻した」と誤解する。
+// 受け付けると ApplyCompanyAuditChanges が何もせず成功し、「戻した」と誤解する。
 func TestParseBackup(t *testing.T) {
 	tests := []struct {
 		name    string
