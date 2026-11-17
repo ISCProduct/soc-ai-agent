@@ -39,6 +39,10 @@ export function useResumePage() {
   const [uploadError, setUploadError] = useState('')
   const [reviewError, setReviewError] = useState('')
   const [reviewInterrupted, setReviewInterrupted] = useState(false)
+  // 応募先の決め方: 企業を選ぶ / 職種だけで見る
+  const [targetMode, setTargetMode] = useState<'company' | 'job'>('company')
+  // ファイル選択・URL入力のたびに増やし、読み込みを自動で始める合図にする
+  const [uploadTick, setUploadTick] = useState(0)
   const [annotateError, setAnnotateError] = useState('')
   const [review, setReview] = useState<ReviewResult | null>(null)
   const [ragReport, setRagReport] = useState('')
@@ -98,7 +102,6 @@ export function useResumePage() {
     setCompanyQuery(candidate.name)
     setCompanyValidated(true)
     setSelectedCompanyMeta(candidate)
-    setCompanyCandidates([])
     setCompanySearchError('')
   }
 
@@ -220,6 +223,57 @@ export function useResumePage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // ファイルを選んだら、そのまま読み込む（ボタンを別に押させない）
+  useEffect(() => {
+    if (uploadTick > 0) void handleUpload()
+    // handleUpload は毎回作り直されるので、合図（uploadTick）だけを見る
+  }, [uploadTick])
+
+  const selectFile = (selected: File) => {
+    setSourceType(selected.name.toLowerCase().endsWith('.docx') ? 'docx' : 'pdf')
+    setSourceUrl('')
+    setFile(selected)
+    setUploadTick((t) => t + 1)
+  }
+
+  const loadFromUrl = (url: string) => {
+    setSourceType('google_docs')
+    setSourceUrl(url)
+    setFile(null)
+    setUploadTick((t) => t + 1)
+  }
+
+  /** 書類を選び直す・別の書類をレビューする。レビューの途中なら止める。 */
+  const resetDocument = () => {
+    reviewAbortRef.current?.abort()
+    setDocumentId(null)
+    setFile(null)
+    setSourceUrl('')
+    setUploadError('')
+    setReview(null)
+    setRagReport('')
+    setScoresBefore(null)
+    setScoresAfter(null)
+    setAnnotateError('')
+    setReviewError('')
+    setReviewInterrupted(false)
+    setReviewLoading(false)
+  }
+
+  /** 読み取りを中止して入力に戻る。書類と応募先の入力は残す。 */
+  const cancelReview = () => {
+    reviewAbortRef.current?.abort()
+    setRagReport('')
+    setReviewError('')
+    setReviewInterrupted(false)
+    setReviewLoading(false)
+  }
+
+  const chooseTargetMode = (mode: 'company' | 'job') => {
+    setTargetMode(mode)
+    if (mode === 'job') clearSelectedCompany()
   }
 
   const handleReview = async () => {
@@ -427,6 +481,12 @@ export function useResumePage() {
     reviewLoading,
     reviewError,
     reviewInterrupted,
+    targetMode,
+    chooseTargetMode,
+    selectFile,
+    loadFromUrl,
+    resetDocument,
+    cancelReview,
     review,
     ragReport,
     handleReview,
