@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { formatDateTime } from '@/lib/i18n/format'
 import { useParams } from 'next/navigation'
 import {
   Accordion,
@@ -275,7 +276,7 @@ export default function PageContent() {
   const formatTs = (v: string | null) => {
     if (!v) return '未取得'
     const d = new Date(v)
-    return Number.isNaN(d.getTime()) ? v : d.toLocaleString('ja-JP')
+    return Number.isNaN(d.getTime()) ? v : formatDateTime(d)
   }
 
   const groupedRelations = useMemo(() => groupRelationsByCategory(relations), [relations])

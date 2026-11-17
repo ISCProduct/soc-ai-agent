@@ -20,6 +20,11 @@ export type InterviewSession = {
   template_version: string
   created_at: string
   updated_at: string
+  /** レポート生成の進捗（SOCAIAGENT-652）。旧バックエンドでは返らない */
+  report_stage?: 'queued' | 'loading' | 'generating' | 'saving' | 'done' | 'failed'
+  report_percent?: number
+  report_failed_reason?: string | null
+  report_progress_at?: string | null
 }
 
 export const INTERVIEW_LANGUAGES = [

@@ -3,6 +3,7 @@ package repositories
 import (
 	"Backend/internal/models"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -130,7 +131,7 @@ func (r *ProfileRecalculationRepository) GetLatestHistory(companyID uint) (*mode
 	err := r.db.Where("company_id = ?", companyID).
 		Order("created_at DESC").
 		First(&h).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &h, err

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { formatDateTime } from '@/lib/i18n/format'
 import { useRouter } from 'next/navigation'
 import { Alert, Box, Button, Paper, Stack, Typography } from '@mui/material'
 import { MarkLabel } from '@/components/company-portal/MarkLabel'
@@ -16,7 +17,7 @@ const PAGE_SIZE = 30
 function formatWhen(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString('ja-JP')
+  return formatDateTime(d)
 }
 
 export default function CompanyPortalScoutsPage() {

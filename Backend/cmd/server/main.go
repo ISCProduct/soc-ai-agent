@@ -14,6 +14,7 @@ import (
 	insightcontrollers "Backend/internal/controllers/insight"
 	interviewcontrollers "Backend/internal/controllers/interview"
 	notificationcontrollers "Backend/internal/controllers/notification"
+	portfoliocontrollers "Backend/internal/controllers/portfolio"
 	releasecontrollers "Backend/internal/controllers/release"
 	resumecontrollers "Backend/internal/controllers/resume"
 	schedulecontrollers "Backend/internal/controllers/schedule"
@@ -51,6 +52,7 @@ import (
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/oauth"
 	"Backend/internal/services/organization"
+	portfoliosvc "Backend/internal/services/portfolio"
 	"Backend/internal/services/refreshtoken"
 	"Backend/internal/services/release"
 	"Backend/internal/services/resume"
@@ -375,6 +377,8 @@ func main() {
 		return shared.UserOwnsCompany(companyAccessRepo, userID, companyID)
 	})
 	resumeService.SetCrossFeatureService(crossFeatureService)
+	resumeService.SetMatchingRunner(matchingService)
+	resumeService.SetAIBudget(aiBudgetService)
 
 	// コントローラー層の初期化
 	organizationRepo := repositories.NewOrganizationRepository(db)
@@ -512,6 +516,7 @@ func main() {
 	notificationService := notificationsvc.NewService(repositories.NewNotificationRepository(db))
 	appService := application.NewApplicationService(appStatusRepo, matchRepo, companyAccessRepo)
 	appService.SetNotifier(notificationService)
+	appService.SetScoreSnapshotReader(userWeightScoreRepo)
 	appController := applicationcontrollers.NewApplicationController(appService)
 	appController.SetSchoolAccess(schoolService)
 	hrStudentAnalysisService := hr.NewStudentAnalysisService(
@@ -545,10 +550,14 @@ func main() {
 	scoreValidationRepo := repositories.NewScoreValidationRepository(db)
 	scoreValidationService := admin.NewScoreValidationService(scoreValidationRepo)
 	scoreValidationController := admincontrollers.NewAdminScoreValidationController(scoreValidationService)
+	// #203: 有効なキャリブレーション重みをマッチング計算へ適用（未アクティブなら全軸1.0）
+	matchingService.SetCalibrationWeightReader(scoreValidationRepo)
 	diagnosisQualityController := admincontrollers.NewAdminDiagnosisQualityController(diagnosisQualityRepo)
 	collectiveInsightRepo := repositories.NewCollectiveInsightRepository(db)
 	collectiveInsightService := flywheel.NewCollectiveInsightService(collectiveInsightRepo, userWeightScoreRepo)
 	collectiveInsightController := insightcontrollers.NewCollectiveInsightController(collectiveInsightService)
+	// 応募・選考更新から集合知ログを自動記録（FE の /actions 呼び出しに依存しない）
+	appService.SetCollectiveInsight(collectiveInsightService)
 	scraperSessionService := admin.NewScraperSessionService(scraperSessionRepo)
 	scraperSessionController := admincontrollers.NewAdminScraperSessionController(scraperSessionService)
 
@@ -596,6 +605,8 @@ func main() {
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupESRoutes(api, esRewriteController, esReviewController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
+	// 自己分析ポートフォリオ（#2030）。本人の診断・面接・ES・適性検査をまとめる
+	routes.SetupPortfolioRoutes(api, portfoliocontrollers.NewController(portfoliosvc.NewService(repositories.NewPortfolioRepository(db), repositories.NewUserWeightScoreRepository(db))), cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupNotificationRoutes(api, notificationcontrollers.NewController(notificationService), cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)
@@ -652,7 +663,7 @@ func main() {
 	// 共有シークレットのみで認証する(#861)
 	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.ServiceSecret))
 
-	startMaintenanceJobs(crawlService, userDeletionService, notificationService, pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo)
+	startMaintenanceJobs(crawlService, userDeletionService, notificationService, pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, scoreValidationService)
 
 	startServer(e, cfg.ServerPort)
 }
