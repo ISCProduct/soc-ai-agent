@@ -20,6 +20,7 @@ import {
 import { visuallyHidden } from '@mui/utils'
 import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone'
 import { authService } from '@/lib/auth'
+import { formatDateTime } from '@/lib/i18n/format'
 import { shouldShowStudentBottomNav } from '@/lib/sidebar-nav'
 import { useInterviewSessionActive } from '@/app/interview/sessionChrome'
 import {
@@ -42,7 +43,7 @@ const PAGE_SIZE = 20
 function formatTime(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return formatDateTime(d, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 /**
