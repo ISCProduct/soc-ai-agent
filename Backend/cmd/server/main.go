@@ -52,6 +52,7 @@ import (
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/oauth"
 	"Backend/internal/services/organization"
+	"Backend/internal/services/piimask"
 	portfoliosvc "Backend/internal/services/portfolio"
 	"Backend/internal/services/refreshtoken"
 	"Backend/internal/services/release"
@@ -300,6 +301,16 @@ func main() {
 	questionService := chat.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := matching.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
 	resumeService := resume.NewResumeService(resumeRepo, "storage/resumes", aiClient)
+	// 履歴書を外部の LLM へ送る前の伏字の辞書に、その学生の氏名・メール・学校名を使う。読めないときは送らない
+	subjectReader := piimask.SubjectReaderFunc(func(userID uint) (piimask.Subject, error) {
+		u, err := userRepo.GetUserByID(userID)
+		if err != nil {
+			return piimask.Subject{}, err
+		}
+		return piimask.Subject{Name: u.Name, Email: u.Email, SchoolName: u.SchoolName}, nil
+	})
+	resumeService.SetSubjectReader(subjectReader)
+	escontrollers.SetSubjectReader(subjectReader) // ES 添削・リライトも、外の LLM へ送る前に同じ辞書で伏字にする
 	crawlService := company.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 	gbizInfoRepo := repositories.NewGBizInfoRepository(db)
 	gbizInfoService := gbizinfo.NewGBizInfoService(cfg, gbizInfoRepo, companyRepo, companyRelationRepo)
