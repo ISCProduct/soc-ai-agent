@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { formatDateTime } from '@/lib/i18n/format'
 import {
   Alert,
   Button,
@@ -180,7 +181,7 @@ export default function PageContent() {
                       <TableCell>
                         {s.expires_at ? (
                           <Chip
-                            label={new Date(s.expires_at).toLocaleString('ja-JP')}
+                            label={formatDateTime(s.expires_at)}
                             color={isExpired(s.expires_at) ? 'error' : 'success'}
                             size="small"
                           />
@@ -188,7 +189,7 @@ export default function PageContent() {
                           <Typography variant="body2" color="text.secondary">なし</Typography>
                         )}
                       </TableCell>
-                      <TableCell>{new Date(s.updated_at).toLocaleString('ja-JP')}</TableCell>
+                      <TableCell>{formatDateTime(s.updated_at)}</TableCell>
                       <TableCell>
                         <IconButton
                           size="small"

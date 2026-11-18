@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { formatDateTime } from '@/lib/i18n/format'
 import { useRouter } from 'next/navigation'
 import {
   Box,
@@ -221,8 +222,8 @@ export default function PageContent() {
                       </Stack>
                       <Typography variant="body2" color="text.secondary">
                         {s.started_at
-                          ? new Date(s.started_at).toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })
-                          : new Date(s.created_at).toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })}
+                          ? formatDateTime(s.started_at, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })
+                          : formatDateTime(s.created_at, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })}
                       </Typography>
                     </Box>
                     <Box sx={{ textAlign: 'right' }}>

@@ -5,6 +5,8 @@
  * （どちらも学生本人の行だけを返し、件数も少ない）。
  */
 
+import { formatDateTime } from '@/lib/i18n/format'
+
 export type NextActionSchedule = { company_name: string; stage: string; title: string; scheduled_at: string }
 export type NextActionApplication = { company_name: string; status: string }
 
@@ -21,7 +23,7 @@ export type NextAction = {
 export const UPCOMING_DAYS = 14
 
 function formatWhen(d: Date): string {
-  return d.toLocaleString('ja-JP', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })
+  return formatDateTime(d, { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })
 }
 
 /** 優先順: 直近の予定（日時が近い順）→ 内定の返事 → 応募するか未決の企業。 */

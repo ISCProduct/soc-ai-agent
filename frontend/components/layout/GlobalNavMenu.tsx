@@ -82,6 +82,8 @@ export function GlobalNavMenu() {
         onClick={() => setOpen(true)}
         sx={{
           position: 'fixed',
+          // 印刷（ポートフォリオの PDF など）に載せない
+          '@media print': { display: 'none' },
           right: 16,
           bottom: { xs: 'calc(72px + env(safe-area-inset-bottom))', md: 16 },
           zIndex: (t) => t.zIndex.appBar,

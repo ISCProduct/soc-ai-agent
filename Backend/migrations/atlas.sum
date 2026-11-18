@@ -1,4 +1,4 @@
-h1:l+LN26gNBUXhBylPcZJ/QfGsSINHKXtJ8KHefrNlhj4=
+h1:1DTX7cwXxFEU1JAyWD5o9wUFbJE6IqVxmYKeeQwd8JY=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -74,4 +74,6 @@ h1:l+LN26gNBUXhBylPcZJ/QfGsSINHKXtJ8KHefrNlhj4=
 000073_user_score_recalculation_jobs.up.sql h1:3j2q8xYkosAgiEeNiJeTjfryHBF2Xf6DsX5dR1CaDjA=
 000074_user_score_recalculation_snapshots.up.sql h1:NU4uBlVRMXRAhUjmsPS+nPaY+LkC5fwGJ4Fiysqehxo=
 20261115225754_application_score_snapshot.up.sql h1:PABCvkB1CkKdFYjNe+Nr97SuEWGYfiojCmqWD0Beza8=
-20261118154700_user_company_match_favorite_index.up.sql h1:aYZtRZxQvgmROGK+LoVdnHUiqvbOJg5ovTpmWWnO8MI=
+20261117104108_create_training_consent_events.up.sql h1:7DzTJC5wFRGYFsRQgHK+STIK3G04c6Kp7CG/CIL51Ac=
+20261117105006_training_scorer_export_runs.up.sql h1:8UIt8WBBkiE26qOVTCb5auUY10Mao7uixR6ocz2qlkY=
+20261118154700_user_company_match_favorite_index.up.sql h1:l6y8ikocvHyBX4w52vqTrm7QXgWqXXGIXRKUT2eBizU=
