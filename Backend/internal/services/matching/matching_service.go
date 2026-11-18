@@ -312,6 +312,11 @@ func (s *MatchingService) calculateMatchScore(
 		match.MatchScore = 0
 	}
 
+	// 大きくずれる軸がある企業は、その数だけ下げる（SOCAIAGENT-670。fit.go）。
+	if fitPenaltyEnabled() {
+		match.MatchScore = math.Max(0, match.MatchScore-FitPenalty(MismatchAxisCount(axisMatchesOf(match))))
+	}
+
 	return match
 }
 

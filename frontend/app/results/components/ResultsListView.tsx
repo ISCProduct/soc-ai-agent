@@ -359,6 +359,11 @@ export default function ResultsListView({
                       </Typography>
                     )}
 
+                  {/* 参考の印は文字で出す（色だけで伝えない）。理由は文頭の「参考:」から続けて読める */}
+                  {company.isReference && company.fitNote && (
+                    <Typography sx={{ fontSize: 13, color: UI.flag, mt: 0.5 }}>{company.fitNote}</Typography>
+                  )}
+
                   <Typography sx={{ fontSize: 15, lineHeight: 1.9, color: UI.ink, maxWidth: '68ch', mb: 2 }}>
                     {leadSentences(company.description)}
                   </Typography>

@@ -43,6 +43,10 @@ type Recommendation struct {
 	// 少ないほど根拠が薄い。低マッチ警告の抑制に使う。
 	// レスポンス直下の evaluated_categories（ユーザースコアの非ゼロ件数）とは別物。
 	MatchedAxisCount int `json:"matched_axis_count"`
+	// IsReference は、本人の傾向と企業の重視点が大きく離れた軸が複数ある提案（SOCAIAGENT-670）。
+	// 適合度は下げてあり、画面は「参考」として理由（FitNote）を添える。
+	IsReference bool   `json:"is_reference"`
+	FitNote     string `json:"fit_note,omitempty"`
 }
 
 // RecommendationResponse は GET /api/chat/recommendations のレスポンス。
@@ -154,6 +158,8 @@ func BuildRecommendations(displayed []*models.UserCompanyMatch, reasonScores []m
 			IsFavorited:      match.IsFavorited,
 			IsApplied:        match.IsApplied,
 			MatchedAxisCount: match.MatchedAxisCount,
+			IsReference:      FitNote(match) != "",
+			FitNote:          FitNote(match),
 			CategoryScores: CategoryScores{
 				Technical:     match.TechnicalMatch,
 				Teamwork:      match.TeamworkMatch,
