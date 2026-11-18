@@ -49,6 +49,7 @@ func main() {
 
 	var report matching.FitReport
 	var jobs jobCoverage
+	var fb feedbackSummary
 	err = db.Connection(func(tx *gorm.DB) error {
 		if err := tx.Exec("SET SESSION TRANSACTION READ ONLY").Error; err != nil {
 			return fmt.Errorf("読み取り専用にできません: %w", err)
@@ -88,6 +89,8 @@ func main() {
 		if jobs, err = loadJobCoverage(tx, companyIDs); err != nil {
 			return err
 		}
+		// フィードバックの表が無い（migration 前）環境でも、ほかの集計は出す
+		fb = loadFeedbackSummary(tx)
 		return nil
 	})
 	if err != nil {
@@ -95,6 +98,68 @@ func main() {
 	}
 	print(report)
 	printJobs(jobs)
+	printFeedback(fb)
+}
+
+// feedbackSummary は、推薦への「合う／合わない」の集計。「参考」の判定と職種の加点が、本人の判断と合っているかを見る。
+type feedbackSummary struct {
+	Available bool
+	// 区分ごとの（合わない件数, 合計）。区分: 全体 / 参考 / 参考以外 / 職種の加点あり / 職種の加点なし
+	Groups [5][2]int
+}
+
+var feedbackGroupNames = [5]string{"全体", "参考（ずれる軸が2つ以上）", "参考以外", "選んだ職種の募集あり", "選んだ職種の募集なし"}
+
+func loadFeedbackSummary(tx *gorm.DB) feedbackSummary {
+	var s feedbackSummary
+	type row struct {
+		Verdict    string
+		IsRef      bool
+		JobMatched bool
+		N          int
+	}
+	var rows []row
+	if err := tx.Raw(`SELECT verdict, (fit_mismatch_axes LIKE '%,%') AS is_ref, job_matched, COUNT(*) AS n
+		FROM user_match_feedbacks GROUP BY verdict, is_ref, job_matched`).Scan(&rows).Error; err != nil {
+		return s
+	}
+	s.Available = true
+	add := func(g int, r row) {
+		s.Groups[g][1] += r.N
+		if r.Verdict == "unfit" {
+			s.Groups[g][0] += r.N
+		}
+	}
+	for _, r := range rows {
+		add(0, r)
+		if r.IsRef {
+			add(1, r)
+		} else {
+			add(2, r)
+		}
+		if r.JobMatched {
+			add(3, r)
+		} else {
+			add(4, r)
+		}
+	}
+	return s
+}
+
+func printFeedback(s feedbackSummary) {
+	if !s.Available {
+		fmt.Println("\n推薦へのフィードバック: 集計できません（表が無い、または読めません）")
+		return
+	}
+	fmt.Println("\n推薦へのフィードバック（「合わない」の割合。件数が少ないうちは参考値）:")
+	for i, name := range feedbackGroupNames {
+		n, unfit := s.Groups[i][1], s.Groups[i][0]
+		if n == 0 {
+			fmt.Printf("  %-22s 0 件\n", name)
+			continue
+		}
+		fmt.Printf("  %-22s %d 件中 合わない %d 件（%.1f%%）\n", name, n, unfit, float64(unfit)/float64(n)*100)
+	}
 }
 
 // jobCoverage は、職種別の募集のデータが、公開企業のどれだけをカバーするか。

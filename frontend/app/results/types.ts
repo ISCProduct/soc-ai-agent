@@ -2,6 +2,9 @@
  * マッチング結果ページ向けの共有型。
  */
 
+/** 推薦への「合う／合わない」の判定 */
+export type MatchFeedbackVerdict = 'fit' | 'unfit'
+
 export interface CategoryScores {
   technical: number
   teamwork: number
@@ -32,6 +35,8 @@ export interface Company {
   fitNote?: string
   /** 本人が選んだ職種の募集がある企業（SOCAIAGENT-670）。適合度は加点してある */
   jobMatched?: boolean
+  /** 本人の「合う／合わない」（SOCAIAGENT-670）。未回答は無い */
+  feedback?: MatchFeedbackVerdict
   tags: string[]
   techStack: string[]
   categoryScores?: CategoryScores
