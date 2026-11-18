@@ -76,3 +76,28 @@ func TestIsBareContactLabel(t *testing.T) {
 		}
 	}
 }
+
+// 大文字入りの URL・全角の「＠」のアカウント名も伏字になること（レビューでの指摘）。合成データ。
+func TestMask_CaseAndFullWidthVariants(t *testing.T) {
+	m := mustMasker(t, Subject{})
+	for _, tt := range []struct{ in, leak string }{
+		{"Github.com/hanako-dev", "hanako-dev"}, {"HTTP://EXAMPLE.COM/me", "EXAMPLE.COM"}, {"＠hanako_dev", "hanako_dev"},
+	} {
+		if got := m.Mask(tt.in); strings.Contains(got, tt.leak) {
+			t.Errorf("%q が残った: %q", tt.in, got)
+		}
+	}
+}
+
+// 技術スキルや年月の普通の文を、アカウント名・生年月日と取り違えて壊さないこと（レビューでの指摘）。
+func TestMask_KeepsSkillAndDateProse(t *testing.T) {
+	m := mustMasker(t, Subject{})
+	for _, in := range []string{
+		"MAX: 100 人規模", "UI/UX: 3年の経験", "Mac OS X: 10.15", "HEADLINE: 2024",
+		"2024/4/1 生成AIを導入", "2024/4/1 生産管理を担当", "12/25/2023 に開催",
+	} {
+		if got := m.Mask(in); got != in {
+			t.Errorf("普通の文が変わった: %q → %q", in, got)
+		}
+	}
+}

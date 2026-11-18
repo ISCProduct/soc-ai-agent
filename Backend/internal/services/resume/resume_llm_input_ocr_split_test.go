@@ -66,3 +66,34 @@ func TestMaskBlocksForLLM_ContinuationKeepsRealRows(t *testing.T) {
 		}
 	}
 }
+
+// 帰省先の欄の続き・空のブロックを挟んだ値も残さないこと（レビューでの指摘）。合成データ。
+func TestMaskBlocksForLLM_ReviewedSplitCases(t *testing.T) {
+	svc := NewResumeService(&resumeRepoStub{}, t.TempDir(), nil)
+	svc.SetSubjectReader(subjectStub{subj: testSubject})
+	for _, tt := range []struct {
+		name  string
+		texts []string
+		leak  []string
+	}{
+		{"帰省先の住所が続く", []string{"帰省先 東京都港区", "六本木1-2-3", "ヒルズ棟 12階"}, []string{"六本木", "ヒルズ"}},
+		{"見出しの次が空のブロック", []string{"氏名", "", "ヤマダ"}, []string{"ヤマダ"}},
+		{"@で終わる行の次が空のブロック", []string{"連絡は taro@", "", "example.com まで"}, []string{"example.com"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			masked, err := svc.maskBlocksForLLM(1, ocrBlocks(tt.texts...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var all strings.Builder
+			for _, b := range masked.list() {
+				all.WriteString(b.Text + "\n")
+			}
+			for _, l := range tt.leak {
+				if strings.Contains(all.String(), l) {
+					t.Errorf("%q が残った: %q", l, all.String())
+				}
+			}
+		})
+	}
+}
