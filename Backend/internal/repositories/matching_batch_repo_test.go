@@ -115,7 +115,7 @@ func TestCreateOrUpdateBatch_SingleUpsert(t *testing.T) {
 	assignments := sql[idx:]
 
 	// スコア・理由・更新時刻は再計算で上書きされる（このIssueの目的）
-	for _, col := range []string{"match_score", "matched_axis_count", "match_reason", "updated_at"} {
+	for _, col := range []string{"match_score", "matched_axis_count", "fit_mismatch_axes", "job_matched", "match_reason", "updated_at"} {
 		if !strings.Contains(assignments, col) {
 			t.Errorf("%s が衝突時の更新対象に含まれていない: %s", col, assignments)
 		}
@@ -130,10 +130,10 @@ func TestCreateOrUpdateBatch_SingleUpsert(t *testing.T) {
 	}
 	// 10カテゴリのスコア列や job_position_id が upsertAssignments から抜け落ちても
 	// 上のアサートだけでは気づけないため、更新対象列の本数も固定する
-	// (job_position_id + match_score + 10カテゴリ + matched_axis_count
-	//  + match_reason + match_reason_prompt_version + updated_at = 16)。
-	if n := strings.Count(assignments, "=VALUES("); n != 16 {
-		t.Errorf("衝突時の更新対象列=%d want 16: %s", n, assignments)
+	// (job_position_id + match_score + 10カテゴリ + matched_axis_count + fit_mismatch_axes
+	//  + job_matched + match_reason + match_reason_prompt_version + updated_at = 18)。
+	if n := strings.Count(assignments, "=VALUES("); n != 18 {
+		t.Errorf("衝突時の更新対象列=%d want 18: %s", n, assignments)
 	}
 	// ユーザー操作の結果と作成時刻は再計算で消さない
 	for _, col := range []string{"is_viewed", "is_favorited", "is_applied", "created_at"} {
