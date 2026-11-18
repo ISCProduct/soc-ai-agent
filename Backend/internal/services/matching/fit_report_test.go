@@ -1,14 +1,24 @@
 package matching
 
-import "testing"
+import (
+	"testing"
+
+	"Backend/internal/models"
+)
 
 // 集計コマンド（cmd/profile-distribution）の数字の元。合成の小さな分布で、分布と効果の集計が正しいことを固定する。
 func TestBuildFitReport(t *testing.T) {
 	companies := saturatedCompanies(60, 3)
+	// 100 点ちょうどが 6 軸以上ある企業（実データに多い形）を 1 社足す
+	companies = append(companies, &models.CompanyWeightProfile{
+		TechnicalOrientation: 100, TeamworkOrientation: 100, StabilityOrientation: 100, GrowthOrientation: 100,
+		DetailOrientation: 100, CommunicationSkill: 100, LeadershipOrientation: 40, CreativityOrientation: 40,
+		WorkLifeBalance: 40, ChallengeSeeking: 40,
+	})
 	sessions := syntheticPersonas(8, 5)
 	r := BuildFitReport(companies, sessions, 10)
 
-	if r.Companies != 60 || r.Sessions != 8 {
+	if r.Companies != 61 || r.Sessions != 8 {
 		t.Fatalf("件数: %+v", r)
 	}
 	// 100 付近に張り付いた軸（技術・チームワーク・安定・成長・細部・コミュニケーション）は、ばらつきのある軸ではない
@@ -22,7 +32,7 @@ func TestBuildFitReport(t *testing.T) {
 			t.Errorf("%s は対象のはず: %+v", r.Axes[i].Name, r.Axes[i])
 		}
 	}
-	if r.CompaniesGE6At100 == 0 {
+	if r.CompaniesGE6At100 < 1 {
 		t.Errorf("100点が多い企業が数えられていない")
 	}
 	if r.TopOnRef > r.TopOffRef || r.AllRef < 0 || r.AllRef > 1 {
