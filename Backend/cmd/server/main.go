@@ -683,7 +683,7 @@ func main() {
 
 	startMaintenanceJobs(crawlService, userDeletionService, notificationService, pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, scoreValidationService)
 
-	startServer(e, cfg.ServerPort)
+	startServer(e, cfg.ServerPort, interviewService, queueServer)
 }
 
 func echoCompanyEntryRateLimit() echo.MiddlewareFunc {

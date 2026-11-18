@@ -5,22 +5,27 @@ import (
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/queue"
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
 	"Backend/internal/safego"
 	"Backend/internal/services/admin"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/company"
+	"Backend/internal/services/interview"
 	"Backend/internal/services/maintenance"
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/organization"
 	"Backend/migrations"
 	"context"
+	"errors"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	sentryecho "github.com/getsentry/sentry-go/echo"
@@ -204,16 +209,45 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 	}
 }
 
-// startServer は HTTP サーバーを起動する。戻るのは異常終了時のみ。
-func startServer(e *echo.Echo, port string) {
-	// サーバー起動
+// startServer は HTTP サーバーを起動し、SIGTERM / SIGINT で処理中の要求を待ってから止める。
+// デプロイのたびに in-flight のリクエストと、キューに入った面接レポートが切れていた（SOCAIAGENT-514）。
+func startServer(e *echo.Echo, port string, interviewService *interview.InterviewService, queueServer *queue.Server) {
 	slog.Info("Starting server", "port", port)
 	// ヘッダーの読み取りと keep-alive の放置に上限を置く。WriteTimeout は履歴書レビューの
 	// SSE を途中で切るので設定しない。予算判定はロックを持たないので、書き込みの遅い
 	// クライアントが他の利用者を止めることはない。
 	e.Server.ReadHeaderTimeout = 10 * time.Second
 	e.Server.IdleTimeout = 120 * time.Second
-	if err := e.Start(":" + port); err != nil {
-		log.Fatalf("Server failed: %v", err)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- e.Start(":" + port)
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("Server failed: %v", err)
+		}
+	case sig := <-sigCh:
+		slog.Info("shutdown signal received", "signal", sig.String())
+		// ECS の停止猶予（既定30秒）の内側で、受け付け済みの HTTP を先に終わらせる。
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := e.Shutdown(ctx); err != nil {
+			slog.Error("http shutdown", "error", err)
+		}
+		// HTTP が終わってからキューを閉じる。閉じた後の投入で panic しないように、
+		// 新しい要求を受け終わってからにする。
+		if interviewService != nil {
+			interviewService.StopWorker()
+		}
+		if queueServer != nil {
+			queueServer.Shutdown()
+		}
 	}
 }

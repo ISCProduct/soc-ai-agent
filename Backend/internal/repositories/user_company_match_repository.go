@@ -158,7 +158,8 @@ func (r *UserCompanyMatchRepository) MarkAsApplied(matchID uint) error {
 		Update("is_applied", true).Error
 }
 
-// GetMatchStatistics マッチング統計情報を取得
+// GetMatchStatistics マッチング統計情報を取得する。
+// 件数と平均は1回の SELECT にまとめ、失敗した集計を 0 として返さない（SOCAIAGENT-517）。
 func (r *UserCompanyMatchRepository) GetMatchStatistics(userID uint, sessionID string) (map[string]any, error) {
 	var result struct {
 		TotalMatches   int64
@@ -169,36 +170,22 @@ func (r *UserCompanyMatchRepository) GetMatchStatistics(userID uint, sessionID s
 	}
 
 	err := r.db.Model(&models.UserCompanyMatch{}).
+		Select(`COUNT(*) AS total_matches,
+			COALESCE(SUM(CASE WHEN is_viewed = 1 THEN 1 ELSE 0 END), 0) AS viewed_count,
+			COALESCE(SUM(CASE WHEN is_favorited = 1 THEN 1 ELSE 0 END), 0) AS favorited_count,
+			COALESCE(SUM(CASE WHEN is_applied = 1 THEN 1 ELSE 0 END), 0) AS applied_count,
+			COALESCE(AVG(match_score), 0) AS avg_match_score`).
 		Where("user_id = ? AND session_id = ?", userID, sessionID).
-		Count(&result.TotalMatches).Error
+		Scan(&result).Error
 	if err != nil {
 		return nil, err
 	}
 
-	r.db.Model(&models.UserCompanyMatch{}).
-		Where("user_id = ? AND session_id = ? AND is_viewed = ?", userID, sessionID, true).
-		Count(&result.ViewedCount)
-
-	r.db.Model(&models.UserCompanyMatch{}).
-		Where("user_id = ? AND session_id = ? AND is_favorited = ?", userID, sessionID, true).
-		Count(&result.FavoritedCount)
-
-	r.db.Model(&models.UserCompanyMatch{}).
-		Where("user_id = ? AND session_id = ? AND is_applied = ?", userID, sessionID, true).
-		Count(&result.AppliedCount)
-
-	r.db.Model(&models.UserCompanyMatch{}).
-		Select("AVG(match_score)").
-		Where("user_id = ? AND session_id = ?", userID, sessionID).
-		Scan(&result.AvgMatchScore)
-
-	stats := map[string]any{
+	return map[string]any{
 		"total_matches":   result.TotalMatches,
 		"viewed_count":    result.ViewedCount,
 		"favorited_count": result.FavoritedCount,
 		"applied_count":   result.AppliedCount,
 		"avg_match_score": result.AvgMatchScore,
-	}
-
-	return stats, nil
+	}, nil
 }

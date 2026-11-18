@@ -93,8 +93,23 @@ func (s *InterviewService) StartWorker() {
 	s.workerOnce.Do(func() {
 		// レポート生成ワーカー。panic で落ちるとレポートが二度と生成されない上に
 		// プロセスごと死ぬ(#1446)。
-		safego.Go(s.runWorker)
+		s.workerWG.Add(1)
+		safego.Go(func() {
+			defer s.workerWG.Done()
+			s.runWorker()
+		})
 	})
+}
+
+// StopWorker は残っているレポート生成を待ってから戻る。二度呼んでも安全。
+func (s *InterviewService) StopWorker() {
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() {
+		close(s.jobCh)
+	})
+	s.workerWG.Wait()
 }
 
 func (s *InterviewService) runWorker() {

@@ -300,3 +300,42 @@ func TestCreateOrUpdateBatch_OnlyWritesMatchRows(t *testing.T) {
 		t.Errorf("呼び出し元のマッチの主キーが書き換わった: %d", match.ID)
 	}
 }
+
+func TestGetMatchStatistics_OneQuery(t *testing.T) {
+	repo, mock, captured := newMatchRepoMock(t)
+
+	mock.ExpectQuery("SELECT").
+		WithArgs(uint(7), "s1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"total_matches", "viewed_count", "favorited_count", "applied_count", "avg_match_score",
+		}).AddRow(4, 3, 2, 1, 80.5))
+
+	got, err := repo.GetMatchStatistics(7, "s1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if len(*captured) != 1 {
+		t.Fatalf("クエリ数 = %d, want 1\n%#v", len(*captured), *captured)
+	}
+	sql := (*captured)[0]
+	for _, want := range []string{"COUNT(*)", "is_viewed", "is_favorited", "is_applied", "AVG(match_score)", "user_id", "session_id"} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("発行SQLに %q が無い:\n%s", want, sql)
+		}
+	}
+	if got["total_matches"] != int64(4) || got["viewed_count"] != int64(3) || got["avg_match_score"] != 80.5 {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestGetMatchStatistics_ReturnsQueryError(t *testing.T) {
+	repo, mock, _ := newMatchRepoMock(t)
+	mock.ExpectQuery("SELECT").WillReturnError(errors.New("db down"))
+
+	if _, err := repo.GetMatchStatistics(7, "s1"); err == nil {
+		t.Fatal("DBエラーを握りつぶしている")
+	}
+}

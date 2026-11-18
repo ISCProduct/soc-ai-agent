@@ -47,6 +47,8 @@ type InterviewService struct {
 	inFlightJobs         map[uint]struct{}
 	inFlightMu           sync.Mutex
 	workerOnce           sync.Once
+	stopOnce             sync.Once
+	workerWG             sync.WaitGroup
 	jobs                 shared.JobEnqueuer
 	ownsCompany          func(userID, companyID uint) (bool, error)
 	companyReadingCache  companyReadingCache
