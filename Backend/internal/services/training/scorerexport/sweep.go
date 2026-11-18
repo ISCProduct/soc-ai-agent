@@ -205,20 +205,19 @@ func (s *Sweeper) remove(ctx context.Context, drop func(subject string) bool) (S
 		files := byRun[runID]
 		sort.Strings(files)
 		runPrefix := runs + runID + "/"
-		if hasManifest[runID] {
-			fix, err := s.dropFromManifest(ctx, runPrefix, files, present[runID])
-			if err != nil {
-				// マニフェストを直せなかった回のファイルは消さない（載っているのに無いファイルを作らないため）。
-				errs = append(errs, fmt.Errorf("回 %s: %w", runID, err))
-				continue
-			}
-			if fix.updated {
-				res.UpdatedManifests++
-			}
-			res.RepairedEntries += fix.repaired
-			if fix.uncounted {
-				res.UncountedManifests++
-			}
+		// 一覧の時点でマニフェストが無かった回も読みに行く（一覧の後に書き出しが終わってマニフェストを書いていれば、ここで直す）。
+		fix, err := s.dropFromManifest(ctx, runPrefix, files, present[runID])
+		if err != nil {
+			// マニフェストを直せなかった回のファイルは消さない（載っているのに無いファイルを作らないため）。
+			errs = append(errs, fmt.Errorf("回 %s: %w", runID, err))
+			continue
+		}
+		if fix.updated {
+			res.UpdatedManifests++
+		}
+		res.RepairedEntries += fix.repaired
+		if fix.uncounted {
+			res.UncountedManifests++
 		}
 		for _, f := range files {
 			if err := s.objects.DeleteObject(ctx, runPrefix+f); err != nil {
@@ -244,7 +243,7 @@ func (s *Sweeper) dropFromManifest(ctx context.Context, runPrefix string, files 
 	var fix manifestFix
 	body, err := s.objects.GetObject(ctx, runPrefix+"manifest.json")
 	if errors.Is(err, ErrObjectNotFound) {
-		// 一覧の後に消えた（直すものが無い）。
+		// マニフェストの無い回（書き出しの途中・途中で落ちた回）は、直すものが無い。
 		return fix, nil
 	}
 	if err != nil {

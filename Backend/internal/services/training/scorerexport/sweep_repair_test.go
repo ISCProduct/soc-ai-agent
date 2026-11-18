@@ -63,6 +63,27 @@ func TestSweep_RepairsRunFinishedDuringSweep(t *testing.T) {
 	}
 }
 
+// TestSweep_ManifestWrittenAfterListingIsFixed は、一覧の時点ではマニフェストが無かった回（書き出しの途中）でも、
+// 消す前にマニフェストを読みに行き、一覧の後に書かれたマニフェストからも消すファイルを外すことを確かめる。
+func TestSweep_ManifestWrittenAfterListingIsFixed(t *testing.T) {
+	store, w := sweepFixture(t)
+	w.afterList = func(prefix string) {
+		if prefix == runsPrefix {
+			w.stored[runsPrefix+"runB/manifest.json"] = manifestBody(t, map[uint]int{2: 1}) // 書き出しが終わった
+		}
+	}
+	res, err := newTestSweeper(t, store, w).Sweep(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := readManifest(t, w, "runB"); len(b.Files) != 0 || b.StudentCount != 0 || b.SessionCount != 0 {
+		t.Errorf("runB のマニフェスト = %+v（消したファイルが載っている）", b)
+	}
+	if res.UpdatedManifests != 3 || res.RepairedEntries != 0 {
+		t.Errorf("結果 = %+v, want 3マニフェスト（runA・runB・runC）", res)
+	}
+}
+
 // TestSweep_KeepsFileWrittenAfterListing は、最初のキーの一覧の後に書かれた（一覧には無いが実在する）ファイルを、
 // 照合でマニフェストから外さないことを確かめる。無いものがあれば、その回を一覧し直して確かめる。
 func TestSweep_KeepsFileWrittenAfterListing(t *testing.T) {
