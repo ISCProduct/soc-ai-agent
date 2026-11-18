@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"database/sql/driver"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -36,10 +37,21 @@ func newTrainingExportTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 
 var outcomeStatuses = []string{"rejected", "offered", "accepted"}
 
+// 学習に使ってよい学生の条件（同意済み・未退会・学生ロール・非ゲスト）。学習データへ書き出すすべての問い合わせに付くこと。
+// どれか1つでも欠けると、同意していない・退会した・学生でない・ゲストの面接が書き出される。
+// 引数（true, "student", false）も固定し、条件の値の取り違えでも落ちるようにする。
+const consentIDs = `\(SELECT tu\.id FROM users AS tu WHERE tu\.allow_training_use = \? AND tu\.withdrawn_at IS NULL AND tu\.role = \? AND tu\.is_guest = \?\)`
+
+var consentArgs = []driver.Value{true, "student", false}
+
+func withConsent(args ...driver.Value) []driver.Value {
+	return append(append([]driver.Value{}, args...), consentArgs...)
+}
+
 func TestTrainingExportRepository_CountOutcomeApplications(t *testing.T) {
 	db, mock := newTrainingExportTestDB(t)
-	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `user_application_statuses` WHERE status IN \\(\\?,\\?,\\?\\)").
-		WithArgs("rejected", "offered", "accepted").
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `user_application_statuses` WHERE status IN \\(\\?,\\?,\\?\\) AND user_id IN " + consentIDs).
+		WithArgs(withConsent("rejected", "offered", "accepted")...).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(7))
 
 	n, err := NewTrainingExportRepository(db).CountOutcomeApplications(context.Background(), outcomeStatuses)
@@ -50,8 +62,8 @@ func TestTrainingExportRepository_CountOutcomeApplications(t *testing.T) {
 
 func TestTrainingExportRepository_CountSessionsByStatus(t *testing.T) {
 	db, mock := newTrainingExportTestDB(t)
-	mock.ExpectQuery("COUNT\\(DISTINCT s.id\\) AS n.*JOIN interview_sessions AS s ON s.user_id = a.user_id AND s.company_id = a.company_id.*WHERE a.status IN \\(\\?,\\?,\\?\\) GROUP BY .a.\\..status.").
-		WithArgs("rejected", "offered", "accepted").
+	mock.ExpectQuery("COUNT\\(DISTINCT s.id\\) AS n.*JOIN interview_sessions AS s ON s.user_id = a.user_id AND s.company_id = a.company_id.*WHERE a.status IN \\(\\?,\\?,\\?\\) AND a.user_id IN " + consentIDs + " GROUP BY .a.\\..status.").
+		WithArgs(withConsent("rejected", "offered", "accepted")...).
 		WillReturnRows(sqlmock.NewRows([]string{"status", "n"}).AddRow("offered", 2).AddRow("rejected", 3))
 
 	got, err := NewTrainingExportRepository(db).CountSessionsByStatus(context.Background(), outcomeStatuses)
@@ -63,8 +75,8 @@ func TestTrainingExportRepository_CountSessionsByStatus(t *testing.T) {
 func TestTrainingExportRepository_CountExportableSessions_OnlyUserUtterances(t *testing.T) {
 	db, mock := newTrainingExportTestDB(t)
 	// JOIN の u.role = ? に "user" が先、その後ろの WHERE に statuses が来る
-	mock.ExpectQuery("JOIN interview_utterances AS u ON u.session_id = s.id AND u.role = \\?.*WHERE a.status IN \\(\\?,\\?,\\?\\)").
-		WithArgs("user", "rejected", "offered", "accepted").
+	mock.ExpectQuery("JOIN interview_utterances AS u ON u.session_id = s.id AND u.role = \\?.*WHERE a.status IN \\(\\?,\\?,\\?\\) AND a.user_id IN " + consentIDs).
+		WithArgs(withConsent("user", "rejected", "offered", "accepted")...).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(4))
 
 	n, err := NewTrainingExportRepository(db).CountExportableSessions(context.Background(), outcomeStatuses)
@@ -75,8 +87,8 @@ func TestTrainingExportRepository_CountExportableSessions_OnlyUserUtterances(t *
 
 func TestTrainingExportRepository_CountUserUtterances_OnlyUserUtterances(t *testing.T) {
 	db, mock := newTrainingExportTestDB(t)
-	mock.ExpectQuery("WHERE a.status IN \\(\\?,\\?,\\?\\) AND u.role = \\?").
-		WithArgs("rejected", "offered", "accepted", "user").
+	mock.ExpectQuery("WHERE \\(a.status IN \\(\\?,\\?,\\?\\) AND u.role = \\?\\) AND a.user_id IN " + consentIDs).
+		WithArgs(withConsent("rejected", "offered", "accepted", "user")...).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(30))
 
 	n, err := NewTrainingExportRepository(db).CountUserUtterances(context.Background(), outcomeStatuses)
@@ -88,8 +100,8 @@ func TestTrainingExportRepository_CountUserUtterances_OnlyUserUtterances(t *test
 func TestTrainingExportRepository_ListOutcomeSessions(t *testing.T) {
 	t.Run("limit なしは全件、id 順", func(t *testing.T) {
 		db, mock := newTrainingExportTestDB(t)
-		mock.ExpectQuery("SELECT s.id AS session_id, a.status AS status FROM .*JOIN user_application_statuses AS a ON s.user_id = a.user_id AND s.company_id = a.company_id WHERE a.status IN \\(\\?,\\?,\\?\\) ORDER BY s.id$").
-			WithArgs("rejected", "offered", "accepted").
+		mock.ExpectQuery("SELECT s.id AS session_id, a.status AS status FROM .*JOIN user_application_statuses AS a ON s.user_id = a.user_id AND s.company_id = a.company_id WHERE a.status IN \\(\\?,\\?,\\?\\) AND a.user_id IN " + consentIDs + " ORDER BY s.id$").
+			WithArgs(withConsent("rejected", "offered", "accepted")...).
 			WillReturnRows(sqlmock.NewRows([]string{"session_id", "status"}).AddRow(1, "offered").AddRow(2, "rejected"))
 
 		got, err := NewTrainingExportRepository(db).ListOutcomeSessions(context.Background(), outcomeStatuses, 0)
@@ -99,8 +111,8 @@ func TestTrainingExportRepository_ListOutcomeSessions(t *testing.T) {
 	})
 	t.Run("limit つきは LIMIT を付ける", func(t *testing.T) {
 		db, mock := newTrainingExportTestDB(t)
-		mock.ExpectQuery("ORDER BY s.id LIMIT \\?").
-			WithArgs("rejected", "offered", "accepted", 5).
+		mock.ExpectQuery("AND a.user_id IN " + consentIDs + " ORDER BY s.id LIMIT \\?").
+			WithArgs(append(withConsent("rejected", "offered", "accepted"), 5)...).
 			WillReturnRows(sqlmock.NewRows([]string{"session_id", "status"}))
 
 		got, err := NewTrainingExportRepository(db).ListOutcomeSessions(context.Background(), outcomeStatuses, 5)
@@ -112,8 +124,8 @@ func TestTrainingExportRepository_ListOutcomeSessions(t *testing.T) {
 
 func TestTrainingExportRepository_ListUserUtterances_OnlyUserRole(t *testing.T) {
 	db, mock := newTrainingExportTestDB(t)
-	mock.ExpectQuery("SELECT session_id, text FROM `interview_utterances` WHERE session_id IN \\(\\?,\\?\\) AND role = \\? ORDER BY session_id, created_at, id").
-		WithArgs(uint(1), uint(2), "user").
+	mock.ExpectQuery("SELECT session_id, text FROM `interview_utterances` WHERE \\(session_id IN \\(\\?,\\?\\) AND role = \\?\\) AND session_id IN \\(SELECT s\\.id FROM interview_sessions AS s WHERE s\\.user_id IN " + consentIDs + "\\) ORDER BY session_id, created_at, id").
+		WithArgs(withConsent(uint(1), uint(2), "user")...).
 		WillReturnRows(sqlmock.NewRows([]string{"session_id", "text"}).AddRow(1, "志望動機は…").AddRow(2, "強みは…"))
 
 	got, err := NewTrainingExportRepository(db).ListUserUtterances(context.Background(), []uint{1, 2})

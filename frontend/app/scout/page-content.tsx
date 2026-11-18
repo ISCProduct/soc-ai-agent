@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { formatDateTime } from '@/lib/i18n/format'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
@@ -33,7 +34,7 @@ const PAGE_SIZE = 30
 function formatWhen(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString('ja-JP')
+  return formatDateTime(d)
 }
 
 export default function PageContent() {

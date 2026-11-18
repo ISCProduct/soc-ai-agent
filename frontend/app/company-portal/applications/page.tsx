@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { formatDate as formatLocaleDate } from '@/lib/i18n/format'
 import { useRouter } from 'next/navigation'
 import {
   Alert,
@@ -36,7 +37,7 @@ function formatDate(value?: string): string {
   if (!value) return '—'
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString('ja-JP')
+  return formatLocaleDate(d)
 }
 
 export default function CompanyPortalApplicationsPage() {

@@ -3,7 +3,10 @@
  */
 import type { CompanyCandidate } from '@/app/resume/types'
 import {
+  buildFindings,
+  countBySeverity,
   getSeverityConfig,
+  pageCountOf,
   isAnnotatedPdfResponse,
   mapDbCompanyResults,
   mapWebSearchResults,
@@ -215,5 +218,47 @@ describe('parseItemScores', () => {
       'readability',
     ])
     expect(RUBRIC_SCORE_MAX).toBe(5)
+  })
+})
+
+describe('buildFindings', () => {
+  const item = (id: number, page: number, severity: string, message = `指摘${id}`) => ({ id, page_number: page, severity, message })
+
+  it('ページ順に並べ、同じページではAI→ルールの順で通し番号を振る', () => {
+    const findings = buildFindings({
+      items: [item(1, 2, 'warning'), item(2, 1, 'critical')],
+      format_findings: [{ rule: 'r', severity: 'warning', start: 0, end: 1, message: 'ルール', fix: '直す', page_hint: 1 }],
+    })
+    expect(findings.map((f) => [f.no, f.page, f.source])).toEqual([
+      [1, 1, 'ai'],
+      [2, 1, 'rule'],
+      [3, 2, 'ai'],
+    ])
+  })
+
+  it('読み取りが不確かな行は書き換え案を空にし、書き換え案と同じ補足は繰り返さない', () => {
+    const [a, b] = buildFindings({
+      items: [
+        { ...item(1, 1, 'info'), rewrite: '直した文', rewrite_withheld: 'low_ocr_confidence', suggestion: '補足' },
+        { ...item(2, 1, 'info'), rewrite: '直した文', suggestion: '直した文' },
+      ],
+    })
+    expect(a.withheld).toBe(true)
+    expect(a.rewrite).toBe('')
+    expect(a.supplement).toBe('補足')
+    expect(b.supplement).toBe('')
+  })
+
+  it('知らない重要度は注意として扱い、ページ番号が無ければ1ページ目にする', () => {
+    const [f] = buildFindings({ items: [item(1, 0, 'mystery')] })
+    expect(f.severity).toBe('warning')
+    expect(f.page).toBe(1)
+  })
+
+  it('重要度ごとの件数とページ数を数える', () => {
+    const findings = buildFindings({ items: [item(1, 1, 'critical'), item(2, 3, 'info'), item(3, 3, 'info')] })
+    expect(countBySeverity(findings)).toEqual({ critical: 1, warning: 0, info: 2 })
+    expect(pageCountOf(findings)).toBe(3)
+    expect(pageCountOf([])).toBe(1)
   })
 })

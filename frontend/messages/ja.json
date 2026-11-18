@@ -17,7 +17,8 @@
       "schedule": "選考スケジュール",
       "applications": "選考管理",
       "scout": "スカウト",
-      "profile": "プロフィール設定"
+      "profile": "プロフィール設定",
+      "home": "ホーム"
     },
     "admin": "管理者機能",
     "bottom": {
@@ -35,6 +36,11 @@
       "open": "メニューを開く",
       "label": "画面の切り替え",
       "current": "表示中"
+    },
+    "groups": {
+      "analysis": "自己分析",
+      "prepare": "準備する",
+      "proceed": "就活を進める"
     }
   }
 }

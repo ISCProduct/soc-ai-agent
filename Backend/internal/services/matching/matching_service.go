@@ -30,6 +30,8 @@ type MatchingService struct {
 	assessmentScores AssessmentScoreReader
 	// キャリブレーション重み（#203）。未注入・未アクティブなら全軸 1.0。
 	calibration CalibrationWeightReader
+	// 本人が選んだ職種の希望（SOCAIAGENT-670）。未注入なら加点しない。
+	jobPref JobPreferenceReader
 }
 
 // AssessmentScoreReader は最新の標準適性検査のカテゴリ別スコアを返す。未受検なら nil。
@@ -113,6 +115,17 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 	}
 	log.Printf("[CalculateMatching] Loaded %d weight profiles\n", len(profiles))
 
+	profileList := make([]*models.CompanyWeightProfile, 0, len(profiles))
+	for _, p := range profiles {
+		if p != nil {
+			profileList = append(profileList, p)
+		}
+	}
+	informative := InformativeAxes(profileList)
+
+	// 本人が選んだ職種の募集がある企業（加点のみ。取得に失敗しても推薦は続ける）
+	hiring := s.companiesHiringSelectedJob(sessionID, companyIDs)
+
 	axisWeights := s.loadCalibrationAxisWeights()
 	if len(axisWeights) > 0 {
 		log.Printf("[CalculateMatching] applying calibration axis weights (%d categories)\n", len(axisWeights))
@@ -139,9 +152,15 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 			continue
 		}
 
-		match := s.calculateMatchScore(scoreMap, profile, axisWeights)
+		match := s.calculateMatchScoreFor(scoreMap, profile, axisWeights, &informative)
+		if hiring[company.ID] {
+			match.JobMatched = true
+			if jobBonusEnabled() {
+				match.MatchScore = applyJobBonus(match.MatchScore)
+			}
+		}
 		if merged {
-			before = append(before, s.calculateMatchScore(chatOnly, profile, axisWeights).MatchScore)
+			before = append(before, s.calculateMatchScoreFor(chatOnly, profile, axisWeights, &informative).MatchScore)
 			after = append(after, match.MatchScore)
 		}
 		match.UserID = userID
@@ -190,6 +209,26 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 
 	log.Printf("[CalculateMatching] Completed: %d matches created for user %d, session %s\n", matchCount, userID, sessionID)
 	return nil
+}
+
+// companiesHiringSelectedJob は、本人が選んだ職種の募集がある企業。職種を選んでいない・読めないときは空。
+func (s *MatchingService) companiesHiringSelectedJob(sessionID string, companyIDs []uint) map[uint]bool {
+	if s.jobPref == nil {
+		return nil
+	}
+	jobCategoryID, err := s.jobPref.SessionJobCategoryID(sessionID)
+	if err != nil || jobCategoryID == 0 {
+		if err != nil {
+			log.Printf("[CalculateMatching] job preference unavailable: %v\n", err)
+		}
+		return nil
+	}
+	hiring, err := s.jobPref.CompanyIDsHiringCategory(companyIDs, jobCategoryID)
+	if err != nil {
+		log.Printf("[CalculateMatching] job hiring lookup failed: %v\n", err)
+		return nil
+	}
+	return hiring
 }
 
 // applyAIReasonsToTopMatches はマッチ度上位N件だけ AI 理由で上書きする（#1061）。
@@ -286,6 +325,17 @@ func (s *MatchingService) calculateMatchScore(
 	companyProfile *models.CompanyWeightProfile,
 	axisWeights map[string]float64,
 ) *models.UserCompanyMatch {
+	return s.calculateMatchScoreFor(userScores, companyProfile, axisWeights, nil)
+}
+
+// calculateMatchScoreFor は calculateMatchScore に、ばらつきのある軸（InformativeAxes）を渡せる版。
+// nil のときは全軸を「ずれる軸」の対象にする。
+func (s *MatchingService) calculateMatchScoreFor(
+	userScores map[string]float64,
+	companyProfile *models.CompanyWeightProfile,
+	axisWeights map[string]float64,
+	informative *AxisFlags,
+) *models.UserCompanyMatch {
 	match := &models.UserCompanyMatch{}
 	evaluatedCount := 0
 	weightedTotal := 0.0
@@ -310,6 +360,14 @@ func (s *MatchingService) calculateMatchScore(
 		match.MatchScore = weightedTotal / weightSum
 	} else {
 		match.MatchScore = 0
+	}
+
+	// 大きくずれる軸がある企業は、その数だけ下げる（SOCAIAGENT-670。fit.go）。
+	// 企業間でばらつきのある軸だけを数える（全社で同じ値の軸は、企業を区別する根拠にならない）。
+	mismatch := MismatchAxes(axisMatchesOf(match), informative)
+	match.FitMismatchAxes = strings.Join(mismatch, ",")
+	if fitPenaltyEnabled() {
+		match.MatchScore = math.Max(0, match.MatchScore-FitPenalty(len(mismatch)))
 	}
 
 	return match

@@ -138,7 +138,7 @@ func TestBuildResumeText_低信頼行に印を付ける(t *testing.T) {
 		{PageNumber: 1, BlockIndex: 0, Text: "売上を伸ばしました", Confidence: &low},
 		{PageNumber: 1, BlockIndex: 1, Text: "チームをまとめました"},
 	}
-	text := buildResumeText(blocks, 1000)
+	text := buildResumeText(maskedForTest(t, blocks), 1000)
 	if !strings.Contains(text, "[P1B0] "+lowConfidenceMark+" 売上を伸ばしました") {
 		t.Fatalf("低信頼の印が無い: %q", text)
 	}
