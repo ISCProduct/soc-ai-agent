@@ -193,6 +193,7 @@ func checkAnnotationFont() {
 func main() {
 	// 構造化ログの初期化（LOG_LEVEL / LOG_FORMAT 環境変数で制御）
 	logger.Setup()
+	middleware.UseRequestIDLogger()
 
 	flushSentry, sentryOn := observability.InitSentry()
 	defer flushSentry()

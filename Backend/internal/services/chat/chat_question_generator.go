@@ -171,7 +171,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	// 職種名と業界名を取得
 	jobCategoryName := "指定なし"
 	if jobCategoryID != 0 {
-		if jc, err := s.jobCategoryRepo.FindByID(jobCategoryID); err == nil && jc != nil {
+		if jc, err := s.jobCategoryRepo.FindByID(ctx, jobCategoryID); err == nil && jc != nil {
 			jobCategoryName = jc.Name
 		}
 	}
@@ -284,7 +284,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	promptVersion := resolvedVersion
 	// フォールバック: AIが空を返した場合は簡易質問を使用する
 	if questionText == "" {
-		fallbackQuestion := s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
+		fallbackQuestion := s.selectFallbackQuestion(ctx, targetCategory, jobCategoryID, targetLevel, askedTexts)
 		if fallbackQuestion != "" {
 			questionText = fallbackQuestion
 		} else {
