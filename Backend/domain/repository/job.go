@@ -6,6 +6,7 @@ import "Backend/internal/models"
 type JobCategoryRepository interface {
 	FindAll() ([]models.JobCategory, error)
 	FindByID(id uint) (*models.JobCategory, error)
+	FindByIDs(ids []uint) ([]models.JobCategory, error)
 	FindByName(name string) ([]models.JobCategory, error)
 	GetTopCategories() ([]models.JobCategory, error)
 }
