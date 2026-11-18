@@ -31,6 +31,9 @@ var allowed = map[string]string{
 	// safego.Go にすると送信が飛び、受信側の <-companyContextCh が永久に
 	// ブロックして面接が止まる。
 	"internal/services/interview/interview_turn.go": "結果を返す goroutine（自前 recover 済み）",
+	// Listen の成否を errCh へ返す。safego.Go だと panic 時に送信が飛ばず、
+	// startServer の select が終わらない。
+	"cmd/server/server.go": "結果を返す goroutine（自前 recover 済み）",
 }
 
 func TestNoBareGoroutine(t *testing.T) {

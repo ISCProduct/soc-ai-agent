@@ -19,6 +19,7 @@ import (
 	"Backend/migrations"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -220,7 +221,14 @@ func startServer(e *echo.Echo, port string, interviewService *interview.Intervie
 	e.Server.IdleTimeout = 120 * time.Second
 
 	errCh := make(chan error, 1)
+	// 起動の成否を errCh へ返す。safego.Go だと panic を握り潰して、
+	// こちらの select がシグナルもエラーも受け取れず止まったままになる。
 	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				errCh <- fmt.Errorf("listen panicked: %v", rec)
+			}
+		}()
 		errCh <- e.Start(":" + port)
 	}()
 
