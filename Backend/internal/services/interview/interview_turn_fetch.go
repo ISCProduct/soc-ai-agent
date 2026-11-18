@@ -3,6 +3,7 @@ package interview
 import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/models"
+	"Backend/internal/openai"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
@@ -50,7 +51,9 @@ func (s *InterviewService) lookupCompanyReading(ctx context.Context, companyName
 	systemPrompt := "あなたは日本企業の名称に詳しいアシスタントです。確実に知っている場合のみ答え、不明なら空文字を返してください。"
 	// 企業名は企業行（自動収集・ゲスト投稿）由来。「」の中に置くので整える（#1970 のレビュー）
 	query := fmt.Sprintf("「%s」の正しい日本語読み（ふりがな）をカタカナで1行だけ答えてください。", shared.InlinePromptName(companyName))
-	ctxTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
+	// 送るのは企業名だけで、学生の文章は含まない。ガードをかけると、学生の氏名の一部を含む企業名が伏字になり、
+	// 全員で共有する読み仮名のキャッシュに誤った結果が残るため、外す。
+	ctxTimeout, cancel := context.WithTimeout(openai.WithoutInputGuard(ctx), 15*time.Second)
 	defer cancel()
 	ctxTimeout = usagectx.WithFeature(ctxTimeout, usagectx.FeatureInterviewTurn)
 	result, err := s.openaiClient.ResponsesWithTemperature(ctxTimeout, systemPrompt, query, 0.0, companyfetch.ExtractModel())

@@ -166,3 +166,16 @@ func TestInputGuard_ChatInterviewMasksHistoryButNotSystemPrompt(t *testing.T) {
 		t.Errorf("失敗なのに %d 件送られた", n)
 	}
 }
+
+// 学生の文章を含まない呼び出し用に、ガードを外せること。
+func TestWithoutInputGuard_RemovesGuard(t *testing.T) {
+	masking := InputGuard(func(string) (string, error) { return "[MASKED]", nil })
+	ctx := WithInputGuard(context.Background(), masking)
+
+	if got, _ := guardInput(ctx, "山田電機"); got != "[MASKED]" {
+		t.Fatalf("ガードが効いていない: %q", got)
+	}
+	if got, err := guardInput(WithoutInputGuard(ctx), "山田電機"); err != nil || got != "山田電機" {
+		t.Fatalf("ガードを外せていない: %q, %v", got, err)
+	}
+}

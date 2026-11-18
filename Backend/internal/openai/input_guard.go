@@ -24,6 +24,12 @@ func WithInputGuard(ctx context.Context, g InputGuard) context.Context {
 	return context.WithValue(ctx, inputGuardKey{}, g)
 }
 
+// WithoutInputGuard は、ctx に付いたガードを外す。学生の文章を含まない呼び出し（企業名だけを送る読み仮名の問い合わせなど）用。
+// 企業名を伏字にすると、学生の氏名の一部が企業名に含まれたときに結果が崩れ、共有のキャッシュにも残る。
+func WithoutInputGuard(ctx context.Context) context.Context {
+	return WithInputGuard(ctx, nil)
+}
+
 // guardInput は、コンテキストにガードがあれば text にかける。ガードが失敗したら送らない。
 func guardInput(ctx context.Context, text string) (string, error) {
 	g, _ := ctx.Value(inputGuardKey{}).(InputGuard)
