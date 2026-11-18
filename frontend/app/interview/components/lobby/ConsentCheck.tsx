@@ -37,7 +37,7 @@ export default function ConsentCheck({ checked, onChange }: ConsentCheckProps) {
               録画と会話の記録を、フィードバックのためだけに使うことに同意します
             </Typography>
             <Typography sx={{ fontSize: 12, color: UI.inkSoft, mt: 0.5 }}>
-              企業には渡りません。録画は終了後90日で自動削除されます。
+              企業には渡りません。録画は退会後約30日で削除されます。AI の学習への利用は別の設定で、同意した場合のみです。
             </Typography>
           </Box>
         }
@@ -52,7 +52,7 @@ export default function ConsentCheck({ checked, onChange }: ConsentCheckProps) {
       </Button>
       <Collapse in={open} id={DETAILS_ID}>
         <Typography component="ul" sx={{ pl: 7, m: 0, fontSize: 12, color: UI.inkSoft, lineHeight: 1.8 }}>
-          <li>音声・動画の録画（フィードバック生成のみに使用）</li>
+          <li>音声・動画の録画（フィードバック生成に使用）</li>
           <li>会話のテキスト（評価スコア算出に使用）</li>
           <li>
             詳細は<Link href="/privacy" target="_blank" style={{ color: UI.mark }}>プライバシーポリシー</Link>をご確認ください
