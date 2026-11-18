@@ -54,8 +54,8 @@ func newJudgmentService(valid []int, scores ...models.UserWeightScore) *ChatServ
 }
 
 func TestJudgmentFor(t *testing.T) {
-	spread := []models.UserWeightScore{sc("a", 80), sc("b", 30), sc("c", 55), sc("d", 60)}
-	flat := []models.UserWeightScore{sc("a", 50), sc("b", 51), sc("c", 50), sc("d", 52)}
+	spread := []models.UserWeightScore{sc("a", 80), sc("b", 30), sc("c", 55), sc("d", 60), sc("e", 45), sc("f", 70)}
+	flat := []models.UserWeightScore{sc("a", 50), sc("b", 51), sc("c", 50), sc("d", 52), sc("e", 50), sc("f", 51)}
 
 	t.Run("15問に満たなくても、傾向が出ていれば完了（職種1+興味2+適性3=6問）", func(t *testing.T) {
 		got := newJudgmentService([]int{4, 2, 3}, spread...).judgmentFor(1, "s")
@@ -72,6 +72,13 @@ func TestJudgmentFor(t *testing.T) {
 	t.Run("床（6問）に満たなければ、傾向が出ていても完了にしない", func(t *testing.T) {
 		got := newJudgmentService([]int{4, 2, 2}, spread...).judgmentFor(1, "s")
 		if got.Ready {
+			t.Fatalf("%+v", got)
+		}
+	})
+	t.Run("4軸しか評価できていなければ、傾向が出ていても完了にしない（推薦の暫定表示の下限は超えているが、6軸に満たない）", func(t *testing.T) {
+		four := spread[:4]
+		got := newJudgmentService([]int{4, 4, 4}, four...).judgmentFor(1, "s")
+		if got.Ready || got.Percent >= 100 {
 			t.Fatalf("%+v", got)
 		}
 	})

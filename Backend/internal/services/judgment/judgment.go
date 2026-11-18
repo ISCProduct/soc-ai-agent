@@ -13,10 +13,15 @@ package judgment
 const (
 	// FloorValidAnswers は、早まった完了を防ぐ床。有効な回答がこれ未満なら、ほかの条件を満たしても完了にしない。
 	FloorValidAnswers = 6
-	// MinEvaluatedCategories は、評価済みカテゴリ数の下限。推薦を暫定表示にする下限
-	// （matching.MinEvaluatedCategoriesForFinal）と同じ値。matching は chat を経由して
-	// このパッケージに循環するので import できない。一致は judgment_sync_test.go で守る。
-	MinEvaluatedCategories = 4
+	// MinEvaluatedCategories は、評価済みカテゴリ数の下限。
+	//
+	// 推薦を暫定表示にする下限（matching.MinEvaluatedCategoriesForFinal = 4）より大きくする。
+	// 実データで、使う軸の数ごとに、推薦の上位10件が全軸の場合とどれだけ重なるかを測った（SOCAIAGENT-670）。
+	// 4軸で42%、5軸で51%、6軸で62%。4軸で完了すると、全軸で出した推薦と6割近く違う。
+	// 6軸に上げると、重なりが約20ポイント上がる。質問は2〜3問増える。
+	// matching は chat を経由してこのパッケージに循環するので import できない。
+	// 完了の下限が暫定表示の下限を下回らないことは、judgment_sync_test.go で守る。
+	MinEvaluatedCategories = 6
 	// MinScoreSpread は、評価済みカテゴリの最高点と最低点の差の下限（0〜100 の目盛り）。
 	// 全部が同じような点だと、何に向いているかを言い切れない。
 	MinScoreSpread = 20
