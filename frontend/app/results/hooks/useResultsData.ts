@@ -271,36 +271,6 @@ export function useResultsData() {
     }
   }
 
-  const handleUnfavoriteCompany = async (e: MouseEvent, company: Company) => {
-    e.stopPropagation()
-    const companyID = Number(company.id)
-    if (!companyID || favoritingId !== null) return
-    // 読み込み中の一覧が、外した企業を戻さないように世代を進める。
-    favoriteRequest.current += 1
-    setFavoritesLoading(false)
-    setFavoritingId(company.matchId ?? companyID)
-    try {
-      const res = await fetch('/api/chat/favorites/remove', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
-        body: JSON.stringify({ company_id: companyID }),
-      })
-      if (!res.ok) {
-        setSnackbar({ open: true, message: 'お気に入りの更新に失敗しました', severity: 'error' })
-        return
-      }
-      setFavoriteCompanies((prev) => prev.filter((item) => item.id !== company.id))
-      setCompanies((prev) => prev.map((item) => (
-        item.id === company.id ? { ...item, isFavorited: false } : item
-      )))
-      setSnackbar({ open: true, message: 'すべての診断のお気に入りから外しました', severity: 'success' })
-    } catch {
-      setSnackbar({ open: true, message: 'お気に入りの更新に失敗しました', severity: 'error' })
-    } finally {
-      setFavoritingId(null)
-    }
-  }
-
   const handleBack = () => {
     router.push('/')
   }
@@ -348,6 +318,40 @@ export function useResultsData() {
     if (!mounted || !userId) return
     void loadFavorites()
   }, [mounted, userId, loadFavorites])
+
+  const handleUnfavoriteCompany = async (e: MouseEvent, company: Company) => {
+    e.stopPropagation()
+    const companyID = Number(company.id)
+    if (!companyID || favoritingId !== null) return
+    // 読み込み中の一覧が、外した企業を戻さないように世代を進める。
+    favoriteRequest.current += 1
+    setFavoritesLoading(false)
+    setFavoritingId(company.matchId ?? companyID)
+    try {
+      const res = await fetch('/api/chat/favorites/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
+        body: JSON.stringify({ company_id: companyID }),
+      })
+      if (!res.ok) {
+        setSnackbar({ open: true, message: 'お気に入りの更新に失敗しました', severity: 'error' })
+        return
+      }
+      favoriteCompanyIds.current.delete(company.id)
+      setFavoriteCompanies((prev) => prev.filter((item) => item.id !== company.id))
+      setCompanies((prev) => prev.map((item) => (
+        item.id === company.id ? { ...item, isFavorited: false } : item
+      )))
+      setSnackbar({ open: true, message: 'すべての診断のお気に入りから外しました', severity: 'success' })
+    } catch {
+      setSnackbar({ open: true, message: 'お気に入りの更新に失敗しました', severity: 'error' })
+    } finally {
+      setFavoritingId(null)
+      // 失敗したときは、無効にした取得のまま空一覧で止まらないように取り直す。
+      // 成功したときも、サーバーの結果を正にする。
+      void loadFavorites()
+    }
+  }
 
   const handleToggleFavorite = async (e: MouseEvent, company: Company) => {
     e.stopPropagation()

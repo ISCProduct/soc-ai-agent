@@ -69,12 +69,31 @@ describe('お気に入り画面', () => {
     fireEvent.click(screen.getByRole('button', { name: '北見工業' }))
     expect(push).toHaveBeenCalledWith('/company/7')
 
-    ;(global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+    const fetchMock = global.fetch as jest.Mock
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ recommendations: [] }) })
     fireEvent.click(screen.getByRole('button', { name: '北見工業をお気に入りから外す' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: '北見工業' })).not.toBeInTheDocument())
-    expect(global.fetch).toHaveBeenLastCalledWith('/api/chat/favorites/remove', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('/api/chat/favorites/remove', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ company_id: 7 }),
     }))
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/chat/favorites?limit=100', expect.anything())
+  })
+
+  it('解除に失敗しても一覧を取り直す', async () => {
+    mockFavorites({ recommendations: [company] })
+    render(<PageContent />)
+    expect(await screen.findByRole('button', { name: '北見工業' })).toBeInTheDocument()
+
+    const fetchMock = global.fetch as jest.Mock
+    fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({}) })
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ recommendations: [company] }) })
+    fireEvent.click(screen.getByRole('button', { name: '北見工業をお気に入りから外す' }))
+
+    expect(await screen.findByText('お気に入りの更新に失敗しました')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '北見工業' })).toBeInTheDocument()
+    expect(screen.queryByText('お気に入りにした企業はまだありません')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/chat/favorites?limit=100', expect.anything())
   })
 })

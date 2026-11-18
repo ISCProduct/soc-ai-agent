@@ -154,3 +154,117 @@ describe('useResultsData handleApply と応募の開閉', () => {
     expect(result.current.applyEnabled).toBe(false)
   })
 })
+
+describe('useResultsData お気に入りの解除', () => {
+  const event = { stopPropagation: jest.fn() } as unknown as Parameters<ReturnType<typeof useResultsData>['handleUnfavoriteCompany']>[0]
+  const favorite = {
+    id: 7,
+    match_id: 20,
+    category_name: '北見工業',
+    score: 80,
+    is_favorited: true,
+  }
+
+  beforeEach(() => {
+    params = new URLSearchParams({ user_id: '1', session_id: 's1' })
+  })
+
+  it('解除に成功したら、一覧を取り直す前でもハートを戻さない', async () => {
+    let favoritesCalls = 0
+    global.fetch = jest.fn((url: string) => {
+      if (String(url).startsWith('/api/chat/favorites?')) {
+        favoritesCalls += 1
+        if (favoritesCalls === 1) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ recommendations: [favorite] }),
+          })
+        }
+        return new Promise(() => {})
+      }
+      if (url === '/api/chat/favorites/remove') {
+        return Promise.resolve({ ok: true, json: async () => ({ ok: true }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    }) as unknown as typeof fetch
+
+    const { result, rerender } = renderHook(() => useResultsData())
+    await act(async () => {})
+    expect(result.current.favoriteCompanies.map((company) => company.id)).toEqual(['7'])
+
+    await act(async () => {
+      recommendationResolvers.s1({
+        ok: true,
+        json: async () => ({ recommendations: [{ ...favorite, is_favorited: false }] }),
+      })
+    })
+    expect(result.current.companies[0]?.isFavorited).toBe(true)
+
+    await act(async () => {
+      await result.current.handleUnfavoriteCompany(event, result.current.companies[0])
+    })
+
+    await act(async () => {
+      params = new URLSearchParams({ user_id: '1', session_id: 's2' })
+      rerender()
+    })
+    await act(async () => {
+      recommendationResolvers.s2({
+        ok: true,
+        json: async () => ({ recommendations: [{ ...favorite, match_id: 21, is_favorited: false }] }),
+      })
+    })
+    expect(result.current.companies[0]?.isFavorited).toBe(false)
+  })
+
+  it('初回の取得が終わる前に解除が失敗しても、一覧を取り直す', async () => {
+    let favoritesCalls = 0
+    let resolveFirst: (value: unknown) => void = () => {}
+    global.fetch = jest.fn((url: string) => {
+      if (String(url).startsWith('/api/chat/favorites?')) {
+        favoritesCalls += 1
+        if (favoritesCalls === 1) {
+          return new Promise((resolve) => {
+            resolveFirst = resolve
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ recommendations: [favorite] }),
+        })
+      }
+      if (url === '/api/chat/favorites/remove') {
+        return Promise.resolve({ ok: false, json: async () => ({}) })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    }) as unknown as typeof fetch
+
+    const { result } = renderHook(() => useResultsData())
+    await act(async () => {})
+    expect(result.current.favoriteCompanies).toEqual([])
+
+    const company = {
+      id: '7',
+      matchId: 20,
+      name: '北見工業',
+      industry: '',
+      location: '',
+      employees: '',
+      description: '',
+      matchScore: 80,
+      tags: [],
+      techStack: [],
+      isFavorited: true,
+    }
+    await act(async () => {
+      await result.current.handleUnfavoriteCompany(event, company)
+    })
+    expect(result.current.favoriteCompanies.map((item) => item.name)).toEqual(['北見工業'])
+    expect(result.current.snackbar.message).toBe('お気に入りの更新に失敗しました')
+
+    await act(async () => {
+      resolveFirst({ ok: true, json: async () => ({ recommendations: [] }) })
+    })
+    expect(result.current.favoriteCompanies.map((item) => item.name)).toEqual(['北見工業'])
+  })
+})

@@ -83,6 +83,8 @@ export default function PageContent() {
       setSnackbar({ open: true, message: 'お気に入りの更新に失敗しました', severity: 'error' })
     } finally {
       setFavoritingId(null)
+      // 解除の開始で進行中の取得を無効にしている。失敗したまま空の案内で止まらないよう、取り直す。
+      void loadFavorites()
     }
   }
 
