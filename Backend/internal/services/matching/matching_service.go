@@ -30,6 +30,8 @@ type MatchingService struct {
 	assessmentScores AssessmentScoreReader
 	// キャリブレーション重み（#203）。未注入・未アクティブなら全軸 1.0。
 	calibration CalibrationWeightReader
+	// 本人が選んだ職種の希望（SOCAIAGENT-670）。未注入なら加点しない。
+	jobPref JobPreferenceReader
 }
 
 // AssessmentScoreReader は最新の標準適性検査のカテゴリ別スコアを返す。未受検なら nil。
@@ -121,6 +123,9 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 	}
 	informative := InformativeAxes(profileList)
 
+	// 本人が選んだ職種の募集がある企業（加点のみ。取得に失敗しても推薦は続ける）
+	hiring := s.companiesHiringSelectedJob(sessionID, companyIDs)
+
 	axisWeights := s.loadCalibrationAxisWeights()
 	if len(axisWeights) > 0 {
 		log.Printf("[CalculateMatching] applying calibration axis weights (%d categories)\n", len(axisWeights))
@@ -148,6 +153,12 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 		}
 
 		match := s.calculateMatchScoreFor(scoreMap, profile, axisWeights, &informative)
+		if hiring[company.ID] {
+			match.JobMatched = true
+			if jobBonusEnabled() {
+				match.MatchScore = applyJobBonus(match.MatchScore)
+			}
+		}
 		if merged {
 			before = append(before, s.calculateMatchScoreFor(chatOnly, profile, axisWeights, &informative).MatchScore)
 			after = append(after, match.MatchScore)
@@ -198,6 +209,26 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 
 	log.Printf("[CalculateMatching] Completed: %d matches created for user %d, session %s\n", matchCount, userID, sessionID)
 	return nil
+}
+
+// companiesHiringSelectedJob は、本人が選んだ職種の募集がある企業。職種を選んでいない・読めないときは空。
+func (s *MatchingService) companiesHiringSelectedJob(sessionID string, companyIDs []uint) map[uint]bool {
+	if s.jobPref == nil {
+		return nil
+	}
+	jobCategoryID, err := s.jobPref.SessionJobCategoryID(sessionID)
+	if err != nil || jobCategoryID == 0 {
+		if err != nil {
+			log.Printf("[CalculateMatching] job preference unavailable: %v\n", err)
+		}
+		return nil
+	}
+	hiring, err := s.jobPref.CompanyIDsHiringCategory(companyIDs, jobCategoryID)
+	if err != nil {
+		log.Printf("[CalculateMatching] job hiring lookup failed: %v\n", err)
+		return nil
+	}
+	return hiring
 }
 
 // applyAIReasonsToTopMatches はマッチ度上位N件だけ AI 理由で上書きする（#1061）。

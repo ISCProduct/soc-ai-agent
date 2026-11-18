@@ -30,6 +30,8 @@ export interface Company {
   isReference?: boolean
   /** 参考の理由（例:「参考: 技術志向・安定志向で、…」）。参考でなければ無い */
   fitNote?: string
+  /** 本人が選んだ職種の募集がある企業（SOCAIAGENT-670）。適合度は加点してある */
+  jobMatched?: boolean
   tags: string[]
   techStack: string[]
   categoryScores?: CategoryScores

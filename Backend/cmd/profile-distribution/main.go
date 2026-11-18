@@ -23,6 +23,7 @@ import (
 	"gorm.io/gorm"
 
 	"Backend/internal/models"
+	"Backend/internal/repositories"
 	"Backend/internal/services/matching"
 )
 
@@ -47,6 +48,7 @@ func main() {
 	fmt.Printf("接続先: host=%s db=%s（読み取り専用）\n", host, os.Getenv("DB_NAME"))
 
 	var report matching.FitReport
+	var jobs jobCoverage
 	err = db.Connection(func(tx *gorm.DB) error {
 		if err := tx.Exec("SET SESSION TRANSACTION READ ONLY").Error; err != nil {
 			return fmt.Errorf("読み取り専用にできません: %w", err)
@@ -76,12 +78,77 @@ func main() {
 			sessions = append(sessions, s)
 		}
 		report = matching.BuildFitReport(profiles, sessions, topN)
+
+		// 職種の募集の量（選んだ職種の加点が効く範囲）
+		var companyIDs []uint
+		for _, p := range profiles {
+			companyIDs = append(companyIDs, p.CompanyID)
+		}
+		var err error
+		if jobs, err = loadJobCoverage(tx, companyIDs); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
 		log.Fatalf("集計に失敗しました: %v", err)
 	}
 	print(report)
+	printJobs(jobs)
+}
+
+// jobCoverage は、職種別の募集のデータが、公開企業のどれだけをカバーするか。
+type jobCoverage struct {
+	Companies, WithPositions int
+	// 選ばれた職種ごとに、その職種の募集がある公開企業の割合（職種名は出さず、割合だけ）
+	ChosenShares []float64
+}
+
+func loadJobCoverage(tx *gorm.DB, companyIDs []uint) (jobCoverage, error) {
+	c := jobCoverage{Companies: len(companyIDs)}
+	if len(companyIDs) == 0 {
+		return c, nil
+	}
+	var n int64
+	if err := tx.Raw(`SELECT COUNT(DISTINCT company_id) FROM company_job_positions
+		WHERE job_category_id > 0 AND company_id IN ?`, companyIDs).Scan(&n).Error; err != nil {
+		return c, err
+	}
+	c.WithPositions = int(n)
+
+	var chosen []uint
+	if err := tx.Raw(`SELECT DISTINCT COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(job_category_ids, '$[0]')) AS UNSIGNED), 0)
+		FROM conversation_contexts WHERE job_category_ids NOT IN ('', '[]')`).Scan(&chosen).Error; err != nil {
+		return c, err
+	}
+	repo := repositories.NewJobPreferenceRepository(tx)
+	for _, id := range chosen {
+		if id == 0 {
+			continue
+		}
+		hiring, err := repo.CompanyIDsHiringCategory(companyIDs, id)
+		if err != nil {
+			return c, err
+		}
+		c.ChosenShares = append(c.ChosenShares, float64(len(hiring))/float64(len(companyIDs)))
+	}
+	return c, nil
+}
+
+func printJobs(j jobCoverage) {
+	fmt.Printf("\n職種別の募集: 公開企業 %d 社のうち、募集データがある企業 %d 社\n", j.Companies, j.WithPositions)
+	if len(j.ChosenShares) == 0 {
+		fmt.Println("選ばれた職種ごとの、募集がある企業の割合: 選択データなし")
+		return
+	}
+	sum, max := 0.0, 0.0
+	for _, s := range j.ChosenShares {
+		sum += s
+		if s > max {
+			max = s
+		}
+	}
+	fmt.Printf("選ばれた職種（%d 種類）ごとの、募集がある企業の割合: 平均 %.1f%% / 最大 %.1f%%\n", len(j.ChosenShares), sum/float64(len(j.ChosenShares))*100, max*100)
 }
 
 func print(r matching.FitReport) {

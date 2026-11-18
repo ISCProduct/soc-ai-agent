@@ -176,6 +176,9 @@ type UserCompanyMatch struct {
 	// 企業間でばらつきのある軸だけで数える。空は「ずれる軸なし」。
 	FitMismatchAxes string `gorm:"size:120;not null;default:''" json:"-"`
 
+	// JobMatched は、本人が選んだ職種の募集がある企業か（SOCAIAGENT-670）。加点だけで、除外はしない。
+	JobMatched bool `gorm:"not null;default:false" json:"-"`
+
 	// マッチング理由・推薦文
 	MatchReason              string `gorm:"type:text"` // AIが生成したマッチング理由
 	MatchReasonPromptVersion string `gorm:"size:64;not null;default:''" json:"match_reason_prompt_version,omitempty"`

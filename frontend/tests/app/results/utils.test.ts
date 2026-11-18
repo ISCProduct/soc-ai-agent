@@ -22,6 +22,8 @@ describe('mapRecommendationToCompany', () => {
     )
     expect(ref.isReference).toBe(true)
     expect(ref.fitNote).toContain('参考: 技術志向')
+    const hiring = mapRecommendationToCompany({ id: 3, category_name: 'C社', score: 70, job_matched: true }, 2)
+    expect(hiring.jobMatched).toBe(true)
     const normal = mapRecommendationToCompany({ id: 2, category_name: 'B社', score: 80 }, 1)
     expect(normal.isReference).toBe(false)
     expect(normal.fitNote).toBeUndefined()
@@ -59,6 +61,7 @@ describe('mapRecommendationToCompany', () => {
       matchScore: 87,
       isReference: false,
       fitNote: undefined,
+      jobMatched: false,
       tags: ['成長'],
       techStack: ['Go'],
       categoryScores: expect.objectContaining({ technical: 80, teamwork: 0 }),

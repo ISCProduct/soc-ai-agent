@@ -44,6 +44,7 @@ export function mapRecommendationToCompany(
     matchedAxisCount: rec.matched_axis_count,
     isReference: rec.is_reference === true,
     fitNote: rec.fit_note || undefined,
+    jobMatched: rec.job_matched === true,
     tags: rec.tags || [],
     techStack: rec.tech_stack || [],
     categoryScores: normalizeCategoryScores(rec.category_scores),

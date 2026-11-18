@@ -47,6 +47,8 @@ type Recommendation struct {
 	// 適合度は下げてあり、画面は「参考」として理由（FitNote）を添える。
 	IsReference bool   `json:"is_reference"`
 	FitNote     string `json:"fit_note,omitempty"`
+	// JobMatched は、本人が選んだ職種の募集がある企業（適合度は加点してある）。
+	JobMatched bool `json:"job_matched"`
 }
 
 // RecommendationResponse は GET /api/chat/recommendations のレスポンス。
@@ -160,6 +162,7 @@ func BuildRecommendations(displayed []*models.UserCompanyMatch, reasonScores []m
 			MatchedAxisCount: match.MatchedAxisCount,
 			IsReference:      FitNote(match) != "",
 			FitNote:          FitNote(match),
+			JobMatched:       match.JobMatched,
 			CategoryScores: CategoryScores{
 				Technical:     match.TechnicalMatch,
 				Teamwork:      match.TeamworkMatch,
