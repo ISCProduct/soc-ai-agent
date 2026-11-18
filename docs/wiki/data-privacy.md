@@ -261,6 +261,16 @@ WHERE created_at < DATE_SUB(NOW(), INTERVAL 2 YEAR);
 
 ---
 
+## 学習データの書き出しの条件
+
+管理者向けの書き出し（`/api/admin/training/export`・`/stats`）は、次の条件に合う学生のデータだけを数え、書き出す。条件は `TrainingExportRepository.trainingConsentedUserIDs` に1か所だけ書き、すべての問い合わせが通る。
+
+- 学習利用に同意済み（`users.allow_training_use = 1`）
+- 未退会（`withdrawn_at IS NULL`。退会の猶予期間中は論理削除でフラグが 1 のまま残るため、フラグだけでは判定しない）
+- 学生ロール・非ゲスト
+
+発話の取り出しは、一覧を取ったあとに同意を取り消した人の発話を拾わないよう、セッション単位でも条件を付け直す。条件を変えたら、`training_export_repository_test.go` の期待 SQL も合わせる（外すとテストが落ちる）。
+
 ## 今後の対応事項（ToDo）
 
 - [ ] プライバシーポリシーへの「集合知分析への参加」条項の追加
