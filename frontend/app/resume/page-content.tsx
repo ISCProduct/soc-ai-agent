@@ -51,6 +51,7 @@ function ResumeContent() {
     reviewLoading,
     reviewError,
     reviewInterrupted,
+    reviewProgress,
     review,
     ragReport,
     handleReview,
@@ -140,7 +141,7 @@ function ResumeContent() {
 
         {phase === 'running' && (
           <ResumeRunningCard
-            hasReport={!!ragReport}
+            progress={reviewProgress}
             fileName={fileName}
             targetLabel={targetLabel}
             candidateLabel={candidateLabel}

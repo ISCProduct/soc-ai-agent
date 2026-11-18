@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { authService } from '@/lib/auth'
 import type { WeightScore } from '@/components/feedback/ScoreUpdateBanner'
-import type { CompanyCandidate, ReviewResult } from '../types'
+import type { CompanyCandidate, ReviewProgress, ReviewResult } from '../types'
 import {
   isAnnotatedPdfResponse,
   mapDbCompanyResults,
@@ -44,6 +44,7 @@ export function useResumePage() {
   const [uploadError, setUploadError] = useState('')
   const [reviewError, setReviewError] = useState('')
   const [reviewInterrupted, setReviewInterrupted] = useState(false)
+  const [reviewProgress, setReviewProgress] = useState<ReviewProgress | null>(null)
   // 応募先の決め方: 企業を選ぶ / 職種だけで見る
   const [targetMode, setTargetMode] = useState<'company' | 'job'>('company')
   // ファイル選択・URL入力のたびに増やし、読み込みを自動で始める合図にする
@@ -312,6 +313,7 @@ export function useResumePage() {
     setReview(null)
     setRagReport('')
     setScoresAfter(null)
+    setReviewProgress(null)
     setReviewLoading(true)
 
     if (userId && sessionId) {
@@ -377,6 +379,8 @@ export function useResumePage() {
             annotated_available?: boolean
             format_findings?: ReviewResult['format_findings']
             message?: string
+            stage?: number
+            percent?: number
           }
           try {
             data = JSON.parse(line.slice(6))
@@ -385,7 +389,11 @@ export function useResumePage() {
             continue
           }
 
-          if (data.type === 'chunk') {
+          if (data.type === 'progress') {
+            if (Number.isFinite(data.stage) && Number.isFinite(data.percent)) {
+              setReviewProgress({ stage: data.stage as number, percent: Math.min(100, Math.max(0, data.percent as number)) })
+            }
+          } else if (data.type === 'chunk') {
             setRagReport((prev) => prev + (data.text ?? ''))
           } else if (data.type === 'complete') {
             sawTerminal = true
@@ -493,6 +501,7 @@ export function useResumePage() {
     reviewLoading,
     reviewError,
     reviewInterrupted,
+    reviewProgress,
     targetMode,
     chooseTargetMode,
     selectFile,

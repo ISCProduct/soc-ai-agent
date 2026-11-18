@@ -18,6 +18,13 @@ export type ReviewItem = {
   rewrite_withheld?: string
 }
 
+/** レビュー中に Backend が送る進み具合。percent は処理の節目ごとの目安 */
+export type ReviewProgress = {
+  /** 0=書類を読み取る / 1=内容を確認する / 2=レポートを書く / 3=仕上げをする */
+  stage: number
+  percent: number
+}
+
 export type ReviewResult = {
   review: {
     id: number
