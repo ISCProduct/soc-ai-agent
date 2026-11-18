@@ -113,6 +113,14 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 	}
 	log.Printf("[CalculateMatching] Loaded %d weight profiles\n", len(profiles))
 
+	profileList := make([]*models.CompanyWeightProfile, 0, len(profiles))
+	for _, p := range profiles {
+		if p != nil {
+			profileList = append(profileList, p)
+		}
+	}
+	informative := InformativeAxes(profileList)
+
 	axisWeights := s.loadCalibrationAxisWeights()
 	if len(axisWeights) > 0 {
 		log.Printf("[CalculateMatching] applying calibration axis weights (%d categories)\n", len(axisWeights))
@@ -139,9 +147,9 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 			continue
 		}
 
-		match := s.calculateMatchScore(scoreMap, profile, axisWeights)
+		match := s.calculateMatchScoreFor(scoreMap, profile, axisWeights, &informative)
 		if merged {
-			before = append(before, s.calculateMatchScore(chatOnly, profile, axisWeights).MatchScore)
+			before = append(before, s.calculateMatchScoreFor(chatOnly, profile, axisWeights, &informative).MatchScore)
 			after = append(after, match.MatchScore)
 		}
 		match.UserID = userID
@@ -286,6 +294,17 @@ func (s *MatchingService) calculateMatchScore(
 	companyProfile *models.CompanyWeightProfile,
 	axisWeights map[string]float64,
 ) *models.UserCompanyMatch {
+	return s.calculateMatchScoreFor(userScores, companyProfile, axisWeights, nil)
+}
+
+// calculateMatchScoreFor は calculateMatchScore に、ばらつきのある軸（InformativeAxes）を渡せる版。
+// nil のときは全軸を「ずれる軸」の対象にする。
+func (s *MatchingService) calculateMatchScoreFor(
+	userScores map[string]float64,
+	companyProfile *models.CompanyWeightProfile,
+	axisWeights map[string]float64,
+	informative *AxisFlags,
+) *models.UserCompanyMatch {
 	match := &models.UserCompanyMatch{}
 	evaluatedCount := 0
 	weightedTotal := 0.0
@@ -313,8 +332,11 @@ func (s *MatchingService) calculateMatchScore(
 	}
 
 	// 大きくずれる軸がある企業は、その数だけ下げる（SOCAIAGENT-670。fit.go）。
+	// 企業間でばらつきのある軸だけを数える（全社で同じ値の軸は、企業を区別する根拠にならない）。
+	mismatch := MismatchAxes(axisMatchesOf(match), informative)
+	match.FitMismatchAxes = strings.Join(mismatch, ",")
 	if fitPenaltyEnabled() {
-		match.MatchScore = math.Max(0, match.MatchScore-FitPenalty(MismatchAxisCount(axisMatchesOf(match))))
+		match.MatchScore = math.Max(0, match.MatchScore-FitPenalty(len(mismatch)))
 	}
 
 	return match

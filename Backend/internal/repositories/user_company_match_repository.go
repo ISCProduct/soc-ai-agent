@@ -31,6 +31,7 @@ var upsertAssignments = clause.AssignmentColumns([]string{
 	"detail_match",
 	"communication_match",
 	"matched_axis_count",
+	"fit_mismatch_axes",
 	"match_reason",
 	// 理由と一緒に更新する。AI理由を作らない再計算では空になり、
 	// 存在しないAI理由を古い版が生成したことにならない。

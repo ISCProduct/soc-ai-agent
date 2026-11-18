@@ -172,6 +172,10 @@ type UserCompanyMatch struct {
 	// 同名のJSONフィールド（ユーザースコアの非ゼロ件数）と意味が違うため。
 	MatchedAxisCount int `gorm:"not null;default:0" json:"matched_axis_count"`
 
+	// FitMismatchAxes は、本人の傾向と企業の重視点が大きく離れた軸の名前（カンマ区切り。SOCAIAGENT-670）。
+	// 企業間でばらつきのある軸だけで数える。空は「ずれる軸なし」。
+	FitMismatchAxes string `gorm:"size:120;not null;default:''" json:"-"`
+
 	// マッチング理由・推薦文
 	MatchReason              string `gorm:"type:text"` // AIが生成したマッチング理由
 	MatchReasonPromptVersion string `gorm:"size:64;not null;default:''" json:"match_reason_prompt_version,omitempty"`
