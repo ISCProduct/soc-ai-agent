@@ -200,7 +200,7 @@ export default function ResultsListView({
           </Typography>
           <Typography sx={{ fontSize: 15, color: UI.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 1.5 }}>
             {favoritesOnly
-              ? '今までの診断でお気に入りにした企業です。同じ企業は1社にまとめています。適合度は、いちばん新しく更新した診断のものです。'
+              ? '今までの診断でお気に入りにした企業です。同じ企業は1社にまとめています。適合度は、いちばん新しい診断のものです。'
               : isProvisional
                 ? 'ここまでの回答で並べています。会話を続けると根拠が増え、順番も変わります。'
                 : '回答の傾向と、企業が重視する人物像を突き合わせた順に並べています。'}
@@ -399,7 +399,8 @@ export default function ResultsListView({
                         <IconButton
                           size="small"
                           onClick={(e) => onToggleFavorite(e, company)}
-                          aria-label="お気に入りの切り替え"
+                          aria-pressed={Boolean(company.isFavorited)}
+                          aria-label={company.isFavorited ? `${company.name}をお気に入りから外す` : `${company.name}をお気に入りに入れる`}
                           disabled={favoritingId === company.matchId}
                           sx={{ color: company.isFavorited ? UI.flag : UI.rule }}
                         >

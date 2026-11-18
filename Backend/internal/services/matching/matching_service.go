@@ -431,9 +431,10 @@ func (s *MatchingService) ListFavoriteCompanies(userID uint, limit int) ([]*mode
 }
 
 // UnfavoriteCompany はそのユーザーの、その企業のお気に入りを診断をまたいで外す。
+// 対象が無いときも成功にする。解除は何度呼んでも同じ結果になる。
 func (s *MatchingService) UnfavoriteCompany(userID uint, companyID uint) error {
 	if companyID == 0 {
-		return shared.ErrNotFound
+		return nil
 	}
 	return s.matchRepo.UnfavoriteCompany(userID, companyID)
 }

@@ -133,8 +133,10 @@ func DisplayableMatches(matches []*models.UserCompanyMatch) []*models.UserCompan
 }
 
 // DedupedFavorites はお気に入りを企業ごとに1行へまとめる。
-// 同じ企業は更新がいちばん新しい行を残す。並びは適合度の高い順で、同点は企業IDの昇順。
-// 課金などで順位を上げない。limit を超えた分は捨てる。
+// 同じ企業は診断がいちばん新しい行（マッチの created_at。同点はIDが大きい方）を残す。
+// updated_at は再計算や閲覧でも進むので、代表行の判定には使わない。
+// 並びは適合度の高い順で、同点は企業IDの昇順。課金などで順位を上げない。
+// 1社にまとめたあとに limit を超えた分を捨てる。
 func DedupedFavorites(matches []*models.UserCompanyMatch, limit int) []*models.UserCompanyMatch {
 	ordered := append([]*models.UserCompanyMatch(nil), matches...)
 	slices.SortStableFunc(ordered, func(a, b *models.UserCompanyMatch) int {
@@ -147,8 +149,8 @@ func DedupedFavorites(matches []*models.UserCompanyMatch, limit int) []*models.U
 			}
 			return -1
 		}
-		if !a.UpdatedAt.Equal(b.UpdatedAt) {
-			if a.UpdatedAt.After(b.UpdatedAt) {
+		if !a.CreatedAt.Equal(b.CreatedAt) {
+			if a.CreatedAt.After(b.CreatedAt) {
 				return -1
 			}
 			return 1

@@ -64,6 +64,8 @@ export default function PageContent() {
     e.stopPropagation()
     const companyID = Number(company.id)
     if (!companyID || favoritingId !== null) return
+    requestRef.current += 1
+    setLoading(false)
     setFavoritingId(company.matchId ?? companyID)
     try {
       const res = await fetch('/api/chat/favorites/remove', {
@@ -76,7 +78,7 @@ export default function PageContent() {
         return
       }
       setCompanies((prev) => prev.filter((item) => item.id !== company.id))
-      setSnackbar({ open: true, message: 'お気に入りを解除しました', severity: 'success' })
+      setSnackbar({ open: true, message: 'すべての診断のお気に入りから外しました', severity: 'success' })
     } catch {
       setSnackbar({ open: true, message: 'お気に入りの更新に失敗しました', severity: 'error' })
     } finally {
@@ -90,7 +92,7 @@ export default function PageContent() {
         お気に入り
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 3 }}>
-        今までの診断でお気に入りにした企業です。同じ企業は1社にまとめています。適合度は、いちばん新しく更新した診断のものです。
+        今までの診断でお気に入りにした企業です。同じ企業は1社にまとめています。適合度は、いちばん新しい診断のものです。
       </Typography>
 
       {loading ? (

@@ -274,6 +274,67 @@ func TestFindTopMatchesByUserAndSession_ExcludesCompaniesWithoutProfile(t *testi
 	}
 }
 
+func TestFindFavoritedByUser_PicksNewestSessionAndRequiresProfile(t *testing.T) {
+	repo, mock, captured := newMatchRepoMock(t)
+
+	mock.ExpectQuery("SELECT id FROM").
+		WithArgs(uint(7), true).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	if _, err := repo.FindFavoritedByUser(7); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(*captured) == 0 {
+		t.Fatal("SQLが記録されていない")
+	}
+	sql := (*captured)[0]
+	for _, want := range []string{
+		"ROW_NUMBER()",
+		"PARTITION BY company_id",
+		"ORDER BY created_at DESC, id DESC",
+		"user_id = ?",
+		"is_favorited = ?",
+		"company_weight_profiles",
+		"job_position_id IS NULL",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("発行SQLに %q が無い:\n%s", want, sql)
+		}
+	}
+	if strings.Contains(sql, "updated_at") {
+		t.Errorf("代表行を updated_at で選んでいる:\n%s", sql)
+	}
+	if strings.Contains(sql, "LIMIT") {
+		t.Errorf("1社にまとめる前に件数で切っている:\n%s", sql)
+	}
+}
+
+func TestUnfavoriteCompany_ScopesUserAndCompany(t *testing.T) {
+	repo, mock, captured := newMatchRepoMock(t)
+
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `user_company_matches`").
+		WithArgs(false, sqlmock.AnyArg(), uint(7), uint(3), true).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := repo.UnfavoriteCompany(7, 3); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if len(*captured) == 0 {
+		t.Fatal("SQLが記録されていない")
+	}
+	sql := (*captured)[0]
+	for _, want := range []string{"user_id", "company_id", "is_favorited"} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("発行SQLに %q が無い:\n%s", want, sql)
+		}
+	}
+}
+
 // TestCreateOrUpdateBatch_OnlyWritesMatchRows は、企業を持つマッチを保存しても
 // user_company_matches の行だけが書かれ、企業の行へは触れないことと、
 // 呼び出し元のマッチの主キーを書き換えないことを検証する。

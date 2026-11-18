@@ -121,16 +121,42 @@ func (r *UserCompanyMatchRepository) FindTopMatchesByUserAndSession(
 	return ms, nil
 }
 
-// favoriteScanCap はお気に入り集計で読む行の上限。
-// 同じ企業を診断ごとに持つので、1社にまとめる前の行数で頭打ちにする。
-const favoriteScanCap = 1000
-
-// FindFavoritedByUser はお気に入りのマッチを更新が新しい順に返す。
+// FindFavoritedByUser はお気に入りを企業ごとに1行へまとめて返す。
+//
+// 代表行は診断の新しさ（その診断のマッチが作られた created_at）で選ぶ。
+// updated_at は再計算・閲覧・応募・解除でも進むので、古い診断が新しい診断より
+// 新しく見える。先に1社へまとめてから件数を切る。更新が新しい順に1000行で
+// 切ると、適合度が上位の企業が窓の外に落ちる。
+// プロファイルの無い企業はここで外す。後段で落とすと件数を食ったまま画面に出ず、
+// 学生から外せなくなる。
 func (r *UserCompanyMatchRepository) FindFavoritedByUser(userID uint) ([]*models.UserCompanyMatch, error) {
+	var picked []struct {
+		ID uint
+	}
+	err := r.db.Raw(`
+SELECT id FROM (
+  SELECT id,
+         ROW_NUMBER() OVER (
+           PARTITION BY company_id
+           ORDER BY created_at DESC, id DESC
+         ) AS rn
+  FROM user_company_matches
+  WHERE user_id = ? AND is_favorited = ? AND `+CompanyHasWeightProfileSQL("company_id")+`
+) ranked
+WHERE rn = 1`, userID, true).Scan(&picked).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(picked) == 0 {
+		return []*models.UserCompanyMatch{}, nil
+	}
+	ids := make([]uint, len(picked))
+	for i, row := range picked {
+		ids[i] = row.ID
+	}
+
 	var ms []*models.UserCompanyMatch
-	err := r.db.Where("user_id = ? AND is_favorited = ?", userID, true).
-		Order("updated_at DESC, id DESC").
-		Limit(favoriteScanCap).
+	err = r.db.Where("id IN ?", ids).
 		Preload("Company").
 		Preload("JobPosition").
 		Find(&ms).Error

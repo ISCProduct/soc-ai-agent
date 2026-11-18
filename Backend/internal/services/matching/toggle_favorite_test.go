@@ -101,8 +101,8 @@ func TestUnfavoriteCompany_ClearsAcrossSessions(t *testing.T) {
 func TestListFavoriteCompanies_DedupesRepoRows(t *testing.T) {
 	older := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	repo := &stubToggleFavoriteMatchRepo{favorited: []*models.UserCompanyMatch{
-		{ID: 1, CompanyID: 10, MatchScore: 90, UpdatedAt: older, Company: models.Company{ID: 10}},
-		{ID: 2, CompanyID: 10, MatchScore: 50, UpdatedAt: older.Add(time.Hour), Company: models.Company{ID: 10}},
+		{ID: 1, CompanyID: 10, MatchScore: 90, CreatedAt: older, UpdatedAt: older.Add(2 * time.Hour), Company: models.Company{ID: 10}},
+		{ID: 2, CompanyID: 10, MatchScore: 50, CreatedAt: older.Add(time.Hour), UpdatedAt: older, Company: models.Company{ID: 10}},
 	}}
 	s := &MatchingService{matchRepo: repo}
 

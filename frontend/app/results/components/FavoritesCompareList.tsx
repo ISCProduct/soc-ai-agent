@@ -68,7 +68,18 @@ export default function FavoritesCompareList({
         },
         // 狭い画面では行を縦に積む。横スクロールの表は指で比較しにくい。
         '@media (max-width:599.95px)': {
-          '& thead': { display: 'none' },
+          // display:none だと見出しが読み上げから消える。見た目だけ隠し、名前は残す。
+          '& thead': {
+            position: 'absolute',
+            width: '1px',
+            height: '1px',
+            padding: 0,
+            margin: '-1px',
+            overflow: 'hidden',
+            clip: 'rect(0, 0, 0, 0)',
+            whiteSpace: 'nowrap',
+            border: 0,
+          },
           '& tr': {
             display: 'block',
             borderBottom: `1px solid ${UI.rule}`,

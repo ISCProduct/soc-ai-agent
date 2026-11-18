@@ -464,9 +464,6 @@ func (c *ChatController) RemoveFavoriteCompany(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "matching service not available")
 	}
 	if err := c.matchingService.UnfavoriteCompany(userID, req.CompanyID); err != nil {
-		if err == shared.ErrNotFound {
-			return echo.NewHTTPError(http.StatusNotFound, "company not found")
-		}
 		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]bool{"ok": true})
