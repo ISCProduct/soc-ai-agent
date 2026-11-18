@@ -6,6 +6,7 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/repositories"
 	"Backend/internal/services/chat"
+	"Backend/internal/services/piimask"
 	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
@@ -25,7 +26,12 @@ type QualityService struct {
 	chatRepo   repository.ChatMessageRepository
 	matchRepo  repository.UserCompanyMatchRepository
 	aiClient   *openai.Client
+	// subjects は、LLM へ送る直前の伏字に使う、学生の登録情報の読み取り。未設定なら規則だけで伏字にする。
+	subjects piimask.SubjectReader
 }
+
+// SetSubjectReader は、伏字に使う登録情報の読み取りを設定する。
+func (s *QualityService) SetSubjectReader(r piimask.SubjectReader) { s.subjects = r }
 
 func NewQualityService(
 	reportRepo *repositories.DiagnosisQualityRepository,
@@ -51,6 +57,8 @@ type qualityLLMResult struct {
 
 // RunDiagnosisQuality は会話・スコア・マッチからフラグを算出し保存する。
 func (s *QualityService) RunDiagnosisQuality(ctx context.Context, userID uint, sessionID string) error {
+	// 会話の抜粋を外部 AI へ送る前に、個人を特定できる語を伏字にする（作れなければ送らない）
+	ctx = openai.WithInputGuard(ctx, piimask.GuardFor(s.subjects, userID))
 	scores, err := s.scoreRepo.FindByUserAndSession(userID, sessionID)
 	if err != nil {
 		return fmt.Errorf("load scores: %w", err)

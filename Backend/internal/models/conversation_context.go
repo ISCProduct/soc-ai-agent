@@ -10,7 +10,10 @@ type ConversationContext struct {
 	JobCategoryIDs string `gorm:"type:json"`
 	AnswerHistory  string `gorm:"type:text"`
 	CurrentPhase   string `gorm:"size:50"`
-	TotalScore     int    `gorm:"default:0"`
+	// ConsultIntent はホームの「キャリア相談」で選んだ意図（空は未選択）。値は chat.ConsultIntent* を参照。
+	// 自由記述の本文は chat_messages にだけ残し、ここには複製しない。
+	ConsultIntent string `gorm:"size:30;not null;default:''"`
+	TotalScore    int    `gorm:"default:0"`
 	// LlmSummary はセッションに対する LLM 生成の診断サマリ（日本語の短い要約）を保存します。
 	LlmSummary string `gorm:"type:text" json:"llm_summary,omitempty"`
 	CreatedAt  time.Time
