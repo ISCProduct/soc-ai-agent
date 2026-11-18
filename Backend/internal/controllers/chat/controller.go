@@ -261,6 +261,10 @@ func (c *ChatController) Chat(ctx echo.Context) error {
 	if req.SessionID == "" || req.Message == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Missing required fields")
 	}
+	// 相談の意図（任意）。知らない値と、長すぎる自由記述は受け付けない
+	if err := chat.ValidateConsultIntent(req.ConsultIntent, req.Message); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 
 	// 既存セッションへの書き込みの場合、他ユーザーのセッションでないことを検証する（#946 IDOR対策）。
 	// さらに NEW セッションの同時開始時には session_id の所有権を原子的に確定させ、

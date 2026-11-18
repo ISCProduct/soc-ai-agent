@@ -163,7 +163,7 @@ Referer に user_id が残るだけです。
 | メソッド | パス | パラメータ | 概要 |
 |---------|------|-----------|------|
 | POST | `/api/chat/match-feedback` | body: match_id, verdict（fit / unfit / none） | 推薦への「合う／合わない」を記録（SOCAIAGENT-670） |
-| POST | `/api/chat` | body: session_id, message | 発言・スコア更新・次の質問 |
+| POST | `/api/chat` | body: session_id, message, consult_intent（任意） | 発言・スコア更新・次の質問。応答に `judgment_percent`（判定の進み具合）・`suggest_provisional` |
 | GET | `/api/chat/history` | ?session_id | 履歴 |
 | GET | `/api/chat/scores` | ?session_id | 10カテゴリスコア取得 |
 | GET | `/api/chat/recommendations` | ?session_id | マッチング企業一覧 |

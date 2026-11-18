@@ -2,6 +2,7 @@ package chat
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/judgment"
 	"context"
 	"fmt"
 	"log"
@@ -17,6 +18,8 @@ type processQuestionInput struct {
 	allPhases           []models.AnalysisPhase
 	completedProgresses []models.UserAnalysisProgress
 	phaseByID           map[uint]*models.AnalysisPhase
+	// extraRound は、全フェーズを終えても判定できず、最後のフェーズの枠で続けている質問。
+	extraRound bool
 }
 
 func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input processQuestionInput) (*ChatResponse, error) {
@@ -72,9 +75,10 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 
 	// フェーズの質問枠を、先頭の未評価軸が使い切らないように配る（SOCAIAGENT-473）。
 	phaseNameForPick := ""
-	if currentPhase != nil && currentPhase.Phase != nil {
+	if currentPhase != nil && currentPhase.Phase != nil && !input.extraRound {
 		phaseNameForPick = currentPhase.Phase.PhaseName
 	}
+	// 延長ラウンドは、フェーズで絞らず全軸から選ぶ（判定に足りない軸を埋めるため）。
 	targetCategory, _ := pickPhaseTarget(
 		allowedCategoriesForPhase(phaseNameForPick, allCategories),
 		scoreMap,
@@ -155,8 +159,10 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	answeredCount := countUserAnswers(history)
 	_ = allPhasesReachedMax(completedProgresses, allPhases)
 
-	// 完了判定: 全フェーズが完了していれば終了
-	isComplete := completedPhaseCount == len(allPhases)
+	// 完了判定: 質問数やフェーズの消化ではなく、判定できたかで決める（SOCAIAGENT-668）。
+	// 15 問に満たなくても、判定できていれば完了。15 問を超えても、判定できなければ続ける。
+	judged := s.judgmentFor(req.UserID, req.SessionID)
+	isComplete := judged.Ready
 
 	log.Printf("Diagnosis progress: %d phases completed out of %d, %d questions asked, %d/10 categories evaluated, complete: %v\n",
 		completedPhaseCount, len(allPhases), answeredCount, len(evaluatedCategories), isComplete)
@@ -247,6 +253,8 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		TotalCategories:     10,
 		Summary:             sessionSummary,
 		JobCategoryID:       jobCategoryID,
+		JudgmentPercent:     judged.Percent,
+		SuggestProvisional:  judgment.SuggestProvisional(answeredCount, judged.Ready),
 	}, nil
 }
 
