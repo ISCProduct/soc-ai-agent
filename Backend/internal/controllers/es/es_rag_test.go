@@ -12,6 +12,7 @@ import (
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/openai"
+	"Backend/internal/services/piimask"
 	"Backend/internal/usagectx"
 
 	"github.com/labstack/echo/v4"
@@ -268,5 +269,80 @@ func TestReview_WithoutUsageKeepsBody(t *testing.T) {
 	}
 	if len(usages) != 0 {
 		t.Errorf("usage が無いのに記録された: %+v", usages)
+	}
+}
+
+// ES の本文は、外の LLM（RAG 経由）へ送る前に伏字にする。データはすべて合成。
+func TestReview_MasksPIIBeforeSendingToRAG(t *testing.T) {
+	var ragReq map[string]any
+	srv := ragStub(t, http.StatusOK, ragOKBody, &ragReq)
+	defer srv.Close()
+	t.Setenv("RAG_REVIEW_URL", srv.URL)
+
+	ctx, rec := newCtx(http.MethodPost, "/api/es/review",
+		`{"es_text": "私の強みは粘り強さです。連絡は taro.yamada@example.com か 090-1234-5678 まで。"}`)
+	if err := NewESReviewController(&openai.Client{}).Review(ctx); err != nil {
+		t.Fatalf("Review が失敗: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	sent, _ := ragReq["es_text"].(string)
+	for _, pii := range []string{"taro.yamada", "example.com", "090-1234-5678"} {
+		if strings.Contains(sent, pii) {
+			t.Errorf("RAG へ送った本文に %q が残っている: %q", pii, sent)
+		}
+	}
+	if !strings.Contains(sent, "私の強みは粘り強さです") {
+		t.Errorf("添削に必要な本文が消えている: %q", sent)
+	}
+	if !strings.Contains(sent, "<EMAIL>") || !strings.Contains(sent, "<PHONE>") {
+		t.Errorf("伏字の記号が入っていない: %q", sent)
+	}
+}
+
+type subjectStub struct {
+	subj piimask.Subject
+	err  error
+}
+
+func (s subjectStub) SubjectFor(uint) (piimask.Subject, error) { return s.subj, s.err }
+
+// ログイン中の学生なら、登録した氏名・学校名も伏字にする。登録情報を読めなければ、送らずに断る。
+func TestReview_MasksSubjectAndFailsClosed(t *testing.T) {
+	t.Cleanup(func() { SetSubjectReader(nil) })
+	var ragReq map[string]any
+	srv := ragStub(t, http.StatusOK, ragOKBody, &ragReq)
+	defer srv.Close()
+	t.Setenv("RAG_REVIEW_URL", srv.URL)
+
+	withUser := func(body string) (echo.Context, *httptest.ResponseRecorder) {
+		ctx, rec := newCtx(http.MethodPost, "/api/es/review", body)
+		r := ctx.Request().WithContext(context.WithValue(ctx.Request().Context(), middleware.UserIDContextKey, uint(7)))
+		ctx.SetRequest(r)
+		return ctx, rec
+	}
+
+	SetSubjectReader(subjectStub{subj: piimask.Subject{Name: "山田 太郎", SchoolName: "架空情報専門学校"}})
+	ctx, _ := withUser(`{"es_text": "山田太郎です。架空情報専門学校でAPIを設計しました。"}`)
+	if err := NewESReviewController(&openai.Client{}).Review(ctx); err != nil {
+		t.Fatalf("Review が失敗: %v", err)
+	}
+	sent, _ := ragReq["es_text"].(string)
+	if strings.Contains(sent, "山田") || strings.Contains(sent, "架空情報専門学校") {
+		t.Errorf("登録した氏名・学校名が残っている: %q", sent)
+	}
+
+	// 読めなければ、RAG へは送らない
+	ragReq = nil
+	SetSubjectReader(subjectStub{err: errors.New("db down")})
+	ctx, _ = withUser(`{"es_text": "山田太郎です。"}`)
+	err := NewESReviewController(&openai.Client{}).Review(ctx)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("err = %v, want 503", err)
+	}
+	if ragReq != nil {
+		t.Errorf("伏字の準備ができないのに RAG へ送った: %v", ragReq)
 	}
 }

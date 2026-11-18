@@ -3,6 +3,7 @@ package interview
 import (
 	"Backend/internal/aifailover"
 	"Backend/internal/models"
+	"Backend/internal/services/piimask"
 	"Backend/internal/services/shared"
 	"context"
 	"log"
@@ -62,6 +63,7 @@ func (s *InterviewService) Turn(
 ) (*TurnResult, error) {
 	ctx, cancelBudget := s.withTurnBudget(ctx)
 	defer cancelBudget()
+	ctx = s.withPIIGuard(ctx, userID) // 学生の発話を外部 AI へ送る前に伏字にする
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -236,15 +238,14 @@ func (s *InterviewService) Turn(
 			systemPrompt = profileCtx + "\n" + systemPrompt
 		}
 	}
-	if nameCtx := buildStudentNameContext(s.fetchStudentName(userID)); nameCtx != "" {
-		systemPrompt = nameCtx + "\n" + systemPrompt
-	}
+	systemPrompt = studentNameInstruction + systemPrompt
 	// Chat失敗時も面接官としての言い換え応答にフォールバックし、ターンを中断させない（#910）
 	aiText, llmOutcome, err := s.chatInterview(ctx, systemPrompt, history)
 	if err != nil {
 		log.Printf("[Interview] chat error: %v", err)
 		aiText = interviewFallbackReplyText
 	}
+	aiText = piimask.StripTokens(aiText)
 
 	// TTS: AI返答を音声化（企業名は読み仮名に置換して誤読を防ぐ。表示用のaiTextはそのまま保持）。
 	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
@@ -316,6 +317,7 @@ func (s *InterviewService) StartTurn(
 ) (*TurnResult, error) {
 	ctx, cancelBudget := s.withTurnBudget(ctx)
 	defer cancelBudget()
+	ctx = s.withPIIGuard(ctx, userID) // 学生の発話を外部 AI へ送る前に伏字にする
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -383,9 +385,7 @@ func (s *InterviewService) StartTurn(
 			systemPromptStart = profileCtx + "\n" + systemPromptStart
 		}
 	}
-	if nameCtx := buildStudentNameContext(s.fetchStudentName(userID)); nameCtx != "" {
-		systemPromptStart = nameCtx + "\n" + systemPromptStart
-	}
+	systemPromptStart = studentNameInstruction + systemPromptStart
 	// Chat失敗時も面接開始を中断させず、定型の冒頭挨拶にフォールバックする（#910）
 	aiText, llmOutcome, err := s.chatInterview(ctx, systemPromptStart, []map[string]string{
 		{"role": "user", "content": "面接を開始してください。最初の自己紹介・志望動機の質問からお願いします。"},
@@ -394,6 +394,7 @@ func (s *InterviewService) StartTurn(
 		log.Printf("[Interview] chat error: %v", err)
 		aiText = "本日はよろしくお願いします。早速ですが、簡単に自己紹介をお願いできますか？"
 	}
+	aiText = piimask.StripTokens(aiText)
 
 	// TTS: 企業名は読み仮名に置換して誤読を防ぐ（表示用のaiTextはそのまま保持）。
 	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
