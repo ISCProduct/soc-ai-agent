@@ -37,7 +37,7 @@ export default function ConsentCheck({ checked, onChange }: ConsentCheckProps) {
               録画と会話の記録を、フィードバックのためだけに使うことに同意します
             </Typography>
             <Typography sx={{ fontSize: 12, color: UI.inkSoft, mt: 0.5 }}>
-              企業には渡りません。録画は退会後約30日で削除されます。AI の学習への利用は別の設定で、同意した場合のみです。
+              企業には渡りません。録画は有効な間は保管し、退会後約30日で削除します。AI の学習への利用は別の設定で、同意した場合のみです。
             </Typography>
           </Box>
         }
