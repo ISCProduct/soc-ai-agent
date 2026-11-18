@@ -2,15 +2,12 @@ import { Box, Typography } from '@mui/material'
 import { HOME_COLORS } from '@/lib/home-theme'
 
 interface ProgressStripProps {
-  /** 有効に答えた質問数 */
-  valid: number
-  /** 想定の質問数（既定は 15。API の total_questions に寄せる） */
-  required: number
+  /** 判定の進み具合（0〜100）。質問数は固定しないので、何問目かは出さない */
   percent: number
 }
 
-/** ホームの進捗の帯（Figma「改善G／相談中心」ノード 37:431）。「質問 N / M 問（P%）」と、答えるとできること。 */
-export function ProgressStrip({ valid, required, percent }: ProgressStripProps) {
+/** ホームの進捗の帯（Figma「改善G／相談中心」ノード 37:431）。「判定の進み具合 P%」と、答えるとできること。 */
+export function ProgressStrip({ percent }: ProgressStripProps) {
   return (
     <Box
       component="section"
@@ -29,7 +26,7 @@ export function ProgressStrip({ valid, required, percent }: ProgressStripProps) 
       }}
     >
       <Typography component="span" sx={{ fontWeight: 700, color: HOME_COLORS.ink }}>
-        {`質問 ${valid} / ${required} 問（${percent}%）`}
+        {`判定の進み具合 ${percent}%`}
       </Typography>
       <Typography component="span" sx={{ color: HOME_COLORS.soft }}>
         答えると、希望に近い企業が探せます。

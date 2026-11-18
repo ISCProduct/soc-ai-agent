@@ -42,11 +42,11 @@ describe('MuiChat の initialView（診断を始める前の表示の差し替�
     const handleSend = jest.fn()
     setChat({ handleSend, isLoading: true })
     render(<MuiChat initialView={initialView} />)
-    const ctx = (initialView.mock.calls[0] as unknown[])[0] as { onSend: (t: string) => void; isLoading: boolean; progress: unknown }
+    const ctx = (initialView.mock.calls[0] as unknown[])[0] as { onSend: (t: string, intent?: string) => void; isLoading: boolean; progress: unknown }
     expect(ctx.isLoading).toBe(true)
     expect(ctx.progress).toEqual({ valid: 2, required: 15, percent: 13 })
-    ctx.onSend('自分の強みを整理したい')
-    expect(handleSend).toHaveBeenCalledWith('自分の強みを整理したい')
+    ctx.onSend('自分の強みを整理したい', 'organize_strengths')
+    expect(handleSend).toHaveBeenCalledWith('自分の強みを整理したい', { consultIntent: 'organize_strengths' })
   })
 
   it('1通でも送ったあとは、従来のチャット表示に切り替わる', () => {

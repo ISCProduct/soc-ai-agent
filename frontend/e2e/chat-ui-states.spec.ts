@@ -53,7 +53,7 @@ test.describe('チャットの状態表示', () => {
     await expect(page.locator('.MuiSkeleton-root')).toHaveCount(0)
     const options = page.getByRole('group', { name: 'はじめに、いまの気持ちに近いものを選んでください。' })
     await expect(options.getByRole('button')).toHaveCount(4)
-    await expect(page.getByText('質問 0 / 15 問（0%）')).toBeVisible()
+    await expect(page.getByRole('region', { name: '診断の進み具合' }).getByText('判定の進み具合 0%')).toBeVisible()
   })
 
   test('履歴の取得に失敗したら空のままにせず、理由と再試行を出す', async ({ page }) => {

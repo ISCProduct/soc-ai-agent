@@ -9,11 +9,12 @@ import { ChatHeader } from './components/ChatHeader'
 import { ChatMessageList } from './components/ChatMessageList'
 import { ChatInputBar } from './components/ChatInputBar'
 import { ChatModals } from './components/ChatModals'
+import type { ConsultIntent } from '@/lib/career-consult'
 
 /** 診断を始める前（案内のメッセージだけ）の表示を差し替えるときに渡す値。 */
 export interface MuiChatInitialViewContext {
   /** 回答として送る。履歴・送信の状態は MuiChat（useMuiChat）が持つ。 */
-  onSend: (text: string) => void
+  onSend: (text: string, intent?: ConsultIntent) => void
   isLoading: boolean
   /** 診断の進捗（有効な回答数 / 想定の質問数 / 割合） */
   progress: { valid: number; required: number; percent: number }
@@ -67,8 +68,8 @@ export function MuiChat({ initialView }: MuiChatProps = {}) {
 
       {showInitialView ? (
         initialView({
-          onSend: (text) => {
-            void chat.handleSend(text)
+          onSend: (text, intent) => {
+            void chat.handleSend(text, intent ? { consultIntent: intent } : undefined)
           },
           isLoading: chat.isLoading,
           progress: chat.progressTotals,
@@ -79,6 +80,8 @@ export function MuiChat({ initialView }: MuiChatProps = {}) {
           progressTotals={chat.progressTotals}
           questionCount={chat.questionCount}
           totalQuestions={chat.totalQuestions}
+          suggestProvisional={chat.suggestProvisional && !chat.analysisComplete}
+          onViewProvisional={chat.handleViewResults}
           onEndChat={chat.handleEndChat}
         />
 

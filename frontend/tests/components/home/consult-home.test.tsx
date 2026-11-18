@@ -5,6 +5,14 @@ import { CONSULT_OPTIONS } from '@/lib/career-consult'
 
 const progress = { valid: 0, required: 15, percent: 0 }
 
+// 4つの選択肢と、送る意図（バックエンドの ConsultIntent* と同じ値）
+const INTENT_OF: Record<string, string> = {
+  やりたい仕事を一緒に考えたい: 'find_job',
+  志望する業界について知りたい: 'learn_industry',
+  就活の進め方がわからない: 'how_to_proceed',
+  自分の強みを整理したい: 'organize_strengths',
+}
+
 function setup(overrides: Partial<React.ComponentProps<typeof ConsultHome>> = {}) {
   const onSend = jest.fn()
   render(<ConsultHome displayName="山田 太郎" onSend={onSend} progress={progress} {...overrides} />)
@@ -21,7 +29,7 @@ describe('ConsultHome（診断を始める前のホーム）', () => {
       expect(screen.getByRole('button', { name: option })).toBeInTheDocument()
     }
     expect(screen.getByText('入力した内容にもとづいて、次の質問が変わります。')).toBeInTheDocument()
-    expect(screen.getByText('質問 0 / 15 問（0%）')).toBeInTheDocument()
+    expect(screen.getByText('判定の進み具合 0%')).toBeInTheDocument()
     expect(screen.getByText('答えると、希望に近い企業が探せます。')).toBeInTheDocument()
   })
 
@@ -31,11 +39,20 @@ describe('ConsultHome（診断を始める前のホーム）', () => {
     expect(group.querySelectorAll('button')).toHaveLength(4)
   })
 
-  it('選択肢を押すと、その文言を回答として送る', () => {
+  it('選択肢を押すと、その文言を回答として、相談の意図とあわせて送る', () => {
     const { onSend } = setup()
     fireEvent.click(screen.getByRole('button', { name: '就活の進め方がわからない' }))
     expect(onSend).toHaveBeenCalledTimes(1)
-    expect(onSend).toHaveBeenCalledWith('就活の進め方がわからない')
+    expect(onSend).toHaveBeenCalledWith('就活の進め方がわからない', 'how_to_proceed')
+  })
+
+  it('4つの選択肢は、それぞれ別の意図を送る', () => {
+    for (const option of CONSULT_OPTIONS) {
+      const { onSend } = setup()
+      fireEvent.click(screen.getAllByRole('button', { name: option }).at(-1) as HTMLElement)
+      expect(onSend).toHaveBeenCalledWith(option, INTENT_OF[option])
+      document.body.innerHTML = ''
+    }
   })
 
   it('自由入力は、入力した文章（前後の空白を除く）を送り、入力欄を空にする', () => {
@@ -43,7 +60,7 @@ describe('ConsultHome（診断を始める前のホーム）', () => {
     const input = screen.getByRole('textbox', { name: /自分の言葉で入力する/ })
     fireEvent.change(input, { target: { value: '  情報系の仕事に就きたい  ' } })
     fireEvent.click(screen.getByRole('button', { name: '送る' }))
-    expect(onSend).toHaveBeenCalledWith('情報系の仕事に就きたい')
+    expect(onSend).toHaveBeenCalledWith('情報系の仕事に就きたい', 'free')
     expect(input).toHaveValue('')
   })
 
@@ -70,6 +87,6 @@ describe('ConsultHome（診断を始める前のホーム）', () => {
 
   it('進捗帯は、渡された進捗を出す', () => {
     setup({ progress: { valid: 6, required: 15, percent: 40 } })
-    expect(screen.getByText('質問 6 / 15 問（40%）')).toBeInTheDocument()
+    expect(screen.getByText('判定の進み具合 40%')).toBeInTheDocument()
   })
 })

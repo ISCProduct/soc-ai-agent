@@ -3,13 +3,14 @@
 import { Box, Typography } from '@mui/material'
 import { HOME_COLORS, HOME_LAYOUT } from '@/lib/home-theme'
 import { greetingFor } from '@/lib/home-greeting'
+import type { ConsultIntent } from '@/lib/career-consult'
 import { CareerConsultCard } from './CareerConsultCard'
 import { ProgressStrip } from './ProgressStrip'
 
 interface ConsultHomeProps {
   /** ログイン中の学生の名前（挨拶は姓だけを使う）。 */
   displayName: string
-  onSend: (text: string) => void
+  onSend: (text: string, intent: ConsultIntent) => void
   disabled?: boolean
   progress: { valid: number; required: number; percent: number }
 }
@@ -44,7 +45,7 @@ export function ConsultHome({ displayName, onSend, disabled = false, progress }:
           </Typography>
         </Box>
         <CareerConsultCard onSend={onSend} disabled={disabled} />
-        <ProgressStrip valid={progress.valid} required={progress.required} percent={progress.percent} />
+        <ProgressStrip percent={progress.percent} />
       </Box>
     </Box>
   )

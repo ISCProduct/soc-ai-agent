@@ -81,16 +81,27 @@ describe('HomeSidebar（ホームの左サイドバー）', () => {
     expect(current.map((l) => l.textContent)).toEqual(['面接履歴'])
   })
 
-  it('自己分析の進捗は、初期は 0 / 15 問（0%）で、チャットの進捗イベントで更新される', () => {
+  it('自己分析の進捗は、初期は 判定の進み具合 0% で、チャットの進捗イベントで更新される', () => {
     render(<HomeSidebar user={user} onLogout={jest.fn()} />)
-    expect(within(nav()).getByText('0 / 15 問（0%）')).toBeInTheDocument()
+    expect(within(nav()).getByText('判定の進み具合 0%')).toBeInTheDocument()
     expect(within(nav()).getByRole('progressbar', { name: '自己分析の進み具合' })).toHaveAttribute('aria-valuenow', '0')
 
     act(() => {
       window.dispatchEvent(new CustomEvent('chatProgress', { detail: { messageCount: 7, questionCount: 6, totalQuestions: 15 } }))
     })
-    expect(within(nav()).getByText('6 / 15 問（40%）')).toBeInTheDocument()
+    expect(within(nav()).getByText('判定の進み具合 40%')).toBeInTheDocument()
     expect(within(nav()).getByRole('progressbar', { name: '自己分析の進み具合' })).toHaveAttribute('aria-valuenow', '40')
+  })
+
+  it('サーバーが判定の進み具合を返したら、質問数から出した割合より優先する', () => {
+    render(<HomeSidebar user={user} onLogout={jest.fn()} />)
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('chatProgress', { detail: { messageCount: 7, questionCount: 6, totalQuestions: 15, judgmentPercent: 72 } }),
+      )
+    })
+    expect(within(nav()).getByText('判定の進み具合 72%')).toBeInTheDocument()
+    expect(within(nav()).getByRole('progressbar', { name: '自己分析の進み具合' })).toHaveAttribute('aria-valuenow', '72')
   })
 
   it('ログアウトを押すと onLogout を呼ぶ', () => {

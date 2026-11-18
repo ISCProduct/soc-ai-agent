@@ -6,6 +6,8 @@ import { HOME_COLORS } from '@/lib/home-theme'
 import {
   CONSULT_FREE_INPUT_LABEL,
   CONSULT_FREE_INPUT_OPTIONAL,
+  CONSULT_INTENT_BY_OPTION,
+  type ConsultIntent,
   CONSULT_LABEL,
   CONSULT_NOTE,
   CONSULT_OPTIONS,
@@ -13,8 +15,8 @@ import {
 } from '@/lib/career-consult'
 
 interface CareerConsultCardProps {
-  /** 選んだ選択肢の文言、または入力した文章を回答として送る。 */
-  onSend: (text: string) => void
+  /** 選んだ選択肢の文言、または入力した文章を、相談の意図とあわせて回答として送る。 */
+  onSend: (text: string, intent: ConsultIntent) => void
   /** 送信中など。選択肢と送信を無効にする。 */
   disabled?: boolean
 }
@@ -33,7 +35,7 @@ export function CareerConsultCard({ onSend, disabled = false }: CareerConsultCar
   const submit = (e: FormEvent) => {
     e.preventDefault()
     if (!canSubmit) return
-    onSend(text.trim())
+    onSend(text.trim(), 'free')
     setText('')
   }
 
@@ -68,7 +70,7 @@ export function CareerConsultCard({ onSend, disabled = false }: CareerConsultCar
           <ButtonBase
             key={option}
             disabled={disabled}
-            onClick={() => onSend(option)}
+            onClick={() => onSend(option, CONSULT_INTENT_BY_OPTION[option])}
             sx={{
               width: '100%',
               minHeight: 56,

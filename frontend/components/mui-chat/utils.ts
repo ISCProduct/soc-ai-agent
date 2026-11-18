@@ -108,6 +108,20 @@ export function computeProgressTotals(args: {
   phases: { questions_asked?: number; valid_answers?: number; min_questions?: number; max_questions?: number }[] | null
   questionCount: number
   totalQuestions: number
+  /** サーバーが返す「判定の進み具合」（0〜100）。あれば、質問数ではなくこれを割合にする（SOCAIAGENT-668） */
+  judgmentPercent?: number | null
+}): { valid: number; required: number; percent: number } {
+  const totals = computeQuestionTotals(args)
+  if (typeof args.judgmentPercent === 'number') {
+    return { ...totals, percent: Math.min(100, Math.max(0, Math.round(args.judgmentPercent))) }
+  }
+  return totals
+}
+
+function computeQuestionTotals(args: {
+  phases: { questions_asked?: number; valid_answers?: number; min_questions?: number; max_questions?: number }[] | null
+  questionCount: number
+  totalQuestions: number
 }): { valid: number; required: number; percent: number } {
   const totalFallback = Math.max(1, args.totalQuestions || 15)
   if (args.phases && args.phases.length > 0) {

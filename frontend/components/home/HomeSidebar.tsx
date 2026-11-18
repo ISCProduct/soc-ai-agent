@@ -91,6 +91,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
   const t = useTranslations('nav')
   const [questionCount, setQuestionCount] = useState(0)
   const [totalQuestions, setTotalQuestions] = useState(15)
+  const [judgmentPercent, setJudgmentPercent] = useState<number | null>(null)
   const [phases, setPhases] = useState<PhaseProgress[] | null>(null)
   const [isAdmin, setIsAdmin] = useState(!!user.is_admin)
 
@@ -127,13 +128,14 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
     const handleChatProgress = (event: CustomEvent) => {
       setQuestionCount(event.detail.questionCount || 0)
       setTotalQuestions(event.detail.totalQuestions || 15)
+      setJudgmentPercent(typeof event.detail.judgmentPercent === 'number' ? event.detail.judgmentPercent : null)
       if (event.detail.phases) setPhases(event.detail.phases as PhaseProgress[])
     }
     window.addEventListener('chatProgress', handleChatProgress as EventListener)
     return () => window.removeEventListener('chatProgress', handleChatProgress as EventListener)
   }, [user])
 
-  const progress = computeProgressTotals({ phases, questionCount, totalQuestions })
+  const progress = computeProgressTotals({ phases, questionCount, totalQuestions, judgmentPercent })
 
   const navItem = (
     href: string,
@@ -223,7 +225,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
             {t('groups.analysis')}
           </Typography>
           <Typography component="span" sx={{ fontSize: 16, color: HOME_COLORS.soft }}>
-            {`${progress.valid} / ${progress.required} 問（${progress.percent}%）`}
+            {`判定の進み具合 ${progress.percent}%`}
           </Typography>
         </Box>
         <Box sx={{ px: 1.5, py: 0.5 }}>

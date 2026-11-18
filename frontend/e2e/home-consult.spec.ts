@@ -40,7 +40,7 @@ test.describe('ホーム（相談中心・広い画面）', () => {
     await expect(options.getByRole('button')).toHaveCount(4)
     await expect(page.getByRole('textbox', { name: /自分の言葉で入力する/ })).toBeVisible()
     await expect(page.getByText('入力した内容にもとづいて、次の質問が変わります。')).toBeVisible()
-    await expect(page.getByText('質問 0 / 15 問（0%）')).toBeVisible()
+    await expect(page.getByRole('region', { name: '診断の進み具合' }).getByText('判定の進み具合 0%')).toBeVisible()
 
     // 右パネルの3つの欄
     const panel = rightPanel(page)
@@ -63,9 +63,14 @@ test.describe('ホーム（相談中心・広い画面）', () => {
   test('選択肢を押すと、その文言が回答として送られ、チャット表示に切り替わる', async ({ page }) => {
     await mockHome(page)
     const posted: string[] = []
+    const intents: Array<string | undefined> = []
     await page.route('**/api/chat', async (route) => {
-      posted.push(JSON.parse(route.request().postData() ?? '{}').message ?? '')
-      await route.fulfill(json({ response: 'ありがとうございます。次の質問です。', answered_questions: 1, total_questions: 15 }))
+      const body = JSON.parse(route.request().postData() ?? '{}')
+      posted.push(body.message ?? '')
+      intents.push(body.consult_intent)
+      await route.fulfill(
+        json({ response: 'ありがとうございます。次の質問です。', answered_questions: 1, total_questions: 15, judgment_percent: 18 }),
+      )
     })
 
     await page.goto('/')
@@ -73,14 +78,17 @@ test.describe('ホーム（相談中心・広い画面）', () => {
     await page.getByRole('button', { name: OPTION }).click()
 
     await expect.poll(() => posted, { timeout: 10000 }).toEqual([OPTION])
+    // 文言とあわせて、相談の意図（バックエンドへ保存される）も送る
+    expect(intents).toEqual(['how_to_proceed'])
     // 診断が始まったので、チャット表示（自分の回答とAIの返答）になる。右パネルは残る
     const log = page.getByRole('log', { name: '自己分析チャットのやり取り' })
     await expect(log).toContainText(OPTION)
     await expect(log).toContainText('次の質問です')
     await expect(heading(page)).toHaveCount(0)
     await expect(rightPanel(page)).toBeVisible()
-    // サイドバーの進捗も進む
-    await expect(page.getByText('1 / 15 問（7%）').first()).toBeVisible()
+    // 判定の進み具合は、サーバーが返した値（18%）になる。サイドバーとチャットの上部の両方
+    await expect(page.getByText('判定の進み具合 18%').first()).toBeVisible()
+    await expect(page.getByRole('progressbar', { name: '自己分析の進み具合' }).first()).toHaveAttribute('aria-valuenow', '18')
   })
 
   test('自由入力は、入力した文章を送り、空のときは送れない', async ({ page }) => {
