@@ -67,12 +67,19 @@ func maskBlocksWith(m *piimask.Masker, blocks []models.ResumeTextBlock) llmBlock
 	// OCR は行ごとにブロックを分けるので、1つの値が複数のブロックにまたがることがある。
 	//   - 見出しだけの行（「氏名」）の次のブロックは値。辞書にない書き方（ふりがな・ローマ字）も残さず除く。
 	//   - 住所・電話・メールの欄の行の次に、番地・建物名・電話やメールの続きが来たら、それも除く（最大2ブロック）。
+	//     見出しだけの行（「住所」）は、値のブロックに加えて、続きも最大2ブロック除く（合計で最大3ブロック）。
 	//   - 「…@」で終わるブロックの次の先頭は、メールのドメインの続き。
 	afterBareLabel := false
 	continuations := 0
 	prevEndsWithAt := false
 	for _, b := range blocks {
 		text := strings.TrimSpace(b.Text)
+		if text == "" {
+			// 空のブロックは、見出しや続きの状態を変えない（OCR が空白だけのブロックを挟んでも、値を残さない）
+			b.Text = ""
+			out = append(out, b)
+			continue
+		}
 		if piimask.IsContactFieldLine(text) {
 			afterBareLabel = piimask.IsBareContactLabel(text)
 			continuations = 0
