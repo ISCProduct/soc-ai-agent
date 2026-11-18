@@ -27,6 +27,7 @@ chromadb>=0.6.3,<0.7.0
 
 # --- 数値計算 ---
 # numpy 2.0 以降で chromadb および一部パッケージとの互換性問題が報告されているため上限を維持。
+# training/scorer（#2170）が直接使うため requirements.txt にも宣言した（上限はここと同じ）。
 numpy<3.0
 
 # --- LLM プロキシ ---

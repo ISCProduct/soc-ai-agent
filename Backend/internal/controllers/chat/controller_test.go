@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"Backend/internal/services/matching"
 	"Backend/internal/services/shared"
 
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -694,5 +696,105 @@ func TestChatController_GetRecommendations_LimitCap(t *testing.T) {
 			testsupport.AssertStatus(t, newChatController(chatSvc, matchSvc, nil, nil, nil).GetRecommendations, testsupport.NewCtx(req, rec), http.StatusOK)
 			matchSvc.AssertExpectations(t)
 		})
+	}
+}
+
+// --- 推薦への「合う／合わない」（SOCAIAGENT-670） ---
+
+type fakeMatchFeedback struct {
+	err       error
+	submitted []string
+	verdicts  map[uint]string
+}
+
+func (f *fakeMatchFeedback) Submit(userID, matchID uint, verdict string) error {
+	f.submitted = append(f.submitted, fmt.Sprintf("%d/%d/%s", userID, matchID, verdict))
+	return f.err
+}
+func (f *fakeMatchFeedback) Verdicts(uint, []uint) map[uint]string { return f.verdicts }
+
+func postFeedback(t *testing.T, c *chatcontrollers.ChatController, body string, userID uint) int {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/match-feedback", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	if userID != 0 {
+		req = testsupport.WithUserID(req, userID)
+	}
+	rec := httptest.NewRecorder()
+	// ハンドラは、失敗を echo.HTTPError で返す（レコーダーにはステータスが入らない）
+	if err := c.SubmitMatchFeedback(testsupport.NewCtx(req, rec)); err != nil {
+		var he *echo.HTTPError
+		if errors.As(err, &he) {
+			return he.Code
+		}
+		return http.StatusInternalServerError
+	}
+	return rec.Code
+}
+
+func TestChatController_SubmitMatchFeedback(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   string
+		user   uint
+		err    error
+		want   int
+		nilFB  bool
+		called bool
+	}{
+		{"成功", `{"match_id":5,"verdict":"fit"}`, 7, nil, http.StatusOK, false, true},
+		{"取り消し", `{"match_id":5,"verdict":"none"}`, 7, nil, http.StatusOK, false, true},
+		{"未認証", `{"match_id":5,"verdict":"fit"}`, 0, nil, http.StatusUnauthorized, false, false},
+		{"match_id が無い", `{"verdict":"fit"}`, 7, nil, http.StatusBadRequest, false, false},
+		{"verdict が無い", `{"match_id":5}`, 7, nil, http.StatusBadRequest, false, false},
+		{"知らない判定", `{"match_id":5,"verdict":"x"}`, 7, matching.ErrInvalidFeedbackVerdict, http.StatusBadRequest, false, true},
+		{"他人の推薦", `{"match_id":5,"verdict":"fit"}`, 7, shared.ErrForbidden, http.StatusForbidden, false, true},
+		{"推薦が無い", `{"match_id":5,"verdict":"fit"}`, 7, shared.ErrNotFound, http.StatusNotFound, false, true},
+		{"保存に失敗", `{"match_id":5,"verdict":"fit"}`, 7, errors.New("db"), http.StatusInternalServerError, false, true},
+		{"未注入", `{"match_id":5,"verdict":"fit"}`, 7, nil, http.StatusServiceUnavailable, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newChatController(&mocks.ChatServiceMock{}, &mocks.MatchingServiceMock{}, nil, nil, nil)
+			fb := &fakeMatchFeedback{err: tt.err}
+			if !tt.nilFB {
+				c.SetMatchFeedback(fb)
+			}
+			if code := postFeedback(t, c, tt.body, tt.user); code != tt.want {
+				t.Fatalf("status=%d, want %d", code, tt.want)
+			}
+			if (len(fb.submitted) > 0) != tt.called {
+				t.Fatalf("Submit の呼び出し: %v", fb.submitted)
+			}
+		})
+	}
+}
+
+// 推薦に、本人の「合う／合わない」が付く（SOCAIAGENT-670）。読めない判定は空のまま。
+func TestChatController_GetRecommendations_AttachesFeedback(t *testing.T) {
+	matchSvc := &mocks.MatchingServiceMock{}
+	chatSvc := &mocks.ChatServiceMock{}
+	matches := []*models.UserCompanyMatch{
+		{ID: 11, UserID: 1, Company: models.Company{ID: 1, Name: "A社"}},
+		{ID: 12, UserID: 1, Company: models.Company{ID: 2, Name: "B社"}},
+	}
+	matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 10).Return(matches, nil)
+	matchSvc.On("ReasonScores", uint(1), mock.Anything).Return([]models.UserWeightScore{})
+	chatSvc.On("GetUserScores", uint(1), "s1").Return([]models.UserWeightScore{}, nil)
+
+	c := newChatController(chatSvc, matchSvc, nil, nil, nil)
+	c.SetMatchFeedback(&fakeMatchFeedback{verdicts: map[uint]string{11: "unfit"}})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1", nil)
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, c.GetRecommendations, testsupport.NewCtx(req, rec), http.StatusOK)
+
+	var resp matching.RecommendationResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Recommendations) != 2 || resp.Recommendations[0].Feedback != "unfit" || resp.Recommendations[1].Feedback != "" {
+		t.Fatalf("判定が付くのは回答した推薦だけ: %+v", resp.Recommendations)
 	}
 }

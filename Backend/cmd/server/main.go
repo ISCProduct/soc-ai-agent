@@ -399,6 +399,8 @@ func main() {
 	authController := authcontrollers.NewAuthController(authService, cfg.UserSecret)
 	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService)
 	chatController := chatcontrollers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
+	// 推薦への「合う／合わない」（SOCAIAGENT-670）
+	chatController.SetMatchFeedback(matching.NewMatchFeedbackService(repositories.NewUserMatchFeedbackRepository(db)))
 	chatController.SetAIBudget(aiBudgetService)
 	if jobEnqueuer != nil {
 		chatController.SetJobEnqueuer(jobEnqueuer)
@@ -605,6 +607,8 @@ func main() {
 	// 適性検査 第1段（#1678）。結果は source=assessment で user_weight_scores へ入り、マッチングへ合流する
 	assessmentRepo := repositories.NewAssessmentRepository(db)
 	matchingService.SetAssessmentScoreReader(assessmentRepo)
+	// 本人が選んだ職種の募集がある企業を加点する（SOCAIAGENT-670。加点のみ・除外なし）
+	matchingService.SetJobPreferenceReader(repositories.NewJobPreferenceRepository(db))
 	assessmentService := assessmentsvc.NewService(assessmentRepo, matchingService, userWeightScoreRepo)
 	routes.SetupAssessmentRoutes(api, assessmentcontrollers.NewController(assessmentService), cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 適性検査 第2段（#1675）。学校独自テンプレートはマッチングに合流させない

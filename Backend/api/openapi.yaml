@@ -1152,6 +1152,33 @@ paths:
         "400": { description: match_id が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/chat/match-feedback:
+    post:
+      tags: [chat]
+      summary: 推薦への「合う／合わない」を記録する
+      description: |
+        対象は `match_id`（`UserCompanyMatch` のID）。本人の推薦だけに付けられる。
+        `verdict` は `fit`（合う）/ `unfit`（合わない）/ `none`（取り消し）。自由記述は受け付けない。
+        精度の評価に使うため、押した時点の適合度・ずれる軸・職種の加点を写しで保存する。
+        `GET /api/chat/recommendations` の各推薦に、本人の判定が `feedback` として付く。
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [match_id, verdict]
+              properties:
+                match_id: { type: integer }
+                verdict: { type: string, enum: [fit, unfit, none] }
+      responses:
+        "200": { description: 記録した }
+        "400": { description: match_id・verdict が無い、または verdict が知らない値 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: 他人の推薦 }
+        "404": { description: 推薦が無い }
+
   # ── questions ──────────────────────────────────────
   /api/questions/generate:
     post:
