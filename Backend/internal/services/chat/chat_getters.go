@@ -2,6 +2,7 @@ package chat
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/openai"
 	"Backend/internal/usagectx"
 	"context"
 	"errors"
@@ -64,6 +65,10 @@ func (s *ChatService) aiCallWithRetries(ctx context.Context, prompt string) (str
 		}
 		if err == nil {
 			err = errors.New("empty response")
+		}
+		// 伏字を準備できなかったときは、何度やっても同じ結果なので再試行しない（外部へは何も送っていない）
+		if errors.Is(err, openai.ErrInputGuardFailed) {
+			return "", err
 		}
 		// log and wait before retry
 		log.Printf("Warning: AI call failed or empty response (attempt %d): %v\n", i+1, err)

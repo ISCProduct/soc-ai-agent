@@ -131,6 +131,9 @@ type SessionSummary struct {
 
 // ProcessChat チャット処理のメインロジック
 func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	// 学生の回答を外部 AI へ送る前に、個人を特定できる語を伏字にする（下流の全呼び出しに効く）
+	ctx = s.withPIIGuard(ctx, req.UserID)
+
 	// セッション開始の特殊処理
 	if req.Message == "START_SESSION" {
 		return s.handleSessionStart(ctx, req)

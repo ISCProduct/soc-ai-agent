@@ -54,6 +54,10 @@ export type StudentSurface = {
   ruleSoft: string
   mark: string
   flag: string
+  /** 色面。Figma（履歴書レビュー改善案）の mark-tint / flag-tint / ok-tint。文字色ではなく背景にだけ使う。 */
+  markTint: string
+  flagTint: string
+  okTint: string
   /** 面接の暗い画面（ロビー・面接中・レポート）の地・面・文字。 */
   nightBg: string
   nightStage: string
@@ -76,6 +80,9 @@ export const STUDENT_SURFACES: Record<StudentThemeMode, StudentSurface> = {
     ruleSoft: '#e2e8f0',
     mark: COMFORTABLE.primary,
     flag: '#B44A00',
+    markTint: '#e6f1f8',
+    flagTint: '#fbefe6',
+    okTint: '#e3f4ee',
     nightBg: '#221610',
     // Stitchデザイン案のダークテーマ(Material 3の surface-dim/background相当)に合わせた(#2D化)
     nightStage: '#0f131d',
@@ -95,6 +102,9 @@ export const STUDENT_SURFACES: Record<StudentThemeMode, StudentSurface> = {
     ruleSoft: '#4d4d4d',
     mark: HIGH_CONTRAST.primary,
     flag: HIGH_CONTRAST.error,
+    markTint: '#f0f0f0',
+    flagTint: '#f0f0f0',
+    okTint: '#f0f0f0',
     nightBg: '#000000',
     nightStage: '#000000',
     nightPanel: '#000000',

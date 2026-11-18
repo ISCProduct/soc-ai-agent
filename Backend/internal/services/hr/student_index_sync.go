@@ -1,6 +1,7 @@
 package hr
 
 import (
+	"Backend/internal/services/piimask"
 	"context"
 	"log"
 	"strings"
@@ -28,7 +29,11 @@ type studentVectorIndexer interface {
 type StudentIndexSyncer struct {
 	profiles scoutProfileReader
 	indexer  studentVectorIndexer
+	subjects piimask.SubjectReader
 }
+
+// SetSubjectReader は、自己PRなどの自由記述を RAG（外の埋め込み API）へ送る前に伏字にするための登録情報の読み口を渡す。
+func (s *StudentIndexSyncer) SetSubjectReader(r piimask.SubjectReader) { s.subjects = r }
 
 func NewStudentIndexSyncer(profiles scoutProfileReader, indexer studentVectorIndexer) *StudentIndexSyncer {
 	return &StudentIndexSyncer{profiles: profiles, indexer: indexer}
@@ -57,6 +62,12 @@ func (s *StudentIndexSyncer) Sync(ctx context.Context, userID uint) {
 	if strings.TrimSpace(text) == "" {
 		// 公開できる情報が無い状態でベクトルだけ残らないよう削除する。
 		s.delete(ctx, userID)
+		return
+	}
+	// 自己PR・希望勤務地は自由記述なので、外へ送る前に伏字にする。伏字にできなければ送らない
+	text, err = piimask.GuardFor(s.subjects, userID)(text)
+	if err != nil {
+		log.Printf("[WARN] student profile mask failed user_id=%d: %v", userID, err)
 		return
 	}
 	if err := s.indexer.Index(ctx, userID, text); err != nil {
