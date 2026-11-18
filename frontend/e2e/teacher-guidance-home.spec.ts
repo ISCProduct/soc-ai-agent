@@ -17,8 +17,10 @@ async function silenceOtherBanners(page: Page) {
 const loadFailedText = '先生からの案内を読み込めませんでした'
 
 // #1691: 取得失敗（Error）と案内なし（Empty）を同じ見た目にしない。
-test.describe('ホームの教員案内', () => {
+// 右パネルが無い狭い画面（lg 未満）の積み方。広い画面（右パネルの「先生から」）は home-consult.spec.ts で検査する。
+test.describe('ホームの教員案内（狭い画面）', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 800 })
     await setupAuth(page, TEST_USER)
     await silenceOtherBanners(page)
   })
