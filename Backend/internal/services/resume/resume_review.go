@@ -415,7 +415,8 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 			sendEvent(map[string]any{"type": "error", "message": "forbidden"})
 			return shared.ErrForbidden
 		}
-		sendEvent(map[string]any{"type": "error", "message": err.Error()})
+		log.Printf("resume_review_stream: find document failed document_id=%d err=%v", documentID, err)
+		sendEvent(map[string]any{"type": "error", "message": streamErrorDocument})
 		return err
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
@@ -429,7 +430,8 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 
 	canonicalName, err := s.ensureRealCompany(ctx, companyName)
 	if err != nil {
-		msg := err.Error()
+		log.Printf("resume_review_stream: ensure company failed document_id=%d err=%v", documentID, err)
+		msg := "企業情報を確認できませんでした。もう一度お試しください。"
 		var ve *shared.ValidationError
 		if errors.As(err, &ve) {
 			msg = ve.Message
@@ -441,14 +443,16 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 
 	workDir, err := s.ensureWorkingDir(doc.ID)
 	if err != nil {
-		sendEvent(map[string]any{"type": "error", "message": err.Error()})
+		log.Printf("resume_review_stream: ensure working dir failed document_id=%d err=%v", documentID, err)
+		sendEvent(map[string]any{"type": "error", "message": streamErrorDocument})
 		return err
 	}
 	defer os.RemoveAll(workDir)
 
 	pdfPath, normalizedStored, err := s.normalizeToPDF(doc, workDir)
 	if err != nil {
-		sendEvent(map[string]any{"type": "error", "message": err.Error()})
+		log.Printf("resume_review_stream: normalize to pdf failed document_id=%d err=%v", documentID, err)
+		sendEvent(map[string]any{"type": "error", "message": streamErrorDocument})
 		return err
 	}
 	doc.NormalizedPath = normalizedStored
@@ -467,7 +471,8 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 	blocks, err := s.extractTextBlocks(doc, pdfPath)
 	if err != nil {
-		sendEvent(map[string]any{"type": "error", "message": err.Error()})
+		log.Printf("resume_review_stream: extract text blocks failed document_id=%d err=%v", documentID, err)
+		sendEvent(map[string]any{"type": "error", "message": streamErrorDocument})
 		return err
 	}
 	if !hasExtractableText(blocks) {
@@ -558,9 +563,13 @@ func reviewScoreErrorMessage(err error) string {
 		// 内部設定が学生に見えないよう固定文言にする(#1293)
 		return "現在AI機能を利用できません。しばらくしてから再度お試しください。"
 	default:
-		return err.Error()
+		// 例外文には内部のパス・DB・外部APIの応答が混ざりうる。利用者へは固定文言にし、ログにだけ残す
+		return "レビューを作成できませんでした。時間をおいてもう一度お試しください。"
 	}
 }
+
+// streamErrorDocument は、書類の取得・展開・読み取りで内部エラーが起きたときに利用者へ返す文言。
+const streamErrorDocument = "書類を処理できませんでした。PDF または DOCX の形式を確認して、もう一度お試しください。"
 
 // flushSSE はバッファを送出する。Echo の Response.Flush は WrapMiddleware 配下で
 // panic するため使わず、Unwrap して実体の Flusher を探す (#855)。
