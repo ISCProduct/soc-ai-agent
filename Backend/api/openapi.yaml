@@ -358,6 +358,13 @@ components:
         message: { type: string }
         industry_id: { type: integer }
         job_category_id: { type: integer }
+        consult_intent:
+          type: string
+          enum: [find_job, learn_industry, how_to_proceed, organize_strengths, free]
+          description: |
+            ホームの「キャリア相談」で選んだ意図（任意。送らない既存のクライアントは従来どおり動く）。
+            セッションの最初の回答でだけ使い、意図を保存して、次の質問で職種を聞く。
+            free のときの message は 1〜1000 文字。知らない値・長すぎる自由記述は 400。
 
     ChatResponse:
       type: object
@@ -382,6 +389,16 @@ components:
         answered_questions: { type: integer }
         evaluated_categories: { type: integer }
         total_categories: { type: integer }
+        judgment_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: |
+            判定の進み具合（%）。質問数は固定しないので、画面の進捗はこれを使う。
+            判定できた（is_complete）ときだけ 100。
+        suggest_provisional:
+          type: boolean
+          description: 目安の回答数（30）を超えても判定できていないとき true。画面は「いまの暫定の結果を見る」を出す（質問は続けられる）。
 
     InterviewSession:
       type: object

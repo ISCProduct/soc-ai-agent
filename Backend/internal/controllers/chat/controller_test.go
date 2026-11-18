@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	chatcontrollers "Backend/internal/controllers/chat"
@@ -128,6 +129,47 @@ func TestChatController_Chat_Success_NewSession(t *testing.T) {
 	chatSvc.On("ProcessChat", mock.Anything, mock.Anything).Return(&chat.ChatResponse{Response: "ok"}, nil)
 
 	body := `{"session_id":"s2","message":"hello"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).Chat, testsupport.NewCtx(req, rec), http.StatusOK)
+	chatSvc.AssertExpectations(t)
+}
+
+// 相談の意図（SOCAIAGENT-668）。知らない値・長すぎる自由記述は、サービスに渡す前に 400 で拒否する。
+func TestChatController_Chat_ConsultIntent_Invalid(t *testing.T) {
+	long := strings.Repeat("あ", 1001)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"知らない値", `{"session_id":"s1","message":"x","consult_intent":"unknown"}`},
+		{"自由記述が長すぎる", `{"session_id":"s1","message":"` + long + `","consult_intent":"free"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chatSvc := &mocks.ChatServiceMock{}
+			req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewBufferString(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			req = testsupport.WithUserID(req, 1)
+			rec := httptest.NewRecorder()
+			testsupport.AssertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).Chat, testsupport.NewCtx(req, rec), http.StatusBadRequest)
+			chatSvc.AssertNotCalled(t, "ProcessChat", mock.Anything, mock.Anything)
+			chatSvc.AssertNotCalled(t, "ClaimSessionOwnership", mock.Anything, mock.Anything)
+		})
+	}
+}
+
+func TestChatController_Chat_ConsultIntent_Valid(t *testing.T) {
+	chatSvc := &mocks.ChatServiceMock{}
+	chatSvc.On("ClaimSessionOwnership", "s1", uint(1)).Return(nil)
+	chatSvc.On("SessionHasOtherUserMessages", "s1", uint(1)).Return(false, nil)
+	chatSvc.On("ProcessChat", mock.Anything, mock.MatchedBy(func(r chat.ChatRequest) bool {
+		return r.ConsultIntent == "find_job" && r.UserID == 1
+	})).Return(&chat.ChatResponse{Response: "ok"}, nil)
+
+	body := `{"session_id":"s1","message":"やりたい仕事を一緒に考えたい","consult_intent":"find_job"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req = testsupport.WithUserID(req, 1)
