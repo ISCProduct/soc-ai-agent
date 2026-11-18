@@ -200,7 +200,7 @@ export function useResultsData() {
         }
 
         if (data && data.recommendations && Array.isArray(data.recommendations)) {
-          const mappedCompanies = data.recommendations.map(
+          const mappedCompanies: Company[] = data.recommendations.map(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any -- API レスポンス
             (rec: any, index: number) => mapRecommendationToCompany(rec, index),
           )
@@ -328,7 +328,7 @@ export function useResultsData() {
       const data = await res.json()
       if (requestId !== favoriteRequest.current) return
       const rows = Array.isArray(data?.recommendations) ? data.recommendations : []
-      const mapped = rows.map((rec: unknown, index: number) => mapRecommendationToCompany(rec, index))
+      const mapped: Company[] = rows.map((rec: unknown, index: number) => mapRecommendationToCompany(rec, index))
       favoriteCompanyIds.current = new Set(mapped.map((company) => company.id))
       setFavoriteCompanies(mapped)
       setCompanies((prev) => prev.map((company) => (
