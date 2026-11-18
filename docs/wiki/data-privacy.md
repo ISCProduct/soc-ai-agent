@@ -261,6 +261,24 @@ WHERE created_at < DATE_SUB(NOW(), INTERVAL 2 YEAR);
 
 ---
 
+## ログの個人情報の扱い
+
+ログ・エラー文に、学生の入力（チャットの回答・面接の発話・履歴書や ES の本文・プロンプト全文）とメールアドレス・電話番号を出さない。出すのは、ID・件数・文字数・結果コードだけ。
+
+守り方は3段。
+
+1. **書き方**: 学生の入力は `logsafe.Chars(text)`（文字数）で出し、メールは `logsafe.MaskEmail` / `MaskEmails`（`t***@example.com`）で伏せる。
+2. **検査（`internal/logpolicy`）**: `log.*` / `slog.*` の呼び出しの引数に、名前の最後の単語が `email` `phone` `address` `answer` `message` `text` `content` `body` `prompt` `utterance` `transcript` `to` `input` などの値を渡すと、`go test` が落ちる（CI の Go Unit Tests）。`internal/` と `cmd/` の全体が対象。`import stdlog "log"` の別名、`log.Default().Printf`、名前が `log` / `logger` で終わる値のメソッド（`s.logger.Info`）も見る。
+   出してよい理由があるときだけ、その行の**コメントに** `// logpolicy:ok 理由` を書く（理由が無い目印、文字列の中の目印は許可にならない。企業情報・料金のアラート本文など、学生の入力を含まないもの）。`reason` は、コード（理由の種別）と自由記述の両方に使われ名前で区別できないため、検査の対象外。自由記述は `answer` / `text` などの名前で運ぶこと。
+3. **出力直前の伏字（`internal/logger/redact.go`）**: `slog` のハンドラが、メッセージと文字列・error・`String()` を持つ値・グループの値の、メールアドレスと電話番号を `<EMAIL>` / `<PHONE>` にする。`slog.SetDefault` 後は標準の `log.Printf` も同じハンドラを通る。
+   電話番号は、ID・UUID・sha・16進・小数・パスの断片を誤って伏字にしないよう、前後が英数字・`.`・`-`・`_`・`/` のものと、「0.」「0-」で始まるものを除く（学習データ用の規則に、ログ用の条件を足している）。氏名・住所は規則では見分けられないので対象外（1・2 で守る）。構造体・マップの値は中身を見ない。`String()` / `Error()` が panic する値（nil ポインタ）は、元の値のまま渡す。
+
+**限界**
+- 検査は名前で判定する。別の名前に代入する（`s := userMessage; log.Printf("%s", s)`）、構造体を丸ごと `%v` / `%+v` で出す、`fmt.Errorf("…%s", answer)` で作った error を出す、とすり抜ける。ログに構造体や `req` 全体を出さないこと。
+- 名前が `name`（氏名）・`fullName`・`question`・`resume`・`raw`・`resp`・`msg`・`q` の値は、検査の対象外（企業名・メール構造体・エラー文などにも使われ、誤検出が多いため）。氏名・本文を運ぶ変数には、上の語（`answer` `text` など）の名前を付ける。
+- 名前が `log` / `logger` で終わらない値（`l.Info(...)`）のメソッド呼び出しは、見ない。
+- ハンドラのメール規則は、`path/to/file@host.com` のように、パスに「@」とドメインが続く文字列を丸ごと伏字にする（個人情報を守る側に倒している）。
+
 ## 学習データの書き出しの条件
 
 管理者向けの書き出し（`/api/admin/training/export`・`/stats`）は、次の条件に合う学生のデータだけを数え、書き出す。条件は `TrainingExportRepository.trainingConsentedUserIDs` に1か所だけ書き、すべての問い合わせが通る。

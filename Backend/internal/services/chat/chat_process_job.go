@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"Backend/internal/logsafe"
 	"Backend/internal/models"
 	"context"
 	"fmt"
@@ -38,7 +39,7 @@ func (s *ChatService) resolveJobCategoryForChat(ctx context.Context, req ChatReq
 	}
 
 	if jobCategoryID == 0 && s.shouldValidateJobCategory(history) {
-		log.Printf("[JobValidation] Validating job category answer: %s\n", req.Message)
+		log.Printf("[JobValidation] Validating job category answer: chars=%d\n", logsafe.Chars(req.Message))
 		// 直前に提示した質問文を渡す。番号だけの回答は、そのとき並んでいた
 		// 選択肢に対して解釈しないと別の職種になる（#1330）。
 		presentedQuestion := findLastAssistantQuestion(history)

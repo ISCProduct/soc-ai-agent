@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"Backend/internal/logsafe"
 	"Backend/internal/models"
 	"Backend/internal/services/prompts"
 	"context"
@@ -379,7 +380,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 
 		// 最後の試行で重複してもそのまま使用（無限ループ防止）
 		if attempt == maxRetries-1 {
-			log.Printf("Max retries reached, using question anyway: %s\n", questionText)
+			log.Printf("Max retries reached, using question anyway: chars=%d\n", logsafe.Chars(questionText))
 		}
 	}
 
