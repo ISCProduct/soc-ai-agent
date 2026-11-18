@@ -33,6 +33,7 @@ export default function ConsentDialog({ open, consentGiven, onConsentChange, onC
         <Typography variant="body2" component="ul" sx={{ pl: 2, mb: 2, color: 'text.secondary' }}>
           <li>音声・動画の録画（フィードバック生成に使用）</li>
           <li>会話のテキスト（評価スコア算出に使用）</li>
+          <li>音声は、文字起こしのため外部のAI事業者へ送信します。面接中にお名前や連絡先は話さないでください</li>
         </Typography>
         <Typography variant="body2" color="error.main" sx={{ mb: 2 }}>
           ※ これらのデータは企業には提供されません。サービス内でのみ使用します。

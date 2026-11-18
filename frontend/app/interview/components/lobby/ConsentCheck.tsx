@@ -54,6 +54,7 @@ export default function ConsentCheck({ checked, onChange }: ConsentCheckProps) {
         <Typography component="ul" sx={{ pl: 7, m: 0, fontSize: 12, color: UI.inkSoft, lineHeight: 1.8 }}>
           <li>音声・動画の録画（フィードバック生成に使用）</li>
           <li>会話のテキスト（評価スコア算出に使用）</li>
+          <li>音声は、文字起こしのため外部のAI事業者へ送信します。面接中にお名前や連絡先は話さないでください</li>
           <li>
             詳細は<Link href="/privacy" target="_blank" style={{ color: UI.mark }}>プライバシーポリシー</Link>をご確認ください
           </li>

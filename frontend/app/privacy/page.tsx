@@ -48,6 +48,11 @@ export default function PrivacyPage() {
         <Typography variant="body1" component="ul" sx={{ pl: 3 }}>
           <li>法令に基づく場合</li>
           <li>ユーザー本人の同意がある場合</li>
+          <li>機能の提供のため、生成AI・音声認識・音声合成を行う外部の事業者へ、処理を委託する場合（下記）</li>
+        </Typography>
+        <Typography variant="body1">
+          チャット・面接・ES・職務経歴書の文章は、氏名・メールアドレス・電話番号・住所・生年月日などの個人を特定できる情報を、送信前に伏字にしたうえで、外部のAI事業者へ送って処理します。伏字にできない場合は送信しません。
+          面接の音声は、文字起こしのために外部のAI事業者へ送信します。音声は伏字にできないため、面接中にお名前や連絡先を話された場合、その内容が送信先に渡ります。
         </Typography>
         <Typography variant="body1" color="error.main" fontWeight="bold">
           ※ 面接動画・職務経歴書は企業に提供しません。当サービス内での分析にのみ使用します。
