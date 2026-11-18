@@ -25,7 +25,7 @@ import {
   Favorite,
   FavoriteBorder,
 } from '@mui/icons-material'
-import type { AnalysisScores, Company, SnackbarState, SuggestedRole } from '../types'
+import type { AnalysisScores, Company, MatchFeedbackVerdict, SnackbarState, SuggestedRole } from '../types'
 import { buildEsRewriteQuery, buildInterviewQuery, getTopCategoryScores } from '../utils'
 import AnalysisScoreCard from './AnalysisScoreCard'
 import {
@@ -54,6 +54,8 @@ export interface ResultsListViewProps {
   suggestedRoles: SuggestedRole[]
   emailSending: boolean
   favoritingId: number | null
+  /** 「合う／合わない」を送信中の推薦。送信中は押せない */
+  feedbackingId?: number | null
   applyingId: number | null
   snackbar: SnackbarState
   isGuestUser: boolean
@@ -65,6 +67,8 @@ export interface ResultsListViewProps {
   onSendEmail: () => void
   onSelectCompany: (company: Company) => void
   onToggleFavorite: (e: MouseEvent, company: Company) => void
+  /** 推薦への「合う／合わない」。省略すると、ボタンを出さない */
+  onFeedback?: (e: MouseEvent, company: Company, verdict: MatchFeedbackVerdict) => void
   onApply: (e: MouseEvent, company: Company) => void
   onNavigate: (path: string) => void
 }
@@ -97,6 +101,8 @@ export default function ResultsListView({
   onSendEmail,
   onSelectCompany,
   onToggleFavorite,
+  onFeedback,
+  feedbackingId = null,
   onApply,
   onNavigate,
 }: ResultsListViewProps) {
@@ -370,6 +376,24 @@ export default function ResultsListView({
                   <Typography sx={{ fontSize: 15, lineHeight: 1.9, color: UI.ink, maxWidth: '68ch', mb: 2 }}>
                     {leadSentences(company.description)}
                   </Typography>
+
+                  {onFeedback && company.matchId && (
+                    <Box role="group" aria-label={`${company.name}の提案への回答`} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                      <Typography sx={{ fontSize: 13, color: UI.inkSoft }}>この提案は？</Typography>
+                      {(['fit', 'unfit'] as const).map((verdict) => (
+                        <Button
+                          key={verdict}
+                          size="small"
+                          variant={company.feedback === verdict ? 'contained' : 'outlined'}
+                          aria-pressed={company.feedback === verdict}
+                          disabled={feedbackingId === company.matchId}
+                          onClick={(e) => onFeedback(e, company, verdict)}
+                        >
+                          {verdict === 'fit' ? '合う' : '合わない'}
+                        </Button>
+                      ))}
+                    </Box>
+                  )}
 
 
                   {/*

@@ -45,6 +45,7 @@ export function mapRecommendationToCompany(
     isReference: rec.is_reference === true,
     fitNote: rec.fit_note || undefined,
     jobMatched: rec.job_matched === true,
+    feedback: rec.feedback === 'fit' || rec.feedback === 'unfit' ? rec.feedback : undefined,
     tags: rec.tags || [],
     techStack: rec.tech_stack || [],
     categoryScores: normalizeCategoryScores(rec.category_scores),

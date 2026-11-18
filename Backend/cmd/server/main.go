@@ -399,6 +399,8 @@ func main() {
 	authController := authcontrollers.NewAuthController(authService, cfg.UserSecret)
 	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService)
 	chatController := chatcontrollers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
+	// 推薦への「合う／合わない」（SOCAIAGENT-670）
+	chatController.SetMatchFeedback(matching.NewMatchFeedbackService(repositories.NewUserMatchFeedbackRepository(db)))
 	chatController.SetAIBudget(aiBudgetService)
 	if jobEnqueuer != nil {
 		chatController.SetJobEnqueuer(jobEnqueuer)

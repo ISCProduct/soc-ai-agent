@@ -49,6 +49,8 @@ type Recommendation struct {
 	FitNote     string `json:"fit_note,omitempty"`
 	// JobMatched は、本人が選んだ職種の募集がある企業（適合度は加点してある）。
 	JobMatched bool `json:"job_matched"`
+	// Feedback は、本人の「合う／合わない」（fit / unfit）。未回答は空。
+	Feedback string `json:"feedback,omitempty"`
 }
 
 // RecommendationResponse は GET /api/chat/recommendations のレスポンス。
