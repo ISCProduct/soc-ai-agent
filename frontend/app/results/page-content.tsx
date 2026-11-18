@@ -72,6 +72,8 @@ function ResultsContent() {
     diagramError,
     emailSending,
     favoritingId,
+    feedbackingId,
+    handleFeedback,
     applyingId,
     snackbar,
     isGuestUser,
@@ -161,6 +163,8 @@ function ResultsContent() {
       suggestedRoles={suggestedRoles}
       emailSending={emailSending}
       favoritingId={favoritingId}
+      feedbackingId={feedbackingId}
+      onFeedback={handleFeedback}
       applyingId={applyingId}
       snackbar={snackbar}
       isGuestUser={isGuestUser}

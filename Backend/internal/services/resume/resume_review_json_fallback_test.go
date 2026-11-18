@@ -55,7 +55,7 @@ func TestBuildReviewScoreItems_JSONmode非対応でもレビューが成立す�
 	t.Cleanup(srv.Close)
 
 	svc := NewResumeService(&resumeRepoStub{}, t.TempDir(), openai.NewWithBaseURL(srv.URL, "gpt-4o-mini"))
-	review, items, err := svc.buildReviewScoreItems(context.Background(), reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
+	review, items, err := svc.buildReviewScoreItems(context.Background(), maskedForTest(t, reviewBlocks()), "", "エンジニア", candidateTypeNewGrad, "")
 	if err != nil {
 		t.Fatalf("形式を落としてレビューが成立するべき: %v", err)
 	}

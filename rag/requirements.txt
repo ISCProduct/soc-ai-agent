@@ -10,6 +10,9 @@ langchain>=1.4.9,<2.0
 langchain-core>=1.7.3,<2.0
 langchain-openai>=1.7.4,<2.0
 langchain-text-splitters>=1.0,<2.0
+# 軽量採点モデルの学習（training/scorer、#2170）で直接使う。chromadb の推移的依存として既に入っている。
+# 上限は constraints.txt と同じ。下限は chromadb 0.6 系が要求する版。
+numpy>=1.22.5,<3.0
 # openai SDK 2.x 系（litellm との両立）
 openai>=3.46.0,<4.0
 # /metrics 公開（#1186）

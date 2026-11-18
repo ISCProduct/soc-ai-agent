@@ -23,6 +23,7 @@ import type {
   Company,
   SnackbarState,
   SuggestedRole,
+  MatchFeedbackVerdict,
 } from '../types'
 import {
   buildEmptyRecommendationsMessage,
@@ -58,6 +59,7 @@ export function useResultsData() {
   const [diagramError, setDiagramError] = useState<string | null>(null)
   const [emailSending, setEmailSending] = useState(false)
   const [favoritingId, setFavoritingId] = useState<number | null>(null)
+  const [feedbackingId, setFeedbackingId] = useState<number | null>(null)
   const [applyingId, setApplyingId] = useState<number | null>(null)
   // 応募を受け付けているか。取得できるまでは閉じている扱い（SOCAIAGENT-403）
   const [applyEnabled, setApplyEnabled] = useState(false)
@@ -272,6 +274,35 @@ export function useResultsData() {
     router.push('/')
   }
 
+  // 推薦への「合う／合わない」。同じ判定をもう一度押したら取り消す（SOCAIAGENT-670）
+  const handleFeedback = async (e: MouseEvent, company: Company, verdict: MatchFeedbackVerdict) => {
+    e.stopPropagation()
+    if (!company.matchId || feedbackingId !== null) return
+    const next = company.feedback === verdict ? undefined : verdict
+    setFeedbackingId(company.matchId)
+    try {
+      const res = await fetch('/api/chat/match-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
+        body: JSON.stringify({ match_id: company.matchId, verdict: next ?? 'none' }),
+      })
+      if (res.ok) {
+        setCompanies((prev) => prev.map((c) => (c.matchId === company.matchId ? { ...c, feedback: next } : c)))
+        setSnackbar({
+          open: true,
+          message: next ? '回答を記録しました。今後の改善に使います' : '回答を取り消しました',
+          severity: 'success',
+        })
+      } else {
+        setSnackbar({ open: true, message: '回答の記録に失敗しました', severity: 'error' })
+      }
+    } catch {
+      setSnackbar({ open: true, message: '回答の記録に失敗しました', severity: 'error' })
+    } finally {
+      setFeedbackingId(null)
+    }
+  }
+
   const handleToggleFavorite = async (e: MouseEvent, company: Company) => {
     e.stopPropagation()
     if (!company.matchId || favoritingId !== null) return
@@ -414,6 +445,8 @@ export function useResultsData() {
     diagramError,
     emailSending,
     favoritingId,
+    feedbackingId,
+    handleFeedback,
     applyingId,
     applyEnabled,
     snackbar,
