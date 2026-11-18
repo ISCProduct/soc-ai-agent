@@ -71,6 +71,12 @@ type SweepResult struct {
 	DeletedFiles int
 	// UpdatedManifests は書き直したマニフェストの数。
 	UpdatedManifests int
+	// RepairedEntries は、マニフェストに載っているのに実在しなかったので外したファイルの数。
+	// 削除どうしが同時に走ってマニフェストの書き直しが重なった、書き出しの途中で消した、などのずれを、ここで直す。
+	RepairedEntries int
+	// UncountedManifests は、file_sessions を持たない（この仕組みより前に書いた）ため、
+	// ファイルを外しても session_count を直せなかったマニフェストの数。session_count はそのまま残る（多めになる）。
+	UncountedManifests int
 }
 
 // Sweep は、いま学習に使ってよい学生以外のファイルを、すべての回から消し、監査ログに残す。
@@ -150,6 +156,10 @@ func (s *Sweeper) runsPrefix() string { return s.cfg.Prefix + "/runs/" }
 var subjectKeyPattern = regexp.MustCompile(`^([^/]+)/subjects/([0-9a-f]{64})\.jsonl$`)
 
 // remove は、drop が true を返す subject のファイルを、すべての回から消す。
+// あわせて、マニフェストのある回は、載っているのに実在しないファイルをマニフェストから外す（照合）。
+// マニフェストの書き直しは排他していない（S3 に読み書きのロックが無い）ので、削除どうしが同時に走ると、
+// 後から書いたほうが先に外したファイルを戻すことがある。そのファイルは既に消えていてキーの一覧に出ないため、
+// 消す対象からだけでは直せない。照合を毎回行い、次の削除で直す。
 // 1つの回で失敗しても、ほかの回は続け、最後にまとめてエラーを返す。
 func (s *Sweeper) remove(ctx context.Context, drop func(subject string) bool) (SweepResult, error) {
 	var res SweepResult
@@ -158,18 +168,35 @@ func (s *Sweeper) remove(ctx context.Context, drop func(subject string) bool) (S
 	if err != nil {
 		return res, fmt.Errorf("scorerexport: 書き出し済みのファイルの一覧を取得できませんでした: %w", err)
 	}
-	// 実行 ID ごとに、消すファイル（runs/<実行ID>/ からの相対パス）をまとめる。
+	// 実行 ID ごとに、消すファイル（runs/<実行ID>/ からの相対パス）と、実在するキーをまとめる。
 	byRun := map[string][]string{}
+	present := map[string]map[string]bool{}
+	hasManifest := map[string]bool{}
 	for _, key := range keys {
-		m := subjectKeyPattern.FindStringSubmatch(strings.TrimPrefix(key, runs))
+		rel := strings.TrimPrefix(key, runs)
+		runID, file, ok := strings.Cut(rel, "/")
+		if !ok || runID == "" {
+			continue
+		}
+		if present[runID] == nil {
+			present[runID] = map[string]bool{}
+		}
+		present[runID][file] = true
+		if file == "manifest.json" {
+			hasManifest[runID] = true
+			continue
+		}
+		m := subjectKeyPattern.FindStringSubmatch(rel)
 		if m == nil || !drop(m[2]) {
 			continue
 		}
-		byRun[m[1]] = append(byRun[m[1]], "subjects/"+m[2]+".jsonl")
+		byRun[runID] = append(byRun[runID], file)
 	}
-	runIDs := make([]string, 0, len(byRun))
-	for id := range byRun {
-		runIDs = append(runIDs, id)
+	runIDs := make([]string, 0, len(byRun)+len(hasManifest))
+	for id := range present {
+		if len(byRun[id]) > 0 || hasManifest[id] {
+			runIDs = append(runIDs, id)
+		}
 	}
 	sort.Strings(runIDs)
 
@@ -178,14 +205,20 @@ func (s *Sweeper) remove(ctx context.Context, drop func(subject string) bool) (S
 		files := byRun[runID]
 		sort.Strings(files)
 		runPrefix := runs + runID + "/"
-		updated, err := s.dropFromManifest(ctx, runPrefix, files)
-		if err != nil {
-			// マニフェストを直せなかった回のファイルは消さない（載っているのに無いファイルを作らないため）。
-			errs = append(errs, fmt.Errorf("回 %s: %w", runID, err))
-			continue
-		}
-		if updated {
-			res.UpdatedManifests++
+		if hasManifest[runID] {
+			fix, err := s.dropFromManifest(ctx, runPrefix, files, present[runID])
+			if err != nil {
+				// マニフェストを直せなかった回のファイルは消さない（載っているのに無いファイルを作らないため）。
+				errs = append(errs, fmt.Errorf("回 %s: %w", runID, err))
+				continue
+			}
+			if fix.updated {
+				res.UpdatedManifests++
+			}
+			res.RepairedEntries += fix.repaired
+			if fix.uncounted {
+				res.UncountedManifests++
+			}
 		}
 		for _, f := range files {
 			if err := s.objects.DeleteObject(ctx, runPrefix+f); err != nil {
@@ -198,49 +231,99 @@ func (s *Sweeper) remove(ctx context.Context, drop func(subject string) bool) (S
 	return res, errors.Join(errs...)
 }
 
-// dropFromManifest は、その回のマニフェストから files を外し、件数を直して書き直す。
-// マニフェストが無い回（書き出しの途中・途中で落ちた回）は、直すものが無いので何もしない。
-// 書き直したら true を返す。
-func (s *Sweeper) dropFromManifest(ctx context.Context, runPrefix string, files []string) (bool, error) {
+// manifestFix は dropFromManifest の結果。
+type manifestFix struct {
+	updated   bool // 書き直した
+	repaired  int  // 載っているのに実在しなかったので外した数
+	uncounted bool // file_sessions が無く、session_count を直せなかった
+}
+
+// dropFromManifest は、その回のマニフェストから files と、載っているのに実在しないファイルを外し、件数を直して書き直す。
+// present は、キーの一覧で見つかったその回のキー（runs/<実行ID>/ からの相対パス）。
+func (s *Sweeper) dropFromManifest(ctx context.Context, runPrefix string, files []string, present map[string]bool) (manifestFix, error) {
+	var fix manifestFix
 	body, err := s.objects.GetObject(ctx, runPrefix+"manifest.json")
 	if errors.Is(err, ErrObjectNotFound) {
-		return false, nil
+		// 一覧の後に消えた（直すものが無い）。
+		return fix, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("マニフェストを読めませんでした: %w", err)
+		return fix, fmt.Errorf("マニフェストを読めませんでした: %w", err)
 	}
 	var m Manifest
 	if err := json.Unmarshal(body, &m); err != nil {
-		return false, fmt.Errorf("マニフェストの形が違います: %w", err)
+		return fix, fmt.Errorf("マニフェストの形が違います: %w", err)
 	}
 	drop := make(map[string]bool, len(files))
 	for _, f := range files {
 		drop[f] = true
 	}
+	missing, err := s.missingFiles(ctx, runPrefix, m.Files, drop, present)
+	if err != nil {
+		return fix, err
+	}
 	kept := make([]string, 0, len(m.Files))
-	changed := false
 	for _, f := range m.Files {
-		if !drop[f] {
+		if !drop[f] && !missing[f] {
 			kept = append(kept, f)
 			continue
 		}
-		changed = true
+		if missing[f] {
+			fix.repaired++
+		}
 		m.StudentCount--
-		m.SessionCount -= m.FileSessions[f]
-		delete(m.FileSessions, f)
+		if m.FileSessions == nil {
+			// この仕組みより前に書いたマニフェスト。ファイルごとの件数が分からないので、session_count は直さない。
+			fix.uncounted = true
+		} else {
+			m.SessionCount -= m.FileSessions[f]
+			delete(m.FileSessions, f)
+		}
 	}
-	if !changed {
-		return false, nil
+	if len(kept) == len(m.Files) {
+		return manifestFix{}, nil
 	}
 	m.Files = kept
 	m.StudentCount = max(m.StudentCount, 0)
 	m.SessionCount = max(m.SessionCount, 0)
 	out, err := marshalJSON(m, "  ")
 	if err != nil {
-		return false, fmt.Errorf("マニフェストを作れませんでした: %w", err)
+		return manifestFix{}, fmt.Errorf("マニフェストを作れませんでした: %w", err)
 	}
 	if err := s.objects.PutObject(ctx, runPrefix+"manifest.json", out, "application/json"); err != nil {
-		return false, fmt.Errorf("マニフェストを書き直せませんでした: %w", err)
+		return manifestFix{}, fmt.Errorf("マニフェストを書き直せませんでした: %w", err)
 	}
-	return true, nil
+	fix.updated = true
+	return fix, nil
+}
+
+// missingFiles は、マニフェストに載っているファイルのうち、実在しないもの（drop 以外）を返す。
+// 最初のキーの一覧（present）は、マニフェストを読む前に取ったもの。その間に書き出しがファイルとマニフェストを
+// 書いていると、実在するファイルを「無い」と見てしまうので、無いものがあればその回のキーを一覧し直して確かめる
+// （書き出しはファイルを先に、マニフェストを最後に書くので、マニフェストを読んだ後の一覧には載っている）。
+func (s *Sweeper) missingFiles(ctx context.Context, runPrefix string, files []string, drop, present map[string]bool) (map[string]bool, error) {
+	var candidates []string
+	for _, f := range files {
+		if !drop[f] && !present[f] {
+			candidates = append(candidates, f)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	keys, err := s.objects.ListKeys(ctx, runPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("マニフェストとの照合のためのファイルの一覧を取得できませんでした: %w", err)
+	}
+	now := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		now[strings.TrimPrefix(k, runPrefix)] = true
+	}
+	missing := map[string]bool{}
+	for _, f := range candidates {
+		if !now[f] {
+			missing[f] = true
+		}
+	}
+	return missing, nil
 }

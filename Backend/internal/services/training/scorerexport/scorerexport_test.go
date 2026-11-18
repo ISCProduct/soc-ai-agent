@@ -172,6 +172,9 @@ type fakeWriter struct {
 	stored  map[string][]byte
 	listErr error
 	getErr  error
+	// afterList は ListKeys が一覧を作った後に呼ぶ（一覧とマニフェストの読み込みの間に、ほかの処理が書く場面を作る）。
+	afterList func(prefix string)
+	lists     []string
 }
 
 func (w *fakeWriter) DeleteObject(_ context.Context, key string) error {
@@ -197,6 +200,10 @@ func (w *fakeWriter) ListKeys(_ context.Context, prefix string) ([]string, error
 		}
 	}
 	sort.Strings(keys)
+	w.lists = append(w.lists, prefix)
+	if w.afterList != nil {
+		w.afterList(prefix)
+	}
 	return keys, nil
 }
 

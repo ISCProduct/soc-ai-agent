@@ -46,16 +46,27 @@ func main() {
 		if err != nil {
 			log.Fatalf("書き出し済みのデータの削除に失敗しました（消せた分: ファイル %d）: %v", swept.DeletedFiles, err)
 		}
-		fmt.Printf("書き出し済みのデータを消しました: ファイル %d・マニフェストの書き直し %d\n", swept.DeletedFiles, swept.UpdatedManifests)
+		printSwept(swept)
 		return
 	}
 	res, swept, err := scorerexport.RunFromEnv(ctx, os.Getenv, connectStore, newS3Store)
 	if err != nil {
 		log.Fatalf("書き出しに失敗しました（削除したファイル %d）: %v", swept.DeletedFiles, err)
 	}
-	fmt.Printf("書き出し済みのデータを消しました: ファイル %d・マニフェストの書き直し %d\n", swept.DeletedFiles, swept.UpdatedManifests)
+	printSwept(swept)
 	fmt.Printf("書き出しました: 学生 %d 人・面接 %d 件（書き出さなかった面接 %d 件）→ %s\n",
 		res.Students, res.Sessions, res.SkippedSessions, res.Destination)
+}
+
+// printSwept は削除の結果を表示する。照合で外したものと、件数を直せなかったマニフェストがあれば、それも出す。
+func printSwept(r scorerexport.SweepResult) {
+	fmt.Printf("書き出し済みのデータを消しました: ファイル %d・マニフェストの書き直し %d\n", r.DeletedFiles, r.UpdatedManifests)
+	if r.RepairedEntries > 0 {
+		fmt.Printf("マニフェストに載っているのに無かったファイルを外しました: %d\n", r.RepairedEntries)
+	}
+	if r.UncountedManifests > 0 {
+		fmt.Printf("file_sessions の無い古いマニフェストのため、面接の件数（session_count）を直せなかった回: %d\n", r.UncountedManifests)
+	}
 }
 
 func connectStore() (scorerexport.Store, error) {
