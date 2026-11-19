@@ -46,7 +46,8 @@ test.describe('ホームの教員案内（狭い画面）', () => {
     fail = false
     await errorAlert.getByRole('button', { name: '再読み込み' }).click()
     await expect(errorAlert).toHaveCount(0)
-    await expect(page.getByRole('alert').filter({ hasText: '応募先を一緒に見直しましょう' })).toBeVisible()
+    // 案内そのものは緊急ではない（error ではない）ので role="status"。取得の失敗だけが role="alert"（#2217）
+    await expect(page.getByRole('status').filter({ hasText: '応募先を一緒に見直しましょう' })).toBeVisible()
   })
 
   test('案内が0件ならエラーは出ない', async ({ page }) => {
