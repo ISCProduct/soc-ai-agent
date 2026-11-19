@@ -22,6 +22,7 @@ import { BulkPublishBar } from './components/BulkPublishBar'
 import { CompanyList } from './components/CompanyList'
 import { CompanyActionsMenu } from './components/CompanyActionsMenu'
 import { AdvancedSettings } from './components/AdvancedSettings'
+import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 
 export default function PageContent() {
   const list = useCompanyList()
@@ -135,6 +136,15 @@ export default function PageContent() {
           groupByIndustry={list.groupByIndustry}
           setGroupByIndustry={list.setGroupByIndustry}
           setPage={list.setPage}
+        />
+        <ConfirmDialog
+          open={row.bulkPublishTargets !== null}
+          title="企業を学生に公開"
+          message={`選択した ${row.bulkPublishTargets?.length ?? 0} 社を学生に公開しますか？`}
+          confirmLabel="公開する"
+          busy={row.bulkPublishing}
+          onConfirm={row.confirmBulkPublish}
+          onCancel={row.cancelBulkPublish}
         />
         <BulkPublishBar
           selectableOnPage={list.selectableOnPage}
