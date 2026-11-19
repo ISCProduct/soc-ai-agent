@@ -219,6 +219,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	// ワーカーには認証ミドルウェアの actor が届かない。載せないとレポートの費用が
 	// 誰の予算にも入らない。
 	ctx = usagectx.WithActor(ctx, session.UserID, session.OrganizationID)
+	ctx = s.withPIIGuard(ctx, session.UserID) // 面接ログを外部 AI へ送る前に伏字にする
 
 	utterances, err := s.utterRepo.FindBySessionID(sessionID)
 	if err != nil {

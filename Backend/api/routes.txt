@@ -179,6 +179,7 @@ POST /api/chat
 GET /api/chat/analysis
 POST /api/chat/favorite
 GET /api/chat/history
+POST /api/chat/match-feedback
 GET /api/chat/recommendations
 GET /api/chat/scores
 POST /api/chat/send-report

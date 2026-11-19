@@ -13,6 +13,10 @@ func (cli *Client) Embedding(ctx context.Context, input string, modelOverride ..
 	if err := cli.ensureEmbedding(); err != nil {
 		return nil, err
 	}
+	input, err := guardInput(ctx, input)
+	if err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(input) == "" {
 		return nil, errors.New("embedding input is empty")
 	}
