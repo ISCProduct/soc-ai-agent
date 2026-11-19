@@ -16,6 +16,14 @@ import { BACKEND_URL } from '@/lib/config'
 
 const ENDPOINT = `${BACKEND_URL}/api/user/training-consent`
 
+/**
+ * この画面に出している同意の文言の版（#2168）。保存のたびに送り、サーバーは今の版と一致したときだけ記録する。
+ * 下の説明文・箇条書き・スイッチの文言を変えたら、バックエンドの `TrainingConsentTextVersion`
+ * （Backend/internal/models/training_consent_event.go）と一緒に上げること（両者が同じことはバックエンドのテストで確かめる）。
+ * 古いタブ・古いフロントは古い版を送るので、サーバーが 409 で拒否し、新しい文言への同意として記録されない。
+ */
+export const TRAINING_CONSENT_TEXT_VERSION = '2026-11-18'
+
 async function fetchConsent(): Promise<boolean> {
   const r = await fetch(ENDPOINT, { headers: authService.getUserFetchHeaders() })
   if (!r.ok) throw new Error('failed')
@@ -30,6 +38,11 @@ async function fetchConsent(): Promise<boolean> {
  * 混ぜないのは、同意は希望条件と無関係で、「保存」を押し忘れて同意したつもり・取り消したつもりになるのを防ぐため。
  * 保存の応答が失敗したら、今の値を取り直して表示する（応答だけ失われて実際は保存されている場合に、
  * 保存前の値を決め打ちで見せない）。取り直せなければスイッチを出さない（#2180 のレビュー）。
+ *
+ * 同意の文言（下の説明文・箇条書き・スイッチの文言）を変えたら、`TRAINING_CONSENT_TEXT_VERSION` と
+ * バックエンドの `TrainingConsentTextVersion` の版を上げること。同意の履歴には、操作したときの文言の版が
+ * 記録される（#2168）。上げ忘れると、変更前の文言に同意した人も新しい文言に同意したように記録される。
+ * 文言が更新された後の古い画面からの保存は拒否される（409）ので、再読み込みを促してスイッチを止める。
  */
 export function TrainingConsentCard() {
   const [allow, setAllow] = useState(false)
@@ -38,6 +51,8 @@ export function TrainingConsentCard() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
+  // 表示している文言が古い（サーバーが 409 で拒否した）。再読み込みするまで操作させない。
+  const [stale, setStale] = useState(false)
 
   useEffect(() => {
     fetchConsent()
@@ -56,8 +71,17 @@ export function TrainingConsentCard() {
       const res = await fetch(ENDPOINT, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
-        body: JSON.stringify({ allow_training_use: next }),
+        body: JSON.stringify({
+          allow_training_use: next,
+          consent_text_version: TRAINING_CONSENT_TEXT_VERSION,
+        }),
       })
+      if (res.status === 409) {
+        // 何も保存されていない。古い文言のまま押し直しても同じなので、再読み込みを促す。
+        setAllow(previous)
+        setStale(true)
+        return
+      }
       if (!res.ok) throw new Error('failed')
       const data: { allow_training_use?: boolean } = await res.json()
       setAllow(data.allow_training_use === true)
@@ -84,10 +108,10 @@ export function TrainingConsentCard() {
           AI 面接の改善への協力
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          あなたの AI 面接の記録（発話とスコア）を、面接の採点モデルを改善するための学習に使ってよいかの設定です。
+          あなたの AI 面接の記録（発話・スコア・録画した動画）を、面接の採点モデルを改善するための学習に使ってよいかの設定です。
         </Typography>
         <Box component="ul" sx={{ m: 0, mb: 2, pl: 2.5, color: 'text.secondary', typography: 'body2' }}>
-          <li>氏名・メールアドレス・学校名・企業名などは、学習に使う前に別の記号に置き換えます。</li>
+          <li>氏名・メールアドレス・学校名・企業名などは、学習に使う前に別の記号に置き換えます。ただし、録画した動画の顔や声は置き換えられません。</li>
           <li>学習以外の目的には使いません。企業や先生に公開されることもありません。</li>
           <li>いつでもオフにできます。オフにすると、すでに学習用に書き出したあなたのデータも削除します。</li>
         </Box>
@@ -100,6 +124,11 @@ export function TrainingConsentCard() {
           <Alert severity="error">設定の取得に失敗しました。ページを再読み込みしてください。</Alert>
         ) : (
           <>
+            {stale && (
+              <Alert severity="warning" sx={{ mb: 1 }}>
+                同意の文言が更新されたため、保存しませんでした。画面を再読み込みして、新しい文言を確認してから操作してください。
+              </Alert>
+            )}
             {error && (
               <Alert severity="error" sx={{ mb: 1 }}>
                 {error}
@@ -114,11 +143,11 @@ export function TrainingConsentCard() {
               control={
                 <Switch
                   checked={allow}
-                  disabled={saving}
+                  disabled={saving || stale}
                   onChange={(e) => void change(e.target.checked)}
                 />
               }
-              label="面接の記録を、採点モデルの学習に使うことに同意する"
+              label="面接の記録（動画を含む）を、採点モデルの学習に使うことに同意する"
             />
           </>
         )}

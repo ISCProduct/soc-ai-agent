@@ -87,3 +87,26 @@ func (r *ConversationContextRepository) SetSessionSummary(userID uint, sessionID
 	}
 	return r.db.Model(ctx).Updates(map[string]any{"llm_summary": summary}).Error
 }
+
+// SetConsultIntent は相談の意図を保存する。既に保存済みなら上書きしない（最初の選択を正とする）。
+func (r *ConversationContextRepository) SetConsultIntent(userID uint, sessionID string, intent string) error {
+	ctx, err := r.GetOrCreate(userID, sessionID)
+	if err != nil {
+		return err
+	}
+	return r.db.Model(&models.ConversationContext{}).
+		Where("id = ? AND consult_intent = ''", ctx.ID).
+		Update("consult_intent", intent).Error
+}
+
+// GetConsultIntent は保存した相談の意図を返す。セッションが無い・未選択のときは空文字。
+func (r *ConversationContextRepository) GetConsultIntent(sessionID string) (string, error) {
+	ctx, err := r.GetBySessionID(sessionID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	return ctx.ConsultIntent, nil
+}

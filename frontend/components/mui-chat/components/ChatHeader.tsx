@@ -9,6 +9,9 @@ type ChatHeaderProps = {
   progressTotals: ProgressTotals | null
   questionCount: number
   totalQuestions: number
+  /** 目安の回答数を超えても判定できていないとき。暫定の結果を見る導線を出す（質問は続けられる） */
+  suggestProvisional?: boolean
+  onViewProvisional?: () => void
   onEndChat: () => void
 }
 
@@ -17,9 +20,10 @@ export function ChatHeader({
   progressTotals,
   questionCount,
   totalQuestions,
+  suggestProvisional = false,
+  onViewProvisional,
   onEndChat,
 }: ChatHeaderProps) {
-  const valid = progressTotals?.valid ?? questionCount
   const required = progressTotals?.required ?? Math.max(1, totalQuestions)
   const percent =
     progressTotals?.percent ?? Math.min(100, Math.round((questionCount / required) * 100))
@@ -41,7 +45,7 @@ export function ChatHeader({
           IT業界キャリアエージェント
         </Typography>
         <Typography variant="body2" color="text.secondary" className={styles.chatProgress}>
-          {valid}問に回答（全{required}問）
+          判定の進み具合 {percent}%
         </Typography>
         <LinearProgress
           variant="determinate"
@@ -54,6 +58,11 @@ export function ChatHeader({
             '& .MuiLinearProgress-bar': { bgcolor: CHAT_BRAND },
           }}
         />
+        {suggestProvisional && onViewProvisional && (
+          <Button variant="text" size="small" onClick={onViewProvisional} sx={{ mt: 0.5, px: 0, color: CHAT_ACCENT }}>
+            いまの暫定の結果を見る
+          </Button>
+        )}
       </Box>
       <Button
         variant="outlined"

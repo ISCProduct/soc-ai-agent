@@ -27,11 +27,12 @@ chromadb>=0.6.3,<0.7.0
 
 # --- 数値計算 ---
 # numpy 2.0 以降で chromadb および一部パッケージとの互換性問題が報告されているため上限を維持。
+# training/scorer（#2170）が直接使うため requirements.txt にも宣言した（上限はここと同じ）。
 numpy<3.0
 
 # --- LLM プロキシ ---
 # litellm は推移的依存。メジャーバージョン固定で API 互換性を保証。
-litellm>=1.106.6,<2.0
+litellm>=1.109.1,<2.0
 
 # --- OpenAI SDK ---
 # litellm>=1.83.7 が openai 2.x を要求するため 2.x 系列に移行。
@@ -57,4 +58,4 @@ prometheus-client>=0.26.0,<1.0
 
 # --- エラートラッキング（#1185） ---
 # FastAPI / Starlette 統合付き。3.x は未検証のため上限を設定する。
-sentry-sdk>=2.73.0,<3.0
+sentry-sdk>=2.75.0,<3.0

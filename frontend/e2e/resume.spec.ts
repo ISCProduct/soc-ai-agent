@@ -17,7 +17,10 @@ test.describe('職務経歴書レビューフロー', () => {
   test('職務経歴書ページが表示される', async ({ page }) => {
     await page.goto('/resume')
     await page.waitForLoadState('networkidle')
-    await expect(page.getByText('履歴書・エントリシート レビュー')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByRole('heading', { name: '履歴書・ES のレビュー' })).toBeVisible({ timeout: 8000 })
+    // 入力の流れ（書類 → 応募先 → 結果）が見え、書類が無いうちは開始できない
+    await expect(page.getByRole('heading', { name: /レビューする書類/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'レビューを始める' })).toBeDisabled()
   })
 
   test('PDFアップロードからレビュー完了まで', async ({ page }) => {
@@ -59,23 +62,24 @@ test.describe('職務経歴書レビューフロー', () => {
 
     await page.goto('/resume')
     await page.waitForLoadState('networkidle')
-    await expect(page.getByText('履歴書・エントリシート レビュー')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByRole('heading', { name: '履歴書・ES のレビュー' })).toBeVisible({ timeout: 8000 })
 
-    // "アップロード" ボタンを直接クリックしてモックで documentId を取得する
-    const uploadBtn = page.getByRole('button', { name: 'アップロード', exact: true })
-    if (await uploadBtn.count() > 0) {
-      await uploadBtn.click()
-    }
+    // ファイルを選ぶと、そのまま読み込まれる
+    await page.locator('input[type=file]').setInputFiles({ name: '履歴書.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4') })
+    await expect(page.getByText('読み込めました')).toBeVisible()
 
-    const reviewBtn = page.getByRole('button', { name: 'レビューを生成' })
-    const isEnabled = await reviewBtn.isEnabled({ timeout: 5000 }).catch(() => false)
-    if (isEnabled) {
-      // #570以降: 企業は候補選択必須。未選択時は職種入力で一般レビューする
-      await page.getByLabel(/応募職種/).fill('エンジニア')
-      await reviewBtn.click()
-      await expect(page.getByText('全体的にバランスの取れた経歴書です。')).toBeVisible({ timeout: 10000 })
-      await expect(page.getByText('店舗売上を前年比10%伸ばしました')).toBeVisible()
-      await expect(page.getByText(/AIの提案です/)).toBeVisible()
-    }
+    // #570以降: 企業は候補選択必須。企業を決めないときは「職種だけで見る」で一般レビューする
+    const startBtn = page.getByRole('button', { name: 'レビューを始める' })
+    await expect(startBtn).toBeDisabled()
+    await page.getByRole('radio', { name: '職種だけで見る' }).click()
+    await page.getByLabel(/応募職種/).fill('エンジニア')
+    await expect(startBtn).toBeEnabled()
+    await startBtn.click()
+
+    // 結果: 書類の強調と、番号つきの指摘。選んだ指摘に書き換え案がAIの提案として出る
+    await expect(page.getByRole('heading', { name: 'レビュー結果' })).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText('全体的にバランスの取れた経歴書です。')).toBeVisible()
+    await expect(page.getByText('3名でWebの機能開発を1年担当しました').or(page.getByText('店舗売上を前年比10%伸ばしました'))).toBeVisible()
+    await expect(page.getByText(/事実と違う内容になっていないか/)).toBeVisible()
   })
 })
