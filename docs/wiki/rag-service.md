@@ -215,6 +215,13 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 
 - `POST /api/resume/review` の応答と、`/api/resume/review/stream` の `complete` イベントに `format_findings` を載せる。保存はしない（#1531）。
 
+### 書類の表示（SOCAIAGENT-664）
+
+- レビュー結果の左側は、実際の書類（PDF）を `react-pdf`（PDF.js）で描き、指摘の位置に番号つきの強調を重ねる。書類は `GET /api/resume/document`（DOCX・Google Docs もレビュー時に PDF へ変換済みの `NormalizedPath`）から取る。
+- 強調の位置は、指摘の `bbox`（`{"bbox":[x0,y0,x1,y1],"page_width":W,"page_height":H}`。OCR と同じ 150dpi の画素で、左上が原点）をページに対する割合にして決める（`utils.ts` の `parseBBox` / `overlayRect`）。位置が分からない指摘（形式チェックなど）は、一覧にだけ出す。
+- 書類を読み込めないとき（レビュー前・壊れている・通信失敗）は、指摘の原文を並べた表示に切り替える。
+- 日本語の書類は文字コードの対応表（CMap）に頼るので、`frontend/public/pdfjs/` に写しを置いている。`pdfjs-dist` を上げたら `npm run pdfjs:assets` で更新する。
+
 ### ストリーム中断の扱い（SOCAIAGENT-664）
 
 - `/resume/review/stream` の失敗時、`error` イベントの `message` は例外文ではなく固定文言（`REVIEW_STREAM_ERROR_MESSAGE`）にする。例外の中身はログにだけ残す。
