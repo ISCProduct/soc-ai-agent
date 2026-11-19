@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"Backend/internal/models"
@@ -207,6 +208,7 @@ func ValidateRubricScores(scores map[string]int) error {
 // 入れ替えた捏造（「部費を3倍にすることができました」）は正当な要約と同じ帯に入り、
 // しきい値では分離できない（`TestValidateEvidence_KnownLimitation`、Issue #1566）。
 // 発話に無い数値を含むものだけは hasUnspokenNumber で別に弾く（#1596）。
+// 発話に無いカタカナ・英字の語（技術名・店の種類など）を含むものも hasUnspokenTerm で弾く（SOCAIAGENT-675）。
 //
 // 評価項目やプロンプトを変えたときは textsim で実測してこの表を引き直すこと。
 const EvidenceMatchThreshold = 0.25
@@ -319,29 +321,31 @@ func SpokenContent(utterances []models.InterviewUtterance) SpokenEvidence {
 	for _, n := range extractNumbers(b.String()) {
 		numbers[n] = true
 	}
-	return SpokenEvidence{Content: textsim.NewContent(b.String()), numbers: numbers}
+	return SpokenEvidence{Content: textsim.NewContent(b.String()), numbers: numbers, normalized: normalizeForTerms(b.String())}
 }
 
 // SpokenEvidence は受験者発話の照合用の表現。
 type SpokenEvidence struct {
 	// Content は内容語だけの文字bigram（textsim.ContentBestMatch 用）。
 	Content textsim.Bigrams
-	// numbers は発話に出た数値（正規化済み）。
+	// numbers は発話に出た数値（正規化済み。漢数字も算用数字にしたもの）。
 	numbers map[string]bool
+	// normalized は発話の全文を、語の照合用に幅と大文字小文字をそろえたもの（SOCAIAGENT-675）。
+	normalized string
 }
 
-var numberPattern = regexp.MustCompile(`[0-9０-９]+(?:[,，.．][0-9０-９]+)*`)
+var numberPattern = regexp.MustCompile(`([0-9０-９]+(?:[,，.．][0-9０-９]+)*)(万|億)?`)
 
-// extractNumbers は算用数字の数値を正規化して返す（全角→半角、桁区切りのカンマを除去）。
+// extractNumbers は数値を正規化して返す（全角→半角、桁区切りのカンマを除去）。
 //
-// ponytail: 漢数字（三倍・五十人）は拾わない。発話側が漢数字で evidence 側が算用数字だと
-// 正当な引用も未照合になるが、誤った値より欠損を選ぶ（docs/wiki/scoring.md §2-3）。
-// 取りこぼしが目立つようなら漢数字の数値化を足す。
+// 漢数字も算用数字にして返す（SOCAIAGENT-675。三倍→"3"、五十人→"50"）。発話が漢数字で
+// evidence が算用数字だと正当な引用が未照合になり、逆に evidence 側の漢数字は照合されず
+// 捏造した数値が通っていた。数値にするのは助数詞つきと位取りの並びだけ（extractKanjiNumbers）。
 func extractNumbers(s string) []string {
-	var out []string
-	for _, m := range numberPattern.FindAllString(s, -1) {
+	out := extractKanjiNumbers(s)
+	for _, sub := range numberPattern.FindAllStringSubmatch(s, -1) {
 		var b strings.Builder
-		for _, r := range m {
+		for _, r := range sub[1] {
 			switch {
 			case r >= '０' && r <= '９':
 				b.WriteRune('0' + (r - '０'))
@@ -352,9 +356,31 @@ func extractNumbers(s string) []string {
 				b.WriteRune(r)
 			}
 		}
-		out = append(out, b.String())
+		// 「200万円」と「二百万円」を同じ数値にする（漢数字側は万・億を掛けた値になるため）
+		out = append(out, scaleArabicNumber(b.String(), sub[2]))
 	}
 	return out
+}
+
+// scaleArabicNumber は算用数字に続く万・億を掛けた値を返す（"200"+"万"→"2000000"）。
+// 掛けられない値（小数の端数が残るなど）はそのまま返す。
+func scaleArabicNumber(n, unit string) string {
+	var mul int64
+	switch unit {
+	case "万":
+		mul = 10_000
+	case "億":
+		mul = 100_000_000
+	default:
+		return n
+	}
+	if v, err := strconv.ParseFloat(n, 64); err == nil {
+		scaled := v * float64(mul)
+		if scaled == float64(int64(scaled)) {
+			return strconv.FormatInt(int64(scaled), 10)
+		}
+	}
+	return n
 }
 
 // hasUnspokenNumber は evidence に、受験者が発話していない数値があるかを返す（#1596）。
@@ -400,7 +426,8 @@ func ValidateEvidence(evidence map[string]string, spoken SpokenEvidence) Evidenc
 			continue
 		}
 		out.Checked++
-		if textsim.ContentBestMatch(text, spoken.Content) < EvidenceMatchThreshold || hasUnspokenNumber(text, spoken) {
+		if textsim.ContentBestMatch(text, spoken.Content) < EvidenceMatchThreshold ||
+			hasUnspokenNumber(text, spoken) || hasUnspokenTerm(text, spoken) {
 			out.Unmatched = append(out.Unmatched, key)
 		}
 	}
