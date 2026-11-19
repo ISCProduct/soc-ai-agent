@@ -31,6 +31,7 @@ import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import { authService } from '@/lib/auth'
 import { datetimeLocalToISO, formatLocalDateKey, isoToDatetimeLocal } from '@/lib/datetime-local'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
+import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ListSkeleton } from '@/components/common/ListSkeleton'
 
@@ -109,6 +110,8 @@ export default function PageContent() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<EventFormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  // 削除の確認ダイアログで確認中のイベントID。null なら閉じている
+  const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null)
 
   useEffect(() => {
     const auth = authService.getStoredUser()
@@ -208,15 +211,24 @@ export default function PageContent() {
     }
   }
 
+  // 削除は確認ダイアログで確定するまで実行しない
+  const requestDelete = (id: number) => {
+    if (!userId) return
+    setDeleteTargetId(id)
+  }
+
   const handleDelete = async (id: number) => {
     if (!userId) return
-    if (!confirm('このイベントを削除しますか？')) return
+    // 編集ダイアログから削除した場合も閉じる。失敗時のエラーは画面側に出すため
+    setDialogOpen(false)
     try {
       const res = await fetch(`/api/schedule/${id}`, { method: 'DELETE' })
       if (!res.ok && res.status !== 204) throw new Error('削除に失敗しました')
       await fetchEvents()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDeleteTargetId(null)
     }
   }
 
@@ -412,7 +424,7 @@ export default function PageContent() {
                   <IconButton size="small" onClick={() => openEditDialog(ev)} aria-label="予定を編集">
                     <EditIcon fontSize="small" />
                   </IconButton>
-                  <IconButton size="small" onClick={() => handleDelete(ev.id)} aria-label="予定を削除">
+                  <IconButton size="small" onClick={() => requestDelete(ev.id)} aria-label="予定を削除">
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </Stack>
@@ -486,10 +498,7 @@ export default function PageContent() {
           {editingId && (
             <Button
               color="error"
-              onClick={async () => {
-                setDialogOpen(false)
-                await handleDelete(editingId)
-              }}
+              onClick={() => requestDelete(editingId)}
             >
               削除
             </Button>
@@ -501,6 +510,17 @@ export default function PageContent() {
           </Button>
         </DialogActions>
       </Dialog>
+      <ConfirmDialog
+        open={deleteTargetId !== null}
+        title="イベントを削除"
+        message="このイベントを削除しますか？"
+        confirmLabel="削除する"
+        destructive
+        onConfirm={async () => {
+          if (deleteTargetId !== null) await handleDelete(deleteTargetId)
+        }}
+        onCancel={() => setDeleteTargetId(null)}
+      />
       <BottomNavSpacer />
     </Box>
   )

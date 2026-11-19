@@ -45,6 +45,7 @@ import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContaine
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
+import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { companyAspectHref, type CompanyAspect } from '@/components/admin/CompanyAspectTabs'
 import { fetchCompanyPrimary, formatFetchPrimarySummary, formatFetchPrimaryEmptyAspects, hasActionableSoftEmpty } from '@/lib/admin/company-fetch'
 import {
@@ -227,6 +228,8 @@ export default function PageContent() {
   const [menuAnchor, setMenuAnchor] = useState<{ el: HTMLElement; company: Company } | null>(null)
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [bulkPublishing, setBulkPublishing] = useState(false)
+  // 一括公開の確認ダイアログで確認中の対象。開いた時点の対象を固定する。null なら閉じている
+  const [bulkPublishTargets, setBulkPublishTargets] = useState<Company[] | null>(null)
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
   // 学校の承認済み企業ID。null は「取得できていない」。空集合と区別する(#1452)。
   // 以前は失敗時も空集合のままで、承認済みの企業まで一覧が全件「未承認」に見えていた。
@@ -654,7 +657,7 @@ export default function PageContent() {
     await reloadCurrentList()
   }
 
-  const handleBulkPublish = async () => {
+  const handleBulkPublish = () => {
     const targets = companies.filter((c) => selectedIds.includes(c.id) && canSelectForPublish(c))
     if (targets.length === 0) {
       setFetchSeverity('warning')
@@ -662,9 +665,11 @@ export default function PageContent() {
       return
     }
 
-    const ok = window.confirm(`選択した ${targets.length} 社を学生に公開しますか？`)
-    if (!ok) return
+    // 確認ダイアログで確定するまで公開しない
+    setBulkPublishTargets(targets)
+  }
 
+  const runBulkPublish = async (targets: Company[]) => {
     setBulkPublishing(true)
     setError('')
     setFetchMessage('')
@@ -1638,6 +1643,22 @@ export default function PageContent() {
           </Stack>
         </AccordionDetails>
       </Accordion>
+
+      <ConfirmDialog
+        open={bulkPublishTargets !== null}
+        title="企業を一括公開"
+        message={bulkPublishTargets ? `選択した ${bulkPublishTargets.length} 社を学生に公開しますか？` : ''}
+        confirmLabel="公開する"
+        onConfirm={async () => {
+          if (!bulkPublishTargets) return
+          try {
+            await runBulkPublish(bulkPublishTargets)
+          } finally {
+            setBulkPublishTargets(null)
+          }
+        }}
+        onCancel={() => setBulkPublishTargets(null)}
+      />
     </PageContainer>
   )
 }

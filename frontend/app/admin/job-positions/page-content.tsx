@@ -23,6 +23,7 @@ import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContaine
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
+import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { AdminListCard } from '@/components/admin/AdminListCard'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { isCompanyUnpublished } from '@/lib/company/draft'
@@ -252,6 +253,8 @@ export default function PageContent() {
   const [isPlatform, setIsPlatform] = useState(false)
   const [jobPositions, setJobPositions] = useState<JobPosition[]>([])
   const [error, setError] = useState('')
+  // 未公開企業の求人を承認する確認ダイアログで確認中の求人ID。null なら閉じている
+  const [publishConfirmId, setPublishConfirmId] = useState<number | null>(null)
   const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'published' | 'rejected'>('all')
 
   const fetchJobPositions = async () => {
@@ -272,14 +275,17 @@ export default function PageContent() {
       .catch(() => setIsPlatform(false))
   }, [])
 
+  // 企業が未公開のときだけ、確認ダイアログで確定してから承認する
   const handlePublish = async (id: number) => {
     const position = jobPositions.find((p) => p.id === id)
     if (isCompanyUnpublished(position?.company)) {
-      const ok = window.confirm(
-        'この企業はまだ公開されていません。求人だけ承認しても学生には表示されません。続行しますか？',
-      )
-      if (!ok) return
+      setPublishConfirmId(id)
+      return
     }
+    await publishPosition(id)
+  }
+
+  const publishPosition = async (id: number) => {
     const res = await fetch(`/api/admin/job-positions/${id}/publish`, {
       method: 'PATCH',
       headers: authService.getAdminFetchHeaders(),
@@ -367,6 +373,22 @@ export default function PageContent() {
           </Stack>
         </AdminPanelBody>
       </AdminPanel>
+
+      <ConfirmDialog
+        open={publishConfirmId !== null}
+        title="未公開企業の求人を承認"
+        message="この企業はまだ公開されていません。求人だけ承認しても学生には表示されません。続行しますか？"
+        confirmLabel="承認する"
+        onConfirm={async () => {
+          if (publishConfirmId === null) return
+          try {
+            await publishPosition(publishConfirmId)
+          } finally {
+            setPublishConfirmId(null)
+          }
+        }}
+        onCancel={() => setPublishConfirmId(null)}
+      />
     </PageContainer>
   )
 }
