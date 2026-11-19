@@ -179,8 +179,9 @@ export default function PageContent() {
                   value={answers[key] ?? ''}
                   onChange={(e) => answer(q.id, Number(e.target.value))}
                 >
+                  {/* Radio の既定の余白 9px だと行の高さが 42px。10px にして押せる範囲を 44px にする（#2214） */}
                   {LIKERT_OPTIONS.map((o) => (
-                    <FormControlLabel key={o.value} value={o.value} control={<Radio />} label={o.label} />
+                    <FormControlLabel key={o.value} value={o.value} control={<Radio sx={{ p: '10px' }} />} label={o.label} />
                   ))}
                 </RadioGroup>
                 <Typography variant="caption" role="status" color={state === 'error' ? 'error' : 'text.secondary'}>

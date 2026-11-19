@@ -318,6 +318,9 @@ export function ChatMessageList({
                     onClick={() => onQuickSelect(option)}
                     clickable
                     sx={{
+                      // 押せる Chip は高さ32pxでは足りないので 44px にする（#2214）。角は丸いまま
+                      height: 44,
+                      borderRadius: '22px',
                       cursor: 'pointer',
                       borderColor: CHAT_ACCENT,
                       '&:hover': { bgcolor: 'rgba(236,91,19,0.08)' },

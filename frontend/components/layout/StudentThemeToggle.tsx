@@ -17,7 +17,8 @@ export function StudentThemeToggle() {
           <FormControlLabel
             key={key}
             value={key}
-            control={<Radio />}
+            // Radio の既定の余白 9px だと行の高さが 42px。10px にして押せる範囲を 44px にする（#2214）
+            control={<Radio sx={{ p: '10px' }} />}
             label={STUDENT_THEME_LABELS[key]}
           />
         ))}

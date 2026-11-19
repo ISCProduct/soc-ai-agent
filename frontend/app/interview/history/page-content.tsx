@@ -187,10 +187,10 @@ export default function PageContent() {
               onChange={(_, v) => { if (v !== null) setTrendLimit(v) }}
               size="small"
             >
-              {/* size="small" の高さ37pxではモバイルのタップ領域が足りない（#1481） */}
-              <ToggleButton value={5} sx={{ fontSize: 12, px: 1.5, minHeight: 44 }}>直近5回</ToggleButton>
-              <ToggleButton value={10} sx={{ fontSize: 12, px: 1.5, minHeight: 44 }}>直近10回</ToggleButton>
-              <ToggleButton value={0} sx={{ fontSize: 12, px: 1.5, minHeight: 44 }}>全期間</ToggleButton>
+              {/* size="small" の高さ37pxではモバイルのタップ領域が足りない（#1481）。文字は本文の最小の 14px（#2214） */}
+              <ToggleButton value={5} sx={{ fontSize: 14, px: 1.5, minHeight: 44 }}>直近5回</ToggleButton>
+              <ToggleButton value={10} sx={{ fontSize: 14, px: 1.5, minHeight: 44 }}>直近10回</ToggleButton>
+              <ToggleButton value={0} sx={{ fontSize: 14, px: 1.5, minHeight: 44 }}>全期間</ToggleButton>
             </ToggleButtonGroup>
           </Stack>
           {trendLoading ? (

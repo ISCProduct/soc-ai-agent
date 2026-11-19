@@ -15,6 +15,9 @@ export const STUDENT_THEME_LABELS: Record<StudentThemeMode, string> = {
 // 定義は design-tokens に一本化してある（企業ポータルも同じ書体を使うため）。
 const FONT_FAMILY = FONT_STACK_PROPORTIONAL
 
+/** 押せる範囲の最小の大きさ（px）。縦横ともこれ以上にする（#2214、資料 08章）。 */
+export const TOUCH_TARGET_MIN = 44
+
 /** パターン3 既定: Wong に近い色覚セーフ青 */
 export const COMFORTABLE_PRIMARY = '#0072B2'
 
@@ -196,6 +199,20 @@ export function createStudentMuiTheme(mode: StudentThemeMode) {
       MuiButton: {
         styleOverrides: {
           root: { textTransform: 'none', fontWeight: 700, minHeight: 44 },
+        },
+      },
+      // #2214: アイコンだけのボタン・切り替えボタンの押せる範囲を縦横 44px 以上にする。
+      // MUI 既定は IconButton が約40px（small は約30px）、ToggleButton small が約37px。
+      // アイコンや文字の大きさは変えず、最小の大きさだけを広げる（中身は中央に寄る）。
+      // 管理画面・企業ポータルは別のテーマ（lib/admin/theme.ts・lib/company/theme.ts）なので影響しない。
+      MuiIconButton: {
+        styleOverrides: {
+          root: { minWidth: TOUCH_TARGET_MIN, minHeight: TOUCH_TARGET_MIN },
+        },
+      },
+      MuiToggleButton: {
+        styleOverrides: {
+          root: { minWidth: TOUCH_TARGET_MIN, minHeight: TOUCH_TARGET_MIN },
         },
       },
       MuiCard: {
