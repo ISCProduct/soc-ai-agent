@@ -126,6 +126,10 @@ jobs:
       - name: govulncheck の例外判定
         run: ./automation/test/govulncheck-filter-test.sh
 
+      # pip-audit（RAG）の例外判定。考え方は govulncheck と同じ（SOCAIAGENT-578）。
+      - name: pip-audit の例外判定
+        run: ./automation/test/pip-audit-filter-test.sh
+
       # 版番号の比較対象。checkout の既定は fetch-depth=1 で origin/develop を
       # 持たないため、ここで取得する。
       - name: develop を取得（版番号の比較用）

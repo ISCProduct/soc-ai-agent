@@ -376,6 +376,12 @@ CI の `Security scan (govulncheck)` は、コードから到達する脆弱性�
 
 **現在の例外（期限 2026-12-31）:** Echo v4 の GO-2026-6875（`Proxy` の X-Real-IP 転送）と GO-2026-6872（`RealIP` と標準 `RateLimiter` の XFF 先頭の信頼）。v4 には修正版がなく、v5.4.0 以降で修正されている。アプリは該当機能を使わず、レート制限は自前の `middleware.GetClientIP` が XFF の末尾を読む。期限までに、v4 の修正版を待つか v5 へ移行するかを判断する。
 
+### pip-audit の例外（RAG）
+
+RAG（Python）の依存は、`RAG Python Tests` の `Dependency audit (pip-audit)` が検査する（SOCAIAGENT-578）。本番と同じ Python 3.12 で `-c rag/constraints.txt` 付きで入れ、実際に入った版（`pip freeze`）を `pip-audit` で調べる。考え方は govulncheck と同じで、修正版がなく、該当機能を使っていない場合だけ `.github/pip-audit-allowlist.json` に理由と期限を付けて例外にできる。期限切れ・修正版の公開・別のパッケージでの検出・前提の使い方（`forbidden_patterns`、`rag/` のテスト以外のコードと設定を探す）のどれかで例外が効かなくなり、CI が失敗する。判定のテストは `automation/test/pip-audit-filter-test.sh`。
+
+**現在の例外（期限 2026-12-31）:** chromadb 0.6.3 の PYSEC-2026-3813 / 3814 / 3815（Chroma サーバーの HTTP API の認可漏れ・`trust_remote_code` によるコード実行・RBAC のテナント確認漏れ）。修正版がない。RAG の chromadb パッケージはクライアント（`HttpClient`）か埋め込み（`PersistentClient`）として使い、サーバーを動かさない。ただし別コンテナで動かしている `chromadb/chroma:0.6.3`（docker-compose・staging・prod）のサーバーは対象なので、修正版が出たらサーバーのイメージも上げる。
+
 ### 面接セッション監視
 
 同時接続数の上限: `REALTIME_MAX_CONCURRENT_CONNECTIONS=30`

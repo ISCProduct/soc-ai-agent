@@ -1,0 +1,23 @@
+[
+  {
+    "id": "PYSEC-2026-3813",
+    "package": "chromadb",
+    "reason": "Chroma サーバーの HTTP API で、認証済みの利用者が他のテナントのコレクションを読み書きできる問題（CVE-2026-45830）。RAG の chromadb パッケージはクライアント（HttpClient）か埋め込み（PersistentClient）として使い、サーバーを動かさない。修正版が出ていない。別コンテナの chromadb/chroma サーバーイメージは対象なので、そちらは別途確認する。",
+    "expires": "2026-12-31",
+    "forbidden_patterns": ["chromadb\\.app", "chromadb\\.server", "chroma run", "chroma_server_authz"]
+  },
+  {
+    "id": "PYSEC-2026-3814",
+    "package": "chromadb",
+    "reason": "Chroma サーバーのコレクション更新 API に trust_remote_code を付けて任意のコードを動かせる問題（CVE-2026-45833）。RAG はサーバーを動かさず、埋め込み関数に trust_remote_code も使わない。修正版が出ていない。別コンテナの chromadb/chroma サーバーイメージは対象なので、そちらは別途確認する。",
+    "expires": "2026-12-31",
+    "forbidden_patterns": ["chromadb\\.app", "chromadb\\.server", "chroma run", "trust_remote_code"]
+  },
+  {
+    "id": "PYSEC-2026-3815",
+    "package": "chromadb",
+    "reason": "Chroma サーバーの SimpleRBACAuthorizationProvider がテナントを確かめない問題（CVE-2026-45831）。RAG はサーバーを動かさず、この認可プロバイダも設定しない。修正版が出ていない。別コンテナの chromadb/chroma サーバーイメージは対象なので、そちらは別途確認する。",
+    "expires": "2026-12-31",
+    "forbidden_patterns": ["chromadb\\.app", "chromadb\\.server", "chroma run", "SimpleRBACAuthorizationProvider", "chroma_server_authz"]
+  }
+]
