@@ -1,0 +1,115 @@
+# staging の異常を人へ届ける（prod/alarms.tf と同じ設計。SOCAIAGENT-584）。
+#
+# これまで staging には CloudWatch アラームが無く、検証環境の 5xx・遅延・RDS 異常に
+# 気付けなかった。staging も EC2 停止中は ALB ターゲットが全滅して ELB が生の503を返す
+# （README「エラーページ」参照）ので、prod と同様に停止中に鳴らさない。
+#   - treat_missing_data = "notBreaching"
+#   - 停止中でも出る HTTPCode_ELB_5XX は対象にせず、アプリが返した HTTPCode_Target_5XX を見る
+# 通知先は staging 専用の SNS トピック（prod の soc-app-alarms とは別）。
+
+resource "aws_sns_topic" "alarms" {
+  name = "${var.project_name}-alarms"
+  tags = local.tags
+}
+
+# メール宛先。設定しないとアラームは状態を持つだけで誰にも届かない。
+# 購読はメール側で確認(Confirm)するまで有効にならない。
+resource "aws_sns_topic_subscription" "alarms_email" {
+  count     = var.alarm_email == "" ? 0 : 1
+  topic_arn = aws_sns_topic.alarms.arn
+  protocol  = "email"
+  endpoint  = var.alarm_email
+}
+
+locals {
+  alb_dimension = {
+    LoadBalancer = replace(module.alb.alb_arn, "/^.*:loadbalancer\\//", "")
+  }
+}
+
+# アプリが返した 5xx。ALB自身が返す503(ターゲット全滅=計画停止)とは別物で、
+# こちらは稼働中にしか出ない。1件でも出たら中身を見る必要がある。
+resource "aws_cloudwatch_metric_alarm" "target_5xx" {
+  alarm_name          = "${var.project_name}-target-5xx"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "HTTPCode_Target_5XX_Count"
+  namespace           = "AWS/ApplicationELB"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 5
+  dimensions          = local.alb_dimension
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "アプリが5xxを返している。計画停止中のELB 5xxとは別で、稼働中のみ発生する"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+  tags                = local.tags
+}
+
+# 応答が遅い。体感で分かる前に気付くため。
+resource "aws_cloudwatch_metric_alarm" "target_latency" {
+  alarm_name          = "${var.project_name}-target-latency"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "TargetResponseTime"
+  namespace           = "AWS/ApplicationELB"
+  period              = 300
+  extended_statistic  = "p95"
+  threshold           = 3
+  dimensions          = local.alb_dimension
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "p95応答時間が3秒を超えている"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  tags                = local.tags
+}
+
+# ディスク枯渇。RDSは停止中もストレージ課金され、枯渇すると起動しても書けない。
+resource "aws_cloudwatch_metric_alarm" "rds_storage" {
+  alarm_name          = "${var.project_name}-rds-free-storage"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "FreeStorageSpace"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Minimum"
+  threshold           = 2147483648 # 2GiB
+  dimensions          = { DBInstanceIdentifier = "${var.project_name}-mysql" }
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "RDSの空き容量が2GiBを下回った"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  tags                = local.tags
+}
+
+# 接続が枯渇すると AI 以外の機能も止まる。db.t4g.micro の max_connections は約85。
+resource "aws_cloudwatch_metric_alarm" "rds_connections" {
+  alarm_name          = "${var.project_name}-rds-connections"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "DatabaseConnections"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Maximum"
+  threshold           = 68
+  dimensions          = { DBInstanceIdentifier = "${var.project_name}-mysql" }
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "RDSの接続数が上限の8割を超えた"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  tags                = local.tags
+}
+
+# db.t4g.micro は小さく、CPUが張り付くと一気に詰まる。
+resource "aws_cloudwatch_metric_alarm" "rds_cpu" {
+  alarm_name          = "${var.project_name}-rds-cpu"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 80
+  dimensions          = { DBInstanceIdentifier = "${var.project_name}-mysql" }
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "RDSのCPUが80%を10分超えている"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  tags                = local.tags
+}
