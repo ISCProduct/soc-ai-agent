@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	admincontrollers "Backend/internal/controllers/admin"
@@ -283,6 +284,21 @@ func TestAdminJobController_GraduateEmployments_List_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 	testsupport.AssertStatus(t, newAdminJobController(nil, nil, gradRepo, nil).GraduateEmployments, testsupport.NewCtx(req, rec), http.StatusOK)
 	gradRepo.AssertExpectations(t)
+}
+
+func TestAdminJobController_GraduateEmploymentSummary_NoNames(t *testing.T) {
+	gradRepo := &mocks.GraduateEmploymentRepositoryMock{}
+	gradRepo.On("PlacementFacts", (*uint)(nil)).Return([]models.GraduatePlacement{
+		{GraduationYear: 2024, SchoolName: "A校", Industry: "IT"},
+		{GraduationYear: 2024, SchoolName: "A校", Industry: "IT"},
+	}, nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/summary", nil), nil)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, newAdminJobController(nil, nil, gradRepo, nil).GraduateEmploymentSummary, testsupport.NewCtx(req, rec), http.StatusOK)
+	gradRepo.AssertExpectations(t)
+	if strings.Contains(rec.Body.String(), "graduate_name") || !strings.Contains(rec.Body.String(), `"offer_rate_available":false`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
 }
 
 func TestAdminJobController_GetGraduateEmployment_InvalidID(t *testing.T) {

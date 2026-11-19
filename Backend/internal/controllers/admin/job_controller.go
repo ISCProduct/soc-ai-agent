@@ -5,6 +5,7 @@ import (
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
+	"Backend/internal/services/graduate"
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/school"
 	"net/http"
@@ -185,6 +186,28 @@ func (c *AdminJobController) GraduateEmployments(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"entries": entries,
 	})
+}
+
+// GraduateEmploymentSummary GET /api/admin/graduate-employments/summary
+// 氏名は返さない。内定率は卒業生全体の人数が無いので計算しない。
+func (c *AdminJobController) GraduateEmploymentSummary(ctx echo.Context) error {
+	schoolID, err := httpapi.AdminSchoolFilter(ctx)
+	if err != nil {
+		return err
+	}
+	rows, err := c.graduateRepo.PlacementFacts(schoolID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to summarize graduate employments")
+	}
+	facts := make([]graduate.Placement, len(rows))
+	for i, row := range rows {
+		facts[i] = graduate.Placement{
+			GraduationYear: row.GraduationYear,
+			SchoolName:     row.SchoolName,
+			Industry:       row.Industry,
+		}
+	}
+	return ctx.JSON(http.StatusOK, graduate.Summarize(facts))
 }
 
 // resolveGraduateSchoolID は作成する卒業生就職情報に紐づける学校IDを決める(#1157)。
