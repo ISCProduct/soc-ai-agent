@@ -68,7 +68,7 @@ func clampAxis(v int) int {
 }
 
 // rankByMatchScore はマッチ度降順の企業インデックスを返す。
-// 並べ方は topMatchesByScore と同じ安定ソートで、同点は元の順序のまま残る。
+// 点数の格子を見るための並びで、推薦の同点副キー（matchrank）とは別。
 func rankByMatchScore(user resolutionProfile, companies []resolutionProfile, axes []int) []int {
 	idx := make([]int, len(companies))
 	for i := range idx {
