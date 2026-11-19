@@ -492,7 +492,7 @@ func (r *UserWeightScoreRepository) RollbackRecalculatedSessions(jobID uint, ver
 
 // rollbackSnapshot は1セッションを元に戻す。再計算の後にチャット回答や履歴書・ES・面接の
 // 反映があったセッションは、戻すとその更新が消えるので戻さない。戻さなかったスナップショットは
-// 消さない（唯一の控えなので）。
+// 消さない（唯一の控えなので）。行がすでに無いセッションは、控えから書き戻す。
 func (r *UserWeightScoreRepository) rollbackSnapshot(snapshot models.UserScoreRecalculationSnapshot, version string) (bool, error) {
 	var rows []models.UserWeightScore
 	if err := json.Unmarshal([]byte(snapshot.ScoresJSON), &rows); err != nil {
@@ -506,15 +506,19 @@ func (r *UserWeightScoreRepository) rollbackSnapshot(snapshot models.UserScoreRe
 		if err := scope.Session(&gorm.Session{}).Clauses(clause.Locking{Strength: "UPDATE"}).Order("id").Find(&current).Error; err != nil {
 			return err
 		}
-		if len(current) == 0 || changedSinceRecalculation(current, rows, version) {
+		// 行がすでに無いセッションは、再計算の後に更新されたのではない（更新なら行がある）。
+		// 戻さずにいると、控えだけが残り続けて元の点数に戻せないので、控えから書き戻す。
+		if len(current) > 0 && changedSinceRecalculation(current, rows, version) {
 			return nil
 		}
-		lockedIDs := make([]uint, len(current))
-		for i, r := range current {
-			lockedIDs[i] = r.ID
-		}
-		if err := tx.Where("id IN ?", lockedIDs).Delete(&models.UserWeightScore{}).Error; err != nil {
-			return err
+		if len(current) > 0 {
+			lockedIDs := make([]uint, len(current))
+			for i, r := range current {
+				lockedIDs[i] = r.ID
+			}
+			if err := tx.Where("id IN ?", lockedIDs).Delete(&models.UserWeightScore{}).Error; err != nil {
+				return err
+			}
 		}
 		for i := range rows {
 			rows[i].ID = 0
