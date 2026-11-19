@@ -126,7 +126,7 @@ resource "aws_cloudfront_response_headers_policy" "hsts" {
     strict_transport_security {
       access_control_max_age_sec = 63072000
       include_subdomains         = true
-      override                    = true
+      override                   = true
     }
   }
 }
@@ -217,11 +217,11 @@ resource "aws_cloudfront_distribution" "app" {
   # 単一オリジンとし、500/502/503/504はcustom_error_responseで
   # 静的ページ(別ビヘイビア経由でS3から直接取得)に差し替える。
   default_cache_behavior {
-    allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "PATCH", "POST", "DELETE"]
-    cached_methods           = ["GET", "HEAD"]
-    target_origin_id         = "alb"
-    viewer_protocol_policy   = "redirect-to-https"
-    compress                 = true
+    allowed_methods            = ["GET", "HEAD", "OPTIONS", "PUT", "PATCH", "POST", "DELETE"]
+    cached_methods             = ["GET", "HEAD"]
+    target_origin_id           = "alb"
+    viewer_protocol_policy     = "redirect-to-https"
+    compress                   = true
     cache_policy_id            = aws_cloudfront_cache_policy.no_cache.id
     origin_request_policy_id   = aws_cloudfront_origin_request_policy.all_viewer.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.hsts.id
@@ -229,11 +229,11 @@ resource "aws_cloudfront_distribution" "app" {
 
   # 静的ページ自体はS3から直接取得(GET/HEADのみのため制約なし)
   ordered_cache_behavior {
-    path_pattern           = "/service-unavailable.html"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = "s3-errors"
-    viewer_protocol_policy = "redirect-to-https"
+    path_pattern               = "/service-unavailable.html"
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    target_origin_id           = "s3-errors"
+    viewer_protocol_policy     = "redirect-to-https"
     compress                   = true
     cache_policy_id            = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # AWS managed: CachingDisabled
     response_headers_policy_id = aws_cloudfront_response_headers_policy.hsts.id
