@@ -1,11 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import NextLink from 'next/link'
 import { Box, Button, Skeleton, Typography } from '@mui/material'
 import EventIcon from '@mui/icons-material/Event'
 import { authService } from '@/lib/auth'
-import { fetchWithTimeout } from '@/lib/fetch-timeout'
+import { fetchWithTimeout, LIST_FETCH_TIMEOUT_MS } from '@/lib/fetch-timeout'
 import { pickNextActions, type GrowthStatus, type NextAction } from '@/lib/next-actions'
 import { fetchPortfolio } from '@/lib/portfolio'
 
@@ -16,28 +16,33 @@ type State =
 
 /**
  * 診断と面接の状況（SOCAIAGENT-614）。既存の /api/portfolio から取る。
- * 取れなくても予定・応募は出したいので、失敗は null にする（改善の提案を出さないだけ）。
+ * 取れなくても予定・応募は出したいので、失敗（タイムアウトを含む）は null にする（改善の提案を出さないだけ）。
+ * 帯だけが使う。右パネルの「これからの予定」には改善の提案を出さない。
  */
 async function loadGrowthStatus(): Promise<GrowthStatus | null> {
   try {
-    const p = await fetchPortfolio(['diagnosis', 'interview'])
+    const p = await fetchPortfolio(['diagnosis', 'interview'], LIST_FETCH_TIMEOUT_MS)
     return { diagnosis: p.diagnosis?.scores ?? [], interviewCount: p.interviews?.length ?? 0 }
   } catch {
     return null
   }
 }
 
-async function loadNextActions(): Promise<NextAction[]> {
+/**
+ * 直近の予定と選考状況から「次にやること」を組み立てる（右パネルの「これからの予定」でも使う）。
+ * growth を渡したときだけ、改善の提案も混ぜる（帯だけが渡す）。
+ */
+export async function loadNextActions(growth?: Promise<GrowthStatus | null>): Promise<NextAction[]> {
   const headers = authService.getUserFetchHeaders()
-  const [schedule, applications, growth] = await Promise.all([
+  const [schedule, applications, growthStatus] = await Promise.all([
     fetchWithTimeout('/api/schedule', { headers, cache: 'no-store' }),
     fetchWithTimeout('/api/applications', { headers, cache: 'no-store' }),
-    loadGrowthStatus(),
+    growth ?? Promise.resolve(null),
   ])
   if (!schedule.ok || !applications.ok) throw new Error('next actions fetch failed')
   const events = await schedule.json()
   const apps = await applications.json()
-  return pickNextActions(Array.isArray(events) ? events : [], apps?.applications ?? [], new Date(), growth)
+  return pickNextActions(Array.isArray(events) ? events : [], apps?.applications ?? [], new Date(), growthStatus)
 }
 
 /**
@@ -47,11 +52,14 @@ async function loadNextActions(): Promise<NextAction[]> {
 export function NextActionsBar() {
   const [state, setState] = useState<State>({ kind: 'loading' })
 
+  // 再読み込みを続けて押したとき、先の遅い応答で新しい結果を上書きしない
+  const seq = useRef(0)
   const load = useCallback(() => {
+    const mine = ++seq.current
     setState({ kind: 'loading' })
-    loadNextActions()
-      .then((actions) => setState({ kind: 'ready', actions }))
-      .catch(() => setState({ kind: 'error' }))
+    loadNextActions(loadGrowthStatus())
+      .then((actions) => { if (mine === seq.current) setState({ kind: 'ready', actions }) })
+      .catch(() => { if (mine === seq.current) setState({ kind: 'error' }) })
   }, [])
 
   useEffect(() => { load() }, [load])

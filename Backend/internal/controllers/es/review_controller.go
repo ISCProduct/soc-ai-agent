@@ -7,6 +7,7 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/ragclient"
 	"Backend/internal/services/esreview"
+	"Backend/internal/services/piimask"
 	"Backend/internal/usagectx"
 	"bytes"
 	"context"
@@ -17,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -203,6 +205,45 @@ func (c *ESReviewController) persist(ctx echo.Context, req esReviewRequest, body
 	return withPrevious(body, previous)
 }
 
+// errESMaskUnavailable は、伏字の準備ができず、添削を断るときの利用者向けの文言。
+const errESMaskUnavailable = "個人情報を安全に処理できなかったため、添削できませんでした。しばらくしてからもう一度お試しください。"
+
+var (
+	subjectReaderMu sync.RWMutex
+	subjectReader   piimask.SubjectReader
+)
+
+// SetSubjectReader は、伏字の辞書に使う、学生の登録情報（氏名・メール・学校名）を読む処理を注入する。
+// 起動時に1度だけ呼ぶ。注入しなくても、未ログインのときと同じく、規則（メール・電話・住所など）で伏字にする。
+func SetSubjectReader(r piimask.SubjectReader) {
+	subjectReaderMu.Lock()
+	defer subjectReaderMu.Unlock()
+	subjectReader = r
+}
+
+// maskESForLLM は ES の本文を、外の LLM へ送る前に伏字にする。
+// ログイン中の学生なら、登録情報で辞書を作る。読めなかったらエラー（送ってはならない）。
+func maskESForLLM(ctx echo.Context, text string) (string, error) {
+	var subj piimask.Subject
+	if userID, ok := middleware.UserIDFromContext(ctx.Request().Context()); ok {
+		subjectReaderMu.RLock()
+		r := subjectReader
+		subjectReaderMu.RUnlock()
+		if r != nil {
+			got, err := r.SubjectFor(userID)
+			if err != nil {
+				return "", err
+			}
+			subj = got
+		}
+	}
+	m, err := piimask.ForLLM(subj)
+	if err != nil {
+		return "", err
+	}
+	return m.Mask(text), nil
+}
+
 // esReviewPrevious は前回の添削のうち差分表示に使う項目だけ(#1531)。
 //
 // models.ESReview をそのまま返すと ES本文・改善文・フィードバック全文まで
@@ -253,6 +294,14 @@ func withPrevious(body []byte, previous *models.ESReview) []byte {
 // ES添削・ESリライトの唯一の生成経路。プロンプトとインジェクション対策は RAG 側の
 // services/es_review.py に一本化してあるので、ここでプロンプトを組み立てないこと。
 func postESReview(ctx echo.Context, payload esReviewRAGRequest, cli *openai.Client, feature string) (int, []byte, error) {
+	// 外の LLM へ送るのは伏字にした本文だけ。伏字の準備ができなければ送らない（失敗したら送らない）
+	masked, err := maskESForLLM(ctx, payload.ESText)
+	if err != nil {
+		log.Printf("es_review: mask failed: %v", err)
+		return 0, nil, echo.NewHTTPError(http.StatusServiceUnavailable, errESMaskUnavailable)
+	}
+	payload.ESText = masked
+
 	ragURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
 	if ragURL == "" {
 		return 0, nil, echo.NewHTTPError(http.StatusServiceUnavailable, "RAG_REVIEW_URL is not configured")

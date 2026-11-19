@@ -243,6 +243,7 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 // chat_score_recalculation_test.go で突き合わせている。職種の選択状態（jobRoleSet）は
 // 履歴から復元できないので false を渡す。precheckHuman が現状未使用なので値は変わらない。
 func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, sessionID string) (map[string]int, error) {
+	ctx = s.withPIIGuard(ctx, userID)
 	messages, err := s.chatMessageRepo.FindBySessionIDForUser(sessionID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load chat session for recalculation: %w", err)

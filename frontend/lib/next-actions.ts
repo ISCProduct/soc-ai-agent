@@ -57,14 +57,19 @@ export const MIN_MEASURED_FOR_WEAKEST = 4
  * 練習の対象のカテゴリのうち、いちばん低いもの。測れた数が少ない・低めでないときは null。
  * 同じ点なら CATEGORY_PRACTICE の並び順で先のもの。
  */
-export function findWeakestCategory(diagnosis: GrowthStatus['diagnosis']): { category: string; score: number } | null {
+export function findWeakestCategory(
+  diagnosis: GrowthStatus['diagnosis'],
+): { category: string; score: number; tied: boolean } | null {
   const order = Object.keys(CATEGORY_PRACTICE)
   const measured = diagnosis
     .filter((d) => d.category in CATEGORY_PRACTICE && Number.isFinite(d.score))
     .sort((a, b) => a.score - b.score || order.indexOf(a.category) - order.indexOf(b.category))
   if (measured.length < MIN_MEASURED_FOR_WEAKEST) return null
   const weakest = measured[0]
-  return weakest.score < WEAK_SCORE_BELOW ? weakest : null
+  if (weakest.score >= WEAK_SCORE_BELOW) return null
+  // 2番目も同じ点なら「ほかより低め」とは言えない
+  const tied = measured[1] !== undefined && measured[1].score === weakest.score
+  return { category: weakest.category, score: weakest.score, tied }
 }
 
 /** 診断・面接の状況から、改善の提案を作る（並びは 診断の開始 → 低めの傾向の練習 → 面接の開始）。 */
@@ -82,7 +87,10 @@ export function pickGrowthActions(growth: GrowthStatus): NextAction[] {
       const practice = CATEGORY_PRACTICE[weakest.category]
       actions.push({
         key: `weakest-${weakest.category}`,
-        text: `「${weakest.category}」が ${Math.round(weakest.score)} と、ほかより低めです。${practice.hint}`,
+        // 同じ点の傾向がほかにもあるときは、ほかより劣っているようには書かない
+        text: weakest.tied
+          ? `「${weakest.category}」が ${Math.round(weakest.score)} と低めです。${practice.hint}`
+          : `「${weakest.category}」が ${Math.round(weakest.score)} と、ほかより低めです。${practice.hint}`,
         actionLabel: practice.kind === 'interview' ? '面接で練習する' : 'ES で練習する',
         href: practice.kind === 'interview' ? '/interview' : '/es-rewrite',
       })
@@ -91,7 +99,8 @@ export function pickGrowthActions(growth: GrowthStatus): NextAction[] {
   if (growth.interviewCount === 0) {
     actions.push({
       key: 'interview-start',
-      text: 'AI 面接の練習をまだしていません。本番の前に一度試してみましょう',
+      // 件数はレポートのある終了済みの面接（生成待ち・失敗は数えない）なので、「練習していない」とは言い切らない
+      text: 'AI 面接の練習レポートがまだありません。本番の前に一度試してみましょう',
       actionLabel: '面接を練習する',
       href: '/interview',
     })

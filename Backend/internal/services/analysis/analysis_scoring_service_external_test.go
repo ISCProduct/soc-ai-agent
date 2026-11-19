@@ -100,6 +100,12 @@ func (m *mockConversationContextRepo) SetSessionSummary(userID uint, sessionID s
 	m.saved = summary
 	return nil
 }
+func (m *mockConversationContextRepo) SetConsultIntent(userID uint, sessionID string, intent string) error {
+	return nil
+}
+func (m *mockConversationContextRepo) GetConsultIntent(sessionID string) (string, error) {
+	return "", nil
+}
 
 type mockUserWeightScoreRepo struct{}
 

@@ -85,6 +85,12 @@ describe('診断・面接の改善の提案', () => {
     expect(findWeakestCategory(scores({ ...base, 技術志向: 30, コミュニケーション力: 30 }))?.category).toBe('コミュニケーション力')
   })
 
+  it('同じ点の傾向がほかにもあるときは「ほかより低め」と書かない', () => {
+    const tied = pickGrowthActions({ diagnosis: scores({ ...base, 技術志向: 30, コミュニケーション力: 30 }), interviewCount: 1 })
+    expect(tied[0].text).toBe('「コミュニケーション力」が 30 と低めです。面接で、結論から短く話す練習をしてみましょう')
+    expect(findWeakestCategory(scores({ ...base, コミュニケーション力: 30 }))?.tied).toBe(false)
+  })
+
   it('診断・面接がまだなら始めることを勧める。診断はホームのチャットで進めるのでボタンを出さない', () => {
     const got = pickGrowthActions({ diagnosis: [], interviewCount: 0 })
     expect(got.map((a) => a.key)).toEqual(['diagnosis-start', 'interview-start'])

@@ -44,7 +44,7 @@ func TestRequestReviewJSON_JSONmodeで呼ぶ(t *testing.T) {
 			}
 			svc, stub := newReviewService(t, bodies...)
 
-			if _, _, err := svc.buildReviewScoreItems(context.Background(), reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, ""); err != nil {
+			if _, _, err := svc.buildReviewScoreItems(context.Background(), maskedForTest(t, reviewBlocks()), "", "エンジニア", candidateTypeNewGrad, ""); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			formats := stub.requestedTextFormats()
