@@ -39,6 +39,12 @@ export async function GET(request: NextRequest) {
     if (contentRange) {
       headers.set('Content-Range', contentRange)
     }
+    // これが無いと PDF.js は分割読みを始めず、書類全体を受け取る
+    const acceptRanges = response.headers.get('accept-ranges')
+    if (acceptRanges) {
+      headers.set('Accept-Ranges', acceptRanges)
+    }
+    headers.set('Content-Length', String(buffer.byteLength))
 
     const status = response.status === 206 ? 206 : 200
     return new NextResponse(buffer, { status, headers })
