@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +57,48 @@ type fakeStore struct {
 	// eligSeq を設定すると、その学生の判定は呼ばれるたびに先頭から順に返す（書く前と書いた後で変えるため）。
 	eligSeq map[uint][]bool
 	eligErr map[uint][]error
+
+	// 書き出し済みのデータの削除（Sweep）で使う。eligibleIDs が nil なら、subjects のうち eligible のものを返す。
+	eligibleIDs    []uint
+	eligibleIDsErr error
+	sweepStartErr  error
+	sweepFinishErr error
+	sweepStarted   []string
+	sweepFinished  []sweepFinishCall
+}
+
+type sweepFinishCall struct {
+	id           uint
+	status       string
+	deletedFiles int
+	errMsg       string
+	ctxErr       error
+}
+
+func (f *fakeStore) ListTrainingEligibleUserIDs(context.Context) ([]uint, error) {
+	if f.eligibleIDsErr != nil {
+		return nil, f.eligibleIDsErr
+	}
+	if f.eligibleIDs != nil {
+		return f.eligibleIDs, nil
+	}
+	var ids []uint
+	for _, s := range f.subjects {
+		if f.eligible[s.UserID] {
+			ids = append(ids, s.UserID)
+		}
+	}
+	return ids, nil
+}
+
+func (f *fakeStore) StartTrainingSweepRun(_ context.Context, destination string, _ time.Time) (uint, error) {
+	f.sweepStarted = append(f.sweepStarted, destination)
+	return 77, f.sweepStartErr
+}
+
+func (f *fakeStore) FinishTrainingSweepRun(ctx context.Context, id uint, status string, deletedFiles int, errMsg string, _ time.Time) error {
+	f.sweepFinished = append(f.sweepFinished, sweepFinishCall{id: id, status: status, deletedFiles: deletedFiles, errMsg: errMsg, ctxErr: ctx.Err()})
+	return f.sweepFinishErr
 }
 
 var _ Store = (*fakeStore)(nil)
@@ -123,17 +166,59 @@ type fakeWriter struct {
 	failOn    string
 	deletes   []string
 	deleteErr error
+	// deleteFailOn を含むキーの削除を失敗させる。
+	deleteFailOn string
+	// stored は今あるオブジェクト（PutObject で増え、DeleteObject で消える）。ListKeys・GetObject が読む。
+	stored  map[string][]byte
+	listErr error
+	getErr  error
+	// afterList は ListKeys が一覧を作った後に呼ぶ（一覧とマニフェストの読み込みの間に、ほかの処理が書く場面を作る）。
+	afterList func(prefix string)
+	lists     []string
 }
 
 func (w *fakeWriter) DeleteObject(_ context.Context, key string) error {
 	if w.deleteErr != nil {
 		return w.deleteErr
 	}
+	if w.deleteFailOn != "" && strings.Contains(key, w.deleteFailOn) {
+		return fmt.Errorf("AccessDenied on resource arn:aws:s3:::train-bucket/%s: delete denied", key)
+	}
 	w.deletes = append(w.deletes, key)
+	delete(w.stored, key)
 	return nil
 }
 
-var _ ObjectWriter = (*fakeWriter)(nil)
+func (w *fakeWriter) ListKeys(_ context.Context, prefix string) ([]string, error) {
+	if w.listErr != nil {
+		return nil, w.listErr
+	}
+	var keys []string
+	for k := range w.stored {
+		if strings.HasPrefix(k, prefix) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	w.lists = append(w.lists, prefix)
+	if w.afterList != nil {
+		w.afterList(prefix)
+	}
+	return keys, nil
+}
+
+func (w *fakeWriter) GetObject(_ context.Context, key string) ([]byte, error) {
+	if w.getErr != nil {
+		return nil, w.getErr
+	}
+	b, ok := w.stored[key]
+	if !ok {
+		return nil, ErrObjectNotFound
+	}
+	return bytes.Clone(b), nil
+}
+
+var _ ObjectStore = (*fakeWriter)(nil)
 
 func (w *fakeWriter) PutObject(_ context.Context, key string, body []byte, contentType string) error {
 	if w.failOn != "" && strings.Contains(key, w.failOn) {
@@ -141,6 +226,10 @@ func (w *fakeWriter) PutObject(_ context.Context, key string, body []byte, conte
 		return fmt.Errorf("AccessDenied on resource arn:aws:s3:::train-bucket/%s: %w", key, errPut)
 	}
 	w.puts = append(w.puts, putCall{key: key, contentType: contentType, body: bytes.Clone(body)})
+	if w.stored == nil {
+		w.stored = map[string][]byte{}
+	}
+	w.stored[key] = bytes.Clone(body)
 	return nil
 }
 
@@ -337,6 +426,10 @@ func TestRun_WritesSamplesAndManifest(t *testing.T) {
 	if m.RunID != "20261117T010203Z-a1b2c3d4" || m.StudentCount != 1 || m.SessionCount != 2 ||
 		len(m.Files) != 1 || m.Files[0] != "subjects/"+subject+".jsonl" || !m.ExportedAt.Equal(fixedNow) {
 		t.Errorf("マニフェスト = %+v", m)
+	}
+	// ファイルごとの面接の数（消すときに学生のファイルを読まずに session_count を直すため）。
+	if fmt.Sprint(m.FileSessions) != fmt.Sprintf("map[subjects/%s.jsonl:2]", subject) {
+		t.Errorf("file_sessions = %v", m.FileSessions)
 	}
 	if len(m.MaskingTokens) != 6 || len(m.RubricKeys) != 5 {
 		t.Errorf("記号 %v / ルーブリック %v", m.MaskingTokens, m.RubricKeys)
@@ -714,9 +807,9 @@ func TestRunFromEnv_ConfigErrorStopsBeforeDB(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			connected, prepared := false, false
-			_, err := RunFromEnv(context.Background(), envOf(tt.env),
+			_, _, err := RunFromEnv(context.Background(), envOf(tt.env),
 				func() (Store, error) { connected = true; return &fakeStore{}, nil },
-				func(context.Context, string) (ObjectWriter, error) { prepared = true; return &fakeWriter{}, nil })
+				func(context.Context, string) (ObjectStore, error) { prepared = true; return &fakeWriter{}, nil })
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
 			}
@@ -731,10 +824,10 @@ func TestRunFromEnv_ConfigErrorStopsBeforeDB(t *testing.T) {
 func TestRunFromEnv_Wiring(t *testing.T) {
 	store, w := leakFixture(), &fakeWriter{}
 	var gotBucket string
-	res, err := RunFromEnv(context.Background(),
+	res, swept, err := RunFromEnv(context.Background(),
 		envOf(map[string]string{EnvHMACKey: string(testKey), EnvDestination: "s3://train-bucket/scorer"}),
 		func() (Store, error) { return store, nil },
-		func(_ context.Context, bucket string) (ObjectWriter, error) { gotBucket = bucket; return w, nil })
+		func(_ context.Context, bucket string) (ObjectStore, error) { gotBucket = bucket; return w, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -752,6 +845,11 @@ func TestRunFromEnv_Wiring(t *testing.T) {
 	}
 	// 環境変数の鍵で HMAC にしている（鍵の配線が切れると subject が変わる）。
 	w.find(t, "/subjects/"+wantHMAC("user", 7)+".jsonl")
+	// 書き出しの前に、書き出し済みのデータの削除を行い、監査ログに残す（消すものが無くても残す）。
+	if fmt.Sprint(store.sweepStarted) != "[s3://train-bucket/scorer/runs/]" || len(store.sweepFinished) != 1 ||
+		store.sweepFinished[0].status != models.TrainingScorerExportSucceeded || swept.DeletedFiles != 0 {
+		t.Errorf("削除の監査ログ = %v %+v, 結果 %+v", store.sweepStarted, store.sweepFinished, swept)
+	}
 }
 
 func TestRunFromEnv_SetupErrors(t *testing.T) {
@@ -760,25 +858,25 @@ func TestRunFromEnv_SetupErrors(t *testing.T) {
 	tests := []struct {
 		name      string
 		connect   func() (Store, error)
-		newWriter func(context.Context, string) (ObjectWriter, error)
+		newWriter func(context.Context, string) (ObjectStore, error)
 		wantErr   error
 	}{
 		{
 			name:      "DB につながらない",
 			connect:   func() (Store, error) { return nil, dbErr },
-			newWriter: func(context.Context, string) (ObjectWriter, error) { return &fakeWriter{}, nil },
+			newWriter: func(context.Context, string) (ObjectStore, error) { return &fakeWriter{}, nil },
 			wantErr:   dbErr,
 		},
 		{
 			name:      "出力先を用意できない",
 			connect:   func() (Store, error) { return &fakeStore{}, nil },
-			newWriter: func(context.Context, string) (ObjectWriter, error) { return nil, s3Err },
+			newWriter: func(context.Context, string) (ObjectStore, error) { return nil, s3Err },
 			wantErr:   s3Err,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := RunFromEnv(context.Background(), env, tt.connect, tt.newWriter); !errors.Is(err, tt.wantErr) {
+			if _, _, err := RunFromEnv(context.Background(), env, tt.connect, tt.newWriter); !errors.Is(err, tt.wantErr) {
 				t.Errorf("err = %v, want %v", err, tt.wantErr)
 			}
 		})
