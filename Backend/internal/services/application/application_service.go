@@ -6,11 +6,11 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/services/notification"
 	"Backend/internal/services/shared"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"slices"
+	"time"
 )
 
 // CollectiveActionRecorder は集合知ログへの書き込み面（#205）。
@@ -24,6 +24,11 @@ type ScoreSnapshotReader interface {
 	FindByUserAndSession(userID uint, sessionID string) ([]models.UserWeightScore, error)
 }
 
+// StatusEventRecorder は選考遷移の履歴。失敗しても応募やステータス更新は成功のままにする。
+type StatusEventRecorder interface {
+	RecordStatusEvent(ev *models.ApplicationStatusEvent) error
+}
+
 // ApplicationService 応募・選考ステータス管理サービス
 type ApplicationService struct {
 	appRepo    *repositories.UserApplicationStatusRepository
@@ -32,6 +37,7 @@ type ApplicationService struct {
 	notifier   notification.Notifier
 	collective CollectiveActionRecorder
 	scores     ScoreSnapshotReader
+	events     StatusEventRecorder
 }
 
 // SetNotifier は選考ステータスの更新を学生へ知らせる通知を設定する（#2033）。
@@ -47,6 +53,11 @@ func (s *ApplicationService) SetCollectiveInsight(c CollectiveActionRecorder) {
 // SetScoreSnapshotReader は応募時スコアスナップショット取得を注入する（#203）。
 func (s *ApplicationService) SetScoreSnapshotReader(r ScoreSnapshotReader) {
 	s.scores = r
+}
+
+// SetStatusEventRecorder は選考遷移の履歴書き込みを注入する（SOCAIAGENT-673）。
+func (s *ApplicationService) SetStatusEventRecorder(r StatusEventRecorder) {
+	s.events = r
 }
 
 func NewApplicationService(
@@ -147,7 +158,7 @@ func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*models.Use
 		return nil, fmt.Errorf("match_id と company_id が一致しません")
 	}
 
-	m, err := s.appRepo.CreateActive(userID, companyID, matchID, terminalStatusList, s.buildScoreSnapshot(userID, match.SessionID))
+	m, err := s.appRepo.CreateActive(userID, companyID, matchID, terminalStatusList, s.buildScoreSnapshot(userID, match))
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicateActiveApplication) {
 			return nil, shared.ErrDuplicateActiveApplication
@@ -156,6 +167,7 @@ func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*models.Use
 	}
 
 	s.recordCollectiveAction(userID, companyID, match.SessionID, "applied")
+	s.recordStatusEvent(m.ID, userID, "", "applied", "student")
 	return m, nil
 }
 
@@ -185,30 +197,54 @@ func (s *ApplicationService) recordCollectiveAction(userID, companyID uint, sess
 	}
 }
 
-// buildScoreSnapshot はマッチングに使った session のスコアを JSON にする（#203）。
-// 取れなくても応募自体は通す（空文字）。
-func (s *ApplicationService) buildScoreSnapshot(userID uint, sessionID string) string {
-	if s.scores == nil || sessionID == "" {
-		return ""
+// buildScoreSnapshot は応募時点の版付き JSON を作る（#203、SOCAIAGENT-673）。
+// スコアが取れなくても応募自体は通す（空文字）。マッチ行の総合点と軸別は、その時点の値をコピーする。
+func (s *ApplicationService) buildScoreSnapshot(userID uint, match *models.UserCompanyMatch) string {
+	categories := map[string]int{}
+	if s.scores != nil && match != nil && match.SessionID != "" {
+		rows, err := s.scores.FindByUserAndSession(userID, match.SessionID)
+		if err != nil {
+			log.Printf("[Application] score snapshot read failed user=%d: %v\n", userID, err)
+		} else {
+			for _, sc := range rows {
+				categories[sc.WeightCategory] = sc.Score
+			}
+		}
 	}
-	rows, err := s.scores.FindByUserAndSession(userID, sessionID)
-	if err != nil || len(rows) == 0 {
-		return ""
+	if len(categories) == 0 {
+		categories = nil
 	}
-	snap := make(map[string]int, len(rows))
-	for _, sc := range rows {
-		snap[sc.WeightCategory] = sc.Score
+	return buildScoreSnapshotDocument(categories, match, time.Now())
+}
+
+func (s *ApplicationService) recordStatusEvent(applicationID, userID uint, fromStatus, toStatus, actorRole string) {
+	if s.events == nil || applicationID == 0 {
+		return
 	}
-	b, err := json.Marshal(snap)
+	err := s.events.RecordStatusEvent(&models.ApplicationStatusEvent{
+		ApplicationID: applicationID,
+		UserID:        userID,
+		FromStatus:    fromStatus,
+		ToStatus:      toStatus,
+		ActorRole:     actorRole,
+	})
 	if err != nil {
-		return ""
+		log.Printf("[Application] status event failed application=%d user=%d %s->%s role=%s: %v\n",
+			applicationID, userID, fromStatus, toStatus, actorRole, err)
 	}
-	return string(b)
 }
 
 // UpdateStatus 選考ステータスを更新する
 // isAdmin=true の場合は管理者権限の遷移が許可される（コントローラー側でクライアント入力から isAdmin を取らないこと）
 func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, status string, notes *string, isAdmin bool) (*models.UserApplicationStatus, error) {
+	role := "student"
+	if isAdmin {
+		role = "staff"
+	}
+	return s.updateStatus(applicationID, userID, status, notes, isAdmin, role)
+}
+
+func (s *ApplicationService) updateStatus(applicationID uint, userID uint, status string, notes *string, isAdmin bool, actorRole string) (*models.UserApplicationStatus, error) {
 	if !isValidStatus(status) {
 		return nil, fmt.Errorf("invalid_status: 無効なステータス %s", status)
 	}
@@ -235,6 +271,7 @@ func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, statu
 	if err := s.appRepo.UpdateStatus(applicationID, status, notes); err != nil {
 		return nil, fmt.Errorf("ステータス更新エラー: %w", err)
 	}
+	s.recordStatusEvent(applicationID, app.UserID, current, status, actorRole)
 
 	app.Status = status
 	if notes != nil {
