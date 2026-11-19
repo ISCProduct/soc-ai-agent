@@ -76,6 +76,44 @@ describe('useResultsData fetchCompanies race condition (#988)', () => {
   })
 })
 
+// #2220: 推薦が0件はエラーではない。error ではなく emptyReason に分ける。
+describe('useResultsData 推薦0件とエラーの区別', () => {
+  beforeEach(() => {
+    params = new URLSearchParams({ user_id: '1', session_id: 's1' })
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) } as unknown as Response)
+  })
+
+  const respond = async (response: unknown) => {
+    const { result } = renderHook(() => useResultsData())
+    await act(async () => {
+      recommendationResolvers['s1'](response)
+    })
+    return result
+  }
+
+  it('recommendations: [] は error にせず、理由を emptyReason に入れる', async () => {
+    const result = await respond({
+      ok: true,
+      json: async () => ({ recommendations: [], reason: 'insufficient_user_scores' }),
+    })
+    expect(result.current.error).toBeNull()
+    expect(result.current.emptyReason).toBe('insufficient_user_scores')
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('理由が無い0件は matching_results_empty として扱う', async () => {
+    const result = await respond({ ok: true, json: async () => ({ recommendations: [] }) })
+    expect(result.current.error).toBeNull()
+    expect(result.current.emptyReason).toBe('matching_results_empty')
+  })
+
+  it('推薦 API の失敗（500）は error にし、emptyReason は入れない', async () => {
+    const result = await respond({ ok: false, status: 500, json: async () => ({}) })
+    expect(result.current.error).toBe('企業データの取得に失敗しました')
+    expect(result.current.emptyReason).toBeNull()
+  })
+})
+
 // SOCAIAGENT-403: 応募を閉じている間は、画面側でも応募APIを呼ばない。
 describe('useResultsData handleApply と応募の開閉', () => {
   const company = {
