@@ -14,7 +14,12 @@
 
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-WF="$ROOT/.github/workflows/deployment.yml"
+WF="$ROOT/.github/workflows/deploy-staging-job.yml"
+CALLER="$ROOT/.github/workflows/deployment.yml"
+if ! grep -q 'uses: \./\.github/workflows/deploy-staging-job.yml' "$CALLER"; then
+  echo "NG: deployment.yml が deploy-staging-job.yml を呼んでいない" >&2
+  exit 1
+fi
 
 WORK=$(mktemp -d)
 FRAGMENT="$WORK/fragment.sh"
@@ -24,7 +29,7 @@ trap 'rm -rf "$WORK"' EXIT
 # 抜き出せなければ「テストしたつもり」になるので必ず失敗させる。
 START=$(grep -n '^      - name: Wait for staging infra ready$' "$WF" | head -1 | cut -d: -f1)
 if [ -z "$START" ]; then
-  echo "NG: 待機ステップが見つかりません。deployment.yml の構造変更を確認してください。" >&2
+  echo "NG: 待機ステップが見つかりません。deploy-staging-job.yml の構造変更を確認してください。" >&2
   exit 1
 fi
 # YAML のキー行（run: 等）を含めると実行した時点で構文エラーになり、
