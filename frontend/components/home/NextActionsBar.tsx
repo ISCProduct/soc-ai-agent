@@ -13,7 +13,8 @@ type State =
   | { kind: 'error' }
   | { kind: 'ready'; actions: NextAction[] }
 
-async function loadNextActions(): Promise<NextAction[]> {
+/** 直近の予定と選考状況から「次にやること」を組み立てる（右パネルの「これからの予定」でも使う）。 */
+export async function loadNextActions(): Promise<NextAction[]> {
   const headers = authService.getUserFetchHeaders()
   const [schedule, applications] = await Promise.all([
     fetchWithTimeout('/api/schedule', { headers, cache: 'no-store' }),

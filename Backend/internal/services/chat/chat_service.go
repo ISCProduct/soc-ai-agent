@@ -88,6 +88,9 @@ type ChatRequest struct {
 	Message       string `json:"message"`
 	IndustryID    uint   `json:"industry_id"`
 	JobCategoryID uint   `json:"job_category_id"`
+	// ConsultIntent はホームの「キャリア相談」で選んだ意図（任意。送らない既存のクライアントは従来どおり動く）。
+	// セッションの最初の回答でだけ使う（ConsultIntent* を参照）。
+	ConsultIntent string `json:"consult_intent,omitempty"`
 }
 
 // ChatResponse チャットレスポンス
@@ -107,6 +110,12 @@ type ChatResponse struct {
 	TotalCategories     int                              `json:"total_categories"`
 	Summary             *SessionSummary                  `json:"summary,omitempty"`
 	JobCategoryID       uint                             `json:"job_category_id,omitempty"`
+	// JudgmentPercent は「判定の進み具合」（0〜100）。質問数は固定しないので、画面の進捗はこれを使う。
+	// 判定できたとき（完了）だけ 100 になる。
+	JudgmentPercent int `json:"judgment_percent"`
+	// SuggestProvisional は、目安の回答数を超えても判定できていないときに true。
+	// 画面は「いまの暫定の結果を見る」を出す（質問は続けられる）。
+	SuggestProvisional bool `json:"suggest_provisional,omitempty"`
 }
 
 // PhaseProgress フェーズ進捗情報
@@ -202,11 +211,21 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	// 有効な回答の場合のみ、以降の処理を実行
 	// 2.6. 現在のフェーズを取得または開始
 	currentPhase, err := s.getCurrentOrNextPhase(ctx, req.UserID, req.SessionID)
+	extraRound := false
 	if err != nil {
-		if err.Error() == "all phases completed" {
+		if err.Error() != "all phases completed" {
+			return nil, fmt.Errorf("failed to get current phase: %w", err)
+		}
+		// 全フェーズを終えても判定できていなければ、最後のフェーズの枠で質問を続ける（延長ラウンド）。
+		// 判定できていれば、従来どおり完了にする。
+		if s.judgmentFor(req.UserID, req.SessionID).Ready {
 			return s.handleAllPhasesCompletedFromPhaseError(ctx, req, history)
 		}
-		return nil, fmt.Errorf("failed to get current phase: %w", err)
+		last, lastErr := s.getLastPhaseProgress(req.UserID, req.SessionID)
+		if lastErr != nil {
+			return nil, fmt.Errorf("failed to get last phase for extra round: %w", lastErr)
+		}
+		currentPhase, extraRound = last, true
 	}
 
 	allPhases, err := s.phaseRepo.FindAll()
@@ -218,7 +237,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	for i := range allPhases {
 		phaseByID[allPhases[i].ID] = &allPhases[i]
 	}
-	if resp, handled := s.handleAllPhasesCompletedFromCount(ctx, req, history, allPhases, completedProgresses, phaseByID); handled {
+	if resp, handled := s.handleAllPhasesCompletedFromCount(ctx, req, history, allPhases); handled {
 		return resp, nil
 	}
 
@@ -231,5 +250,6 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		allPhases:           allPhases,
 		completedProgresses: completedProgresses,
 		phaseByID:           phaseByID,
+		extraRound:          extraRound,
 	})
 }

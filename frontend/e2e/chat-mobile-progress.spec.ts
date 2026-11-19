@@ -25,7 +25,7 @@ test.describe('モバイルの現在地表示', () => {
     await page.screenshot({ path: 'test-results/chat-mobile.png' })
 
     const body = await page.locator('body').innerText()
-    expect(body).toMatch(/問に回答/)
+    expect(body).toMatch(/判定の進み具合/)
     expect(body).not.toContain('ここまで聞いたこと')
   })
 })

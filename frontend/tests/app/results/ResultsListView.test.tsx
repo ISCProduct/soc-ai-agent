@@ -53,6 +53,48 @@ describe('ResultsListView', () => {
     )
   }
 
+  it('「合う／合わない」は、押すと判定を渡し、回答済みは押された状態で示す。省略すると出さない（SOCAIAGENT-670）', () => {
+    const onFeedback = jest.fn()
+    const { rerender } = renderList({ onFeedback })
+    fireEvent.click(screen.getByRole('button', { name: '合わない' }))
+    expect(onFeedback).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ matchId: 10 }), 'unfit')
+    expect(screen.getByRole('button', { name: '合う' })).toHaveAttribute('aria-pressed', 'false')
+
+    rerender(
+      <ResultsListView
+        companies={[{ ...sampleCompany, feedback: 'fit' }]}
+        isProvisional={false}
+        analysisScores={null}
+        scoreComment=""
+        analysisError={null}
+        onRetryAnalysis={noop}
+        jobSuitabilityComment=""
+        suggestedRoles={[]}
+        emailSending={false}
+        favoritingId={null}
+        applyingId={null}
+        snackbar={{ open: false, message: '', severity: 'success' }}
+        isGuestUser={false}
+        applyEnabled
+        onCloseSnackbar={noop}
+        onBack={noop}
+        onReset={noop}
+        onSendEmail={noop}
+        onSelectCompany={noop}
+        onToggleFavorite={noop}
+        onFeedback={onFeedback}
+        onApply={noop}
+        onNavigate={noop}
+      />,
+    )
+    expect(screen.getByRole('button', { name: '合う' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('onFeedback が無いときは、「合う／合わない」を出さない', () => {
+    renderList()
+    expect(screen.queryByRole('button', { name: '合わない' })).toBeNull()
+  })
+
   it('企業名と適合度・応募ボタンを表示する', () => {
     renderList()
 

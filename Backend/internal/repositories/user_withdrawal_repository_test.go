@@ -96,6 +96,7 @@ var hardDeleteTargets = []string{
 	"UserAnalysisProgress",
 	"UserEmbedding",
 	"VariantAssignment",
+	"UserMatchFeedback",
 	"UserCompanyMatch",
 	"UserApplicationStatus",
 	"CompanyReview",

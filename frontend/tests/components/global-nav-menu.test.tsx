@@ -15,7 +15,7 @@ describe('GlobalNavMenu', () => {
     mockPathname = '/interview'
   })
 
-  it('ホーム画面では表示しない（AnalysisSidebar と重複させない）', () => {
+  it('ホーム画面では表示しない（HomeSidebar と重複させない）', () => {
     mockPathname = '/'
     const { container } = render(<GlobalNavMenu />)
     expect(container).toBeEmptyDOMElement()
