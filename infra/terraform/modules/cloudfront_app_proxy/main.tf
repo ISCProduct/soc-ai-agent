@@ -117,6 +117,20 @@ resource "aws_acm_certificate_validation" "app" {
   validation_record_fqdns = [for r in aws_route53_record.cert_validation : r.fqdn]
 }
 
+# ビューアーへ HSTS を付ける。オリジン（Next / Go）が付け忘れても、この配信では常に付く。
+# max-age は Backend と同じ 2 年。preload は外すと戻せないので付けない。
+resource "aws_cloudfront_response_headers_policy" "hsts" {
+  name = "${var.project_name}-${var.env}-hsts"
+
+  security_headers_config {
+    strict_transport_security {
+      access_control_max_age_sec = 63072000
+      include_subdomains         = true
+      override                    = true
+    }
+  }
+}
+
 # ALB配下は動的コンテンツ(認証Cookie等)のためキャッシュを無効化する
 resource "aws_cloudfront_cache_policy" "no_cache" {
   name = "${var.project_name}-${var.env}-app-no-cache"
@@ -208,8 +222,9 @@ resource "aws_cloudfront_distribution" "app" {
     target_origin_id         = "alb"
     viewer_protocol_policy   = "redirect-to-https"
     compress                 = true
-    cache_policy_id          = aws_cloudfront_cache_policy.no_cache.id
-    origin_request_policy_id = aws_cloudfront_origin_request_policy.all_viewer.id
+    cache_policy_id            = aws_cloudfront_cache_policy.no_cache.id
+    origin_request_policy_id   = aws_cloudfront_origin_request_policy.all_viewer.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.hsts.id
   }
 
   # 静的ページ自体はS3から直接取得(GET/HEADのみのため制約なし)
@@ -219,8 +234,9 @@ resource "aws_cloudfront_distribution" "app" {
     cached_methods         = ["GET", "HEAD"]
     target_origin_id       = "s3-errors"
     viewer_protocol_policy = "redirect-to-https"
-    compress               = true
-    cache_policy_id        = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # AWS managed: CachingDisabled
+    compress                   = true
+    cache_policy_id            = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # AWS managed: CachingDisabled
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.hsts.id
   }
 
   custom_error_response {

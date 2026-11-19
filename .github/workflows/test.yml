@@ -212,6 +212,14 @@ jobs:
       - name: ワークフローの checkout 漏れ検査
         run: ./automation/test/workflow-checkout-test.sh
 
+      # サードパーティ Actions がタグの付け替えで差し替わらないこと。
+      - name: サードパーティ Actions の SHA 固定検査
+        run: ./automation/test/third-party-action-pin-test.sh
+
+      # HSTS が Next の本番と CloudFront の両方に付くこと。
+      - name: HSTS ヘッダの検査
+        run: ./automation/test/hsts-header-test.sh
+
       # 反映後スモークがデプロイと同じ concurrency group にいること。
       # ずれるとスモーク中に次のデプロイが環境を落とし、変更と無関係に全滅する。
       - name: スモークの concurrency group 検査
@@ -311,7 +319,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: 1.15.8
           terraform_wrapper: false

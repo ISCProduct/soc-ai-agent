@@ -163,121 +163,132 @@ func buildEventBody(ev *models.ScheduleEvent) calendarEventBody {
 	}
 }
 
+// retryableCalendarError は通信断や 429/5xx のように、同じ操作をやり直せば通る失敗。
+type retryableCalendarError struct{ msg string }
+
+func (e *retryableCalendarError) Error() string { return e.msg }
+
+func isRetryableCalendar(err error) bool {
+	var retryable *retryableCalendarError
+	return errors.As(err, &retryable)
+}
+
+func calendarStatusError(status int) error {
+	msg := fmt.Sprintf("unexpected status %d", status)
+	if status == http.StatusTooManyRequests || status >= 500 {
+		return &retryableCalendarError{msg: msg}
+	}
+	return errors.New(msg)
+}
+
 // CreateEvent はGoogleカレンダーにイベントを作成し、スケジュールのGoogleCalendarEventIDを更新する。
-func (s *CalendarSyncService) CreateEvent(ctx context.Context, userID uint, ev *models.ScheduleEvent) {
+func (s *CalendarSyncService) CreateEvent(ctx context.Context, userID uint, ev *models.ScheduleEvent) error {
 	client, calID, err := s.getOAuthClient(ctx, userID)
 	if err != nil {
-		log.Printf("[CalendarSync] CreateEvent: user=%d %v", userID, err)
-		return
+		return fmt.Errorf("user=%d %w", userID, err)
 	}
 
 	body := buildEventBody(ev)
 	payload, err := json.Marshal(body)
 	if err != nil {
-		log.Printf("[CalendarSync] CreateEvent: marshal error: %v", err)
-		return
+		return fmt.Errorf("marshal error: %w", err)
 	}
 
 	url := fmt.Sprintf("https://www.googleapis.com/calendar/v3/calendars/%s/events", calID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
-		log.Printf("[CalendarSync] CreateEvent: build request error: %v", err)
-		return
+		return fmt.Errorf("build request error: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("[CalendarSync] CreateEvent: http error: %v", err)
-		return
+		return &retryableCalendarError{msg: fmt.Sprintf("http error: %v", err)}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Printf("[CalendarSync] CreateEvent: unexpected status %d", resp.StatusCode)
-		return
+		return calendarStatusError(resp.StatusCode)
 	}
 
 	var result calendarEventResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || result.ID == "" {
-		log.Printf("[CalendarSync] CreateEvent: decode response error: %v", err)
-		return
+		return fmt.Errorf("decode response error: %w", err)
 	}
 
 	ev.GoogleCalendarEventID = result.ID
 	if err := s.scheduleRepo.Update(ev); err != nil {
-		log.Printf("[CalendarSync] CreateEvent: failed to save event id for schedule %d: %v", ev.ID, err)
+		// 作成自体は成功している。やり直すとカレンダー側が二重になるので、再試行しない。
+		return fmt.Errorf("failed to save event id for schedule %d: %w", ev.ID, err)
 	}
+	return nil
 }
 
 // UpdateEvent はGoogleカレンダーのイベントを更新する。
-func (s *CalendarSyncService) UpdateEvent(ctx context.Context, userID uint, ev *models.ScheduleEvent) {
+func (s *CalendarSyncService) UpdateEvent(ctx context.Context, userID uint, ev *models.ScheduleEvent) error {
 	if ev.GoogleCalendarEventID == "" {
 		// カレンダーイベントIDがない場合は新規作成
-		s.CreateEvent(ctx, userID, ev)
-		return
+		return s.CreateEvent(ctx, userID, ev)
 	}
 
 	client, calID, err := s.getOAuthClient(ctx, userID)
 	if err != nil {
-		log.Printf("[CalendarSync] UpdateEvent: user=%d %v", userID, err)
-		return
+		return fmt.Errorf("user=%d %w", userID, err)
 	}
 
 	body := buildEventBody(ev)
 	payload, err := json.Marshal(body)
 	if err != nil {
-		log.Printf("[CalendarSync] UpdateEvent: marshal error: %v", err)
-		return
+		return fmt.Errorf("marshal error: %w", err)
 	}
 
 	url := fmt.Sprintf("https://www.googleapis.com/calendar/v3/calendars/%s/events/%s", calID, ev.GoogleCalendarEventID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(payload))
 	if err != nil {
-		log.Printf("[CalendarSync] UpdateEvent: build request error: %v", err)
-		return
+		return fmt.Errorf("build request error: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("[CalendarSync] UpdateEvent: http error: %v", err)
-		return
+		return &retryableCalendarError{msg: fmt.Sprintf("http error: %v", err)}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Printf("[CalendarSync] UpdateEvent: unexpected status %d", resp.StatusCode)
+		return calendarStatusError(resp.StatusCode)
 	}
+	return nil
 }
 
 // DeleteEvent はGoogleカレンダーのイベントを削除する。
-func (s *CalendarSyncService) DeleteEvent(ctx context.Context, userID uint, googleEventID string) {
+func (s *CalendarSyncService) DeleteEvent(ctx context.Context, userID uint, googleEventID string) error {
 	if googleEventID == "" {
-		return
+		return nil
 	}
 
 	client, calID, err := s.getOAuthClient(ctx, userID)
 	if err != nil {
-		log.Printf("[CalendarSync] DeleteEvent: user=%d %v", userID, err)
-		return
+		return fmt.Errorf("user=%d %w", userID, err)
 	}
 
 	url := fmt.Sprintf("https://www.googleapis.com/calendar/v3/calendars/%s/events/%s", calID, googleEventID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
-		log.Printf("[CalendarSync] DeleteEvent: build request error: %v", err)
-		return
+		return fmt.Errorf("build request error: %w", err)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("[CalendarSync] DeleteEvent: http error: %v", err)
-		return
+		return &retryableCalendarError{msg: fmt.Sprintf("http error: %v", err)}
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-		log.Printf("[CalendarSync] DeleteEvent: unexpected status %d", resp.StatusCode)
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+		return nil
 	}
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return calendarStatusError(resp.StatusCode)
+	}
+	return nil
 }

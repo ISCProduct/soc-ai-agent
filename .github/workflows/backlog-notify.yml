@@ -35,7 +35,7 @@ jobs:
           domain="${BACKLOG_DOMAIN:-backlog.jp}"
           echo "host=${BACKLOG_SPACE_ID}.${domain}" >> "$GITHUB_OUTPUT"
 
-      - uses: bicstone/backlog-notify@v6
+      - uses: bicstone/backlog-notify@bed3fe95e306428ee0992a90a1f5bbfc9c9839d2 # v6
         with:
           project_key: ${{ secrets.BACKLOG_PROJECT_KEY }}
           api_host: ${{ steps.resolve.outputs.host }}
