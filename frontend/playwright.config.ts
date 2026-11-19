@@ -16,6 +16,7 @@ export default defineConfig({
     'student-theme-contrast.spec.ts',
     'list-loading-empty.spec.ts',
     'home-next-actions.spec.ts',
+    'home-consult.spec.ts',
     'chat-ui-states.spec.ts',
     'correlation-diagram-a11y.spec.ts',
     'assessments.spec.ts',

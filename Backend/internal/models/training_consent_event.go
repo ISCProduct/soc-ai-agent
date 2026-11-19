@@ -7,7 +7,7 @@ import "time"
 //
 // TrainingConsentCard.tsx の同意の文言（説明文・箇条書き・スイッチの文言）を変えたら、この版を上げること。
 // 版を上げずに文言だけ変えると、変更前に同意した人も新しい文言に同意したように記録される。
-const TrainingConsentTextVersion = "2026-11-11"
+const TrainingConsentTextVersion = "2026-11-18"
 
 // TrainingConsentLegacyTextVersion は、履歴の記録を始める前（20261117104108 の適用前）から同意していた人の行の版。
 // その人がいつ・どの文言に同意したかは記録が無く分からないため、実在の版とは別の値にして区別する。
