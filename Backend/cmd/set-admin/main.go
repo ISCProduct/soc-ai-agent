@@ -33,7 +33,7 @@ func main() {
 		log.Fatalf("更新失敗: %v", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		log.Fatalf("ユーザーが見つかりません: %s", *email)
+		log.Fatalf("ユーザーが見つかりません: %s", *email) // logpolicy:ok 運用者が手元の CLI に自分で指定した値を、その端末へ出すだけ
 	}
 
 	fmt.Printf("✓ %s を管理者に昇格しました\n", *email)
