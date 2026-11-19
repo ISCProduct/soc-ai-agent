@@ -19,6 +19,8 @@ from services.resume_report import (
 )
 from services.settings import OPENAI_TIMEOUT_SEC
 
+REVIEW_STREAM_ERROR_MESSAGE = "レビューに失敗しました。時間をおいてもう一度お試しください。"
+
 logger = logging.getLogger("main")
 
 router = APIRouter()
@@ -38,7 +40,7 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             yield "data: {}\n\n".format(
-                json.dumps({"type": "error", "message": "OPENAI_API_KEY not set"}, ensure_ascii=False)
+                json.dumps({"type": "error", "message": REVIEW_STREAM_ERROR_MESSAGE}, ensure_ascii=False)
             )
             return
 
@@ -62,9 +64,10 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
                     )
             yield "data: {}\n\n".format(json.dumps({"type": "done"}, ensure_ascii=False))
         except Exception as exc:
+            # 例外文は内部情報を含みうるので、ログにだけ残し、利用者へは固定文言を返す
             logger.error("review_stream generate error: %s", exc)
             yield "data: {}\n\n".format(
-                json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False)
+                json.dumps({"type": "error", "message": REVIEW_STREAM_ERROR_MESSAGE}, ensure_ascii=False)
             )
 
     return StreamingResponse(generate(), media_type="text/event-stream")

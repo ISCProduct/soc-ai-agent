@@ -51,6 +51,10 @@ type ConversationContextRepository interface {
 	GetOrCreate(userID uint, sessionID string) (*models.ConversationContext, error)
 	SetJobCategoryID(userID uint, sessionID string, jobCategoryID uint) error
 	GetJobCategoryID(sessionID string) (uint, error)
+	// SetConsultIntent は相談の意図をセッションに1回だけ保存する（既に保存済みなら上書きしない）。
+	SetConsultIntent(userID uint, sessionID string, intent string) error
+	// GetConsultIntent は保存した相談の意図を返す（未選択は空文字）。
+	GetConsultIntent(sessionID string) (string, error)
 	// SetSessionSummary はセッション単位で LLM による診断サマリを保存します。
 	SetSessionSummary(userID uint, sessionID string, summary string) error
 }

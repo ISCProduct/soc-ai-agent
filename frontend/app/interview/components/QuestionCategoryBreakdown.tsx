@@ -4,6 +4,9 @@ import { Box, Chip, Paper, Stack, Typography } from '@mui/material'
 import { UI } from '@/lib/design/tokens'
 import { parseQuestionCategoryBreakdown } from '@/lib/interview/utils'
 
+/** 「次に練習したい」の印を付ける点数の上限。5点と4点のように、どれも十分なときは付けない */
+export const WEAK_MARK_MAX_SCORE = 3
+
 type Props = {
   /** report.category_breakdown_json。無い（この機能より前のレポート）なら何も出さない */
   json?: string | null
@@ -23,8 +26,8 @@ export default function QuestionCategoryBreakdown({ json, paperBg, paperBorder, 
   const items = parseQuestionCategoryBreakdown(json)
   if (items.length === 0) return null
   const lowest = Math.min(...items.map((i) => i.score))
-  // 全部同じ点なら、どれか1つを弱点として目立たせない
-  const markWeakest = items.length > 1 && items.some((i) => i.score !== lowest)
+  // 全部同じ点なら、どれか1つを弱点として目立たせない。いちばん低くても十分な点なら付けない
+  const markWeakest = items.length > 1 && items.some((i) => i.score !== lowest) && lowest <= WEAK_MARK_MAX_SCORE
 
   return (
     <Paper component="section" aria-labelledby="question-category-title" sx={{ bgcolor: paperBg, border: paperBorder, p: 3, borderRadius: 2, order: 2 }}>
@@ -32,7 +35,7 @@ export default function QuestionCategoryBreakdown({ json, paperBg, paperBorder, 
         質問の種類ごとの評価
       </Typography>
       <Typography variant="caption" sx={{ color: textMuted, display: 'block', mb: 1.5 }}>
-        この面接で聞かれた質問の種類ごとに、AI が回答を 0〜5 で評価した参考値です。
+        この面接で聞かれた質問の種類ごとに、AI が回答を 0〜5 で評価した参考値です。1種類あたりの質問は1〜2問と少ないため、点数は目安として見てください。
       </Typography>
       <Stack component="ul" spacing={1.5} sx={{ listStyle: 'none', m: 0, p: 0 }}>
         {items.map((it) => {

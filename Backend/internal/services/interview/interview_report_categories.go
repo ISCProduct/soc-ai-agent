@@ -32,7 +32,9 @@ type CategoryBreakdown struct {
 
 // SanitizeCategoryBreakdown は LLM の出力を、保存してよい内訳にそろえる。
 //
-// 知らないカテゴリ・範囲外の点数・空の文の行は捨て、同じカテゴリは最初の1件だけ残す。
+// 知らないカテゴリ・範囲外の点数の行は捨て、同じカテゴリは最初の1件だけ残す。
+// 文（弱点・練習）が空でも、点数が範囲内なら行は残す（低い点の種類が比較から消えて、
+// 「次に練習したい」が本当に低い種類でなくなるのを防ぐ。空の文は画面で出さないだけ）。
 // 並びはカテゴリの定義順。1件も残らなければ nil（レポート本体は保存する。内訳だけ出さない）。
 func SanitizeCategoryBreakdown(items []CategoryBreakdown) []CategoryBreakdown {
 	order := make(map[string]int, len(ReportQuestionCategories))
@@ -53,9 +55,6 @@ func SanitizeCategoryBreakdown(items []CategoryBreakdown) []CategoryBreakdown {
 		}
 		it.Weakness = truncateRunes(strings.TrimSpace(it.Weakness), maxCategoryTextRunes)
 		it.Practice = truncateRunes(strings.TrimSpace(it.Practice), maxCategoryTextRunes)
-		if it.Weakness == "" && it.Practice == "" {
-			continue
-		}
 		byCategory[it.Category] = it
 	}
 	if len(byCategory) == 0 {
@@ -70,11 +69,12 @@ func SanitizeCategoryBreakdown(items []CategoryBreakdown) []CategoryBreakdown {
 	return out
 }
 
+// truncateRunes は n 文字を超える文を、省略記号を含めて n 文字に切る（途中で切れたことが分かるように）。
 func truncateRunes(s string, n int) string {
 	if utf8.RuneCountInString(s) <= n {
 		return s
 	}
-	return string([]rune(s)[:n])
+	return string([]rune(s)[:n-1]) + "…"
 }
 
 // categoryBreakdownJSON は保存用の JSON。内訳が無ければ nil（JSON カラムに空文字は書けない）。
@@ -98,5 +98,6 @@ func categoryBreakdownPromptSection() string {
 - 実際に質問されたカテゴリだけを出力してください（質問されなかったカテゴリは含めない）
 - score は、そのカテゴリの質問への受験者の回答を、上の評価基準と同じ 0〜5 で採点してください
 - weakness は、そのカテゴリの回答で足りなかった点を1文で（生徒向けのやさしい言葉で。良かった場合は空文字でよい）
-- practice は、次の練習で意識することを1文で具体的に`
+- practice は、次の練習で意識することを1文で具体的に
+- 出力形式の例にある category・score・文は形の例です。値をそのまま使わず、この面接の内容から決めてください`
 }

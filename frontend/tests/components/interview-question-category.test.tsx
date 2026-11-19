@@ -59,6 +59,17 @@ test('全部同じ点なら、弱点の印は付けない', () => {
   expect(screen.queryByText('次に練習したい')).not.toBeInTheDocument()
 })
 
+test('いちばん低くても十分な点（4点以上）なら、弱点の印は付けない', () => {
+  const high = [
+    { category: '自己紹介・志望動機', score: 5, weakness: '', practice: 'この調子で' },
+    { category: '強み・弱み', score: 4, weakness: '', practice: '具体例を1つ足す' },
+  ]
+  render(<InterviewSummary report={{ ...base, category_breakdown_json: JSON.stringify(high) }} theme="light" />)
+  expect(screen.getByText('4 / 5')).toBeInTheDocument()
+  expect(screen.queryByText('次に練習したい')).not.toBeInTheDocument()
+  expect(screen.getByText(/点数は目安として見てください/)).toBeInTheDocument()
+})
+
 test('この機能より前のレポート（内訳なし）では、欄ごと出さない', () => {
   render(<InterviewSummary report={{ ...base, category_breakdown_json: null }} theme="light" />)
   expect(screen.queryByText('質問の種類ごとの評価')).not.toBeInTheDocument()

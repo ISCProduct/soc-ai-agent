@@ -47,30 +47,86 @@ func TestBuildReportPrompts_カテゴリ別の指示を含む(t *testing.T) {
 }
 
 func TestSanitizeCategoryBreakdown(t *testing.T) {
+	exact := strings.Repeat("あ", maxCategoryTextRunes)
 	long := strings.Repeat("あ", maxCategoryTextRunes+10)
-	got := SanitizeCategoryBreakdown([]CategoryBreakdown{
-		{Category: "逆質問", Score: 2, Weakness: "質問が1つだけ", Practice: "3つ用意する"},
-		{Category: "知らないカテゴリ", Score: 3, Weakness: "x", Practice: "y"},
-		{Category: " 自己紹介・志望動機 ", Score: 4, Weakness: "", Practice: long},
-		{Category: "自己紹介・志望動機", Score: 1, Weakness: "重複", Practice: "重複"}, // 同じカテゴリは最初だけ
-		{Category: "強み・弱み", Score: 6, Weakness: "範囲外", Practice: "範囲外"},
-		{Category: "強み・弱み", Score: -1, Weakness: "範囲外", Practice: "範囲外"},
-		{Category: "キャリアビジョン", Score: 3, Weakness: " ", Practice: ""}, // 文が空
-		{Category: "企業別の質問", Score: 0, Weakness: "答えられなかった", Practice: "事業を調べる"},
-	})
-	var cats []string
-	for _, c := range got {
-		cats = append(cats, c.Category)
+	tests := []struct {
+		name string
+		in   []CategoryBreakdown
+		want []CategoryBreakdown
+	}{
+		{
+			name: "並びはカテゴリの定義順。前後の空白は取る",
+			in: []CategoryBreakdown{
+				{Category: "逆質問", Score: 2, Weakness: "質問が1つだけ", Practice: "3つ用意する"},
+				{Category: " 自己紹介・志望動機 ", Score: 4, Weakness: " 弱 ", Practice: "練"},
+			},
+			want: []CategoryBreakdown{
+				{Category: "自己紹介・志望動機", Score: 4, Weakness: "弱", Practice: "練"},
+				{Category: "逆質問", Score: 2, Weakness: "質問が1つだけ", Practice: "3つ用意する"},
+			},
+		},
+		{
+			name: "知らないカテゴリは捨てる",
+			in:   []CategoryBreakdown{{Category: "知らないカテゴリ", Score: 3, Weakness: "x", Practice: "y"}},
+			want: nil,
+		},
+		{
+			name: "同じカテゴリは最初の1件だけ",
+			in: []CategoryBreakdown{
+				{Category: "強み・弱み", Score: 3, Weakness: "1件目", Practice: ""},
+				{Category: "強み・弱み", Score: 1, Weakness: "重複", Practice: "重複"},
+			},
+			want: []CategoryBreakdown{{Category: "強み・弱み", Score: 3, Weakness: "1件目"}},
+		},
+		{
+			name: "0点と5点は残す",
+			in: []CategoryBreakdown{
+				{Category: "企業別の質問", Score: RubricScoreMin, Weakness: "答えられなかった", Practice: "事業を調べる"},
+				{Category: "キャリアビジョン", Score: RubricScoreMax, Weakness: "", Practice: "この調子で"},
+			},
+			want: []CategoryBreakdown{
+				{Category: "キャリアビジョン", Score: RubricScoreMax, Practice: "この調子で"},
+				{Category: "企業別の質問", Score: RubricScoreMin, Weakness: "答えられなかった", Practice: "事業を調べる"},
+			},
+		},
+		{
+			name: "6点と-1点は捨てる",
+			in: []CategoryBreakdown{
+				{Category: "強み・弱み", Score: RubricScoreMax + 1, Weakness: "範囲外"},
+				{Category: "逆質問", Score: RubricScoreMin - 1, Weakness: "範囲外"},
+			},
+			want: nil,
+		},
+		{
+			// 文が空という理由で比較から消すと、「次に練習したい」が本当に低い種類でなくなる
+			name: "文が両方空でも、点数が範囲内なら行は残す",
+			in: []CategoryBreakdown{
+				{Category: "自己紹介・志望動機", Score: 1, Weakness: " ", Practice: ""},
+				{Category: "職務経験・実績", Score: 3, Weakness: "w", Practice: "p"},
+			},
+			want: []CategoryBreakdown{
+				{Category: "自己紹介・志望動機", Score: 1},
+				{Category: "職務経験・実績", Score: 3, Weakness: "w", Practice: "p"},
+			},
+		},
+		{
+			name: "上限ちょうどの文は切らない",
+			in:   []CategoryBreakdown{{Category: "逆質問", Score: 2, Weakness: exact}},
+			want: []CategoryBreakdown{{Category: "逆質問", Score: 2, Weakness: exact}},
+		},
+		{
+			name: "上限を超える文は、省略記号を含めて上限の文字数に切る",
+			in:   []CategoryBreakdown{{Category: "逆質問", Score: 2, Practice: long}},
+			want: []CategoryBreakdown{{Category: "逆質問", Score: 2, Practice: strings.Repeat("あ", maxCategoryTextRunes-1) + "…"}},
+		},
 	}
-	// 並びはカテゴリの定義順
-	if want := []string{"自己紹介・志望動機", "逆質問", "企業別の質問"}; !slices.Equal(cats, want) {
-		t.Fatalf("categories = %v, want %v", cats, want)
-	}
-	if got[0].Score != 4 || []rune(got[0].Practice)[0] != 'あ' || len([]rune(got[0].Practice)) != maxCategoryTextRunes {
-		t.Fatalf("自己紹介 = %+v", got[0])
-	}
-	if got[2].Score != 0 {
-		t.Fatalf("0点は残す: %+v", got[2])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SanitizeCategoryBreakdown(tt.in)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("got  = %+v\nwant = %+v", got, tt.want)
+			}
+		})
 	}
 }
 

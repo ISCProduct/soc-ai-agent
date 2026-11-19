@@ -66,7 +66,9 @@ type interviewReportResponse struct {
 	Evidence     map[string]string `json:"evidence"`
 	Strengths    []string          `json:"strengths"`
 	Improvements []string          `json:"improvements"`
-	Teacher      *struct {
+	// nil は「キーが無い」。本番は strict スキーマで必須にしているので、JSON mode で欠けたら違反として数える
+	CategoryBreakdown []interview.CategoryBreakdown `json:"category_breakdown"`
+	Teacher           *struct {
 		OverallComment   string            `json:"overall_comment"`
 		DetailedEvidence map[string]string `json:"detailed_evidence"`
 		CoachingPoints   []string          `json:"coaching_points"`
@@ -136,6 +138,14 @@ func evaluateInterviewResponse(o Observation, c Case, res CallResult) Observatio
 	}
 	if resp.Teacher == nil || strings.TrimSpace(resp.Teacher.OverallComment) == "" {
 		o.Violations = append(o.Violations, "teacher_missing")
+	}
+	// 質問カテゴリ別の評価（SOCAIAGENT-610）。保存前と同じ検証を通し、捨てられる行があれば違反にする
+	// （知らないカテゴリ・範囲外の点数・同じカテゴリの重複）。別実装にすると本番と判定がずれる。
+	switch {
+	case resp.CategoryBreakdown == nil:
+		o.Violations = append(o.Violations, "category_breakdown_missing")
+	case len(interview.SanitizeCategoryBreakdown(resp.CategoryBreakdown)) != len(resp.CategoryBreakdown):
+		o.Violations = append(o.Violations, "category_breakdown_invalid")
 	}
 
 	// 根拠の捏造。プロンプトは「受験者が実際に話した発言をそのまま引用」を
