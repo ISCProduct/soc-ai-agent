@@ -40,8 +40,13 @@ export function ResumeRunningCard({ hasReport, fileName, targetLabel, candidateL
         <Typography sx={{ fontSize: { xs: 20, md: 22 }, lineHeight: '32px', fontWeight: 700, color: UI.ink }}>
           {hasReport ? 'レポートを書いています' : '書類を読み取っています'}
         </Typography>
+        {/*
+          「通常30〜60秒」は計測した値ではなかったので、目安の数字は出さない（#2217）。
+          画面を離れると、useResumePage の後始末（アンマウント時の reviewAbortRef.abort()）で通信を止めるので、
+          添削は中断される。そのとおりに書く。
+        */}
         <Typography sx={{ fontSize: 16, lineHeight: '26px', color: UI.inkSoft }}>
-          通常30〜60秒かかります。この画面を開いたままお待ちください。
+          しばらくかかります。画面を離れると中断されるので、この画面を開いたままお待ちください。
         </Typography>
         <Stack component="dl" spacing={0.75} sx={{ width: '100%', m: 0, px: 2.5, py: 2, bgcolor: UI.tint, borderRadius: '8px', textAlign: 'left' }}>
           {rows.map(([label, value]) => (

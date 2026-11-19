@@ -14,13 +14,13 @@ import {
   MenuItem,
   TextField,
   Typography,
-  Alert,
   Snackbar,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import PersonIcon from '@mui/icons-material/Person'
 import SchoolIcon from '@mui/icons-material/School'
 import WorkIcon from '@mui/icons-material/Work'

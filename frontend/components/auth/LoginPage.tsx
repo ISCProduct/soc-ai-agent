@@ -11,8 +11,8 @@ import {
   Tabs,
   Tab,
   Divider,
-  Alert,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import GoogleIcon from '@mui/icons-material/Google'
 import Link from 'next/link'

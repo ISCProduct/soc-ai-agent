@@ -2,7 +2,6 @@
 
 import { FormEvent, useEffect, useState } from 'react'
 import {
-  Alert,
   Box,
   Button,
   Card,
@@ -16,6 +15,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { authService } from '@/lib/auth'
 import { BACKEND_URL } from '@/lib/config'
 

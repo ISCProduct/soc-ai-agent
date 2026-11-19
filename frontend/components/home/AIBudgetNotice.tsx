@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { authService } from '@/lib/auth'
 
 const POLL_INTERVAL_MS = 60_000

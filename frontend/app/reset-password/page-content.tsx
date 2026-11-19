@@ -9,8 +9,8 @@ import {
   TextField,
   Button,
   Typography,
-  Alert,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import Link from 'next/link'
 import { authService } from '@/lib/auth'
 

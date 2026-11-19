@@ -180,7 +180,8 @@ describe('ResultsListView', () => {
       },
     })
 
-    const alert = screen.getByRole('alert')
+    // success の通知は割り込まない role="status"（error だけが role="alert"。#2217）
+    const alert = screen.getByRole('status')
     const linkButton = within(alert).getByRole('button', { name: '選考管理を見る' })
     fireEvent.click(linkButton)
     expect(onNavigate).toHaveBeenCalledWith('/applications')
@@ -190,7 +191,8 @@ describe('ResultsListView', () => {
     renderList({
       snackbar: { open: true, message: 'お気に入りに追加しました', severity: 'success' },
     })
-    const alert = screen.getByRole('alert')
+    // success の通知は割り込まない role="status"（error だけが role="alert"。#2217）
+    const alert = screen.getByRole('status')
     expect(within(alert).queryByRole('button', { name: '選考管理を見る' })).not.toBeInTheDocument()
   })
 

@@ -1,6 +1,7 @@
 'use client'
 
-import { Alert, Box, Button, Typography } from '@mui/material'
+import { Box, Button, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { Refresh } from '@mui/icons-material'
 import type { AnalysisScores } from '../types'
 import { UI } from '@/lib/design/tokens'

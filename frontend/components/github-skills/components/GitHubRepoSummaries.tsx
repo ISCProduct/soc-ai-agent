@@ -1,5 +1,4 @@
 import {
-  Alert,
   Box,
   Button,
   Chip,
@@ -7,6 +6,7 @@ import {
   Divider,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import GitHubIcon from '@mui/icons-material/GitHub'

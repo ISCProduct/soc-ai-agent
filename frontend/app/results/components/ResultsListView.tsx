@@ -11,10 +11,10 @@ import {
   Avatar,
   Chip,
   Snackbar,
-  Alert,
   IconButton,
   Tooltip,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import {
   ArrowBack,
   LocationOn,

@@ -1,5 +1,4 @@
 import {
-  Alert,
   Box,
   Button,
   Chip,
@@ -7,6 +6,7 @@ import {
   Paper,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { AXES_ORDER, CATEGORY_COLORS, CATEGORY_LABELS } from '../constants'

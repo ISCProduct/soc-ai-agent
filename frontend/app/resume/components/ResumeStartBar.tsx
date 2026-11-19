@@ -46,7 +46,8 @@ export function ResumeStartBar({ ready, summary, hint, onStart }: ResumeStartBar
           {ready ? summary : hint}
         </Typography>
         <Box sx={{ display: 'flex', flexDirection: { xs: 'column-reverse', md: 'row' }, alignItems: 'center', gap: 2 }}>
-          <Typography sx={{ fontSize: 14, color: UI.inkSoft, whiteSpace: 'nowrap' }}>通常30〜60秒かかります</Typography>
+          {/* 計測した値ではないので、目安の数字は出さない（#2217。ResumeRunningCard と同じ） */}
+          <Typography sx={{ fontSize: 14, color: UI.inkSoft, whiteSpace: 'nowrap' }}>しばらくかかります</Typography>
           <Button
             variant="contained"
             disabled={!ready}

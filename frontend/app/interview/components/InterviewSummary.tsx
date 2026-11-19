@@ -12,9 +12,9 @@ import {
   Stack,
   Tooltip,
   Typography,
-  Alert,
   Button,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import CheckIcon from '@mui/icons-material/Check'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { InterviewReport, InterviewUtterance, PhraseSuggestion, interviewApi } from '@/lib/interview'

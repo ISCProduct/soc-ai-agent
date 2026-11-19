@@ -5,7 +5,6 @@ import { formatDate } from '@/lib/i18n/format'
 import FormatFindingsSection, { type FormatFinding } from '@/components/feedback/FormatFindingsSection'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
-  Alert,
   Box,
   Button,
   Chip,
@@ -19,6 +18,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'

@@ -18,9 +18,9 @@ import {
   FormControl,
   InputLabel,
   Snackbar,
-  Alert,
   IconButton,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { ArrowBack, Edit, Check } from '@mui/icons-material'
 import { authService } from '@/lib/auth'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
