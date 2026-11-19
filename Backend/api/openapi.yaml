@@ -3776,6 +3776,25 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/admin/graduate-employments/summary:
+    get:
+      tags: [admin-analytics]
+      summary: 就職先の内訳（氏名なし）
+      description: |
+        担当校スコープ。年度・業界・学校ごとの件数と、登録件数に占める割合を返す。
+        卒業生全体の人数が無いため内定率は計算しない。氏名は含めない。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: query
+          name: school_id
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   /api/admin/graduate-employments/{id}:
     get:
       tags: [admin-analytics]
