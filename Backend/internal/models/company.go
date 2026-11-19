@@ -223,6 +223,19 @@ type UserApplicationStatus struct {
 	UpdatedAt time.Time
 }
 
+// ApplicationStatusEvent は選考ステータスの遷移1件。変更者はロールだけ（SOCAIAGENT-673）。
+type ApplicationStatusEvent struct {
+	ID            uint   `gorm:"primaryKey"`
+	ApplicationID uint   `gorm:"not null;index:idx_application_status_events_application,priority:1"`
+	UserID        uint   `gorm:"not null;index"`
+	FromStatus    string `gorm:"type:varchar(50);not null;default:''"`
+	ToStatus      string `gorm:"type:varchar(50);not null"`
+	ActorRole     string `gorm:"type:varchar(32);not null"`
+	CreatedAt     time.Time
+}
+
+func (ApplicationStatusEvent) TableName() string { return "application_status_events" }
+
 // CompanyProfileUpdateHistory 企業プロファイル更新履歴（ロールバック用）
 type CompanyProfileUpdateHistory struct {
 	ID        uint    `gorm:"primaryKey"`

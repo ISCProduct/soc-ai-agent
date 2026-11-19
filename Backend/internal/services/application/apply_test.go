@@ -145,6 +145,41 @@ func TestApply_SucceedsAndMarksApplied(t *testing.T) {
 	}
 }
 
+type failEvents struct{ called int }
+
+func (f *failEvents) RecordStatusEvent(*models.ApplicationStatusEvent) error {
+	f.called++
+	return errors.New("history down")
+}
+
+func TestApply_StatusEventFailureDoesNotFailApply(t *testing.T) {
+	db, mock := newSQLMockDB(t)
+	repo := &stubApplyMatchRepo{findByIDResult: &models.UserCompanyMatch{ID: 5, UserID: 1, CompanyID: 10, MatchScore: 70}}
+	events := &failEvents{}
+	s := &ApplicationService{matchRepo: repo, appRepo: repositories.NewUserApplicationStatusRepository(db), events: events}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT \\* FROM `user_application_statuses` WHERE user_id = \\? AND company_id = \\? AND status NOT IN \\(\\?,\\?,\\?\\)").
+		WithArgs(uint(1), uint(10), "accepted", "withdrawn", "rejected", sqlmock.AnyArg()).
+		WillReturnError(gorm.ErrRecordNotFound)
+	mock.ExpectExec("INSERT INTO `user_application_statuses`").
+		WillReturnResult(sqlmock.NewResult(100, 1))
+	mock.ExpectExec("UPDATE `user_company_matches` SET `is_applied`=\\?").
+		WithArgs(true, sqlmock.AnyArg(), uint(5)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if _, err := s.Apply(1, 10, 5); err != nil {
+		t.Fatalf("履歴の失敗で応募が落ちた: %v", err)
+	}
+	if events.called != 1 {
+		t.Fatalf("called = %d", events.called)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql: %v", err)
+	}
+}
+
 // MarkAsApplied相当のUPDATEが失敗した場合、応募のCreateごとロールバックされ、
 // 中途半端な状態（応募だけ作られてis_appliedが更新されない）が残らないことを確認する。
 func TestApply_RollsBackWhenMarkAppliedFails(t *testing.T) {
