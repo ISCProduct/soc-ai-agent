@@ -17,7 +17,14 @@ import (
 	"time"
 )
 
-const WithdrawalRetentionDays = 30
+// WithdrawalRetentionMonths は退会日から物理削除までの月数。
+// 退会ボタンを押した瞬間には消さない。再計算の控えもスコア本体と同じ日に消す（SOCAIAGENT-633）。
+const WithdrawalRetentionMonths = 12
+
+// WithdrawalPurgeAfter は退会日時から物理削除する日時を返す。
+func WithdrawalPurgeAfter(withdrawnAt time.Time) time.Time {
+	return withdrawnAt.UTC().AddDate(0, WithdrawalRetentionMonths, 0)
+}
 
 // ObjectDeleter は S3 等のオブジェクト削除インターフェース。
 type ObjectDeleter interface {
@@ -71,7 +78,7 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 	}
 
 	now := time.Now().UTC()
-	purgeAfter := now.AddDate(0, 0, WithdrawalRetentionDays)
+	purgeAfter := WithdrawalPurgeAfter(now)
 	var email string
 	var keyCount int
 
@@ -118,7 +125,7 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 			"deleted_user_email_masked": maskEmail(email),
 			"purge_after":               purgeAfter.Format(time.RFC3339),
 			"s3_object_count":           keyCount,
-			"retention_days":            WithdrawalRetentionDays,
+			"retention_months":          WithdrawalRetentionMonths,
 		})
 	}
 
@@ -196,7 +203,7 @@ type scoutIndexDeleter interface {
 // 検索結果は DB 側で再フィルタされるため情報漏洩は起きないが、
 // 個人データが消えない状態が誰にも気づかれずに続く。
 //
-// 物理パージ(30日)を待つと窓が広すぎるので、パージと同じ日次ジョブで消し直す。
+// 物理パージ（12ヶ月）を待つと窓が広すぎるので、パージと同じ日次ジョブで消し直す。
 // 削除は冪等なので、既に消えているユーザーに対して繰り返し呼んでも副作用はない。
 //
 // 戻り値: (試行件数, 失敗件数, エラー)。エラーは対象の取得に失敗した場合のみ。

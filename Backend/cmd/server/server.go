@@ -160,7 +160,7 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 	safego.Every(24*time.Hour, true, func() {
 		// 退会時のベクトル削除はRAG障害でも退会を失敗させないためエラーを飲む。
 		// 取りこぼしをここで消し直す(#1204)。パージより先に実行して、
-		// 30日待たずに個人データを消す。
+		// パージ期限を待たずに個人データを消す。
 		if attempted, failed, err := userDeletionService.ReconcileScoutIndex(context.Background()); err != nil {
 			slog.Error("scout index reconcile failed", "error", err)
 		} else if failed > 0 {
