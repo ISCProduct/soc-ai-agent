@@ -75,7 +75,7 @@ func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint
 		shared.WrapUntrustedText(transcript, "応募者発言"))
 
 	model := aimodel.For(aimodel.StageInterviewReport)
-	ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewRealtime)
+	ctx = usagectx.WithFeature(s.withPIIGuard(ctx, session.UserID), usagectx.FeatureInterviewRealtime)
 	llmCtx, cancel := context.WithTimeout(ctx, interviewPhraseSuggestionsLLMTimeout)
 	defer cancel()
 	raw, err := s.openaiClient.ChatCompletionJSON(llmCtx, systemPrompt, userPrompt, 0.5, 1000, model)

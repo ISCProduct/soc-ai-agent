@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Box, Button, Skeleton, Stack, Typography } from '@mui/material'
 import { UI } from '@/lib/design/tokens'
-import { fetchAxisBreakdown, type AxisBreakdown, type AxisRow } from '@/lib/axis-match'
+import { AxisBreakdownNotFoundError, fetchAxisBreakdown, type AxisBreakdown, type AxisRow } from '@/lib/axis-match'
 
 /**
  * 推薦1件の、軸ごとの内訳（SOCAIAGENT-611）。10軸それぞれの「あなた・企業の重視度・一致度」を数値で出し、
@@ -20,12 +20,13 @@ export default function AxisBreakdownPanel({ matchId }: { matchId: number }) {
   const load = useCallback(async () => {
     const mine = ++seq.current
     setError('')
-    setData(null)
+    // 同じ推薦の再読み込みでは、今の内容を残したまま取り直す（別の推薦の内容は残さない）
+    setData((prev) => (prev?.match_id === matchId ? prev : null))
     try {
       const result = await fetchAxisBreakdown(matchId)
       if (mine === seq.current) setData(result)
     } catch (e) {
-      if (mine === seq.current) setError(e instanceof Error && e.message.startsWith('この企業') ? e.message : '内訳を読み込めませんでした。')
+      if (mine === seq.current) setError(e instanceof AxisBreakdownNotFoundError ? e.message : '内訳を読み込めませんでした。')
     }
   }, [matchId])
 

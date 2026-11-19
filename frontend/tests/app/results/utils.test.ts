@@ -15,6 +15,27 @@ import {
 } from '@/app/results/utils'
 
 describe('mapRecommendationToCompany', () => {
+  it('「合う／合わない」は、知っている値だけを持つ', () => {
+    expect(mapRecommendationToCompany({ id: 1, category_name: 'A社', feedback: 'fit' }, 0).feedback).toBe('fit')
+    expect(mapRecommendationToCompany({ id: 1, category_name: 'A社', feedback: 'unfit' }, 0).feedback).toBe('unfit')
+    expect(mapRecommendationToCompany({ id: 1, category_name: 'A社', feedback: 'x' }, 0).feedback).toBeUndefined()
+    expect(mapRecommendationToCompany({ id: 1, category_name: 'A社' }, 0).feedback).toBeUndefined()
+  })
+
+  it('参考の印と理由（SOCAIAGENT-670）を、あればそのまま持つ。無ければ参考ではない', () => {
+    const ref = mapRecommendationToCompany(
+      { id: 1, category_name: 'A社', score: 60, is_reference: true, fit_note: '参考: 技術志向・安定志向で、あなたの傾向と企業の重視点が大きく離れています。' },
+      0,
+    )
+    expect(ref.isReference).toBe(true)
+    expect(ref.fitNote).toContain('参考: 技術志向')
+    const hiring = mapRecommendationToCompany({ id: 3, category_name: 'C社', score: 70, job_matched: true }, 2)
+    expect(hiring.jobMatched).toBe(true)
+    const normal = mapRecommendationToCompany({ id: 2, category_name: 'B社', score: 80 }, 1)
+    expect(normal.isReference).toBe(false)
+    expect(normal.fitNote).toBeUndefined()
+  })
+
   it('API フィールドを画面用 Company にマッピングする', () => {
     const company = mapRecommendationToCompany(
       {
@@ -45,6 +66,10 @@ describe('mapRecommendationToCompany', () => {
       employees: '100-500',
       description: 'マッチ理由',
       matchScore: 87,
+      isReference: false,
+      fitNote: undefined,
+      jobMatched: false,
+      feedback: undefined,
       tags: ['成長'],
       techStack: ['Go'],
       categoryScores: expect.objectContaining({ technical: 80, teamwork: 0 }),

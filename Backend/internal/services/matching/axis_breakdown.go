@@ -99,7 +99,22 @@ func (s *MatchingService) GetAxisBreakdown(matchID, userID uint) (*AxisBreakdown
 	if profile == nil {
 		return nil, shared.ErrNotFound
 	}
-	scores, err := s.userWeightScoreRepo.FindByUserAndSession(userID, match.SessionID)
+	scoreMap, err := s.mergedSessionScores(userID, match.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := BuildAxisBreakdown(scoreMap, profile)
+	out.MatchID = match.ID
+	out.CompanyID = match.CompanyID
+	out.CompanyName = match.Company.Name
+	return out, nil
+}
+
+// mergedSessionScores は、その診断のスコアに適性検査を合流させた値（推薦の計算と同じ）。
+// 「あなたの10の傾向」と「軸ごとの内訳」は、どちらもこれを使う（同じ画面で数値が食い違わないように）。
+func (s *MatchingService) mergedSessionScores(userID uint, sessionID string) (map[string]float64, error) {
+	scores, err := s.userWeightScoreRepo.FindByUserAndSession(userID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -107,13 +122,38 @@ func (s *MatchingService) GetAxisBreakdown(matchID, userID uint) (*AxisBreakdown
 	for _, sc := range scores {
 		scoreMap[sc.WeightCategory] = float64(sc.Score)
 	}
-	scoreMap = s.mergeAssessmentScores(userID, scoreMap)
+	return s.mergeAssessmentScores(userID, scoreMap), nil
+}
 
-	out := BuildAxisBreakdown(scoreMap, profile)
-	out.MatchID = match.ID
-	out.CompanyID = match.CompanyID
-	out.CompanyName = match.Company.Name
-	return out, nil
+// MyAxisScore は「あなたの10の傾向」の1軸。Score が nil の軸は、まだ測れていない。
+type MyAxisScore struct {
+	Key   string   `json:"key"`
+	Label string   `json:"label"`
+	Score *float64 `json:"score"`
+}
+
+// GetMyAxisScores は本人の診断（sessionID）の10軸のスコアを、軸ごとの内訳と同じ基準
+// （適性検査を合流させ、整数に丸めた値）で返す。他人の診断のスコアは、user_id で絞るので返らない。
+func (s *MatchingService) GetMyAxisScores(userID uint, sessionID string) ([]MyAxisScore, error) {
+	scoreMap, err := s.mergedSessionScores(userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return BuildMyAxisScores(scoreMap), nil
+}
+
+// BuildMyAxisScores は10軸の並び（Axes）でスコアを返す。丸め方は BuildAxisBreakdown と同じ。
+func BuildMyAxisScores(userScores map[string]float64) []MyAxisScore {
+	out := make([]MyAxisScore, 0, len(Axes))
+	for _, a := range Axes {
+		row := MyAxisScore{Key: a.Key, Label: a.Category}
+		if v, ok := userScores[a.Category]; ok {
+			r := math.Round(v)
+			row.Score = &r
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // BuildAxisBreakdown はスコアと企業の重視度から、軸別の内訳と言葉を組み立てる。

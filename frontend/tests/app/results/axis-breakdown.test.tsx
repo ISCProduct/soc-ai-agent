@@ -37,8 +37,12 @@ function respond(routes: (url: string) => [number, unknown]) {
   return urls
 }
 
-test('診断のスコアを10軸の並びにそろえ、無い軸は未計測（null）にする', () => {
-  const got = toMyCategoryScores([{ WeightCategory: '安定志向', Score: 41.6 }, { WeightCategory: '技術志向', Score: 80 }])
+test('10軸のスコアを固定の並びにそろえ、無い軸・数値でない値は未計測（null）にする', () => {
+  const got = toMyCategoryScores([
+    { key: 'stability', label: '安定志向', score: 41.6 },
+    { key: 'technical', label: '技術志向', score: 80 },
+    { key: 'teamwork', label: 'チームワーク志向', score: null },
+  ])
   expect(got).toHaveLength(10)
   expect(got[0]).toEqual({ label: '技術志向', score: 80 })
   expect(got[4]).toEqual({ label: '安定志向', score: 42 })
@@ -47,23 +51,24 @@ test('診断のスコアを10軸の並びにそろえ、無い軸は未計測（
 
 describe('あなたの10の傾向', () => {
   test('10軸を固定の並びで、数値も文字で出す。測れていない軸は「未計測」', async () => {
-    const urls = respond(() => [200, [{ WeightCategory: '技術志向', Score: 80 }]])
+    const urls = respond(() => [200, { axes: [{ key: 'technical', label: '技術志向', score: 80 }] }])
     render(<MyCategoryScoresCard sessionId="s 1" />)
     expect(await screen.findByRole('img', { name: '技術志向 80' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'チームワーク志向 未計測' })).toBeInTheDocument()
     expect(screen.getAllByText('未計測')).toHaveLength(9)
-    expect(urls[0]).toBe('/api/chat/scores?session_id=s%201')
+    // 軸ごとの内訳と同じ、適性検査を合流させた値を取る（合流前の /api/chat/scores ではない）
+    expect(urls[0]).toBe('/api/chat/axis-scores?session_id=s%201')
   })
 
   test('スコアがまだ無ければ、対話を進めるよう案内する', async () => {
-    respond(() => [200, []])
+    respond(() => [200, { axes: [] }])
     render(<MyCategoryScoresCard sessionId="s1" />)
     expect(await screen.findByText(/まだスコアがありません/)).toBeInTheDocument()
   })
 
   test('読み込みに失敗したら知らせ、再読み込みできる', async () => {
     let ok = false
-    respond(() => (ok ? [200, [{ WeightCategory: '技術志向', Score: 80 }]] : [500, {}]))
+    respond(() => (ok ? [200, { axes: [{ key: 'technical', label: '技術志向', score: 80 }] }] : [500, {}]))
     render(<MyCategoryScoresCard sessionId="s1" />)
     expect(await screen.findByText('傾向のスコアを読み込めませんでした。')).toBeInTheDocument()
     ok = true
@@ -102,6 +107,16 @@ describe('軸ごとの内訳', () => {
     expect(await screen.findByText('内訳を読み込めませんでした。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '再読み込み' })).toBeInTheDocument()
   })
+
+  test('読み込みの失敗後に取り直すと、内訳を出す', async () => {
+    let ok = false
+    respond(() => (ok ? [200, BREAKDOWN] : [500, {}]))
+    render(<AxisBreakdownPanel matchId={10} />)
+    expect(await screen.findByText('内訳を読み込めませんでした。')).toBeInTheDocument()
+    ok = true
+    fireEvent.click(screen.getByRole('button', { name: '再読み込み' }))
+    expect(await screen.findByRole('table')).toBeInTheDocument()
+  })
 })
 
 describe('結果一覧への組み込み', () => {
@@ -123,7 +138,7 @@ describe('結果一覧への組み込み', () => {
       />,
     )
     expect(screen.getByText('あなたの10の傾向')).toBeInTheDocument()
-    await waitFor(() => expect(urls).toContain('/api/chat/scores?session_id=s1'))
+    await waitFor(() => expect(urls).toContain('/api/chat/axis-scores?session_id=s1'))
     expect(urls.some((u) => u.includes('/axes'))).toBe(false)
 
     const toggle = screen.getByRole('button', { name: '軸ごとの内訳を見る' })

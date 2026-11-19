@@ -59,6 +59,9 @@ func (s *stubMatchingService) ReasonScores(_ uint, scores []models.UserWeightSco
 func (s *stubMatchingService) GetAxisBreakdown(uint, uint) (*matching.AxisBreakdown, error) {
 	return nil, nil
 }
+func (s *stubMatchingService) GetMyAxisScores(uint, string) ([]matching.MyAxisScore, error) {
+	return nil, nil
+}
 
 // TestRunBackgroundMatching_SkipsWhileRunning は実行中の同一セッションが
 // 多重に計算されないことを検証する（#1167 の核心）。

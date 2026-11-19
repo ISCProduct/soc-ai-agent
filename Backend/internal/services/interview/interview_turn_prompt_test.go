@@ -182,22 +182,13 @@ func TestBuildInterviewSystemPromptForbidsRepeatingThemes(t *testing.T) {
 	}
 }
 
-// TestBuildStudentNameContext は、聞き間違いに左右されない氏名の正を
-// システムプロンプトへ渡すブロックの中身を確認する（#name mismatch bug）。
-func TestBuildStudentNameContext(t *testing.T) {
-	ctx := buildStudentNameContext("田中優希")
-	if !strings.Contains(ctx, "田中優希") {
-		t.Fatalf("name context missing student name: %s", ctx)
+// TestStudentNameInstruction は、氏名を渡さず、呼びかけと伏字記号の扱いだけを指示することを確認する。
+func TestStudentNameInstruction(t *testing.T) {
+	if !strings.Contains(studentNameInstruction, "氏名では呼ばず") {
+		t.Fatalf("instruction missing no-name rule: %s", studentNameInstruction)
 	}
-	if !strings.Contains(ctx, "音声認識の誤り") {
-		t.Fatalf("name context missing rationale for overriding heard name: %s", ctx)
-	}
-
-	if got := buildStudentNameContext(""); got != "" {
-		t.Fatalf("expected empty context for blank name, got: %q", got)
-	}
-	if got := buildStudentNameContext("   "); got != "" {
-		t.Fatalf("expected empty context for whitespace-only name, got: %q", got)
+	if !strings.Contains(studentNameInstruction, "<NAME>") {
+		t.Fatalf("instruction missing masked-token rule: %s", studentNameInstruction)
 	}
 }
 

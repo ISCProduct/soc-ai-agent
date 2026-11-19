@@ -21,6 +21,10 @@ func SetupChatRoutes(api *echo.Group, chatController *chatcontrollers.ChatContro
 	chat.POST("/favorite", chatController.ToggleFavorite)
 	// 推薦1件の軸別のマッチの内訳（SOCAIAGENT-611）
 	chat.GET("/matches/:id/axes", chatController.GetAxisBreakdown)
+	// 「あなたの10の傾向」（内訳と同じく適性検査を合流させた値。SOCAIAGENT-611）
+	chat.GET("/axis-scores", chatController.GetMyAxisScores)
+	// 推薦への「合う／合わない」（SOCAIAGENT-670）
+	chat.POST("/match-feedback", chatController.SubmitMatchFeedback)
 
 	// 質問管理エンドポイント（認証必須）
 	questions := api.Group("/questions", EchoUserAuth(userSecret, access, orgs))

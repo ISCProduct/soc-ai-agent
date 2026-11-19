@@ -22,6 +22,46 @@ export const SIDEBAR_NAV_ITEMS = [
   { href: '/profile', label: t('sidebar.profile') },
 ] as const
 
+/**
+ * ホーム（相談中心）のサイドバーの構成。Figma「改善G／相談中心」のサイドバー（ノード 37:340）の並び。
+ * 表示名は辞書が正本。href は SIDEBAR_NAV_ITEMS と同じ行き先で、取りこぼしが無いことをテストで確かめている。
+ */
+export const HOME_SIDEBAR_TOP = [
+  { href: '/', label: t('sidebar.home') },
+  { href: '/results', label: t('home.results') },
+] as const
+
+/** 「自己分析」の進捗の下に並ぶ項目。 */
+export const HOME_SIDEBAR_ANALYSIS = [
+  { href: '/correlation-diagram', label: t('sidebar.correlationDiagram') },
+  { href: '/chat-history', label: t('sidebar.chatHistory') },
+] as const
+
+export const HOME_SIDEBAR_GROUPS = [
+  {
+    heading: t('groups.prepare'),
+    items: [
+      { href: '/resume', label: t('sidebar.resume') },
+      { href: '/es-rewrite', label: t('sidebar.esRewrite') },
+      { href: '/assessments', label: t('sidebar.personalityAssessment') },
+      { href: '/ability-assessments', label: t('sidebar.abilityAssessment') },
+      { href: '/interview', label: t('sidebar.interview') },
+      { href: '/interview/history', label: t('sidebar.interviewHistory') },
+    ],
+  },
+  {
+    heading: t('groups.proceed'),
+    items: [
+      { href: '/schedule', label: t('sidebar.schedule') },
+      { href: '/applications', label: t('sidebar.applications') },
+      { href: '/scout', label: t('sidebar.scout') },
+    ],
+  },
+] as const
+
+/** サイドバーの一番下の項目。 */
+export const HOME_SIDEBAR_FOOTER = { href: '/profile', label: t('sidebar.profile') } as const
+
 export const SIDEBAR_ADMIN_NAV = {
   href: '/admin',
   label: t('admin'),
@@ -53,7 +93,7 @@ export function isCurrentNav(pathname: string, href: string): boolean {
 
 /**
  * `allHrefs` の中に前方一致が重なる項目があるとき（例: /interview と /interview/history）、
- * 最も長く一致する項目だけを現在地とする。GlobalNavMenu / AnalysisSidebar で共通利用（#403）。
+ * 最も長く一致する項目だけを現在地とする。GlobalNavMenu / HomeSidebar で共通利用（#403）。
  */
 export function isCurrentNavExclusive(pathname: string, href: string, allHrefs: readonly string[]): boolean {
   return isCurrentNav(pathname, href) && !allHrefs.some((o) => o.length > href.length && isCurrentNav(pathname, o))

@@ -52,6 +52,7 @@ import (
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/oauth"
 	"Backend/internal/services/organization"
+	"Backend/internal/services/piimask"
 	portfoliosvc "Backend/internal/services/portfolio"
 	"Backend/internal/services/refreshtoken"
 	"Backend/internal/services/release"
@@ -300,6 +301,16 @@ func main() {
 	questionService := chat.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := matching.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
 	resumeService := resume.NewResumeService(resumeRepo, "storage/resumes", aiClient)
+	// 履歴書を外部の LLM へ送る前の伏字の辞書に、その学生の氏名・メール・学校名を使う。読めないときは送らない
+	subjectReader := piimask.SubjectReaderFunc(func(userID uint) (piimask.Subject, error) {
+		u, err := userRepo.GetUserByID(userID)
+		if err != nil {
+			return piimask.Subject{}, err
+		}
+		return piimask.Subject{Name: u.Name, Email: u.Email, SchoolName: u.SchoolName}, nil
+	})
+	resumeService.SetSubjectReader(subjectReader)
+	escontrollers.SetSubjectReader(subjectReader) // ES 添削・リライトも、外の LLM へ送る前に同じ辞書で伏字にする
 	crawlService := company.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 	gbizInfoRepo := repositories.NewGBizInfoRepository(db)
 	gbizInfoService := gbizinfo.NewGBizInfoService(cfg, gbizInfoRepo, companyRepo, companyRelationRepo)
@@ -338,6 +349,7 @@ func main() {
 		aiClient,
 		nil,
 	)
+	analysisService.SetSubjectReader(subjectReader) // 直近の発言を外の LLM へ送る前に、同じ辞書で伏字にする
 	interviewService := interview.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
 	// 面接1回ごとに STT / LLM / TTS を叩くため、セッション数がそのまま費用に効く。
 	// 既定は監視のみで、止めるのは INTERVIEW_BUDGET_ENFORCE を明示したときだけ。
@@ -355,6 +367,7 @@ func main() {
 		matchRepo,
 		aiClient,
 	)
+	diagnosisQualityService.SetSubjectReader(subjectReader) // 会話の抜粋を外の LLM へ送る前に、同じ辞書で伏字にする
 
 	if rdb != nil {
 		queueServer = queue.NewServer(rdb)
@@ -386,6 +399,8 @@ func main() {
 	authController := authcontrollers.NewAuthController(authService, cfg.UserSecret)
 	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService)
 	chatController := chatcontrollers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
+	// 推薦への「合う／合わない」（SOCAIAGENT-670）
+	chatController.SetMatchFeedback(matching.NewMatchFeedbackService(repositories.NewUserMatchFeedbackRepository(db)))
 	chatController.SetAIBudget(aiBudgetService)
 	if jobEnqueuer != nil {
 		chatController.SetJobEnqueuer(jobEnqueuer)
@@ -541,6 +556,7 @@ func main() {
 	userPreferenceRepo := repositories.NewUserPreferenceRepository(db)
 	// 希望条件の保存とプロフィール更新の両方から同じ同期処理を呼ぶ (#1094)
 	scoutIndexSyncer := hr.NewStudentIndexSyncer(userPreferenceRepo, studentSemanticClient)
+	scoutIndexSyncer.SetSubjectReader(subjectReader) // 自己PRなどの自由記述を、外の埋め込み API へ送る前に伏字にする
 	authService.SetScoutIndexSyncer(scoutIndexSyncer)
 	// 退会時のベクトル削除と、日次のリコンサイル(ReconcileScoutIndex)も同じ同期処理を使う（#1094, #1204）。
 	userDeletionService.SetScoutIndexSyncer(scoutIndexSyncer)
@@ -591,6 +607,8 @@ func main() {
 	// 適性検査 第1段（#1678）。結果は source=assessment で user_weight_scores へ入り、マッチングへ合流する
 	assessmentRepo := repositories.NewAssessmentRepository(db)
 	matchingService.SetAssessmentScoreReader(assessmentRepo)
+	// 本人が選んだ職種の募集がある企業を加点する（SOCAIAGENT-670。加点のみ・除外なし）
+	matchingService.SetJobPreferenceReader(repositories.NewJobPreferenceRepository(db))
 	assessmentService := assessmentsvc.NewService(assessmentRepo, matchingService, userWeightScoreRepo)
 	routes.SetupAssessmentRoutes(api, assessmentcontrollers.NewController(assessmentService), cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 適性検査 第2段（#1675）。学校独自テンプレートはマッチングに合流させない

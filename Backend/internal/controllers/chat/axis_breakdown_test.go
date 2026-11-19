@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	chatcontrollers "Backend/internal/controllers/chat"
@@ -58,4 +59,42 @@ func TestChatController_GetAxisBreakdown_Errors(t *testing.T) {
 	failing.On("GetAxisBreakdown", uint(5), uint(1)).Return(nil, errors.New("db"))
 	ctx, _ = axesCtx("5", 1)
 	testsupport.AssertStatus(t, newChatController(nil, failing, nil, nil, nil).GetAxisBreakdown, ctx, http.StatusInternalServerError)
+}
+
+// SOCAIAGENT-611: GET /api/chat/axis-scores（「あなたの10の傾向」。内訳と同じ合流後の値）
+
+func axisScoresCtx(query string, userID uint) (echo.Context, *httptest.ResponseRecorder) {
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/axis-scores"+query, nil)
+	if userID > 0 {
+		req = testsupport.WithUserID(req, userID)
+	}
+	rec := httptest.NewRecorder()
+	return testsupport.NewCtx(req, rec), rec
+}
+
+func TestChatController_GetMyAxisScores(t *testing.T) {
+	score := 72.0
+	matchSvc := &mocks.MatchingServiceMock{}
+	matchSvc.On("GetMyAxisScores", uint(1), "s1").Return([]matching.MyAxisScore{{Key: "technical", Label: "技術志向", Score: &score}}, nil)
+	ctx, rec := axisScoresCtx("?session_id=s1", 1)
+	if err := newChatController(nil, matchSvc, nil, nil, nil).GetMyAxisScores(ctx); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("err = %v code = %d", err, rec.Code)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"axes":[{"key":"technical","label":"技術志向","score":72}]`) {
+		t.Fatalf("body = %s", body)
+	}
+	matchSvc.AssertExpectations(t)
+}
+
+func TestChatController_GetMyAxisScores_Errors(t *testing.T) {
+	c := chatcontrollers.NewChatController(nil, nil, nil, nil, nil)
+	ctx, _ := axisScoresCtx("?session_id=s1", 0)
+	testsupport.AssertStatus(t, c.GetMyAxisScores, ctx, http.StatusUnauthorized)
+	ctx, _ = axisScoresCtx("", 1)
+	testsupport.AssertStatus(t, c.GetMyAxisScores, ctx, http.StatusBadRequest)
+
+	failing := &mocks.MatchingServiceMock{}
+	failing.On("GetMyAxisScores", uint(1), "s1").Return(nil, errors.New("db"))
+	ctx, _ = axisScoresCtx("?session_id=s1", 1)
+	testsupport.AssertStatus(t, newChatController(nil, failing, nil, nil, nil).GetMyAxisScores, ctx, http.StatusInternalServerError)
 }

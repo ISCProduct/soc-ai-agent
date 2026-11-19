@@ -155,3 +155,40 @@ func TestGetAxisBreakdown(t *testing.T) {
 		}
 	}
 }
+
+// 「あなたの10の傾向」と「軸ごとの内訳」は、適性検査を合流させた同じ値を出す（同じ画面で食い違わない）。
+func TestGetMyAxisScores_内訳と同じ合流後の値(t *testing.T) {
+	t.Setenv("ASSESSMENT_SCORE_MERGE", "")
+	match := &models.UserCompanyMatch{ID: 5, UserID: 7, SessionID: "s1", CompanyID: 1, Company: models.Company{Name: "A社"}}
+	svc := &MatchingService{
+		matchRepo:   &stubToggleFavoriteMatchRepo{findByIDResult: match},
+		companyRepo: &matchingCompanyRepo{profiles: map[uint]*models.CompanyWeightProfile{1: profileWith(func(p *models.CompanyWeightProfile) { p.TechnicalOrientation = 80 })}},
+		userWeightScoreRepo: &matchingScoreRepo{scores: []models.UserWeightScore{
+			{WeightCategory: "技術志向", Score: 40}, {WeightCategory: "安定志向", Score: 61},
+		}},
+	}
+	// 技術: チャット40と検査81 → 60.5 → 丸めて61（チャットだけの40ではない）。成長: 検査だけ90
+	svc.SetAssessmentScoreReader(stubAssessmentScores{scores: map[string]float64{"技術志向": 81, "成長志向": 90}})
+
+	mine, err := svc.GetMyAxisScores(7, "s1")
+	if err != nil || len(mine) != len(Axes) {
+		t.Fatalf("mine = %+v err = %v", mine, err)
+	}
+	breakdown, err := svc.GetAxisBreakdown(5, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, a := range Axes {
+		got, want := mine[i].Score, breakdown.Axes[i].UserScore
+		if (got == nil) != (want == nil) || (got != nil && *got != *want) {
+			t.Fatalf("%s: 傾向=%v 内訳=%v", a.Category, got, want)
+		}
+	}
+	if *mine[0].Score == 40 {
+		t.Fatal("技術志向が合流前のチャットの値のまま")
+	}
+	// 測れていない軸は null（0点と区別する）
+	if mine[1].Label != "チームワーク志向" || mine[1].Score != nil {
+		t.Fatalf("teamwork = %+v", mine[1])
+	}
+}

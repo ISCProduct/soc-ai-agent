@@ -43,36 +43,47 @@ export type AxisBreakdown = {
 /** 自分の10カテゴリのスコア。測れていない軸は null */
 export type MyCategoryScore = { label: string; score: number | null }
 
+/** 見られない推薦（他人・存在しない・企業のプロファイルが無い）。読み込みの失敗と区別する */
+export class AxisBreakdownNotFoundError extends Error {
+  constructor() {
+    super('この企業の内訳は見られません')
+    this.name = 'AxisBreakdownNotFoundError'
+  }
+}
+
 export async function fetchAxisBreakdown(matchId: number, signal?: AbortSignal): Promise<AxisBreakdown> {
   const res = await fetch(`/api/chat/matches/${encodeURIComponent(String(matchId))}/axes`, {
     headers: authService.getUserFetchHeaders(),
     cache: 'no-store',
     signal,
   })
-  if (!res.ok) throw new Error(res.status === 404 ? 'この企業の内訳は見られません' : `axes ${res.status}`)
+  if (res.status === 404) throw new AxisBreakdownNotFoundError()
+  if (!res.ok) throw new Error(`axes ${res.status}`)
   return (await res.json()) as AxisBreakdown
 }
 
-type ScoreRow = { WeightCategory?: string; weight_category?: string; category?: string; Score?: number; score?: number }
+type AxisScoreRow = { key?: unknown; label?: unknown; score?: unknown }
 
-/** 診断のスコアを10軸の並びにそろえる。API は Go のフィールド名（WeightCategory / Score）で返す */
-export function toMyCategoryScores(rows: ScoreRow[]): MyCategoryScore[] {
+/** /api/chat/axis-scores の axes を10軸の並びにそろえる。無い軸・数値でない値は未計測（null） */
+export function toMyCategoryScores(rows: AxisScoreRow[]): MyCategoryScore[] {
   const byLabel = new Map<string, number>()
   for (const r of rows) {
-    const label = r.WeightCategory ?? r.weight_category ?? r.category
-    const score = r.Score ?? r.score
-    if (label && typeof score === 'number') byLabel.set(label, score)
+    if (typeof r.label === 'string' && typeof r.score === 'number' && Number.isFinite(r.score)) byLabel.set(r.label, r.score)
   }
   return AXES.map((a) => ({ label: a.label, score: byLabel.has(a.label) ? Math.round(byLabel.get(a.label) as number) : null }))
 }
 
+/**
+ * 自分の10の傾向。軸ごとの内訳の「あなた」と同じ値（適性検査を合流させた値）を取る。
+ * /api/chat/scores は合流前のチャット由来の値なので、同じ画面で並べると数値が食い違う。
+ */
 export async function fetchMyCategoryScores(sessionId: string, signal?: AbortSignal): Promise<MyCategoryScore[]> {
-  const res = await fetch(`/api/chat/scores?session_id=${encodeURIComponent(sessionId)}`, {
+  const res = await fetch(`/api/chat/axis-scores?session_id=${encodeURIComponent(sessionId)}`, {
     headers: authService.getUserFetchHeaders(),
     cache: 'no-store',
     signal,
   })
   if (!res.ok) throw new Error(`scores ${res.status}`)
-  const data = (await res.json()) as unknown
-  return toMyCategoryScores(Array.isArray(data) ? (data as ScoreRow[]) : [])
+  const data = (await res.json()) as { axes?: unknown }
+  return toMyCategoryScores(Array.isArray(data?.axes) ? (data.axes as AxisScoreRow[]) : [])
 }

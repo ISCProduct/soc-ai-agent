@@ -30,6 +30,8 @@ type MatchingService interface {
 	ReasonScores(userID uint, scores []models.UserWeightScore) []models.UserWeightScore
 	// GetAxisBreakdown は本人の推薦1件の、軸別のマッチの内訳（SOCAIAGENT-611）。
 	GetAxisBreakdown(matchID, userID uint) (*matching.AxisBreakdown, error)
+	// GetMyAxisScores は本人の診断の10軸のスコア（内訳と同じく適性検査を合流させた値。SOCAIAGENT-611）。
+	GetMyAxisScores(userID uint, sessionID string) ([]matching.MyAxisScore, error)
 }
 
 // AnalysisScoringService 分析・スコアリングサービスのインターフェース
