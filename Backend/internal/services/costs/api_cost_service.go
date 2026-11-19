@@ -618,7 +618,7 @@ func (s *APICostService) NotifyIfMonthCostExceeded(total float64, monthID string
 	if breakdown := s.formatModelBreakdown(monthID); breakdown != "" {
 		body += "models:\n" + breakdown
 	}
-	log.Printf("[APICost] ALERT %s", strings.ReplaceAll(body, "\n", " "))
+	log.Printf("[APICost] ALERT %s", strings.ReplaceAll(body, "\n", " ")) // logpolicy:ok 利用料金のアラート本文で、個人情報を含まない
 
 	text := subject + "\n" + body
 	s.sendSlackAlert(text)
