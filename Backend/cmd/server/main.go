@@ -681,7 +681,7 @@ func main() {
 	// 共有シークレットのみで認証する(#861)
 	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.ServiceSecret))
 
-	startMaintenanceJobs(crawlService, userDeletionService, notificationService, pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, scoreValidationService)
+	startMaintenanceJobs(crawlService, userDeletionService, notificationService, pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, scoreValidationService, apiCallLogRepo)
 
 	startServer(e, cfg.ServerPort)
 }
