@@ -152,7 +152,12 @@ func (cli *Client) ChatInterview(ctx context.Context, systemPrompt string, histo
 		if role != "user" && role != "assistant" {
 			role = "user"
 		}
-		msgs = append(msgs, message{Role: role, Content: h["content"]})
+		// 発話の履歴（学生の発話と、それを受けた面接官の応答）は、ガードがあれば伏字にして送る
+		content, err := guardInput(ctx, h["content"])
+		if err != nil {
+			return "", err
+		}
+		msgs = append(msgs, message{Role: role, Content: content})
 	}
 
 	payload := request{

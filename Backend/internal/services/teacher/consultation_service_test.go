@@ -37,7 +37,10 @@ func (m *memConsultation) FindGuidance(id uint) (*models.TeacherStudentGuidance,
 	}
 	return nil, gorm.ErrRecordNotFound
 }
-func (m *memConsultation) CreateQuestion(studentUserID uint, body string) (*models.TeacherStudentGuidance, error) {
+func (m *memConsultation) CreateQuestion(studentUserID uint, body string, maxOpen int64) (*models.TeacherStudentGuidance, error) {
+	if n, _ := m.CountOpenQuestions(studentUserID); n >= maxOpen {
+		return nil, repositories.ErrOpenQuestionLimit
+	}
 	id := uint(len(m.guidances) + 1)
 	g := &models.TeacherStudentGuidance{ID: id, StudentUserID: studentUserID, Kind: models.GuidanceKindQuestion, Message: body}
 	m.guidances[id] = g

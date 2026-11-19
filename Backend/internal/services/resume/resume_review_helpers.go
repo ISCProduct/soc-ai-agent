@@ -127,12 +127,12 @@ func normalizeOCRScore(score float64) *float64 {
 	return &v
 }
 
-func buildResumeText(blocks []models.ResumeTextBlock, maxLen int) string {
-	if len(blocks) == 0 {
+func buildResumeText(blocks llmBlocks, maxLen int) string {
+	if len(blocks.items) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	for _, block := range blocks {
+	for _, block := range blocks.items {
 		line := formatReviewBlockLine(block)
 		if line == "" {
 			continue

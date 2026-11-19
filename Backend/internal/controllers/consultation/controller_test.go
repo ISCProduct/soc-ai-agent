@@ -36,7 +36,7 @@ func (s *store) FindGuidance(id uint) (*models.TeacherStudentGuidance, error) {
 	}
 	return &models.TeacherStudentGuidance{ID: 1, StudentUserID: 10, Kind: models.GuidanceKindQuestion, Message: "質問"}, nil
 }
-func (s *store) CreateQuestion(studentUserID uint, body string) (*models.TeacherStudentGuidance, error) {
+func (s *store) CreateQuestion(studentUserID uint, body string, _ int64) (*models.TeacherStudentGuidance, error) {
 	s.asked++
 	return &models.TeacherStudentGuidance{ID: 2, StudentUserID: studentUserID, Kind: models.GuidanceKindQuestion, Message: body}, nil
 }

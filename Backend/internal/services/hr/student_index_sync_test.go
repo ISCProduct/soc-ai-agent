@@ -1,6 +1,7 @@
 package hr
 
 import (
+	"Backend/internal/services/piimask"
 	"context"
 	"errors"
 	"testing"
@@ -147,4 +148,27 @@ func TestEnsureDeleted(t *testing.T) {
 		require.NoError(t, s.EnsureDeleted(context.Background(), 1))
 		require.NoError(t, NewStudentIndexSyncer(&stubScoutProfiles{}, nil).EnsureDeleted(context.Background(), 1))
 	})
+}
+
+// 自己PRの自由記述は、外の埋め込み API へ送る前に伏字になる。
+func TestStudentIndexSyncer_Sync_MasksFreeText(t *testing.T) {
+	indexer := &stubIndexer{}
+	syncer := NewStudentIndexSyncer(&stubScoutProfiles{allow: true, text: "自己PR: 連絡は taro.sample@example.com まで。"}, indexer)
+	syncer.SetSubjectReader(piimask.SubjectReaderFunc(func(uint) (piimask.Subject, error) { return piimask.Subject{}, nil }))
+
+	syncer.Sync(context.Background(), 7)
+
+	require.Len(t, indexer.indexed, 1)
+	assert.NotContains(t, indexer.indexed[0], "taro.sample@example.com")
+}
+
+// 登録情報を読めず伏字にできないときは、何も送らない。
+func TestStudentIndexSyncer_Sync_MaskFailureSendsNothing(t *testing.T) {
+	indexer := &stubIndexer{}
+	syncer := NewStudentIndexSyncer(&stubScoutProfiles{allow: true, text: "自己PR: 頑張ります"}, indexer)
+	syncer.SetSubjectReader(piimask.SubjectReaderFunc(func(uint) (piimask.Subject, error) { return piimask.Subject{}, errors.New("db down") }))
+
+	syncer.Sync(context.Background(), 7)
+
+	assert.Empty(t, indexer.indexed)
 }

@@ -97,6 +97,24 @@ export default function AdminConsultationsPage() {
     }
   }
 
+  // スレッドで返信・既読にしたあとは、先頭のページだけ取り直して差し替える。
+  // 一覧ごと読み直すと、「さらに読み込む」で足した2ページ目以降が消えるため。
+  const refreshHead = useCallback(async () => {
+    const seq = requestSeq.current
+    try {
+      const page = await fetchTeacherInbox(schoolId)
+      if (seq !== requestSeq.current) return
+      setItems((prev) => {
+        const rest = prev.filter((p) => !page.items.some((it) => it.guidance_id === p.guidance_id))
+        // 先頭のページより後ろを読んでいなければ、続きの位置は取り直した結果に合わせる
+        if (prev.length <= page.items.length) setNextBeforeId(page.next_before_id)
+        return [...page.items, ...rest]
+      })
+    } catch {
+      // 一覧の更新に失敗しても、開いているスレッドの操作は終わっているので、表示はそのままにする
+    }
+  }, [schoolId])
+
   const handleScopeResolved = useCallback((failure?: string) => {
     if (failure) {
       setScope('failed')
@@ -171,7 +189,7 @@ export default function AdminConsultationsPage() {
           </IconButton>
         </DialogTitle>
         <DialogContent dividers>
-          {openId !== null && <ConsultationThread me="teacher" load={loadOpen} send={sendOpen} onChanged={() => void load()} />}
+          {openId !== null && <ConsultationThread me="teacher" load={loadOpen} send={sendOpen} onChanged={() => void refreshHead()} />}
         </DialogContent>
       </Dialog>
     </PageContainer>

@@ -33,13 +33,13 @@ const MaxOpenQuestions = 5
 // ConsultationStore は相談の永続化（repositories.GuidanceMessageRepository が満たす）。
 type ConsultationStore interface {
 	FindGuidance(id uint) (*models.TeacherStudentGuidance, error)
-	CreateQuestion(studentUserID uint, body string) (*models.TeacherStudentGuidance, error)
+	// CreateQuestion は未回答の質問が maxOpen 件以上なら repositories.ErrOpenQuestionLimit を返す
+	CreateQuestion(studentUserID uint, body string, maxOpen int64) (*models.TeacherStudentGuidance, error)
 	CreateMessage(m *models.GuidanceMessage) error
 	CreateMessageAndMarkRead(m *models.GuidanceMessage, seenUpToID uint, at time.Time) error
 	ListMessages(guidanceID uint) ([]models.GuidanceMessage, error)
 	MarkReadBy(guidanceID uint, readerRole string, upToID uint, at time.Time) error
 	UnreadForStudent(studentUserID uint) (map[uint]int, error)
-	CountOpenQuestions(studentUserID uint) (int64, error)
 	ListStudentThreads(studentUserID uint, before *repositories.StudentThreadCursor, limit int) ([]repositories.StudentThreadRow, error)
 	TeacherInbox(schoolID *uint, beforeID uint, limit int) ([]repositories.ConsultationInboxRow, error)
 }
@@ -85,14 +85,11 @@ func (s *ConsultationService) Ask(studentUserID uint, body string) (*ThreadView,
 	if err != nil {
 		return nil, err
 	}
-	open, err := s.store.CountOpenQuestions(studentUserID)
-	if err != nil {
-		return nil, err
-	}
-	if open >= MaxOpenQuestions {
+	// 数えてから作るまでは、同時に送られても上限を超えないよう保存側の1トランザクションで行う
+	g, err := s.store.CreateQuestion(studentUserID, body, MaxOpenQuestions)
+	if errors.Is(err, repositories.ErrOpenQuestionLimit) {
 		return nil, ErrConsultationTooManyOpen
 	}
-	g, err := s.store.CreateQuestion(studentUserID, body)
 	if err != nil {
 		return nil, err
 	}

@@ -267,4 +267,28 @@ describe('先生の受信一覧', () => {
     expect(await screen.findByText('佐藤')).toBeInTheDocument()
     expect(urls.at(-1)).toBe('/api/admin/teacher/consultations?before_id=50')
   })
+
+  test('スレッドで返信したあとも、「さらに読み込む」で足した続きを消さない', async () => {
+    const urls = respondWith((url) => {
+      if (url.includes('before_id=50')) return [200, { items: [{ ...INBOX_ITEM, guidance_id: 2, student_name: '佐藤', last_message_id: 40 }] }]
+      if (url.startsWith('/api/admin/teacher/consultations/1')) {
+        return [200, { ...THREAD, messages: [...THREAD.messages, { id: 3, guidance_id: 1, author_role: 'teacher', body: '返信です', read_at: null, created_at: '2026-11-13T03:00:00Z' }] }]
+      }
+      return [200, { items: [{ ...INBOX_ITEM, unread: 0 }], next_before_id: 50 }]
+    })
+    render(<AdminConsultationsPage />)
+    await act(async () => resolveScope?.())
+    expect(await screen.findByText('山田')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'さらに読み込む' }))
+    expect(await screen.findByText('佐藤')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /山田さんの相談を開く/ }))
+    fireEvent.change(await screen.findByLabelText('学生への返信'), { target: { value: '返信です' } })
+    fireEvent.click(screen.getByRole('button', { name: '送信する' }))
+    await waitFor(() => expect(urls.filter((u) => u === '/api/admin/teacher/consultations').length).toBeGreaterThanOrEqual(2))
+    fireEvent.click(screen.getByRole('button', { name: '閉じる' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByText('佐藤')).toBeInTheDocument()
+    expect(screen.getByText('山田')).toBeInTheDocument()
+  })
 })

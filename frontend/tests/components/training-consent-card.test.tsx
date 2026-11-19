@@ -2,7 +2,10 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { TrainingConsentCard } from '@/components/profile/TrainingConsentCard'
+import {
+  TRAINING_CONSENT_TEXT_VERSION,
+  TrainingConsentCard,
+} from '@/components/profile/TrainingConsentCard'
 
 jest.mock('@/lib/auth', () => ({
   authService: {
@@ -10,7 +13,7 @@ jest.mock('@/lib/auth', () => ({
   },
 }))
 
-type Reply = { ok: boolean; body?: unknown }
+type Reply = { ok: boolean; status?: number; body?: unknown }
 
 const originalFetch = global.fetch
 let getReply: Reply
@@ -25,7 +28,11 @@ beforeEach(() => {
     expect(String(input)).toContain('/api/user/training-consent')
     const reply = init?.method === 'PUT' ? putReply : getReply
     if (init?.method === 'PUT') putBodies.push(JSON.parse(String(init.body)))
-    return { ok: reply.ok, json: async () => reply.body } as Response
+    return {
+      ok: reply.ok,
+      status: reply.status ?? (reply.ok ? 200 : 500),
+      json: async () => reply.body,
+    } as Response
   })
 })
 
@@ -52,7 +59,9 @@ describe('TrainingConsentCard', () => {
     fireEvent.click(await consentSwitch())
 
     await screen.findByText('学習への利用に同意しました')
-    expect(putBodies).toEqual([{ allow_training_use: true }])
+    expect(putBodies).toEqual([
+      { allow_training_use: true, consent_text_version: TRAINING_CONSENT_TEXT_VERSION },
+    ])
     expect(await consentSwitch()).toBeChecked()
   })
 
@@ -63,7 +72,9 @@ describe('TrainingConsentCard', () => {
     fireEvent.click(await consentSwitch())
 
     await screen.findByText('学習への利用をオフにしました')
-    expect(putBodies).toEqual([{ allow_training_use: false }])
+    expect(putBodies).toEqual([
+      { allow_training_use: false, consent_text_version: TRAINING_CONSENT_TEXT_VERSION },
+    ])
     expect(await consentSwitch()).not.toBeChecked()
   })
 
@@ -97,6 +108,25 @@ describe('TrainingConsentCard', () => {
 
     await screen.findByText(/設定の取得に失敗しました/)
     expect(screen.queryByRole('switch')).not.toBeInTheDocument()
+  })
+
+  it('表示している文言が古い（409）なら、保存されていないので元の値に戻し、再読み込みを促して操作を止める', async () => {
+    putReply = { ok: false, status: 409, body: { error: 'conflict' } }
+    render(<TrainingConsentCard />)
+    fireEvent.click(await consentSwitch())
+
+    await screen.findByText(/画面を再読み込みして/)
+    const sw = await consentSwitch()
+    expect(sw).not.toBeChecked()
+    expect(sw).toBeDisabled()
+    expect(screen.queryByText('学習への利用に同意しました')).not.toBeInTheDocument()
+    // 「保存できたか分からない」ではない（拒否されたことが分かっている）ので、取り直しの案内は出さない
+    expect(screen.queryByText(/保存できたか確認できませんでした/)).not.toBeInTheDocument()
+    expect(putBodies).toHaveLength(1)
+  })
+
+  it('文言の版は日付（YYYY-MM-DD）で持つ', () => {
+    expect(TRAINING_CONSENT_TEXT_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 
   it('取得に失敗したら、スイッチを出さずにエラーを出す（不明な状態をオフに見せない）', async () => {

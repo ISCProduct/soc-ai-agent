@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { Box, Button, IconButton, AppBar, Toolbar, Typography, Alert, Link as MuiLink } from '@mui/material'
+import { Box, Button, IconButton, AppBar, Toolbar, Typography, Alert, Link as MuiLink, useMediaQuery, useTheme } from '@mui/material'
 import NextLink from 'next/link'
 import { Menu as MenuIcon } from '@mui/icons-material'
-import { AnalysisSidebar } from '@/components/home/AnalysisSidebar'
+import { HomeSidebar } from '@/components/home/HomeSidebar'
+import { ConsultHome } from '@/components/home/ConsultHome'
+import { HomeRightPanel } from '@/components/home/HomeRightPanel'
 import { MuiChat } from '@/components/mui-chat'
 import { PageLoading } from '@/components/common/PageLoading'
 import { authService, User } from '@/lib/auth'
@@ -34,6 +36,9 @@ import styles from './page.module.css'
 
 export default function PageContent() {
   const router = useRouter()
+  const theme = useTheme()
+  // 3カラム（右パネルあり）にする幅。狭い画面は従来どおり上に積む
+  const showRightPanel = useMediaQuery(theme.breakpoints.up('lg'))
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -118,6 +123,16 @@ export default function PageContent() {
       })
   }
 
+  // 先生の案内を既読にする（右パネルの「読みました」と、狭い画面の Alert の × で共通）
+  const dismissGuidanceById = (id: number) => {
+    setGuidanceError('')
+    setDismissingIds((prev) => withDismissing(prev, id))
+    dismissGuidance(id)
+      .then(() => setGuidances((prev) => prev.filter((x) => x.id !== id)))
+      .catch(() => setGuidanceError('案内を閉じられませんでした。時間をおいて再度お試しください'))
+      .finally(() => setDismissingIds((prev) => withoutDismissing(prev, id)))
+  }
+
   const dismissWhatsNewBanner = () => {
     markWhatsNewAsSeen(whatsNewEntries)
     setShowWhatsNewBanner(false)
@@ -135,9 +150,11 @@ export default function PageContent() {
 
   // お知らせは重要度順に並べ、既定では先頭1件だけ出す（#1576）。
   // 種類ごとに積むと、4種が同時に出たときチャット入力欄が画面外へ押し出される。
-  const notices: Notice[] = []
+  // 先生の案内と、それ以外。広い画面では先生の案内を右パネルに、狭い画面では従来どおり上にまとめて積む。
+  const guidanceNotices: Notice[] = []
+  const otherNotices: Notice[] = []
   if (guidanceLoadFailed) {
-    notices.push({
+    guidanceNotices.push({
       key: 'guidance-load-failed',
       node: (
         <Alert
@@ -155,7 +172,7 @@ export default function PageContent() {
     })
   }
   if (guidanceError) {
-    notices.push({
+    guidanceNotices.push({
       key: 'guidance-error',
       node: (
         <Alert severity="error" onClose={() => setGuidanceError('')} sx={{ borderRadius: 0 }}>
@@ -165,27 +182,14 @@ export default function PageContent() {
     })
   }
   for (const g of guidances) {
-    notices.push({
+    guidanceNotices.push({
       key: `guidance-${g.id}`,
       node: (
         <Alert
           severity="info"
           // 閉じる処理中は無効化する。連打すると同じ案内へ何度もPOSTが飛ぶ。
           closeText="閉じる"
-          onClose={
-            !canDismiss(dismissingIds, g.id)
-              ? undefined
-              : () => {
-                  setGuidanceError('')
-                  setDismissingIds((prev) => withDismissing(prev, g.id))
-                  dismissGuidance(g.id)
-                    .then(() => setGuidances((prev) => prev.filter((x) => x.id !== g.id)))
-                    .catch(() =>
-                      setGuidanceError('案内を閉じられませんでした。時間をおいて再度お試しください'),
-                    )
-                    .finally(() => setDismissingIds((prev) => withoutDismissing(prev, g.id)))
-                }
-          }
+          onClose={!canDismiss(dismissingIds, g.id) ? undefined : () => dismissGuidanceById(g.id)}
           sx={{ borderRadius: 0 }}
         >
           <Box component="span" sx={{ fontWeight: 700 }}>{g.kind === 'question' ? 'あなたの質問: ' : '先生から: '}</Box>
@@ -204,7 +208,7 @@ export default function PageContent() {
     })
   }
   if (resumeReminder) {
-    notices.push({
+    otherNotices.push({
       key: 'resume',
       node: (
         // MUI の Alert は action を渡すと onClose の閉じるボタンを描画しないため
@@ -223,7 +227,7 @@ export default function PageContent() {
     })
   }
   if (appNoticesLoadFailed) {
-    notices.push({
+    otherNotices.push({
       key: 'notifications-load-failed',
       node: (
         <Alert
@@ -237,7 +241,7 @@ export default function PageContent() {
     })
   }
   if (appNoticeError) {
-    notices.push({
+    otherNotices.push({
       key: 'notifications-error',
       node: (
         <Alert severity="error" onClose={() => setAppNoticeError('')} sx={{ borderRadius: 0 }}>
@@ -248,7 +252,7 @@ export default function PageContent() {
   }
   for (const n of appNotices) {
     const link = safeNotificationLink(n.link)
-    notices.push({
+    otherNotices.push({
       key: `notification-${n.id}`,
       node: (
         <Alert
@@ -269,7 +273,7 @@ export default function PageContent() {
     })
   }
   if (showWhatsNewBanner && whatsNewEntries.length > 0) {
-    notices.push({
+    otherNotices.push({
       key: 'whats-new',
       node: (
         <Alert
@@ -292,9 +296,11 @@ export default function PageContent() {
     })
   }
 
+  const notices: Notice[] = [...guidanceNotices, ...otherNotices]
+
   return (
     <Box sx={{ display: 'flex', height: '100dvh', maxHeight: '100dvh', overflow: 'hidden' }}>
-      <AnalysisSidebar
+      <HomeSidebar
         user={user}
         onLogout={handleLogout}
         mobileOpen={mobileOpen}
@@ -331,13 +337,33 @@ export default function PageContent() {
             </Typography>
           </Toolbar>
         </AppBar>
-        <NextActionsBar />
-        <AIBudgetNotice />
-        <NoticeStack notices={notices} />
+        {/* 狭い画面（lg 未満）は右パネルが無いので、従来どおり上に積む */}
+        {!showRightPanel && (
+          <>
+            <NextActionsBar />
+            <AIBudgetNotice />
+            <NoticeStack notices={notices} />
+          </>
+        )}
         <div className={styles.chatWrapper}>
-          <MuiChat />
+          <MuiChat
+            initialView={(ctx) => (
+              <ConsultHome displayName={user.name} onSend={ctx.onSend} disabled={ctx.isLoading} progress={ctx.progress} />
+            )}
+          />
         </div>
       </main>
+      {showRightPanel && (
+        <HomeRightPanel
+          guidances={guidances}
+          guidanceLoadFailed={guidanceLoadFailed}
+          guidanceError={guidanceError}
+          dismissingIds={dismissingIds}
+          onDismissGuidance={dismissGuidanceById}
+          onRetryGuidances={loadGuidances}
+          notices={otherNotices}
+        />
+      )}
     </Box>
   )
 }

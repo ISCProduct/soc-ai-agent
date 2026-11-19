@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"errors"
 	"time"
 
 	"Backend/internal/models"
@@ -26,10 +27,27 @@ func (r *GuidanceMessageRepository) FindGuidance(id uint) (*models.TeacherStuden
 	return &g, nil
 }
 
+// ErrOpenQuestionLimit は、未回答の質問が上限に達していて新しい質問を作らなかったこと。
+var ErrOpenQuestionLimit = errors.New("open question limit reached")
+
 // CreateQuestion は学生からの質問のスレッド（種類 question の案内）と最初の発言を、1つのトランザクションで作る。
-func (r *GuidanceMessageRepository) CreateQuestion(studentUserID uint, body string) (*models.TeacherStudentGuidance, error) {
+//
+// 未回答の質問が maxOpen 件以上あれば ErrOpenQuestionLimit を返して作らない。数えてから作るまでを
+// 1つのトランザクションにし、学生の users 行をロックする（同時に送られても上限を超えないように）。
+func (r *GuidanceMessageRepository) CreateQuestion(studentUserID uint, body string, maxOpen int64) (*models.TeacherStudentGuidance, error) {
 	g := &models.TeacherStudentGuidance{StudentUserID: studentUserID, Kind: models.GuidanceKindQuestion, Message: body}
 	err := r.db.Transaction(func(tx *gorm.DB) error {
+		var locked uint
+		if err := tx.Raw("SELECT id FROM users WHERE id = ? FOR UPDATE", studentUserID).Scan(&locked).Error; err != nil {
+			return err
+		}
+		open, err := countOpenQuestions(tx, studentUserID)
+		if err != nil {
+			return err
+		}
+		if open >= maxOpen {
+			return ErrOpenQuestionLimit
+		}
 		if err := tx.Create(g).Error; err != nil {
 			return err
 		}
@@ -85,8 +103,12 @@ func markRead(db *gorm.DB, guidanceID uint, readerRole string, upToID uint, at t
 
 // CountOpenQuestions は学生の質問のうち、教員がまだ1度も答えていないものの数を返す。
 func (r *GuidanceMessageRepository) CountOpenQuestions(studentUserID uint) (int64, error) {
+	return countOpenQuestions(r.db, studentUserID)
+}
+
+func countOpenQuestions(db *gorm.DB, studentUserID uint) (int64, error) {
 	var n int64
-	err := r.db.Table("teacher_student_guidances g").
+	err := db.Table("teacher_student_guidances g").
 		Where("g.student_user_id = ? AND g.kind = ?", studentUserID, models.GuidanceKindQuestion).
 		Where("NOT EXISTS (SELECT 1 FROM guidance_messages m WHERE m.guidance_id = g.id AND m.author_role = ?)", models.GuidanceAuthorTeacher).
 		Count(&n).Error

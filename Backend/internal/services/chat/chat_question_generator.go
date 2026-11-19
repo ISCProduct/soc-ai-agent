@@ -55,7 +55,7 @@ func (s *ChatService) handleSessionStart(ctx context.Context, req ChatRequest) (
 	return &ChatResponse{
 		Response:            response,
 		IsComplete:          false,
-		TotalQuestions:      15,
+		TotalQuestions:      defaultTargetQuestions,
 		AnsweredQuestions:   0,
 		EvaluatedCategories: 0,
 		TotalCategories:     10,
@@ -231,6 +231,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 				currentPhase.QuestionsAsked+1)
 		}
 	}
+	phaseContext += s.consultIntentContext(sessionID)
 	choiceGuidance := ""
 	// phaseName はフェーズカテゴリ選定で取得済み
 	forceTextQuestion := shouldForceTextQuestion(history, currentPhase)

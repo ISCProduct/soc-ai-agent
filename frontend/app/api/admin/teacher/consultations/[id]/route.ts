@@ -3,7 +3,7 @@ import { proxyAdminBackend, jsonFromProxyResult, proxyErrorResponse, adminProxyH
 
 export const dynamic = 'force-dynamic'
 
-// 先生が相談のスレッドを見る（#2028）。担当校以外は Backend が 403 を返す
+// 先生が相談のスレッドを見る（#2028）。担当校以外は Backend が 404 を返す（相談の有無を推測させない）
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   if (!/^\d+$/.test(id)) return NextResponse.json({ error: 'id が不正です' }, { status: 400 })

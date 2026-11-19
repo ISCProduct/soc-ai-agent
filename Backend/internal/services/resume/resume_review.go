@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/repositories"
 	"Backend/internal/safego"
+	"Backend/internal/services/piimask"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"bufio"
@@ -81,7 +82,12 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 	}
 
 	findings := formatFindingsFor(blocks)
-	review, items, err := s.buildResumeReviewWithAI(ctx, blocks, companyName, jobTitle, candidateType, doc.UserID)
+	// 外へ送るのは伏字済みの写しだけ。保存した本文と注釈PDFの位置は元のまま。失敗したら送らない
+	masked, err := s.maskBlocksForLLM(doc.UserID, blocks)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	review, items, err := s.buildResumeReviewWithAI(ctx, masked, companyName, jobTitle, candidateType, doc.UserID)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -415,7 +421,8 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 			sendEvent(map[string]any{"type": "error", "message": "forbidden"})
 			return shared.ErrForbidden
 		}
-		sendEvent(map[string]any{"type": "error", "message": err.Error()})
+		log.Printf("resume_review_stream: find document failed document_id=%d err=%v", documentID, err)
+		sendEvent(map[string]any{"type": "error", "message": streamErrorDocument})
 		return err
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
@@ -429,7 +436,8 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 
 	canonicalName, err := s.ensureRealCompany(ctx, companyName)
 	if err != nil {
-		msg := err.Error()
+		log.Printf("resume_review_stream: ensure company failed document_id=%d err=%v", documentID, err)
+		msg := "企業情報を確認できませんでした。もう一度お試しください。"
 		var ve *shared.ValidationError
 		if errors.As(err, &ve) {
 			msg = ve.Message
@@ -441,14 +449,16 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 
 	workDir, err := s.ensureWorkingDir(doc.ID)
 	if err != nil {
-		sendEvent(map[string]any{"type": "error", "message": err.Error()})
+		log.Printf("resume_review_stream: ensure working dir failed document_id=%d err=%v", documentID, err)
+		sendEvent(map[string]any{"type": "error", "message": streamErrorDocument})
 		return err
 	}
 	defer os.RemoveAll(workDir)
 
 	pdfPath, normalizedStored, err := s.normalizeToPDF(doc, workDir)
 	if err != nil {
-		sendEvent(map[string]any{"type": "error", "message": err.Error()})
+		log.Printf("resume_review_stream: normalize to pdf failed document_id=%d err=%v", documentID, err)
+		sendEvent(map[string]any{"type": "error", "message": streamErrorDocument})
 		return err
 	}
 	doc.NormalizedPath = normalizedStored
@@ -467,7 +477,8 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 	blocks, err := s.extractTextBlocks(doc, pdfPath)
 	if err != nil {
-		sendEvent(map[string]any{"type": "error", "message": err.Error()})
+		log.Printf("resume_review_stream: extract text blocks failed document_id=%d err=%v", documentID, err)
+		sendEvent(map[string]any{"type": "error", "message": streamErrorDocument})
 		return err
 	}
 	if !hasExtractableText(blocks) {
@@ -478,13 +489,20 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	_ = s.repo.ReplaceTextBlocks(doc.ID, blocks)
 	findings := formatFindingsFor(blocks)
 
-	text := buildResumeText(blocks, reviewTextLimit)
+	// 外へ送るのは伏字済みの写しだけ。失敗したら送らない
+	masked, err := s.maskBlocksForLLM(doc.UserID, blocks)
+	if err != nil {
+		log.Printf("resume_review_stream: mask failed document_id=%d err=%v", documentID, err)
+		sendEvent(map[string]any{"type": "error", "message": errMaskUnavailable.Error()})
+		return err
+	}
+	text := buildResumeText(masked, reviewTextLimit)
 
 	// RAGレポートをストリーミングしつつ全文を収集する
 	ragReport := s.streamRAGReport(ctx, w, text, companyName, jobTitle, doc.UserID)
 
 	// スコア・指摘事項を生成
-	review, items, err := s.buildReviewScoreItems(ctx, blocks, companyName, jobTitle, candidateType, ragReport)
+	review, items, err := s.buildReviewScoreItems(ctx, masked, companyName, jobTitle, candidateType, ragReport)
 	if err != nil {
 		log.Printf("resume_review_stream: build score failed: %v", err)
 		sendEvent(map[string]any{"type": "error", "message": reviewScoreErrorMessage(err)})
@@ -558,9 +576,13 @@ func reviewScoreErrorMessage(err error) string {
 		// 内部設定が学生に見えないよう固定文言にする(#1293)
 		return "現在AI機能を利用できません。しばらくしてから再度お試しください。"
 	default:
-		return err.Error()
+		// 例外文には内部のパス・DB・外部APIの応答が混ざりうる。利用者へは固定文言にし、ログにだけ残す
+		return "レビューを作成できませんでした。時間をおいてもう一度お試しください。"
 	}
 }
+
+// streamErrorDocument は、書類の取得・展開・読み取りで内部エラーが起きたときに利用者へ返す文言。
+const streamErrorDocument = "書類を処理できませんでした。PDF または DOCX の形式を確認して、もう一度お試しください。"
 
 // flushSSE はバッファを送出する。Echo の Response.Flush は WrapMiddleware 配下で
 // panic するため使わず、Unwrap して実体の Flusher を探す (#855)。
@@ -618,7 +640,7 @@ func relaySSEChunks(body io.Reader, w http.ResponseWriter) (string, error) {
 	return accum.String(), scanner.Err()
 }
 
-func (s *ResumeService) buildResumeReviewWithAI(ctx context.Context, blocks []models.ResumeTextBlock, companyName string, jobTitle string, candidateType string, userID uint) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (s *ResumeService) buildResumeReviewWithAI(ctx context.Context, blocks llmBlocks, companyName string, jobTitle string, candidateType string, userID uint) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	text := buildResumeText(blocks, reviewTextLimit)
 	if strings.TrimSpace(text) == "" {
 		return nil, nil, &shared.ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
@@ -640,7 +662,7 @@ func (s *ResumeService) buildResumeReviewWithAI(ctx context.Context, blocks []mo
 
 // buildReviewScoreItems はcompanyInfoを受け取りOpenAIでスコア・指摘事項を生成する。
 // fetchRAGReportStream など外部から取得したRAGレポートを直接渡す場合に使用する。
-func (s *ResumeService) buildReviewScoreItems(ctx context.Context, blocks []models.ResumeTextBlock, companyName, jobTitle, candidateType, companyInfo string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (s *ResumeService) buildReviewScoreItems(ctx context.Context, blocks llmBlocks, companyName, jobTitle, candidateType, companyInfo string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	if s.aiClient == nil {
 		return nil, nil, fmt.Errorf("AIクライアントが初期化されていません")
 	}
@@ -684,7 +706,7 @@ func (s *ResumeService) buildReviewScoreItems(ctx context.Context, blocks []mode
 		log.Printf("resume_review: ルーブリック違反のためスコアを捨てる: %v", scoreErr)
 	}
 
-	items := mapReviewItems(blocks, response.Items)
+	items := mapReviewItems(blocks.list(), response.Items)
 	log.Printf("resume_review: items mapped=%d raw=%d", len(items), len(response.Items))
 	if len(items) < 3 || scoreErr != nil {
 		items, overall, scoreErr = s.retryReviewGeneration(ctx, blocks, companyName, jobTitle, candidateType, companyInfo, modelOverride, items, overall, scoreErr)
@@ -713,14 +735,14 @@ func prependCompanyBrief(brief, companyInfo string) string {
 // 1度だけ作り直し、採用する指摘とスコアを返す。やり直しに失敗したら初回の結果をそのまま返す。
 func (s *ResumeService) retryReviewGeneration(
 	ctx context.Context,
-	blocks []models.ResumeTextBlock,
+	blocks llmBlocks,
 	companyName, jobTitle, candidateType, companyInfo, modelOverride string,
 	items []models.ResumeReviewItem,
 	overall int,
 	scoreErr error,
 ) ([]models.ResumeReviewItem, int, error) {
 	// スコアだけが不正なときもやり直す。面接（#795）と同じく作り直しは1度だけ。
-	blocksForRetry := selectReviewBlocks(blocks, 40)
+	blocksForRetry := selectReviewBlocks(blocks.list(), 40)
 	blockList := buildBlockList(blocksForRetry)
 	retryPrompt := buildReviewRetryPrompt(blockList, companyName, jobTitle, companyInfo, candidateType)
 	rawRetry, retryReqErr := s.requestReviewJSON(ctx, reviewRetrySystemPrompt, retryPrompt, modelOverride)
@@ -730,7 +752,7 @@ func (s *ResumeService) retryReviewGeneration(
 	if retryReqErr == nil {
 		responseRetry := aiReviewResponse{}
 		if decodeJSON(rawRetry, &responseRetry) == nil {
-			retryItems := mapReviewItems(blocks, responseRetry.Items)
+			retryItems := mapReviewItems(blocks.list(), responseRetry.Items)
 			log.Printf("resume_review: retry items mapped=%d raw=%d", len(retryItems), len(responseRetry.Items))
 			// 指摘の差し替えは「初回が3件未満」のときだけ。スコアだけが不正で
 			// 初回の指摘が足りているなら、本文に紐づいた初回の指摘を守る。
@@ -920,5 +942,11 @@ func BuildReviewPromptFromTextWithConfidence(resumeText string, confidence []flo
 		lineNo++
 		blocks = append(blocks, block)
 	}
-	return buildReviewPrompt(buildResumeText(blocks, reviewTextLimit), companyName, jobTitle, companyInfo, candidateType)
+	// 評価ハーネスは合成データで測るが、本番と同じく伏字済みのブロックだけをプロンプトへ載せる。
+	// 辞書は空（登録情報が無い）で、規則だけで伏字にする。作れなければ空のプロンプトを返して送らせない。
+	m, err := piimask.ForLLM(piimask.Subject{})
+	if err != nil {
+		return ""
+	}
+	return buildReviewPrompt(buildResumeText(maskBlocksWith(m, blocks), reviewTextLimit), companyName, jobTitle, companyInfo, candidateType)
 }

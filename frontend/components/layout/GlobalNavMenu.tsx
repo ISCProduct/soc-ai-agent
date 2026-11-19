@@ -58,7 +58,7 @@ const NAV_ICONS: Record<NavHref, React.ReactNode> = {
 
 /**
  * ホーム画面以外のページから主要機能（ES・スケジュール・選考管理・相関図・面接履歴など）へ
- * 到達するための共通メニュー。ホームは AnalysisSidebar が同等の導線を持つため表示しない。
+ * 到達するための共通メニュー。ホームは HomeSidebar が同等の導線を持つため表示しない。
  * チャット進捗などホーム固有の責務は持たせず、ナビ項目のみを共通化する。
  */
 export function GlobalNavMenu() {
@@ -80,6 +80,8 @@ export function GlobalNavMenu() {
         onClick={() => setOpen(true)}
         sx={{
           position: 'fixed',
+          // 印刷（ポートフォリオの PDF など）に載せない
+          '@media print': { display: 'none' },
           right: 16,
           bottom: { xs: 'calc(72px + env(safe-area-inset-bottom))', md: 16 },
           zIndex: (t) => t.zIndex.appBar,
