@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"unicode/utf8"
 )
 
 type jobCategoryResolutionResult struct {
@@ -120,7 +119,7 @@ func (s *ChatService) handleConsultIntent(ctx context.Context, req ChatRequest) 
 		}
 	}
 	// 本文はログに出さない（文字数だけ）
-	log.Printf("[ConsultIntent] saved intent=%s chars=%d\n", req.ConsultIntent, utf8.RuneCountInString(req.Message))
+	log.Printf("[ConsultIntent] saved intent=%s chars=%d\n", req.ConsultIntent, logsafe.Chars(req.Message))
 
 	jobQuestion, err := s.jobValidator.GenerateJobSelectionQuestion(ctx)
 	if err != nil {
