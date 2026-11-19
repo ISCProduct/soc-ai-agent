@@ -16,6 +16,7 @@ import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"Backend/internal/netsafe"
+	"Backend/internal/usagectx"
 )
 
 // 法人番号公表サイトで読み仮名が取れなかった企業を、公式サイトの会社概要から補う（SOCAIAGENT-670 の関連）。
@@ -104,7 +105,9 @@ func (e *SiteReadingExtractor) Extract(ctx context.Context, c *models.Company) (
 		if evidence == "" {
 			continue // 社名の記載が無いページでは、AI を呼ばない（費用と、誤りを避ける）
 		}
-		reply, err := e.AI.ChatCompletionJSON(ctx, siteReadingSystemPrompt, buildSiteReadingPrompt(c.Name, evidence), 0, 300)
+		// AI の費用を機能別に集計できるよう、機能名を付ける（api_call_logs.feature）
+		aiCtx := usagectx.WithFeature(ctx, usagectx.FeatureCompanyParse)
+		reply, err := e.AI.ChatCompletionJSON(aiCtx, siteReadingSystemPrompt, buildSiteReadingPrompt(c.Name, evidence), 0, 300)
 		if err != nil {
 			return SiteReading{}, fmt.Errorf("読みの抜き出しに失敗: %w", err)
 		}

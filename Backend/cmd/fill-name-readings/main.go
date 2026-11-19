@@ -3,18 +3,18 @@
 // 既定は確認だけで、DB には書き込まない（法人番号公表サイトへの問い合わせは行う。読み取りのみ・無料）。
 // 取得結果と、採用できなかった企業（理由つき）を表示する。
 //
-//	cd Backend
-//	HOUJIN_BANGOU_APP_ID=... go run ./cmd/fill-name-readings                              # 確認のみ
-//	HOUJIN_BANGOU_APP_ID=... go run ./cmd/fill-name-readings --apply --backup before.json  # 空の読み仮名だけを埋める
-//	go run ./cmd/fill-name-readings --restore before.json                                  # 埋めた読み仮名を空に戻す
+//		cd Backend
+//		HOUJIN_BANGOU_APP_ID=... go run ./cmd/fill-name-readings                              # 確認のみ
+//		HOUJIN_BANGOU_APP_ID=... go run ./cmd/fill-name-readings --apply --backup before.json  # 空の読み仮名だけを埋める
+//		go run ./cmd/fill-name-readings --restore before.json                                  # 埋めた読み仮名を空に戻す
 //
-//   - 対象は、公開済み（published）・有効・読み仮名が空の企業だけ。既に値がある企業は変えない。
-//   - まず法人番号公表サイトのフリガナ（公的データ）を使う。取れなかった企業だけ、公式サイトの会社概要から読みを抜き出す
-//     （--no-website で止められる。OPENAI_API_KEY が必要）。AI には推測させず、サイトに書かれた記載の抜き出しだけをさせ、
-//     引用文がページに実在すること・読みが引用文に書かれていることをコードで検証する。満たさなければ採用しない。
-//   - 読みの出どころ（corporate_registry / website）と、出典の URL を DB に残す。
-//   - 本番（APP_ENV=production）や localhost 以外の DB への書き込みは --allow-production が必要（接続より先に確認する）。
-//   - 法人番号公表サイトのアプリケーションID（HOUJIN_BANGOU_APP_ID）は、ログにも出さない。
+//	  - 対象は、公開済み（published）・有効・読み仮名が空の企業だけ。既に値がある企業は変えない。
+//	  - まず法人番号公表サイトのフリガナ（公的データ）を使う。取れなかった企業だけ、公式サイトの会社概要から読みを抜き出す
+//	    （--no-website で止められる。OPENAI_API_KEY が必要）。AI には推測させず、サイトに書かれた記載の抜き出しだけをさせ、
+//	    引用文がページに実在すること・読みが引用文に書かれていることをコードで検証する。満たさなければ採用しない。
+//	  - 読みの出どころ（corporate_registry / website）と、出典の URL を DB に残す。
+//	  - 本番（APP_ENV=production）や localhost 以外の DB への書き込みは --allow-production が必要（接続より先に確認する）。
+//	  - 法人番号公表サイトのアプリケーションID（HOUJIN_BANGOU_APP_ID）は、ログにも出さない。
 package main
 
 import (
