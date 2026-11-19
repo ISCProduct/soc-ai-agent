@@ -12,8 +12,9 @@ import (
 )
 
 // OrderSQL は user_company_matches の並び。GORM の Order にそのまま渡す。
-// CRC32 の入力は Go の TieKey と同じ「user_id:company_id」の十進文字列。
-const OrderSQL = "match_score DESC, CRC32(CONCAT(user_id, ':', company_id)) ASC, company_id ASC, id ASC"
+// match_tie_key は生成列で、式は TieKey と同じ CRC32(CONCAT(user_id, ':', company_id))。
+// 式を ORDER BY に書くと索引の順で読めず、filesort に戻る。
+const OrderSQL = "match_score DESC, match_tie_key ASC, company_id ASC, id ASC"
 
 // TieKey は MySQL の CRC32(CONCAT(user_id, ':', company_id)) と同じ値。
 // hash/crc32 の IEEE は zlib と同じ多項式で、MySQL の CRC32 と一致する。

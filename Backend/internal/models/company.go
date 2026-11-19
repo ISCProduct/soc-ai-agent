@@ -144,10 +144,13 @@ type L1CoverageStats struct {
 type UserCompanyMatch struct {
 	ID uint `gorm:"primaryKey"`
 	// uniq_user_session_company は migration 000023 で追加した一意キー（#1166 の upsert が依存）
-	UserID        uint                `gorm:"not null;index:idx_user_session;uniqueIndex:uniq_user_session_company,priority:1"`
-	User          User                `gorm:"foreignKey:UserID"`
-	SessionID     string              `gorm:"type:varchar(255);index:idx_user_session;uniqueIndex:uniq_user_session_company,priority:2"`
-	CompanyID     uint                `gorm:"not null;index;uniqueIndex:uniq_user_session_company,priority:3"`
+	UserID    uint   `gorm:"not null;index:idx_user_session;uniqueIndex:uniq_user_session_company,priority:1"`
+	User      User   `gorm:"foreignKey:UserID"`
+	SessionID string `gorm:"type:varchar(255);index:idx_user_session;uniqueIndex:uniq_user_session_company,priority:2"`
+	CompanyID uint   `gorm:"not null;index;uniqueIndex:uniq_user_session_company,priority:3"`
+	// MatchTieKey は同点順位の副キー（SOCAIAGENT-674）。
+	// CRC32(CONCAT(user_id, ':', company_id)) の生成列。アプリからは書かない。
+	MatchTieKey   uint32              `gorm:"column:match_tie_key;->" json:"-"`
 	Company       Company             `gorm:"foreignKey:CompanyID"`
 	JobPositionID *uint               `gorm:"index"`
 	JobPosition   *CompanyJobPosition `gorm:"foreignKey:JobPositionID"`
