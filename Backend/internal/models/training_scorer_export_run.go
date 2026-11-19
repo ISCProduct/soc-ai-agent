@@ -9,12 +9,20 @@ const (
 	TrainingScorerExportFailed    = "failed"
 )
 
+// 監査ログの種類（#2168）。export は書き出し、sweep は同意の取り消し・退会による書き出し済みのデータの削除。
+const (
+	TrainingScorerRunKindExport = "export"
+	TrainingScorerRunKindSweep  = "sweep"
+)
+
 // TrainingScorerExportRun は採点モデルの学習データの書き出し1回ぶんの監査ログ（#2168）。
 //
 // 個人を特定するもの（利用者 ID・氏名・HMAC 化した ID も含む）は持たない。件数と出力先だけを残すので、
 // 退会時のパージ（hardDeleteUserData）の対象にしなくてよい。
 type TrainingScorerExportRun struct {
 	ID uint `gorm:"primaryKey"`
+	// Kind は export（書き出し）か sweep（書き出し済みのデータの削除）。
+	Kind string `gorm:"size:16;not null;default:export"`
 	// Status は running / succeeded / failed。開始時に running で作り、終わったら更新する。
 	// 途中でプロセスが落ちると running のまま残り、終わらなかった回だと分かる。
 	Status       string     `gorm:"size:16;not null"`
@@ -22,6 +30,8 @@ type TrainingScorerExportRun struct {
 	FinishedAt   *time.Time `gorm:"column:finished_at"`
 	StudentCount int        `gorm:"not null;default:0"`
 	SessionCount int        `gorm:"not null;default:0"`
+	// DeletedFileCount は sweep で消した学生のファイルの数（回ごとに数える）。export では 0。
+	DeletedFileCount int `gorm:"not null;default:0"`
 	// Destination は出力先（s3://bucket/prefix/runs/<実行ID>/）。
 	Destination string `gorm:"size:1024;not null"`
 	// ErrorMessage は失敗したときのエラー。成功なら空。
