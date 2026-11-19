@@ -92,7 +92,7 @@ export default function FormatFindingsSection({ findings, text, showPage = false
               >
                 <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
-                    <Chip label={config.label} color={config.color} size="small" />
+                    <Chip icon={<config.Icon aria-hidden />} label={config.label} color={config.color} size="small" />
                     {showPage && f.page_hint ? (
                       <Typography variant="caption" color="text.secondary">
                         ページ {f.page_hint}

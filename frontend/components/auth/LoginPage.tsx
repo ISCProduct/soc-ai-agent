@@ -13,6 +13,7 @@ import {
   Divider,
   Alert,
 } from '@mui/material'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import GoogleIcon from '@mui/icons-material/Google'
 import Link from 'next/link'
@@ -25,6 +26,19 @@ import { TabPanel, tabA11yProps } from '@/components/common/TabPanel'
 const AUTH_TABS_ID = 'auth'
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/**
+ * メールの形式の誤りの文（#2218）。何が起きたか＋次にすることの形にし、先頭に字形を付ける
+ * （エラーの色は comfortable では黒になるので、色だけでは誤りと分からない）。
+ */
+function EmailFormatError() {
+  return (
+    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'flex-start', gap: 0.5 }}>
+      <ErrorOutlineIcon aria-hidden sx={{ fontSize: '1rem', mt: '1px' }} />
+      メールアドレスの形式が正しくありません。@ を含めて入力してください
+    </Box>
+  )
+}
 
 interface LoginPageProps {
   onAuthSuccess: (authResponse: AuthResponse) => void
@@ -181,7 +195,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 onChange={(e) => setEmail(e.target.value)}
                 onBlur={() => setEmailTouched(true)}
                 error={emailInvalid}
-                helperText={emailInvalid ? 'メールアドレスの形式が正しくありません' : ' '}
+                helperText={emailInvalid ? <EmailFormatError /> : ' '}
                 required
                 autoComplete="username"
                 slotProps={{ htmlInput: { inputMode: 'email' } }}
@@ -233,7 +247,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                   onChange={(e) => setEmail(e.target.value)}
                   onBlur={() => setEmailTouched(true)}
                   error={emailInvalid}
-                  helperText={emailInvalid ? 'メールアドレスの形式が正しくありません' : ' '}
+                  helperText={emailInvalid ? <EmailFormatError /> : ' '}
                   required
                   autoComplete="email"
                   slotProps={{ htmlInput: { inputMode: 'email' } }}
