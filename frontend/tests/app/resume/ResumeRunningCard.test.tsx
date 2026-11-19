@@ -18,7 +18,7 @@ describe('ResumeRunningCard', () => {
     const bar = screen.getByRole('progressbar', { name: 'レビューの進み具合' })
     expect(bar).toHaveAttribute('aria-valuenow', '70')
     expect(screen.getByRole('status')).toHaveTextContent('レポートを書いています')
-    expect(screen.getByText('全体の進み具合（3 / 4 段階目）')).toBeInTheDocument()
+    expect(screen.getByText('進み具合の目安（3 / 4 段階目）')).toBeInTheDocument()
     // 色だけで示さず、文言で状態を伝える
     expect(screen.getAllByText('完了')).toHaveLength(2)
     expect(screen.getAllByText('進行中')).toHaveLength(1)

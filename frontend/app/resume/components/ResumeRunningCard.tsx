@@ -105,7 +105,7 @@ export function ResumeRunningCard({ progress, fileName, targetLabel, candidateLa
           </Typography>
         </Box>
         <Typography sx={{ fontSize: 16, color: UI.inkSoft, textAlign: 'center' }}>
-          全体の進み具合（{Math.min(stage + 1, REVIEW_STAGES.length)} / {REVIEW_STAGES.length} 段階目）
+          進み具合の目安（{Math.min(stage + 1, REVIEW_STAGES.length)} / {REVIEW_STAGES.length} 段階目）
         </Typography>
         <Box
           role="progressbar"
