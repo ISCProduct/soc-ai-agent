@@ -72,7 +72,7 @@ func TestSearch_不正な条件は400(t *testing.T) {
 		"prefecture=%E6%9D%B1%E4%BA%AC", // 「東京」（都道府県の一覧に無い）
 		"prefecture=%25",                // LIKE の記号
 		"job_category_id=0", "job_category_id=abc",
-		"offset=-1", "offset=x",
+		"offset=-1", "offset=x", "offset=10001",
 		"name=" + strings.Repeat("a", maxNameRunes+1),
 	} {
 		s := &fakeStore{}

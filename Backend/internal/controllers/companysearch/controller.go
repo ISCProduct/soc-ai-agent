@@ -37,6 +37,8 @@ const (
 	// maxFavoriteIDs はお気に入りの状態を1回で問い合わせられる企業の数（1ページ分より十分大きく）
 	maxFavoriteIDs = 100
 	maxNameRunes   = 100
+	// maxOffset は読み飛ばせる件数の上限（20件ずつで500ページ分）
+	maxOffset = 10000
 )
 
 func badRequest(msg string) error {
@@ -68,7 +70,8 @@ func (c *Controller) Search(ctx echo.Context) error {
 	}
 	if raw := ctx.QueryParam("offset"); raw != "" {
 		o, err := strconv.Atoi(raw)
-		if err != nil || o < 0 {
+		// 認証なしの公開 API なので、巨大な OFFSET で MySQL に大量の読み飛ばしをさせない
+		if err != nil || o < 0 || o > maxOffset {
 			return badRequest("offset が不正です")
 		}
 		f.Offset = o

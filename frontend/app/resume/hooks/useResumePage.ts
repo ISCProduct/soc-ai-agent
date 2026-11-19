@@ -12,6 +12,13 @@ import {
   parseApiErrorMessage,
 } from '../utils'
 
+const REVIEW_FAILED_MESSAGE = 'レビューに失敗しました。時間をおいてもう一度お試しください。'
+
+function userFacingMessage(message: unknown): string {
+  const text = typeof message === 'string' ? message.trim() : ''
+  return text !== '' && text.length <= 200 ? text : REVIEW_FAILED_MESSAGE
+}
+
 /**
  * 履歴書レビューページの state・副作用・イベントハンドラ。
  */
@@ -36,12 +43,19 @@ export function useResumePage() {
   const [reviewLoading, setReviewLoading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [reviewError, setReviewError] = useState('')
+  const [reviewInterrupted, setReviewInterrupted] = useState(false)
+  // 応募先の決め方: 企業を選ぶ / 職種だけで見る
+  const [targetMode, setTargetMode] = useState<'company' | 'job'>('company')
+  // ファイル選択・URL入力のたびに増やし、読み込みを自動で始める合図にする
+  const [uploadTick, setUploadTick] = useState(0)
   const [annotateError, setAnnotateError] = useState('')
   const [review, setReview] = useState<ReviewResult | null>(null)
   const [ragReport, setRagReport] = useState('')
   const [scoresBefore, setScoresBefore] = useState<WeightScore[] | null>(null)
   const [scoresAfter, setScoresAfter] = useState<WeightScore[] | null>(null)
   const reviewAbortRef = useRef<AbortController | null>(null)
+  // 企業検索の世代。遅れて届いた古い応答で、新しい結果や選択を上書きしない
+  const searchSeqRef = useRef(0)
 
   const prefilledCompany = searchParams.get('company_name') || ''
   const prefilledIndustry = searchParams.get('industry') || ''
@@ -95,7 +109,6 @@ export function useResumePage() {
     setCompanyQuery(candidate.name)
     setCompanyValidated(true)
     setSelectedCompanyMeta(candidate)
-    setCompanyCandidates([])
     setCompanySearchError('')
   }
 
@@ -121,6 +134,8 @@ export function useResumePage() {
       setCompanySearchError('企業名を入力してください')
       return
     }
+    const seq = ++searchSeqRef.current
+    const stale = () => seq !== searchSeqRef.current
     setCompanySearchLoading(true)
     setCompanySearchError('')
     setCompanyCandidates([])
@@ -132,6 +147,7 @@ export function useResumePage() {
           throw new Error(parseApiErrorMessage(errText, '企業の検索に失敗しました'))
         }
         const data = await res.json()
+        if (stale()) return
         const list = mapDbCompanyResults(data)
         setCompanyCandidates(list)
         if (list.length === 0) {
@@ -143,6 +159,7 @@ export function useResumePage() {
       // WEB: 候補一覧 API（DB優先 + WEB補完）。単体 validate より候補選択しやすい
       const res = await fetch(`/api/companies/web-search?q=${encodeURIComponent(q)}`, { cache: 'no-store' })
       const data = await res.json().catch(() => ({}))
+      if (stale()) return
       if (!res.ok) {
         throw new Error(parseApiErrorMessage(JSON.stringify(data), 'Web検索に失敗しました'))
       }
@@ -155,9 +172,10 @@ export function useResumePage() {
         setCompanySearchError('候補が見つかりませんでした。企業名を変えて再検索するか、職種のみでレビューしてください')
       }
     } catch (err) {
+      if (stale()) return
       setCompanySearchError(err instanceof Error ? err.message : '企業検索に失敗しました')
     } finally {
-      setCompanySearchLoading(false)
+      if (!stale()) setCompanySearchLoading(false)
     }
   }
 
@@ -181,6 +199,7 @@ export function useResumePage() {
     setScoresAfter(null)
     setAnnotateError('')
     setReviewError('')
+    setReviewInterrupted(false)
     setReviewLoading(false)
     setLoading(true)
     try {
@@ -218,6 +237,57 @@ export function useResumePage() {
     }
   }
 
+  // ファイルを選んだら、そのまま読み込む（ボタンを別に押させない）
+  useEffect(() => {
+    if (uploadTick > 0) void handleUpload()
+    // handleUpload は毎回作り直されるので、合図（uploadTick）だけを見る
+  }, [uploadTick])
+
+  const selectFile = (selected: File) => {
+    setSourceType(selected.name.toLowerCase().endsWith('.docx') ? 'docx' : 'pdf')
+    setSourceUrl('')
+    setFile(selected)
+    setUploadTick((t) => t + 1)
+  }
+
+  const loadFromUrl = (url: string) => {
+    setSourceType('google_docs')
+    setSourceUrl(url)
+    setFile(null)
+    setUploadTick((t) => t + 1)
+  }
+
+  /** 書類を選び直す・別の書類をレビューする。レビューの途中なら止める。 */
+  const resetDocument = () => {
+    reviewAbortRef.current?.abort()
+    setDocumentId(null)
+    setFile(null)
+    setSourceUrl('')
+    setUploadError('')
+    setReview(null)
+    setRagReport('')
+    setScoresBefore(null)
+    setScoresAfter(null)
+    setAnnotateError('')
+    setReviewError('')
+    setReviewInterrupted(false)
+    setReviewLoading(false)
+  }
+
+  /** 読み取りを中止して入力に戻る。書類と応募先の入力は残す。 */
+  const cancelReview = () => {
+    reviewAbortRef.current?.abort()
+    setRagReport('')
+    setReviewError('')
+    setReviewInterrupted(false)
+    setReviewLoading(false)
+  }
+
+  const chooseTargetMode = (mode: 'company' | 'job') => {
+    setTargetMode(mode)
+    if (mode === 'job') clearSelectedCompany()
+  }
+
   const handleReview = async () => {
     if (!documentId) {
       setReviewError('document_id が未設定です')
@@ -237,6 +307,7 @@ export function useResumePage() {
     reviewAbortRef.current = abortController
 
     setReviewError('')
+    setReviewInterrupted(false)
     setAnnotateError('')
     setReview(null)
     setRagReport('')
@@ -279,6 +350,8 @@ export function useResumePage() {
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      // complete / error を受け取らずに閉じたら中断として扱う
+      let sawTerminal = false
 
       while (true) {
         if (abortController.signal.aborted) {
@@ -315,6 +388,7 @@ export function useResumePage() {
           if (data.type === 'chunk') {
             setRagReport((prev) => prev + (data.text ?? ''))
           } else if (data.type === 'complete') {
+            sawTerminal = true
             const backendAnnotated = data.annotated_available === true
             const annotatedAvailable = backendAnnotated || (documentId ? await checkAnnotatedPdfAvailable(documentId) : false)
             if (abortController.signal.aborted) return
@@ -341,9 +415,15 @@ export function useResumePage() {
           } else if (data.type === 'annotate_error') {
             setAnnotateError(String(data.message ?? ''))
           } else if (data.type === 'error') {
-            throw new Error(String(data.message ?? 'Review failed'))
+            sawTerminal = true
+            // Backend は利用者向けの文言だけを送る（内部の例外文は固定文言にしてある）。空のときだけ固定文言にする
+            throw new Error(userFacingMessage(data.message))
           }
         }
+      }
+
+      if (!sawTerminal && !abortController.signal.aborted) {
+        setReviewInterrupted(true)
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
@@ -412,6 +492,13 @@ export function useResumePage() {
     setCandidateType,
     reviewLoading,
     reviewError,
+    reviewInterrupted,
+    targetMode,
+    chooseTargetMode,
+    selectFile,
+    loadFromUrl,
+    resetDocument,
+    cancelReview,
     review,
     ragReport,
     handleReview,

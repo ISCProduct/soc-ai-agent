@@ -16,8 +16,11 @@ async function mockHome(page: Page, opts: { schedule: unknown[]; applications: u
 }
 
 // #1576: ホームで「次にやること」が分かり、お知らせが積み重なってチャットを押し下げない。
-test.describe('ホームの次にやること', () => {
+// 右パネルが無い狭い画面（lg 未満）では、従来どおり上に「次にやること」とお知らせを積む。
+// 広い画面（3カラム）は home-consult.spec.ts で検査する。
+test.describe('ホームの次にやること（狭い画面）', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 800 })
     await setupAuth(page, TEST_USER)
   })
 

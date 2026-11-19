@@ -22,6 +22,11 @@ export type CompanySearchItem = {
   location: string
   description: string
   logo_url: string
+  /** 出どころ（詳細画面と同じ判定で「AI推定」を出す） */
+  source_type?: string
+  source_url?: string
+  last_fetch_confidence?: string
+  last_model_used?: string
 }
 
 export type CompanySearchResult = { companies: CompanySearchItem[]; total: number }

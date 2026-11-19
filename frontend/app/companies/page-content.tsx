@@ -32,6 +32,8 @@ import {
   type CompanySearchOptions,
   type CompanySearchResult,
 } from '@/lib/company-search'
+import { ProvenanceBadge } from '@/components/company/ProvenanceBadge'
+import { classifyProvenance } from '@/lib/company/provenance'
 
 /**
  * 企業を探す（SOCAIAGENT-612）。業界・地域（都道府県）・職種・名前で、自分の条件で企業を探す。
@@ -48,8 +50,13 @@ export default function CompanySearchPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [favorites, setFavorites] = useState<Record<number, CompanyFavoriteState>>({})
-  const [togglingId, setTogglingId] = useState<number | null>(null)
+  // 送信中の企業。企業ごとに持つ（別の企業を押しても、送信中のボタンを押せるようにしない）
+  const [toggling, setToggling] = useState<ReadonlySet<number>>(() => new Set())
+  // 同じ描画のうちに続けて押されても弾けるよう、判定は ref で行う（state は表示用）
+  const togglingRef = useRef<Set<number>>(new Set())
   const [favoriteError, setFavoriteError] = useState('')
+  // お気に入りの状態を取れなかった（推薦が無いのとは区別して、再試行を出す）
+  const [favoritesLoadFailed, setFavoritesLoadFailed] = useState(false)
 
   const loadOptions = useCallback(async () => {
     setOptionsError(false)
@@ -68,6 +75,19 @@ export default function CompanySearchPage() {
   const seq = useRef(0)
   const controller = useRef<AbortController | null>(null)
 
+  // お気に入りの状態は補助。取れなくても一覧は出し、失敗したことと再試行を出す
+  const loadFavorites = useCallback(async (companyIds: number[], mine: number) => {
+    setFavoritesLoadFailed(false)
+    try {
+      const states = await fetchFavoriteStates(companyIds)
+      if (mine === seq.current) setFavorites(Object.fromEntries(states.map((s) => [s.company_id, s])))
+    } catch {
+      if (mine !== seq.current) return
+      setFavorites({})
+      setFavoritesLoadFailed(true)
+    }
+  }, [])
+
   const load = useCallback(async (f: CompanySearchFilter) => {
     const mine = ++seq.current
     controller.current?.abort()
@@ -79,21 +99,14 @@ export default function CompanySearchPage() {
       const r = await searchCompanies(f, ac.signal)
       if (mine !== seq.current) return
       setResult(r)
-      // お気に入りの状態は補助。取れなくても一覧は出す（ハートを出さないだけ）
-      fetchFavoriteStates(r.companies.map((c) => c.id))
-        .then((states) => {
-          if (mine === seq.current) setFavorites(Object.fromEntries(states.map((s) => [s.company_id, s])))
-        })
-        .catch(() => {
-          if (mine === seq.current) setFavorites({})
-        })
+      void loadFavorites(r.companies.map((c) => c.id), mine)
     } catch {
       if (mine !== seq.current) return
       setError('企業を読み込めませんでした。通信状況を確認して、もう一度お試しください')
     } finally {
       if (mine === seq.current) setLoading(false)
     }
-  }, [])
+  }, [loadFavorites])
 
   useEffect(() => {
     void load(filter)
@@ -114,7 +127,9 @@ export default function CompanySearchPage() {
   }
 
   const onToggleFavorite = async (state: CompanyFavoriteState) => {
-    setTogglingId(state.company_id)
+    if (togglingRef.current.has(state.company_id)) return
+    togglingRef.current.add(state.company_id)
+    setToggling(new Set(togglingRef.current))
     setFavoriteError('')
     try {
       await toggleFavorite(state.match_id)
@@ -122,7 +137,8 @@ export default function CompanySearchPage() {
     } catch {
       setFavoriteError('お気に入りを切り替えられませんでした。もう一度お試しください')
     } finally {
-      setTogglingId(null)
+      togglingRef.current.delete(state.company_id)
+      setToggling(new Set(togglingRef.current))
     }
   }
 
@@ -176,6 +192,15 @@ export default function CompanySearchPage() {
           </Alert>
         )}
         {favoriteError && <Alert severity="error" sx={{ mb: 2 }}>{favoriteError}</Alert>}
+        {favoritesLoadFailed && result && !error && (
+          <Alert
+            severity="warning"
+            sx={{ mb: 2 }}
+            action={<Button color="inherit" size="small" onClick={() => void loadFavorites(result.companies.map((c) => c.id), seq.current)}>再読み込み</Button>}
+          >
+            お気に入りの状態を読み込めませんでした。企業の一覧は見られます。
+          </Alert>
+        )}
 
         {loading && !result && (
           <Stack spacing={1.5} aria-label="企業を読み込み中">
@@ -202,7 +227,8 @@ export default function CompanySearchPage() {
                   return (
                     <Box component="li" key={c.id}>
                       <Card variant="outlined" sx={{ display: 'flex', alignItems: 'stretch' }}>
-                        <CardActionArea component={NextLink} href={`/company/${c.id}`} sx={{ flex: 1, minWidth: 0 }}>
+                        <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                        <CardActionArea component={NextLink} href={`/company/${c.id}`} sx={{ flex: 1 }}>
                           <CardContent>
                             <Typography fontWeight={700}>{c.name}</Typography>
                             <Typography variant="caption" color="text.secondary">
@@ -215,13 +241,20 @@ export default function CompanySearchPage() {
                             )}
                           </CardContent>
                         </CardActionArea>
+                        {/* AI 補完の紹介文を確認済みの事実に見せない（詳細画面と同じ判定）。ツールチップを開けるようリンクの外に置く */}
+                        {classifyProvenance(c)?.kind === 'ai' && (
+                          <Box sx={{ px: 2, pb: 1.5 }}>
+                            <ProvenanceBadge provenance={c} target="企業の紹介・業界・所在地" />
+                          </Box>
+                        )}
+                        </Box>
                         {fav && (
                           <Box sx={{ display: 'flex', alignItems: 'center', pr: 1 }}>
                             <Tooltip title={fav.is_favorited ? 'お気に入りから外す' : 'お気に入りに入れる'}>
                               <IconButton
                                 aria-label={`${c.name}を${fav.is_favorited ? 'お気に入りから外す' : 'お気に入りに入れる'}`}
                                 aria-pressed={fav.is_favorited}
-                                disabled={togglingId === c.id}
+                                disabled={toggling.has(c.id)}
                                 onClick={() => void onToggleFavorite(fav)}
                               >
                                 {fav.is_favorited ? <Favorite color="error" /> : <FavoriteBorder />}
@@ -241,6 +274,8 @@ export default function CompanySearchPage() {
                   count={pageCount}
                   page={filter.page}
                   onChange={(_, page) => setFilter((prev) => ({ ...prev, page }))}
+                  // 新しい条件の読み込み中は、古い結果のページ数で移動させない
+                  disabled={loading}
                   aria-label="ページ"
                 />
               </Box>

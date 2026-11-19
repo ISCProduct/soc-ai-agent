@@ -62,6 +62,11 @@ type CompanySearchRow struct {
 	Location    string `json:"location"`
 	Description string `json:"description"`
 	LogoURL     string `json:"logo_url"`
+	// 出どころ（詳細画面と同じ判定で「AI推定」を出すため。AI 補完の値を確認済みの事実に見せない）
+	SourceType          string `json:"source_type"`
+	SourceURL           string `json:"source_url"`
+	LastFetchConfidence string `json:"last_fetch_confidence"`
+	LastModelUsed       string `json:"last_model_used"`
 }
 
 // visibleCompanyForSearch は学生に見せてよい企業（applyCompanyFilters と同じ判定）。
@@ -72,11 +77,14 @@ func (r *CompanySearchRepository) visible() *gorm.DB {
 }
 
 // jobCategoryCondition は、その職種（または子の職種）の公開中の求人を持つ企業に絞る条件。
-const jobCategoryCondition = `EXISTS (
+// 企業本体が公開中であることも求める。下書きの企業の求人は、学生向けの求人一覧
+// （publishedCompanyExists）と同じく根拠に数えない。
+var jobCategoryCondition = `EXISTS (
 	SELECT 1 FROM company_job_positions jp
 	JOIN job_categories jc ON jc.id = jp.job_category_id
 	WHERE jp.company_id = companies.id
 	  AND jp.is_active = true AND jp.data_status = 'published' AND jp.deleted_at IS NULL
+	  AND ` + publishedCompanyExists("jp.company_id") + `
 	  AND (jc.id = ? OR jc.parent_id = ?)
 )`
 
@@ -101,7 +109,9 @@ func (r *CompanySearchRepository) Search(f CompanySearchFilter) ([]CompanySearch
 	}
 	var rows []CompanySearchRow
 	err := q.Session(&gorm.Session{}).
-		Select("companies.id, companies.name, COALESCE(companies.industry, '') AS industry, COALESCE(companies.location, '') AS location, COALESCE(companies.description, '') AS description, COALESCE(companies.logo_url, '') AS logo_url").
+		Select("companies.id, companies.name, COALESCE(companies.industry, '') AS industry, COALESCE(companies.location, '') AS location, COALESCE(companies.description, '') AS description, COALESCE(companies.logo_url, '') AS logo_url, " +
+			"COALESCE(companies.source_type, '') AS source_type, COALESCE(companies.source_url, '') AS source_url, " +
+			"COALESCE(companies.last_fetch_confidence, '') AS last_fetch_confidence, COALESCE(companies.last_model_used, '') AS last_model_used").
 		Order("companies.name ASC, companies.id ASC").
 		Limit(f.Limit).Offset(f.Offset).
 		Scan(&rows).Error
@@ -118,7 +128,9 @@ type JobCategoryOption struct {
 }
 
 // SearchOptions は絞り込みの選択肢を返す。業界は学生に見せる企業に付いているもの、
-// 職種は公開中の求人がある大分類（親の無い職種）だけ。
+// 職種は公開中の企業の公開中の求人がある職種（その職種か、parent_id で子にあたる職種の求人）。
+// 標準のシードは小分類（Level 1）に parent_id を設定していないため、大分類だけに絞ると
+// 小分類の求人しか無い企業を選べなくなる。そのため階層で絞らず、求人のある職種をすべて出す。
 func (r *CompanySearchRepository) SearchOptions() ([]string, []JobCategoryOption, error) {
 	var industries []string
 	if err := r.visible().Where("companies.industry IS NOT NULL AND companies.industry <> ''").
@@ -128,7 +140,7 @@ func (r *CompanySearchRepository) SearchOptions() ([]string, []JobCategoryOption
 	var cats []JobCategoryOption
 	err := r.db.Table("job_categories top").
 		Select("top.id AS id, top.name AS name").
-		Where("top.parent_id IS NULL AND top.is_active = ?", true).
+		Where("top.is_active = ?", true).
 		Where(`EXISTS (
 			SELECT 1 FROM company_job_positions jp
 			JOIN job_categories jc ON jc.id = jp.job_category_id
@@ -136,9 +148,10 @@ func (r *CompanySearchRepository) SearchOptions() ([]string, []JobCategoryOption
 			WHERE (jc.id = top.id OR jc.parent_id = top.id)
 			  AND jp.is_active = true AND jp.data_status = 'published' AND jp.deleted_at IS NULL
 			  AND companies.is_active = true AND companies.deleted_at IS NULL
+			  AND companies.data_status = 'published'
 			  AND ` + guestEntryVisibilityGuard("companies.id") + `
 		)`).
-		Order("top.display_order ASC, top.id ASC").
+		Order("top.level ASC, top.display_order ASC, top.id ASC").
 		Scan(&cats).Error
 	if err != nil {
 		return nil, nil, err

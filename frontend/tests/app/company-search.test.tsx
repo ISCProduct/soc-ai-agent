@@ -96,11 +96,48 @@ test('お気に入りは推薦にある企業だけハートを出し、切り�
   expect(toggle?.init?.body).toBe(JSON.stringify({ match_id: 50 }))
 })
 
-test('お気に入りの状態が取れなくても、一覧は出す', async () => {
-  mockFetch((url, init) => (url.startsWith('/api/companies/search/favorites') ? [500, {}] : defaultRoutes(url, init)))
+test('お気に入りの状態が取れなくても一覧は出し、失敗と再試行を出す（推薦が無いのと区別する）', async () => {
+  let favOk = false
+  mockFetch((url, init) =>
+    url.startsWith('/api/companies/search/favorites') && !favOk ? [500, {}] : defaultRoutes(url, init),
+  )
   render(<CompanySearchPage />)
   expect(await screen.findByText('A社')).toBeInTheDocument()
+  expect(await screen.findByText(/お気に入りの状態を読み込めませんでした/)).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: /お気に入り/ })).not.toBeInTheDocument()
+
+  favOk = true
+  fireEvent.click(screen.getByRole('button', { name: '再読み込み' }))
+  expect(await screen.findByRole('button', { name: 'B社をお気に入りに入れる' })).toBeInTheDocument()
+  expect(screen.queryByText(/お気に入りの状態を読み込めませんでした/)).not.toBeInTheDocument()
+})
+
+test('お気に入りの送信中に同じ企業を続けて押しても、二重に送らない', async () => {
+  let release: () => void = () => {}
+  const calls = mockFetch((url, init) =>
+    url.startsWith('/api/chat/favorite')
+      ? new Promise<[number, unknown]>((resolve) => { release = () => resolve([200, { ok: true }]) })
+      : defaultRoutes(url, init),
+  )
+  render(<CompanySearchPage />)
+  const heart = await screen.findByRole('button', { name: 'B社をお気に入りに入れる' })
+  fireEvent.click(heart)
+  fireEvent.click(heart)
+  await act(async () => { release() })
+  expect(await screen.findByRole('button', { name: 'B社をお気に入りから外す' })).toBeInTheDocument()
+  expect(calls.filter((c) => c.url === '/api/chat/favorite')).toHaveLength(1)
+})
+
+test('AI が補完した企業には「AI推定」の印を付ける（公的DB由来には付けない）', async () => {
+  mockFetch((url, init) =>
+    url.startsWith('/api/companies/search?')
+      ? [200, { companies: [{ ...company(1, 'A社'), source_type: 'web_search', last_fetch_confidence: 'low' }, { ...company(2, 'B社'), source_type: 'gbizinfo' }], total: 2 }]
+      : defaultRoutes(url, init),
+  )
+  render(<CompanySearchPage />)
+  const items = await screen.findAllByRole('listitem')
+  expect(within(items[0]).getByText(/AI推定/)).toBeInTheDocument()
+  expect(within(items[1]).queryByText(/AI推定/)).not.toBeInTheDocument()
 })
 
 test('0件・読み込みの失敗・選択肢の失敗を出し分ける', async () => {

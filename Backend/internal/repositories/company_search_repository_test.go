@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"Backend/internal/models"
 	"github.com/DATA-DOG/go-sqlmock"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -42,13 +43,14 @@ const visibleCompanySQL = "companies.is_active = ? AND companies.deleted_at IS N
 
 func TestCompanySearchRepository_Search(t *testing.T) {
 	repo, mock := newCompanySearchMock(t)
-	filters := "companies.name LIKE ?|companies.industry = ?|companies.location LIKE ?|jp.data_status = 'published'|(jc.id = ? OR jc.parent_id = ?)"
+	filters := "companies.name LIKE ?|companies.industry = ?|companies.location LIKE ?|jp.data_status = 'published'|c.data_status = 'published'|(jc.id = ? OR jc.parent_id = ?)"
 	// 名前の % と _ は文字として扱う。都道府県は所在地に含まれるか
 	args := []driver.Value{true, "%100\\%\\_A社%", "IT", "%東京都%", uint(3), uint(3)}
 	mock.ExpectQuery("SELECT count(*)|" + visibleCompanySQL + "|" + filters).WithArgs(args...).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(41))
 	// 並びは企業名順（推薦や課金で上位に固定しない）
-	mock.ExpectQuery(visibleCompanySQL + "|" + filters + "|ORDER BY companies.name ASC, companies.id ASC|LIMIT ?|OFFSET ?").
+	// 出どころの列も返す（AI 補完の企業に「AI推定」を出すため）
+	mock.ExpectQuery(visibleCompanySQL + "|" + filters + "|AS source_type|AS last_fetch_confidence|AS last_model_used|ORDER BY companies.name ASC, companies.id ASC|LIMIT ?|OFFSET ?").
 		WithArgs(append(args, 20, 40)...).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "industry", "location", "description", "logo_url"}).
 			AddRow(1, "A社", "IT", "東京都渋谷区", "", ""))
@@ -79,8 +81,8 @@ func TestCompanySearchRepository_SearchOptions(t *testing.T) {
 	repo, mock := newCompanySearchMock(t)
 	mock.ExpectQuery(visibleCompanySQL + "|DISTINCT|companies.industry <> ''").
 		WillReturnRows(sqlmock.NewRows([]string{"industry"}).AddRow("IT"))
-	// 職種は公開中の求人がある大分類だけ
-	mock.ExpectQuery("top.parent_id IS NULL|jp.data_status = 'published'|companies.is_active = true|c.is_guest_entry = true").
+	// 職種は、公開中の企業の公開中の求人がある職種。シードの小分類は parent_id が無いので、階層では絞らない
+	mock.ExpectQuery("jc.id = top.id OR jc.parent_id = top.id|jp.data_status = 'published'|companies.is_active = true|companies.data_status = 'published'|c.is_guest_entry = true").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(1, "エンジニア"))
 	industries, cats, err := repo.SearchOptions()
 	if err != nil || len(industries) != 1 || len(cats) != 1 || cats[0].Name != "エンジニア" {
@@ -95,6 +97,7 @@ func TestCompanySearchRepository_FavoriteStates(t *testing.T) {
 	repo, mock := newCompanySearchMock(t)
 	// 最新の診断（面接スナップショット・適性検査を除く）の推薦だけを見る
 	mock.ExpectQuery("FROM `user_weight_scores`|session_id NOT LIKE ?|source <> ?").
+		WithArgs(7, "interview-%", models.ScoreSourceAssessment, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"session_id"}).AddRow("s1"))
 	mock.ExpectQuery("FROM `user_company_matches`|user_id = ? AND session_id = ? AND company_id IN").
 		WithArgs(7, "s1", 1, 2).
