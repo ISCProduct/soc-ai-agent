@@ -10,9 +10,32 @@ jest.mock('next/navigation', () => ({
   usePathname: () => mockPathname,
 }))
 
+const STORED_USER = { user_id: 1, email: 'student@example.com', name: 'テストユーザー', is_guest: false, is_admin: false }
+
 describe('GlobalNavMenu', () => {
+  beforeEach(() => {
+    // メニューはログイン中の学生にだけ出す（#2222）
+    window.localStorage.setItem('user', JSON.stringify(STORED_USER))
+  })
+
   afterEach(() => {
     mockPathname = '/interview'
+    window.localStorage.clear()
+    window.sessionStorage.clear()
+  })
+
+  it('未ログイン（ストレージに user が無い）ではメニューボタンを出さない（#2222）', () => {
+    window.localStorage.clear()
+    mockPathname = '/privacy'
+    const { container } = render(<GlobalNavMenu />)
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByRole('button', { name: 'メニューを開く' })).not.toBeInTheDocument()
+  })
+
+  it('ログイン済みなら /privacy でもメニューボタンを出す', () => {
+    mockPathname = '/privacy'
+    render(<GlobalNavMenu />)
+    expect(screen.getByRole('button', { name: 'メニューを開く' })).toBeInTheDocument()
   })
 
   it('ホーム画面では表示しない（HomeSidebar と重複させない）', () => {

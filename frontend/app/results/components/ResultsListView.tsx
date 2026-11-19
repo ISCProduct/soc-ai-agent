@@ -38,7 +38,7 @@ import {
 import { APPLY_CLOSED_LABEL, getApplyClosedButtonProps } from '@/lib/apply-availability'
 import { CONTENT_MAX_WIDTH, UI, leadSentences, scaleBand } from '@/lib/design/tokens'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
-import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
+import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
 
 export interface ResultsListViewProps {
   companies: Company[]
@@ -557,7 +557,7 @@ export default function ResultsListView({
       <BottomNavSpacer />
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={5000}
+        autoHideDuration={SNACKBAR_AUTO_HIDE_MS}
         onClose={onCloseSnackbar}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         sx={ABOVE_BOTTOM_NAV_SX}
