@@ -250,10 +250,10 @@ function ScoreList({ scores }: { scores: { category: string; score: number }[] }
       {scores.map((s) => (
         <Box key={s.category} sx={{ display: 'grid', gridTemplateColumns: { xs: '7em 1fr 3em', sm: '9em 1fr 3em' }, alignItems: 'center', gap: 1 }}>
           <Typography variant="body2">{s.category}</Typography>
-          <Box role="img" aria-label={`${s.category} ${s.score}点`} sx={{ height: 8, borderRadius: 4, bgcolor: 'action.hover', overflow: 'hidden', '@media print': { border: '1px solid #999' } }}>
+          <Box role="img" aria-label={`${s.category} ${Math.round(s.score)}点`} sx={{ height: 8, borderRadius: 4, bgcolor: 'action.hover', overflow: 'hidden', '@media print': { border: '1px solid #999' } }}>
             <Box sx={{ height: '100%', width: `${Math.max(0, Math.min(100, s.score))}%`, bgcolor: 'primary.main', '@media print': { bgcolor: '#555', printColorAdjust: 'exact' } }} />
           </Box>
-          <Typography variant="body2" sx={{ textAlign: 'right' }}>{s.score}</Typography>
+          <Typography variant="body2" sx={{ textAlign: 'right' }}>{Math.round(s.score)}</Typography>
         </Box>
       ))}
     </Stack>
