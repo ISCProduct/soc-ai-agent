@@ -4,6 +4,7 @@ import (
 	admincontrollers "Backend/internal/controllers/admin"
 	applicationcontrollers "Backend/internal/controllers/application"
 	insightcontrollers "Backend/internal/controllers/insight"
+	usercontrollers "Backend/internal/controllers/user"
 	"Backend/internal/repositories"
 	"Backend/internal/services/school"
 
@@ -40,6 +41,7 @@ func SetupAdminRoutes(
 	schoolService *school.SchoolService,
 	adminSecret string,
 	aiBudgetController *admincontrollers.AIBudgetController,
+	growthController *usercontrollers.GrowthController,
 ) {
 	admin := api.Group("/admin", EchoAdminAuth(userRepo, adminSecret))
 	schoolScope := EchoAdminSchoolScope(schoolService)
@@ -60,6 +62,8 @@ func SetupAdminRoutes(
 	admin.POST("/teacher/students/:id/guidances", teacherGuidanceController.Create)
 	// ES添削の履歴（#1531）。担当校スコープを通し、学園一致はクエリ側で担保する。
 	admin.GET("/teacher/students/:id/es-reviews", teacherESReviewController.List, schoolScope)
+	// 学生のスコアと診断フェーズの履歴（SOCAIAGENT-601）。担当校の学生だけ。
+	admin.GET("/students/:id/growth-history", growthController.ForStaff, schoolScope)
 
 	admin.GET("/interviews", adminInterviewController.ListSessions, schoolScope)
 	admin.GET("/interviews/:id/videos", adminInterviewController.ListVideos)

@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
+	"Backend/internal/services/growth"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,23 @@ import (
 // チャット分析スコアを面接・RAG のコンテキストとして活用する。
 type CrossFeatureIntegrationService struct {
 	weightScoreRepo *repositories.UserWeightScoreRepository
+	growthRecorder  growth.Recorder
+}
+
+// SetGrowthRecorder は、面接・職務経歴書・ES のスコア反映が1件でも書けたあとに履歴を1行残す。
+// 未設定なら何もしない。カテゴリごとの書き込みでは残さず、1回の反映につき1行にする。
+func (s *CrossFeatureIntegrationService) SetGrowthRecorder(r growth.Recorder) {
+	if s == nil {
+		return
+	}
+	s.growthRecorder = r
+}
+
+func (s *CrossFeatureIntegrationService) recordGrowth(userID uint, source, sessionID string) {
+	if s == nil || s.growthRecorder == nil || userID == 0 || sessionID == "" {
+		return
+	}
+	s.growthRecorder.Record(userID, source, sessionID)
 }
 
 func NewCrossFeatureIntegrationService(
@@ -145,6 +163,9 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromInterviewReport(
 	if applied == 0 && failed > 0 {
 		return fmt.Errorf("面接スコアの反映が全件失敗しました (%d件)", failed)
 	}
+	if applied > 0 {
+		s.recordGrowth(userID, growth.SourceInterview, chatSessionID)
+	}
 	return nil
 }
 
@@ -180,10 +201,16 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromResumeReview(
 
 	// 対応表と式は resumeScoreMapping / mapResumeScore（score_mapping.go）に集約している。
 	// 高ければ高く、低ければ低く、スコア全域を使って反映する（#1528）。
+	wrote := 0
 	for _, mapped := range mapResumeScore(*review.Score, criticalCount) {
 		if err := s.applyMovingAverage(userID, chatSessionID, mapped.category, mapped.score); err != nil {
 			log.Printf("[CrossFeature] resume→score update failed (cat=%s): %v\n", mapped.category, err)
+			continue
 		}
+		wrote++
+	}
+	if wrote > 0 {
+		s.recordGrowth(userID, growth.SourceResume, chatSessionID)
 	}
 	return nil
 }
@@ -230,6 +257,9 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromESReview(userID uint, r
 	// 1カテゴリも書けていないのに「反映済み」と記録すると、その本文が以後乗らない。
 	if applied == 0 && failed > 0 {
 		return false, fmt.Errorf("ES添削のスコア反映が全件失敗 (es_review_id=%d)", review.ID)
+	}
+	if applied > 0 {
+		s.recordGrowth(userID, growth.SourceES, sessionID)
 	}
 	return true, nil
 }

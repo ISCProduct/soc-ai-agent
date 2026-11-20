@@ -30,6 +30,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService, User } from '@/lib/auth'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
+import { GrowthHistoryCard } from '@/components/profile/GrowthHistoryCard'
 import { ScoutPreferencesCard } from '@/components/profile/ScoutPreferencesCard'
 import { TrainingConsentCard } from '@/components/profile/TrainingConsentCard'
 import { PageLoading } from '@/components/common/PageLoading'
@@ -271,6 +272,7 @@ function ProfilePageContent() {
             </CardContent>
           </Card>
         )}
+        <GrowthHistoryCard />
         {/* ユーザーヘッダーカード */}
         <Card sx={{ mb: 3, borderRadius: 2 }}>
           <CardContent sx={{ p: 3 }}>

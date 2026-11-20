@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/growth"
 	"context"
 	"fmt"
 	"log"
@@ -26,6 +27,22 @@ type ChatService struct {
 	conversationContextRepo repository.ConversationContextRepository
 	answerEvaluator         *AnswerEvaluator
 	jobValidator            *JobCategoryValidator
+	growthRecorder          growth.Recorder
+}
+
+// SetGrowthRecorder は、スコアが動いたあとに履歴を1行残す。未設定なら何もしない。
+func (s *ChatService) SetGrowthRecorder(r growth.Recorder) {
+	if s == nil {
+		return
+	}
+	s.growthRecorder = r
+}
+
+func (s *ChatService) recordGrowth(userID uint, source, sessionID string) {
+	if s == nil || s.growthRecorder == nil {
+		return
+	}
+	s.growthRecorder.Record(userID, source, sessionID)
 }
 
 func NewChatService(
