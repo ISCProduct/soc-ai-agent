@@ -29,6 +29,7 @@ import GitHubSkills from '@/components/github-skills'
 import { ScoutPreferencesCard } from '@/components/profile/ScoutPreferencesCard'
 import { TrainingConsentCard } from '@/components/profile/TrainingConsentCard'
 import { DeleteAccountDialog } from '@/components/profile/DeleteAccountDialog'
+import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
 import { PageLoading } from '@/components/common/PageLoading'
 import { StudentThemeToggle } from '@/components/layout/StudentThemeToggle'
 
@@ -583,10 +584,12 @@ function ProfilePageContent() {
       {/* 保存成功トースト */}
       <Snackbar
         open={saved}
-        autoHideDuration={3000}
+        autoHideDuration={SNACKBAR_AUTO_HIDE_MS}
         onClose={() => setSaved(false)}
         message="プロフィールを保存しました"
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        // 下部ナビの上へ逃がす（#2222）
+        sx={ABOVE_BOTTOM_NAV_SX}
       />
     </Box>
   )
