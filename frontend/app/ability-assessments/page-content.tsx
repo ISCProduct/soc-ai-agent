@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Alert, Box, Button, Card, CardContent, Paper, Stack, Typography } from '@mui/material'
+import { Alert, Box, Button, Card, CardContent, IconButton, Paper, Stack, Typography } from '@mui/material'
+import ArrowBack from '@mui/icons-material/ArrowBack'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ListSkeleton } from '@/components/common/ListSkeleton'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
@@ -52,9 +53,14 @@ export default function PageContent() {
 
   return (
     <Box sx={{ maxWidth: 800, mx: 'auto', p: { xs: 2, sm: 3 } }}>
-      <Typography variant="h5" component="h1" fontWeight="bold" mb={1}>
-        能力検査
-      </Typography>
+      <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+        <IconButton onClick={() => router.back()} aria-label="前の画面へ戻る" sx={{ width: 44, height: 44 }}>
+          <ArrowBack />
+        </IconButton>
+        <Typography variant="h5" component="h1" fontWeight="bold">
+          能力検査
+        </Typography>
+      </Stack>
       <Typography variant="body2" color="text.secondary" mb={3}>
         言語・非言語の問題に選択式で答えます。<strong>制限時間があり、時間になると自動的に締め切られます</strong>。
         答えた分は自動で保存され、時間切れでもそこまでの回答で提出できます。
