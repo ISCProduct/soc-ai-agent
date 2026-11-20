@@ -133,6 +133,9 @@ class ESReviewUsage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     calls: int = 0
+    # 使ったプロンプトの版（例: es_review_v6）。Backend が使用量の prompt_version に記録する。
+    # 既定は空（古い Backend は読まないだけなので後方互換。SOCAIAGENT-661）
+    prompt_version: str = ""
 
 
 class ESReviewFeedbackItem(BaseModel):

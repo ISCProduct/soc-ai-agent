@@ -356,9 +356,8 @@ func parseAnswerValidity(response string) bool {
 	response = strings.TrimSuffix(response, "```")
 	response = strings.TrimSpace(response)
 
-	var result struct {
-		Valid bool `json:"valid"`
-	}
+	// プロンプトの出力形式と同じ定義で読む（SOCAIAGENT-661）
+	var result prompts.AnswerValidationOutput
 	if err := json.Unmarshal([]byte(response), &result); err != nil {
 		log.Printf("Warning: Failed to parse AI validation response: %v, response: %s\n", err, response)
 		return false

@@ -300,6 +300,12 @@ curl -X POST http://localhost:8080/api/admin/score-validation/calibration/run \
 `PROMPT_VERSION_<STAGE>` も更新する。工程別値は `PROMPT_VERSION` より優先され、未設定時は `v2`。
 設定例と Terraform 変数は `.env.example` と `infra/terraform/environments/` を参照する。
 
+指定できるのはコードで宣言した版（`prompts.declaredPromptVersions`）だけで、それ以外を指定すると
+Backend は不正な環境変数名を出して起動しない（SOCAIAGENT-661）。本番のデプロイは、マイグレーションの前に
+新しいイメージの `/bin/promptcheck` をタスク定義の `PROMPT_VERSION*` で実行し、不正ならジョブを止める。
+staging は確認の工程が無いので、起動しなければ `docker compose logs backend` で `Invalid prompt version settings` を確かめ、
+`/opt/app/.env` を直す。手元では `go run ./cmd/promptcheck` で同じ確認ができる。
+
 staging の Terraform 変数 `prompt_version` / `prompt_versions` は新規インスタンスの user_data にしか
 届かない。稼働中のインスタンスへ反映するときは、`/opt/app/.env` も手で更新する。
 

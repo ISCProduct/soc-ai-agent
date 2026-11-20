@@ -14,6 +14,7 @@ import (
 	"Backend/internal/services/maintenance"
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/organization"
+	"Backend/internal/services/prompts"
 	"Backend/migrations"
 	"context"
 	"log"
@@ -39,6 +40,13 @@ func bootstrap() (*config.Config, *gorm.DB, *openai.Client, *config.OAuthConfig)
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// プロンプト版の環境変数が本文のある版を指しているかを確かめる（SOCAIAGENT-661）。
+	// 本文の無い版のまま動くと、使用量ログの版が実際の本文を指さなくなるので起動を止める。
+	// デプロイ前の確認は cmd/promptcheck で同じ検証だけを実行する。
+	if err := prompts.ValidateSettings(); err != nil {
+		log.Fatalf("Invalid prompt version settings: %v", err)
 	}
 
 	// データベース接続
