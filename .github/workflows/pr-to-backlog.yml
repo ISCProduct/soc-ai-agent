@@ -89,7 +89,15 @@ jobs:
     # 「BACKLOG_API_KEY が未設定または空です」で必ず失敗する（GitHubの仕様）。
     # 同期する課題がそもそも無いのでスキップする。
     # workflow_dispatch（手動リカバリ）は actor が人間なので影響しない。
-    if: github.actor != 'dependabot[bot]' && (github.event_name != 'push' || github.event.created)
+    #
+    # pull_request_target は fork の PR にも secrets を渡す。公開リポジトリなので、
+    # 書き込み権限の無い人が任意の課題キーを書いた PR を開閉するだけで課題を動かせてしまう。
+    # このリポジトリ自身のブランチから出た PR だけを同期する。
+    if: >-
+      github.actor != 'dependabot[bot]'
+      && (github.event_name != 'push' || github.event.created)
+      && (github.event_name != 'pull_request_target'
+          || github.event.pull_request.head.repo.full_name == github.repository)
 
     permissions:
       contents: read
