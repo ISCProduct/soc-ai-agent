@@ -98,7 +98,7 @@ func (s *ChatService) ensureJobCategoryEmbedding(ctx context.Context, jobCategor
 		return err
 	}
 
-	category, err := s.jobCategoryRepo.FindByID(jobCategoryID)
+	category, err := s.jobCategoryRepo.FindByID(ctx, jobCategoryID)
 	if err != nil {
 		return fmt.Errorf("load job category: %w", err)
 	}
