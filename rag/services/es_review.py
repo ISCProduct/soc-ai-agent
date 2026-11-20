@@ -5,7 +5,7 @@ Backend の `/api/es/review`（ES添削タブ）と `/api/es/rewrite`（ESリラ
 どちらもここへ集約され、同じプロンプト・同じ出力スキーマから表示を出し分ける。
 """
 from __future__ import annotations
-from services.prompt_versions import prompt_version
+from services.prompt_versions import log_prompt_call, prompt_version
 
 from services.model_tiers import es_review_model
 import json
@@ -181,6 +181,8 @@ def _chat_json(
     # max_tokens が None の段（改善文 / #1564）はキー自体を送らない。null を送っても
     # OpenAI 側は既定扱いだが、OpenAI 互換サーバ（vLLM / llama.cpp）での解釈差を避ける。
     budget_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
+    # 評価・改善文のどちらの呼び出しでも、工程・版・モデルをログに出す（SOCAIAGENT-560）
+    log_prompt_call("es_review", model)
     resp = client.chat.completions.create(
         model=model,
         messages=[

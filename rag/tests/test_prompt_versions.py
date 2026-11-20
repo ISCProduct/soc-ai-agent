@@ -55,3 +55,13 @@ def test_resume_report_logs_version(monkeypatch, caplog):
             caplog.at_level(logging.INFO, logger="rag-review"):
         generate_resume_report(ReviewRequest(resume_text="経歴", company_name="A社"), [], "none", 1000)
     assert "stage=resume_review prompt_version=resume_review_v1" in caplog.text
+
+
+def test_es_review_logs_version_for_each_call(monkeypatch, caplog):
+    """ES 添削も、評価と改善文の呼び出しごとに版がログに出る（切れたときだけではない）。"""
+    from tests.test_es_review_char_limit import _client, _run
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    with caplog.at_level(logging.INFO, logger="rag-review"):
+        _run(_client([100]))
+    assert caplog.text.count("stage=es_review prompt_version=es_review_v6") == 2
