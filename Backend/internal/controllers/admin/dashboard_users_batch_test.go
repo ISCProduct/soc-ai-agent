@@ -94,3 +94,33 @@ func TestAdminDashboardController_UsersBatch_SessionIDsError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	testsupport.AssertStatus(t, newAdminDashboardController(userRepo, sessRepo, repRepo).ListUsers, testsupport.NewCtx(req, rec), http.StatusOK)
 }
+
+// ユーザーが1000件を超えても分割して取得し、失敗した範囲だけ空欄にして成功した範囲の平均は出す
+func TestAdminDashboardController_UsersBatch_ExportCSV_ChunkedPartialFailure(t *testing.T) {
+	userRepo := &mocks.UserRepositoryMock{}
+	sessRepo := &mocks.DashboardSessionRepoMock{}
+	repRepo := &mocks.DashboardReportRepoMock{}
+	ids := make([]uint, 2500)
+	users := make([]models.User, 2500)
+	for i := range users {
+		ids[i] = uint(i + 1)
+		users[i] = models.User{ID: ids[i], Name: "u"}
+	}
+	userRepo.On("ListUsersPaged", mock.Anything, 0, "", mock.Anything).Return(users, int64(2500), nil)
+	sessRepo.On("GetUserStatsBatch", ids).Return(map[uint]repositories.UserSessionStat{}, nil)
+	// 1〜1000: 成功(ユーザー1のみセッション10) / 1001〜2000: 失敗 / 2001〜2500: 成功(ユーザー2001のみセッション20)
+	sessRepo.On("ListFinishedSessionIDsByUsers", ids[:1000]).Return(map[uint][]uint{1: {10}}, nil)
+	sessRepo.On("ListFinishedSessionIDsByUsers", ids[1000:2000]).Return(nil, errors.New("db error"))
+	sessRepo.On("ListFinishedSessionIDsByUsers", ids[2000:]).Return(map[uint][]uint{2001: {20}}, nil)
+	repRepo.On("FindBySessionIDs", mock.Anything).Return([]models.InterviewReport{scoreReport(10, 4), scoreReport(20, 2)}, nil)
+
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), nil)
+	rec := httptest.NewRecorder()
+	ctrl := newAdminDashboardController(userRepo, sessRepo, repRepo)
+	testsupport.AssertStatus(t, ctrl.ExportCSV, testsupport.NewCtx(req, rec), http.StatusOK)
+
+	out := rec.Body.String()
+	assert.Contains(t, out, ",4.00\n")
+	assert.Contains(t, out, ",2.00\n")
+	sessRepo.AssertNumberOfCalls(t, "ListFinishedSessionIDsByUsers", 3)
+}

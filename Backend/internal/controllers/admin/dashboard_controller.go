@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -129,44 +130,54 @@ func avgScoresJSON(scoresJSON string) (map[string]float64, *float64) {
 	return scores, &avg
 }
 
+// avgScoreBatchSize は IN 句に載せる ID 数の上限(MySQL のプレースホルダ上限 65535 を超えないため)。
+const avgScoreBatchSize = 1000
+
 // userAvgScores はユーザーごとの終了済みセッションの平均スコアを返す(スコアのあるユーザーのみ)。
-// セッションID取得の失敗は該当なしとして扱い(従来動作)、レポート取得の失敗のみエラーを返す。
+// ID を avgScoreBatchSize 件ずつ分けて取得する。失敗した範囲はスコア無しとして飛ばし、成功した範囲の平均は返す。
+// セッションID取得の失敗は該当なしとして扱い(従来動作)、レポート取得の失敗のみ最初のエラーを返す。
 func (c *AdminDashboardController) userAvgScores(ctx context.Context, userIDs []uint) (map[uint]float64, error) {
-	var idsByUser map[uint][]uint
-	if len(userIDs) > 0 {
-		var err error
-		if idsByUser, err = c.sessionRepo.ListFinishedSessionIDsByUsers(ctx, userIDs); err != nil {
-			// 一括取得の失敗は全員スコア無しになる。気づけるようログに残す。
-			log.Printf("[AdminDashboard] finished session ids batch fetch failed (users=%d): %v", len(userIDs), err)
-			idsByUser = nil
-		}
-	}
-	var allSessionIDs []uint
 	sessionToUser := map[uint]uint{}
-	for _, uid := range userIDs {
-		for _, id := range idsByUser[uid] {
-			allSessionIDs = append(allSessionIDs, id)
-			sessionToUser[id] = uid
+	var allSessionIDs []uint
+	for chunk := range slices.Chunk(userIDs, avgScoreBatchSize) {
+		idsByUser, err := c.sessionRepo.ListFinishedSessionIDsByUsers(ctx, chunk)
+		if err != nil {
+			// この範囲のユーザーはスコア無しになる。気づけるようログに残す。
+			log.Printf("[AdminDashboard] finished session ids batch fetch failed (users=%d): %v", len(chunk), err)
+			continue
 		}
-	}
-	reports, err := c.reportRepo.FindBySessionIDs(allSessionIDs)
-	if err != nil {
-		return nil, err
+		for _, uid := range chunk {
+			for _, id := range idsByUser[uid] {
+				allSessionIDs = append(allSessionIDs, id)
+				sessionToUser[id] = uid
+			}
+		}
 	}
 	sum := map[uint]float64{}
 	cnt := map[uint]int{}
-	for _, rep := range reports {
-		if _, avg := avgScoresJSON(rep.ScoresJSON); avg != nil {
-			uid := sessionToUser[rep.SessionID]
-			sum[uid] += *avg
-			cnt[uid]++
+	var firstErr error
+	for chunk := range slices.Chunk(allSessionIDs, avgScoreBatchSize) {
+		reports, err := c.reportRepo.FindBySessionIDs(chunk)
+		if err != nil {
+			log.Printf("[AdminDashboard] reports batch fetch failed (sessions=%d): %v", len(chunk), err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		for _, rep := range reports {
+			if _, avg := avgScoresJSON(rep.ScoresJSON); avg != nil {
+				uid := sessionToUser[rep.SessionID]
+				sum[uid] += *avg
+				cnt[uid]++
+			}
 		}
 	}
 	result := make(map[uint]float64, len(cnt))
 	for uid, n := range cnt {
 		result[uid] = sum[uid] / float64(n)
 	}
-	return result, nil
+	return result, firstErr
 }
 
 // ListUsers handles GET /api/admin/dashboard/users
