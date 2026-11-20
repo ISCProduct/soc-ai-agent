@@ -1,15 +1,13 @@
 package aibench
 
 import (
-	"bytes"
+	"Backend/internal/services/interview"
 	"context"
 	"encoding/json"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -269,32 +267,6 @@ func TestFairnessManifest_回答は同一で企業文脈だけが違う(t *testi
 	}
 }
 
-// 本番の strict スキーマとの乖離を検出する。aibench 側の複製が古くなると、本番と違う
-// 出力形式で測ってしまう（暫定の複製。本番が公開されたらこのテストごと不要になる）。
-func TestInterviewReportSchemaMatchesProduction(t *testing.T) {
-	src, err := os.ReadFile("../services/interview/interview_report_schema.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := regexp.MustCompile("(?s)json\\.RawMessage\\(`(.*?)`\\)").FindSubmatch(src)
-	if m == nil {
-		t.Fatal("本番のスキーマ定義が見つからない")
-	}
-	if !strings.Contains(string(src), `Name: "`+interviewReportSchemaName+`"`) {
-		t.Error("スキーマ名が本番と違う")
-	}
-	var a, b bytes.Buffer
-	if err := json.Compact(&a, m[1]); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Compact(&b, interviewReportSchemaJSON); err != nil {
-		t.Fatal(err)
-	}
-	if a.String() != b.String() {
-		t.Error("aibench のスキーマが本番(interview_report_schema.go)と違う。複製を更新すること")
-	}
-}
-
 // 面接レポートは本番と同じ strict JSON Schema で呼ぶ（JSON mode ではない）。
 func TestInterviewTarget_strictJSONSchemaで呼ぶ(t *testing.T) {
 	var payload map[string]any
@@ -314,6 +286,11 @@ func TestInterviewTarget_strictJSONSchemaで呼ぶ(t *testing.T) {
 	js, _ := rf["json_schema"].(map[string]any)
 	if rf["type"] != "json_schema" || js["strict"] != true || js["name"] != "interview_report" {
 		t.Errorf("response_format = %+v", rf)
+	}
+	// 再現性の計測が本番と同じ条件になるよう、温度・seed・出力上限も本番の定数を送る。
+	if payload["seed"] != float64(interview.ReportSeed) || payload["max_completion_tokens"] != float64(interview.ReportMaxTokens) ||
+		payload["temperature"] != float64(interview.ReportTemperature) {
+		t.Errorf("seed=%v max_completion_tokens=%v temperature=%v（本番の定数と違う）", payload["seed"], payload["max_completion_tokens"], payload["temperature"])
 	}
 	msgs, _ := payload["messages"].([]any)
 	user, _ := msgs[len(msgs)-1].(map[string]any)

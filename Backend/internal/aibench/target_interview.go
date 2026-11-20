@@ -20,16 +20,9 @@ type interviewTarget struct {
 	model string
 }
 
-// 本番の呼び出しパラメータ（generateReport と同じ値）。ここ1か所だけで持つ。
-// ここを本番と違う値にすると、破損率も再現性も別物を測ることになる。
-//
-// ponytail: 本番側が interview.ReportTemperature / ReportMaxTokens を公開したら、
-// この2つをそれらへ差し替える（Manager が統合時に繋ぐ。他の参照は無い）。
+// 呼び出しパラメータとスキーマは本番（interview パッケージ）の値をそのまま使う。
 // 本番は再生成（最大2回）をするが、ここは1回目の出力だけを評価する（README 参照）。
-const (
-	interviewTemperature = 0.4
-	interviewMaxTokens   = 2000
-)
+var interviewSeed = interview.ReportSeed
 
 func newInterviewTarget(modelOverride string) Target {
 	// 本番は INTERVIEW_REPORT_MODEL 未設定なら openai.Client の DefaultModel に
@@ -50,7 +43,7 @@ func (t *interviewTarget) Endpoint() string { return "openai:/chat/completions" 
 
 func (t *interviewTarget) EstimateTokens(c Case) (int, int) {
 	// 1500 はルーブリック説明と出力フォーマット指定ぶんの概算。
-	return ApproxTokensJA(c.Input.Transcript) + 1500, interviewMaxTokens
+	return ApproxTokensJA(c.Input.Transcript) + 1500, interview.ReportMaxTokens
 }
 
 func (t *interviewTarget) Run(ctx context.Context, c Case) Observation {
@@ -62,8 +55,8 @@ func (t *interviewTarget) Run(ctx context.Context, c Case) Observation {
 	// ID 無しの文字列なので、発話へ戻して連番を振り、本番の BuildTranscript で組み直す。
 	systemPrompt, userPrompt := interview.BuildReportPrompts(lang, interview.BuildTranscript(utterancesFromTranscript(c.Input.Transcript)))
 	// 本番と同じ strict JSON Schema（Structured Outputs）で呼ぶ。
-	res := CallChatCompletionsWithSchema(ctx, t.model, systemPrompt, userPrompt, interviewTemperature, interviewMaxTokens,
-		interviewReportSchemaName, interviewReportSchemaJSON)
+	res := CallChatCompletionsWithSchema(ctx, t.model, systemPrompt, userPrompt, float64(interview.ReportTemperature), interview.ReportMaxTokens,
+		interview.ReportResponseSchema().Name, interview.ReportResponseSchema().Schema, &interviewSeed)
 	return evaluateInterviewResponse(newObservation(c), c, res)
 }
 
