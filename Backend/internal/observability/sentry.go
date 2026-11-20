@@ -26,10 +26,20 @@ func InitSentry() (flush func(), enabled bool) {
 	release := strings.TrimSpace(os.Getenv("SENTRY_RELEASE"))
 
 	err := sentry.Init(sentry.ClientOptions{
-		Dsn:              dsn,
-		Environment:      env,
-		Release:          release,
-		SendDefaultPII:   false,
+		Dsn:         dsn,
+		Environment: env,
+		Release:     release,
+		// SendDefaultPII:false 相当（自動収集の PII を抑える）
+		DataCollection: &sentry.DataCollection{
+			UserInfo:   sentry.Set(false),
+			HTTPBodies: []sentry.BodyType{},
+			Cookies:    &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff},
+			HTTPHeaders: &sentry.HeaderCollectionConfig{
+				Request:  &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionDenyList},
+				Response: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionDenyList},
+			},
+			QueryParams: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionDenyList},
+		},
 		BeforeSend:       scrubEvent,
 		TracesSampleRate: 0, // トレースは別Issue。エラー通知のみ。
 	})

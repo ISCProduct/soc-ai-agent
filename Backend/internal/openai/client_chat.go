@@ -147,7 +147,6 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 				},
 			},
 			Temperature:         temperature,
-			MaxTokens:           0,
 			MaxCompletionTokens: maxTokens,
 			ResponseFormat:      responseFormatFor(schema),
 		}
