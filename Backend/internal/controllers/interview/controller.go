@@ -394,13 +394,22 @@ func writeTurnMultipart(ctx echo.Context, meta map[string]any, audio []byte) err
 	mw := multipart.NewWriter(ctx.Response().Writer)
 	ctx.Response().Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
 
-	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
-	json.NewEncoder(metaPart).Encode(meta)
+	metaPart, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(metaPart).Encode(meta); err != nil {
+		return err
+	}
 
-	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {audioContentType(audio)}})
-	audioPart.Write(audio)
-	mw.Close()
-	return nil
+	audioPart, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {audioContentType(audio)}})
+	if err != nil {
+		return err
+	}
+	if _, err := audioPart.Write(audio); err != nil {
+		return err
+	}
+	return mw.Close()
 }
 
 func parseCompanyQuestionHints(raw string) ([]string, error) {

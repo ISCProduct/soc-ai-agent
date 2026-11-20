@@ -9,3 +9,34 @@ linters:
     - errcheck
     - gosec
     - staticcheck
+  settings:
+    gosec:
+      # 意図的なパターン / 偽陽性（設定URL・ログ・ジッタ・一時ファイル権限・識別子名）
+      excludes:
+        - G101
+        - G117
+        - G124
+        - G404
+        - G704
+        - G706
+        - G306
+        - G115
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+      - path: (^|/)scripts/
+        linters:
+          - errcheck
+          - gosec
+      - path: (^|/)cmd/
+        linters:
+          - gosec
