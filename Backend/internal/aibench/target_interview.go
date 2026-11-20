@@ -20,8 +20,12 @@ type interviewTarget struct {
 	model string
 }
 
-// 本番の呼び出しパラメータ（generateReport と同じ値）。
+// 本番の呼び出しパラメータ（generateReport と同じ値）。ここ1か所だけで持つ。
 // ここを本番と違う値にすると、破損率も再現性も別物を測ることになる。
+//
+// ponytail: 本番側が interview.ReportTemperature / ReportMaxTokens を公開したら、
+// この2つをそれらへ差し替える（Manager が統合時に繋ぐ。他の参照は無い）。
+// 本番は再生成（最大2回）をするが、ここは1回目の出力だけを評価する（README 参照）。
 const (
 	interviewTemperature = 0.4
 	interviewMaxTokens   = 2000
@@ -54,19 +58,25 @@ func (t *interviewTarget) Run(ctx context.Context, c Case) Observation {
 	if lang == "" {
 		lang = "ja"
 	}
-	systemPrompt, userPrompt := interview.BuildReportPrompts(lang, c.Input.Transcript)
-	res := CallChatCompletions(ctx, t.model, systemPrompt, userPrompt, interviewTemperature, interviewMaxTokens, true)
+	// 本番は発話ごとに [utterance_id=N] を付けた文字列を LLM へ渡す。ゴールデンは
+	// ID 無しの文字列なので、発話へ戻して連番を振り、本番の BuildTranscript で組み直す。
+	systemPrompt, userPrompt := interview.BuildReportPrompts(lang, interview.BuildTranscript(utterancesFromTranscript(c.Input.Transcript)))
+	// 本番と同じ strict JSON Schema（Structured Outputs）で呼ぶ。
+	res := CallChatCompletionsWithSchema(ctx, t.model, systemPrompt, userPrompt, interviewTemperature, interviewMaxTokens,
+		interviewReportSchemaName, interviewReportSchemaJSON)
 	return evaluateInterviewResponse(newObservation(c), c, res)
 }
 
 // interviewReportResponse はプロンプトが指定している出力形式。
 type interviewReportResponse struct {
-	Summary      string            `json:"summary"`
-	Scores       map[string]int    `json:"scores"`
-	Evidence     map[string]string `json:"evidence"`
-	Strengths    []string          `json:"strengths"`
-	Improvements []string          `json:"improvements"`
-	Teacher      *struct {
+	Summary  string            `json:"summary"`
+	Scores   map[string]int    `json:"scores"`
+	Evidence map[string]string `json:"evidence"`
+	// EvidenceUtteranceIDs は根拠の引用元（本番の reportPayload と同じ形）。
+	EvidenceUtteranceIDs map[string]*uint `json:"evidence_utterance_ids"`
+	Strengths            []string         `json:"strengths"`
+	Improvements         []string         `json:"improvements"`
+	Teacher              *struct {
 		OverallComment   string            `json:"overall_comment"`
 		DetailedEvidence map[string]string `json:"detailed_evidence"`
 		CoachingPoints   []string          `json:"coaching_points"`
@@ -116,6 +126,10 @@ func evaluateInterviewResponse(o Observation, c Case, res CallResult) Observatio
 		sum += float64(resp.Scores[k])
 	}
 	o.RawScore = sum / float64(len(keys))
+	o.AxisScores = make(map[string]float64, len(keys))
+	for _, k := range keys {
+		o.AxisScores[k] = float64(resp.Scores[k])
+	}
 	o.Score = o.RawScore / float64(interview.RubricScoreMax)
 
 	if needsJSONRecovery(res.Text) {
@@ -142,8 +156,10 @@ func evaluateInterviewResponse(o Observation, c Case, res CallResult) Observatio
 	// 指示しており、本番も同じ照合で弾いている（#1527 / #1566）。
 	// ハーネス側で別の照合を書くと、本番が弾く/弾かないの境界と数字がずれる。
 	// #1580 で照合が内容語ベース（SpokenContent）になっている。
-	spoken := interview.SpokenContent(utterancesFromTranscript(c.Input.Transcript))
-	if check := interview.ValidateEvidence(resp.Evidence, spoken); len(check.Unmatched) > 0 {
+	// 引用とともに引用元の utterance ID も本番と同じ ValidateEvidenceReferences で照合する。
+	utterances := utterancesFromTranscript(c.Input.Transcript)
+	spoken := interview.SpokenContent(utterances)
+	if check := interview.ValidateEvidenceReferences(resp.Evidence, resp.EvidenceUtteranceIDs, utterances); len(check.Unmatched) > 0 {
 		o.Violations = append(o.Violations, "evidence_not_spoken")
 	}
 	if resp.Teacher != nil {
@@ -159,6 +175,8 @@ func evaluateInterviewResponse(o Observation, c Case, res CallResult) Observatio
 //
 // 根拠の照合は受験者(role=user)の発話だけを対象にするため、役割の復元が必要。
 // 行頭のラベルが無い行は直前の発話の続きとして扱う（複数行の発話に対応）。
+// ID は出現順の連番（1始まり）。本番の DB 採番の代わりで、プロンプトの
+// [utterance_id=N] と根拠の照合の両方がこの連番を使う。
 func utterancesFromTranscript(transcript string) []models.InterviewUtterance {
 	var out []models.InterviewUtterance
 	for _, line := range strings.Split(transcript, "\n") {
@@ -173,6 +191,9 @@ func utterancesFromTranscript(transcript string) []models.InterviewUtterance {
 			}
 			out[len(out)-1].Text += "\n" + line
 		}
+	}
+	for i := range out {
+		out[i].ID = uint(i + 1)
 	}
 	return out
 }

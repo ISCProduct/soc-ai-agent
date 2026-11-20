@@ -12,6 +12,7 @@ package aibench
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/interview"
 	"bufio"
 	"encoding/json"
 	"fmt"
@@ -69,6 +70,14 @@ type Case struct {
 	Input  Input  `json:"input"`
 	// Note はラベルを付けた理由。人がラベルを見直すときの根拠として残す。
 	Note string `json:"note,omitempty"`
+	// AxisLabels は面接レポートの軸別の人手ラベル（ルーブリックの軸 → 0〜5）。任意。
+	// あるケースだけ軸別 MAE の対象になる。無いケースはスキップする。
+	AxisLabels map[string]float64 `json:"axis_labels,omitempty"`
+	// FairnessPair / ContextVariant は公平性回帰ケース（面接レポート）。
+	// 同じ FairnessPair のケースは受験者の回答が同一で、面接官の質問に入る企業文脈
+	// （ContextVariant: neutral / charged など）だけが違う。ペア間のスコア差を測る。
+	FairnessPair   string `json:"fairness_pair,omitempty"`
+	ContextVariant string `json:"context_variant,omitempty"`
 }
 
 // Input は評価対象ごとの入力。使うフィールドは target によって決まる。
@@ -201,6 +210,17 @@ func validateCase(c Case) error {
 	case TargetInterviewReport:
 		if strings.TrimSpace(c.Input.Transcript) == "" {
 			return fmt.Errorf("input.transcript は必須")
+		}
+		for axis, v := range c.AxisLabels {
+			if !slices.Contains(interview.RubricKeys(), axis) {
+				return fmt.Errorf("axis_labels の %q はルーブリックの軸ではない", axis)
+			}
+			if v < 0 || v > float64(interview.RubricScoreMax) {
+				return fmt.Errorf("axis_labels.%s は 0〜%d（実際: %v）", axis, interview.RubricScoreMax, v)
+			}
+		}
+		if (c.FairnessPair == "") != (c.ContextVariant == "") {
+			return fmt.Errorf("fairness_pair と context_variant は両方必要")
 		}
 	case TargetChatAnswer:
 		if strings.TrimSpace(c.Input.Question) == "" || strings.TrimSpace(c.Input.Answer) == "" {
