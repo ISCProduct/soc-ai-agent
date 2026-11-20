@@ -228,7 +228,7 @@ func (s *ReminderService) post(ctx context.Context, content string, mentions []s
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.webhookURL+"?wait=true", bytes.NewReader(body))
 	if err != nil {
-		return errors.New("Discord 投稿のリクエスト作成に失敗しました")
+		return errors.New("discord 投稿のリクエスト作成に失敗しました")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := s.http.Do(req)
@@ -238,11 +238,11 @@ func (s *ReminderService) post(ctx context.Context, content string, mentions []s
 		if errors.As(err, &ue) {
 			err = ue.Err
 		}
-		return fmt.Errorf("Discord への投稿に失敗しました: %w", err)
+		return fmt.Errorf("discord への投稿に失敗しました: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("Discord への投稿が %d を返しました", resp.StatusCode)
+		return fmt.Errorf("discord への投稿が %d を返しました", resp.StatusCode)
 	}
 	return nil
 }

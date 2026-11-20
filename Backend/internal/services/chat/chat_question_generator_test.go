@@ -251,7 +251,7 @@ func TestGetCategoryOrder_ReturnsCanonicalCategories(t *testing.T) {
 	}
 
 	// 職種未決定
-	check("undecided", (&ChatService{}).getCategoryOrder(0))
+	check("undecided", (&ChatService{}).getCategoryOrder(context.Background(), 0))
 
 	// 職種ごとの優先順位（先頭に何を聞くか）は仕様なので固定する。
 	// 網羅性チェックだけだと順序を入れ替えても検出できない。
@@ -281,10 +281,10 @@ func TestFallbackQuestions_CoverAllCanonicalCategories(t *testing.T) {
 	s := &ChatService{}
 	for _, c := range valueobject.AllWeightCategories() {
 		for _, level := range []string{"新卒", "中途"} {
-			if got := s.fallbackQuestionForCategory(string(c), 0, level); got == "" {
+			if got := s.fallbackQuestionForCategory(context.Background(), string(c), 0, level); got == "" {
 				t.Errorf("%s(%s): 単数フォールバックが空", c, level)
 			}
-			if got := s.fallbackQuestionsForCategory(string(c), 0, level); len(got) == 0 {
+			if got := s.fallbackQuestionsForCategory(context.Background(), string(c), 0, level); len(got) == 0 {
 				t.Errorf("%s(%s): 複数フォールバックが空", c, level)
 			}
 		}
@@ -296,7 +296,7 @@ func TestSelectFallbackQuestion_SkipsAsked(t *testing.T) {
 	asked := map[string]bool{
 		"最近頑張ったことはありますか？": true,
 	}
-	got := s.selectFallbackQuestion("不明カテゴリ", 0, "新卒", asked)
+	got := s.selectFallbackQuestion(context.Background(), "不明カテゴリ", 0, "新卒", asked)
 	if got == "" {
 		t.Fatal("expected non-empty fallback")
 	}
@@ -307,11 +307,11 @@ func TestSelectFallbackQuestion_SkipsAsked(t *testing.T) {
 
 func TestSelectFallbackQuestion_CategoryOptions(t *testing.T) {
 	s := &ChatService{}
-	got := s.selectFallbackQuestion("創造性志向", 0, "新卒", map[string]bool{})
+	got := s.selectFallbackQuestion(context.Background(), "創造性志向", 0, "新卒", map[string]bool{})
 	if got == "" {
 		t.Fatal("expected creativity fallback")
 	}
-	options := s.fallbackQuestionsForCategory("創造性志向", 0, "新卒")
+	options := s.fallbackQuestionsForCategory(context.Background(), "創造性志向", 0, "新卒")
 	found := false
 	for _, q := range options {
 		if q == got {
@@ -326,7 +326,7 @@ func TestSelectFallbackQuestion_CategoryOptions(t *testing.T) {
 
 func TestFallbackQuestionForCategory_DefaultEmpty(t *testing.T) {
 	s := &ChatService{}
-	if got := s.fallbackQuestionForCategory("存在しないカテゴリ", 0, "新卒"); got != "" {
+	if got := s.fallbackQuestionForCategory(context.Background(), "存在しないカテゴリ", 0, "新卒"); got != "" {
 		t.Fatalf("want empty, got %q", got)
 	}
 }
