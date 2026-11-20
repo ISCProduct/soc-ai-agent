@@ -147,7 +147,6 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 				},
 			},
 			Temperature:         temperature,
-			MaxTokens:           0,
 			MaxCompletionTokens: maxTokens,
 			ResponseFormat:      responseFormatFor(schema),
 		}
@@ -177,17 +176,22 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 		}
 		cancel()
 
+		// 応答を受け取ったら、本文が空でも（出力上限・空応答で捨てて再送する場合も）使用量を記録する
+		// （SOCAIAGENT-655）。課金は応答ごとに発生するので、成功した最後の1回だけを記録すると
+		// api_call_logs のコスト集計が実際より少なくなる。
+		if err == nil {
+			cli.reportUsage(ctxReq, usageReport{
+				provider:         cli.textProvider,
+				model:            req.Model,
+				promptTokens:     resp.Usage.PromptTokens,
+				completionTokens: resp.Usage.CompletionTokens,
+				latency:          time.Since(start),
+				cacheHit:         resp.Usage.PromptTokensDetails != nil && resp.Usage.PromptTokensDetails.CachedTokens > 0,
+			})
+		}
 		if err == nil && len(resp.Choices) > 0 {
 			content := strings.TrimSpace(resp.Choices[0].Message.Content)
 			if content != "" {
-				cli.reportUsage(ctxReq, usageReport{
-					provider:         cli.textProvider,
-					model:            req.Model,
-					promptTokens:     resp.Usage.PromptTokens,
-					completionTokens: resp.Usage.CompletionTokens,
-					latency:          time.Since(start),
-					cacheHit:         resp.Usage.PromptTokensDetails != nil && resp.Usage.PromptTokensDetails.CachedTokens > 0,
-				})
 				// キャッシュヒットのログを出力（存在すれば）
 				if resp.Usage.PromptTokensDetails != nil {
 					cached := resp.Usage.PromptTokensDetails.CachedTokens
@@ -222,15 +226,18 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 		if err := callCtx.Err(); err != nil {
 			return "", wrapCallTimeout(err)
 		}
+		// API が明示的に 429 以外の 4xx を返したら、送り直しても直らないので打ち切る（SOCAIAGENT-655）。
+		// 以前は最大5回・約62秒待ってから同じエラーを返していた。判定は Responses 経路と揃える。
+		if isNonRetryableAPIErr(lastErr) {
+			break
+		}
 		if attempt == 5 {
 			break
 		}
-		backoff := time.Duration(1<<attempt) * time.Second
-		jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
 		select {
 		case <-callCtx.Done():
 			return "", wrapCallTimeout(callCtx.Err())
-		case <-time.After(backoff + jitter):
+		case <-time.After(chatCompletionBackoff(attempt)):
 		}
 	}
 
@@ -238,6 +245,35 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 		lastErr = errors.New("no response from model")
 	}
 	return "", wrapCallTimeout(lastErr)
+}
+
+// chatCompletionBackoff は chatCompletionJSON の attempt 回目の失敗後に待つ時間（2,4,8,16秒 + ジッタ）。
+// テストで待ち時間を短くできるよう変数にしている（responsesBackoff と同じ）。
+var chatCompletionBackoff = func(attempt int) time.Duration {
+	return time.Duration(1<<attempt)*time.Second + time.Duration(rand.Intn(1000))*time.Millisecond
+}
+
+// isNonRetryableAPIErr は、API が明示的に 429 以外の 4xx を返したか（送り直しても直らない）を判定する。
+//
+// Responses 経路の waitBeforeRetry と同じ基準（429 と 5xx だけを再送する）。ネットワークエラーや
+// 試行のタイムアウトのように、API のステータスが無いエラーは再送の対象のまま（false）。
+func isNonRetryableAPIErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	status := 0
+	var apiErr *openai.APIError
+	var reqErr *openai.RequestError
+	var respErr *ResponsesAPIError
+	switch {
+	case errors.As(err, &apiErr):
+		status = apiErr.HTTPStatusCode
+	case errors.As(err, &reqErr):
+		status = reqErr.HTTPStatusCode
+	case errors.As(err, &respErr):
+		status = respErr.StatusCode
+	}
+	return status >= 400 && status < 500 && status != http.StatusTooManyRequests
 }
 
 // isRetryableAPIErr は 429 / 5xx など再試行すれば成功しうるエラーか判定する。

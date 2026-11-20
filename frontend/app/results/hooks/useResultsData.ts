@@ -26,7 +26,6 @@ import type {
   MatchFeedbackVerdict,
 } from '../types'
 import {
-  buildEmptyRecommendationsMessage,
   mapAnalysisScores,
   mapRecommendationToCompany,
 } from '../utils'
@@ -40,6 +39,8 @@ export function useResultsData() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // 推薦が0件のときの理由（API の reason）。0件はエラーではないので error とは分ける（#2220）
+  const [emptyReason, setEmptyReason] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
   const [isProvisional, setIsProvisional] = useState(false)
   const [diagnosisSummary, setDiagnosisSummary] = useState<string | null>(null)
@@ -149,6 +150,7 @@ export function useResultsData() {
         setLoading(true)
         // 再フェッチ時に前回の error が残ると一覧が描画されない（Bugbot）
         setError(null)
+        setEmptyReason(null)
         void fetchAnalysis()
 
         const response = await fetchWithTimeout(`/api/chat/recommendations?session_id=${sessionId}&limit=10`, {
@@ -188,10 +190,13 @@ export function useResultsData() {
         )
 
         if (!data || !data.recommendations || !Array.isArray(data.recommendations) || data.recommendations.length === 0) {
-          const reason = data?.reason || 'matching_results_empty'
-          const diagnostics = data?.diagnostics
+          const reason = typeof data?.reason === 'string' && data.reason ? data.reason : 'matching_results_empty'
+          if (data?.diagnostics) {
+            // 内部指標は画面に出さず、調査用に console へ出すだけにする
+            console.debug('[results] empty recommendations diagnostics', data.diagnostics)
+          }
           setCompanies([])
-          setError(buildEmptyRecommendationsMessage(reason, diagnostics))
+          setEmptyReason(reason)
           setLoading(false)
           return
         }
@@ -424,6 +429,7 @@ export function useResultsData() {
     companies,
     loading,
     error,
+    emptyReason,
     isProvisional,
     diagnosisSummary,
     evaluatedCategories,

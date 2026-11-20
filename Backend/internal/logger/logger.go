@@ -11,6 +11,7 @@ import (
 // LOG_FORMAT: json / text (デフォルト: json)
 //
 // slog.SetDefault により既存の log.Println 等も slog 経由で出力される。
+// 出力の直前に、メールアドレス・電話番号を伏字にする。
 func Setup() {
 	level := parseLevel(os.Getenv("LOG_LEVEL"))
 	opts := &slog.HandlerOptions{Level: level}
@@ -22,7 +23,8 @@ func Setup() {
 		handler = slog.NewJSONHandler(os.Stdout, opts)
 	}
 
-	slog.SetDefault(slog.New(handler))
+	// メールアドレス・電話番号は、出力の直前に伏字にする（redact.go）
+	slog.SetDefault(slog.New(redactHandler{inner: handler}))
 }
 
 func parseLevel(s string) slog.Level {

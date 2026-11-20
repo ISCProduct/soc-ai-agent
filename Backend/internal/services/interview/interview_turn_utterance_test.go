@@ -215,7 +215,9 @@ func TestSaveTurnUtterances_IDsAreStablePerTurn(t *testing.T) {
 	if turnUtteranceKey("start", 3, true) == turnUtteranceKey("turn", 3, true) {
 		t.Fatal("冒頭の質問とターンのキーは分けること")
 	}
-	if turnUtteranceKey("turn", 0, false) == turnUtteranceKey("turn", 0, false) {
+	key1 := turnUtteranceKey("turn", 0, false)
+	key2 := turnUtteranceKey("turn", 0, false)
+	if key1 == key2 {
 		t.Fatal("保存済みの件数を読めなかったときは毎回別のキーにすること")
 	}
 }
