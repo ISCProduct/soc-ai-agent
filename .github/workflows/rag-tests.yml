@@ -2,14 +2,29 @@ name: RAG Python Tests
 
 on:
   # このワークフロー自体を変えたときも走らせる（キャッシュなどの設定変更を検証できるように）
+  # 例外リストと判定スクリプトを変えたときも、脆弱性スキャンを走らせる（SOCAIAGENT-578）
   push:
     paths:
       - 'rag/**'
       - '.github/workflows/rag-tests.yml'
+      - '.github/pip-audit-allowlist.json'
+      - '.github/scripts/pip_audit_filter.py'
   pull_request:
     paths:
       - 'rag/**'
       - '.github/workflows/rag-tests.yml'
+      - '.github/pip-audit-allowlist.json'
+      - '.github/scripts/pip_audit_filter.py'
+  # 依存を変えなくても新しい脆弱性は公開されるので、週1回は検査する。例外の期限切れもここで気づく
+  # （SOCAIAGENT-578）。月曜 9:00 JST。
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+# どのジョブもチェックアウトしか要らない。PR で変えた requirements を pip install するので、
+# 依存のビルド処理に書き込みできるトークンを渡さない。
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -21,7 +36,9 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v7
         with:
-          python-version: '3.10'
+          # 本番のイメージ（rag/Dockerfile の python:3.12-slim、#315）と同じ版でテストする（SOCAIAGENT-576）。
+          # 3.10 のままだと、CI が通っても本番の版で動く保証にならない。
+          python-version: '3.12'
           # pip のダウンロードキャッシュを残し、毎回すべてを取り直さない（#2049）。
           # キーは依存の宣言ファイルから作るので、requirements / constraints を変えたら作り直される。
           # キャッシュするのはダウンロード済みのパッケージだけで、インストールは毎回 -c 付きで行う
@@ -56,3 +73,48 @@ jobs:
         with:
           name: rag-test-coverage
           path: rag/coverage.xml || coverage.xml || ''
+
+  # RAG（pip）の依存の脆弱性スキャン（SOCAIAGENT-578）。Go は govulncheck、FE は dependency-review が
+  # 見ているが、pip の依存は見ていなかった（#295 の Pillow のような再発を検知できない）。
+  audit:
+    name: Dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # 本番のイメージ（rag/Dockerfile の python:3.12-slim）と同じ版で解決する。
+      # 版で入るパッケージ（バックポートなど）が変わるため。
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            rag/requirements.txt
+            rag/constraints.txt
+
+      # 本番と同じ手順（-c constraints.txt）で入れて、実際に入った版を書き出す。
+      # requirements.txt だけを渡すと、constraints で固定した版ではなく解決し直した版を見てしまう。
+      # pip 自体などのツールは本番のコードではないので、freeze に入らないものは見ない。
+      - name: Install dependencies
+        run: |
+          python -m venv "$RUNNER_TEMP/rag"
+          "$RUNNER_TEMP/rag/bin/pip" install -r rag/requirements.txt -c rag/constraints.txt
+          "$RUNNER_TEMP/rag/bin/pip" freeze --exclude-editable > "$RUNNER_TEMP/frozen.txt"
+          wc -l < "$RUNNER_TEMP/frozen.txt"
+
+      # pip-audit は検査対象と別の環境に入れ、検査対象の依存に混ぜない。版は固定する。
+      # 修正版のない脆弱性は .github/pip-audit-allowlist.json に理由と期限を付けて載せる。
+      - name: Security scan (pip-audit)
+        run: |
+          python -m venv "$RUNNER_TEMP/audit"
+          "$RUNNER_TEMP/audit/bin/pip" install pip-audit==2.10.1
+          # 脆弱性があると終了コード 1 になるが、判定は例外リストと突き合わせてから行う
+          "$RUNNER_TEMP/audit/bin/pip-audit" --progress-spinner off -r "$RUNNER_TEMP/frozen.txt" \
+            --no-deps --disable-pip -f json --desc on -o "$RUNNER_TEMP/pip-audit.json" || true
+          python3 .github/scripts/pip_audit_filter.py \
+            --report "$RUNNER_TEMP/pip-audit.json" \
+            --allowlist .github/pip-audit-allowlist.json \
+            --source-root rag

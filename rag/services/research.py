@@ -4,6 +4,7 @@ patch("main.OpenAI") / patch("main._run_async") 等との互換のため、
 実行時に main モジュール上のシンボルを参照する。
 """
 from __future__ import annotations
+from services.prompt_versions import log_prompt_call
 
 from services.model_tiers import summary_model
 import asyncio
@@ -13,7 +14,6 @@ import json
 import logging
 import os
 import re
-import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
@@ -24,6 +24,7 @@ from services.sanitize import (
     _sanitize_job_title,
     _wrap_untrusted_text,
 )
+from services import query_cache
 from services.settings import DEFAULT_SEARCH_LOG_DIR
 
 logger = logging.getLogger("main")
@@ -97,6 +98,7 @@ def run_deep_research(company_name: str, job_title: str) -> str:
         }
         if use_tools:
             kwargs["tools"] = [{"type": "web_search"}]
+        log_prompt_call("deep_research", model_name)
         return client.responses.create(**kwargs)
 
     # 1回目: メインリクエスト（tools有効・メインモデル）
@@ -253,32 +255,16 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
     cache_ttl = int(os.getenv("RAG_QUERY_CACHE_TTL_SECONDS", "300"))
     cache_path = os.path.join(os.getenv("RAG_SEARCH_LOG_DIR", DEFAULT_SEARCH_LOG_DIR), "query_cache.json")
     cache_key = f"{safe_company}::{role_text}"
-    try:
-        if os.path.exists(cache_path):
-            with open(cache_path, "r", encoding="utf-8") as f:
-                cache = json.load(f)
-            entry = cache.get(cache_key)
-            if entry:
-                ts = entry.get("ts", 0)
-                if time.time() - ts < cache_ttl:
-                    # 上限を読み出し側にも掛ける。保存側だけだと、上限を下げても
-                    # キャッシュ済みの古い件数が TTL 切れまで返り続けてノブが効かない
-                    return entry.get("queries", [])[: max_search_queries()]
-    except Exception as exc:
-        logger.warning("query cache read failed error=%s", exc)
+    # 読み書きはロック付き・期限切れの掃除つき（services/query_cache.py、SOCAIAGENT-557）
+    cached = query_cache.get(cache_path, cache_key, cache_ttl)
+    # 空のリストも保存した結果なので使う（偽として扱うと TTL のあいだ毎回作り直す）
+    if cached is not None:
+        # 上限を読み出し側にも掛ける。保存側だけだと、上限を下げても
+        # キャッシュ済みの古い件数が TTL 切れまで返り続けてノブが効かない
+        return cached[: max_search_queries()]
 
     def save_to_cache(key: str, queries: List[str]) -> None:
-        try:
-            cache = {}
-            if os.path.exists(cache_path):
-                with open(cache_path, "r", encoding="utf-8") as f:
-                    cache = json.load(f)
-            cache[key] = {"ts": int(time.time()), "queries": queries}
-            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-            with open(cache_path, "w", encoding="utf-8") as f:
-                json.dump(cache, f, ensure_ascii=False)
-        except Exception as exc:
-            logger.warning("query cache save failed error=%s", exc)
+        query_cache.put(cache_path, key, queries, cache_ttl)
 
     # テンプレートベースのフォールバック
     def template_queries(cn: str, role: str) -> List[str]:
@@ -310,6 +296,7 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
                 company=_wrap_untrusted_text(safe_company, "企業名"),
                 role=_wrap_untrusted_text(role_text, "職種"),
             )
+            log_prompt_call("search_queries", summary_model())
             resp = client.chat.completions.create(
                 model=summary_model(),
                 messages=[{"role": "user", "content": prompt}],
@@ -349,6 +336,7 @@ def _web_search_openai(query: str) -> str:
         model = "gpt-4o-mini"
     client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     try:
+        log_prompt_call("web_search", model)
         response = client.responses.create(
             model=model,
             input=query,
@@ -403,6 +391,7 @@ def _summarize_for_hiring(company_name: str, job_title: str, raw_texts: List[str
                  f"【検索結果】\n{_wrap_untrusted_text(combined, '検索結果')}"
              )
     try:
+        log_prompt_call("hiring_summary", summary_model())
         resp = client.chat.completions.create(
             model=summary_model(),
             messages=[
