@@ -339,7 +339,7 @@ type CompanyWeightProfile struct {
 
 本番相当の842社での実測。7軸は面接だけ受けた学生（`interviewScoreMapping` の反映先7軸しか
 持たない）で、1点の重みが 1.43倍になるうえ、格子が粗くなるぶん**同点はさらに増える**。
-同点は `sort.SliceStable` により DB の取得順のまま残る。
+同点は `match_tie_key`（`CRC32(CONCAT(user_id, ':', company_id))` の生成列）、次に `company_id`、最後に行の `id` で決まる。取得順には依存しない。並びは `idx_ucm_user_session_rank` に載せる（SOCAIAGENT-674）。
 
 固定は `matching/match_resolution_test.go`、判断の経緯は §6.3（#1560）。
 
@@ -720,7 +720,7 @@ rubric 0 と 5 は 0〜100 の clamp に当たるため、上下に半分はみ�
 1. **上位は同点が支配していて、割り方に根拠が無い。**
    上の実測で、上位20件の隣接ギャップは同点が 6〜9件、0.1点差が 4〜7件。
    軸が欠けている学生（7軸）では格子が粗くなるぶん**同点はさらに増える**（11件）。
-   同点は `sort.SliceStable` で DB の取得順のまま残る（`topMatchesByScore`）。
+   同点は `topMatchesByScore` が `matchrank.Less` で割り、DB の `ORDER BY match_tie_key, company_id, id` と同じ順になる。取得順のままではない（SOCAIAGENT-674）。
    小数を入れればこの同点は割れるが、割る根拠は下の 2. の弱い代理量なので、
    恣意的な順序を「もっともらしく見える別の恣意的な順序」に置き換えるだけで、
    推薦が当たるようになるわけではない。
