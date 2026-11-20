@@ -49,6 +49,24 @@ def test_is_fresh_ttl():
     assert vs._is_fresh(stale, ttl_seconds=86400) is False
 
 
+def test_is_fresh_treats_broken_fetched_at_as_stale():
+    """読めない・ありえない未来の取得時刻は古い扱いにする（SOCAIAGENT-567）。
+
+    新鮮扱いにすると TTL で二度と失効せず、古い企業情報が残り続ける。
+    """
+    now = datetime.now(timezone.utc)
+    for broken in ["not-a-date", "2026-13-45T00:00:00", "2026/11/19"]:
+        assert vs._is_fresh(broken, ttl_seconds=86400) is False, broken
+    assert vs._is_fresh((now + timedelta(days=365)).isoformat(), ttl_seconds=86400) is False
+    # ホスト間の時計のずれ（数十秒の未来）は新鮮のまま
+    assert vs._is_fresh((now + timedelta(seconds=30)).isoformat(), ttl_seconds=86400) is True
+    # 型が文字列でなくても例外にせず古い扱い
+    assert vs._is_fresh(12345, ttl_seconds=86400) is False  # type: ignore[arg-type]
+    # 取得時刻が無い（記録する前の文書）は今までどおり新鮮扱い
+    assert vs._is_fresh(None, ttl_seconds=86400) is True
+    assert vs._is_fresh("", ttl_seconds=86400) is True
+
+
 def test_set_and_get_cached_documents_roundtrip():
     vs.reset_chroma_client_for_tests()
 
@@ -239,8 +257,6 @@ def test_get_cached_documents_does_not_leak_across_punctuation_variants():
     key_plain = vs.build_cache_key(
         "company_research", "HIS", "指定なし", company_original="HIS"
     )
-    fetched = datetime.now(timezone.utc).isoformat()
-
     store: Dict[str, Dict[str, Any]] = {}
 
     def upsert_side_effect(**kwargs):
