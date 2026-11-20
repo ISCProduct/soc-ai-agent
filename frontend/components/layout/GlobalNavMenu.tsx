@@ -27,6 +27,7 @@ import ManageAccountsIcon from '@mui/icons-material/ManageAccounts'
 import HomeIcon from '@mui/icons-material/Home'
 import FactCheckIcon from '@mui/icons-material/FactCheck'
 import QuizIcon from '@mui/icons-material/Quiz'
+import SearchIcon from '@mui/icons-material/Search'
 import {
   GLOBAL_NAV_HOME_ITEMS,
   SIDEBAR_NAV_ITEMS,
@@ -52,6 +53,7 @@ const NAV_ICONS: Record<NavHref, React.ReactNode> = {
   '/es-rewrite': <EditNoteIcon color="primary" />,
   '/schedule': <CalendarMonthIcon color="primary" />,
   '/applications': <AssignmentIcon color="primary" />,
+  '/companies': <SearchIcon color="primary" />,
   '/scout': <MailOutlineIcon color="primary" />,
   '/profile': <ManageAccountsIcon color="primary" />,
 }

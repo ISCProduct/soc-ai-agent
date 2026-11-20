@@ -16,7 +16,6 @@ import {
   Divider,
   IconButton,
   Stack,
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -28,6 +27,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import { authService } from '@/lib/auth'
 import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
 type ScraperSession = {
@@ -165,7 +165,7 @@ export default function PageContent() {
             ) : sessions.length === 0 ? (
               <Typography variant="body2" color="text.secondary">登録されたセッションはありません</Typography>
             ) : (
-              <Table size="small">
+              <AdminTableWrapper>
                 <TableHead>
                   <TableRow>
                     <TableCell>サイトキー</TableCell>
@@ -203,7 +203,7 @@ export default function PageContent() {
                     </TableRow>
                   ))}
                 </TableBody>
-              </Table>
+              </AdminTableWrapper>
             )}
           </CardContent>
         </Card>

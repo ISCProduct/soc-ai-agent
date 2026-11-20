@@ -8,7 +8,6 @@
 import argparse
 import json
 import re
-import sys
 from typing import Iterator, Dict, Any
 
 PII_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")

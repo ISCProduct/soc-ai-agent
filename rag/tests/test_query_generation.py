@@ -1,7 +1,5 @@
-from unittest.mock import patch, MagicMock
-import os
+from unittest.mock import patch
 import json
-import tempfile
 
 import main
 
