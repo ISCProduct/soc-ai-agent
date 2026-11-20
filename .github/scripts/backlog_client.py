@@ -138,6 +138,8 @@ def bl_request(
 
     url = build_url(base, path, api_key, extra)
     m = method.upper()
+    global LAST_ERROR_CODE
+    LAST_ERROR_CODE = None
     for attempt in range(len(RETRY_WAITS) + 1):
         req = urllib.request.Request(url, data=body, method=m)
         for k, v in headers.items():
@@ -170,6 +172,9 @@ def bl_request(
 # 呼び出し側は警告だけ出して成功で終わるため、更新漏れが黙って残っていた。
 RETRY_WAITS = (2, 10, 30)
 RATE_LIMIT_WAIT_MAX = 60
+# 直近の bl_request が失敗したときの HTTP ステータス（成功・未呼び出しは None、通信エラーは 0）。
+# 戻り値の None だけでは「課題が削除済み(404)」と「一時的な失敗」を区別できないため。
+LAST_ERROR_CODE: int | None = None
 
 
 def _retryable(method: str, code: int) -> bool:
@@ -190,6 +195,8 @@ def _retry_wait(e: urllib.error.HTTPError, default: int) -> int:
 
 def _fail(code: int, err_body: str, method: str, path: str, fatal: bool):
     """再試行しても失敗したときの報告。code=0 は通信エラー。"""
+    global LAST_ERROR_CODE
+    LAST_ERROR_CODE = code
     print(f"Backlog API エラー {code}: {err_body}", file=sys.stderr)
     print(f"リクエスト: {method} {path}", file=sys.stderr)
     if code == 401:
@@ -386,6 +393,11 @@ def advance_issue_status(
     call = request or (lambda method, path, data=None: bl_request(base, api_key, method, path, data, fatal=False))
 
     issue = call("GET", f"/issues/{issue_key}")
+    if issue is None and LAST_ERROR_CODE == 404:
+        # 削除済みの課題。昇格PRはコミット範囲から過去のキーまで拾うので普通に出てくる。
+        # 同期すべきものが無いだけなので失敗にしない（失敗にすると本番デプロイ後の同期が毎回赤くなる）。
+        print(f"{issue_key}: 課題が削除されているため対象外")
+        return "skipped"
     if issue is None:
         # 今のステータスが分からないまま書くと、完了済みの課題を
         # 「ステージング環境反映」へ戻しかねない。失敗として返し、ジョブを赤くする
@@ -398,6 +410,13 @@ def advance_issue_status(
         return "skipped"
 
     if call("PATCH", f"/issues/{issue_key}", {"statusId": status_id}) is None:
+        # 本番デプロイ後の同期は PR ごとの同期を一斉に起動するので、同じ課題を別の実行が
+        # 先に同じステータスへ進めていることがある。Backlog はその無変更 PATCH を
+        # 400 code 7 で拒否する。読み直して既に目標どおりなら成功とみなす。
+        now = call("GET", f"/issues/{issue_key}")
+        if ((now or {}).get("status") or {}).get("name") == status_name:
+            print(f"{issue_key}: 既に '{status_name}' になっていた（並行実行が先に更新）")
+            return "skipped"
         return "failed"
     return "updated"
 
@@ -545,6 +564,30 @@ if __name__ == "__main__":
         return {"status": {"name": "リリース待ち"}} if method == "GET" else None
 
     assert advance_issue_status("b", "k", "X-1", 4, "完了", request=_req_patch_failed) == "failed"
+
+    # 削除済みの課題(404)は失敗にしない。PATCH も送らない
+    sent.clear()
+
+    def _req_deleted(method, path, data=None):
+        sent.append((method, path, data))
+        globals()["LAST_ERROR_CODE"] = 404
+        return None
+
+    assert advance_issue_status("b", "k", "X-1", 4, "完了", request=_req_deleted) == "skipped"
+    assert all(m == "GET" for m, _, _ in sent), f"削除済みに PATCH を送っている: {sent}"
+    globals()["LAST_ERROR_CODE"] = None
+
+    # 並行実行が先に同じステータスへ進めていた(PATCH が 400 code 7)なら成功扱い
+    seen_gets = []
+
+    def _req_raced(method, path, data=None):
+        if method == "GET":
+            seen_gets.append(path)
+            return {"status": {"name": "リリース待ち" if len(seen_gets) == 1 else "完了"}}
+        return None
+
+    assert advance_issue_status("b", "k", "X-1", 4, "完了", request=_req_raced) == "skipped"
+    assert len(seen_gets) == 2, "PATCH 失敗後に読み直していない"
 
     # set_issue_status_unless_same: 同じステータスなら PATCH を送らない。
     # 無変更 PATCH は Backlog が 400 code 7 で拒否し、PR URL 追記まで巻き添えになる。
