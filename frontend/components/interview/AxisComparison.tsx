@@ -94,7 +94,7 @@ export default function AxisComparison({ points }: AxisComparisonProps) {
   }, [baseId, targetId, retryToken])
 
   return (
-    <Paper elevation={0} sx={{ mt: 2, p: { xs: 2, md: 3 }, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
+    <Paper elevation={0} sx={{ mt: 2, p: { xs: 2, md: 3 }, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field, overflowWrap: 'anywhere' }}>
       <Typography component="h2" sx={{ fontWeight: 700, fontSize: 16, mb: 0.5 }}>回ごとの比較</Typography>
       <Typography sx={{ fontSize: 13, color: UI.inkSoft, mb: 2 }}>
         2回の面接を並べて、どの軸が伸びたか落ちたかを見ます。スコアはAIの評価で、確定した能力ではありません。上の期間を変えると、選べる回も変わります。

@@ -20,7 +20,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 )
 
 type InterviewController struct {
@@ -94,7 +93,7 @@ func (c *InterviewController) CompareAxes(ctx echo.Context) error {
 		if errors.Is(err, interviewsvc.ErrReportNotReady) {
 			return echo.NewHTTPError(http.StatusNotFound, "report not yet available")
 		}
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "session not found")
 		}
 		return httpapi.InternalError(err)

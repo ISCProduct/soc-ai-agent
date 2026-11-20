@@ -1,11 +1,10 @@
 package interview
 
 import (
+	"Backend/domain/repository"
 	"encoding/json"
 	"errors"
 	"math"
-
-	"gorm.io/gorm"
 )
 
 // 面接スコアは 0〜5。高いほど良い、という向きは interview_report の採点と同じ。
@@ -106,9 +105,6 @@ func (s *InterviewService) CompareAxes(userID, baseSessionID, targetSessionID ui
 		return nil, ErrInvalidComparison
 	}
 	if err := s.EnsureSessionOwnership(userID, baseSessionID); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, gorm.ErrRecordNotFound
-		}
 		return nil, err
 	}
 	if err := s.EnsureSessionOwnership(userID, targetSessionID); err != nil {
@@ -135,7 +131,7 @@ func (s *InterviewService) axisScores(sessionID uint) (map[string]float64, error
 	}
 	report, err := s.reportRepo.FindBySessionID(sessionID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrReportNotReady
 		}
 		return nil, err

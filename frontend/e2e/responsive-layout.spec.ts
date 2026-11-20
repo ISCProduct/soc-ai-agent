@@ -356,6 +356,19 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
         route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
       if (pathname === '/api/interviews') return json({ ...SESSION_RESPONSE })
       if (pathname === '/api/interviews/trend') return json({ points: TREND_POINTS })
+      if (pathname === '/api/interviews/axis-comparison') {
+        return json({
+          base_session_id: 2,
+          target_session_id: 3,
+          axes: [
+            { axis: 'logic', label: '論理性', base: 3, target: 3, delta: 0, direction: 'unchanged', change_label: '変化なし' },
+            { axis: 'specificity', label: '具体性', base: 4, target: 4, delta: 0, direction: 'unchanged', change_label: '変化なし' },
+            { axis: 'ownership', label: '主体性', base: 3, target: 3, delta: 0, direction: 'unchanged', change_label: '変化なし' },
+            { axis: 'communication', label: 'コミュニケーション', base: 4, target: 4, delta: 0, direction: 'unchanged', change_label: '変化なし' },
+            { axis: 'enthusiasm', label: '熱意', base: 3, target: 3, delta: 0, direction: 'unchanged', change_label: '変化なし' },
+          ],
+        })
+      }
       if (pathname === '/api/interviews/1') {
         return json({ session: SESSION_RESPONSE.sessions[0], utterances: [], report: REPORT })
       }
