@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactNode } from 'react'
 import { Box, ButtonBase, IconButton, Stack, Typography } from '@mui/material'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
@@ -15,6 +16,8 @@ type ResumeDocumentViewerProps = {
   selectedNo: number | null
   onSelect: (no: number) => void
   onPageChange: (page: number) => void
+  /** 実際の書類を描いた中身。渡さないときは、指摘の原文を並べた表示にする */
+  pageContent?: ReactNode
 }
 
 const navButtonSx = {
@@ -35,7 +38,7 @@ function Bar({ w }: { w: number | string }) {
  * 書類のページ。指摘された原文を、番号つきで強調して並べる。
  * 書類そのものの描画ではなく、該当箇所を並べた表示（レイアウトは実物と異なる）。
  */
-export function ResumeDocumentViewer({ page, pageCount, findings, selectedNo, onSelect, onPageChange }: ResumeDocumentViewerProps) {
+export function ResumeDocumentViewer({ page, pageCount, findings, selectedNo, onSelect, onPageChange, pageContent }: ResumeDocumentViewerProps) {
   return (
     <Box
       sx={{
@@ -70,80 +73,86 @@ export function ResumeDocumentViewer({ page, pageCount, findings, selectedNo, on
       </Stack>
 
       <Box sx={{ flex: 1, overflow: 'auto', px: { xs: 1.5, md: 0 }, py: { xs: 2, md: 3.5 } }}>
-        <Box
-          sx={{
-            width: { md: 520 },
-            maxWidth: '100%',
-            mx: 'auto',
-            minHeight: { md: 700 },
-            bgcolor: UI.field,
-            border: `1px solid ${UI.rule}`,
-            pl: { xs: 4.5, md: 4.375 },
-            pr: { xs: 2, md: 4.375 },
-            py: 4,
-          }}
-        >
-          <Typography sx={{ fontSize: 18, fontWeight: 700, color: UI.ink, mb: 2.5 }}>{page === 1 ? '履　歴　書' : `履歴書（${page}/${pageCount}）`}</Typography>
-          <Stack spacing={1.25} sx={{ mb: 3 }} aria-hidden>
-            <Bar w={200} />
-            <Bar w={320} />
-            <Bar w={120} />
-          </Stack>
+        {pageContent ? (
+          <Box sx={{ pl: { xs: 4, md: 5 }, pr: { xs: 1, md: 5 } }}>{pageContent}</Box>
+        ) : (
+          <>
+            <Box
+              sx={{
+                width: { md: 520 },
+                maxWidth: '100%',
+                mx: 'auto',
+                minHeight: { md: 700 },
+                bgcolor: UI.field,
+                border: `1px solid ${UI.rule}`,
+                pl: { xs: 4.5, md: 4.375 },
+                pr: { xs: 2, md: 4.375 },
+                py: 4,
+              }}
+            >
+              <Typography sx={{ fontSize: 18, fontWeight: 700, color: UI.ink, mb: 2.5 }}>{page === 1 ? '履　歴　書' : `履歴書（${page}/${pageCount}）`}</Typography>
+              <Stack spacing={1.25} sx={{ mb: 3 }} aria-hidden>
+                <Bar w={200} />
+                <Bar w={320} />
+                <Bar w={120} />
+              </Stack>
 
-          {findings.length === 0 && (
-            <Typography sx={{ fontSize: 14, color: UI.inkSoft }}>このページに指摘はありません。</Typography>
-          )}
+              {findings.length === 0 && (
+                <Typography sx={{ fontSize: 14, color: UI.inkSoft }}>このページに指摘はありません。</Typography>
+              )}
 
-          {findings.map((f) => {
-            const selected = f.no === selectedNo
-            const text = f.quote || f.message
-            return (
-              <Box key={f.no} sx={{ mb: 3 }}>
-                <Stack spacing={1.25} sx={{ mb: 2 }} aria-hidden>
-                  <Bar w="100%" />
-                  <Bar w="58%" />
-                </Stack>
-                <Box sx={{ position: 'relative' }}>
-                  <Box sx={{ position: 'absolute', left: { xs: -34, md: -28 }, top: 6 }}>
-                    <NoBadge no={f.no} selected={selected} size={22} onFlag />
+              {findings.map((f) => {
+                const selected = f.no === selectedNo
+                const text = f.quote || f.message
+                return (
+                  <Box key={f.no} sx={{ mb: 3 }}>
+                    <Stack spacing={1.25} sx={{ mb: 2 }} aria-hidden>
+                      <Bar w="100%" />
+                      <Bar w="58%" />
+                    </Stack>
+                    <Box sx={{ position: 'relative' }}>
+                      <Box sx={{ position: 'absolute', left: { xs: -34, md: -28 }, top: 6 }}>
+                        <NoBadge no={f.no} selected={selected} size={22} onFlag />
+                      </Box>
+                      <ButtonBase
+                        onClick={() => onSelect(f.no)}
+                        aria-pressed={selected}
+                        aria-label={`指摘${f.no}を選ぶ: ${text}`}
+                        sx={{
+                          width: '100%',
+                          display: 'block',
+                          textAlign: 'left',
+                          px: 1.5,
+                          py: 1,
+                          borderRadius: '4px',
+                          fontSize: 14,
+                          lineHeight: 1.6,
+                          color: UI.ink,
+                          overflowWrap: 'anywhere',
+                          bgcolor: selected ? UI.markTint : UI.flagTint,
+                          border: selected ? `3px solid ${UI.mark}` : `1.5px solid ${UI.flag}`,
+                          // 太さが変わっても文字の位置が動かないよう、細い側で余白を足す
+                          ...(selected ? { px: 'calc(12px - 1.5px)', py: 'calc(8px - 1.5px)' } : {}),
+                        }}
+                      >
+                        {text}
+                      </ButtonBase>
+                    </Box>
                   </Box>
-                  <ButtonBase
-                    onClick={() => onSelect(f.no)}
-                    aria-pressed={selected}
-                    aria-label={`指摘${f.no}を選ぶ: ${text}`}
-                    sx={{
-                      width: '100%',
-                      display: 'block',
-                      textAlign: 'left',
-                      px: 1.5,
-                      py: 1,
-                      borderRadius: '4px',
-                      fontSize: 14,
-                      lineHeight: 1.6,
-                      color: UI.ink,
-                      overflowWrap: 'anywhere',
-                      bgcolor: selected ? UI.markTint : UI.flagTint,
-                      border: selected ? `3px solid ${UI.mark}` : `1.5px solid ${UI.flag}`,
-                      // 太さが変わっても文字の位置が動かないよう、細い側で余白を足す
-                      ...(selected ? { px: 'calc(12px - 1.5px)', py: 'calc(8px - 1.5px)' } : {}),
-                    }}
-                  >
-                    {text}
-                  </ButtonBase>
-                </Box>
-              </Box>
-            )
-          })}
+                )
+              })}
 
-          <Stack spacing={1.25} aria-hidden>
-            <Bar w="100%" />
-            <Bar w="100%" />
-            <Bar w="58%" />
-          </Stack>
-        </Box>
-        <Typography sx={{ mt: 1.5, px: 2, textAlign: 'center', fontSize: 12, color: UI.inkSoft }}>
-          指摘された原文を並べた表示です。実際の書類のレイアウトとは異なります。
-        </Typography>
+              <Stack spacing={1.25} aria-hidden>
+                <Bar w="100%" />
+                <Bar w="100%" />
+                <Bar w="58%" />
+              </Stack>
+            </Box>
+            <Typography sx={{ mt: 1.5, px: 2, textAlign: 'center', fontSize: 12, color: UI.inkSoft }}>
+              指摘された原文を並べた表示です。実際の書類のレイアウトとは異なります。
+            </Typography>
+          </>
+        )}
       </Box>
     </Box>
   )
