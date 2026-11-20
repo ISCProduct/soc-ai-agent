@@ -1,13 +1,18 @@
 package repository
 
-import "Backend/internal/models"
+import (
+	"context"
+
+	"Backend/internal/models"
+)
 
 // JobCategoryRepository は職種カテゴリの永続化インターフェース。
+// context はリクエストのキャンセルと締切をクエリへ渡す。
 type JobCategoryRepository interface {
-	FindAll() ([]models.JobCategory, error)
-	FindByID(id uint) (*models.JobCategory, error)
-	FindByName(name string) ([]models.JobCategory, error)
-	GetTopCategories() ([]models.JobCategory, error)
+	FindAll(ctx context.Context) ([]models.JobCategory, error)
+	FindByID(ctx context.Context, id uint) (*models.JobCategory, error)
+	FindByName(ctx context.Context, name string) ([]models.JobCategory, error)
+	GetTopCategories(ctx context.Context) ([]models.JobCategory, error)
 }
 
 // GraduateEmploymentRepository は就職実績情報の永続化インターフェース。
