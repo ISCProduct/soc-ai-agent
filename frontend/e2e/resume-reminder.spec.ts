@@ -12,7 +12,7 @@ async function mockResumeStatus(page: Page, status: ResumeStatus) {
   })
 }
 
-// 同じ画面の「新着情報」バナーも role=alert かつ閉じるボタンを持つため、
+// 同じ画面の「新着情報」バナーも同じ role（error 以外の Alert は role=status。#2217）かつ閉じるボタンを持つため、
 // 空にしておかないとセレクタが2件に解決して strict mode 違反になる。
 async function silenceWhatsNew(page: Page) {
   await page.route('**/api/whats-new', async (route) => {
@@ -24,9 +24,12 @@ async function silenceWhatsNew(page: Page) {
   })
 }
 
-/** 履歴書リマインダーの Alert だけに絞り込む。 */
+/**
+ * 履歴書リマインダーの Alert だけに絞り込む。
+ * リマインダーは緊急ではない（error ではない）ので、割り込まない role="status" で読み上げる（#2217）。
+ */
 function reminderAlert(page: Page) {
-  return page.getByRole('alert').filter({ hasText: /履歴書/ })
+  return page.getByRole('status').filter({ hasText: /履歴書/ })
 }
 
 test.describe('履歴書リマインダーカード', () => {

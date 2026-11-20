@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState, type MouseEvent } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import {
-  Alert,
   Badge,
   Box,
   Button,
@@ -17,6 +16,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { visuallyHidden } from '@mui/utils'
 import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone'
 import { authService } from '@/lib/auth'

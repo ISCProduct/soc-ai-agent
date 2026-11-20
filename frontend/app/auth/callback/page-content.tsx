@@ -2,7 +2,8 @@
 
 import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Box, CircularProgress, Typography, Alert } from '@mui/material'
+import { Box, CircularProgress, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { authService } from '@/lib/auth'
 import { fixMojibake } from '@/lib/mojibake'
 

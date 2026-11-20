@@ -30,7 +30,10 @@ export default function ProgressCard({ view, stalled, startedAtMs, uploadStatus,
     <Box sx={cardSx}>
       <Stack spacing={2}>
         <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-          <Typography component="h2" sx={{ fontWeight: 700 }}>{title}</Typography>
+          {/* 待ちの文を読み上げに伝える（#2217）。数秒ごとに変わる % は入れない（読み上げが続いてうるさくなるため） */}
+          <Box role="status" aria-busy="true">
+            <Typography component="h2" sx={{ fontWeight: 700 }}>{title}</Typography>
+          </Box>
           {view && <Typography sx={{ color: UI.mark, fontWeight: 700, fontSize: 28 }}>{view.percent}%</Typography>}
         </Box>
         {view ? (

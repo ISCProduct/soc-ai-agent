@@ -14,7 +14,10 @@ export function PageLoading({
   fullScreen = true,
 }: PageLoadingProps) {
   return (
+    // 読み込み中であることを読み上げに伝える（#2217）。RouteLoading もこれを使う
     <Box
+      role="status"
+      aria-busy="true"
       sx={{
         display: 'flex',
         flexDirection: 'column',

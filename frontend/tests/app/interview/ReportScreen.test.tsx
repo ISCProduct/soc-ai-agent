@@ -90,7 +90,10 @@ describe('ReportScreen', () => {
     renderScreen({ reportProgress: { stage: 'generating', percent: 42, stalled: true } })
 
     expect(screen.getByText('時間がかかっています')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('いつもより時間がかかっています')
+    // 見出し（待ちの文）と案内の両方を読み上げに届ける（#2217）
+    const statuses = screen.getAllByRole('status').map((s) => s.textContent ?? '')
+    expect(statuses).toContain('時間がかかっています')
+    expect(statuses.some((t) => t.includes('いつもより時間がかかっています'))).toBe(true)
   })
 
   it('動画アップロードは進捗カードの中の1行で出す', () => {

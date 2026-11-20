@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Alert, Box, Button, Collapse, MenuItem, Stack, TextField, Typography } from '@mui/material'
+import { Box, Button, Collapse, MenuItem, Stack, TextField, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import { UI } from '@/lib/design/tokens'
