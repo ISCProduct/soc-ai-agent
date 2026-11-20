@@ -592,7 +592,7 @@ def test_router_reports_context_source(
     monkeypatch.setattr(main, "set_cached_context", MagicMock())
     monkeypatch.setattr(main, "get_cached_context", MagicMock(return_value=cached))
     monkeypatch.setattr(main, "ALLOW_WEB_SEARCH_FALLBACK", web_search_enabled)
-    monkeypatch.setattr(main, "_run_async", MagicMock(return_value=web_summary))
+    monkeypatch.setattr(main, "_run_async", MagicMock(return_value=[web_summary]))
     fake = MagicMock(side_effect=lambda **kwargs: _fake_review_response(
         kwargs["company_context_source"]
     ))
@@ -649,3 +649,62 @@ def test_router_propagates_422(monkeypatch, client):
 
     assert resp.status_code == 422
     assert resp.json()["detail"] == _TOO_LONG_MESSAGE
+
+
+# --- SOCAIAGENT-553: ES 添削の Web Search は一般だけ。エンジニア向けは技術スタックがあるときだけ並列で足す ---
+
+
+@pytest.mark.parametrize(
+    ("tech_stack", "expected_roles"),
+    [
+        ("", [""]),
+        ("Go, React", ["", "エンジニア"]),
+    ],
+)
+def test_es_web_search_runs_engineer_only_with_tech_stack(monkeypatch, client, tech_stack, expected_roles):
+    import main
+
+    calls = []
+
+    async def fake_pipeline(company, role):
+        calls.append(role)
+        return f"{role or '一般'}の要約"
+
+    monkeypatch.setattr(main, "set_cached_context", MagicMock())
+    monkeypatch.setattr(main, "get_cached_context", MagicMock(return_value=[]))
+    monkeypatch.setattr(main, "ALLOW_WEB_SEARCH_FALLBACK", True)
+    monkeypatch.setattr(main, "_run_web_search_pipeline", fake_pipeline)
+    fake = MagicMock(side_effect=lambda **kwargs: _fake_review_response(kwargs["company_context_source"]))
+    monkeypatch.setattr(main, "_run_es_review", fake)
+
+    resp = client.post(
+        "/es/review",
+        json={"es_text": "学生時代に頑張ったこと", "question_type": "自己PR",
+              "company_name": "株式会社Example", "tech_stack": tech_stack},
+    )
+
+    assert resp.status_code == 200
+    assert sorted(calls) == sorted(expected_roles)
+    docs = fake.call_args.kwargs["context_docs"]
+    assert docs and docs[0].startswith("一般の要約")
+    assert ("エンジニアの要約" in docs[0]) == (len(expected_roles) == 2)
+
+
+def test_es_web_search_runs_pipelines_concurrently():
+    """2本のときは並列に走らせる（直列だと待ち時間が倍になる）。"""
+    import asyncio
+    import time
+
+    from routers.es import _es_web_search
+
+    class FakeMain:
+        @staticmethod
+        async def _run_web_search_pipeline(company, role):
+            await asyncio.sleep(0.2)
+            return role or "一般"
+
+    started = time.monotonic()
+    results = asyncio.run(_es_web_search(FakeMain, "株式会社Example", True))
+    elapsed = time.monotonic() - started
+    assert results == ["一般", "エンジニア"]
+    assert elapsed < 0.35, elapsed
