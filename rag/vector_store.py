@@ -203,15 +203,31 @@ def build_cache_key(
     return f"{company_segment}::{role}"
 
 
+# 取得時刻が未来にずれていてよい幅（ホスト間の時計のずれ）。これを超える未来の日付は壊れているとみなす。
+_FETCHED_AT_FUTURE_TOLERANCE_SECONDS = 300
+
+
 def _is_fresh(fetched_at: Optional[str], ttl_seconds: int = CACHE_TTL_SECONDS) -> bool:
+    """キャッシュ文書が TTL 内かを返す。
+
+    fetched_at が読めない・ありえない未来の日付のときは古い扱い（False）にする（SOCAIAGENT-567）。
+    新鮮扱いにすると TTL で二度と失効せず、古い企業情報がキャッシュに残り続ける。古い扱いなら
+    検索し直して上書きされるので、壊れた日付の文書が自然に入れ替わる。
+
+    fetched_at が無い（取得時刻を記録する前の文書）ときは今までどおり新鮮扱いにする。
+    """
     if not fetched_at or ttl_seconds <= 0:
         return True
     try:
-        ts = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+        ts = datetime.fromisoformat(str(fetched_at).replace("Z", "+00:00"))
         age = (datetime.now(timezone.utc) - ts.astimezone(timezone.utc)).total_seconds()
-        return age <= ttl_seconds
-    except ValueError:
-        return True
+    except (ValueError, TypeError, OverflowError):
+        logger.warning("cache document has unreadable fetched_at=%r; treating as stale", fetched_at)
+        return False
+    if age < -_FETCHED_AT_FUTURE_TOLERANCE_SECONDS:
+        logger.warning("cache document has future fetched_at=%r; treating as stale", fetched_at)
+        return False
+    return age <= ttl_seconds
 
 
 def _doc_ids(cache_key: str, count: int) -> List[str]:

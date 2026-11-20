@@ -183,7 +183,7 @@ func validateCase(c Case) error {
 	if strings.TrimSpace(c.ID) == "" {
 		return fmt.Errorf("id は必須")
 	}
-	if _, ok := labelRank[c.Label]; !ok && !(c.Label == "" && slices.Contains(labelOptionalTargets, c.Target)) {
+	if _, ok := labelRank[c.Label]; !ok && (c.Label != "" || !slices.Contains(labelOptionalTargets, c.Target)) {
 		return fmt.Errorf("label は %s / %s / %s のいずれか（実際: %q）", LabelGood, LabelMid, LabelBad, c.Label)
 	}
 	if !slices.Contains(ValidTargets(), c.Target) {
