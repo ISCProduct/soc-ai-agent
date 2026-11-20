@@ -212,4 +212,114 @@ describe('ResultsListView', () => {
     expect(screen.getByRole('button', { name: '応募済み' })).toBeDisabled()
     expect(screen.queryByText('応募は準備中')).not.toBeInTheDocument()
   })
+
+  // #2088: 位置（index）を key にすると、並べ替えたときに React が位置で要素を使い回し、別の値の状態を引き継いでしまう
+  it('技術スタックを並べ替えても、同じ値の要素は同じ DOM のまま移動する', () => {
+    const { rerender } = renderList({ companies: [{ ...sampleCompany, techStack: ['Go', 'AWS'] }] })
+    const awsBefore = screen.getByText('AWS')
+    rerender(
+      <ResultsListView
+        companies={[{ ...sampleCompany, techStack: ['AWS', 'Go'] }]}
+        isProvisional={false}
+        analysisScores={null}
+        scoreComment=""
+        analysisError={null}
+        onRetryAnalysis={() => {}}
+        jobSuitabilityComment=""
+        suggestedRoles={[]}
+        emailSending={false}
+        favoritingId={null}
+        applyingId={null}
+        snackbar={{ open: false, message: '', severity: 'success' }}
+        isGuestUser={false}
+        applyEnabled
+        onCloseSnackbar={() => {}}
+        onBack={() => {}}
+        onReset={() => {}}
+        onSendEmail={() => {}}
+        onSelectCompany={() => {}}
+        onToggleFavorite={() => {}}
+        onApply={() => {}}
+        onNavigate={() => {}}
+      />,
+    )
+    expect(screen.getByText('AWS')).toBe(awsBefore)
+  })
+
+  // 値から作った key は、同じ値が重なっても重ならない（React の警告が出ない）
+  it('技術スタック・タグ・職種の提案に同じ値が重なっても、key の重複の警告を出さずに全部描く', () => {
+    const errors = jest.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      renderList({
+        companies: [{ ...sampleCompany, techStack: ['Go', 'Go', 'AWS'], tags: ['成長企業', '成長企業'] }],
+        suggestedRoles: [
+          { title: 'バックエンド', reason: 'a' },
+          { title: 'バックエンド', reason: 'b' },
+        ],
+      })
+      expect(screen.getAllByText('Go')).toHaveLength(2)
+      expect(screen.getAllByText('成長企業')).toHaveLength(2)
+      expect(screen.getAllByText('バックエンド')).toHaveLength(2)
+      const keyWarnings = errors.mock.calls.filter((args) => String(args[0]).includes('same key'))
+      expect(keyWarnings).toEqual([])
+    } finally {
+      errors.mockRestore()
+    }
+  })
+
+  // #2221: 押せない理由は吹き出し（Tooltip）だけでなく、常に見える文で出し、aria-describedby で結ぶ
+  describe('押せない理由の文', () => {
+    const describedText = (button: HTMLElement) => {
+      const id = button.getAttribute('aria-describedby')
+      expect(id).toBeTruthy()
+      return document.getElementById(id as string)?.textContent
+    }
+
+    it('ゲストには、メール送信と選考管理が使えない理由を画面の文で出す', () => {
+      renderList({ isGuestUser: true })
+      const emailButtons = screen.getAllByRole('button', { name: '結果をメールで受け取る' })
+      expect(emailButtons).toHaveLength(2)
+      for (const button of emailButtons) {
+        expect(button).toBeDisabled()
+        expect(describedText(button)).toBe('ゲストユーザーはメール送信できません。アカウント登録後にご利用ください。')
+      }
+      // 上下の2つのボタンは、別の文を指す（id が重ならない）
+      expect(emailButtons[0].getAttribute('aria-describedby')).not.toBe(emailButtons[1].getAttribute('aria-describedby'))
+      const applications = screen.getByRole('button', { name: '選考管理を見る' })
+      expect(describedText(applications)).toContain('応募・選考管理を利用できません')
+      // 登録への導線も近くにある
+      expect(screen.getAllByRole('button', { name: 'アカウント登録して機能を解放' }).length).toBeGreaterThan(0)
+    })
+
+    it('ゲストの「応募する」は、行の近くの文で理由を示す', () => {
+      renderList({ isGuestUser: true })
+      const apply = screen.getByRole('button', { name: '応募する' })
+      expect(apply).toBeDisabled()
+      expect(describedText(apply)).toContain('応募・選考管理を利用できません')
+    })
+
+    it('応募が準備中なら、「応募は準備中」の理由を行の近くの文で示す', () => {
+      renderList({ applyEnabled: false })
+      const apply = screen.getByRole('button', { name: '応募は準備中' })
+      expect(describedText(apply)).toBe('応募機能は現在準備中です。公開までお待ちください。')
+      expect(screen.getByText('応募機能は現在準備中です。公開までお待ちください。')).toBeVisible()
+    })
+
+    it('通常のユーザーには理由の文を出さない（aria-describedby も付けない）', () => {
+      renderList()
+      expect(screen.queryByText(/アカウント登録後にご利用ください/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/準備中です/)).not.toBeInTheDocument()
+      for (const name of ['結果をメールで受け取る', '応募する', '選考管理を見る']) {
+        for (const button of screen.getAllByRole('button', { name })) {
+          expect(button).not.toHaveAttribute('aria-describedby')
+        }
+      }
+    })
+
+    it('応募済みの企業には、応募が準備中でも理由の文を出さない', () => {
+      renderList({ applyEnabled: false, companies: [{ ...sampleCompany, isApplied: true }] })
+      expect(screen.getByRole('button', { name: '応募済み' })).not.toHaveAttribute('aria-describedby')
+      expect(screen.queryByText('応募機能は現在準備中です。公開までお待ちください。')).not.toBeInTheDocument()
+    })
+  })
 })
