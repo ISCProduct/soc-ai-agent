@@ -74,3 +74,11 @@ AI呼び出しは `unknown` として保存し、未計測経路を識別でき�
 `prompt_stage` は機能配賦用の `feature` とは異なる分析軸であり、1工程が複数の機能に対応する場合がある。
 例: `question_generation` → `chat_question`、`score_evaluation` → `chat_answer_eval`、
 `company_extraction` → `company_parse` / `company_search`。未計測経路は `unknown` として記録する。
+
+## RAG（Python）のプロンプトの版（SOCAIAGENT-560）
+
+RAG のプロンプトの版は `rag/services/prompt_versions.py` の `PROMPT_VERSIONS` に工程ごとに集めている（ES 添削・Deep Research・検索クエリの生成・Web Search・採用観点の要約・面接ヒントの要約と parse・履歴書レビュー）。LLM を呼ぶたびに `llm call stage=… prompt_version=… model=…` をログに出すので、プロンプトを変えた前後の比較や切り戻しをログから追える。
+
+- **プロンプトの文面を変えたら、その工程の版を上げる**（版の名前は `工程_v番号`。テストで形を確かめる）
+- 版を付けていない工程の名前で呼ぶと `KeyError` になる（付け忘れに気づくため）
+- Backend の `PROMPT_VERSION_*` とは別の管理で、使用量（`api_call_logs`）への版の記録は RAG 側ではまだしていない

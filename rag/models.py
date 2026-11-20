@@ -205,6 +205,19 @@ class VectorReembedRequest(BaseModel):
     refresh: bool = True  # True なら削除後に WebSearch で再取得
 
 
+class VectorReembedResult(BaseModel):
+    """再埋め込みの doc_type ごとの結果（SOCAIAGENT-658）。
+
+    replaced: 新しい文書に置き換えた / unchanged: 再取得が空だったので旧データを残した /
+    failed: 再取得か書き込みに失敗したので旧データを残した
+    """
+
+    doc_type: str
+    status: Literal["replaced", "unchanged", "failed"]
+    deleted: int = 0
+    error: Optional[str] = None
+
+
 class VectorReembedResponse(BaseModel):
     status: str
     company: str
@@ -212,3 +225,4 @@ class VectorReembedResponse(BaseModel):
     collections: dict
     refreshed: bool
     sources: List[str] = []
+    results: List[VectorReembedResult] = []

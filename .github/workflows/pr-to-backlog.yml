@@ -9,7 +9,7 @@ name: PR → Backlog 同期
 #       （すでに「PR確認待ち」以降の課題は動かさない）。
 #       `create` イベントは既定ブランチ(main)のワークフローしか動かず反映が遅れるため、
 #       そのブランチ自身のワークフローが動く `push`（created）を使う。
-#   - PR オープン/再オープン/ドラフト解除: ステータスを「PR確認待ち」に変更し、説明に PR URL を追記
+#   - PR オープン/再オープン/ドラフト解除/本文・タイトル編集: ステータスを「PR確認待ち」に変更し、説明に PR URL を追記
 #       ドラフトの間は「処理中」のまま。すでに先へ進んでいる課題は戻さない。
 #   - PR への追加 push            : ステータスは変えず、説明の PR URL だけを更新
 #       （レビュー待ちの課題が push のたびに「処理中」へ戻らないようにする）
@@ -32,14 +32,15 @@ name: PR → Backlog 同期
 # 課題キーの検出場所（優先順）:
 #   1. PR タイトルに書かれた PROJ-N（[ ] / ( ) / 裸書きのいずれでも可）
 #   2. PR 本文の <!-- backlog-key:PROJ-N --> マーカー
-#   3. PR 本文の「Backlog: PROJ-N」記述
+#   3. PR 本文の「Backlog: PROJ-N」記述（コロンは省略可）。無ければ本文中のキーが1種類だけのときそれ
 #   4. PR タイトル・本文の Closes/Fixes/Resolves/Refs/Related/See/Issue #N が指す GitHub Issue
 #   5. ブランチ名に埋め込まれた番号（fix/1374-... / feature/619-... / feature/issue-521）
 #
 #   6. 上の 1〜5 で決まらないとき: PR タイトル・参照する GitHub Issue のタイトルを、
 #      Backlog の課題名と照合する（`feat(scope):` 等の接頭辞・末尾の (#N)・空白を除いた完全一致が
 #      1 件に決まるときだけ採用。複数一致・不一致は採らない）。
-#   それでも決まらないときは黙ってスキップせず、Actions に `::warning::` を残す（ジョブは失敗させない）。
+#   それでも決まらないときは黙ってスキップせず、Actions に `::warning::` を残す。
+#   レビュー待ち（ドラフト以外）の PR ではジョブを失敗させ、PR 上に赤く出す（必須チェックではない）。
 #
 #   4・5 の参照先が Issue ではなく別のPRだった場合は、そのPRの参照先をもう一段たどる
 #   （「#1357 のレビュー指摘」のような追いPRは、元PR経由でしか元Issueに届かない）。
@@ -61,8 +62,15 @@ name: PR → Backlog 同期
 #   BACKLOG_DOMAIN      : ドメイン（省略時は backlog.jp → backlog.com の順に自動判定）
 
 on:
-  pull_request:
-    types: [opened, reopened, ready_for_review, synchronize, closed]
+  # pull_request ではなく pull_request_target を使う。
+  # pull_request は「ベースとコンフリクトしている PR では起動しない」（GitHub の仕様）。
+  # 実際に #2438 / #2443 は作成時にコンフリクトしていて一度も同期されず、
+  # 課題が「PR が紐づいていない」ままになった。
+  # pull_request_target はベースブランチのワークフローで動き、checkout もベース側になる。
+  # PR のタイトル・本文は API から取ってデータとして扱うだけで、PR のコードは実行しない。
+  # edited: 本文やタイトルに後からキーを書き足したとき、次の push を待たずに同期する。
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize, edited, closed]
   # ブランチ作成の検知用。実際に動くのは新しいブランチの最初の push（下の job の if）だけ
   push:
     branches-ignore: [main, develop, release]
@@ -81,7 +89,15 @@ jobs:
     # 「BACKLOG_API_KEY が未設定または空です」で必ず失敗する（GitHubの仕様）。
     # 同期する課題がそもそも無いのでスキップする。
     # workflow_dispatch（手動リカバリ）は actor が人間なので影響しない。
-    if: github.actor != 'dependabot[bot]' && (github.event_name != 'push' || github.event.created)
+    #
+    # pull_request_target は fork の PR にも secrets を渡す。公開リポジトリなので、
+    # 書き込み権限の無い人が任意の課題キーを書いた PR を開閉するだけで課題を動かせてしまう。
+    # このリポジトリ自身のブランチから出た PR だけを同期する。
+    if: >-
+      github.actor != 'dependabot[bot]'
+      && (github.event_name != 'push' || github.event.created)
+      && (github.event_name != 'pull_request_target'
+          || github.event.pull_request.head.repo.full_name == github.repository)
 
     permissions:
       contents: read
@@ -155,10 +171,17 @@ jobs:
               m = re.search(r'<!--\s*backlog-key:(\S+?)\s*-->', body or '')
               if m:
                   return m.group(1)
-              # 3. 本文の「Backlog: PROJ-N」記述
-              m = re.search(rf'[Bb]acklog[：:]\s*({re.escape(PROJ_KEY)}-\d+)', body or '')
+              # 3. 本文の「Backlog: PROJ-N」記述。コロンは省略可。
+              #    「Backlog SOCAIAGENT-479」とコロン無しで書く PR が多く（#2439〜#2449 の8件）、
+              #    コロン必須だったためキーが書いてあるのに同期されていなかった。
+              key_re = re.escape(PROJ_KEY) + r'-\d+'
+              m = re.search(rf'[Bb]acklog\s*[：:]?\s*({key_re})', body or '')
               if m:
                   return m.group(1)
+              # 4. 本文に出てくるキーが1種類だけなら、それを使う（複数なら決めない）。
+              keys = set(re.findall(key_re, body or ''))
+              if len(keys) == 1:
+                  return keys.pop()
               return None
 
           def gh_get_issue_or_pr(number):
@@ -469,17 +492,25 @@ jobs:
           # 追加 push ではステータスを変えない（PR確認待ちの課題を処理中へ戻さない）。
           # どちらも前進のみ。すでに先へ進んだ課題（追いPRなど）は戻さない。
           if ACTION != 'closed':
+              # 閉じた PR の本文を直しても、課題を「PR確認待ち」へ戻さない。
+              if ACTION == 'edited' and pr.get('state') != 'open':
+                  print("閉じた PR の編集のため何もしません。")
+                  sys.exit(0)
+              is_draft = bool(pr.get('draft'))
               if not own_key:
                   warn("課題キーが見つからず、課題名でも特定できません。ステータスを更新しません。"
                        "PR タイトルに [SOCAIAGENT-N]、または本文に「Backlog: SOCAIAGENT-N」を書くと同期されます。")
-                  sys.exit(0)
-              is_draft = bool(pr.get('draft'))
+                  # レビュー待ちの PR は失敗にして PR 上に赤く出す。警告だけでは誰も読まず、
+                  # 毎回「どの課題にも紐づいていません」のズレになっていた。
+                  # 必須チェックではないのでマージは止めない。本文を直せば edited で再実行される。
+                  sys.exit(0 if is_draft else 1)
               if is_draft:
                   target_name = '処理中'
-              elif ACTION in ('opened', 'reopened', 'ready_for_review'):
+              elif ACTION in ('opened', 'reopened', 'ready_for_review', 'edited'):
                   target_name = 'PR確認待ち'
               else:
                   target_name = None
+              failed = False
               if target_name:
                   status_map = load_status_id_map()
                   target_id = status_map.get(target_name)
@@ -493,10 +524,11 @@ jobs:
                       )
                   elif advance_issue_status(BL_BASE, API_KEY, own_key, target_id, target_name) == 'failed':
                       print(f"警告: {own_key} のステータス更新に失敗しました。", file=sys.stderr)
+                      failed = True
               # 説明欄の PR URL は、ステータスが動かなくても常に最新にする
               append_pr_url(own_key, PR_URL)
               print(f"Backlog 課題を反映しました: {own_key} (ステータス: {target_name or '変更なし'}、PR URL を追記)")
-              sys.exit(0)
+              sys.exit(1 if failed else 0)
 
           # ---- PR クローズ（非マージ）: 未対応に戻す ----
           if not PR_MERGED:
@@ -504,8 +536,9 @@ jobs:
                   warn("課題キーが見つからず、課題名でも特定できません。ステータスを更新しません。"
                        "PR タイトルに [SOCAIAGENT-N]、または本文に「Backlog: SOCAIAGENT-N」を書くと同期されます。")
                   sys.exit(0)
-              if update_backlog_status(own_key, 1):
-                  print(f"Backlog 課題を更新しました: {own_key} (ステータス: 未対応)")
+              if not update_backlog_status(own_key, 1):
+                  sys.exit(1)
+              print(f"Backlog 課題を更新しました: {own_key} (ステータス: 未対応)")
               sys.exit(0)
 
           # ---- PR マージ時: マージ先ブランチに応じたステータスへ ----
@@ -532,9 +565,19 @@ jobs:
               sys.exit(0)
 
           print(f"検出した Backlog 課題キー: {', '.join(sorted(keys))}")
+          failed_keys = []
           for key in sorted(keys):
               result = update_merge_status(key, status_id, status_name,
                                            pr_url=PR_URL if key == own_key else None)
               if result == "updated":
                   print(f"Backlog 課題を更新しました: {key} (ステータス: {status_name})")
+              elif result == "failed":
+                  failed_keys.append(key)
+          # 1件の失敗で残りを止めない。全部試してから、失敗があればジョブを赤くする。
+          # 以前は失敗を数えずに成功で終わり、連続マージで API が詰まったときの
+          # 更新漏れが誰にも見えなかった。workflow_dispatch に PR 番号を渡せば再実行できる。
+          if failed_keys:
+              print(f"::error title=Backlog 更新失敗::{', '.join(failed_keys)} を「{status_name}」へ更新できませんでした。"
+                    f"Actions の「PR → Backlog 同期」を pr_number={PR_NUMBER} で手動実行してください。")
+              sys.exit(1)
           PYEOF

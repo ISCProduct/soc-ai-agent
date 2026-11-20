@@ -522,7 +522,6 @@ def test_sanitize_does_not_remove_japanese_instruction():
 
 
 def test_deep_research_wraps_company_and_role(monkeypatch):
-    import main
     from services.research import run_deep_research
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")

@@ -5,6 +5,7 @@ Backend の `/api/es/review`（ES添削タブ）と `/api/es/rewrite`（ESリラ
 どちらもここへ集約され、同じプロンプト・同じ出力スキーマから表示を出し分ける。
 """
 from __future__ import annotations
+from services.prompt_versions import log_prompt_call, prompt_version
 
 from services.model_tiers import es_review_model
 import json
@@ -30,7 +31,8 @@ logger = logging.getLogger("main")
 #   v5 でリライト経路では表示しない指摘出力を省いた(#1532)
 #   v6 で改善文の目標字数を数値で明示する。元より短いときと目標上限を
 #   超えたときは警告し、効果の無かった作り直しは呼ばない(#1606)
-_PROMPT_VERSION = "es_review_v6"
+# 版は services/prompt_versions.py に集めている（SOCAIAGENT-560）
+_PROMPT_VERSION = prompt_version("es_review")
 
 # 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測レートは素材で大きく散る
 # （英数混在 0.20 / 日本語＋英数 0.53 / 漢字かな混在 0.78〜0.81 / ひらがな主体 0.91 /
@@ -180,6 +182,8 @@ def _chat_json(
     # max_tokens が None の段（改善文 / #1564）はキー自体を送らない。null を送っても
     # OpenAI 側は既定扱いだが、OpenAI 互換サーバ（vLLM / llama.cpp）での解釈差を避ける。
     budget_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
+    # 評価・改善文のどちらの呼び出しでも、工程・版・モデルをログに出す（SOCAIAGENT-560）
+    log_prompt_call("es_review", model)
     resp = client.chat.completions.create(
         model=model,
         messages=[
@@ -194,6 +198,22 @@ def _chat_json(
         tally.add(getattr(resp, "usage", None))
     choice = resp.choices[0]
     return (choice.message.content or "", getattr(choice, "finish_reason", "") or "")
+
+
+def _parse_json_object(content: str) -> Dict[str, Any]:
+    """モデル出力をJSONオブジェクトとして読む。空文字は {}。
+
+    JSONでない/オブジェクト(dict)でない出力は ValueError にする。呼び出し側の
+    `.get` が AttributeError で落ちて原因不明の500になるのを避け、
+    _run_es_review の except が「何が悪かったか」付きで返せるようにする。
+    """
+    try:
+        parsed = json.loads(content or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError("model output was not valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"model output was not a JSON object (got {type(parsed).__name__})")
+    return parsed
 
 
 def _call_json_with_retry(
@@ -222,7 +242,7 @@ def _call_json_with_retry(
             client, model, system_prompt, user_prompt, max_tokens, tally
         )
         if finish_reason != "length":
-            return json.loads(content or "{}")
+            return _parse_json_object(content)
         logger.warning(
             "es review output truncated label=%s attempt=%d max_tokens=%s prompt_version=%s",
             label, attempt, max_tokens, _PROMPT_VERSION,

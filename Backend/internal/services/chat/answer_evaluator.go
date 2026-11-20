@@ -191,7 +191,10 @@ func (e *AnswerEvaluator) Evaluate(question *models.PredefinedQuestion, answer s
 	// 2. ネガティブキーワードチェック
 	var negativeKeywords []string
 	if question.NegativeKeywords != "" {
-		json.Unmarshal([]byte(question.NegativeKeywords), &negativeKeywords)
+		if err := json.Unmarshal([]byte(question.NegativeKeywords), &negativeKeywords); err != nil {
+			log.Printf("[AnswerEvaluator] negative keywords unmarshal failed: %v", err)
+			negativeKeywords = nil
+		}
 	}
 
 	for _, keyword := range negativeKeywords {
@@ -206,7 +209,10 @@ func (e *AnswerEvaluator) Evaluate(question *models.PredefinedQuestion, answer s
 	// 3. ポジティブキーワードチェック
 	var positiveKeywords []string
 	if question.PositiveKeywords != "" {
-		json.Unmarshal([]byte(question.PositiveKeywords), &positiveKeywords)
+		if err := json.Unmarshal([]byte(question.PositiveKeywords), &positiveKeywords); err != nil {
+			log.Printf("[AnswerEvaluator] positive keywords unmarshal failed: %v", err)
+			positiveKeywords = nil
+		}
 	}
 
 	matchedCount := 0
@@ -221,7 +227,10 @@ func (e *AnswerEvaluator) Evaluate(question *models.PredefinedQuestion, answer s
 	// 4. スコアリングルールの適用
 	var scoreRules []models.ScoreRule
 	if question.ScoreRules != "" {
-		json.Unmarshal([]byte(question.ScoreRules), &scoreRules)
+		if err := json.Unmarshal([]byte(question.ScoreRules), &scoreRules); err != nil {
+			log.Printf("[AnswerEvaluator] score rules unmarshal failed: %v", err)
+			scoreRules = nil
+		}
 	}
 
 	for _, rule := range scoreRules {
@@ -248,7 +257,10 @@ func (e *AnswerEvaluator) Evaluate(question *models.PredefinedQuestion, answer s
 	// 6. 追加質問が必要かチェック
 	var followUpRules []models.FollowUpRule
 	if question.FollowUpRules != "" {
-		json.Unmarshal([]byte(question.FollowUpRules), &followUpRules)
+		if err := json.Unmarshal([]byte(question.FollowUpRules), &followUpRules); err != nil {
+			log.Printf("[AnswerEvaluator] follow-up rules unmarshal failed: %v", err)
+			followUpRules = nil
+		}
 	}
 
 	for _, rule := range followUpRules {
