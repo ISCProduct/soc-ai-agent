@@ -32,6 +32,33 @@ describe('GlobalNavMenu', () => {
     expect(screen.queryByRole('button', { name: 'メニューを開く' })).not.toBeInTheDocument()
   })
 
+  // #2222 のレビュー: RootLayout の部品は /login でもマウントされたままで、ログインは router.push（SPA の遷移）。
+  // 同じマウントのまま、パスが変わったら判定し直すこと
+  it('ログインして別の画面へ移ると、同じマウントのままメニューボタンが出る', () => {
+    window.localStorage.clear()
+    mockPathname = '/privacy'
+    const { rerender } = render(<GlobalNavMenu />)
+    expect(screen.queryByRole('button', { name: 'メニューを開く' })).not.toBeInTheDocument()
+
+    window.localStorage.setItem('user', JSON.stringify(STORED_USER)) // saveAuth
+    mockPathname = '/results' // router.push
+    rerender(<GlobalNavMenu />)
+    expect(screen.getByRole('button', { name: 'メニューを開く' })).toBeInTheDocument()
+  })
+
+  it('ログアウトして別の画面へ移ると、同じマウントのままメニューボタンが消える', () => {
+    mockPathname = '/results'
+    const { rerender } = render(<GlobalNavMenu />)
+    expect(screen.getByRole('button', { name: 'メニューを開く' })).toBeInTheDocument()
+
+    // logout() と同じく、利用者の情報を消す（最初の読み込みで localStorage から sessionStorage へ移っている）
+    window.sessionStorage.clear()
+    window.localStorage.clear()
+    mockPathname = '/privacy'
+    rerender(<GlobalNavMenu />)
+    expect(screen.queryByRole('button', { name: 'メニューを開く' })).not.toBeInTheDocument()
+  })
+
   it('ログイン済みなら /privacy でもメニューボタンを出す', () => {
     mockPathname = '/privacy'
     render(<GlobalNavMenu />)
