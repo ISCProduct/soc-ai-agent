@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -136,25 +137,76 @@ def bl_request(
         path = path_only
 
     url = build_url(base, path, api_key, extra)
-    req = urllib.request.Request(url, data=body, method=method.upper())
-    for k, v in headers.items():
-        req.add_header(k, v)
+    m = method.upper()
+    global LAST_ERROR_CODE
+    LAST_ERROR_CODE = None
+    for attempt in range(len(RETRY_WAITS) + 1):
+        req = urllib.request.Request(url, data=body, method=m)
+        for k, v in headers.items():
+            req.add_header(k, v)
+        last = attempt == len(RETRY_WAITS)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                raw = r.read()
+                return json.loads(raw) if raw else None
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode(errors="replace")
+            if not last and _retryable(m, e.code):
+                wait = _retry_wait(e, RETRY_WAITS[attempt])
+                print(f"Backlog API {e.code}（{m} {path}）: {wait} 秒待って再試行します", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            return _fail(e.code, err_body, m, path, fatal)
+        except (urllib.error.URLError, TimeoutError) as e:
+            # 届いたか分からない POST は再送しない（課題が二重に作られる）
+            if not last and m != "POST":
+                print(f"Backlog API 通信エラー（{m} {path}）: {e}。再試行します", file=sys.stderr)
+                time.sleep(RETRY_WAITS[attempt])
+                continue
+            return _fail(0, str(e), m, path, fatal)
+    return None
+
+
+# 連続マージやプロモーションPRのマージでは、短時間に多数の課題を更新して
+# レート制限(429)や一時的な 5xx に当たる。以前はここで即 None を返し、
+# 呼び出し側は警告だけ出して成功で終わるため、更新漏れが黙って残っていた。
+RETRY_WAITS = (2, 10, 30)
+RATE_LIMIT_WAIT_MAX = 60
+# 直近の bl_request が失敗したときの HTTP ステータス（成功・未呼び出しは None、通信エラーは 0）。
+# 戻り値の None だけでは「課題が削除済み(404)」と「一時的な失敗」を区別できないため。
+LAST_ERROR_CODE: int | None = None
+
+
+def _retryable(method: str, code: int) -> bool:
+    """429 は処理されていないので何でも再送してよい。5xx は冪等な GET/PATCH だけ。"""
+    if code == 429:
+        return True
+    return code >= 500 and method in ("GET", "PATCH")
+
+
+def _retry_wait(e: urllib.error.HTTPError, default: int) -> int:
+    """Backlog が返す X-RateLimit-Reset（解除時刻の UNIX 秒）があればそこまで待つ。"""
+    reset = (e.headers or {}).get("X-RateLimit-Reset") if e.code == 429 else None
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            raw = r.read()
-            return json.loads(raw) if raw else None
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode(errors="replace")
-        print(f"Backlog API エラー {e.code}: {err_body}", file=sys.stderr)
-        print(f"リクエスト: {method.upper()} {path}", file=sys.stderr)
-        if e.code == 401:
-            print(
-                "対処: BACKLOG_API_KEY が無効か期限切れです。GitHub Secrets を更新してください。",
-                file=sys.stderr,
-            )
-        if fatal:
-            sys.exit(1)
-        return None
+        return max(1, min(RATE_LIMIT_WAIT_MAX, int(reset) - int(time.time()) + 1))
+    except (TypeError, ValueError):
+        return default
+
+
+def _fail(code: int, err_body: str, method: str, path: str, fatal: bool):
+    """再試行しても失敗したときの報告。code=0 は通信エラー。"""
+    global LAST_ERROR_CODE
+    LAST_ERROR_CODE = code
+    print(f"Backlog API エラー {code}: {err_body}", file=sys.stderr)
+    print(f"リクエスト: {method} {path}", file=sys.stderr)
+    if code == 401:
+        print(
+            "対処: BACKLOG_API_KEY が無効か期限切れです。GitHub Secrets を更新してください。",
+            file=sys.stderr,
+        )
+    if fatal:
+        sys.exit(1)
+    return None
 
 
 def load_dotenv_if_missing(names: tuple[str, ...], path: str = ".env") -> None:
@@ -341,12 +393,30 @@ def advance_issue_status(
     call = request or (lambda method, path, data=None: bl_request(base, api_key, method, path, data, fatal=False))
 
     issue = call("GET", f"/issues/{issue_key}")
-    current_name = ((issue or {}).get("status") or {}).get("name", "")
+    if issue is None and LAST_ERROR_CODE == 404:
+        # 削除済みの課題。昇格PRはコミット範囲から過去のキーまで拾うので普通に出てくる。
+        # 同期すべきものが無いだけなので失敗にしない（失敗にすると本番デプロイ後の同期が毎回赤くなる）。
+        print(f"{issue_key}: 課題が削除されているため対象外")
+        return "skipped"
+    if issue is None:
+        # 今のステータスが分からないまま書くと、完了済みの課題を
+        # 「ステージング環境反映」へ戻しかねない。失敗として返し、ジョブを赤くする
+        # （翌朝の backlog-sync-audit もマージ済みの遅れを自動で進める）。
+        print(f"{issue_key}: 現在のステータスを取得できないため更新しません", file=sys.stderr)
+        return "failed"
+    current_name = (issue.get("status") or {}).get("name", "")
     if current_name and not is_status_advance(current_name, status_name):
         print(f"{issue_key}: 既に '{current_name}' のため '{status_name}' へは戻さない")
         return "skipped"
 
     if call("PATCH", f"/issues/{issue_key}", {"statusId": status_id}) is None:
+        # 本番デプロイ後の同期は PR ごとの同期を一斉に起動するので、同じ課題を別の実行が
+        # 先に同じステータスへ進めていることがある。Backlog はその無変更 PATCH を
+        # 400 code 7 で拒否する。読み直して既に目標どおりなら成功とみなす。
+        now = call("GET", f"/issues/{issue_key}")
+        if ((now or {}).get("status") or {}).get("name") == status_name:
+            print(f"{issue_key}: 既に '{status_name}' になっていた（並行実行が先に更新）")
+            return "skipped"
         return "failed"
     return "updated"
 
@@ -476,16 +546,15 @@ if __name__ == "__main__":
     assert advance_issue_status("b", "k", "X-1", 4, "完了", request=_req("リリース待ち")) == "updated"
     assert ("PATCH", "/issues/X-1", {"statusId": 4}) in sent, f"前進時に PATCH が無い: {sent}"
 
-    # 現在ステータスを取得できないときは従来どおり更新する。
-    # 取得失敗を理由に同期が止まる方が困る。
+    # 現在ステータスを取得できないときは書かない（後退させないため）。failed にしてジョブを赤くする。
     sent.clear()
 
     def _req_get_failed(method, path, data=None):
         sent.append((method, path, data))
         return None if method == "GET" else {}
 
-    assert advance_issue_status("b", "k", "X-1", 4, "完了", request=_req_get_failed) == "updated"
-    assert ("PATCH", "/issues/X-1", {"statusId": 4}) in sent, f"取得失敗時に PATCH が無い: {sent}"
+    assert advance_issue_status("b", "k", "X-1", 4, "完了", request=_req_get_failed) == "failed"
+    assert all(m == "GET" for m, _, _ in sent), f"取得失敗時に PATCH を送っている: {sent}"
 
     # PATCH が失敗したら failed を返す（成功したことにしない）
     sent.clear()
@@ -495,6 +564,30 @@ if __name__ == "__main__":
         return {"status": {"name": "リリース待ち"}} if method == "GET" else None
 
     assert advance_issue_status("b", "k", "X-1", 4, "完了", request=_req_patch_failed) == "failed"
+
+    # 削除済みの課題(404)は失敗にしない。PATCH も送らない
+    sent.clear()
+
+    def _req_deleted(method, path, data=None):
+        sent.append((method, path, data))
+        globals()["LAST_ERROR_CODE"] = 404
+        return None
+
+    assert advance_issue_status("b", "k", "X-1", 4, "完了", request=_req_deleted) == "skipped"
+    assert all(m == "GET" for m, _, _ in sent), f"削除済みに PATCH を送っている: {sent}"
+    globals()["LAST_ERROR_CODE"] = None
+
+    # 並行実行が先に同じステータスへ進めていた(PATCH が 400 code 7)なら成功扱い
+    seen_gets = []
+
+    def _req_raced(method, path, data=None):
+        if method == "GET":
+            seen_gets.append(path)
+            return {"status": {"name": "リリース待ち" if len(seen_gets) == 1 else "完了"}}
+        return None
+
+    assert advance_issue_status("b", "k", "X-1", 4, "完了", request=_req_raced) == "skipped"
+    assert len(seen_gets) == 2, "PATCH 失敗後に読み直していない"
 
     # set_issue_status_unless_same: 同じステータスなら PATCH を送らない。
     # 無変更 PATCH は Backlog が 400 code 7 で拒否し、PR URL 追記まで巻き添えになる。
@@ -588,6 +681,60 @@ if __name__ == "__main__":
     assert resolve_status_id("b", "k", "P", "完了", 4, request=req) == 4
 
     globals()["bl_request"] = _orig
+
+    # --- 429 / 5xx / 通信エラーの再試行 ---
+    import io
+
+    class _Resp:
+        def __init__(self, raw):
+            self.raw = raw
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            return self.raw
+
+    def _err(code, hdrs=None):
+        return urllib.error.HTTPError("u", code, "x", hdrs or {}, io.BytesIO(b"{}"))
+
+    def _run(method, outcomes):
+        """outcomes を順に返す urlopen で bl_request を呼び、(戻り値, 試行回数, 待ち秒) を返す"""
+        seq, waits = list(outcomes), []
+        orig_open, orig_sleep = urllib.request.urlopen, time.sleep
+        def _open(req, timeout=None):
+            o = seq.pop(0)
+            if isinstance(o, Exception):
+                raise o
+            return o
+
+        urllib.request.urlopen = _open
+        time.sleep = waits.append
+        try:
+            n = len(seq)
+            res = bl_request("https://x/api/v2", "K", method, "/issues/X-1", fatal=False)
+            return res, n - len(seq), waits
+        finally:
+            urllib.request.urlopen, time.sleep = orig_open, orig_sleep
+
+    ok = _Resp(b'{"ok": 1}')
+    # 連続マージで 429 に当たっても、待ってから成功させる
+    assert _run("PATCH", [_err(429), ok]) == ({"ok": 1}, 2, [2])
+    # 解除時刻があればそこまで待つ（上限 60 秒）
+    reset = {"X-RateLimit-Reset": str(int(time.time()) + 5)}
+    res, n, waits = _run("GET", [_err(429, reset), ok])
+    assert res == {"ok": 1} and 5 <= waits[0] <= 6, waits
+    assert _run("GET", [_err(429, {"X-RateLimit-Reset": str(int(time.time()) + 999)}), ok])[2] == [60]
+    # 一時的な 5xx・通信エラーも再試行する
+    assert _run("GET", [_err(503), urllib.error.URLError("reset"), ok])[:2] == ({"ok": 1}, 3)
+    # 再試行し尽くしたら None（呼び出し側が failed にする）
+    assert _run("PATCH", [_err(503)] * 4) == (None, 4, [2, 10, 30])
+    # 400 などは再試行しない
+    assert _run("PATCH", [_err(400)])[:2] == (None, 1)
+    # POST は 5xx・通信エラーで再送しない（課題の二重作成を防ぐ）。429 は再送してよい
+    assert _run("POST", [_err(500)])[:2] == (None, 1)
+    assert _run("POST", [urllib.error.URLError("x")])[:2] == (None, 1)
+    assert _run("POST", [_err(429), ok])[:2] == ({"ok": 1}, 2)
     assert normalize_space_id("https://myspace.backlog.jp") == "myspace"
     assert build_url("https://x/api/v2", "/issues?a=b", "K").count("?") == 1
     print("OK")

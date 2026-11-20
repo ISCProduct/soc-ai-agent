@@ -46,7 +46,7 @@ func TestWriteBackup_RoundTripAndNeverOverwrites(t *testing.T) {
 }
 
 func TestSourceOf(t *testing.T) {
-	if sourceOf("website") != "website" || sourceOf("corporate_number") != "corporate_registry" || sourceOf("name_match") != "corporate_registry" {
+	if sourceOf("website") != "website" || sourceOf("gbizinfo") != "gbizinfo" || sourceOf("corporate_number") != "corporate_registry" || sourceOf("name_match") != "corporate_registry" {
 		t.Fatal("出どころの対応")
 	}
 }
