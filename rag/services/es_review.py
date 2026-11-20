@@ -167,6 +167,7 @@ class _UsageTally:
             prompt_tokens=self.prompt_tokens,
             completion_tokens=self.completion_tokens,
             calls=self.calls,
+            prompt_version=_PROMPT_VERSION,
         )
 
 
