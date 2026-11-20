@@ -72,6 +72,14 @@ func (m *InterviewServiceMock) GetTrend(userID uint, limit int) ([]interview.Int
 	return args.Get(0).([]interview.InterviewTrendPoint), args.Error(1)
 }
 
+func (m *InterviewServiceMock) CompareAxes(userID, baseSessionID, targetSessionID uint) (*interview.AxisComparison, error) {
+	args := m.Called(userID, baseSessionID, targetSessionID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*interview.AxisComparison), args.Error(1)
+}
+
 func (m *InterviewServiceMock) SendReportEmail(userID, sessionID uint) error {
 	return m.Called(userID, sessionID).Error(0)
 }

@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
+	"gorm.io/gorm"
 )
 
 type InterviewController struct {
@@ -65,6 +66,49 @@ func (c *InterviewController) GetTrend(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"points": points,
 	})
+}
+
+// CompareAxes GET /api/interviews/axis-comparison?base=&target=
+// 2回の面接について、評価軸ごとの差分を返す。
+func (c *InterviewController) CompareAxes(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	baseID, err := queryUint(ctx, "base")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "base にセッションIDを指定してください")
+	}
+	targetID, err := queryUint(ctx, "target")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "target にセッションIDを指定してください")
+	}
+	result, err := c.interviewService.CompareAxes(userID, baseID, targetID)
+	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		if errors.Is(err, interviewsvc.ErrInvalidComparison) {
+			return echo.NewHTTPError(http.StatusBadRequest, "異なる2つのセッションを指定してください")
+		}
+		if errors.Is(err, interviewsvc.ErrReportNotReady) {
+			return echo.NewHTTPError(http.StatusNotFound, "report not yet available")
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		}
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, result)
+}
+
+func queryUint(ctx echo.Context, key string) (uint, error) {
+	raw := ctx.QueryParam(key)
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || id == 0 {
+		return 0, err
+	}
+	return uint(id), nil
 }
 
 // GetReport GET /api/interviews/:id/report

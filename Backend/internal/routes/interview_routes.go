@@ -13,8 +13,9 @@ func SetupInterviewRoutes(api *echo.Group, interviewController *interviewcontrol
 	// 予算は面接を始める時点で判定する。開始後の発話や終了を止めると体験が壊れるので、
 	// turn / utterances / finish には付けない。
 	interviews := api.Group("/interviews", EchoUserAuth(userSecret, access, orgs))
-	// /trend は /:id より先にEchoのルーターが解決するため先に登録する
+	// /trend と /axis-comparison は /:id より先にEchoのルーターが解決するため先に登録する
 	interviews.GET("/trend", interviewController.GetTrend)
+	interviews.GET("/axis-comparison", interviewController.CompareAxes)
 	interviews.GET("", interviewController.List)
 	interviews.POST("", interviewController.Create)
 	interviews.GET("/:id", interviewController.Get)
