@@ -256,16 +256,16 @@ type reportCandidate struct {
 // 第2戻り値は照合対象にした項目の総数(ログ用)。
 func checkReportEvidence(candidate reportPayload, utterances []models.InterviewUtterance, spoken SpokenEvidence) (reportCandidate, int) {
 	ev := ValidateEvidenceReferences(candidate.Evidence, candidate.EvidenceUtteranceIDs, utterances)
-	te := ValidateEvidence(teacherDetailedEvidence(candidate), spoken)
+	te := ValidateTeacherEvidence(teacherDetailedEvidence(candidate), spoken)
 	c := reportCandidate{
 		payload:   candidate,
 		evidence:  ev.EvidenceCheck,
 		teacher:   te,
-		unmatched: append(slices.Clone(ev.EvidenceCheck.Unmatched), prefixKeys("teacher.", te.Unmatched)...),
-		matched:   ev.EvidenceCheck.Matched() + te.Matched(),
+		unmatched: append(slices.Clone(ev.Unmatched), prefixKeys("teacher.", te.Unmatched)...),
+		matched:   ev.Matched() + te.Matched(),
 	}
 	c.payload.EvidenceUtteranceIDs = evidenceIDsAsPointers(ev.UtteranceIDs)
-	return c, ev.EvidenceCheck.Checked + te.Checked
+	return c, ev.Checked + te.Checked
 }
 
 // generateReportPayload は LLM に講評を作らせ、保存してよい内容を返す。
@@ -489,9 +489,15 @@ func (s *InterviewService) SendReportEmail(userID, sessionID uint) error {
 	}
 
 	var scores map[string]int
-	json.Unmarshal([]byte(report.ScoresJSON), &scores)
+	if err := json.Unmarshal([]byte(report.ScoresJSON), &scores); err != nil {
+		log.Printf("[InterviewReport] scores unmarshal failed session_id=%d: %v", sessionID, err)
+		scores = map[string]int{}
+	}
 	var evidence map[string]string
-	json.Unmarshal([]byte(report.EvidenceJSON), &evidence)
+	if err := json.Unmarshal([]byte(report.EvidenceJSON), &evidence); err != nil {
+		log.Printf("[InterviewReport] evidence unmarshal failed session_id=%d: %v", sessionID, err)
+		evidence = map[string]string{}
+	}
 
 	summary := strings.Split(strings.TrimSpace(report.SummaryText), "\n")
 	var filtered []string

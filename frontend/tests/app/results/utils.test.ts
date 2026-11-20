@@ -5,6 +5,7 @@ import type { CapitalRelation } from '@/lib/company/data'
 import type { CategoryScores } from '@/app/results/types'
 import {
   buildEmptyRecommendationsMessage,
+  emptyRecommendationsAction,
   buildEsRewriteQuery,
   buildInterviewQuery,
   collectRelatedCompanyIds,
@@ -108,12 +109,16 @@ describe('mapRecommendationToCompany', () => {
 })
 
 describe('buildEmptyRecommendationsMessage', () => {
-  it('デフォルトメッセージを返す', () => {
-    expect(buildEmptyRecommendationsMessage()).toContain('データがありません')
+  // #2220: 「データがありません」だけでは何が無いのか分からない。なぜか・次にすることを言う
+  it('デフォルトメッセージは、計算待ちであることと次にすることを言う', () => {
+    const message = buildEmptyRecommendationsMessage()
+    expect(message).not.toContain('データがありません')
+    expect(message).toContain('読み込み直して')
+    expect(message).toContain('診断チャットを続けて')
   })
 
   it('insufficient_user_scores の場合は根拠不足メッセージ', () => {
-    expect(buildEmptyRecommendationsMessage('insufficient_user_scores')).toContain('根拠が不足')
+    expect(buildEmptyRecommendationsMessage('insufficient_user_scores')).toContain('回答の根拠が足りません')
   })
 
   it('insufficient_company_data の場合は企業データ不足メッセージ', () => {
@@ -139,6 +144,16 @@ describe('buildEmptyRecommendationsMessage', () => {
     expect(message).not.toContain('企業数')
     expect(message).not.toContain('プロファイル数')
     expect(message).not.toContain('undefined')
+  })
+})
+
+describe('emptyRecommendationsAction', () => {
+  it('根拠が足りないときは診断チャットを続ける、それ以外は読み込み直す', () => {
+    expect(emptyRecommendationsAction('insufficient_user_scores')).toBe('chat')
+    expect(emptyRecommendationsAction('insufficient_company_data')).toBe('reload')
+    expect(emptyRecommendationsAction('insufficient_company_profiles')).toBe('reload')
+    expect(emptyRecommendationsAction('matching_results_empty')).toBe('reload')
+    expect(emptyRecommendationsAction()).toBe('reload')
   })
 })
 

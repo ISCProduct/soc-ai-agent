@@ -17,10 +17,13 @@ jest.mock('next/navigation', () => ({
 describe('GlobalNavMenu とAI面接セッションの連動 (#1569)', () => {
   beforeEach(() => {
     setInterviewSessionActive(false)
+    // メニューはログイン中の学生にだけ出す（#2222）
+    window.localStorage.setItem('user', JSON.stringify({ user_id: 1, email: 's@example.com', name: 'テスト', is_guest: false }))
   })
 
   afterEach(() => {
     setInterviewSessionActive(false)
+    window.localStorage.clear()
   })
 
   it('セッション画面表示中(setInterviewSessionActive(true))はFabを描画しない', () => {

@@ -644,10 +644,10 @@ func (s *APICostService) formatModelBreakdown(monthID string) string {
 	var b strings.Builder
 	for i, r := range rows {
 		if i >= maxModels {
-			b.WriteString(fmt.Sprintf("  ... and %d more\n", len(rows)-maxModels))
+			fmt.Fprintf(&b, "  ... and %d more\n", len(rows)-maxModels)
 			break
 		}
-		b.WriteString(fmt.Sprintf("  - %s: $%.4f (%d calls)\n", r.Model, r.TotalCostUSD, r.CallCount))
+		fmt.Fprintf(&b, "  - %s: $%.4f (%d calls)\n", r.Model, r.TotalCostUSD, r.CallCount)
 	}
 	return b.String()
 }
