@@ -8,7 +8,9 @@ name: Backlog 通知 (commit / PR)
 #   BACKLOG_SPACE_ID  : スペースID（例: myspace ← myspace.backlog.jp の場合）
 #   BACKLOG_PROJECT_KEY: プロジェクトキー（例: PROJ）
 #   BACKLOG_API_KEY   : Backlog のアカウント設定で発行した APIキー
-#   BACKLOG_DOMAIN    : 任意。backlog.jp 以外を利用する場合のドメイン
+#   BACKLOG_DOMAIN    : 任意。省略時は backlog.jp → backlog.com の順に自動判定
+#                       （他の Backlog 連携 WF と同じ。v6 移行時に .jp 固定のまま漏れ、
+#                       backlog.com スペースで notify だけ Not Found になっていた）
 
 on:
   push:
@@ -25,15 +27,40 @@ jobs:
     # 通知する対象がそもそも無いのでスキップする。
     if: github.actor != 'dependabot[bot]'
 
+    permissions:
+      contents: read
+
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            .github/scripts/backlog_client.py
+          sparse-checkout-cone-mode: false
+
       - name: Backlog ホスト名を解決
         id: resolve
         env:
           BACKLOG_SPACE_ID: ${{ secrets.BACKLOG_SPACE_ID }}
           BACKLOG_DOMAIN: ${{ secrets.BACKLOG_DOMAIN }}
+          BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
         run: |
-          domain="${BACKLOG_DOMAIN:-backlog.jp}"
-          echo "host=${BACKLOG_SPACE_ID}.${domain}" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import os
+          import sys
+
+          sys.path.insert(0, ".github/scripts")
+          from backlog_client import env_optional, normalize_space_id, resolve_bl_base
+
+          space_id = normalize_space_id(os.environ["BACKLOG_SPACE_ID"])
+          api_key = os.environ["BACKLOG_API_KEY"]
+          domain = env_optional("BACKLOG_DOMAIN")
+          _, resolved = resolve_bl_base(space_id, api_key, domain)
+          host = f"{space_id}.{resolved}"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"host={host}\n")
+          print(f"host={host}", flush=True)
+          PY
 
       - uses: bicstone/backlog-notify@v6
         with:
