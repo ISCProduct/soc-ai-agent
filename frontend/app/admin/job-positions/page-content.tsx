@@ -26,6 +26,7 @@ import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminListCard } from '@/components/admin/AdminListCard'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { isCompanyUnpublished } from '@/lib/company/draft'
+import { withStableKeys } from '@/lib/list-keys'
 import styles from './page-content.module.css'
 
 type JobPosition = {
@@ -214,8 +215,8 @@ function JobPositionCard({
                 必須スキル
               </Typography>
               <Stack direction="row" flexWrap="wrap" gap={0.5}>
-                {reqSkills.map((s, i) => (
-                  <Chip key={i} label={s} size="small" color="primary" variant="outlined" />
+                {withStableKeys(reqSkills).map(({ key, item: s }) => (
+                  <Chip key={key} label={s} size="small" color="primary" variant="outlined" />
                 ))}
               </Stack>
             </Box>
@@ -228,8 +229,8 @@ function JobPositionCard({
                 歓迎スキル
               </Typography>
               <Stack direction="row" flexWrap="wrap" gap={0.5}>
-                {prefSkills.map((s, i) => (
-                  <Chip key={i} label={s} size="small" variant="outlined" />
+                {withStableKeys(prefSkills).map(({ key, item: s }) => (
+                  <Chip key={key} label={s} size="small" variant="outlined" />
                 ))}
               </Stack>
             </Box>
