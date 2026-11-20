@@ -331,7 +331,7 @@ components:
             - challenge_seeking
             - detail_orientation
             - communication_skill
-        Score: { type: integer, minimum: 0, maximum: 100 }
+        Score: { type: number, minimum: 0, maximum: 100, description: 小数第2位まで（DECIMAL(5,2)）。表示側で丸める }
 
     PhaseProgress:
       type: object

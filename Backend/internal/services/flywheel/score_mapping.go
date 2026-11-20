@@ -206,45 +206,30 @@ func NewInterviewTranscriptStats(utterances []models.InterviewUtterance) Intervi
 // 6段階しか取れなかった値が rubric 1〜4 では帯ごとに11段階になる。
 // rubric 0 と 5 は 0〜100 の clamp に当たるため段階数が減る（#1555）。
 //
-// この分解能が保存値に残るのは初回書き込み（既存行なし＝SetScore の絶対値パス）だけで、
-// 2回目以降は blendScore で ×0.3 され、score カラムが int なので delta の整数化でさらに潰れる。
-// 詳細は docs/wiki/scoring.md §6.3。
-func mapInterviewScore(rubric int, evidence string, stats InterviewTranscriptStats) int {
+// 返す値は小数第2位まで（DECIMAL(5,2)）。整数に丸めないので、移動平均（×0.3）を通っても
+// 寄与が保存値から消えない（SOCAIAGENT-513）。詳細は docs/wiki/scoring.md §6.3。
+func mapInterviewScore(rubric int, evidence string, stats InterviewTranscriptStats) float64 {
 	base := clampInt(rubric, 0, 5) * rubricStep
 	// signal 0.5 を無補正の基準点にする。
 	adjusted := float64(base) + (interviewSignal(evidence, stats)-0.5)*float64(interviewAdjustSpan)
-	return clampInt(int(math.Round(adjusted)), 0, 100)
+	return round2(math.Max(0, math.Min(100, adjusted)))
 }
+
+// round2 は小数第2位で丸める（user_weight_scores.score は DECIMAL(5,2)）。
+func round2(v float64) float64 { return math.Round(v*100) / 100 }
 
 // interviewSignal は補正量の元になる 0〜1 の連続量を返す。
 //
 // evidence は「有無と長さ」だけを見る。内容が実際の発話と一致しているかの照合は
-// #1527 で実装中で、現時点の evidence には未検証のものが混ざる。
-// 内容の正しさに依存させると、その未検証の文章がスコアを動かしてしまうため、
-// #1527 がマージされるまでは長さのみを使う。
+// 別途（#1527）行い、捏造と判定された evidence は空文字になって渡る。
 //
 // evidence・発話統計のどちらも「欠損は中立(0.5)」で揃える（#1554）。
-// evidence を signal から外す選択もあったが、外すと補正が回答量だけになり
-// #1528 で増やした分解能が半分落ちるので、欠損の扱いを揃える方を採った。
 //
-// # 既知の歪み: 短い evidence は無記録より最大3点低く出る
-//
-// 欠損を中立(0.5)に置く以上、evidence が 1〜59文字のときは
-// signalRatio < 0.5 となり「1文字も書かなかったレポート」より低く出る。
-// 実測（rubric=3・発話十分）: 0文字=62 / 1文字=59 / 30文字=61 / 60文字=62 / 120文字=65。
-// 境界は TestMapInterviewScore_ShortEvidenceIsBelowMissing で固定している。
-//
-// これを承知で残す判断の理由（#1558 レビュー）:
-//   - 非単調性は「未知は中央値で補完／観測された低い値はそのまま低い」という
-//     補完の性質そのもので、中立値をどこに置いても消えない。
-//     「欠損時は重みごと落として補正幅を縮める」案でも 1文字(59) < 無記録(62) は残る。
-//   - 消すには観測値にも下限0.5を入れるしかないが、それは evidence 0〜59文字
-//     （簡潔な引用が実際に収まるレンジ）の分解能を丸ごと捨て、
-//     補正幅も -2〜+5 の非対称になる。#1528 の目的である分解能を、
-//     #1554（記録の不備で下げない）の修正に混ぜて削りたくない。
-//   - 歪みは最大3点で、移動平均(×0.3)と int 量子化を通ると保存値では最大1点。
-//   - そもそも evidence の長さは LLM の引用の冗長さでもある。
-//     #1527 の内容照合が入った時点で evidence の評価軸自体を見直す。
+// evidence は単調にする（#1558）: 空=0.5、非空=0.5+0.5*min(len/120,1)。
+// 非空は常に空以上なので、短い本物の引用が「何も書かなかった」より低く出ることはなく、
+// 捏造で空文字になった方が得になる逆転も起きない。長いほど単調に上がる。
+// 代わりに evidence 由来の減点側（旧: 空より最大3点低い領域）は無くなり、
+// evidence の補正は 0 〜 +0.6*0.5*interviewAdjustSpan 点に収まる。
 func interviewSignal(evidence string, stats InterviewTranscriptStats) float64 {
 	// evidence が空なのは「根拠の無い面接」ではなく「レポートに記録が無い」。
 	// LLM が evidence を省いた場合（ValidateRubricScores はスコアだけを見る）や
@@ -252,7 +237,7 @@ func interviewSignal(evidence string, stats InterviewTranscriptStats) float64 {
 	// どれだけ良い面接でも signal の上限が 0.4 になり全カテゴリが一律で下がる。
 	ev := 0.5
 	if trimmed := strings.TrimSpace(evidence); trimmed != "" {
-		ev = signalRatio(len([]rune(trimmed)), evidenceFullRunes)
+		ev = 0.5 + 0.5*signalRatio(len([]rune(trimmed)), evidenceFullRunes)
 	}
 
 	if stats.UserTurns <= 0 {
@@ -282,9 +267,9 @@ const (
 )
 
 // blendScore は既存値と新しい値を移動平均で混ぜる（0〜100 に収める）。
-func blendScore(existing, newValue int) int {
-	blended := float64(existing)*movingAvgExistingWeight + float64(newValue)*movingAvgNewWeight
-	return clampInt(int(math.Round(blended)), 0, 100)
+func blendScore(existing, newValue float64) float64 {
+	blended := existing*movingAvgExistingWeight + newValue*movingAvgNewWeight
+	return round2(math.Max(0, math.Min(100, blended)))
 }
 
 // ── ドライラン ───────────────────────────────────────────────────────────
@@ -319,7 +304,7 @@ func FormatScoreMappingDryRun() string {
 			{200, InterviewTranscriptStats{UserTurns: 10, AvgAnswerRunes: 120}},
 		} {
 			evidence := strings.Repeat("あ", c.evidenceRunes)
-			fmt.Fprintf(&b, "%6d %14d %14d %6d | %3d | %3d\n",
+			fmt.Fprintf(&b, "%6d %14d %14d %6d | %3d | %6.2f\n",
 				rubric, c.evidenceRunes, c.stats.AvgAnswerRunes, c.stats.UserTurns,
 				rubric*rubricStep, mapInterviewScore(rubric, evidence, c.stats))
 		}
