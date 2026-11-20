@@ -118,7 +118,9 @@ def test_set_and_get_cached_documents_roundtrip():
     assert collection.query.call_count >= 2
 
 
-def test_query_with_where_falls_back_to_scoped_filter_on_error():
+def test_query_with_where_falls_back_to_scoped_filter_on_error(monkeypatch):
+    # where の中身そのものを比べるので、TTL 条件（SOCAIAGENT-659）は切って確かめる
+    monkeypatch.setenv("RAG_TTL_WHERE", "0")
     # whereクエリ自体が例外を投げる環境でも、フィルタを完全に外すのではなく
     # fallback_where(companyのみ)でスコープを維持したまま再試行すること。
     collection = MagicMock()
@@ -147,7 +149,9 @@ def test_query_with_where_falls_back_to_scoped_filter_on_error():
     assert docs == ["Acme社のメモ"]
 
 
-def test_query_with_where_never_falls_back_to_unfiltered_query():
+def test_query_with_where_never_falls_back_to_unfiltered_query(monkeypatch):
+    # where の中身そのものを比べるので、TTL 条件（SOCAIAGENT-659）は切って確かめる
+    monkeypatch.setenv("RAG_TTL_WHERE", "0")
     # company scopeを維持できない場合、他社データ混入を避けるため
     # フィルタ無しの無絞り込み検索は一切行わずキャッシュミス(空リスト)を返すこと。
     collection = MagicMock()

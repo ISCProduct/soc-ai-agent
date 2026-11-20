@@ -325,6 +325,29 @@ def _build_where(filters: Dict[str, str]) -> Dict[str, Any]:
     return {"$and": [{k: v} for k, v in filters.items()]}
 
 
+def ttl_where_enabled() -> bool:
+    """RAG_TTL_WHERE=0 なら TTL を where で絞らない（後段の _is_fresh だけにする。切り戻し用）。"""
+    return os.getenv("RAG_TTL_WHERE", "1").strip().lower() not in ("0", "false", "off")
+
+
+def _with_ttl(where: Dict[str, Any], ttl_seconds: int = CACHE_TTL_SECONDS) -> Dict[str, Any]:
+    """where に「取得時刻（fetched_at_ts）が TTL 内」の条件を足す（SOCAIAGENT-659）。
+
+    以前は n_results 件を取ってから期限切れを捨てていたので、期限切れの文書が類似度の上位を占めると、
+    有効な文書があっても返らなかった。検索の条件で絞れば、有効な文書が n_results 件まで返る。
+    fetched_at_ts（数値）が無い文書は条件に当たらず、古い扱いになる（既存の文書は
+    scripts/backfill_fetched_at_ts.py で先に補完すること）。
+    """
+    if ttl_seconds <= 0 or not ttl_where_enabled():
+        return where
+    ttl_clause = {"fetched_at_ts": {"$gte": int(datetime.now(timezone.utc).timestamp()) - ttl_seconds}}
+    if not where:
+        return ttl_clause
+    if "$and" in where:
+        return {"$and": [*where["$and"], ttl_clause]}
+    return {"$and": [where, ttl_clause]}
+
+
 def _query_with_where(
     collection: Any,
     query_embedding: List[float],
@@ -336,22 +359,28 @@ def _query_with_where(
         return collection.query(
             query_embeddings=[query_embedding],
             n_results=n_results,
-            where=w,
+            where=_with_ttl(w),
             include=["documents", "metadatas"],
         )
 
     try:
         results = _run(where)
-    except Exception:
+    except Exception as first_exc:
         # whereフィルタが失敗した場合でも、他社のデータが混入しないよう
         # fallback_where(通常はcompanyのみ)でスコープを維持したまま再試行する。
         # スコープを維持できない場合は、フィルタ無し検索(他社データ混入の
         # リスクがある)は行わずキャッシュミス扱いにする。
+        # 以前は失敗を黙って握りつぶしていたので、キャッシュミスの原因が追えなかった（SOCAIAGENT-659）。
         if not fallback_where:
+            logger.warning("chromadb query failed; treated as cache miss where=%s error=%s", where, first_exc)
             return []
         try:
             results = _run(fallback_where)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "chromadb query failed twice; treated as cache miss where=%s fallback=%s error=%s",
+                where, fallback_where, exc,
+            )
             return []
 
     documents: List[str] = results.get("documents", [[]])[0] or []
@@ -383,7 +412,8 @@ def set_cached_documents(
         if mapped:
             meta["collection"] = mapped
     collection_name = physical_collection_name(meta["collection"])
-    fetched_at = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    fetched_at = now.isoformat()
     try:
         client = get_chroma_client()
         collection = client.get_or_create_collection(collection_name)
@@ -396,6 +426,8 @@ def set_cached_documents(
                 "doc_type": meta["doc_type"],
                 "source": source,
                 "fetched_at": fetched_at,
+                # TTL を検索の where で絞るための数値（SOCAIAGENT-659）
+                "fetched_at_ts": int(now.timestamp()),
                 "cache_key": meta["cache_key"],
             }
             for _ in docs
@@ -406,6 +438,12 @@ def set_cached_documents(
             embeddings=embeddings,
             metadatas=metadatas,
         )
+        # 件数が減る更新（3チャンク → 2チャンク）で、前回の3つ目が残らないようにする（SOCAIAGENT-659）。
+        # 同じ cache_key でも用途（doc_type）が違う文書は共有コレクションに並ぶので、doc_type でも絞る
+        stale_where = _build_where({"cache_key": meta["cache_key"], "doc_type": meta["doc_type"]})
+        stale = [i for i in (collection.get(where=stale_where, include=[]).get("ids") or []) if i not in set(ids)]
+        if stale:
+            collection.delete(ids=stale)
         logger.info(
             "chromadb upsert key=%s collection=%s docs=%d source=%s doc_type=%s",
             cache_key,
@@ -458,9 +496,13 @@ def delete_company_documents(
     existing = _collection_names(client)
     deleted_total = 0
     per_collection: Dict[str, int] = {}
-    where = _build_where(
-        _company_filter({"company": company, "company_hash": _company_hash(company_original)})
-    )
+    filters = _company_filter({"company": company, "company_hash": _company_hash(company_original)})
+    if doc_type:
+        # company_context は resume_review と company_research が共有している。doc_type を指定したら
+        # その用途だけを消す（以前はコレクションごと企業の文書を消していた。SOCAIAGENT-659）。
+        # doc_type を持たない旧文書は消さない（U2）
+        filters["doc_type"] = doc_type
+    where = _build_where(filters)
 
     for name in collections:
         physical = physical_collection_name(name)
@@ -518,7 +560,8 @@ def replace_documents(
     client = get_chroma_client()
     collection = client.get_or_create_collection(physical_collection_name(logical))
     ids = _doc_ids(cache_key, len(docs))
-    fetched_at = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    fetched_at = now.isoformat()
     collection.upsert(
         ids=ids,
         documents=docs,
@@ -531,6 +574,7 @@ def replace_documents(
                 "doc_type": meta["doc_type"],
                 "source": source,
                 "fetched_at": fetched_at,
+                "fetched_at_ts": int(now.timestamp()),
                 "cache_key": meta["cache_key"],
             }
             for _ in docs
