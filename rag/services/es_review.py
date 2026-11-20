@@ -5,6 +5,7 @@ Backend の `/api/es/review`（ES添削タブ）と `/api/es/rewrite`（ESリラ
 どちらもここへ集約され、同じプロンプト・同じ出力スキーマから表示を出し分ける。
 """
 from __future__ import annotations
+from services.prompt_versions import log_prompt_call, prompt_version
 
 from services.model_tiers import es_review_model
 import json
@@ -30,7 +31,8 @@ logger = logging.getLogger("main")
 #   v5 でリライト経路では表示しない指摘出力を省いた(#1532)
 #   v6 で改善文の目標字数を数値で明示する。元より短いときと目標上限を
 #   超えたときは警告し、効果の無かった作り直しは呼ばない(#1606)
-_PROMPT_VERSION = "es_review_v6"
+# 版は services/prompt_versions.py に集めている（SOCAIAGENT-560）
+_PROMPT_VERSION = prompt_version("es_review")
 
 # 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測レートは素材で大きく散る
 # （英数混在 0.20 / 日本語＋英数 0.53 / 漢字かな混在 0.78〜0.81 / ひらがな主体 0.91 /
@@ -179,6 +181,8 @@ def _chat_json(
     # max_tokens が None の段（改善文 / #1564）はキー自体を送らない。null を送っても
     # OpenAI 側は既定扱いだが、OpenAI 互換サーバ（vLLM / llama.cpp）での解釈差を避ける。
     budget_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
+    # 評価・改善文のどちらの呼び出しでも、工程・版・モデルをログに出す（SOCAIAGENT-560）
+    log_prompt_call("es_review", model)
     resp = client.chat.completions.create(
         model=model,
         messages=[
