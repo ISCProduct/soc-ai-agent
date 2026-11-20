@@ -129,9 +129,44 @@ func (r *TrainingScorerExportRepository) ListTrainingMaskingTerms(ctx context.Co
 	return out, nil
 }
 
+// ListTrainingEligibleUserIDs は、いま学習に使ってよい学生の利用者 ID を返す。書き出し済みのデータの削除
+// （scorerexport.Sweeper.Sweep）が、この一覧に無い学生のファイルを消すのに使う。条件は trainingEligibleUsers。
+func (r *TrainingScorerExportRepository) ListTrainingEligibleUserIDs(ctx context.Context) ([]uint, error) {
+	var ids []uint
+	err := r.trainingEligibleUsers(ctx).Order("u.id").Pluck("u.id", &ids).Error
+	return ids, err
+}
+
+// StartTrainingSweepRun は、書き出し済みのデータの削除の監査ログを running で作り、その ID を返す。
+func (r *TrainingScorerExportRepository) StartTrainingSweepRun(ctx context.Context, destination string, startedAt time.Time) (uint, error) {
+	run := models.TrainingScorerExportRun{
+		Kind:        models.TrainingScorerRunKindSweep,
+		Status:      models.TrainingScorerExportRunning,
+		StartedAt:   startedAt,
+		Destination: destination,
+	}
+	if err := r.db.WithContext(ctx).Create(&run).Error; err != nil {
+		return 0, err
+	}
+	return run.ID, nil
+}
+
+// FinishTrainingSweepRun は、削除の監査ログに結果（消したファイルの数）を書く。
+func (r *TrainingScorerExportRepository) FinishTrainingSweepRun(ctx context.Context, id uint, status string, deletedFiles int, errMsg string, finishedAt time.Time) error {
+	return r.db.WithContext(ctx).Model(&models.TrainingScorerExportRun{}).
+		Where("id = ? AND kind = ?", id, models.TrainingScorerRunKindSweep).
+		Updates(map[string]any{
+			"status":             status,
+			"deleted_file_count": deletedFiles,
+			"error_message":      errMsg,
+			"finished_at":        finishedAt,
+		}).Error
+}
+
 // StartTrainingExportRun は監査ログを running で作り、その ID を返す。
 func (r *TrainingScorerExportRepository) StartTrainingExportRun(ctx context.Context, destination string, startedAt time.Time) (uint, error) {
 	run := models.TrainingScorerExportRun{
+		Kind:        models.TrainingScorerRunKindExport,
 		Status:      models.TrainingScorerExportRunning,
 		StartedAt:   startedAt,
 		Destination: destination,

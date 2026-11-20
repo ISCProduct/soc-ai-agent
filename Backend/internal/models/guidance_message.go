@@ -12,7 +12,7 @@ const (
 	GuidanceAuthorTeacher = "teacher"
 )
 
-// GuidanceMessage は案内のスレッドの発言（#2028）。テーブルは migrations/20261119182744_guidance_messages。
+// GuidanceMessage は案内のスレッドの発言（#2028）。テーブルは migrations/20261120113420_guidance_messages。
 // ReadAt は相手側が読んだ日時（学生の発言なら教員が、教員の発言なら学生が読んだ時刻）。
 type GuidanceMessage struct {
 	ID           uint       `gorm:"primaryKey" json:"id"`
