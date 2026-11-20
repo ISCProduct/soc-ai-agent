@@ -7,10 +7,10 @@ on:
     paths:
       - 'rag/**'
       - '.github/workflows/rag-lint.yml'
+  # PR ではパスで絞らず毎回動かす。必須チェックにしているため、絞ると rag を触らない PR で
+  # 結果が返らず「待機中」のままマージできなくなる。必須でなかった間は、赤いままマージされて
+  # develop が壊れた（#2426 と #2429 の組み合わせ。#2462 で修正）。
   pull_request:
-    paths:
-      - 'rag/**'
-      - '.github/workflows/rag-lint.yml'
 
 permissions:
   contents: read
