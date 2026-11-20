@@ -1,0 +1,13 @@
+# RAG（Python）の lint（SOCAIAGENT-575）。CI の rag-lint.yml で走らせる。
+#
+# まずは誤りに近いものだけ（pyflakes の F: 未使用の import・変数、未定義の名前など／E9: 構文エラー）。
+# 書き方の好み（行の長さ・import の並びなど）は入れていない。広げるときは、既存のコードを直してから足す。
+target-version = "py312"
+
+[lint]
+select = ["F", "E9"]
+
+[lint.per-file-ignores]
+# main は `patch("main.xxx")` と各モジュールの `m.xxx` のために名前を再エクスポートしている。
+# 使っていないように見える import も消してはいけない。
+"main.py" = ["F401"]

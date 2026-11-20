@@ -70,6 +70,13 @@ func (m *mockReportRepo) FindBySessionID(sessionID uint) (*models.InterviewRepor
 	}
 	return args.Get(0).(*models.InterviewReport), args.Error(1)
 }
+func (m *mockReportRepo) FindBySessionIDs(ids []uint) ([]models.InterviewReport, error) {
+	args := m.Called(ids)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.InterviewReport), args.Error(1)
+}
 func (m *mockReportRepo) Upsert(r *models.InterviewReport) error { return m.Called(r).Error(0) }
 
 type mockUserRepo struct{ mock.Mock }
@@ -407,12 +414,13 @@ func TestInterviewService_GetTrend_Limit(t *testing.T) {
 			// DBには上限より多くの完了済みセッションがある想定にし、
 			// リポジトリへ渡った limit の件数だけ返す。
 			sessions := make([]models.InterviewSession, 0, tt.wantLimit)
+			reports := make([]models.InterviewReport, 0, tt.wantLimit)
 			for i := range tt.wantLimit {
 				id := uint(i + 1)
 				sessions = append(sessions, models.InterviewSession{ID: id, UserID: 1})
-				rRepo.On("FindBySessionID", id).
-					Return(&models.InterviewReport{SessionID: id, ScoresJSON: `{"logic":80}`}, nil)
+				reports = append(reports, models.InterviewReport{SessionID: id, ScoresJSON: `{"logic":80}`})
 			}
+			rRepo.On("FindBySessionIDs", mock.Anything).Return(reports, nil)
 			sRepo.On("ListFinishedByUser", uint(1), tt.wantLimit).Return(sessions, nil)
 
 			svc := interview.NewInterviewService(sRepo, nil, rRepo, nil, nil, nil, nil)

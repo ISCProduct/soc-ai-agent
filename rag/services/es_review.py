@@ -199,6 +199,22 @@ def _chat_json(
     return (choice.message.content or "", getattr(choice, "finish_reason", "") or "")
 
 
+def _parse_json_object(content: str) -> Dict[str, Any]:
+    """モデル出力をJSONオブジェクトとして読む。空文字は {}。
+
+    JSONでない/オブジェクト(dict)でない出力は ValueError にする。呼び出し側の
+    `.get` が AttributeError で落ちて原因不明の500になるのを避け、
+    _run_es_review の except が「何が悪かったか」付きで返せるようにする。
+    """
+    try:
+        parsed = json.loads(content or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError("model output was not valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"model output was not a JSON object (got {type(parsed).__name__})")
+    return parsed
+
+
 def _call_json_with_retry(
         client: Any,
         model: str,
@@ -225,7 +241,7 @@ def _call_json_with_retry(
             client, model, system_prompt, user_prompt, max_tokens, tally
         )
         if finish_reason != "length":
-            return json.loads(content or "{}")
+            return _parse_json_object(content)
         logger.warning(
             "es review output truncated label=%s attempt=%d max_tokens=%s prompt_version=%s",
             label, attempt, max_tokens, _PROMPT_VERSION,
