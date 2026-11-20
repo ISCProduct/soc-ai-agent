@@ -7,7 +7,6 @@ import {
   Chip,
   MenuItem,
   Stack,
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -17,6 +16,7 @@ import {
 } from '@mui/material'
 import { authService } from '@/lib/auth'
 import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin/fetch'
+import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 
 type CompanyUserItem = {
   id: number
@@ -134,7 +134,7 @@ export function CompanyUsersPanel({ companyId }: { companyId: string }) {
           招待
         </Button>
       </Stack>
-      <Table size="small">
+      <AdminTableWrapper>
         <TableHead>
           <TableRow>
             <TableCell>氏名</TableCell>
@@ -165,7 +165,7 @@ export function CompanyUsersPanel({ companyId }: { companyId: string }) {
             </TableRow>
           ))}
         </TableBody>
-      </Table>
+      </AdminTableWrapper>
     </Stack>
   )
 }
