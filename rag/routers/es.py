@@ -1,8 +1,9 @@
 """ES添削エンドポイント。"""
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter
 
@@ -13,6 +14,22 @@ from vector_store import build_cache_key
 logger = logging.getLogger("main")
 
 router = APIRouter()
+
+
+async def _es_web_search(m, company_name: str, include_engineer: bool) -> List[Optional[str]]:
+    """ES 添削の企業情報を Web Search で取る（SOCAIAGENT-553）。
+
+    以前は「一般」と「エンジニア」の2本のパイプライン（クエリ生成＋最大4検索＋要約）を、
+    職種に関係なく毎回直列に走らせていた。1企業の初回で Web Search が倍になり、
+    エンジニア以外の ES でもエンジニア向けの検索を払っていた。
+
+    一般の観点は常に取り、エンジニア向けは技術スタックが渡されたとき（ESリライトで技術職の
+    ES を書いているとき）だけ足す。2本のときは並列に走らせる。
+    """
+    jobs = [m._run_web_search_pipeline(company_name, "")]
+    if include_engineer:
+        jobs.append(m._run_web_search_pipeline(company_name, "エンジニア"))
+    return list(await asyncio.gather(*jobs))
 
 
 @router.post("/es/review", response_model=ESReviewResponse)
@@ -47,10 +64,11 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
         if not context_docs and m.ALLOW_WEB_SEARCH_FALLBACK:
             logger.info("es review web search start company=%s", safe_company_name)
             try:
-                # 段階的に2回の軽量Web Searchパイプラインを実行して、採用情報（一般）とエンジニア向け観点を取得する
-                summary_general = m._run_async(m._run_web_search_pipeline, safe_company_name, "")
-                summary_engineer = m._run_async(m._run_web_search_pipeline, safe_company_name, "エンジニア")
-                parts = [s for s in (summary_general, summary_engineer) if s]
+                # 一般の観点は常に、エンジニア向けは技術スタックがあるときだけ（並列）
+                summaries = m._run_async(
+                    _es_web_search, m, safe_company_name, bool(request.tech_stack.strip())
+                )
+                parts = [s for s in summaries if s]
                 if parts:
                     combined = "\n\n".join(parts)
                     # 先頭2000文字に制限してコンテキストに注入（プロンプト長を考慮）
