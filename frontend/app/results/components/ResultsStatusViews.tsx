@@ -6,8 +6,9 @@ import {
   Button,
   Stack,
 } from '@mui/material'
-import { Refresh } from '@mui/icons-material'
+import { ErrorOutline, Refresh } from '@mui/icons-material'
 import { ListSkeleton } from '@/components/common/ListSkeleton'
+import { buildEmptyRecommendationsMessage, emptyRecommendationsAction } from '../utils'
 
 type NavigateHandler = () => void
 
@@ -23,53 +24,71 @@ export function ResultsLoadingView() {
   )
 }
 
-/** empty フラグ時（既存どおり稀にしか立たないが UI を維持） */
-export function ResultsEmptyView({ onBackToChat }: { onBackToChat: NavigateHandler }) {
+/** ページを読み込み直す（テストで差し替えられるように引数で受ける） */
+const reloadPage = () => window.location.reload()
+
+/**
+ * おすすめ企業が0件（エラーではない。#2220）。何が無いか・なぜか・次にすること（主な操作は1つ）を出す。
+ * 診断を終えていないだけの人に「失敗した」ように見せないため、エラーの見た目（赤字・alert）にしない。
+ */
+export function ResultsEmptyView({
+  reason,
+  onBackToChat,
+  onReload = reloadPage,
+}: {
+  reason?: string | null
+  onBackToChat: NavigateHandler
+  onReload?: NavigateHandler
+}) {
+  const action = emptyRecommendationsAction(reason ?? undefined)
   return (
     <Box sx={{
-      height: '100vh',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       flexDirection: 'column',
       gap: 2,
-      p: 3,
+      py: 6,
+      px: 3,
     }}>
       <Typography variant="h6" component="p" sx={{ textAlign: 'center', fontWeight: 700 }}>
-        まだおすすめ企業を計算できていません
+        おすすめ企業がまだありません
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', maxWidth: '44ch' }}>
-        診断チャットを最後まで進めると、希望条件との一致度が高い企業がここに並びます。
-        診断を終えた直後は数秒かかるので、ページを更新してください。
+        {buildEmptyRecommendationsMessage(reason ?? undefined)}
       </Typography>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ width: { xs: '100%', sm: 'auto' } }}>
-        <Button
-          variant="contained"
-          startIcon={<Refresh />}
-          onClick={() => window.location.reload()}
-        >
-          ページを更新
-        </Button>
-        <Button
-          variant="outlined"
-          onClick={onBackToChat}
-        >
-          チャットに戻る
-        </Button>
+        {action === 'chat' ? (
+          <Button variant="contained" onClick={onBackToChat}>
+            診断チャットを続ける
+          </Button>
+        ) : (
+          <>
+            <Button variant="contained" startIcon={<Refresh />} onClick={onReload}>
+              もう一度読み込む
+            </Button>
+            <Button variant="text" onClick={onBackToChat}>
+              診断チャットに戻る
+            </Button>
+          </>
+        )}
       </Stack>
     </Box>
   )
 }
 
-/** API エラー / 推薦空メッセージ表示 */
+/**
+ * おすすめ企業の取得に失敗した（本当のエラーだけ。0件は ResultsEmptyView）。
+ * 本文は role="alert" で読み上げに届け、状態は色だけでなく字形（アイコン）でも示す。主な操作は「もう一度読み込む」。
+ */
 export function ResultsErrorView({
   error,
   onBack,
-  onReset,
+  onReload = reloadPage,
 }: {
   error: string
   onBack: NavigateHandler
-  onReset: NavigateHandler
+  onReload?: NavigateHandler
 }) {
   return (
     <Box sx={{
@@ -81,29 +100,18 @@ export function ResultsErrorView({
       py: 6,
       px: 3,
     }}>
-      <Typography variant="h6" color="error" sx={{ whiteSpace: 'pre-line', textAlign: 'center' }}>
-        {error}
-      </Typography>
+      <Box role="alert" sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'error.main' }}>
+        <ErrorOutline aria-hidden />
+        <Typography variant="h6" component="p" sx={{ whiteSpace: 'pre-line', textAlign: 'center' }}>
+          {error}
+        </Typography>
+      </Box>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ width: { xs: '100%', sm: 'auto' } }}>
-        <Button
-          variant="contained"
-          startIcon={<Refresh />}
-          onClick={() => window.location.reload()}
-        >
-          ページを更新
+        <Button variant="contained" startIcon={<Refresh />} onClick={onReload}>
+          もう一度読み込む
         </Button>
-        <Button
-          variant="outlined"
-          onClick={onBack}
-        >
-          チャットに戻る
-        </Button>
-        <Button
-          variant="outlined"
-          color="error"
-          onClick={onReset}
-        >
-          最初からやり直す
+        <Button variant="text" onClick={onBack}>
+          診断チャットに戻る
         </Button>
       </Stack>
     </Box>

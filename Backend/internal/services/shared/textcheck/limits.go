@@ -32,7 +32,7 @@ func (r DateOrder) Check(text string) []Finding {
 	for _, m := range dateRangeRe.FindAllStringSubmatchIndex(s, -1) {
 		y1, m1 := yearMonth(s, m, 1)
 		y2, m2 := yearMonth(s, m, 5)
-		if !(y1 > y2 || (y1 == y2 && m1 > 0 && m2 > 0 && m1 > m2)) {
+		if y1 <= y2 && (y1 != y2 || m1 <= 0 || m2 <= 0 || m1 <= m2) {
 			continue
 		}
 		sp := p.bytes(m[0], m[1])
