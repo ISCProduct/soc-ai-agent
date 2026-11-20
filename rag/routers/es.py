@@ -51,6 +51,8 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
                 # 軽量Web Searchパイプラインを2回（一般/エンジニア向け）同時に実行する。
                 # 検索件数・要約は従来どおり。片方が例外なら従来同様 except で握る。
                 # _run_async はスレッドごとに独立したイベントループを使うので並列にできる。
+                # 注意: 2本は同時に開始済みなので、片方が失敗してももう片方は最後まで走る
+                # （結果は捨てる）。従来は一般が失敗するとエンジニア側は実行されなかった。
                 with ThreadPoolExecutor(max_workers=2) as pool:
                     f_general = pool.submit(m._run_async, m._run_web_search_pipeline, safe_company_name, "")
                     f_engineer = pool.submit(m._run_async, m._run_web_search_pipeline, safe_company_name, "エンジニア")

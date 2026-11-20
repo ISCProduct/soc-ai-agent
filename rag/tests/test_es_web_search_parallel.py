@@ -1,14 +1,11 @@
 """ES添削のWeb検索2回(一般/エンジニア)が同時実行されることのテスト(SOCAIAGENT-682)。"""
-import asyncio
-import time
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from models import ESReviewRequest
 from routers.es import es_review
-
-_DELAY = 0.2
 
 
 def _call(pipeline):
@@ -65,11 +62,14 @@ def test_片方が例外ならコンテキストなしで続行する(failing_jo
     set_cache.assert_not_called()
 
 
-def test_2回が重なって実行される():
-    async def pipeline(company, job):
-        await asyncio.sleep(_DELAY)
-        return "x"
+def test_2回が同時に実行される():
+    # 時間の長さには頼らない。2本が同時に走っていれば、互いを待ち合わせて通過できる。
+    # 直列に実行されると、先の1本が相手を待ち続けてタイムアウトし、コンテキストなしになる。
+    barrier = threading.Barrier(2, timeout=5)
 
-    t = time.monotonic()
-    _call(pipeline)
-    assert time.monotonic() - t < _DELAY * 1.7
+    async def pipeline(company, job):
+        barrier.wait()
+        return f"s[{job}]"
+
+    kwargs, _ = _call(pipeline)
+    assert kwargs["context_docs"] == ["s[]\n\ns[エンジニア]"]
