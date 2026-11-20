@@ -21,9 +21,10 @@ import (
 )
 
 type CompanyRelationController struct {
-	repo         repository.CompanyRelationQueryRepository
-	openaiClient *openai.Client
-	validator    *company.CompanyValidationService
+	repo           repository.CompanyRelationQueryRepository
+	openaiClient   *openai.Client
+	validator      *company.CompanyValidationService
+	correlationMap *company.CompanyCorrelationMapService
 }
 
 func NewCompanyRelationController(repo repository.CompanyRelationQueryRepository, openaiClient *openai.Client) *CompanyRelationController {
@@ -32,6 +33,11 @@ func NewCompanyRelationController(repo repository.CompanyRelationQueryRepository
 
 func (ctrl *CompanyRelationController) SetCompanyValidator(v *company.CompanyValidationService) {
 	ctrl.validator = v
+}
+
+// SetCorrelationMapService は学生向け企業相関図APIを有効にする。
+func (ctrl *CompanyRelationController) SetCorrelationMapService(s *company.CompanyCorrelationMapService) {
+	ctrl.correlationMap = s
 }
 
 // GetCompanyRelations 企業IDに関連する企業関係を取得
@@ -48,6 +54,54 @@ func (ctrl *CompanyRelationController) GetCompanyRelations(ctx echo.Context) err
 	}
 
 	return ctx.JSON(http.StatusOK, relations)
+}
+
+// GetCompanyCorrelationMap 企業相関図（学生向け）用データを返す。
+// GET /api/companies/:id/correlation-map
+//
+// 既存の関係・市場情報・企業プロフィールを組み立てる。事業タグ専用データは未整備のため
+// business_tags は空・status=unavailable。採用情報は含めない。
+func (ctrl *CompanyRelationController) GetCompanyCorrelationMap(ctx echo.Context) error {
+	if ctrl.correlationMap == nil {
+		return echo.NewHTTPError(http.StatusNotImplemented, "correlation map is not configured")
+	}
+	companyID, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
+	}
+	view, err := ctrl.correlationMap.Build(uint(companyID))
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) || strings.Contains(err.Error(), "company not found") {
+			return echo.NewHTTPError(http.StatusNotFound, "Company not found")
+		}
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, view)
+}
+
+// CompareCompanyBusiness 起点企業と選択企業の事業説明を並べて返す。
+// GET /api/companies/:id/correlation-map/compare?with=:otherId
+func (ctrl *CompanyRelationController) CompareCompanyBusiness(ctx echo.Context) error {
+	if ctrl.correlationMap == nil {
+		return echo.NewHTTPError(http.StatusNotImplemented, "correlation map is not configured")
+	}
+	focusID, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
+	}
+	withStr := ctx.QueryParam("with")
+	selectedID, err := strconv.ParseUint(withStr, 10, 32)
+	if err != nil || selectedID == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "query parameter 'with' (selected company id) is required")
+	}
+	view, err := ctrl.correlationMap.CompareBusiness(uint(focusID), uint(selectedID))
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return echo.NewHTTPError(http.StatusNotFound, "Company not found")
+		}
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, view)
 }
 
 // GetCompanyMarketInfo 企業の市場情報を取得

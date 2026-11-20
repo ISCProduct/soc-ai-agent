@@ -288,7 +288,7 @@ exists=false の場合は canonical_name を空文字、evidence_urls を空配�
 
 		parsed, parseErr := parseValidationJSON(text)
 		if parseErr != nil {
-			log.Printf("[CompanyValidation] parse failed query=%q raw=%q err=%v", query, truncateRunes(text, 200), parseErr)
+			log.Printf("[CompanyValidation] parse failed query=%q raw=%q err=%v", query, truncateRunes(text, 200), parseErr) // logpolicy:ok 企業情報の検索結果（LLM の出力）で、学生の入力を含まない
 			return nil, fmt.Errorf("企業検索の結果を読み取れませんでした")
 		}
 

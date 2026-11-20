@@ -27,6 +27,7 @@ import {
 } from '@mui/icons-material'
 import type { AnalysisScores, Company, MatchFeedbackVerdict, SnackbarState, SuggestedRole } from '../types'
 import { buildEsRewriteQuery, buildInterviewQuery, getTopCategoryScores } from '../utils'
+import { withStableKeys } from '@/lib/list-keys'
 import AnalysisScoreCard from './AnalysisScoreCard'
 import {
   GUEST_REGISTER_CTA_LABEL,
@@ -262,10 +263,10 @@ export default function ResultsListView({
                 </Typography>
               )}
               <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, maxWidth: '72ch' }}>
-                {suggestedRoles.map((role, i) => (
+                {withStableKeys(suggestedRoles, (r) => r.title).map(({ key, item: role, index: i }) => (
                   <Box
                     component="li"
-                    key={i}
+                    key={key}
                     sx={{
                       py: 1.25,
                       borderTop: i === 0 ? `1px solid ${UI.ruleSoft}` : 'none',
@@ -402,9 +403,9 @@ export default function ResultsListView({
                   */}
                   {company.techStack && company.techStack.length > 0 && (
                     <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
-                      {company.techStack.map((tech, i) => (
+                      {withStableKeys(company.techStack).map(({ key, item: tech }) => (
                         <Box
-                          key={i}
+                          key={key}
                           sx={{
                             fontSize: 12.5,
                             color: UI.inkSoft,
@@ -422,8 +423,8 @@ export default function ResultsListView({
 
                   {company.tags && company.tags.length > 0 && (
                     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                      {company.tags.map((tag, i) => (
-                        <Chip key={i} label={tag} size="small" />
+                      {withStableKeys(company.tags).map(({ key, item: tag }) => (
+                        <Chip key={key} label={tag} size="small" />
                       ))}
                     </Stack>
                   )}
