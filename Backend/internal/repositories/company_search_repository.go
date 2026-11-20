@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -70,8 +71,8 @@ type CompanySearchRow struct {
 }
 
 // visibleCompanyForSearch は学生に見せてよい企業（applyCompanyFilters と同じ判定）。
-func (r *CompanySearchRepository) visible() *gorm.DB {
-	return r.db.Model(&models.Company{}).
+func (r *CompanySearchRepository) visible(ctx context.Context) *gorm.DB {
+	return r.db.WithContext(ctx).Model(&models.Company{}).
 		Where("companies.is_active = ? AND companies.deleted_at IS NULL", true).
 		Where(guestEntryVisibilityGuard("companies.id"))
 }
@@ -89,8 +90,8 @@ var jobCategoryCondition = `EXISTS (
 )`
 
 // Search は条件に合う企業を企業名順に返す（総件数つき）。
-func (r *CompanySearchRepository) Search(f CompanySearchFilter) ([]CompanySearchRow, int64, error) {
-	q := r.visible()
+func (r *CompanySearchRepository) Search(ctx context.Context, f CompanySearchFilter) ([]CompanySearchRow, int64, error) {
+	q := r.visible(ctx)
 	if name := strings.TrimSpace(f.Name); name != "" {
 		q = q.Where("companies.name LIKE ?", "%"+escapeLike(name)+"%")
 	}
@@ -131,14 +132,14 @@ type JobCategoryOption struct {
 // 職種は公開中の企業の公開中の求人がある職種（その職種か、parent_id で子にあたる職種の求人）。
 // 標準のシードは小分類（Level 1）に parent_id を設定していないため、大分類だけに絞ると
 // 小分類の求人しか無い企業を選べなくなる。そのため階層で絞らず、求人のある職種をすべて出す。
-func (r *CompanySearchRepository) SearchOptions() ([]string, []JobCategoryOption, error) {
+func (r *CompanySearchRepository) SearchOptions(ctx context.Context) ([]string, []JobCategoryOption, error) {
 	var industries []string
-	if err := r.visible().Where("companies.industry IS NOT NULL AND companies.industry <> ''").
+	if err := r.visible(ctx).Where("companies.industry IS NOT NULL AND companies.industry <> ''").
 		Distinct().Order("companies.industry ASC").Pluck("companies.industry", &industries).Error; err != nil {
 		return nil, nil, err
 	}
 	var cats []JobCategoryOption
-	err := r.db.Table("job_categories top").
+	err := r.db.WithContext(ctx).Table("job_categories top").
 		Select("top.id AS id, top.name AS name").
 		Where("top.is_active = ?", true).
 		Where(`EXISTS (
@@ -169,13 +170,13 @@ type FavoriteState struct {
 // FavoriteStates は、本人の最新の診断（面接スナップショット・適性検査を除くチャット診断）の推薦のうち、
 // 指定した企業のものを返す。お気に入りは推薦（user_company_matches）に付くので、推薦に無い企業は含まれない。
 // 診断がまだ無ければ空。
-func (r *CompanySearchRepository) FavoriteStates(userID uint, companyIDs []uint) ([]FavoriteState, error) {
+func (r *CompanySearchRepository) FavoriteStates(ctx context.Context, userID uint, companyIDs []uint) ([]FavoriteState, error) {
 	out := []FavoriteState{}
 	if len(companyIDs) == 0 {
 		return out, nil
 	}
 	var latest models.UserWeightScore
-	err := r.db.Where("user_id = ? AND session_id NOT LIKE ? AND source <> ?", userID, "interview-%", models.ScoreSourceAssessment).
+	err := r.db.WithContext(ctx).Where("user_id = ? AND session_id NOT LIKE ? AND source <> ?", userID, "interview-%", models.ScoreSourceAssessment).
 		Order("updated_at DESC, id DESC").Select("session_id").First(&latest).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return out, nil
@@ -183,7 +184,7 @@ func (r *CompanySearchRepository) FavoriteStates(userID uint, companyIDs []uint)
 	if err != nil {
 		return nil, err
 	}
-	err = r.db.Model(&models.UserCompanyMatch{}).
+	err = r.db.WithContext(ctx).Model(&models.UserCompanyMatch{}).
 		Select("company_id, id AS match_id, is_favorited").
 		Where("user_id = ? AND session_id = ? AND company_id IN ?", userID, latest.SessionID, companyIDs).
 		Scan(&out).Error

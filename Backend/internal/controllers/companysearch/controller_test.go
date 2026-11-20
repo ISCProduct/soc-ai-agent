@@ -25,14 +25,14 @@ type fakeStore struct {
 	searched bool
 }
 
-func (f *fakeStore) Search(filter repositories.CompanySearchFilter) ([]repositories.CompanySearchRow, int64, error) {
+func (f *fakeStore) Search(_ context.Context, filter repositories.CompanySearchFilter) ([]repositories.CompanySearchRow, int64, error) {
 	f.got, f.searched = filter, true
 	return nil, 0, f.err
 }
-func (f *fakeStore) SearchOptions() ([]string, []repositories.JobCategoryOption, error) {
+func (f *fakeStore) SearchOptions(_ context.Context) ([]string, []repositories.JobCategoryOption, error) {
 	return nil, nil, f.err
 }
-func (f *fakeStore) FavoriteStates(userID uint, ids []uint) ([]repositories.FavoriteState, error) {
+func (f *fakeStore) FavoriteStates(_ context.Context, userID uint, ids []uint) ([]repositories.FavoriteState, error) {
 	f.favUser, f.favIDs = userID, ids
 	return []repositories.FavoriteState{}, f.err
 }
