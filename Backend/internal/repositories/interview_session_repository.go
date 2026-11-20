@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"context"
 	"time"
 
 	"gorm.io/gorm"
@@ -158,7 +159,7 @@ func (r *InterviewSessionRepository) ListFinishedSessionIDsByUser(userID uint) (
 }
 
 // ListFinishedSessionIDsByUsers は複数ユーザーの終了済みセッションIDをユーザーIDごとに一括取得する
-func (r *InterviewSessionRepository) ListFinishedSessionIDsByUsers(userIDs []uint) (map[uint][]uint, error) {
+func (r *InterviewSessionRepository) ListFinishedSessionIDsByUsers(ctx context.Context, userIDs []uint) (map[uint][]uint, error) {
 	result := make(map[uint][]uint, len(userIDs))
 	if len(userIDs) == 0 {
 		return result, nil
@@ -167,7 +168,7 @@ func (r *InterviewSessionRepository) ListFinishedSessionIDsByUsers(userIDs []uin
 		ID     uint
 		UserID uint
 	}
-	if err := r.db.Model(&models.InterviewSession{}).Select("id, user_id").
+	if err := r.db.WithContext(ctx).Model(&models.InterviewSession{}).Select("id, user_id").
 		Where("user_id IN ? AND status = ? AND deleted_at IS NULL", userIDs, "finished").
 		Scan(&rows).Error; err != nil {
 		return nil, err

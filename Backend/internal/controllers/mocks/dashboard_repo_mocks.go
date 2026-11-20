@@ -3,6 +3,7 @@ package mocks
 import (
 	"Backend/internal/models"
 	"Backend/internal/repositories"
+	"context"
 	"time"
 
 	"github.com/stretchr/testify/mock"
@@ -26,7 +27,7 @@ func (m *DashboardSessionRepoMock) ListFinishedSessionIDsByUser(userID uint) ([]
 	return args.Get(0).([]uint), args.Error(1)
 }
 
-func (m *DashboardSessionRepoMock) ListFinishedSessionIDsByUsers(userIDs []uint) (map[uint][]uint, error) {
+func (m *DashboardSessionRepoMock) ListFinishedSessionIDsByUsers(ctx context.Context, userIDs []uint) (map[uint][]uint, error) {
 	args := m.Called(userIDs)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)

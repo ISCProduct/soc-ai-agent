@@ -9,6 +9,7 @@ import (
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/organization"
 	"Backend/internal/services/school"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -129,11 +130,11 @@ func avgScoresJSON(scoresJSON string) (map[string]float64, *float64) {
 
 // userAvgScores はユーザーごとの終了済みセッションの平均スコアを返す(スコアのあるユーザーのみ)。
 // セッションID取得の失敗は該当なしとして扱い(従来動作)、レポート取得の失敗のみエラーを返す。
-func (c *AdminDashboardController) userAvgScores(userIDs []uint) (map[uint]float64, error) {
+func (c *AdminDashboardController) userAvgScores(ctx context.Context, userIDs []uint) (map[uint]float64, error) {
 	var idsByUser map[uint][]uint
 	if len(userIDs) > 0 {
 		var err error
-		if idsByUser, err = c.sessionRepo.ListFinishedSessionIDsByUsers(userIDs); err != nil {
+		if idsByUser, err = c.sessionRepo.ListFinishedSessionIDsByUsers(ctx, userIDs); err != nil {
 			idsByUser = nil
 		}
 	}
@@ -191,7 +192,7 @@ func (c *AdminDashboardController) ListUsers(ctx echo.Context) error {
 		return httpapi.InternalError(err)
 	}
 
-	userAvg, err := c.userAvgScores(userIDs)
+	userAvg, err := c.userAvgScores(ctx.Request().Context(), userIDs)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -324,7 +325,7 @@ func (c *AdminDashboardController) ExportCSV(ctx echo.Context) error {
 	statMap, _ := c.sessionRepo.GetUserStatsBatch(userIDs)
 
 	// 取得失敗時は平均スコア空欄で出力を続ける(従来動作)
-	userAvg, _ := c.userAvgScores(userIDs)
+	userAvg, _ := c.userAvgScores(ctx.Request().Context(), userIDs)
 
 	w := ctx.Response().Writer
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
