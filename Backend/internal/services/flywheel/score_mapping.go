@@ -301,8 +301,8 @@ func FormatScoreMappingDryRun() string {
 	b.WriteString("score critical | 旧(細部/コミュ/技術)     | 新(細部/コミュ)\n")
 	for _, score := range []int{0, 30, 50, 70, 85, 100} {
 		for _, crit := range []int{0, 3, 5} {
-			b.WriteString(fmt.Sprintf("%5d %8d | %-24s | %s\n",
-				score, crit, formatLegacyResume(score, crit), formatCategoryScores(mapResumeScore(score, crit))))
+			fmt.Fprintf(&b, "%5d %8d | %-24s | %s\n",
+				score, crit, formatLegacyResume(score, crit), formatCategoryScores(mapResumeScore(score, crit)))
 		}
 	}
 
@@ -319,9 +319,9 @@ func FormatScoreMappingDryRun() string {
 			{200, InterviewTranscriptStats{UserTurns: 10, AvgAnswerRunes: 120}},
 		} {
 			evidence := strings.Repeat("あ", c.evidenceRunes)
-			b.WriteString(fmt.Sprintf("%6d %14d %14d %6d | %3d | %3d\n",
+			fmt.Fprintf(&b, "%6d %14d %14d %6d | %3d | %3d\n",
 				rubric, c.evidenceRunes, c.stats.AvgAnswerRunes, c.stats.UserTurns,
-				rubric*rubricStep, mapInterviewScore(rubric, evidence, c.stats)))
+				rubric*rubricStep, mapInterviewScore(rubric, evidence, c.stats))
 		}
 	}
 	return b.String()
