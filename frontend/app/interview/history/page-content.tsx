@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { formatDateTime } from '@/lib/i18n/format'
 import { useRouter } from 'next/navigation'
 import {
@@ -20,7 +20,8 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import PsychologyIcon from '@mui/icons-material/Psychology'
 import dynamic from 'next/dynamic'
 import { authService, User } from '@/lib/auth'
-import { interviewApi, InterviewDetail, InterviewSession, InterviewTrendPoint, TeacherReport } from '@/lib/interview'
+import { interviewApi, InterviewDetail, InterviewPlayback, InterviewSession, InterviewTrendPoint, TeacherReport } from '@/lib/interview'
+import ReviewPlayer from '@/components/interview/ReviewPlayer'
 import InterviewSummary from '../components/InterviewSummary'
 import { parseJsonSafe } from '@/lib/interview/utils'
 
@@ -58,6 +59,12 @@ export default function PageContent() {
   const [listError, setListError] = useState<string | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [trendError, setTrendError] = useState<string | null>(null)
+  const [playback, setPlayback] = useState<InterviewPlayback | null>(null)
+  const [playbackLoading, setPlaybackLoading] = useState(false)
+  const [playbackError, setPlaybackError] = useState<string | null>(null)
+  const [playbackRetry, setPlaybackRetry] = useState(0)
+  const [seek, setSeek] = useState<{ id: number; nonce: number } | null>(null)
+  const playbackGen = useRef(0)
 
   const limit = 10
 
@@ -100,6 +107,33 @@ export default function PageContent() {
 
   useEffect(() => { void loadSessions() }, [loadSessions])
   useEffect(() => { void loadTrend() }, [loadTrend])
+
+  useEffect(() => {
+    const sessionId = selectedDetail?.session.id
+    if (!sessionId) {
+      setPlayback(null)
+      setPlaybackError(null)
+      setPlaybackLoading(false)
+      return
+    }
+    const gen = playbackGen.current + 1
+    playbackGen.current = gen
+    setPlaybackLoading(true)
+    setPlaybackError(null)
+    void interviewApi.listPlayback(sessionId)
+      .then((data) => {
+        if (playbackGen.current !== gen) return
+        setPlayback(data)
+      })
+      .catch(() => {
+        if (playbackGen.current !== gen) return
+        setPlayback(null)
+        setPlaybackError('録画の情報を取得できませんでした')
+      })
+      .finally(() => {
+        if (playbackGen.current === gen) setPlaybackLoading(false)
+      })
+  }, [selectedDetail?.session.id, playbackRetry])
 
   // 教員モードは職員・管理者のみ。サーバー側の開示条件(is_staff/is_admin)と揃える(#1815)
   const isTeacher = Boolean(user?.is_staff || user?.is_admin)
@@ -266,6 +300,15 @@ export default function PageContent() {
           ) : (
             <Stack spacing={2}>
               {/* Report */}
+              <ReviewPlayer
+                sessionId={selectedDetail.session.id}
+                playback={playback}
+                loading={playbackLoading}
+                error={playbackError}
+                onRetry={() => setPlaybackRetry((current) => current + 1)}
+                seekUtteranceId={seek?.id ?? null}
+                seekNonce={seek?.nonce ?? 0}
+              />
               {selectedDetail.report ? (
                 <>
                   <InterviewSummary
@@ -273,6 +316,9 @@ export default function PageContent() {
                     utterances={selectedDetail.utterances}
                     userId={user?.user_id}
                     theme="light"
+                    onPlayEvidence={playback?.videos.some((video) => video.status === 'done')
+                      ? (utteranceId) => setSeek({ id: utteranceId, nonce: Date.now() })
+                      : undefined}
                   />
 
                   {/* 教員用レポートパネル。開示判定はサーバー側（実ロールで teacher_report_json

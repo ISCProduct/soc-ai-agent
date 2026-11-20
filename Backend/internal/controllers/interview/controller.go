@@ -17,9 +17,11 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
+	"gorm.io/gorm"
 )
 
 type InterviewController struct {
@@ -223,6 +225,89 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 		"status":   "uploading",
 		"message":  "動画のアップロードを開始しました",
 	})
+}
+
+// Playback GET /api/interviews/:id/videos
+// 本人の録画一覧と、発話を録画時刻へ合わせるための目安を返す。保存先のキーは返さない。
+func (c *InterviewController) Playback(ctx echo.Context) error {
+	sessionID, userID, err := c.ownedSession(ctx)
+	if err != nil {
+		return err
+	}
+	detail, err := c.interviewService.GetSessionDetail(userID, sessionID)
+	if err != nil {
+		return interviewAccessError(err)
+	}
+	videos := []interviewsvc.StudentVideo{}
+	if c.videoUpload != nil {
+		videos, err = c.videoUpload.ListForUser(ctx.Request().Context(), sessionID, userID)
+		if err != nil {
+			return httpapi.InternalError(err)
+		}
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"videos": videos,
+		"cues":   interviewsvc.ReviewCues(detail.Session.StartedAt, detail.Utterances),
+		"anchor": "session_started_at",
+	})
+}
+
+// VideoPlaybackURL GET /api/interviews/:id/videos/:video_id/url
+// 本人の完了済み録画にだけ、15分の再生URLを発行する。
+func (c *InterviewController) VideoPlaybackURL(ctx echo.Context) error {
+	sessionID, userID, err := c.ownedSession(ctx)
+	if err != nil {
+		return err
+	}
+	videoID, err := httpapi.UintParam(ctx, "video_id")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid video ID")
+	}
+	if c.videoUpload == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "video playback is not configured")
+	}
+	if err := c.interviewService.EnsureSessionOwnership(userID, sessionID); err != nil {
+		return interviewAccessError(err)
+	}
+	url, expiresAt, err := c.videoUpload.PresignForUser(ctx.Request().Context(), sessionID, videoID, userID)
+	if err != nil {
+		if errors.Is(err, interviewsvc.ErrVideoNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "video not found")
+		}
+		if errors.Is(err, interviewsvc.ErrVideoNotReady) {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, "video is not available yet")
+		}
+		if errors.Is(err, interviewsvc.ErrVideoPlaybackUnavailable) {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "video playback is not configured")
+		}
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]string{
+		"url":        url,
+		"expires_at": expiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
+func (c *InterviewController) ownedSession(ctx echo.Context) (uint, uint, error) {
+	sessionID, err := httpapi.UintParam(ctx, "id")
+	if err != nil {
+		return 0, 0, echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
+	}
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return 0, 0, echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	return sessionID, userID, nil
+}
+
+func interviewAccessError(err error) error {
+	if errors.Is(err, shared.ErrForbidden) {
+		return echo.NewHTTPError(http.StatusForbidden, "forbidden")
+	}
+	if errors.Is(err, repository.ErrNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	return httpapi.InternalError(err)
 }
 
 // Turn POST /api/interviews/:id/turn
