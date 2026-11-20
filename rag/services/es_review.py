@@ -37,7 +37,7 @@ logger = logging.getLogger("main")
 #   v5 でリライト経路では表示しない指摘出力を省いた(#1532)
 #   v6 で改善文の目標字数を数値で明示する。元より短いときと目標上限を
 #   超えたときは警告し、効果の無かった作り直しは呼ばない(#1606)
-_PROMPT_VERSION = "es_review_v6"
+_PROMPT_VERSION = prompt_version("es_review")
 
 # 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測レートは素材で大きく散る
 # （英数混在 0.20 / 日本語＋英数 0.53 / 漢字かな混在 0.78〜0.81 / ひらがな主体 0.91 /
