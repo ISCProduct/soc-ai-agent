@@ -94,7 +94,7 @@ def vector_reembed(request: VectorReembedRequest) -> VectorReembedResponse:
                 sources=[],
             )
 
-        fetchers: Dict[str, Callable[[], str]] = {
+        fetchers: Dict[str, Callable[[], Optional[str]]] = {
             "company_research": lambda: m._run_async(m._run_web_search_pipeline, safe_company, "指定なし"),
             "interview_hints": lambda: m._run_hints_web_search(safe_company, "一般職"),
             "es_review": lambda: m._run_async(m._run_web_search_pipeline, safe_company, ""),
