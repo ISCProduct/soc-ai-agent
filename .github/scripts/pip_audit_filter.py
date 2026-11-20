@@ -46,8 +46,13 @@ def scanned_files(source_root):
 
 
 def find_forbidden(source_root, patterns):
-    """テスト以外のコード・設定から、禁止した使い方を探す（# のコメント行は見ない）。"""
-    compiled = [re.compile(pattern) for pattern in patterns]
+    """テスト以外のコード・設定から、禁止した使い方を探す（# のコメント行は見ない）。
+
+    大文字小文字は区別しない（環境変数名 CHROMA_SERVER_AUTHZ_PROVIDER なども拾う）。
+    パターンは目安で、書き方を変えれば抜けられる（動的 import など）。例外の前提が崩れたことに
+    気づくための網で、完全な検出ではない。
+    """
+    compiled = [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
     hits = []
     for path in scanned_files(source_root):
         for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
@@ -60,6 +65,9 @@ def find_forbidden(source_root, patterns):
 
 def rejection_reason(entry, finding, today, source_root):
     """例外を適用できない理由を返す。適用できるなら None。"""
+    reason = entry.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        return "例外リストの設定エラーです。reason（例外にした理由）を書いてください"
     if today > datetime.date.fromisoformat(entry["expires"]):
         return f'例外の期限（{entry["expires"]}）を過ぎています。理由を見直してください'
     if finding["fixed"]:
@@ -94,6 +102,23 @@ def evaluate(findings, allowlist, today, source_root):
     return failures, allowed, stale
 
 
+# 例外の期限がこの日数以内なら、CI のログに注意を出す（期限切れで RAG を触る全 PR が落ちる前に気づく）
+EXPIRY_WARNING_DAYS = 30
+
+
+def expiring_soon(allowlist, today):
+    """期限が EXPIRY_WARNING_DAYS 日以内の例外の (ID, 期限) を返す。"""
+    out = []
+    for entry in allowlist:
+        try:
+            expires = datetime.date.fromisoformat(entry["expires"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if today <= expires <= today + datetime.timedelta(days=EXPIRY_WARNING_DAYS):
+            out.append((entry.get("id", "?"), entry["expires"]))
+    return out
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", required=True)
@@ -120,6 +145,9 @@ def main():
         print(f"例外を適用: {vuln_id}")
     for vuln_id in stale:
         print(f"注意: {vuln_id} は検出されなくなりました。例外リストから消してください")
+    for vuln_id, expires in expiring_soon(allowlist, today):
+        # GitHub Actions の警告として出す（ジョブの要約に残る）
+        print(f"::warning::pip-audit の例外 {vuln_id} の期限（{expires}）が近づいています。依存の更新か例外の見直しをしてください")
     if failures:
         print(f"FAIL {len(failures)} 件の脆弱性が残っています")
         for failure in failures:

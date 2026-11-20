@@ -15,6 +15,16 @@ on:
       - '.github/workflows/rag-tests.yml'
       - '.github/pip-audit-allowlist.json'
       - '.github/scripts/pip_audit_filter.py'
+  # 依存を変えなくても新しい脆弱性は公開されるので、週1回は検査する。例外の期限切れもここで気づく
+  # （SOCAIAGENT-578）。月曜 9:00 JST。
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+# どのジョブもチェックアウトしか要らない。PR で変えた requirements を pip install するので、
+# 依存のビルド処理に書き込みできるトークンを渡さない。
+permissions:
+  contents: read
 
 jobs:
   test:

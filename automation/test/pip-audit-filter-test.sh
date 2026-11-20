@@ -95,6 +95,54 @@ from chromadb.app import app
 EOF
 check "前提の使い方を始めたら落ちる" 1 "例外の前提である使い方" "$WORK/listed.json"
 
+# 理由の無い例外は設定エラー（理由と期限を付けた例外だけを許す）
+mkdir -p "$WORK/clean-src"
+echo 'import chromadb' > "$WORK/clean-src/app.py"
+for reason in '""' '"  "' 'null'; do
+  cat > "$WORK/allow-noreason.json" <<EOF
+[{"id": "PYSEC-1", "package": "chromadb", "reason": $reason, "expires": "2026-12-31", "forbidden_patterns": ["chromadb_app_unused"]}]
+EOF
+  out=$(python3 "$FILTER" --report "$WORK/listed.json" --allowlist "$WORK/allow-noreason.json" --source-root "$WORK/clean-src" --today 2026-11-19 2>&1)
+  if [ $? -ne 1 ] || ! grep -qF "reason" <<< "$out"; then
+    echo "FAIL 理由が空の例外は設定エラーにする[$reason]"; echo "$out" | sed 's/^/    /'; fail=$((fail + 1))
+  else
+    echo "ok   理由が空の例外は設定エラーにする[$reason]"
+  fi
+done
+
+# 期限が30日以内なら警告を出す（通るが、ログで気づける）
+out=$(python3 "$FILTER" --report "$WORK/listed.json" --allowlist "$WORK/allow.json" --source-root "$WORK/clean-src" --today 2026-12-10 2>&1)
+if [ $? -eq 0 ] && grep -qF "::warning::" <<< "$out"; then echo "ok   期限が近い例外は警告を出す"; else echo "FAIL 期限が近い例外は警告を出す"; echo "$out" | sed 's/^/    /'; fail=$((fail + 1)); fi
+out=$(python3 "$FILTER" --report "$WORK/listed.json" --allowlist "$WORK/allow.json" --source-root "$WORK/clean-src" --today 2026-11-01 2>&1)
+if [ $? -eq 0 ] && ! grep -qF "::warning::" <<< "$out"; then echo "ok   期限まで余裕があれば警告しない"; else echo "FAIL 期限まで余裕があれば警告しない"; echo "$out" | sed 's/^/    /'; fail=$((fail + 1)); fi
+
+# 本物の例外リストの禁止パターンが、サーバーを動かす書き方を拾うこと
+REAL_ALLOW="$ROOT/.github/pip-audit-allowlist.json"
+cat > "$WORK/real.json" <<'EOF'
+{"dependencies": [{"name": "chromadb", "version": "0.6.3", "vulns": [
+  {"id": "PYSEC-2026-3813", "fix_versions": [], "aliases": []},
+  {"id": "PYSEC-2026-3814", "fix_versions": [], "aliases": []},
+  {"id": "PYSEC-2026-3815", "fix_versions": [], "aliases": []}]}], "fixes": []}
+EOF
+real_check() {
+  local name="$1" file="$2" content="$3" out rc
+  rm -rf "$WORK/real-src"; mkdir -p "$WORK/real-src"
+  printf '%s\n' "$content" > "$WORK/real-src/$file"
+  out=$(python3 "$FILTER" --report "$WORK/real.json" --allowlist "$REAL_ALLOW" --source-root "$WORK/real-src" --today 2026-11-19 2>&1)
+  rc=$?
+  if [ "$rc" -ne 1 ] || ! grep -qF "例外の前提である使い方" <<< "$out"; then
+    echo "FAIL 禁止パターン: $name"; echo "$out" | sed 's/^/    /'; fail=$((fail + 1))
+  else
+    echo "ok   禁止パターン: $name"
+  fi
+}
+real_check "Dockerfile の exec 形式の chroma run" Dockerfile 'CMD ["chroma", "run", "--path", "/data"]'
+real_check "シェルの chroma run" start.sh 'exec chroma run --host 0.0.0.0'
+real_check "from chromadb import app" server.py 'from chromadb import app'
+real_check "from chromadb.app import" server.py 'from chromadb.app import app'
+real_check "大文字の環境変数の認可プロバイダ" settings.toml 'CHROMA_SERVER_AUTHZ_PROVIDER = "x"'
+real_check "trust_remote_code" embed.py 'fn = Embedder(trust_remote_code=True)'
+
 if [ "$fail" -gt 0 ]; then
   echo "FAILED ($fail)"
   exit 1
