@@ -29,6 +29,7 @@ type trendReportRepo struct {
 	reports    map[uint]models.InterviewReport
 	singleCall int
 	batchCall  int
+	batchErr   error
 }
 
 func (r *trendReportRepo) FindBySessionID(id uint) (*models.InterviewReport, error) {
@@ -42,6 +43,9 @@ func (r *trendReportRepo) FindBySessionID(id uint) (*models.InterviewReport, err
 
 func (r *trendReportRepo) FindBySessionIDs(ids []uint) ([]models.InterviewReport, error) {
 	r.batchCall++
+	if r.batchErr != nil {
+		return nil, r.batchErr
+	}
 	var out []models.InterviewReport
 	for _, id := range ids {
 		if rep, ok := r.reports[id]; ok {
@@ -80,6 +84,18 @@ func TestGetTrend_BatchesReportLookup(t *testing.T) {
 
 	assert.Equal(t, 1, reports.batchCall)
 	assert.Equal(t, 0, reports.singleCall)
+}
+
+// レポートの一括取得に失敗しても、従来どおりエラーにせず空の推移を返す（ログには残る）。
+func TestGetTrend_BatchFetchError_ReturnsEmpty(t *testing.T) {
+	sessions := []models.InterviewSession{{ID: 1, CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}
+	reports := &trendReportRepo{batchErr: assert.AnError}
+	svc := interview.NewInterviewService(&trendSessionRepo{finished: sessions}, &mockInterviewUtterRepo{}, reports, &mockUserRepo2{}, nil, nil, nil)
+
+	points, err := svc.GetTrend(1, 20)
+	require.NoError(t, err)
+	assert.Empty(t, points)
+	assert.Equal(t, 1, reports.batchCall)
 }
 
 func TestGetTrend_OldestFirst(t *testing.T) {

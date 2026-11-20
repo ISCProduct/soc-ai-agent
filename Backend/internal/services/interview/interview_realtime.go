@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -121,10 +122,12 @@ func (s *InterviewService) GetTrend(userID uint, limit int) ([]InterviewTrendPoi
 		ids[i] = session.ID
 	}
 	reportBySession := map[uint]*models.InterviewReport{}
-	if reports, err := s.reportRepo.FindBySessionIDs(ids); err == nil {
-		for i := range reports {
-			reportBySession[reports[i].SessionID] = &reports[i]
-		}
+	reports, err := s.reportRepo.FindBySessionIDs(ids)
+	if err != nil {
+		log.Printf("[Interview] GetTrend: report batch fetch failed (user=%d, sessions=%d): %v", userID, len(ids), err)
+	}
+	for i := range reports {
+		reportBySession[reports[i].SessionID] = &reports[i]
 	}
 
 	points := make([]InterviewTrendPoint, 0, len(sessions))
