@@ -227,6 +227,21 @@ describe('ResultsListView', () => {
     expect(names).toEqual(['お気に入り株式会社', '職種なし株式会社'])
   })
 
+  it('100社を超えるお気に入りは、次の100社へ進める', () => {
+    const onFavoritesOffsetChange = jest.fn()
+    renderList({
+      favoriteCompanies: [sampleCompany],
+      favoritesTotal: 130,
+      favoritesOffset: 0,
+      onFavoritesOffsetChange,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'お気に入りだけ（130）' }))
+    expect(screen.getByText('お気に入りにした130社')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '次の100社' }))
+    expect(onFavoritesOffsetChange).toHaveBeenCalledWith(100)
+  })
+
   it('お気に入りが無いときは、すべての企業へ戻れる', () => {
     renderList()
 

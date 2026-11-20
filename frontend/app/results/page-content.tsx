@@ -50,6 +50,9 @@ function ResultsContent() {
     sessionId,
     companies,
     favoriteCompanies,
+    favoritesTotal,
+    favoritesOffset,
+    setFavoritesOffset,
     favoritesLoading,
     favoritesError,
     retryFavorites,
@@ -154,6 +157,9 @@ function ResultsContent() {
     <ResultsListView
       companies={companies}
       favoriteCompanies={favoriteCompanies}
+      favoritesTotal={favoritesTotal}
+      favoritesOffset={favoritesOffset}
+      onFavoritesOffsetChange={setFavoritesOffset}
       favoritesLoading={favoritesLoading}
       favoritesError={favoritesError}
       onRetryFavorites={retryFavorites}

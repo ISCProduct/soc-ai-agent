@@ -48,8 +48,8 @@ func (s *stubMatchingService) GetTopMatches(context.Context, uint, string, int) 
 	return nil, nil
 }
 func (s *stubMatchingService) ToggleFavorite(uint, uint) error { return nil }
-func (s *stubMatchingService) ListFavoriteCompanies(uint, int) ([]*models.UserCompanyMatch, error) {
-	return nil, nil
+func (s *stubMatchingService) ListFavoriteCompanies(uint, int, int) ([]*models.UserCompanyMatch, int, []uint, error) {
+	return nil, 0, nil, nil
 }
 func (s *stubMatchingService) UnfavoriteCompany(uint, uint) error { return nil }
 func (s *stubMatchingService) GetDiagnostics(uint, string) (*matching.MatchingDiagnostics, error) {
