@@ -16,6 +16,36 @@ AI呼び出しの `api_call_logs` に `prompt_stage`、`prompt_version` を記�
 機能ではない。プロンプト本文を変更するときは対応する工程のラベルも同じリリースで更新する。
 prod / staging の設定経路は `infra/terraform/environments/` を参照する。
 
+## 宣言済みの版と起動時の検証（SOCAIAGENT-661）
+
+本文の無い版を環境変数に指定すると、本文は今のまま版ラベルだけが変わり、使用量ログの版が実際の本文を
+指さなくなる。そこで、環境変数で指定できる版を `prompts.declaredPromptVersions`（工程ごと。今は全工程 `v2`）に
+限り、Backend の起動時に `prompts.ValidateSettings()` で確かめる。
+
+- 宣言されていない版・形式が不正な値なら、どの環境変数が不正かをすべて出して起動を止める。形式が不正な値は、
+  別の設定（シークレットを含みうる）を誤って入れた可能性があるので、値そのものは出さない
+- `PROMPT_VERSION` は、工程別の `PROMPT_VERSION_<STAGE>` が無い工程に効くので、その工程すべてで宣言済みかを確かめる
+- A/B の候補の版（`RegisterCandidateBodies`）は `PROMPT_AB_<STAGE>` でだけ使い、`PROMPT_VERSION_<STAGE>` では選べない。
+  選ぶと `Body()` は今の本文を返し、ラベルと本文がずれるため
+- 本文を変えたら、その工程の版を `declaredPromptVersions` で書き換え（または足し）、同じリリースで環境変数も揃える
+- 本番のデプロイは、マイグレーションの前に `/bin/promptcheck`（`cmd/promptcheck`）を新しいイメージとタスク定義の
+  `PROMPT_VERSION*` で実行し、不正ならサービスを差し替えない。実行時の版の解決（`ResolvePromptVersion`）は変えていない
+
+## ES 添削の版（SOCAIAGENT-661）
+
+ES 添削のプロンプトは RAG が持ち、版も RAG の本文と一緒に管理する（`rag/services/es_review.py` の `_PROMPT_VERSION`）。
+RAG は使用量（`usage.prompt_version`）で版を返し、Backend は `api_call_logs` に `prompt_stage='es_review'` と
+その版を記録する。ES 添削（`es_review`）とリライト（`es_rewrite`）は同じプロンプトなので、どちらの記録にも入る。
+版を返さない古い RAG や形式に合わない値のときは、版なしで使用量だけを記録する。
+
+## 出力スキーマ（SOCAIAGENT-661）
+
+回答妥当性チェックと回答品質評価の出力は、Go の構造体（`prompts.AnswerValidationOutput` /
+`prompts.AnswerQualityOutput`）を正とし、プロンプトの出力形式はそこから作る。出力を読む側
+（`chat.LLMAnswerEvaluation`、`parseAnswerValidity`）も同じ構造体を使う。キーを変えるときは構造体のタグを直し、
+本文が変わるので工程の版も上げる。プロンプトのキーと構造体のずれ、ベンチ（aibench）の読み方とのずれはテストで検出する。
+必須キーが欠けた出力の扱い（ゼロ値で続行）は変えていない。
+
 ## A/B 割当（#1976）
 
 工程ごとに候補の版と比率を `PROMPT_AB_<STAGE>` で指定する（例: `PROMPT_AB_SCORE_EVALUATION=v2:50,v3:50`）。
@@ -44,3 +74,11 @@ AI呼び出しは `unknown` として保存し、未計測経路を識別でき�
 `prompt_stage` は機能配賦用の `feature` とは異なる分析軸であり、1工程が複数の機能に対応する場合がある。
 例: `question_generation` → `chat_question`、`score_evaluation` → `chat_answer_eval`、
 `company_extraction` → `company_parse` / `company_search`。未計測経路は `unknown` として記録する。
+
+## RAG（Python）のプロンプトの版（SOCAIAGENT-560）
+
+RAG のプロンプトの版は `rag/services/prompt_versions.py` の `PROMPT_VERSIONS` に工程ごとに集めている（ES 添削・Deep Research・検索クエリの生成・Web Search・採用観点の要約・面接ヒントの要約と parse・履歴書レビュー）。LLM を呼ぶたびに `llm call stage=… prompt_version=… model=…` をログに出すので、プロンプトを変えた前後の比較や切り戻しをログから追える。
+
+- **プロンプトの文面を変えたら、その工程の版を上げる**（版の名前は `工程_v番号`。テストで形を確かめる）
+- 版を付けていない工程の名前で呼ぶと `KeyError` になる（付け忘れに気づくため）
+- Backend の `PROMPT_VERSION_*` とは別の管理で、使用量（`api_call_logs`）への版の記録は RAG 側ではまだしていない

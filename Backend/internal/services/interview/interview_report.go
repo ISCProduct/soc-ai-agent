@@ -256,7 +256,7 @@ type reportCandidate struct {
 // 第2戻り値は照合対象にした項目の総数(ログ用)。
 func checkReportEvidence(candidate reportPayload, utterances []models.InterviewUtterance, spoken SpokenEvidence) (reportCandidate, int) {
 	ev := ValidateEvidenceReferences(candidate.Evidence, candidate.EvidenceUtteranceIDs, utterances)
-	te := ValidateEvidence(teacherDetailedEvidence(candidate), spoken)
+	te := ValidateTeacherEvidence(teacherDetailedEvidence(candidate), spoken)
 	c := reportCandidate{
 		payload:   candidate,
 		evidence:  ev.EvidenceCheck,

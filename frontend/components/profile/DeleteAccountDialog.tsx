@@ -24,13 +24,13 @@ export function DeleteAccountDialog({ open, deleting, onClose, onConfirm }: Dele
       <DialogContent>
         <Typography variant="body2" color="text.secondary">
           退会後すぐにログインできなくなり、サービス上でのデータ閲覧もできなくなります。
-          保管データ（チャット・面接録画・職務経歴書など）は約30日後に完全削除されます。この操作は取り消せません。
+          保管データ（チャット・面接録画・職務経歴書など）は12ヶ月後に完全削除されます。この操作は取り消せません。
         </Typography>
         <Typography variant="body2" component="ul" sx={{ pl: 2, mt: 1, color: 'text.secondary' }}>
           <li>退会直後: ログイン不可・データ閲覧不可</li>
-          <li>約30日後: チャット・スコア・マッチング結果を完全削除</li>
-          <li>約30日後: 面接練習の録画・レポートを完全削除</li>
-          <li>約30日後: 職務経歴書・アカウント情報を完全削除</li>
+          <li>12ヶ月後: チャット・スコア・マッチング結果を完全削除</li>
+          <li>12ヶ月後: 面接練習の録画・レポートを完全削除</li>
+          <li>12ヶ月後: 職務経歴書・アカウント情報を完全削除</li>
         </Typography>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
