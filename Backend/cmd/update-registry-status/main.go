@@ -155,7 +155,7 @@ func run(ctx context.Context, o options, st store, f finder, out io.Writer, now 
 	if o.IncludeDrafts {
 		scope = "未公開・仮登録を含む"
 	}
-	fmt.Fprintf(out, "対象（有効・法人番号あり・%s）: %d 社\n\n", scope, len(targets))
+	pf(out, "対象（有効・法人番号あり・%s）: %d 社\n\n", scope, len(targets))
 
 	var (
 		rows                       []backupRow
@@ -203,24 +203,24 @@ func run(ctx context.Context, o options, st store, f finder, out io.Writer, now 
 		rows = append(rows, backupRow{CompanyID: c.ID, Before: before, After: after})
 	}
 
-	fmt.Fprintf(out, "結果: 保存する %d 社 / 変更なし %d 社 / 商号の不一致 %d 社 / 国税庁に無い %d 社 / 通信などの失敗 %d 社（対象 %d 社）\n",
+	pf(out, "結果: 保存する %d 社 / 変更なし %d 社 / 商号の不一致 %d 社 / 国税庁に無い %d 社 / 通信などの失敗 %d 社（対象 %d 社）\n",
 		len(rows), unchanged, len(mismatches), len(missing), len(fails), len(targets))
-	fmt.Fprintf(out, "内訳: 国の機関 %d 社 / 地方公共団体 %d 社 / 登記が閉鎖 %d 社（商号が一致した企業のうち）。確認済みで値が変わった企業 %d 社\n", agencies, localGovs, closed, changed)
+	pf(out, "内訳: 国の機関 %d 社 / 地方公共団体 %d 社 / 登記が閉鎖 %d 社（商号が一致した企業のうち）。確認済みで値が変わった企業 %d 社\n", agencies, localGovs, closed, changed)
 	printList(out, "商号が一致しなかった企業（書き込みません。法人番号の入力誤りの可能性があります。人が確認してください）", mismatches)
 	printList(out, "国税庁に見つからなかった企業", missing)
 	printList(out, "通信などで失敗した企業（再実行してください）", fails)
-	fmt.Fprintln(out, "\n出典表示の注意: 国税庁の法人番号公表サイトのデータを画面などに出すときは、"+
+	pl(out, "\n出典表示の注意: 国税庁の法人番号公表サイトのデータを画面などに出すときは、"+
 		"「国税庁法人番号公表サイト（国税庁）」と表示すること。利用規約は人が確認してください。")
 	if !o.IncludeDrafts {
-		fmt.Fprintln(out, "注意: 公開済みだけを対象にしています。国の機関は未公開の仮登録がほとんどなので、相関図から除くには --include-drafts を付けて実行してください。")
+		pl(out, "注意: 公開済みだけを対象にしています。国の機関は未公開の仮登録がほとんどなので、相関図から除くには --include-drafts を付けて実行してください。")
 	}
 
 	if !o.Apply {
-		fmt.Fprintln(out, "\n確認のみです（DB には書き込んでいません）。書き込むには --apply --backup <ファイル> を付けてください。")
+		pl(out, "\n確認のみです（DB には書き込んでいません）。書き込むには --apply --backup <ファイル> を付けてください。")
 		return nil
 	}
 	if len(rows) == 0 {
-		fmt.Fprintln(out, "\n書き込む企業がありません。")
+		pl(out, "\n書き込む企業がありません。")
 		return nil
 	}
 	if err := writeBackup(o.Backup, rows); err != nil {
@@ -230,17 +230,21 @@ func run(ctx context.Context, o options, st store, f finder, out io.Writer, now 
 	if err != nil {
 		return fmt.Errorf("書き込みに失敗（全件ロールバック済み）: %w", err)
 	}
-	fmt.Fprintf(out, "\n書き込みました: %d 社（バックアップ: %s）\n元に戻す: go run ./cmd/update-registry-status --restore %s\n", n, o.Backup, o.Backup)
+	pf(out, "\n書き込みました: %d 社（バックアップ: %s）\n元に戻す: go run ./cmd/update-registry-status --restore %s\n", n, o.Backup, o.Backup)
 	return nil
 }
+
+// pf / pl は標準出力への表示。書き込みの失敗は処理に影響しないので無視する。
+func pf(out io.Writer, format string, a ...any) { _, _ = fmt.Fprintf(out, format, a...) }
+func pl(out io.Writer, a ...any)                { _, _ = fmt.Fprintln(out, a...) }
 
 func printList(out io.Writer, title string, items []listed) {
 	if len(items) == 0 {
 		return
 	}
-	fmt.Fprintf(out, "\n%s:\n", title)
+	pf(out, "\n%s:\n", title)
 	for _, it := range items {
-		fmt.Fprintf(out, "  %-6d %s — %s\n", it.ID, it.Name, it.Reason)
+		pf(out, "  %-6d %s — %s\n", it.ID, it.Name, it.Reason)
 	}
 }
 
@@ -276,18 +280,19 @@ func writeBackup(path string, rows []backupRow) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(path, //nolint:gosec // 利用者が --backup で指定した保存先
+		os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err // 既存のファイルは上書きしない
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, err = f.Write(b)
 	return err
 }
 
 // runRestore は、バックアップの企業を書く前の値に戻す。ただし、書き込んだ値のままの企業だけ（その後に変わった値は戻さない）。
 func runRestore(st store, path string, out io.Writer) error {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // 利用者が --restore で指定したファイル
 	if err != nil {
 		return fmt.Errorf("バックアップを読めません: %w", err)
 	}
@@ -299,7 +304,7 @@ func runRestore(st store, path string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("復元に失敗（全件ロールバック済み）: %w", err)
 	}
-	fmt.Fprintf(out, "書く前の値に戻しました: %d 社（バックアップ %d 社のうち、書き込んだ値のままだった企業）\n", n, len(rows))
+	pf(out, "書く前の値に戻しました: %d 社（バックアップ %d 社のうち、書き込んだ値のままだった企業）\n", n, len(rows))
 	return nil
 }
 

@@ -212,7 +212,7 @@ func TestWriteBackup_NeverOverwrites(t *testing.T) {
 	if err := writeBackup(path, nil); err == nil {
 		t.Fatal("既存のバックアップは上書きしない")
 	}
-	b, _ := os.ReadFile(path)
+	b, _ := os.ReadFile(path) //nolint:gosec // テストの一時ファイル
 	if !strings.Contains(string(b), `"company_id": 1`) {
 		t.Fatal("元の内容が残る")
 	}
