@@ -45,7 +45,7 @@ jobs:
           BACKLOG_DOMAIN: ${{ secrets.BACKLOG_DOMAIN }}
           BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
         run: |
-          python3 - <<'PY'
+          python3 - <<'PYEOF'
           import os
           import sys
 
@@ -60,7 +60,7 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               fh.write(f"host={host}\n")
           print(f"host={host}", flush=True)
-          PY
+          PYEOF
 
       - uses: bicstone/backlog-notify@v6
         with:
