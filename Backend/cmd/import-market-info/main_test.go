@@ -150,7 +150,8 @@ func TestBackupAndRestoreAction(t *testing.T) {
 	if err := writeBackup(path, rows); err == nil {
 		t.Fatal("既存のファイルを上書きした")
 	}
-	if b, _ := os.ReadFile(path); !strings.Contains(string(b), `"company_id": 1`) {
+	b, _ := os.ReadFile(path) // #nosec G304 -- テスト用の一時ファイル
+	if !strings.Contains(string(b), `"company_id": 1`) {
 		t.Fatalf("%s", b)
 	}
 	after := marketValue{MarketType: "growth", IsListed: true, StockCode: "1111"}
