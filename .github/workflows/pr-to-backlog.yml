@@ -485,7 +485,7 @@ jobs:
           # どちらも前進のみ。すでに先へ進んだ課題（追いPRなど）は戻さない。
           if ACTION != 'closed':
               # 閉じた PR の本文を直しても、課題を「PR確認待ち」へ戻さない。
-              if pr.get('state') != 'open':
+              if ACTION == 'edited' and pr.get('state') != 'open':
                   print("閉じた PR の編集のため何もしません。")
                   sys.exit(0)
               is_draft = bool(pr.get('draft'))
@@ -502,6 +502,7 @@ jobs:
                   target_name = 'PR確認待ち'
               else:
                   target_name = None
+              failed = False
               if target_name:
                   status_map = load_status_id_map()
                   target_id = status_map.get(target_name)
@@ -515,10 +516,11 @@ jobs:
                       )
                   elif advance_issue_status(BL_BASE, API_KEY, own_key, target_id, target_name) == 'failed':
                       print(f"警告: {own_key} のステータス更新に失敗しました。", file=sys.stderr)
+                      failed = True
               # 説明欄の PR URL は、ステータスが動かなくても常に最新にする
               append_pr_url(own_key, PR_URL)
               print(f"Backlog 課題を反映しました: {own_key} (ステータス: {target_name or '変更なし'}、PR URL を追記)")
-              sys.exit(0)
+              sys.exit(1 if failed else 0)
 
           # ---- PR クローズ（非マージ）: 未対応に戻す ----
           if not PR_MERGED:
@@ -526,8 +528,9 @@ jobs:
                   warn("課題キーが見つからず、課題名でも特定できません。ステータスを更新しません。"
                        "PR タイトルに [SOCAIAGENT-N]、または本文に「Backlog: SOCAIAGENT-N」を書くと同期されます。")
                   sys.exit(0)
-              if update_backlog_status(own_key, 1):
-                  print(f"Backlog 課題を更新しました: {own_key} (ステータス: 未対応)")
+              if not update_backlog_status(own_key, 1):
+                  sys.exit(1)
+              print(f"Backlog 課題を更新しました: {own_key} (ステータス: 未対応)")
               sys.exit(0)
 
           # ---- PR マージ時: マージ先ブランチに応じたステータスへ ----
@@ -554,9 +557,19 @@ jobs:
               sys.exit(0)
 
           print(f"検出した Backlog 課題キー: {', '.join(sorted(keys))}")
+          failed_keys = []
           for key in sorted(keys):
               result = update_merge_status(key, status_id, status_name,
                                            pr_url=PR_URL if key == own_key else None)
               if result == "updated":
                   print(f"Backlog 課題を更新しました: {key} (ステータス: {status_name})")
+              elif result == "failed":
+                  failed_keys.append(key)
+          # 1件の失敗で残りを止めない。全部試してから、失敗があればジョブを赤くする。
+          # 以前は失敗を数えずに成功で終わり、連続マージで API が詰まったときの
+          # 更新漏れが誰にも見えなかった。workflow_dispatch に PR 番号を渡せば再実行できる。
+          if failed_keys:
+              print(f"::error title=Backlog 更新失敗::{', '.join(failed_keys)} を「{status_name}」へ更新できませんでした。"
+                    f"Actions の「PR → Backlog 同期」を pr_number={PR_NUMBER} で手動実行してください。")
+              sys.exit(1)
           PYEOF
