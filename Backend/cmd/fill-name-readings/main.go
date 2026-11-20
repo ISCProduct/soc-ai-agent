@@ -1,18 +1,21 @@
-// fill-name-readings は、公開済みの企業の読み仮名（companies.name_reading）を、法人番号公表サイトから埋める。
+// fill-name-readings は、公開済みの企業の読み仮名（companies.name_reading）を、公的データから埋める。
 //
 // 既定は確認だけで、DB には書き込まない（法人番号公表サイトへの問い合わせは行う。読み取りのみ・無料）。
 // 取得結果と、採用できなかった企業（理由つき）を表示する。
 //
 //		cd Backend
-//		HOUJIN_BANGOU_APP_ID=... go run ./cmd/fill-name-readings                              # 確認のみ
+//		go run ./cmd/fill-name-readings                                                        # 確認のみ（HOUJIN_BANGOU_APP_ID は任意）
 //		HOUJIN_BANGOU_APP_ID=... go run ./cmd/fill-name-readings --apply --backup before.json  # 空の読み仮名だけを埋める
 //		go run ./cmd/fill-name-readings --restore before.json                                  # 埋めた読み仮名を空に戻す
 //
 //	  - 対象は、公開済み（published）・有効・読み仮名が空の企業だけ。既に値がある企業は変えない。
-//	  - まず法人番号公表サイトのフリガナ（公的データ）を使う。取れなかった企業だけ、公式サイトの会社概要から読みを抜き出す
+//	  - まず、DB に保存済みの gBizINFO のフリガナ（公的データ。API 呼び出し・費用なし。アプリケーションID も要らない）を使う。
+//	    登録の商号・法人番号が一致しなければ採用しない。
+//	  - 次に法人番号公表サイトのフリガナ（公的データ。HOUJIN_BANGOU_APP_ID が設定されているときだけ）を使う。
+//	    取れなかった企業だけ、公式サイトの会社概要から読みを抜き出す
 //	    （--no-website で止められる。OPENAI_API_KEY が必要）。AI には推測させず、サイトに書かれた記載の抜き出しだけをさせ、
 //	    引用文がページに実在すること・読みが引用文に書かれていることをコードで検証する。満たさなければ採用しない。
-//	  - 読みの出どころ（corporate_registry / website）と、出典の URL を DB に残す。
+//	  - 読みの出どころ（gbizinfo / corporate_registry / website）と、出典の URL を DB に残す。
 //	  - 本番（APP_ENV=production）や localhost 以外の DB への書き込みは --allow-production が必要（接続より先に確認する）。
 //	  - 法人番号公表サイトのアプリケーションID（HOUJIN_BANGOU_APP_ID）は、ログにも出さない。
 package main
@@ -85,8 +88,9 @@ func main() {
 	}
 
 	finder := houjinbangou.NewClientFromEnv()
-	if !finder.Enabled() {
-		log.Fatal("HOUJIN_BANGOU_APP_ID が未設定です（国税庁の法人番号システム Web-API のアプリケーションID）")
+	registryEnabled := finder.Enabled()
+	if !registryEnabled {
+		fmt.Println("注意: HOUJIN_BANGOU_APP_ID が未設定のため、法人番号公表サイトは使いません（保存済みの gBizINFO と、公式サイトだけで取得します）")
 	}
 
 	var siteExtractor *company.SiteReadingExtractor
@@ -105,17 +109,45 @@ func main() {
 	}
 	fmt.Printf("対象（公開済み・読み仮名が空）: %d 社\n\n", len(targets))
 
+	// 同期のときに保存済みの gBizINFO の法人基本情報（フリガナを含む）。API は呼ばない。
+	profiles := map[uint]*models.GBizCompanyProfile{}
+	if len(targets) > 0 {
+		ids := make([]uint, len(targets))
+		for i := range targets {
+			ids[i] = targets[i].ID
+		}
+		var ps []models.GBizCompanyProfile
+		if err := db.Where("company_id IN ?", ids).Find(&ps).Error; err != nil {
+			log.Fatalf("gBizINFO の保存済み情報の取得に失敗: %v", err)
+		}
+		for i := range ps {
+			profiles[ps[i].CompanyID] = &ps[i]
+		}
+	}
+
 	var found []backupRow
 	var misses []unresolved
 	failed := 0
 	for i := range targets {
 		c := &targets[i]
-		res, err := company.ResolveNameReading(context.Background(), finder, c)
-		time.Sleep(requestInterval)
-		if err != nil {
-			failed++
-			log.Printf("取得に失敗（企業 %d）: %v", c.ID, err)
+		// 保存済みの gBizINFO のフリガナを最初に使う（API 呼び出し・費用なし）。
+		g := company.ReadingFromGBizProfile(c, profiles[c.ID])
+		if g.Reading != "" {
+			found = append(found, backupRow{CompanyID: c.ID, Reading: g.Reading, Method: g.Method})
+			fmt.Printf("  %-5d %s → %s（%s）\n", c.ID, c.Name, g.Reading, g.Method)
 			continue
+		}
+		// 法人番号公表サイトを使えないときは、gBizINFO で採用しなかった理由だけを持って、公式サイトの読み取りへ進む。
+		res := company.ReadingResult{Reason: "gBizINFO: " + g.Reason}
+		if registryEnabled {
+			var err error
+			res, err = company.ResolveNameReading(context.Background(), finder, c)
+			time.Sleep(requestInterval)
+			if err != nil {
+				failed++
+				log.Printf("取得に失敗（企業 %d）: %v", c.ID, err)
+				continue
+			}
 		}
 		if res.Reading != "" {
 			found = append(found, backupRow{CompanyID: c.ID, Reading: res.Reading, Method: res.Method})
@@ -190,8 +222,11 @@ func applyReadings(db *gorm.DB, rows []backupRow) (int64, error) {
 
 // sourceOf は、取得方法を、DB に残す出どころの値にする。
 func sourceOf(method string) string {
-	if method == company.MethodWebsite {
+	switch method {
+	case company.MethodWebsite:
 		return "website"
+	case company.MethodGBizInfo:
+		return "gbizinfo" // 保存済みの gBizINFO のフリガナ（公的データ）
 	}
 	return "corporate_registry" // 法人番号公表サイト（登録の法人番号、または商号と所在地での特定）
 }
