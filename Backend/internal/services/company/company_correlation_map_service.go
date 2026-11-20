@@ -18,6 +18,50 @@ const CorrelationMapInitialChildLimit = 4
 // CorrelationMapShortBusinessMaxRunes はカード用の短い事業説明の上限。
 const CorrelationMapShortBusinessMaxRunes = 48
 
+// 国税庁の法人種別コード（リソース定義書 k-resource-dl-ver4 の「法人種別」）。
+// 相関図から除くのは、企業ではない次の2種別だけ。他のコード（301 株式会社 など）は推測で足さない。
+const (
+	CorporateKindNationalAgency  = "101" // 国の機関（行政機関・裁判所・国会の機関）
+	CorporateKindLocalGovernment = "201" // 地方公共団体（普通地方公共団体・特別地方公共団体）
+)
+
+// wellKnownEmployeeThreshold は「よく知る企業」とみなす従業員数の下限。
+// 登記が閉鎖された企業でも、よく知る企業なら相関図に残す（合併・社名変更の前の名前で知られているため）。
+// 暫定値。運用しながら調整する前提で、定義はこの定数と isWellKnownCompany の1か所に集めている。
+const wellKnownEmployeeThreshold = 1000
+
+// isWellKnownCompany は「よく知る企業」か。上場している、または従業員数が閾値以上。
+// 「よく知る企業」の定義を変えるときは、ここだけを直す。
+func isWellKnownCompany(c *models.Company, market *models.CompanyMarketInfo) bool {
+	if market != nil && market.IsListed {
+		return true
+	}
+	return c.EmployeeCount >= wellKnownEmployeeThreshold
+}
+
+// isPublicBody は国の機関・地方公共団体か（企業ではない）。未確認（空）は false。
+func isPublicBody(c *models.Company) bool {
+	switch strings.TrimSpace(c.CorporateKind) {
+	case CorporateKindNationalAgency, CorporateKindLocalGovernment:
+		return true
+	}
+	return false
+}
+
+// isRegistryClosed は登記が閉鎖されているか。未確認・閉鎖なし（nil）は false。
+func isRegistryClosed(c *models.Company) bool {
+	return c.RegistryClosedOn != nil
+}
+
+// correlationExcluded は相関図に出さない企業か。
+// 国の機関・地方公共団体、または「よく知る企業」でない閉鎖企業。未確認は除外しない。
+func correlationExcluded(c *models.Company, market *models.CompanyMarketInfo) bool {
+	if isPublicBody(c) {
+		return true
+	}
+	return isRegistryClosed(c) && !isWellKnownCompany(c, market)
+}
+
 // CorrelationMapNode は相関図カード／詳細に必要な企業情報。
 type CorrelationMapNode struct {
 	ID                  uint       `json:"id"`
@@ -39,7 +83,10 @@ type CorrelationMapNode struct {
 	SourceFetchedAt     *time.Time `json:"source_fetched_at,omitempty"`
 	RelationsFetchedAt  *time.Time `json:"relations_fetched_at,omitempty"`
 	IsFocus             bool       `json:"is_focus"`
-	DetailPath          string     `json:"detail_path"` // FE の企業詳細への相対パス
+	// RegistryClosed は登記上は閉鎖されている企業（よく知る企業のため残している）。画面で「登記上は閉鎖」と注記する。
+	RegistryClosed   bool   `json:"registry_closed"`
+	RegistryClosedOn string `json:"registry_closed_on,omitempty"` // YYYY-MM-DD。不明なら省略
+	DetailPath       string `json:"detail_path"`                  // FE の企業詳細への相対パス
 }
 
 // CorrelationMapCapitalEdge は資本関係（親→子）。subsidiary と affiliate を区別する。
@@ -134,14 +181,14 @@ func (s *CompanyCorrelationMapService) Build(focusID uint) (*CompanyCorrelationM
 		}
 		companyByID[focusID] = *focus
 	}
-	focusCompany := companyByID[focusID]
-	if !briefVisible(&focusCompany) {
-		return nil, fmt.Errorf("company not found (id=%d)", focusID)
-	}
-
 	marketByID, err := s.relationRepo.GetMarketInfoByCompanyIDs(nodeIDs)
 	if err != nil {
 		return nil, fmt.Errorf("load market info: %w", err)
+	}
+
+	focusCompany := companyByID[focusID]
+	if !briefVisible(&focusCompany) || correlationExcluded(&focusCompany, marketByID[focusID]) {
+		return nil, fmt.Errorf("company not found (id=%d)", focusID)
 	}
 
 	relations, err := s.relationRepo.GetRelationsByCompanyIDs(nodeIDs)
@@ -149,12 +196,14 @@ func (s *CompanyCorrelationMapService) Build(focusID uint) (*CompanyCorrelationM
 		return nil, fmt.Errorf("load relations: %w", err)
 	}
 
-	// 公開API向け: 審査前ゲスト投稿をノードから除外（GetRelationsByCompanyIDs に
+	// 公開API向け: 国の機関・地方公共団体と、よく知る企業でない閉鎖企業もここで除く
+	// （辺は下の nodeSet に無いノードにつながるものを出さないので、一緒に消える）。
+	// 審査前ゲスト投稿をノードから除外（GetRelationsByCompanyIDs に
 	// guestEntryVisibilityGuard が無いため、ここで多層防御する）。
 	visibleIDs := make([]uint, 0, len(base.Nodes))
 	for _, n := range base.Nodes {
 		c, ok := companyByID[n.ID]
-		if !ok || !briefVisible(&c) {
+		if !ok || !briefVisible(&c) || correlationExcluded(&c, marketByID[n.ID]) {
 			continue
 		}
 		visibleIDs = append(visibleIDs, n.ID)
@@ -292,8 +341,15 @@ func (s *CompanyCorrelationMapService) CompareBusiness(focusID, selectedID uint)
 	}
 	focus, ok1 := byID[focusID]
 	selected, ok2 := byID[selectedID]
-	// 公開API。審査前のゲスト投稿企業は、Build と同じ条件で隠す。
+	// 公開API。審査前のゲスト投稿企業と、相関図から除く企業は、Build と同じ条件で隠す。
 	if !ok1 || !ok2 || !briefVisible(&focus) || !briefVisible(&selected) {
+		return nil, fmt.Errorf("company not found")
+	}
+	excluded, err := s.anyExcluded(&focus, &selected)
+	if err != nil {
+		return nil, err
+	}
+	if excluded {
 		return nil, fmt.Errorf("company not found")
 	}
 	fs, fsrc, fKnown := DeriveShortBusiness(focus.MainBusiness, focus.Description)
@@ -323,6 +379,27 @@ func (s *CompanyCorrelationMapService) CompareBusiness(focusID, selectedID uint)
 	}, nil
 }
 
+// anyExcluded は、渡した企業のどれかが相関図から除く対象か。
+// 市場情報（上場）は、閉鎖企業の判定に要るときだけ引く。
+func (s *CompanyCorrelationMapService) anyExcluded(cs ...*models.Company) (bool, error) {
+	for _, c := range cs {
+		if isPublicBody(c) {
+			return true, nil
+		}
+		if !isRegistryClosed(c) || c.EmployeeCount >= wellKnownEmployeeThreshold {
+			continue
+		}
+		market, err := s.relationRepo.GetMarketInfoByCompanyIDs([]uint{c.ID})
+		if err != nil {
+			return false, fmt.Errorf("load market info: %w", err)
+		}
+		if correlationExcluded(c, market[c.ID]) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func buildCorrelationNode(c models.Company, market *models.CompanyMarketInfo, isFocus bool) CorrelationMapNode {
 	reading := strings.TrimSpace(c.NameReading)
 	short, src, known := DeriveShortBusiness(c.MainBusiness, c.Description)
@@ -344,6 +421,10 @@ func buildCorrelationNode(c models.Company, market *models.CompanyMarketInfo, is
 		SourceFetchedAt:     c.SourceFetchedAt,
 		RelationsFetchedAt:  c.RelationsFetchedAt,
 		DetailPath:          fmt.Sprintf("/company/%d", c.ID),
+	}
+	if isRegistryClosed(&c) {
+		n.RegistryClosed = true
+		n.RegistryClosedOn = c.RegistryClosedOn.Format("2006-01-02")
 	}
 	if market != nil {
 		n.MarketTypeKnown = true
