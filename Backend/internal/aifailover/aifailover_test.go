@@ -111,7 +111,8 @@ func TestBreaker(t *testing.T) {
 		t.Fatal("再び半開")
 	}
 	b.Success()
-	if !b.Allow() || !b.Allow() || b.Open() {
+	allow1, allow2 := b.Allow(), b.Allow()
+	if !allow1 || !allow2 || b.Open() {
 		t.Fatal("試しが成功したら閉じる")
 	}
 }

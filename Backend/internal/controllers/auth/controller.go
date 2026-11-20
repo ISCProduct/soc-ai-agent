@@ -238,7 +238,9 @@ func (c *AuthController) RequestPasswordReset(ctx echo.Context) error {
 	}
 
 	// エラーがあっても常に200を返す（情報漏洩防止）
-	c.authService.RequestPasswordReset(body.Email)
+	if err := c.authService.RequestPasswordReset(body.Email); err != nil {
+		slog.WarnContext(ctx.Request().Context(), "request password reset failed", "err", err)
+	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "パスワードリセットメールを送信しました"})
 }
