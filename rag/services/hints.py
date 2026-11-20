@@ -6,9 +6,11 @@ import asyncio
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from typing import List, Optional
 
 from models import CompanyHintsResponse
+from services.deadline import run_with_deadline
 from services.sanitize import (
     _sanitize_company_name_for_query,
     _sanitize_job_title,
@@ -47,15 +49,26 @@ def _run_hints_web_search(company_name: str, position: str) -> Optional[str]:
 async def _run_hints_web_search_pipeline(
         company_name: str, role_text: str, queries: List[str]
 ) -> str:
-    """面接調査クエリを並列Web Searchし、面接観点でLLM要約して返す。"""
+    """面接調査クエリを並列Web Searchし、面接観点でLLM要約して返す。
+
+    全体に上限時間があり、過ぎたら空文字を返す（services/deadline.py、SOCAIAGENT-558）。
+    """
+    return await run_with_deadline(
+        lambda executor: _hints_web_search_steps(company_name, role_text, queries, executor),
+        "hints_web_search", company_name,
+    )
+
+
+async def _hints_web_search_steps(
+        company_name: str, role_text: str, queries: List[str], executor: ThreadPoolExecutor
+) -> str:
     import main as m
 
     loop = asyncio.get_event_loop()
 
-    with ThreadPoolExecutor() as executor:
-        raw_results = list(await asyncio.gather(
-            *[loop.run_in_executor(executor, m._web_search_openai, q) for q in queries]
-        ))
+    raw_results = list(await asyncio.gather(
+        *[loop.run_in_executor(executor, m._web_search_openai, q) for q in queries]
+    ))
     raw_results = [r for r in raw_results if r]
 
     if not raw_results:
@@ -91,7 +104,10 @@ async def _run_hints_web_search_pipeline(
                  f"【検索結果】\n{_wrap_untrusted_text(combined, '検索結果')}"
              )
     try:
-        resp = client.chat.completions.create(
+        # 同期の呼び出しをコルーチンの中で直接呼ぶと、イベントループが止まって上限時間で
+        # 打ち切れない。専用のスレッドプールで走らせる（SOCAIAGENT-558）
+        resp = await loop.run_in_executor(executor, partial(
+            client.chat.completions.create,
             model=summary_model(),
             messages=[
                 {
@@ -107,7 +123,7 @@ async def _run_hints_web_search_pipeline(
             ],
             temperature=0.2,
             max_tokens=800,
-        )
+        ))
         summary = resp.choices[0].message.content or ""
         logger.info("hints web search summary company=%s chars=%d", company_name, len(summary))
         return summary.strip()
