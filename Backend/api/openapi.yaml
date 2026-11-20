@@ -4463,7 +4463,10 @@ paths:
   /health:
     get:
       tags: [ops]
-      summary: ヘルスチェック
+      summary: 生存確認
+      description: |
+        プロセスが応答できることだけを返す。DB は見ない。
+        ALB と ECS のヘルスチェックはこちら（または `/healthz`）のままにする。
       security: []
       responses:
         "200":
@@ -4472,11 +4475,26 @@ paths:
   /healthz:
     get:
       tags: [ops]
-      summary: ヘルスチェック（別名）
+      summary: 生存確認（別名）
+      description: ECS ターゲットグループと ALB が使うパス。`/health` と同じで、DB は見ない。
       security: []
       responses:
         "200":
           description: "`{\"status\":\"ok\"}`"
+
+  /ready:
+    get:
+      tags: [ops]
+      summary: 起動準備の確認
+      description: |
+        DB へ ping する。失敗時は 503。
+        ALB のヘルスチェック先にはしない。DB の瞬断でタスクが落ちるため。
+      security: []
+      responses:
+        "200":
+          description: "`{\"status\":\"ok\"}`"
+        "503":
+          description: "`{\"status\":\"unavailable\"}`"
 
   /metrics:
     get:

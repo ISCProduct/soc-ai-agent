@@ -1,6 +1,8 @@
 package mocks
 
 import (
+	"context"
+
 	"Backend/internal/models"
 
 	"github.com/stretchr/testify/mock"
@@ -23,6 +25,14 @@ func (m *JobCategoryRepositoryMock) FindByID(id uint) (*models.JobCategory, erro
 	args := m.Called(id)
 	if v := args.Get(0); v != nil {
 		return v.(*models.JobCategory), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *JobCategoryRepositoryMock) FindByIDs(ctx context.Context, ids []uint) ([]models.JobCategory, error) {
+	args := m.Called(ctx, ids)
+	if v := args.Get(0); v != nil {
+		return v.([]models.JobCategory), args.Error(1)
 	}
 	return nil, args.Error(1)
 }

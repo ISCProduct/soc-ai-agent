@@ -174,13 +174,10 @@ JSONのみを返してください。説明は不要です。`, userAnswer, stri
 		return nil, fmt.Errorf("failed to parse AI response: %w, response: %s", err, responseText)
 	}
 
-	// 5. マッチした職種の詳細を取得
-	matchedCategories := []models.JobCategory{}
-	for _, id := range aiResponse.MatchedIDs {
-		category, err := v.jobCategoryRepo.FindByID(id)
-		if err == nil {
-			matchedCategories = append(matchedCategories, *category)
-		}
+	// 5. マッチした職種の詳細を取得。IDごとに問い合わせると、候補の数だけ往復する。
+	matchedCategories, err := v.loadMatchedCategories(ctx, aiResponse.MatchedIDs)
+	if err != nil {
+		return nil, err
 	}
 
 	return &JobValidationResult{
@@ -189,6 +186,31 @@ JSONのみを返してください。説明は不要です。`, userAnswer, stri
 		SuggestedQuestion:  aiResponse.SuggestedQuestion,
 		NeedsClarification: aiResponse.NeedsClarification,
 	}, nil
+}
+
+// loadMatchedCategories は候補IDを1回で読み、依頼された順に並べる。
+// マスタに無いIDは飛ばす。同じIDが複数回あれば、その回数だけ返す。
+func (v *JobCategoryValidator) loadMatchedCategories(ctx context.Context, ids []uint) ([]models.JobCategory, error) {
+	if len(ids) == 0 {
+		return []models.JobCategory{}, nil
+	}
+	rows, err := v.jobCategoryRepo.FindByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load matched job categories: %w", err)
+	}
+	byID := make(map[uint]models.JobCategory, len(rows))
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+	matched := make([]models.JobCategory, 0, len(ids))
+	for _, id := range ids {
+		row, ok := byID[id]
+		if !ok {
+			continue
+		}
+		matched = append(matched, row)
+	}
+	return matched, nil
 }
 
 // normalizeNumericAnswer は番号だけの回答を職種名へ置き換える。

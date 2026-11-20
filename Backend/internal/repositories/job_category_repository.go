@@ -1,6 +1,8 @@
 package repositories
 
 import (
+	"context"
+
 	"Backend/internal/models"
 	"gorm.io/gorm"
 )
@@ -25,6 +27,16 @@ func (r *JobCategoryRepository) FindByID(id uint) (*models.JobCategory, error) {
 	var category models.JobCategory
 	err := r.db.First(&category, id).Error
 	return &category, err
+}
+
+// FindByIDs は指定したIDの職種を1回の問い合わせで返す。存在しないIDは結果に含めない。
+func (r *JobCategoryRepository) FindByIDs(ctx context.Context, ids []uint) ([]models.JobCategory, error) {
+	if len(ids) == 0 {
+		return []models.JobCategory{}, nil
+	}
+	var categories []models.JobCategory
+	err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&categories).Error
+	return categories, err
 }
 
 // FindByName 名前で職種を検索（部分一致）
