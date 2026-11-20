@@ -229,7 +229,11 @@ func (c *ResumeController) serveDocumentFile(ctx echo.Context, open func(documen
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
 	if file.CloseFunc != nil {
-		defer file.CloseFunc()
+		defer func() {
+			if err := file.CloseFunc(); err != nil {
+				log.Printf("[ResumeController] file close failed: %v", err)
+			}
+		}()
 	}
 
 	w := ctx.Response().Writer

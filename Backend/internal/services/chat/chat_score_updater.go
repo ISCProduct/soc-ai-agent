@@ -289,7 +289,6 @@ func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, s
 				continue
 			}
 			result.Score, _ = AdjustChoiceAxisScore(result.Score, resolved.Reason)
-			scoreInput = resolved.Letter
 		} else {
 			if resolved.IsFreeText {
 				scoreInput = resolved.Text

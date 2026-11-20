@@ -30,6 +30,8 @@ type InterviewUtteranceRepository interface {
 // InterviewReportRepository は面接レポートの永続化インターフェース。
 type InterviewReportRepository interface {
 	FindBySessionID(sessionID uint) (*models.InterviewReport, error)
+	// FindBySessionIDs は複数セッションのレポートを一括取得する。
+	FindBySessionIDs(sessionIDs []uint) ([]models.InterviewReport, error)
 	Upsert(report *models.InterviewReport) error
 	// ClaimScoresApplication はスコア反映の権利を1つのプロセスだけに与える（#1512）。
 	// scores_applied_at が NULL の行だけを更新するので、同時に呼んでも true を
