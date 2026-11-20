@@ -61,7 +61,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	}
 
 	// スコア分布を分析
-	scoreMap := make(map[string]int)
+	scoreMap := make(map[string]float64)
 	evaluatedCategories := make(map[string]bool)
 	for _, score := range scores {
 		scoreMap[score.WeightCategory] = score.Score

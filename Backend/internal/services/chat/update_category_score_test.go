@@ -14,26 +14,26 @@ type mockWeightScoreRepo struct {
 	findErr    error
 	setCalled  bool
 	addCalled  bool
-	addDelta   int
+	addDelta   float64
 	setVersion string
 	addVersion string
 }
 
-func (m *mockWeightScoreRepo) SetScore(userID uint, sessionID, category string, absoluteScore int) error {
+func (m *mockWeightScoreRepo) SetScore(userID uint, sessionID, category string, absoluteScore float64) error {
 	m.setCalled = true
 	return nil
 }
-func (m *mockWeightScoreRepo) SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore int, promptVersion string) error {
+func (m *mockWeightScoreRepo) SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore float64, promptVersion string) error {
 	m.setCalled = true
 	m.setVersion = promptVersion
 	return nil
 }
-func (m *mockWeightScoreRepo) AddScore(userID uint, sessionID, category string, delta int) error {
+func (m *mockWeightScoreRepo) AddScore(userID uint, sessionID, category string, delta float64) error {
 	m.addCalled = true
 	m.addDelta = delta
 	return nil
 }
-func (m *mockWeightScoreRepo) AddScoreWithPromptVersion(userID uint, sessionID, category string, delta int, promptVersion string) error {
+func (m *mockWeightScoreRepo) AddScoreWithPromptVersion(userID uint, sessionID, category string, delta float64, promptVersion string) error {
 	m.addCalled = true
 	m.addDelta = delta
 	m.addVersion = promptVersion
@@ -94,7 +94,7 @@ func TestUpdateCategoryScore_UpdatesExisting(t *testing.T) {
 	}
 	// 移動平均 = 50*0.7 + 80*0.3 = 59、差分delta = 9
 	if repo.addDelta != 9 {
-		t.Fatalf("addDelta = %d, want 9", repo.addDelta)
+		t.Fatalf("addDelta = %v, want 9", repo.addDelta)
 	}
 	if repo.addVersion != "v2" {
 		t.Fatalf("stored prompt version = %q, want v2", repo.addVersion)

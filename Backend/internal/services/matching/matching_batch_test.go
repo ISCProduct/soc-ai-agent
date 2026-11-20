@@ -107,12 +107,12 @@ type matchingScoreRepo struct {
 	scores []models.UserWeightScore
 }
 
-func (s *matchingScoreRepo) SetScore(uint, string, string, int) error { return nil }
-func (s *matchingScoreRepo) AddScore(uint, string, string, int) error { return nil }
-func (s *matchingScoreRepo) SetScoreWithPromptVersion(uint, string, string, int, string) error {
+func (s *matchingScoreRepo) SetScore(uint, string, string, float64) error { return nil }
+func (s *matchingScoreRepo) AddScore(uint, string, string, float64) error { return nil }
+func (s *matchingScoreRepo) SetScoreWithPromptVersion(uint, string, string, float64, string) error {
 	return nil
 }
-func (s *matchingScoreRepo) AddScoreWithPromptVersion(uint, string, string, int, string) error {
+func (s *matchingScoreRepo) AddScoreWithPromptVersion(uint, string, string, float64, string) error {
 	return nil
 }
 func (s *matchingScoreRepo) FindByUserAndSession(uint, string) ([]models.UserWeightScore, error) {
