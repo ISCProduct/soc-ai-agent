@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { test, expect } from '@playwright/test'
 import { setupAuth, TEST_USER } from './fixtures/auth'
 
@@ -81,5 +83,48 @@ test.describe('職務経歴書レビューフロー', () => {
     await expect(page.getByText('全体的にバランスの取れた経歴書です。')).toBeVisible()
     await expect(page.getByText('3名でWebの機能開発を1年担当しました').or(page.getByText('店舗売上を前年比10%伸ばしました'))).toBeVisible()
     await expect(page.getByText(/事実と違う内容になっていないか/)).toBeVisible()
+  })
+
+  test('実際の書類（PDF）を描き、指摘の位置に番号つきの強調を重ねる', async ({ page }) => {
+    const pdf = readFileSync(join(__dirname, 'fixtures', 'sample-resume.pdf'))
+    await page.route('**/api/resume/document*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/pdf', body: pdf }),
+    )
+    await page.route('**/api/resume/upload', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ document: { id: 42 } }) }),
+    )
+    // bbox は OCR と同じ、150dpi の画素（左上が原点）。ページの大きさ 1240x1755 に対する位置
+    const item = {"id": 1, "page_number": 1, "severity": "critical", "message": "何を・どれくらい・どう取り組んだかが読み取れません。", "quote": "学生時代はいろいろな活動を頑張りました。", "rewrite": "学園祭の実行委員として【担当した役割】を担い、【数字で表せる成果】を出しました。", "bbox": "{\"bbox\": [125.00000000000001, 433.33333333333337, 625.0, 463.33332061767584], \"page_width\": 1240, \"page_height\": 1755}"}
+    await page.route('**/api/resume/review/stream*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: [
+          `data: ${JSON.stringify({ type: 'chunk', text: 'レポート' })}`,
+          `data: ${JSON.stringify({ type: 'complete', review: { id: 1, score: 62, summary: '改善の余地があります。' }, items: [item], annotated_available: false })}`,
+        ].join('\n') + '\n',
+      }),
+    )
+
+    await page.goto('/resume')
+    await page.waitForLoadState('networkidle')
+    await page.locator('input[type=file]').setInputFiles({ name: '履歴書.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4') })
+    await expect(page.getByText('読み込めました')).toBeVisible()
+    await page.getByRole('radio', { name: '職種だけで見る' }).click()
+    await page.getByLabel(/応募職種/).fill('エンジニア')
+    await page.getByRole('button', { name: 'レビューを始める' }).click()
+
+    // PDF.js が書類のページを描く（原文を並べた代わりの表示ではない）
+    const canvas = page.locator('canvas').first()
+    await expect(canvas).toBeVisible({ timeout: 20000 })
+    await expect(page.getByText(/実際の書類のレイアウトとは異なります/)).toHaveCount(0)
+
+    // 強調は、ページの大きさに対する割合の位置に重なる（x0=125/1240、y0=433/1755）
+    const highlight = page.getByRole('button', { name: /指摘1を選ぶ/ })
+    await expect(highlight).toBeVisible()
+    const c = (await canvas.boundingBox())!
+    const h = (await highlight.boundingBox())!
+    expect((h.x - c.x) / c.width).toBeCloseTo(125 / 1240, 1)
+    expect((h.y - c.y) / c.height).toBeCloseTo(433 / 1755, 1)
   })
 })
