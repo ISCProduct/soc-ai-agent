@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from services.model_tiers import es_review_model
-import os
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
