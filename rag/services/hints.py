@@ -1,5 +1,6 @@
 """面接ヒントの Web Search と構造化パース。"""
 from __future__ import annotations
+from services.output_schemas import HINTS_PARSE_SCHEMA, json_response_format
 
 from services.model_tiers import hints_parse_model, summary_model
 import asyncio
@@ -155,7 +156,8 @@ def _parse_hints_from_text(company_name: str, position: str, research_text: str)
             ],
             temperature=0.2,
             max_tokens=m.HINTS_PARSE_MAX_TOKENS,
-            response_format={"type": "json_object"},
+            # 形をモデル側で保証する（SOCAIAGENT-563）。RAG_STRUCTURED_OUTPUTS=0 で JSON モードに戻せる
+            response_format=json_response_format("hints_parse", HINTS_PARSE_SCHEMA),
         )
         raw = resp.choices[0].message.content or "{}"
         data = _json.loads(raw)

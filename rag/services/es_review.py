@@ -5,6 +5,12 @@ Backend の `/api/es/review`（ES添削タブ）と `/api/es/rewrite`（ESリラ
 どちらもここへ集約され、同じプロンプト・同じ出力スキーマから表示を出し分ける。
 """
 from __future__ import annotations
+from services.output_schemas import (
+    ES_IMPROVED_SCHEMA,
+    ES_REVIEW_SCHEMA,
+    is_schema_unsupported,
+    json_response_format,
+)
 
 from services.model_tiers import es_review_model
 import json
@@ -170,8 +176,12 @@ def _chat_json(
         user_prompt: str,
         max_tokens: Optional[int],
         tally: Optional[_UsageTally] = None,
+        schema: Optional[Tuple[str, Dict[str, Any]]] = None,
 ) -> Tuple[str, str]:
-    """JSONモードでチャット補完を1回呼び、(本文, finish_reason) を返す。
+    """JSON でチャット補完を1回呼び、(本文, finish_reason) を返す。
+
+    schema（名前, JSON スキーマ）があれば strict の Structured Outputs で形を強制する（SOCAIAGENT-563）。
+    スキーマに対応しないモデル・互換サーバのエラーなら、JSON モードで1回だけ呼び直す。
 
     JSONパースの成否ではなく finish_reason で出力上限の到達を判定するため、
     ここではパースせず生の本文を返す（上限到達時はJSONが途中で切れている）。
@@ -179,16 +189,28 @@ def _chat_json(
     # max_tokens が None の段（改善文 / #1564）はキー自体を送らない。null を送っても
     # OpenAI 側は既定扱いだが、OpenAI 互換サーバ（vLLM / llama.cpp）での解釈差を避ける。
     budget_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.3,
-        response_format={"type": "json_object"},
-        **budget_kwargs,
-    )
+    json_mode = {"type": "json_object"}
+    response_format = json_response_format(*schema) if schema else json_mode
+
+    def create(fmt: Dict[str, Any]) -> Any:
+        return client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3,
+            response_format=fmt,
+            **budget_kwargs,
+        )
+
+    try:
+        resp = create(response_format)
+    except Exception as exc:
+        if response_format == json_mode or not is_schema_unsupported(exc):
+            raise
+        logger.warning("structured outputs unsupported model=%s; falling back to json mode error=%s", model, exc)
+        resp = create(json_mode)
     if tally is not None:
         tally.add(getattr(resp, "usage", None))
     choice = resp.choices[0]
@@ -205,6 +227,7 @@ def _call_json_with_retry(
         tally: Optional[_UsageTally] = None,
         truncated_message: Optional[str] = None,
         keep_truncated: bool = False,
+        schema: Optional[Tuple[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """出力上限に到達した場合のみ、上限を引き上げて1回だけ再試行する。
 
@@ -218,7 +241,7 @@ def _call_json_with_retry(
     content = ""
     for attempt in (1, 2):
         content, finish_reason = _chat_json(
-            client, model, system_prompt, user_prompt, max_tokens, tally
+            client, model, system_prompt, user_prompt, max_tokens, tally, schema
         )
         if finish_reason != "length":
             return json.loads(content or "{}")
@@ -698,6 +721,7 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
             ),
             label="review",
             tally=tally,
+            schema=("es_review", ES_REVIEW_SCHEMA),
         )
         feedback = str(review_data.get("feedback", ""))
 
@@ -717,6 +741,7 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
             truncated_message=improved_truncated_message,
             # 上限なしの長文はモデル自身の出力上限で切れる。422にすると警告も本文も届かない。
             keep_truncated=char_limit is None,
+            schema=("es_improved_text", ES_IMPROVED_SCHEMA),
         )
         improved_text = _text_field(improved_data, "improved_text")
         improved_length = count_es_chars(improved_text)
@@ -754,6 +779,7 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
                         label="improved_text",
                         tally=tally,
                         truncated_message=improved_truncated_message,
+                        schema=("es_improved_text", ES_IMPROVED_SCHEMA),
                     )
                 except Exception as exc:
                     logger.warning(
