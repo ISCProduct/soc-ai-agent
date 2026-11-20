@@ -2,6 +2,7 @@ package auth
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/logsafe"
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"context"
@@ -361,15 +362,5 @@ func MaskEmail(email string) string {
 }
 
 func maskEmail(email string) string {
-	email = strings.TrimSpace(email)
-	at := strings.Index(email, "@")
-	if at <= 0 {
-		return "***"
-	}
-	local := email[:at]
-	domain := email[at:]
-	if len(local) == 1 {
-		return local + "***" + domain
-	}
-	return string(local[0]) + "***" + domain
+	return logsafe.MaskEmail(email)
 }

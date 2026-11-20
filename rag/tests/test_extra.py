@@ -2,9 +2,7 @@
 追加テスト: OpenAI 429 リトライ、キャッシュ例外ハンドリング、CrewAI モック
 """
 from unittest.mock import MagicMock, patch
-import types
 
-import pytest
 
 # rag をパスに追加は conftest.py が担当しているためここでは不要
 import main
