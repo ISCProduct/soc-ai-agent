@@ -346,3 +346,41 @@ func TestReview_MasksSubjectAndFailsClosed(t *testing.T) {
 		t.Errorf("伏字の準備ができないのに RAG へ送った: %v", ragReq)
 	}
 }
+
+// SOCAIAGENT-559: 評価と改善文でモデルが違う。RAG がモデルごとの内訳を返したら、モデルごとに記録する
+// （合計を1つのモデルで記録すると、単価の違うトークンが混ざってコストがずれる）。
+func TestReview_RecordsUsagePerModel(t *testing.T) {
+	body := `{"feedback":"f","feedback_items":[],"improved_text":"t","usage":{"model":"gpt-4o","prompt_tokens":300,"completion_tokens":600,"calls":3,` +
+		`"by_model":[{"model":"gpt-4o","prompt_tokens":100,"completion_tokens":200,"calls":1},` +
+		`{"model":"gpt-4o-mini","prompt_tokens":200,"completion_tokens":400,"calls":2}]}}`
+	srv := ragStub(t, http.StatusOK, body, nil)
+	defer srv.Close()
+	t.Setenv("RAG_REVIEW_URL", srv.URL)
+
+	var usages []openai.Usage
+	cli := &openai.Client{OnUsage: func(u openai.Usage) { usages = append(usages, u) }}
+	ctx, rec := newCtx(http.MethodPost, "/api/es/review", `{"es_text": "元の文章"}`)
+	if err := NewESReviewController(cli).Review(ctx); err != nil {
+		t.Fatalf("Review が失敗: %v", err)
+	}
+	if strings.Contains(rec.Body.String(), "by_model") {
+		t.Errorf("内訳がレスポンスに漏れている: %s", rec.Body.String())
+	}
+	if len(usages) != 2 {
+		t.Fatalf("モデルごとに2行記録するはず: %+v", usages)
+	}
+	if usages[0].Model != "gpt-4o" || usages[0].PromptTokens != 100 || usages[0].CompletionTokens != 200 {
+		t.Errorf("評価のモデルの行 = %+v", usages[0])
+	}
+	if usages[1].Model != "gpt-4o-mini" || usages[1].PromptTokens != 200 || usages[1].CompletionTokens != 400 {
+		t.Errorf("改善文のモデルの行 = %+v", usages[1])
+	}
+	if usages[1].LatencyMs != 0 {
+		t.Errorf("応答時間を2行目にも付けて重複させている: %+v", usages[1])
+	}
+	for _, u := range usages {
+		if u.Feature != usagectx.FeatureESReview {
+			t.Errorf("機能名 = %q", u.Feature)
+		}
+	}
+}

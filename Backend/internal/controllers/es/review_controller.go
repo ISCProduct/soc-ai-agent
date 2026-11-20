@@ -72,6 +72,16 @@ type esReviewRAGUsage struct {
 	PromptTokens     int    `json:"prompt_tokens"`
 	CompletionTokens int    `json:"completion_tokens"`
 	Calls            int    `json:"calls"`
+	// ByModel はモデルごとの内訳（SOCAIAGENT-559）。評価と改善文でモデルが違い、単価も違うので、
+	// あればモデルごとに記録する。無ければ（古い RAG）上の合計を Model で記録する。
+	ByModel []esReviewRAGModelUsage `json:"by_model"`
+}
+
+type esReviewRAGModelUsage struct {
+	Model            string `json:"model"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	Calls            int    `json:"calls"`
 }
 
 // esReviewRAGResponse は RAG の /es/review レスポンスのうち Go が読む項目。
@@ -383,12 +393,32 @@ func consumeRAGUsage(ctx echo.Context, cli *openai.Client, feature string, body 
 	if err := json.Unmarshal(usageRaw, &usage); err == nil && usage.Calls > 0 {
 		// 機能名は呼び出し元が定数で渡す（#1294 の方針）。実行主体はリクエストの
 		// コンテキストから取る（未ログイン利用も仕様の経路なので無ければ NULL）。
-		cli.ReportProxyUsage(usagectx.WithFeature(ctx.Request().Context(), feature), openai.ProxyUsage{
-			Model:            usage.Model,
-			PromptTokens:     usage.PromptTokens,
-			CompletionTokens: usage.CompletionTokens,
-			Latency:          latency,
-		})
+		reportCtx := usagectx.WithFeature(ctx.Request().Context(), feature)
+		if len(usage.ByModel) == 0 {
+			cli.ReportProxyUsage(reportCtx, openai.ProxyUsage{
+				Model:            usage.Model,
+				PromptTokens:     usage.PromptTokens,
+				CompletionTokens: usage.CompletionTokens,
+				Latency:          latency,
+			})
+			return cleaned
+		}
+		// モデルごとに記録する。応答時間は1リクエスト分なので、重複して数えないよう最初の行にだけ付ける
+		for i, m := range usage.ByModel {
+			if m.Calls <= 0 {
+				continue
+			}
+			rowLatency := latency
+			if i > 0 {
+				rowLatency = 0
+			}
+			cli.ReportProxyUsage(reportCtx, openai.ProxyUsage{
+				Model:            m.Model,
+				PromptTokens:     m.PromptTokens,
+				CompletionTokens: m.CompletionTokens,
+				Latency:          rowLatency,
+			})
+		}
 	}
 	return cleaned
 }
