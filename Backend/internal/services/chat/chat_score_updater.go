@@ -3,6 +3,7 @@ package chat
 import (
 	"Backend/domain/repository"
 	"Backend/domain/valueobject"
+	"Backend/internal/logsafe"
 	"Backend/internal/models"
 	"context"
 	"errors"
@@ -18,8 +19,8 @@ func (s *ChatService) scoreAnswer(ctx context.Context, userID uint, sessionID, a
 	trimmedAnswer := strings.TrimSpace(answer)
 	lastAssistantQuestion := findLastAssistantQuestion(history)
 	resolved := ResolveChoiceAnswer(lastAssistantQuestion, trimmedAnswer)
-	log.Printf("[ProcessChat] Checking answer: raw=%q resolved_choice=%v letter=%q reason=%q free_text=%v\n",
-		trimmedAnswer, resolved.IsChoice, resolved.Letter, resolved.Reason, resolved.IsFreeText)
+	log.Printf("[ProcessChat] Checking answer: chars=%d resolved_choice=%v letter=%q reason_chars=%d free_text=%v\n",
+		logsafe.Chars(trimmedAnswer), resolved.IsChoice, resolved.Letter, logsafe.Chars(resolved.Reason), resolved.IsFreeText)
 	isQualityAnswer := false
 	if resolved.IsChoice && s.isChoiceAnswer(resolved.Letter) {
 		log.Printf("[ProcessChat] Processing as choice answer\n")
@@ -147,7 +148,7 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 		targetCategory = s.inferCategoryFromQuestion(lastQuestion)
 	}
 
-	log.Printf("[Choice Answer] Processing choice '%s' reason=%q for category: %s\n", answer, reason, targetCategory)
+	log.Printf("[Choice Answer] Processing choice '%s' reason_chars=%d for category: %s\n", answer, logsafe.Chars(reason), targetCategory) // logpolicy:ok answer は選択肢の記号（A〜E）で、学生の自由記述ではない（reason は文字数だけを出す）
 
 	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, answer, true, jobCategoryID != 0, nil)
 	if result.Action != PrecheckScore {
