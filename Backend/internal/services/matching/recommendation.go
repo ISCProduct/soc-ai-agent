@@ -59,6 +59,12 @@ type RecommendationResponse struct {
 	DiagnosisFlags      []string             `json:"diagnosis_flags,omitempty"`
 	DiagnosisSummary    string               `json:"diagnosis_summary,omitempty"`
 	MinMatchedAxisCount int                  `json:"min_matched_axis_count,omitempty"`
+	// Total はお気に入り一覧の、ページを切る前の社数。
+	// おすすめ企業の応答では 0 のままなので出さない。
+	Total int `json:"total,omitempty"`
+	// FavoriteCompanyIDs はお気に入りの全企業ID（適合度の高い順）。
+	// 1ページに載らない企業のハートを、結果画面で付けるために返す。
+	FavoriteCompanyIDs []uint `json:"favorite_company_ids,omitempty"`
 }
 
 // CountEvaluatedCategories はスコアが0でないカテゴリの数を返す。
@@ -196,6 +202,32 @@ func DedupedFavorites(matches []*models.UserCompanyMatch, limit int) []*models.U
 		picked = picked[:limit]
 	}
 	return picked
+}
+
+// PageFavorites は企業ごとに1行へまとめたお気に入りを、offset 社目から limit 件返す。
+// total はページを切る前の社数。companyIDs は表示できる全社の企業ID（適合度の高い順）。
+// offset が末尾を超えてもエラーにせず、空のページと社数を返す。
+// limit が負のときは末尾まで返す。
+func PageFavorites(matches []*models.UserCompanyMatch, offset, limit int) (page []*models.UserCompanyMatch, total int, companyIDs []uint) {
+	// 表示できない行を先に外す。ページを切ったあとで落とすと、
+	// 100社に満たないページの次に、まだ見えていない企業が出てしまう。
+	all := DisplayableMatches(DedupedFavorites(matches, -1))
+	total = len(all)
+	companyIDs = make([]uint, total)
+	for i, row := range all {
+		companyIDs[i] = row.CompanyID
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total {
+		return []*models.UserCompanyMatch{}, total, companyIDs
+	}
+	end := total
+	if limit >= 0 && offset+limit < end {
+		end = offset + limit
+	}
+	return all[offset:end], total, companyIDs
 }
 
 // BuildRecommendations は表示対象の match を推薦一覧に整形する。

@@ -38,6 +38,7 @@ import {
 import { APPLY_CLOSED_LABEL, getApplyClosedButtonProps } from '@/lib/apply-availability'
 import { CONTENT_MAX_WIDTH, UI, leadSentences, scaleBand } from '@/lib/design/tokens'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
+import { FavoritesPageNav } from '@/components/favorites/FavoritesPageNav'
 import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
 
 export interface ResultsListViewProps {
@@ -46,6 +47,11 @@ export interface ResultsListViewProps {
   favoriteCompanies: Company[]
   favoritesLoading: boolean
   favoritesError: string | null
+  /** ページを切る前の社数。未指定なら今見えている件数 */
+  favoritesTotal?: number
+  /** 今のページの先頭が何社目か。0 が先頭 */
+  favoritesOffset?: number
+  onFavoritesOffsetChange?: (offset: number) => void
   onRetryFavorites: () => void
   isProvisional: boolean
   diagnosisSummary?: string | null
@@ -84,6 +90,9 @@ export default function ResultsListView({
   favoriteCompanies,
   favoritesLoading,
   favoritesError,
+  favoritesTotal: favoritesTotalProp,
+  favoritesOffset = 0,
+  onFavoritesOffsetChange,
   onRetryFavorites,
   isProvisional,
   diagnosisSummary = null,
@@ -117,7 +126,8 @@ export default function ResultsListView({
   const applyClosedProps = getApplyClosedButtonProps(applyEnabled)
   // お気に入りは過去の診断も含め、同じ企業は1行。中身は呼び出し側がまとめて渡す。
   const [favoritesOnly, setFavoritesOnly] = useState(false)
-  const favoriteCount = favoriteCompanies.length
+  const favoritesTotal = favoritesTotalProp ?? favoriteCompanies.length
+  const favoriteCount = favoritesTotal
   const listedCompanies = favoritesOnly ? favoriteCompanies : companies
   // 一覧全体の幅。各社の位置はこの中で示す。並び順は渡されたまま（適合度順）。
   const band = scaleBand(listedCompanies.map((c) => c.matchScore))
@@ -196,7 +206,11 @@ export default function ResultsListView({
               mb: 0.5,
             }}
           >
-            {favoritesOnly ? `お気に入りにした${listedCompanies.length}社` : `あなたに近い${companies.length}社`}
+            {favoritesOnly
+              ? favoritesTotal > listedCompanies.length || favoritesOffset > 0
+                ? `お気に入りにした${favoritesTotal}社`
+                : `お気に入りにした${listedCompanies.length}社`
+              : `あなたに近い${companies.length}社`}
           </Typography>
           <Typography sx={{ fontSize: 15, color: UI.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 1.5 }}>
             {favoritesOnly
@@ -332,6 +346,10 @@ export default function ResultsListView({
                 再読み込み
               </Button>
             </Box>
+          ) : favoritesOnly && listedCompanies.length === 0 && favoritesOffset > 0 ? (
+            <Typography sx={{ fontSize: 15, color: UI.inkSoft, py: 3 }}>
+              お気に入りを読み込んでいます
+            </Typography>
           ) : favoritesOnly && listedCompanies.length === 0 ? (
             <Box sx={{ py: 3 }}>
               <Typography sx={{ fontSize: 16, fontWeight: 700, color: UI.ink, mb: 1 }}>
@@ -345,12 +363,22 @@ export default function ResultsListView({
               </Button>
             </Box>
           ) : favoritesOnly ? (
-            <FavoritesCompareList
-              companies={listedCompanies}
-              favoritingId={favoritingId}
-              onSelectCompany={onSelectCompany}
-              onToggleFavorite={onUnfavoriteCompany}
-            />
+            <>
+              <FavoritesCompareList
+                companies={listedCompanies}
+                favoritingId={favoritingId}
+                onSelectCompany={onSelectCompany}
+                onToggleFavorite={onUnfavoriteCompany}
+              />
+              {onFavoritesOffsetChange ? (
+                <FavoritesPageNav
+                  total={favoritesTotal}
+                  offset={favoritesOffset}
+                  pageCount={listedCompanies.length}
+                  onOffsetChange={onFavoritesOffsetChange}
+                />
+              ) : null}
+            </>
           ) : (
           <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0 }}>
             {companies.map((company, index) => (
