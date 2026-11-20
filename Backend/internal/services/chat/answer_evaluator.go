@@ -30,15 +30,9 @@ func NewAnswerEvaluatorWithLLM(client *internalOpenAI.Client) *AnswerEvaluator {
 	return &AnswerEvaluator{llmClient: client}
 }
 
-// LLMAnswerEvaluation はLLM評価のレスポンス構造体
-type LLMAnswerEvaluation struct {
-	Score        int    `json:"score"`
-	Confidence   string `json:"confidence"`
-	Specificity  int    `json:"specificity"`
-	Authenticity int    `json:"authenticity"`
-	Consistency  int    `json:"consistency"`
-	Explanation  string `json:"explanation"`
-}
+// LLMAnswerEvaluation はLLM評価のレスポンス構造体。
+// プロンプトの出力形式と同じ定義を使う（prompts.AnswerQualityOutput が正。SOCAIAGENT-661）。
+type LLMAnswerEvaluation = prompts.AnswerQualityOutput
 
 // llmEvaluate は質問と回答をLLMで評価する。llmClientがnilの場合はnilを返す。
 func (e *AnswerEvaluator) llmEvaluate(ctx context.Context, question, answer string) *LLMAnswerEvaluation {

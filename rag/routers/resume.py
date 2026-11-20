@@ -1,5 +1,6 @@
 """履歴書レビューエンドポイント。"""
 from __future__ import annotations
+from services.prompt_versions import log_prompt_call
 
 import json
 import logging
@@ -46,6 +47,7 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
 
         try:
             client = OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT_SEC)
+            log_prompt_call("resume_review", resume_review_model())
             stream = client.chat.completions.create(
                 model=resume_review_model(),
                 messages=[
