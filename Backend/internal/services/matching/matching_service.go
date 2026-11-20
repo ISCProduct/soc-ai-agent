@@ -86,7 +86,7 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 	// スコアをマップに変換
 	scoreMap := make(map[string]float64)
 	for _, score := range userScores {
-		scoreMap[score.WeightCategory] = float64(score.Score)
+		scoreMap[score.WeightCategory] = score.Score
 	}
 
 	log.Printf("[CalculateMatching] User scores: %v\n", scoreMap)
@@ -614,7 +614,7 @@ func formatTopUserScores(scores []models.UserWeightScore) string {
 		if sorted[i].Score <= 0 {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s:%d", sorted[i].WeightCategory, sorted[i].Score))
+		parts = append(parts, fmt.Sprintf("%s:%.0f", sorted[i].WeightCategory, sorted[i].Score))
 	}
 	if len(parts) == 0 {
 		return "有効なスコアなし"
@@ -688,7 +688,7 @@ func (s *MatchingService) mergeAssessmentScores(userID uint, chat map[string]flo
 func (s *MatchingService) ReasonScores(userID uint, scores []models.UserWeightScore) []models.UserWeightScore {
 	chat := make(map[string]float64, len(scores))
 	for _, sc := range scores {
-		chat[sc.WeightCategory] = float64(sc.Score)
+		chat[sc.WeightCategory] = sc.Score
 	}
 	merged := s.mergeAssessmentScores(userID, chat)
 	if len(merged) == len(chat) && sameScores(merged, chat) {
@@ -705,7 +705,7 @@ func scoresFromMap(userID uint, sessionID string, m map[string]float64) []models
 	out := make([]models.UserWeightScore, 0, len(m))
 	for _, c := range valueobject.AllWeightCategories() {
 		if v, ok := m[string(c)]; ok {
-			out = append(out, models.UserWeightScore{UserID: userID, SessionID: sessionID, WeightCategory: string(c), Score: int(math.Round(v))})
+			out = append(out, models.UserWeightScore{UserID: userID, SessionID: sessionID, WeightCategory: string(c), Score: math.Round(v*100) / 100})
 		}
 	}
 	return out

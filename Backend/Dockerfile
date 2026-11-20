@@ -28,6 +28,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -ldflags="-s -w" -o /bin/migrate ./cmd/migrate
 
+# プロンプト版の設定だけを確かめるコマンド。本番デプロイでサービスを差し替える前に実行する（SOCAIAGENT-661）
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -ldflags="-s -w" -o /bin/promptcheck ./cmd/promptcheck
+
 # OCR の Python 依存はここで作り、実行イメージへ中身だけコピーする。
 # PyMuPDF 1.20.2 は cp311 の wheel が無く、ソースビルドにコンパイラが要る（#1142）。
 # コンパイラはこのステージに留め、本番イメージには置かない。
@@ -135,11 +140,12 @@ RUN groupadd --gid 10001 app \
 
 COPY --from=builder /bin/server /bin/server
 COPY --from=builder /bin/migrate /bin/migrate
+COPY --from=builder /bin/promptcheck /bin/promptcheck
 COPY --chown=app:app config/match_reason_templates.json /app/config/match_reason_templates.json
 COPY --chown=app:app config/l1_catalog_seed.sample.csv /app/config/l1_catalog_seed.sample.csv
 COPY --chown=app:app scripts/ocr_extract.py scripts/annotate_pdf.py /app/scripts/
 
-RUN chmod +x /bin/server /bin/migrate \
+RUN chmod +x /bin/server /bin/migrate /bin/promptcheck \
  && mkdir -p /app/storage \
  && chown -R app:app /app/storage /home/app
 

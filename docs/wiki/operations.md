@@ -300,6 +300,12 @@ curl -X POST http://localhost:8080/api/admin/score-validation/calibration/run \
 `PROMPT_VERSION_<STAGE>` も更新する。工程別値は `PROMPT_VERSION` より優先され、未設定時は `v2`。
 設定例と Terraform 変数は `.env.example` と `infra/terraform/environments/` を参照する。
 
+指定できるのはコードで宣言した版（`prompts.declaredPromptVersions`）だけで、それ以外を指定すると
+Backend は不正な環境変数名を出して起動しない（SOCAIAGENT-661）。本番のデプロイは、マイグレーションの前に
+新しいイメージの `/bin/promptcheck` をタスク定義の `PROMPT_VERSION*` で実行し、不正ならジョブを止める。
+staging は確認の工程が無いので、起動しなければ `docker compose logs backend` で `Invalid prompt version settings` を確かめ、
+`/opt/app/.env` を直す。手元では `go run ./cmd/promptcheck` で同じ確認ができる。
+
 staging の Terraform 変数 `prompt_version` / `prompt_versions` は新規インスタンスの user_data にしか
 届かない。稼働中のインスタンスへ反映するときは、`/opt/app/.env` も手で更新する。
 
@@ -375,6 +381,17 @@ CI の `Security scan (govulncheck)` は、コードから到達する脆弱性�
 - 例外の前提である機能をコードが使い始めた（`forbidden_patterns`）
 
 **現在の例外（期限 2026-12-31）:** Echo v4 の GO-2026-6875（`Proxy` の X-Real-IP 転送）と GO-2026-6872（`RealIP` と標準 `RateLimiter` の XFF 先頭の信頼）。v4 には修正版がなく、v5.4.0 以降で修正されている。アプリは該当機能を使わず、レート制限は自前の `middleware.GetClientIP` が XFF の末尾を読む。期限までに、v4 の修正版を待つか v5 へ移行するかを判断する。
+
+### pip-audit の例外（RAG）
+
+RAG（Python）の依存は、`RAG Python Tests` の `Dependency audit (pip-audit)` が検査する（SOCAIAGENT-578）。本番と同じ Python 3.12 で `-c rag/constraints.txt` 付きで入れ、実際に入った版（`pip freeze`）を `pip-audit` で調べる。考え方は govulncheck と同じで、修正版がなく、該当機能を使っていない場合だけ `.github/pip-audit-allowlist.json` に理由と期限を付けて例外にできる。期限切れ・修正版の公開・別のパッケージでの検出・前提の使い方（`forbidden_patterns`、`rag/` のテスト以外のコードと設定を探す）のどれかで例外が効かなくなり、CI が失敗する。判定のテストは `automation/test/pip-audit-filter-test.sh`。
+
+- 依存を変えなくても新しい脆弱性は公開されるので、**週1回（月曜 9:00 JST）の定期実行**でも検査する。手動実行（workflow_dispatch）もできる
+- 例外には `reason`（理由）が必須で、空なら設定エラーで失敗する。期限が30日以内に近づくと、ジョブのログに警告（`::warning::`）を出す
+- `forbidden_patterns` は大文字小文字を区別せずに探す（`CHROMA_SERVER_AUTHZ_PROVIDER` なども拾う）。ただし目安で、動的 import などの書き方は拾えない
+- ワークフローのトークンは読み取りだけ（`permissions: contents: read`）
+
+**現在の例外（期限 2026-12-31）:** chromadb 0.6.3 の PYSEC-2026-3813 / 3814 / 3815（Chroma サーバーの HTTP API の認可漏れ・`trust_remote_code` によるコード実行・RBAC のテナント確認漏れ）。修正版がない。RAG の chromadb パッケージはクライアント（`HttpClient`）か埋め込み（`PersistentClient`）として使い、サーバーを動かさない。ただし別コンテナで動かしている `chromadb/chroma:0.6.3`（docker-compose・staging・prod）のサーバーは対象なので、修正版が出たらサーバーのイメージも上げる。
 
 ### 面接セッション監視
 
