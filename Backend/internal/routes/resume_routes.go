@@ -14,4 +14,5 @@ func SetupResumeRoutes(api *echo.Group, resumeController *resumecontrollers.Resu
 	resume.POST("/review/stream", resumeController.ReviewStream, budget.Immediate)
 	resume.GET("/status", resumeController.Status)
 	resume.GET("/annotated", resumeController.Annotated)
+	resume.GET("/document", resumeController.Document)
 }
