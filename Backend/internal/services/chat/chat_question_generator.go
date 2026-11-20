@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"Backend/internal/logsafe"
 	"Backend/internal/models"
 	"Backend/internal/services/prompts"
 	"context"
@@ -171,7 +172,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	// 職種名と業界名を取得
 	jobCategoryName := "指定なし"
 	if jobCategoryID != 0 {
-		if jc, err := s.jobCategoryRepo.FindByID(jobCategoryID); err == nil && jc != nil {
+		if jc, err := s.jobCategoryRepo.FindByID(ctx, jobCategoryID); err == nil && jc != nil {
 			jobCategoryName = jc.Name
 		}
 	}
@@ -284,7 +285,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	promptVersion := resolvedVersion
 	// フォールバック: AIが空を返した場合は簡易質問を使用する
 	if questionText == "" {
-		fallbackQuestion := s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
+		fallbackQuestion := s.selectFallbackQuestion(ctx, targetCategory, jobCategoryID, targetLevel, askedTexts)
 		if fallbackQuestion != "" {
 			questionText = fallbackQuestion
 		} else {
@@ -380,7 +381,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 
 		// 最後の試行で重複してもそのまま使用（無限ループ防止）
 		if attempt == maxRetries-1 {
-			log.Printf("Max retries reached, using question anyway: %s\n", questionText)
+			log.Printf("Max retries reached, using question anyway: chars=%d\n", logsafe.Chars(questionText))
 		}
 	}
 
