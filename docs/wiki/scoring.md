@@ -677,6 +677,10 @@ rubric 0 と 5 は 0〜100 の clamp に当たるため、上下に半分はみ�
   `TestMapInterviewScore_EvidenceIsMonotonic` で固定している。
 
 > **`score` は小数第2位まで保存する**（SOCAIAGENT-513 / #1555）。
+> **リリース順（切り戻し安全のため2段階）**: 先に Go の `float64` 化を出し、列の `DECIMAL(5,2)` 化は次のリリースのマイグレーションで行う。
+> `float64` のコードは `BIGINT` の列も読め、書いた小数は DB 側で整数に丸められるだけなので、どの段階で image を戻しても読めなくならない。
+> 逆順（列を先に変える）だと、旧コード（`int`）が `DECIMAL` を読めずスコア関連 API が失敗する。
+>
 > `user_weight_scores.score` は `DECIMAL(5,2)`（0.00〜100.00）で、Go では `float64`、
 > JSON の `score` は小数を含む number になる（キー名は変えない。表示側で丸める）。
 > 面接スコアの写像（`mapInterviewScore`）と移動平均（`blendScore`）は整数に丸めず、
