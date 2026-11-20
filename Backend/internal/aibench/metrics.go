@@ -173,3 +173,59 @@ func ApproxTokensJA(s string) int {
 	}
 	return other + (ascii+3)/4
 }
+
+// LabelTargetScore は人手の3段階ラベルを正規化スコア(0-1)へ数値化する。
+// 0-1 を3等分した各区間の中央（悪 1/6・中 1/2・良 5/6）。端（0/1）にしないのは、
+// 「悪」に0点・「良」に満点を要求すると、モデルが妥当な範囲で付けた点まで誤差になるため。
+// ラベルなし（ok=false）は MAE の対象外。
+func LabelTargetScore(label string) (float64, bool) {
+	switch label {
+	case LabelBad:
+		return 1.0 / 6, true
+	case LabelMid:
+		return 0.5, true
+	case LabelGood:
+		return 5.0 / 6, true
+	}
+	return 0, false
+}
+
+// MeanAbsError は平均絶対誤差。長さが違う・空のときは 0。
+// 順位相関と違い、スコアの中心や幅のずれ（較正）も誤差に数える。
+func MeanAbsError(want, got []float64) float64 {
+	if len(want) != len(got) || len(want) == 0 {
+		return 0
+	}
+	var sum float64
+	for i := range want {
+		sum += math.Abs(want[i] - got[i])
+	}
+	return sum / float64(len(want))
+}
+
+// PearsonCorrelation は線形相関（-1〜1）。定義できないとき（2件未満・定数）は 0。
+func PearsonCorrelation(xs, ys []float64) float64 {
+	if len(xs) != len(ys) || len(xs) < 2 {
+		return 0
+	}
+	return pearson(xs, ys)
+}
+
+// FairnessGaps は公平性ペアごとのスコア差（組内の最大-最小）の平均と最大を返す。
+// 比べる相手が1件しかない組（variant が1つ）は数えない。n は数えた組の数。
+func FairnessGaps(byPair map[string][]float64) (n int, mean, maxGap float64) {
+	var sum float64
+	for _, xs := range byPair {
+		if len(xs) < 2 {
+			continue
+		}
+		gap := slices.Max(xs) - slices.Min(xs)
+		n++
+		sum += gap
+		maxGap = max(maxGap, gap)
+	}
+	if n > 0 {
+		mean = sum / float64(n)
+	}
+	return n, mean, maxGap
+}

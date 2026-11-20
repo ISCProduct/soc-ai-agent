@@ -32,6 +32,11 @@ on:
       - 'Backend/internal/services/matching/matching_service.go'
       - 'Backend/internal/services/resume/**'
       - 'Backend/internal/services/interview/interview_report*.go'
+      # 採点に効くルーブリック・根拠照合と、企業文脈が質問へ入る経路（公平性）
+      - 'Backend/internal/services/interview/interview_rubric.go'
+      - 'Backend/internal/services/interview/interview_evidence_tokens.go'
+      - 'Backend/internal/services/interview/interview_company_context.go'
+      - 'Backend/internal/services/interview/interview_turn_prompt.go'
       - 'Backend/internal/aibench/**'
       - 'Backend/cmd/aibench/**'
       - 'docs/research/ai-eval/**'

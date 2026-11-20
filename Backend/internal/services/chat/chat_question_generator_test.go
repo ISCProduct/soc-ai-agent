@@ -57,7 +57,7 @@ func TestGenerateStrategicQuestion_FallbackDoesNotRecordPromptVersion(t *testing
 		nil,
 		42,
 		"session-1",
-		map[string]int{},
+		map[string]float64{},
 		[]string{"創造性志向"},
 		map[string]bool{},
 		0,
