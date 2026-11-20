@@ -101,3 +101,28 @@ def test_hints_parse_uses_strict_schema(monkeypatch):
     fmt = client.chat.completions.create.call_args.kwargs["response_format"]
     assert fmt["type"] == "json_schema" and fmt["json_schema"]["name"] == "hints_parse"
     assert result.style_tags == ["a"]
+
+
+def test_hints_parse_falls_back_to_json_mode_when_schema_unsupported(monkeypatch):
+    """ヒントの parse もスキーマ非対応なら JSON モードで呼び直す（空のヒントを成功にしない）。"""
+    import main
+    from services.hints import _parse_hints_from_text
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("RAG_STRUCTURED_OUTPUTS", raising=False)
+    ok = MagicMock()
+    ok.choices = [MagicMock(message=MagicMock(content=json.dumps({"style_tags": ["a"], "top_questions": ["q"]})))]
+
+    def create(**kwargs):
+        if kwargs["response_format"]["type"] == "json_schema":
+            raise RuntimeError("'response_format' of type 'json_schema' is not supported with this model")
+        return ok
+
+    client = MagicMock()
+    client.chat.completions.create.side_effect = create
+    monkeypatch.setattr(main, "OpenAI", lambda **_kw: client)
+
+    result = _parse_hints_from_text("テスト株式会社", "エンジニア", "リサーチ結果")
+
+    assert result.style_tags == ["a"] and result.top_questions == ["q"]
+    assert [f["type"] for f in _formats(client)] == ["json_schema", "json_object"]
