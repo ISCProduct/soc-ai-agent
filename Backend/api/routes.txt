@@ -193,6 +193,8 @@ GET /api/companies/:id
 GET /api/companies/:id/job-positions
 GET /api/companies/:id/market-info
 GET /api/companies/:id/relations
+GET /api/companies/:id/correlation-map
+GET /api/companies/:id/correlation-map/compare
 GET /api/companies/brief
 GET /api/companies/market-info
 GET /api/companies/relations
