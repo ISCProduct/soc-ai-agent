@@ -51,8 +51,12 @@ def delete_student(user_id: int) -> int:
     return 1
 
 
-def query_students(embedding: List[float], top_k: int) -> List[Dict[str, Any]]:
-    """クエリベクトルに近い学生を関連度順で返す。"""
+def query_students(embedding: List[float], top_k: int, min_score: float = 0.0) -> List[Dict[str, Any]]:
+    """クエリベクトルに近い学生を関連度順で返す。
+
+    min_score より関連度の低い学生は返さない（SOCAIAGENT-568）。候補の少ないクエリでも
+    top_k 件を無条件に返すと、無関係な学生が上位に並ぶ。
+    """
     collection = _collection()
     if collection.count() == 0:
         return []
@@ -72,5 +76,10 @@ def query_students(embedding: List[float], top_k: int) -> List[Dict[str, Any]]:
         if user_id is None:
             continue
         # Chroma の距離は小さいほど近い。1/(1+d) で 0<score<=1 の関連度へ写す。
-        hits.append({"user_id": int(user_id), "score": 1.0 / (1.0 + float(distance))})
+        score = 1.0 / (1.0 + float(distance))
+        if score < min_score:
+            continue
+        hits.append({"user_id": int(user_id), "score": score})
+    if len(hits) < len(metadatas):
+        logger.info("student query kept %d/%d hits (min_score=%.3f)", len(hits), len(metadatas), min_score)
     return hits

@@ -147,7 +147,7 @@ func evaluateInterviewResponse(o Observation, c Case, res CallResult) Observatio
 		o.Violations = append(o.Violations, "evidence_not_spoken")
 	}
 	if resp.Teacher != nil {
-		if check := interview.ValidateEvidence(resp.Teacher.DetailedEvidence, spoken); len(check.Unmatched) > 0 {
+		if check := interview.ValidateTeacherEvidence(resp.Teacher.DetailedEvidence, spoken); len(check.Unmatched) > 0 {
 			o.Violations = append(o.Violations, "teacher_evidence_not_spoken")
 		}
 	}

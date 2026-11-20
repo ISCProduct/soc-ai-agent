@@ -8,6 +8,7 @@ import (
 	"Backend/internal/ragclient"
 	"Backend/internal/services/esreview"
 	"Backend/internal/services/piimask"
+	"Backend/internal/services/prompts"
 	"Backend/internal/usagectx"
 	"bytes"
 	"context"
@@ -72,6 +73,8 @@ type esReviewRAGUsage struct {
 	PromptTokens     int    `json:"prompt_tokens"`
 	CompletionTokens int    `json:"completion_tokens"`
 	Calls            int    `json:"calls"`
+	// PromptVersion は RAG が使ったプロンプトの版（例: es_review_v6）。古い RAG は返さないので空がありうる（SOCAIAGENT-661）
+	PromptVersion string `json:"prompt_version"`
 }
 
 // esReviewRAGResponse は RAG の /es/review レスポンスのうち Go が読む項目。
@@ -383,7 +386,13 @@ func consumeRAGUsage(ctx echo.Context, cli *openai.Client, feature string, body 
 	if err := json.Unmarshal(usageRaw, &usage); err == nil && usage.Calls > 0 {
 		// 機能名は呼び出し元が定数で渡す（#1294 の方針）。実行主体はリクエストの
 		// コンテキストから取る（未ログイン利用も仕様の経路なので無ければ NULL）。
-		cli.ReportProxyUsage(usagectx.WithFeature(ctx.Request().Context(), feature), openai.ProxyUsage{
+		reqCtx := usagectx.WithFeature(ctx.Request().Context(), feature)
+		// プロンプトの版は es_review / es_rewrite のどちらでも記録する（同じ添削プロンプト。SOCAIAGENT-661）。
+		// 形式に合わない値は api_call_logs.prompt_version（varchar(64)）に入れない
+		if v := strings.TrimSpace(usage.PromptVersion); prompts.ValidPromptVersion(v) {
+			reqCtx = usagectx.WithPromptAssignment(reqCtx, string(prompts.StageESReview), v, "")
+		}
+		cli.ReportProxyUsage(reqCtx, openai.ProxyUsage{
 			Model:            usage.Model,
 			PromptTokens:     usage.PromptTokens,
 			CompletionTokens: usage.CompletionTokens,
