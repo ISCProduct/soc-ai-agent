@@ -88,7 +88,7 @@ func resolveWebSearchModel(override string) string {
 }
 
 func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxTokens int, modelOverride ...string) (string, error) {
-	return cli.chatCompletionJSON(ctx, systemPrompt, userPrompt, temperature, maxTokens, nil, modelOverride...)
+	return cli.chatCompletionJSON(ctx, systemPrompt, userPrompt, temperature, maxTokens, nil, nil, modelOverride...)
 }
 
 // ChatCompletionWithSchema は JSON Schema を強制して応答を得る（Structured Outputs）。
@@ -99,7 +99,13 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 //
 // スキーマ非対応のモデル・エンドポイントでは JSON mode へ落ちる。
 func (cli *Client) ChatCompletionWithSchema(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxTokens int, schema *ResponseSchema, modelOverride ...string) (string, error) {
-	return cli.chatCompletionJSON(ctx, systemPrompt, userPrompt, temperature, maxTokens, schema, modelOverride...)
+	return cli.chatCompletionJSON(ctx, systemPrompt, userPrompt, temperature, maxTokens, schema, nil, modelOverride...)
+}
+
+// ChatCompletionWithSchemaSeed は ChatCompletionWithSchema に seed を渡す版。
+// 同一入力の出力のブレを下げたい呼び出し用（SOCAIAGENT-513）。seed は best effort で、完全一致は保証されない。
+func (cli *Client) ChatCompletionWithSchemaSeed(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxTokens int, seed int, schema *ResponseSchema, modelOverride ...string) (string, error) {
+	return cli.chatCompletionJSON(ctx, systemPrompt, userPrompt, temperature, maxTokens, schema, &seed, modelOverride...)
 }
 
 // ResponseSchema は Structured Outputs に渡すスキーマ。
@@ -108,7 +114,7 @@ type ResponseSchema struct {
 	Schema json.RawMessage
 }
 
-func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxTokens int, schema *ResponseSchema, modelOverride ...string) (string, error) {
+func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxTokens int, schema *ResponseSchema, seed *int, modelOverride ...string) (string, error) {
 	if err := cli.ensureText(); err != nil {
 		return "", err
 	}
@@ -149,6 +155,7 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 			Temperature:         temperature,
 			MaxCompletionTokens: maxTokens,
 			ResponseFormat:      responseFormatFor(schema),
+			Seed:                seed,
 		}
 
 		// レイテンシはリトライ込みで測る。利用者から見た待ち時間はそれなので（#1294）。
