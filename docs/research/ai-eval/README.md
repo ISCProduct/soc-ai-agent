@@ -451,7 +451,7 @@ role_fit / completeness / readability、各0〜5）の加重和から本番と�
 | `chat-answer.jsonl` | **30** | good 10 / mid 10 / bad 10（SOCAIAGENT-450 で新設） |
 | `company-extract.jsonl` | **12** | ラベルなし（#1782 で新設。正解の項目との一致で点を付ける） |
 | `matching-reason.jsonl` | **12** | ラベルなし（#1782 で新設。指示の遵守で点を付ける。企業情報が業種だけのケース4件を含む） |
-| `interview-report-fairness.jsonl` | **8**（4組×2） | 公平性回帰ケース（SOCAIAGENT-513）。受験者の回答は同一で、面接官の最初の質問に入る企業文脈（架空企業。中立 `neutral` / 課金型事業を想起させる `charged`）だけが違うペア。`-target interview-report` で単独に回し、ペア間のスコア差を測る。ラベルは組内で同じ |
+| `interview-report-fairness.jsonl` | **8**（4組×2） | 公平性回帰ケース（SOCAIAGENT-513）。受験者の回答は同一で、面接官の最初の質問に入る企業文脈（架空企業2社。業種・事業モデルが違う。`context_variant` は `neutral` / `charged` だが、`charged` は「アイテム課金型の事業」の意味で、本サービスの契約プランではない）だけが違うペア。`-target interview-report` で単独に回し、ペア間のスコア差を測る。ラベルは組内で同じ |
 | `interview-evidence-synthetic.jsonl` | **22** | legit 12 / fabricated 10（SOCAIAGENT-675 で新設）。面接レポートの根拠照合だけを測る合成ケースで、`-target` では使わない。「発話」と「根拠」を固定し、LLM を呼ばずに検出率と誤検知率を出す（`Backend/internal/aibench/evidence_synthetic_test.go`。`go test` で毎回走る） |
 
 **全て合成データ。個人情報を含む実データは入っていない**（`docs/wiki/data-privacy.md` の方針）。
@@ -944,6 +944,8 @@ gpt-4o-mini・各ラベル2件×2回（sha `d2614b37c550`）で JSON mode の有
 
 公平性ケースは採点プロンプトが企業情報を受け取らない前提の回帰テストで、
 企業文脈が質問経由でトランスクリプトに入っても採点が動かないことを見る。
+契約プラン（本サービスに課金している企業かどうか）は、面接の企業文脈（`interview_company_context.go`）にも採点プロンプトにも渡していない。
+プランで採点が甘辛しないことは構造で担保し、このケースは企業名・業種の違いが質問経由で採点に漏れないかを見る。
 **ゴールデンとは別マニフェストなので別に実行する**（マニフェストのSHAが別。比較も同じ
 マニフェスト同士で行う）。
 
