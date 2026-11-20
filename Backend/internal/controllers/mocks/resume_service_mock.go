@@ -55,6 +55,14 @@ func (m *ResumeServiceMock) OpenAnnotatedFile(documentID uint, requestingUserID 
 	return args.Get(0).(*resume.AnnotatedFile), args.Error(1)
 }
 
+func (m *ResumeServiceMock) OpenNormalizedFile(documentID uint, requestingUserID uint) (*resume.AnnotatedFile, error) {
+	args := m.Called(documentID, requestingUserID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*resume.AnnotatedFile), args.Error(1)
+}
+
 func (m *ResumeServiceMock) GetResumeStatus(userID uint) (*resume.ResumeStatus, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {

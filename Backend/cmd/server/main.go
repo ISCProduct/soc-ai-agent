@@ -65,6 +65,8 @@ import (
 	"Backend/internal/services/storage"
 	"Backend/internal/services/teacher"
 	"Backend/internal/services/training"
+	"Backend/internal/services/training/scorerexport"
+	"context"
 	"log"
 	"log/slog"
 	"net/http"
@@ -408,6 +410,7 @@ func main() {
 	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
 	questionController := chatcontrollers.NewQuestionController(questionService)
 	relationController := companycontrollers.NewCompanyRelationController(companyQueryRepo, aiClient)
+	relationController.SetCorrelationMapService(company.NewCompanyCorrelationMapService(companyRepo, companyRelationRepo))
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
 	companyValidator.SetSearchFlight(companySearchFlight)
@@ -459,6 +462,16 @@ func main() {
 		logger.EnableS3ErrorArchive(s3UploadService)
 	}
 	userDeletionService := auth.NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), objectDeleter, auditLogService)
+	// パージのときに、採点モデルの学習用に書き出し済みのデータ（S3）も消す（#2168）。
+	// 書き出しの設定（TRAINING_EXPORT_HMAC_KEY・TRAINING_EXPORT_S3_URI）が無ければ消さない（書き出しも動かない）。
+	if trainingDeleter, err := scorerexport.NewUserDataDeleterFromEnv(context.Background(), os.Getenv,
+		func(ctx context.Context, bucket string) (scorerexport.ObjectStore, error) {
+			return scorerexport.NewS3Writer(ctx, bucket)
+		}); err != nil {
+		slog.Error("学習データの削除を設定できませんでした。パージで書き出し済みの学習データを消せません（cmd/training-export -sweep-only で消してください）", "error", err)
+	} else if trainingDeleter != nil {
+		userDeletionService.SetTrainingDataDeleter(trainingDeleter)
+	}
 	// 本人退会も、管理者による退会・日次のパージ・アクセス遮断と同じインスタンスを使う。
 	authService.SetDeletionService(userDeletionService)
 	adminOrganizationController := admincontrollers.NewAdminOrganizationController(organizationService)

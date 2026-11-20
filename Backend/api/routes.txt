@@ -193,6 +193,8 @@ GET /api/companies/:id
 GET /api/companies/:id/job-positions
 GET /api/companies/:id/market-info
 GET /api/companies/:id/relations
+GET /api/companies/:id/correlation-map
+GET /api/companies/:id/correlation-map/compare
 GET /api/companies/brief
 GET /api/companies/market-info
 GET /api/companies/relations
@@ -284,6 +286,7 @@ GET /api/questions/list
 GET /api/realtime/session-info
 POST /api/realtime/token
 GET /api/resume/annotated
+GET /api/resume/document
 POST /api/resume/review
 POST /api/resume/review/stream
 GET /api/resume/status
