@@ -228,9 +228,11 @@ func writeBackup(path string, rows []backupRow) error {
 	if err != nil {
 		return err // 既存のファイルは上書きしない
 	}
-	defer f.Close()
-	_, err = f.Write(b)
-	return err
+	if _, err = f.Write(b); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // restoreAction は、復元で何をするか。書き込んだ値のままの企業だけを戻す（その後に変わった値は触らない）。
@@ -308,7 +310,7 @@ func download(ctx context.Context, u string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}

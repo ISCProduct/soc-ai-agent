@@ -35,7 +35,7 @@ func readZipEntry(zr *zip.Reader, match func(name string) bool) ([]byte, error) 
 		if err != nil {
 			return nil, err
 		}
-		defer rc.Close()
+		defer func() { _ = rc.Close() }()
 		b, err := io.ReadAll(io.LimitReader(rc, maxEntryBytes+1))
 		if err != nil {
 			return nil, err

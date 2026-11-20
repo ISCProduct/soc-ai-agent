@@ -21,9 +21,9 @@ func makeZip(t *testing.T, files map[string][]byte) []byte {
 	zw := zip.NewWriter(&buf)
 	for name, b := range files {
 		w, _ := zw.Create(name)
-		w.Write(b)
+		_, _ = w.Write(b)
 	}
-	zw.Close()
+	_ = zw.Close()
 	return buf.Bytes()
 }
 
@@ -208,7 +208,7 @@ func TestFindXLSXLinkAndDownload(t *testing.T) {
 	var ua string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ua = r.Header.Get("User-Agent")
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	defer srv.Close()
 	b, err := download(context.Background(), srv.URL)
