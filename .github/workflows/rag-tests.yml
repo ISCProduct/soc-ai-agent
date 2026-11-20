@@ -9,12 +9,10 @@ on:
       - '.github/workflows/rag-tests.yml'
       - '.github/pip-audit-allowlist.json'
       - '.github/scripts/pip_audit_filter.py'
+  # PR ではパスで絞らず毎回動かす。必須チェックにするため（rag-lint.yml / #2462 と同じ）。
+  # 絞ると rag を触らない PR で結果が返らず待機のままマージできなくなる。
+  # 必須でなかった間は赤のままマージされ develop が壊れた。
   pull_request:
-    paths:
-      - 'rag/**'
-      - '.github/workflows/rag-tests.yml'
-      - '.github/pip-audit-allowlist.json'
-      - '.github/scripts/pip_audit_filter.py'
   # 依存を変えなくても新しい脆弱性は公開されるので、週1回は検査する。例外の期限切れもここで気づく
   # （SOCAIAGENT-578）。月曜 9:00 JST。
   schedule:
@@ -28,6 +26,7 @@ permissions:
 
 jobs:
   test:
+    name: RAG Python Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
