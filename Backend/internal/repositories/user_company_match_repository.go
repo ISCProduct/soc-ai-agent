@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"Backend/internal/matchrank"
 	"Backend/internal/models"
 
 	"gorm.io/gorm"
@@ -110,7 +111,7 @@ func (r *UserCompanyMatchRepository) FindTopMatchesByUserAndSession(
 	var ms []*models.UserCompanyMatch
 	err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).
 		Where(CompanyHasWeightProfileSQL("user_company_matches.company_id")).
-		Order("match_score DESC").
+		Order(matchrank.OrderSQL).
 		Limit(limit).
 		Preload("Company").
 		Preload("JobPosition").
