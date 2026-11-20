@@ -135,11 +135,7 @@ func (r *InterviewSessionRepository) GetUserStatsBatch(userIDs []uint) (map[uint
 	}
 	result := make(map[uint]UserSessionStat, len(rows))
 	for _, r := range rows {
-		result[r.UserID] = UserSessionStat{
-			UserID:        r.UserID,
-			SessionCount:  r.SessionCount,
-			LastSessionAt: r.LastSessionAt,
-		}
+		result[r.UserID] = UserSessionStat(r)
 	}
 	return result, nil
 }
