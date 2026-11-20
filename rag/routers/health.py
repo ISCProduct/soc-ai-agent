@@ -1,13 +1,16 @@
 """ヘルスチェックエンドポイント。"""
 from __future__ import annotations
 
+import hmac
 import os
 import threading
 import time
 from typing import Any, Dict
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+
+from services.settings import INTERNAL_TOKEN_HEADER
 
 from services.model_tiers import es_review_model
 from vector_store import ping_chroma
@@ -79,9 +82,26 @@ def _payload(deep: bool) -> Dict[str, Any]:
     }
 
 
+def _require_internal_token(request: Request) -> None:
+    """内部トークンを確かめる（main の内部認証ミドルウェアと同じ判定）。
+
+    /health と /healthz はミドルウェアの免除パスなので、?deep=1 だけここで確かめる。
+    鍵が有効か（reachable）を外から誰でも読めないようにするため（SOCAIAGENT-562 のレビュー）。
+    """
+    expected = os.getenv("RAG_INTERNAL_TOKEN", "").strip()
+    provided = request.headers.get(INTERNAL_TOKEN_HEADER, "")
+    if not expected or not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
 @router.get("/health")
-def health(deep: bool = False) -> dict:
-    """状態を返す。OpenAI の鍵が無ければ degraded。?deep=1 で OpenAI への到達も確かめる。"""
+def health(request: Request, deep: bool = False) -> dict:
+    """状態を返す。OpenAI の鍵が無ければ degraded。
+
+    ?deep=1 で OpenAI への到達も確かめる。こちらは内部トークンが必要（無ければ 401）。
+    """
+    if deep:
+        _require_internal_token(request)
     return _payload(deep)
 
 

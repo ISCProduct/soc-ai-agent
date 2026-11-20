@@ -72,3 +72,16 @@ def test_healthz_stays_200_without_openai_key(client, monkeypatch):
 def test_healthz_503_when_vector_store_down(client, monkeypatch):
     monkeypatch.setattr(health_router, "ping_chroma", lambda: (False, "down"))
     assert client.get("/healthz").status_code == 503
+
+
+def test_deep_health_requires_internal_token(monkeypatch):
+    """?deep=1（鍵が有効かが分かる）は内部トークンが必要。通常の /health は今までどおり認証なし。"""
+    from fastapi.testclient import TestClient
+
+    import main
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    raw = TestClient(main.app)
+    assert raw.get("/health?deep=1").status_code == 401
+    assert raw.get("/health?deep=1", headers={"X-Internal-Token": "wrong"}).status_code == 401
+    assert raw.get("/health").status_code == 200
