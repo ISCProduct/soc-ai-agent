@@ -26,6 +26,14 @@ func (m *DashboardSessionRepoMock) ListFinishedSessionIDsByUser(userID uint) ([]
 	return args.Get(0).([]uint), args.Error(1)
 }
 
+func (m *DashboardSessionRepoMock) ListFinishedSessionIDsByUsers(userIDs []uint) (map[uint][]uint, error) {
+	args := m.Called(userIDs)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[uint][]uint), args.Error(1)
+}
+
 func (m *DashboardSessionRepoMock) ListFinishedByUser(userID uint, limit int) ([]models.InterviewSession, error) {
 	args := m.Called(userID, limit)
 	return args.Get(0).([]models.InterviewSession), args.Error(1)

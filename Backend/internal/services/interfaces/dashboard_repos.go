@@ -9,6 +9,7 @@ import (
 type DashboardSessionRepo interface {
 	GetUserStatsBatch(userIDs []uint) (map[uint]repositories.UserSessionStat, error)
 	ListFinishedSessionIDsByUser(userID uint) ([]uint, error)
+	ListFinishedSessionIDsByUsers(userIDs []uint) (map[uint][]uint, error)
 	ListFinishedByUser(userID uint, limit int) ([]models.InterviewSession, error)
 }
 
