@@ -90,13 +90,13 @@ func TestRollbackSnapshot(t *testing.T) {
 			WithArgs(uint(7), "s1", models.ScoreSourceChat).
 			WillReturnRows(sqlmock.NewRows(scoreColumns))
 		// カテゴリごとに、点数・計算版・元の created_at / updated_at をそのまま書き戻す
-		for _, row := range original {
+		for i, row := range original {
 			mock.ExpectExec("INSERT INTO `user_weight_scores`").
 				// 列: organization_id, user_id, session_id, source, weight_category, score,
 				// calculation_version, prompt_version, created_at, updated_at
 				WithArgs(sqlmock.AnyArg(), row.UserID, row.SessionID, row.Source, row.WeightCategory, row.Score,
 					row.CalculationVersion, sqlmock.AnyArg(), row.CreatedAt, row.UpdatedAt).
-				WillReturnResult(sqlmock.NewResult(int64(row.ID+10), 1))
+				WillReturnResult(sqlmock.NewResult(int64(i)+11, 1))
 		}
 		mock.ExpectExec("DELETE FROM `user_score_recalculation_snapshots`").WithArgs(uint(9)).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectCommit()
