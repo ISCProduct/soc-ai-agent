@@ -66,3 +66,19 @@ def test_concurrent_puts_do_not_lose_entries(tmp_path):
         assert set(json.load(f)) == set(keys)
     # 一時ファイルを残さない
     assert not [name for name in os.listdir(tmp_path) if name.endswith(".tmp")]
+
+
+def test_empty_cached_queries_are_reused(tmp_path, monkeypatch):
+    """保存したクエリが空のリストでも、TTL のあいだは作り直さない（LLM を呼び続けない）。"""
+    import main
+    from services.research import _generate_search_queries
+
+    monkeypatch.setenv("RAG_SEARCH_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("RAG_QUERY_CACHE_TTL_SECONDS", "300")
+    query_cache.put(str(tmp_path / "query_cache.json"), "テスト株式会社::一般職", [], ttl_seconds=300)
+
+    def boom(**_kwargs):
+        raise AssertionError("TTL 内なのに LLM でクエリを作り直している")
+
+    monkeypatch.setattr(main, "OpenAI", boom)
+    assert _generate_search_queries("テスト株式会社", "") == []

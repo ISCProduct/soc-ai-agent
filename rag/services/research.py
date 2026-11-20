@@ -255,7 +255,8 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
     cache_key = f"{safe_company}::{role_text}"
     # 読み書きはロック付き・期限切れの掃除つき（services/query_cache.py、SOCAIAGENT-557）
     cached = query_cache.get(cache_path, cache_key, cache_ttl)
-    if cached:
+    # 空のリストも保存した結果なので使う（偽として扱うと TTL のあいだ毎回作り直す）
+    if cached is not None:
         # 上限を読み出し側にも掛ける。保存側だけだと、上限を下げても
         # キャッシュ済みの古い件数が TTL 切れまで返り続けてノブが効かない
         return cached[: max_search_queries()]
