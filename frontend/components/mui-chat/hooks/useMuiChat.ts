@@ -25,6 +25,9 @@ import {
 import { useChatAutoScroll } from './useChatAutoScroll'
 import type { Message, PhaseProgress, ProgressTotals, ChoiceOption } from '../types'
 
+/** 接続エラーで送れなかった文章を、エラー画面から戻ったときに入力欄へ戻すための sessionStorage のキー（#2213） */
+export const CHAT_UNSENT_DRAFT_KEY = 'chatUnsentDraft'
+
 /**
  * MuiChat の状態・副作用・ハンドラを集約するフック。
  * UI はプレゼンテーショナルコンポーネント側へ委譲する。
@@ -33,6 +36,19 @@ export function useMuiChat() {
   const router = useRouter()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
+
+  // 接続エラーで送れなかった文章があれば、入力欄へ戻す（自動では送り直さない。二重に送らないため）
+  useEffect(() => {
+    try {
+      const draft = sessionStorage.getItem(CHAT_UNSENT_DRAFT_KEY)
+      if (draft) {
+        setInput(draft)
+        sessionStorage.removeItem(CHAT_UNSENT_DRAFT_KEY)
+      }
+    } catch {
+      // ストレージが使えなければ何もしない
+    }
+  }, [])
   const [isLoading, setIsLoading] = useState(false)
   const [analysisComplete, setAnalysisComplete] = useState(false)
   const [allPhasesCompleted, setAllPhasesCompleted] = useState(false)
@@ -407,7 +423,14 @@ export function useMuiChat() {
         }
         setMessages((prev) => [...prev, completionMessage])
       } else if (error instanceof UserFacingApiError && error.gateway) {
-        // 再試行でこのページへ戻れるように、いまのパスを渡す（replace なので history.back では戻れない）
+        // エラー画面へ移るとこの画面は外れ、入力欄を空にした文章が消える。502〜504 はバックエンドに届いていないことがあり、
+        // 履歴にも残らないので、戻ったときに入力欄へ戻せるようタブの中だけに取っておく（#2213 のレビュー）
+        try {
+          sessionStorage.setItem(CHAT_UNSENT_DRAFT_KEY, messageText)
+        } catch {
+          // ストレージが使えなければ諦める（送信の失敗の案内は、エラー画面が出す）
+        }
+        // 「元の画面に戻る」でこのページへ戻れるように、いまのパスを渡す（replace なので history.back では戻れない）
         router.replace(gatewayErrorPath(error.status, `${window.location.pathname}${window.location.search}`))
       } else {
         const errorMsg: Message = {
