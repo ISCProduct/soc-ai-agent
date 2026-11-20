@@ -224,7 +224,7 @@ func writeBackup(path string, rows []backupRow) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- 利用者がコマンドラインで指定したパス
 	if err != nil {
 		return err // 既存のファイルは上書きしない
 	}
@@ -248,7 +248,7 @@ func restoreAction(cur *marketValue, r backupRow) string {
 }
 
 func runRestore(db *gorm.DB, path string) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- 利用者がコマンドラインで指定したパス
 	if err != nil {
 		log.Fatalf("バックアップを読めません: %v", err)
 	}
@@ -292,7 +292,7 @@ func runRestore(db *gorm.DB, path string) {
 
 func loadFile(ctx context.Context, path string, fetch func(context.Context) ([]byte, error)) ([]byte, error) {
 	if path != "" {
-		return os.ReadFile(path)
+		return os.ReadFile(path) // #nosec G304 -- 利用者がコマンドラインで指定したパス
 	}
 	return fetch(ctx)
 }
