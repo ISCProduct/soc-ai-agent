@@ -83,10 +83,11 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 	},
 	map[string]routeClass{
 		// ── 権限管理(requireAdmin) ──
-		"PUT /users/:id":                       classRequireAdmin,
-		"DELETE /users/:id":                    classRequireAdmin,
-		"POST /schools/:id/members":            classRequireAdmin,
-		"DELETE /schools/:id/members/:user_id": classRequireAdmin,
+		"PUT /users/:id":    classRequireAdmin,
+		"DELETE /users/:id": classRequireAdmin,
+		"PUT /schools/:id/interview-video-retention": classRequireAdmin,
+		"POST /schools/:id/members":                  classRequireAdmin,
+		"DELETE /schools/:id/members/:user_id":       classRequireAdmin,
 	},
 	// ── 意図的に staff へ開放(要判断) ──
 	// 掲載申請の審査(#1507)で担当校の職員も企業情報・面接質問・求人を触る可能性があり、

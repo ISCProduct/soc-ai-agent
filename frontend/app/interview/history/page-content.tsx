@@ -22,6 +22,7 @@ import dynamic from 'next/dynamic'
 import { authService, User } from '@/lib/auth'
 import { interviewApi, InterviewDetail, InterviewSession, InterviewTrendPoint, TeacherReport } from '@/lib/interview'
 import InterviewSummary from '../components/InterviewSummary'
+import { VideoRetentionNote } from '@/components/interview/VideoRetentionNote'
 import { parseJsonSafe } from '@/lib/interview/utils'
 
 import { INTERVIEW_HISTORY_CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
@@ -182,6 +183,7 @@ export default function PageContent() {
         {/* Session list */}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>セッション一覧</Typography>
+          <VideoRetentionNote />
           {loading ? (
             <ListSkeleton rows={3} label="面接履歴を読み込み中" />
           ) : listError ? (

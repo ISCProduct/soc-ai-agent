@@ -14,6 +14,7 @@ import (
 	"Backend/internal/services/maintenance"
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/organization"
+	"Backend/internal/services/videoretention"
 	"Backend/migrations"
 	"context"
 	"log"
@@ -144,7 +145,7 @@ func newEchoServer(sentryOn bool, organizationService *organization.Organization
 }
 
 // startMaintenanceJobs は定期実行ジョブを safego 経由で起動する。
-func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionService *auth.UserDeletionService, notificationService *notificationsvc.Service, pendingRegistrationRepo *repositories.PendingRegistrationRepository, refreshTokenRepo *repositories.UserRefreshTokenRepository, companyUserRefreshRepo *repositories.CompanyUserRefreshTokenRepository, scoreValidationService *admin.ScoreValidationService) {
+func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionService *auth.UserDeletionService, notificationService *notificationsvc.Service, pendingRegistrationRepo *repositories.PendingRegistrationRepository, refreshTokenRepo *repositories.UserRefreshTokenRepository, companyUserRefreshRepo *repositories.CompanyUserRefreshTokenRepository, scoreValidationService *admin.ScoreValidationService, videoRetention *videoretention.Purger) {
 	// 以下の定期実行は safego 経由で起動する。素の go だと 1 回の panic で
 	// Backend プロセスが丸ごと落ち、全ユーザーが 502 になる(#1405, #1446)。
 	// Every は各回を個別に recover するので、1 回落ちても次の回は走る。
@@ -182,6 +183,21 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 	// 退会ユーザーの処理とは別の周期にする。あちらは RAG への HTTP を退会者ごとに待つので、
 	// 障害時に何時間も塞がり、DB だけで済むこの削除まで止まってしまうため（#2179 のレビュー）。
 	// 件数と失敗は Run の中でログに出す。
+	// 学校の保持期間を過ぎた面接動画（SOCAIAGENT-671）。退会の削除とは別。
+	// 公開から30日の猶予が終わるまでは何も消さない。
+	if videoRetention != nil {
+		safego.Every(24*time.Hour, true, func() {
+			n, err := videoRetention.Purge(context.Background(), time.Now().UTC())
+			if err != nil {
+				slog.Error("interview video retention purge failed", "error", err)
+				return
+			}
+			if n > 0 {
+				slog.Info("purged expired interview videos", "count", n)
+			}
+		})
+	}
+
 	expiredTokenPurger := maintenance.NewExpiredTokenPurger(pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, slog.Default())
 	safego.Every(24*time.Hour, true, func() {
 		expiredTokenPurger.Run(time.Now().UTC())

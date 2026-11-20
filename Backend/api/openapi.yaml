@@ -4744,6 +4744,56 @@ paths:
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/user/interview-video-retention:
+    get:
+      tags: [user]
+      summary: 自分の学校の面接動画の保持期間を取得
+      description: |
+        学校が選んだ保持期間（SOCAIAGENT-671）。30 / 90 / 180 日、または期限なし。
+        学校が無い学生は既定の 90 日。クエリの user_id は見ない。
+        退会後は、この日数を待たずに約30日で削除する。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [days, unlimited]
+                properties:
+                  days: { type: integer, nullable: true, description: 期限なしのときは null }
+                  unlimited: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/admin/schools/{id}/interview-video-retention:
+    put:
+      tags: [admin-schools]
+      summary: 学校の面接動画の保持期間を更新
+      description: |
+        学校管理者だけが変更できる（SOCAIAGENT-671）。職員は 403。
+        `days` は 30、90、180、または null（期限なし）。
+        短くしても、公開から30日の猶予が終わるまでは既存の録画を消さない。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [days]
+              properties:
+                days: { type: integer, nullable: true }
+      responses:
+        "200": { description: 更新した期間 }
+        "400": { description: 選べない日数 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 学校がいない }
   /api/user/training-consent:
     get:
       tags: [user]
