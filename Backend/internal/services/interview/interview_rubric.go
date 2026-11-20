@@ -321,7 +321,8 @@ func SpokenContent(utterances []models.InterviewUtterance) SpokenEvidence {
 	for _, n := range extractNumbers(b.String()) {
 		numbers[n] = true
 	}
-	return SpokenEvidence{Content: textsim.NewContent(b.String()), numbers: numbers, normalized: normalizeForTerms(b.String())}
+	normalized := normalizeForTerms(b.String())
+	return SpokenEvidence{Content: textsim.NewContent(b.String()), numbers: numbers, normalized: normalized, words: asciiWords(normalized)}
 }
 
 // SpokenEvidence は受験者発話の照合用の表現。
@@ -332,9 +333,11 @@ type SpokenEvidence struct {
 	numbers map[string]bool
 	// normalized は発話の全文を、語の照合用に幅と大文字小文字をそろえたもの（SOCAIAGENT-675）。
 	normalized string
+	// words は発話の英字の語の集合（英字の語は完全一致で照合する）。
+	words map[string]bool
 }
 
-var numberPattern = regexp.MustCompile(`([0-9０-９]+(?:[,，.．][0-9０-９]+)*)(万|億)?`)
+var numberPattern = regexp.MustCompile(`([0-9０-９]+(?:[,，.．][0-9０-９]+)*)(万|億|割)?`)
 
 // extractNumbers は数値を正規化して返す（全角→半角、桁区切りのカンマを除去）。
 //
@@ -358,6 +361,12 @@ func extractNumbers(s string) []string {
 		}
 		// 「200万円」と「二百万円」を同じ数値にする（漢数字側は万・億を掛けた値になるため）
 		out = append(out, scaleArabicNumber(b.String(), sub[2]))
+		// 割は百分率でも比べられるよう、10倍の値も入れる（3割 と 30%）
+		if sub[2] == "割" {
+			if v, err := strconv.ParseFloat(b.String(), 64); err == nil && v*10 == float64(int64(v*10)) {
+				out = append(out, strconv.FormatInt(int64(v*10), 10))
+			}
+		}
 	}
 	return out
 }
@@ -414,6 +423,19 @@ func hasUnspokenNumber(text string, spoken SpokenEvidence) bool {
 //
 // spoken は SpokenContent で作ること（内容語だけの Bigrams）。
 func ValidateEvidence(evidence map[string]string, spoken SpokenEvidence) EvidenceCheck {
+	return validateEvidence(evidence, spoken, false)
+}
+
+// ValidateTeacherEvidence は教員向けの根拠（teacher.detailed_evidence）を照合する（SOCAIAGENT-675）。
+//
+// 教員向けは「引用＋指導ポイント」なので、数値とカタカナ・英字の語は「」の引用の中だけで照合する
+// （quotedOnly）。講評の「次は二点に分けて」「メンバー」は受験者の発言ではない。
+// 内容語の類似度は今までどおり全文で見る。
+func ValidateTeacherEvidence(evidence map[string]string, spoken SpokenEvidence) EvidenceCheck {
+	return validateEvidence(evidence, spoken, true)
+}
+
+func validateEvidence(evidence map[string]string, spoken SpokenEvidence, teacher bool) EvidenceCheck {
 	var out EvidenceCheck
 	// キーは評価項目側から回す。evidence は LLM 出力の JSON をそのまま
 	// unmarshal したものなので、キー自体もモデルが自由に書ける。
@@ -426,8 +448,12 @@ func ValidateEvidence(evidence map[string]string, spoken SpokenEvidence) Evidenc
 			continue
 		}
 		out.Checked++
+		claimed := text
+		if teacher {
+			claimed = quotedOnly(text)
+		}
 		if textsim.ContentBestMatch(text, spoken.Content) < EvidenceMatchThreshold ||
-			hasUnspokenNumber(text, spoken) || hasUnspokenTerm(text, spoken) {
+			hasUnspokenNumber(claimed, spoken) || hasUnspokenTerm(claimed, spoken) {
 			out.Unmatched = append(out.Unmatched, key)
 		}
 	}

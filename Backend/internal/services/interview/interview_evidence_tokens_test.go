@@ -29,6 +29,9 @@ func TestExtractNumbers_漢数字(t *testing.T) {
 		{"算用数字と万", "200万円の売上", []string{"2000000"}},
 		{"算用数字と漢数字の万は同じ値", "二百万円の売上", []string{"2000000"}},
 		{"小数の万", "1.5万人", []string{"15000"}},
+		{"概数（数十・何百）は途中から拾わない", "数十人と何百件と幾千", nil},
+		{"割は百分率でも比べられる（漢数字）", "三割減らしました", []string{"3", "30"}},
+		{"割は百分率でも比べられる（算用数字）", "3割減らしました", []string{"3", "30"}},
 		{"全角数字と桁区切り（従来どおり）", "３,０００円", []string{"3000"}},
 	}
 	for _, tt := range tests {
@@ -80,12 +83,49 @@ func TestValidateEvidence_漢数字と語の照合(t *testing.T) {
 		{"英字の大文字小文字の違いは同じ語", "JAVAで在庫管理のツールを作りました", true},
 		{"言っていない技術名", "Pythonで在庫管理のツールを作りました", false},
 		{"数値の入れ替え（漢数字）", "Javaで在庫管理のツールを作り、作業時間を五割減らしました", false},
-		{"教員向けの講評の語は照合しない", "「Javaで在庫管理のツールを作り」と主体性がある。ただしチームでの分担に触れていない", true},
-		{"教員向けでも引用の中の語は照合する", "「Pythonで在庫管理のツールを作り」と主体性がある", false},
+		{"割と百分率は同じ量", "Javaで在庫管理のツールを作り、作業時間を30パーセント減らしました", true},
+		// 学生向けは「」があっても全文を見る（引用の外の語で捏造を通さない）
+		{"学生向けは「」の外の語も照合する", "Pythonでお客様に「ありがとう」と言われ、在庫管理のツールを作りました", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			matched := len(ValidateEvidence(map[string]string{"logic": tt.evidence}, spoken).Unmatched) == 0
+			if matched != tt.wantMatch {
+				t.Fatalf("照合=%v, want %v: %q", matched, tt.wantMatch, tt.evidence)
+			}
+		})
+	}
+}
+
+func TestValidateEvidence_英字の語は語単位で照合する(t *testing.T) {
+	spoken := SpokenContent([]models.InterviewUtterance{{Role: "user", Text: "JavaScriptで在庫管理のツールを作りました。"}})
+	// 「Java」は発話の「JavaScript」の一部だが、別の技術なので通さない
+	if len(ValidateEvidence(map[string]string{"logic": "Javaで在庫管理のツールを作りました"}, spoken).Unmatched) == 0 {
+		t.Fatal("Java を JavaScript の部分文字列で通している")
+	}
+	if len(ValidateEvidence(map[string]string{"logic": "JavaScriptで在庫管理のツールを作りました"}, spoken).Unmatched) != 0 {
+		t.Fatal("発話どおりの英字の語を落としている")
+	}
+}
+
+func TestValidateTeacherEvidence_引用の外の講評は照合しない(t *testing.T) {
+	spoken := SpokenContent([]models.InterviewUtterance{
+		{Role: "user", Text: "Javaで在庫管理のツールを作り、作業時間を三割減らしました。"},
+	})
+	tests := []struct {
+		name      string
+		evidence  string
+		wantMatch bool
+	}{
+		{"講評の語は照合しない", "「Javaで在庫管理のツールを作り」と主体性がある。ただしチームでの分担に触れていない", true},
+		{"講評の数値は照合しない", "「Javaで在庫管理のツールを作り」と課題を説明できている。次は二点に分けて話すとよい", true},
+		{"引用の中の語は照合する", "「Pythonで在庫管理のツールを作り」と主体性がある", false},
+		{"引用の中の数値は照合する", "「作業時間を五割減らしました」と成果を数字で示している", false},
+		{"引用が無ければ全文を見る", "Pythonで在庫管理のツールを作りました", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matched := len(ValidateTeacherEvidence(map[string]string{"logic": tt.evidence}, spoken).Unmatched) == 0
 			if matched != tt.wantMatch {
 				t.Fatalf("照合=%v, want %v: %q", matched, tt.wantMatch, tt.evidence)
 			}

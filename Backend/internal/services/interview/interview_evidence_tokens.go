@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/text/width"
 )
@@ -35,12 +36,23 @@ var kanjiDigits = map[rune]int64{'〇': 0, '零': 0, '一': 1, '二': 2, '三': 
 var kanjiSmallUnits = map[rune]int64{'十': 10, '百': 100, '千': 1000}
 var kanjiLargeUnits = map[rune]int64{'万': 10_000, '億': 100_000_000}
 
+// approximatePrefixes は、続く漢数字を概数・疑問にする字（数十人・何百人・幾千）。
+// 途中から「十人」「百人」を正確な数として拾わない。
+const approximatePrefixes = "数何幾"
+
 // extractKanjiNumbers は漢数字の数値を算用数字の文字列で返す（三倍→"3"、五十人→"50"）。
+// 割は百分率でも比べられるよう、そのままの値と10倍の値の両方を返す（三割→"3","30"）。
 func extractKanjiNumbers(s string) []string {
 	var out []string
-	for _, m := range kanjiNumberPattern.FindAllStringSubmatch(s, -1) {
-		digits, counter := m[1], m[2]
+	for _, loc := range kanjiNumberPattern.FindAllStringSubmatchIndex(s, -1) {
+		digits, counter := s[loc[2]:loc[3]], ""
+		if loc[4] >= 0 {
+			counter = s[loc[4]:loc[5]]
+		}
 		if kanjiNumberExcluded[digits+counter] {
+			continue
+		}
+		if r, size := utf8.DecodeLastRuneInString(s[:loc[0]]); size > 0 && strings.ContainsRune(approximatePrefixes, r) {
 			continue
 		}
 		if counter == "" && !(utf8RuneCount(digits) >= 2 && strings.ContainsAny(digits, "十百千万億")) {
@@ -48,12 +60,15 @@ func extractKanjiNumbers(s string) []string {
 		}
 		if v, ok := parseKanjiNumber(digits); ok {
 			out = append(out, strconv.FormatInt(v, 10))
+			if counter == "割" {
+				out = append(out, strconv.FormatInt(v*10, 10))
+			}
 		}
 	}
 	return out
 }
 
-func utf8RuneCount(s string) int { return len([]rune(s)) }
+func utf8RuneCount(s string) int { return utf8.RuneCountInString(s) }
 
 // parseKanjiNumber は位取りの漢数字を数値にする（二百五十→250、三万二千→32000、二〇二五→2025）。
 // 位取りの無い並び（二〇二五）は桁を並べたものとして読む。読めない並びは ok=false。
@@ -109,13 +124,19 @@ func normalizeForTerms(s string) string {
 	return strings.ToLower(width.Fold.String(s))
 }
 
+// unitTerms は単位のカタカナ語。数値の照合（割と百分率など）で見るので、語としては照合しない。
+var unitTerms = map[string]bool{
+	"パーセント": true, "キロ": true, "メートル": true, "キロメートル": true, "センチ": true,
+	"グラム": true, "キログラム": true, "リットル": true, "ポイント": true,
+}
+
 // extractTerms はカタカナ・英字の語を、正規化して重複なしで返す（並びは安定させる）。
 // 長音だけの並び（ーー）は語にしない。
 func extractTerms(s string) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, term := range properNounPattern.FindAllString(normalizeForTerms(s), -1) {
-		if strings.Trim(term, "ー") == "" || seen[term] {
+		if strings.Trim(term, "ー") == "" || unitTerms[term] || seen[term] {
 			continue
 		}
 		seen[term] = true
@@ -128,11 +149,12 @@ func extractTerms(s string) []string {
 // quotedPattern は「」で囲んだ引用。
 var quotedPattern = regexp.MustCompile(`「([^「」]*)」`)
 
-// termSource は語を照合する範囲を返す。「」の引用があれば引用の中だけ、無ければ全文。
+// quotedOnly は教員向けの根拠で、数値と語を照合する範囲を返す。「」の引用があれば引用の中だけ、無ければ全文。
 //
-// 教員向けの根拠は「引用＋指導ポイント」で、引用の外は講評（「他メンバーとの分担に触れていない」）。
-// 講評の語は受験者が言ったという主張ではないので照合しない。学生向けの根拠は引用そのものなので全文を見る。
-func termSource(text string) string {
+// 教員向けの根拠は「引用＋指導ポイント」で、引用の外は講評（「他メンバーとの分担に触れていない」
+// 「次は二点に分けて話すとよい」）。講評の語や数値は受験者が言ったという主張ではないので照合しない。
+// 学生向けの根拠は引用そのものなので、ここを通さず全文を見る（ValidateEvidence）。
+func quotedOnly(text string) string {
 	matches := quotedPattern.FindAllStringSubmatch(text, -1)
 	if len(matches) == 0 {
 		return text
@@ -145,12 +167,41 @@ func termSource(text string) string {
 }
 
 // hasUnspokenTerm は evidence に、受験者の発話に出てこないカタカナ・英字の語があるかを返す。
-// 発話側は正規化した全文に含まれるかで見る（語の切れ目の違い「エクセルマクロ」を許すため）。
+//
+// 英字の語は、発話の英字の語と完全一致で見る（「Java」を発話の「JavaScript」で通さない）。
+// カタカナの語は、発話の全文に含まれるかで見る（複合語の切れ目の違い「エクセルマクロ」を許すため）。
+// そのため「ライブ」が「ライブラリ」で通るような見逃しは残る。
 func hasUnspokenTerm(text string, spoken SpokenEvidence) bool {
-	for _, term := range extractTerms(termSource(text)) {
+	for _, term := range extractTerms(text) {
+		if isASCIIWord(term) {
+			if !spoken.words[term] {
+				return true
+			}
+			continue
+		}
 		if !strings.Contains(spoken.normalized, term) {
 			return true
 		}
 	}
 	return false
+}
+
+func isASCIIWord(term string) bool {
+	for i := 0; i < len(term); i++ {
+		if term[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
+// asciiWords は発話の英字の語の集合（正規化済み）。
+func asciiWords(normalized string) map[string]bool {
+	words := map[string]bool{}
+	for _, term := range properNounPattern.FindAllString(normalized, -1) {
+		if isASCIIWord(term) {
+			words[term] = true
+		}
+	}
+	return words
 }
