@@ -236,17 +236,19 @@ func writeBackup(path string, rows []backupRow) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // 保存先は運用者が指定するCLI引数
 	if err != nil {
 		return err // 既存のファイルは上書きしない
 	}
-	defer f.Close()
-	_, err = f.Write(b)
-	return err
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func readBackup(path string) ([]backupRow, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // 読み込み元は運用者が指定するCLI引数
 	if err != nil {
 		return nil, err
 	}
