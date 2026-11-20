@@ -90,31 +90,98 @@ func (s *InterviewService) RegenerateReport(userID uint, sessionID uint) (queued
 
 func (s *InterviewService) StartWorker() {
 	// Redis キュー利用時は asynq worker が処理する。フォールバック用 channel worker は常に起動。
+	s.workerStarted.Store(true)
 	s.workerOnce.Do(func() {
-		// レポート生成ワーカー。panic で落ちるとレポートが二度と生成されない上に
-		// プロセスごと死ぬ(#1446)。
 		s.workerWG.Add(1)
 		safego.Go(func() {
 			defer s.workerWG.Done()
+			defer close(s.workerFinished)
 			s.runWorker()
 		})
 	})
 }
 
-// StopWorker は残っているレポート生成を待ってから戻る。二度呼んでも安全。
-func (s *InterviewService) StopWorker() {
+// StopWorker は残っているレポート生成を、ctx の期限まで待ってから戻る。
+// 期限を過ぎた分は sessionID をログに残して諦める。二度呼んでも安全。
+// jobCh は閉じない。閉じると、HTTP の停止がタイムアウトしたあとに残った
+// FinishSession が closed channel へ送って panic する。
+func (s *InterviewService) StopWorker(ctx context.Context) {
 	if s == nil {
 		return
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	s.stopOnce.Do(func() {
-		close(s.jobCh)
+		s.shutdownCtx = ctx
+		s.stopping.Store(true)
+		close(s.workerStop)
 	})
-	s.workerWG.Wait()
+	if !s.workerStarted.Load() {
+		return
+	}
+	select {
+	case <-s.workerFinished:
+	case <-ctx.Done():
+		s.logAbandonedReports()
+	}
 }
 
 func (s *InterviewService) runWorker() {
-	for sessionID := range s.jobCh {
-		s.runReportJob(sessionID)
+	for {
+		select {
+		case <-s.workerStop:
+			s.drainReportJobs()
+			return
+		case sessionID := <-s.jobCh:
+			s.runReportJob(sessionID)
+		}
+	}
+}
+
+// drainReportJobs は停止時点でチャネルに残っているジョブを、期限まで実行する。
+func (s *InterviewService) drainReportJobs() {
+	ctx := s.shutdownCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		if ctx.Err() != nil {
+			s.logAbandonedReports()
+			return
+		}
+		select {
+		case <-ctx.Done():
+			s.logAbandonedReports()
+			return
+		case sessionID := <-s.jobCh:
+			s.runReportJob(sessionID)
+		default:
+			return
+		}
+	}
+}
+
+func (s *InterviewService) logAbandonedReports() {
+	s.inFlightMu.Lock()
+	active := s.activeReport
+	s.inFlightMu.Unlock()
+	ids := make([]uint, 0, 1)
+	if active != 0 {
+		ids = append(ids, active)
+	}
+	for {
+		select {
+		case id := <-s.jobCh:
+			ids = append(ids, id)
+			s.clearReportJobInFlight(id)
+		default:
+			if len(ids) == 0 {
+				return
+			}
+			log.Printf("[Interview] shutdown budget exceeded, dropped report sessions %v", ids)
+			return
+		}
 	}
 }
 
@@ -123,6 +190,22 @@ func (s *InterviewService) runWorker() {
 // 同じセッションが二重に走らないようにするため。
 func (s *InterviewService) runReportJob(sessionID uint) {
 	defer s.clearReportJobInFlight(sessionID)
+	s.inFlightMu.Lock()
+	s.activeReport = sessionID
+	s.inFlightMu.Unlock()
+	defer func() {
+		s.inFlightMu.Lock()
+		if s.activeReport == sessionID {
+			s.activeReport = 0
+		}
+		s.inFlightMu.Unlock()
+	}()
+	if s.reportJob != nil {
+		if err := s.reportJob(context.Background(), sessionID); err != nil {
+			log.Printf("[Interview] Report generation failed for session %d: %v\n", sessionID, err)
+		}
+		return
+	}
 	if err := s.generateReport(context.Background(), sessionID); err != nil {
 		log.Printf("[Interview] Report generation failed for session %d: %v\n", sessionID, err)
 		return

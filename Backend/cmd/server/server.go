@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -210,6 +211,10 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 	}
 }
 
+// shutdownBudget は ECS の stopTimeout（指定が無ければ 30 秒）の内側に収める。
+// HTTP の停止、フォールバックのレポート生成、asynq の停止を、この1つの期限で並行に行う。
+const shutdownBudget = 25 * time.Second
+
 // startServer は HTTP サーバーを起動し、SIGTERM / SIGINT で処理中の要求を待ってから止める。
 // デプロイのたびに in-flight のリクエストと、キューに入った面接レポートが切れていた（SOCAIAGENT-514）。
 func startServer(e *echo.Echo, port string, interviewService *interview.InterviewService, queueServer *queue.Server) {
@@ -242,20 +247,60 @@ func startServer(e *echo.Echo, port string, interviewService *interview.Intervie
 			log.Fatalf("Server failed: %v", err)
 		}
 	case sig := <-sigCh:
+		// ドレイン中の2回目は、チャネルに溜めずプロセスの既定動作（終了）に戻す。
+		signal.Stop(sigCh)
 		slog.Info("shutdown signal received", "signal", sig.String())
-		// ECS の停止猶予（既定30秒）の内側で、受け付け済みの HTTP を先に終わらせる。
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+		shutdownWithinBudget(e, interviewService, queueServer)
+	}
+}
+
+// shutdownWithinBudget は HTTP・面接レポート・asynq を同時に止め、全体を shutdownBudget で打ち切る。
+// 直列に待つと 15 秒 + レポート生成 + asynq が ECS の 30 秒を超えて SIGKILL される。
+func shutdownWithinBudget(e *echo.Echo, interviewService *interview.InterviewService, queueServer *queue.Server) {
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownBudget)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("http shutdown panic", "panic", rec)
+			}
+		}()
 		if err := e.Shutdown(ctx); err != nil {
 			slog.Error("http shutdown", "error", err)
 		}
-		// HTTP が終わってからキューを閉じる。閉じた後の投入で panic しないように、
-		// 新しい要求を受け終わってからにする。
-		if interviewService != nil {
-			interviewService.StopWorker()
+	}()
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("queue shutdown panic", "panic", rec)
+			}
+		}()
+		if queueServer == nil {
+			return
 		}
-		if queueServer != nil {
+		finished := make(chan struct{})
+		go func() {
+			defer close(finished)
+			defer func() {
+				if rec := recover(); rec != nil {
+					slog.Error("queue shutdown panic", "panic", rec)
+				}
+			}()
 			queueServer.Shutdown()
+		}()
+		select {
+		case <-finished:
+		case <-ctx.Done():
+			slog.Error("queue shutdown exceeded budget")
 		}
+	}()
+	if interviewService != nil {
+		interviewService.StopWorker(ctx)
 	}
+	wg.Wait()
 }
