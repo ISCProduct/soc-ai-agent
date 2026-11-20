@@ -26,7 +26,7 @@ import { authService } from '@/lib/auth'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { fetchWithTimeout } from '@/lib/fetch-timeout'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
-import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
+import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
 import {
   STATUS_COLORS,
   STATUS_LABELS,
@@ -256,7 +256,7 @@ function ApplicationsContent() {
 
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={4000}
+        autoHideDuration={SNACKBAR_AUTO_HIDE_MS}
         onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         sx={ABOVE_BOTTOM_NAV_SX}

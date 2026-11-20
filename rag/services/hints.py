@@ -1,5 +1,7 @@
 """面接ヒントの Web Search と構造化パース。"""
 from __future__ import annotations
+from services.output_schemas import HINTS_PARSE_SCHEMA, is_schema_unsupported, json_response_format
+from services.prompt_versions import log_prompt_call
 
 from services.model_tiers import hints_parse_model, summary_model
 import asyncio
@@ -91,6 +93,7 @@ async def _run_hints_web_search_pipeline(
                  f"【検索結果】\n{_wrap_untrusted_text(combined, '検索結果')}"
              )
     try:
+        log_prompt_call("hints_summary", summary_model())
         resp = client.chat.completions.create(
             model=summary_model(),
             messages=[
@@ -146,8 +149,10 @@ def _parse_hints_from_text(company_name: str, position: str, research_text: str)
         # 読み出し後＝プロンプト組み立て時に囲む（#1591）
         f"リサーチ結果:\n{_wrap_untrusted_text(research_text[:3000], 'リサーチ結果')}"
     )
-    try:
-        resp = client.chat.completions.create(
+    log_prompt_call("hints_parse", model)
+
+    def create(response_format):
+        return client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -155,8 +160,21 @@ def _parse_hints_from_text(company_name: str, position: str, research_text: str)
             ],
             temperature=0.2,
             max_tokens=m.HINTS_PARSE_MAX_TOKENS,
-            response_format={"type": "json_object"},
+            response_format=response_format,
         )
+
+    try:
+        # 形をモデル側で保証する（SOCAIAGENT-563）。RAG_STRUCTURED_OUTPUTS=0 で JSON モードに戻せる。
+        # スキーマに対応しないモデル・互換サーバでは、ES 添削と同じく JSON モードで1回だけ呼び直す
+        # （空のヒントを成功として返さない）
+        response_format = json_response_format("hints_parse", HINTS_PARSE_SCHEMA)
+        try:
+            resp = create(response_format)
+        except Exception as exc:
+            if response_format.get("type") != "json_schema" or not is_schema_unsupported(exc):
+                raise
+            logger.warning("structured outputs unsupported model=%s; falling back to json mode error=%s", model, exc)
+            resp = create({"type": "json_object"})
         raw = resp.choices[0].message.content or "{}"
         data = _json.loads(raw)
         return CompanyHintsResponse(
