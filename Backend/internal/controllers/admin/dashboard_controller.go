@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -135,6 +136,8 @@ func (c *AdminDashboardController) userAvgScores(ctx context.Context, userIDs []
 	if len(userIDs) > 0 {
 		var err error
 		if idsByUser, err = c.sessionRepo.ListFinishedSessionIDsByUsers(ctx, userIDs); err != nil {
+			// 一括取得の失敗は全員スコア無しになる。気づけるようログに残す。
+			log.Printf("[AdminDashboard] finished session ids batch fetch failed (users=%d): %v", len(userIDs), err)
 			idsByUser = nil
 		}
 	}
