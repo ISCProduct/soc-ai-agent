@@ -4,6 +4,7 @@ patch("main.OpenAI") / patch("main._run_async") 等との互換のため、
 実行時に main モジュール上のシンボルを参照する。
 """
 from __future__ import annotations
+from services.prompt_versions import log_prompt_call
 
 from services.model_tiers import summary_model
 import asyncio
@@ -97,6 +98,7 @@ def run_deep_research(company_name: str, job_title: str) -> str:
         }
         if use_tools:
             kwargs["tools"] = [{"type": "web_search"}]
+        log_prompt_call("deep_research", model_name)
         return client.responses.create(**kwargs)
 
     # 1回目: メインリクエスト（tools有効・メインモデル）
@@ -310,6 +312,7 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
                 company=_wrap_untrusted_text(safe_company, "企業名"),
                 role=_wrap_untrusted_text(role_text, "職種"),
             )
+            log_prompt_call("search_queries", summary_model())
             resp = client.chat.completions.create(
                 model=summary_model(),
                 messages=[{"role": "user", "content": prompt}],
@@ -349,6 +352,7 @@ def _web_search_openai(query: str) -> str:
         model = "gpt-4o-mini"
     client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     try:
+        log_prompt_call("web_search", model)
         response = client.responses.create(
             model=model,
             input=query,
@@ -403,6 +407,7 @@ def _summarize_for_hiring(company_name: str, job_title: str, raw_texts: List[str
                  f"【検索結果】\n{_wrap_untrusted_text(combined, '検索結果')}"
              )
     try:
+        log_prompt_call("hiring_summary", summary_model())
         resp = client.chat.completions.create(
             model=summary_model(),
             messages=[

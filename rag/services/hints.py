@@ -1,5 +1,6 @@
 """面接ヒントの Web Search と構造化パース。"""
 from __future__ import annotations
+from services.prompt_versions import log_prompt_call
 
 from services.model_tiers import hints_parse_model, summary_model
 import asyncio
@@ -91,6 +92,7 @@ async def _run_hints_web_search_pipeline(
                  f"【検索結果】\n{_wrap_untrusted_text(combined, '検索結果')}"
              )
     try:
+        log_prompt_call("hints_summary", summary_model())
         resp = client.chat.completions.create(
             model=summary_model(),
             messages=[
@@ -147,6 +149,7 @@ def _parse_hints_from_text(company_name: str, position: str, research_text: str)
         f"リサーチ結果:\n{_wrap_untrusted_text(research_text[:3000], 'リサーチ結果')}"
     )
     try:
+        log_prompt_call("hints_parse", model)
         resp = client.chat.completions.create(
             model=model,
             messages=[
