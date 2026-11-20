@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
@@ -428,6 +429,44 @@ def _summarize_for_hiring(company_name: str, job_title: str, raw_texts: List[str
         return "\n\n".join(raw_texts)
 
 
+# 検索ログの大きさの上限と、残す世代数（SOCAIAGENT-564）。
+# 以前は追記するだけで、長く動かすと /app/search_logs を圧迫しえた。上限を超えたら
+# search_log.jsonl → .1 → .2 … と送り、世代数より古いものは消す（最大でおよそ 上限×(世代数+1)）。
+DEFAULT_SEARCH_LOG_MAX_BYTES = 10 * 1024 * 1024
+DEFAULT_SEARCH_LOG_BACKUPS = 3
+_search_log_lock = threading.Lock()
+
+
+def _env_int(name: str, default: int, minimum: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return max(minimum, int(raw))
+    except ValueError:
+        logger.warning("invalid %s=%r; using %d", name, raw, default)
+        return default
+
+
+def _rotate_search_log(log_path: str) -> None:
+    """上限を超えていたら世代を送る（呼び出し側でロックを持つこと）。"""
+    max_bytes = _env_int("RAG_SEARCH_LOG_MAX_BYTES", DEFAULT_SEARCH_LOG_MAX_BYTES, 1)
+    backups = _env_int("RAG_SEARCH_LOG_BACKUPS", DEFAULT_SEARCH_LOG_BACKUPS, 0)
+    try:
+        if os.path.getsize(log_path) < max_bytes:
+            return
+    except OSError:
+        return  # まだ無い
+    if backups == 0:
+        os.remove(log_path)
+        return
+    for i in range(backups - 1, 0, -1):
+        older = f"{log_path}.{i}"
+        if os.path.exists(older):
+            os.replace(older, f"{log_path}.{i + 1}")
+    os.replace(log_path, f"{log_path}.1")
+
+
 def _save_search_log(
         company_name: str,
         job_title: str,
@@ -455,8 +494,10 @@ def _save_search_log(
             "summary_sha256": summary_digest,
             "summary_chars": len(summary),
         }
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        with _search_log_lock:
+            _rotate_search_log(log_path)
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
         logger.info("search log saved company=%s path=%s", company_name, log_path)
     except Exception as exc:
         logger.warning("search log save failed company=%s error=%s", company_name, exc)
