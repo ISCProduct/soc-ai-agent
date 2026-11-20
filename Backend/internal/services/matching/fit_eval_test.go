@@ -14,7 +14,7 @@ import (
 // ずれた提案 = 上位 N 件のうち、本人の傾向と企業の重視点が大きく離れた軸（fit.go の MismatchAxes）がある提案。
 // 企業の分布が 2 通りの場合で測る。
 //   - ばらけた企業（各軸が 35〜92 に一様）
-//   - 100 に張り付いた企業（実データの開発 DB に近い形。多くの軸が 100 付近で、4 軸だけがばらつく）
+//   - 100 に張り付いた企業（多くの軸が 100 付近で、4 軸だけがばらつく）
 
 var evalAxes = axisNames[:]
 
@@ -156,7 +156,7 @@ func TestFitEval_SpreadCompanies(t *testing.T) {
 	}
 }
 
-// 100 に張り付いた企業（実データに近い形）: ばらつきを考慮しないと、全社に「参考」が付く。
+// 100 に張り付いた企業: ばらつきを考慮しないと、全社に「参考」が付く。
 // 考慮すれば、ばらつきのある軸（4 軸）でのずれだけを数えるので、「参考」は一部の企業にとどまる。
 func TestFitEval_SaturatedCompanies_DoesNotLabelEveryone(t *testing.T) {
 	companies := saturatedCompanies(90, 5)

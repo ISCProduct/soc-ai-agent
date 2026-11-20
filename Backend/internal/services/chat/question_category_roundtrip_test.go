@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"testing"
 
 	"Backend/domain/valueobject"
@@ -24,8 +25,8 @@ func TestFallbackQuestions_ScoreBackToOwnCategory(t *testing.T) {
 	for _, c := range valueobject.AllWeightCategories() {
 		category := string(c)
 		for _, level := range []string{"新卒", "中途"} {
-			questions := []string{s.fallbackQuestionForCategory(category, 0, level)}
-			questions = append(questions, s.fallbackQuestionsForCategory(category, 0, level)...)
+			questions := []string{s.fallbackQuestionForCategory(context.Background(), category, 0, level)}
+			questions = append(questions, s.fallbackQuestionsForCategory(context.Background(), category, 0, level)...)
 
 			for _, q := range questions {
 				if q == "" {
