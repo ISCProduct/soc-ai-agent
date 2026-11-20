@@ -198,7 +198,7 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 				return
 			}
 			if res != nil {
-				slog.Info("auto score calibration applied", "version", res.Version, "categories", len(res.Weights), "message", res.Message)
+				slog.Info("auto score calibration applied", "version", res.Version, "categories", len(res.Weights), "message", res.Message) // logpolicy:ok キャリブレーション結果の文言で、個人情報を含まない
 			}
 		})
 	}

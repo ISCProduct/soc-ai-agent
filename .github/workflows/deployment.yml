@@ -93,8 +93,8 @@ jobs:
           fi
 
       # デプロイ中はASGのヘルスチェックによる置換を止める(#828)。
-      # デプロイは稼働中インスタンス上で down → prune → pull → up を行い、
-      # アプリが数分間停止する。インスタンスは既に InService なので
+      # デプロイは稼働中インスタンス上で pull → down → migrate → up を行い、
+      # アプリが短時間停止する(空きが少ないときは down → prune → pull → up で数分間)。インスタンスは既に InService なので
       # health_check_grace_period は効かず、ALB は30秒で unhealthy と判定する。
       # 止めないとデプロイ中にインスタンスが置換され、デプロイ自体が壊れる。
       #
@@ -413,11 +413,21 @@ jobs:
                 echo "TRUSTED_PROXY_HOPS=2" >> .env
               fi
               df -h /
-              # 稼働中イメージは prune できない。先に down してから空ける。
+              # アプリを動かしたまま先に pull する。変更のないイメージは取得されないので、
+              # 停止時間は down から up までの間だけになる(#678)。
+              # 以前は down → prune -af → pull で、毎回全イメージを取り直し、その間ずっと止まっていた。
+              # 新旧のイメージが同居する分の空きが足りないときだけ、従来どおり down して全て消してから取る。
               # named volume(chroma_data)は --volumes を付けない限り残る。
-              docker compose down --remove-orphans || true
-              docker system prune -af
-              docker compose pull
+              AVAIL_GB=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
+              if [ "${AVAIL_GB:-0}" -lt 10 ]; then
+                echo "disk avail ${AVAIL_GB}G < 10G: down + prune してから pull する"
+                docker compose down --remove-orphans || true
+                docker system prune -af
+                docker compose pull
+              else
+                docker compose pull
+                docker compose down --remove-orphans || true
+              fi
               # DBマイグレーション適用(#618)。新コードは新しい列を読み書きするので、
               # 起動より先に適用する(#1778)。DB接続が間に合わないことがあるためリトライする。
               MIGRATE_OK=0
@@ -431,6 +441,9 @@ jobs:
                 exit 1
               fi
               docker compose up -d
+              # 使われなくなった旧イメージを回収する(動いているコンテナのイメージは消えない)。
+              # pull を先にした分、ここで空けないとデプロイのたびにディスクが増える。
+              docker image prune -af
               df -h /
               # up -d の直後はまだ running になっていないことがある。特に新規インスタンスの
               # 初回起動(イメージpull+ネットワーク/ボリューム作成から)は遅く、即座に判定すると

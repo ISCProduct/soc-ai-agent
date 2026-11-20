@@ -1292,6 +1292,11 @@ GET /api/admin/audit-logs
 | `rds-free-storage` | 空き2GiB未満 |
 | `rds-cpu` | CPU 80%超が10分 |
 
+**staging のアラーム** — SNS トピック `soc-stg-alarms`（prod とは別）。
+`infra/terraform/environments/staging/alarms.tf` に、prod と同じ5本（`target-5xx` / `target-latency` /
+`rds-free-storage` / `rds-connections` / `rds-cpu`）を置く。しきい値と「停止中は鳴らさない」設計も prod と同じ。
+通知先は staging の `alarm_email`（空なら誰にも届かない）。反映は `terraform apply`（staging）で行う。
+
 ### 設計上の要点: 計画停止中に鳴らさない
 
 本番は「指定日のみ終日起動」で、**稼働していない時間の方が長い**。

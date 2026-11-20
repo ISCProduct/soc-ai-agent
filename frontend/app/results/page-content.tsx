@@ -8,6 +8,7 @@ import { CONTENT_MAX_WIDTH } from '@/lib/design/tokens'
 import { useResultsData } from './hooks/useResultsData'
 import {
   ResultsLoadingView,
+  ResultsEmptyView,
   ResultsErrorView,
   ResultsNoMatchView,
 } from './components/ResultsStatusViews'
@@ -51,6 +52,7 @@ function ResultsContent() {
     companies,
     loading,
     error,
+    emptyReason,
     isProvisional,
     diagnosisSummary,
     evaluatedCategories,
@@ -111,8 +113,22 @@ function ResultsContent() {
         <ResultsErrorView
           error={error}
           onBack={handleBack}
-          onReset={handleReset}
         />
+      </ResultsFallbackColumn>
+    )
+  }
+
+  // 推薦が0件（エラーではない。#2220）
+  if (emptyReason) {
+    return (
+      <ResultsFallbackColumn>
+        <AnalysisScoreCard
+          analysisScores={analysisScores}
+          scoreComment={scoreComment}
+          analysisError={analysisError}
+          onRetryAnalysis={handleRetryAnalysis}
+        />
+        <ResultsEmptyView reason={emptyReason} onBackToChat={handleBack} />
       </ResultsFallbackColumn>
     )
   }
