@@ -394,29 +394,32 @@ func consumeRAGUsage(ctx echo.Context, cli *openai.Client, feature string, body 
 		// 機能名は呼び出し元が定数で渡す（#1294 の方針）。実行主体はリクエストの
 		// コンテキストから取る（未ログイン利用も仕様の経路なので無ければ NULL）。
 		reportCtx := usagectx.WithFeature(ctx.Request().Context(), feature)
-		if len(usage.ByModel) == 0 {
-			cli.ReportProxyUsage(reportCtx, openai.ProxyUsage{
-				Model:            usage.Model,
-				PromptTokens:     usage.PromptTokens,
-				CompletionTokens: usage.CompletionTokens,
-				Latency:          latency,
-			})
-			return cleaned
-		}
-		// モデルごとに記録する。応答時間は1リクエスト分なので、重複して数えないよう最初の行にだけ付ける
-		for i, m := range usage.ByModel {
+		// モデルごとに記録する。応答時間は1リクエスト分なので、重複して数えないよう
+		// 実際に記録した最初の行にだけ付ける（添字ではなく、記録したかどうかで決める）
+		reported := 0
+		for _, m := range usage.ByModel {
 			if m.Calls <= 0 {
 				continue
 			}
-			rowLatency := latency
-			if i > 0 {
-				rowLatency = 0
+			rowLatency := time.Duration(0)
+			if reported == 0 {
+				rowLatency = latency
 			}
 			cli.ReportProxyUsage(reportCtx, openai.ProxyUsage{
 				Model:            m.Model,
 				PromptTokens:     m.PromptTokens,
 				CompletionTokens: m.CompletionTokens,
 				Latency:          rowLatency,
+			})
+			reported++
+		}
+		// 内訳が無い（古い RAG）か、内訳から1行も記録できなかったときは、合計を記録する（使用量を捨てない）
+		if reported == 0 {
+			cli.ReportProxyUsage(reportCtx, openai.ProxyUsage{
+				Model:            usage.Model,
+				PromptTokens:     usage.PromptTokens,
+				CompletionTokens: usage.CompletionTokens,
+				Latency:          latency,
 			})
 		}
 	}
