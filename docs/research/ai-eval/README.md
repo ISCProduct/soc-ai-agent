@@ -451,6 +451,7 @@ role_fit / completeness / readability、各0〜5）の加重和から本番と�
 | `chat-answer.jsonl` | **30** | good 10 / mid 10 / bad 10（SOCAIAGENT-450 で新設） |
 | `company-extract.jsonl` | **12** | ラベルなし（#1782 で新設。正解の項目との一致で点を付ける） |
 | `matching-reason.jsonl` | **12** | ラベルなし（#1782 で新設。指示の遵守で点を付ける。企業情報が業種だけのケース4件を含む） |
+| `interview-evidence-synthetic.jsonl` | **22** | legit 12 / fabricated 10（SOCAIAGENT-675 で新設）。面接レポートの根拠照合だけを測る合成ケースで、`-target` では使わない。「発話」と「根拠」を固定し、LLM を呼ばずに検出率と誤検知率を出す（`Backend/internal/aibench/evidence_synthetic_test.go`。`go test` で毎回走る） |
 
 **全て合成データ。個人情報を含む実データは入っていない**（`docs/wiki/data-privacy.md` の方針）。
 氏名は「学生A」、企業・学校名は「株式会社サンプル○○」「サンプル○○専門学校」のような

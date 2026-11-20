@@ -28,8 +28,30 @@ func (s *ResumeService) OpenAnnotatedFile(documentID uint, requestingUserID uint
 	if strings.TrimSpace(doc.AnnotatedPath) == "" {
 		return nil, errors.New("annotated file not ready")
 	}
-	if !isS3URI(doc.AnnotatedPath) {
-		f, err := os.Open(doc.AnnotatedPath)
+	return s.openStoredPDF(doc.AnnotatedPath)
+}
+
+// OpenNormalizedFile は、レビュー画面で書類そのものを見せるための、PDFに揃えた元の書類を開く。
+// DOCX・Google Docs もレビュー時に PDF へ変換して保存してあるので、画面はどれも PDF として描ける。
+// 注釈PDFと違い、指摘の強調は入っていない（画面側が番号つきで重ねる）。
+func (s *ResumeService) OpenNormalizedFile(documentID uint, requestingUserID uint) (*AnnotatedFile, error) {
+	doc, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, shared.ErrForbidden
+		}
+		return nil, err
+	}
+	if strings.TrimSpace(doc.NormalizedPath) == "" {
+		return nil, errors.New("document file not ready")
+	}
+	return s.openStoredPDF(doc.NormalizedPath)
+}
+
+// openStoredPDF は、手元またはS3に保存したPDFを開く。
+func (s *ResumeService) openStoredPDF(path string) (*AnnotatedFile, error) {
+	if !isS3URI(path) {
+		f, err := os.Open(path)
 		if err != nil {
 			return nil, err
 		}
@@ -42,14 +64,14 @@ func (s *ResumeService) OpenAnnotatedFile(documentID uint, requestingUserID uint
 			Reader:      f,
 			Size:        stat.Size(),
 			ContentType: "application/pdf",
-			Filename:    filepath.Base(doc.AnnotatedPath),
+			Filename:    filepath.Base(path),
 			CloseFunc:   f.Close,
 		}, nil
 	}
 	if err := s.ensureS3Available(); err != nil {
 		return nil, err
 	}
-	bucket, key, ok := shared.ParseS3URI(doc.AnnotatedPath)
+	bucket, key, ok := shared.ParseS3URI(path)
 	if !ok {
 		return nil, errors.New("invalid s3 path")
 	}

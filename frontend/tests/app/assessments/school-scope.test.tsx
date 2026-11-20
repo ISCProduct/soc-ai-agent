@@ -1,13 +1,14 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import ListContent from '@/app/assessments/page-content'
 import ResultContent from '@/app/assessments/[sessionId]/result/page-content'
 import { assessmentApi, type AssessmentResult, type AssessmentSummary } from '@/lib/assessments'
 
+const back = jest.fn()
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({ push: jest.fn() }),
+  useRouter: () => ({ push: jest.fn(), back }),
   useParams: () => ({ sessionId: 's1' }),
 }))
 jest.mock('@/lib/auth', () => ({ authService: { getUserFetchHeaders: () => ({}) } }))
@@ -33,6 +34,14 @@ const item = (over: Partial<AssessmentSummary>): AssessmentSummary => ({
 })
 
 describe('学生の検査一覧（学校独自）', () => {
+  it('前の画面へ戻れる', async () => {
+    api.mockResolvedValue({ assessments: [item({})] })
+    render(<ListContent />)
+    expect(await screen.findByRole('heading', { name: '適性検査' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '前の画面へ戻る' }))
+    expect(back).toHaveBeenCalled()
+  })
+
   it('学校独自は「おすすめ企業の計算には使われない」と示し、標準には出さない', async () => {
     api.mockResolvedValue({
       assessments: [item({}), item({ template_id: 2, title: 'A校の検査', scope: 'school' })],
