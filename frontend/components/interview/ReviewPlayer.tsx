@@ -15,8 +15,8 @@ type ReviewPlayerProps = {
   seekNonce: number
 }
 
-function playableVideo(videos: StudentVideo[]): StudentVideo | null {
-  const done = videos.filter((video) => video.status === 'done')
+function playableVideo(videos: StudentVideo[] | undefined): StudentVideo | null {
+  const done = (videos ?? []).filter((video) => video.status === 'done')
   if (done.length === 0) return null
   return done[done.length - 1]
 }
@@ -35,7 +35,9 @@ export default function ReviewPlayer({
   const [playError, setPlayError] = useState<string | null>(null)
   const [preparing, setPreparing] = useState(false)
 
-  const video = playback ? playableVideo(playback.videos) : null
+  const videos = playback && Array.isArray(playback.videos) ? playback.videos : undefined
+  const cues = playback && Array.isArray(playback.cues) ? playback.cues : []
+  const video = playableVideo(videos)
   const playbackRef = useRef(playback)
   playbackRef.current = playback
 
@@ -75,7 +77,7 @@ export default function ReviewPlayer({
     if (seekNonce === 0 || seekUtteranceId == null) return
     const current = playbackRef.current
     if (!current) return
-    const cue = current.cues.find((item) => item.utterance_id === seekUtteranceId)
+    const cue = (current.cues ?? []).find((item) => item.utterance_id === seekUtteranceId)
     if (!cue || cue.offset_seconds == null) {
       setPlayError('この発話の録画位置は特定できません')
       return
@@ -98,7 +100,7 @@ export default function ReviewPlayer({
           <Alert severity="error">{error}</Alert>
           <Button size="small" variant="outlined" onClick={onRetry}>再試行</Button>
         </Stack>
-      ) : !playback || playback.videos.length === 0 ? (
+      ) : !videos || videos.length === 0 ? (
         <Typography color="text.secondary" fontSize={14}>
           この面接の録画はありません。カメラをオンにして練習すると、ここに残ります。
         </Typography>
@@ -118,7 +120,7 @@ export default function ReviewPlayer({
           </Button>
           {playError ? <Alert severity="error">{playError}</Alert> : null}
           <Typography sx={{ fontSize: 12, color: UI.inkFaint }}>
-            {playback.cues.some((cue) => cue.offset_seconds != null)
+            {cues.some((cue) => cue.offset_seconds != null)
               ? 'レポートの「録画のこのあたりを再生」を押すと、その発話のあたりから再生します。'
               : '面接の開始時刻が無いため、発話の位置までは飛べません。最初から再生できます。'}
           </Typography>

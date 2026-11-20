@@ -316,7 +316,7 @@ export default function PageContent() {
                     utterances={selectedDetail.utterances}
                     userId={user?.user_id}
                     theme="light"
-                    onPlayEvidence={playback?.videos.some((video) => video.status === 'done')
+                    onPlayEvidence={playback?.videos?.some((video) => video.status === 'done')
                       ? (utteranceId) => setSeek({ id: utteranceId, nonce: Date.now() })
                       : undefined}
                   />

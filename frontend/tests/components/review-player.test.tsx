@@ -27,6 +27,21 @@ describe('録画で振り返る', () => {
     })
   })
 
+  it('videos が無い応答でも落ちずに、録画が無いと伝える', () => {
+    render(
+      <ReviewPlayer
+        sessionId={1}
+        playback={{ videos: undefined as unknown as InterviewPlayback['videos'], cues: [], anchor: 'session_started_at' }}
+        loading={false}
+        error={null}
+        onRetry={() => undefined}
+        seekUtteranceId={null}
+        seekNonce={0}
+      />,
+    )
+    expect(screen.getByText('この面接の録画はありません。カメラをオンにして練習すると、ここに残ります。')).toBeInTheDocument()
+  })
+
   it('録画が無いことを伝える', () => {
     render(
       <ReviewPlayer
