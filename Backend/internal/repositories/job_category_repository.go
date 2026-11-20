@@ -1,6 +1,8 @@
 package repositories
 
 import (
+	"context"
+
 	"Backend/internal/models"
 	"gorm.io/gorm"
 )
@@ -14,32 +16,32 @@ func NewJobCategoryRepository(db *gorm.DB) *JobCategoryRepository {
 }
 
 // FindAll すべての職種を取得
-func (r *JobCategoryRepository) FindAll() ([]models.JobCategory, error) {
+func (r *JobCategoryRepository) FindAll(ctx context.Context) ([]models.JobCategory, error) {
 	var categories []models.JobCategory
-	err := r.db.Where("is_active = ?", true).Order("display_order ASC").Find(&categories).Error
+	err := r.db.WithContext(ctx).Where("is_active = ?", true).Order("display_order ASC").Find(&categories).Error
 	return categories, err
 }
 
 // FindByID IDで職種を取得
-func (r *JobCategoryRepository) FindByID(id uint) (*models.JobCategory, error) {
+func (r *JobCategoryRepository) FindByID(ctx context.Context, id uint) (*models.JobCategory, error) {
 	var category models.JobCategory
-	err := r.db.First(&category, id).Error
+	err := r.db.WithContext(ctx).First(&category, id).Error
 	return &category, err
 }
 
 // FindByName 名前で職種を検索（部分一致）
-func (r *JobCategoryRepository) FindByName(name string) ([]models.JobCategory, error) {
+func (r *JobCategoryRepository) FindByName(ctx context.Context, name string) ([]models.JobCategory, error) {
 	var categories []models.JobCategory
-	err := r.db.Where("is_active = ? AND name LIKE ?", true, "%"+name+"%").
+	err := r.db.WithContext(ctx).Where("is_active = ? AND name LIKE ?", true, "%"+name+"%").
 		Order("display_order ASC").
 		Find(&categories).Error
 	return categories, err
 }
 
 // GetTopCategories 主要な職種カテゴリを取得（Level 0）
-func (r *JobCategoryRepository) GetTopCategories() ([]models.JobCategory, error) {
+func (r *JobCategoryRepository) GetTopCategories(ctx context.Context) ([]models.JobCategory, error) {
 	var categories []models.JobCategory
-	err := r.db.Where("is_active = ? AND level = ?", true, 0).
+	err := r.db.WithContext(ctx).Where("is_active = ? AND level = ?", true, 0).
 		Order("display_order ASC").
 		Find(&categories).Error
 	return categories, err
