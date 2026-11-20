@@ -509,11 +509,20 @@ func (r *UserWeightScoreRepository) rollbackSnapshot(snapshot models.UserScoreRe
 		if err != nil {
 			return err
 		}
-		var active int64
-		if err := tx.Model(&models.User{}).Where("id = ? AND withdrawn_at IS NULL", locked.UserID).Count(&active).Error; err != nil {
+		var user struct {
+			ID          uint
+			WithdrawnAt *time.Time
+		}
+		err = tx.Model(&models.User{}).Select("id", "withdrawn_at").Where("id = ?", locked.UserID).Take(&user).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// ユーザー行が無い＝物理削除の後。削除が控えを取りこぼしていたので、控えも消す（点数は書き戻さない）
+			return tx.Delete(&models.UserScoreRecalculationSnapshot{}, locked.ID).Error
+		}
+		if err != nil {
 			return err
 		}
-		if active == 0 {
+		if user.WithdrawnAt != nil {
+			// 退会済み（物理削除の前の保管期間）。退会の取り消しに備えて控えは残し、点数は書き戻さない
 			return nil
 		}
 		var rows []models.UserWeightScore

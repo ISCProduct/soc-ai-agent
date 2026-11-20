@@ -46,14 +46,30 @@ var (
 	snapshotColumns = []string{"id", "job_id", "user_id", "session_id", "scores_json", "created_at"}
 )
 
-// expectLockedSnapshot は、控えをロックして読み直し、ユーザーが退会していないことを確かめる問い合わせ。
-func expectLockedSnapshot(mock sqlmock.Sqlmock, scoresJSON string, activeUsers int) {
+// userState は控えを読み直したあとのユーザー行の状態。
+type userState int
+
+const (
+	userActive userState = iota
+	userWithdrawn
+	userGone
+)
+
+// expectLockedSnapshot は、控えをロックして読み直し、ユーザー行の状態を確かめる問い合わせ。
+func expectLockedSnapshot(mock sqlmock.Sqlmock, scoresJSON string, state userState) {
 	mock.ExpectQuery("SELECT \\* FROM `user_score_recalculation_snapshots` WHERE id = \\? .*FOR UPDATE").
 		WithArgs(uint(9), 1).
 		WillReturnRows(sqlmock.NewRows(snapshotColumns).AddRow(9, 1, 7, "s1", scoresJSON, time.Now()))
-	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `users` WHERE id = \\? AND withdrawn_at IS NULL").
-		WithArgs(uint(7)).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(activeUsers))
+	users := sqlmock.NewRows([]string{"id", "withdrawn_at"})
+	switch state {
+	case userActive:
+		users.AddRow(7, nil)
+	case userWithdrawn:
+		users.AddRow(7, time.Now())
+	}
+	mock.ExpectQuery("SELECT `id`,`withdrawn_at` FROM `users` WHERE id = \\?").
+		WithArgs(uint(7), 1).
+		WillReturnRows(users)
 }
 
 func TestRollbackSnapshot(t *testing.T) {
@@ -69,7 +85,7 @@ func TestRollbackSnapshot(t *testing.T) {
 	t.Run("行がすでに無ければ、控えから元の時刻のまま書き戻して控えを消す", func(t *testing.T) {
 		repo, mock := newRollbackMock(t)
 		mock.ExpectBegin()
-		expectLockedSnapshot(mock, snapshotJSON(t, original), 1)
+		expectLockedSnapshot(mock, snapshotJSON(t, original), userActive)
 		mock.ExpectQuery("SELECT \\* FROM `user_weight_scores` WHERE .* FOR UPDATE").
 			WithArgs(uint(7), "s1", models.ScoreSourceChat).
 			WillReturnRows(sqlmock.NewRows(scoreColumns))
@@ -110,10 +126,10 @@ func TestRollbackSnapshot(t *testing.T) {
 		}
 	})
 
-	t.Run("ユーザーが退会済み・削除済みなら何も書かない", func(t *testing.T) {
+	t.Run("退会済み（保管期間中）なら点数を書き戻さず、控えも残す", func(t *testing.T) {
 		repo, mock := newRollbackMock(t)
 		mock.ExpectBegin()
-		expectLockedSnapshot(mock, snapshotJSON(t, original), 0)
+		expectLockedSnapshot(mock, snapshotJSON(t, original), userWithdrawn)
 		mock.ExpectCommit()
 
 		restored, err := repo.rollbackSnapshot(snapshot, "v2")
@@ -125,10 +141,26 @@ func TestRollbackSnapshot(t *testing.T) {
 		}
 	})
 
+	t.Run("ユーザー行が無い（物理削除の後）なら点数を書き戻さず、取りこぼした控えを消す", func(t *testing.T) {
+		repo, mock := newRollbackMock(t)
+		mock.ExpectBegin()
+		expectLockedSnapshot(mock, snapshotJSON(t, original), userGone)
+		mock.ExpectExec("DELETE FROM `user_score_recalculation_snapshots`").WithArgs(uint(9)).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectCommit()
+
+		restored, err := repo.rollbackSnapshot(snapshot, "v2")
+		if err != nil || restored {
+			t.Fatalf("restored = %v err = %v", restored, err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatalf("控えだけを消し、スコアは書いていないこと: %v", err)
+		}
+	})
+
 	t.Run("再計算の後に更新があれば戻さず、控えも消さない", func(t *testing.T) {
 		repo, mock := newRollbackMock(t)
 		mock.ExpectBegin()
-		expectLockedSnapshot(mock, snapshotJSON(t, original), 1)
+		expectLockedSnapshot(mock, snapshotJSON(t, original), userActive)
 		// 置換は元の updated_at（t1）を引き継ぐ。それより新しければ、その後にライブの採点があった
 		mock.ExpectQuery("SELECT \\* FROM `user_weight_scores` WHERE .* FOR UPDATE").
 			WillReturnRows(sqlmock.NewRows(scoreColumns).
@@ -147,7 +179,7 @@ func TestRollbackSnapshot(t *testing.T) {
 	t.Run("再計算のままなら元の行に戻し、控えを消す", func(t *testing.T) {
 		repo, mock := newRollbackMock(t)
 		mock.ExpectBegin()
-		expectLockedSnapshot(mock, snapshotJSON(t, original[:1]), 1)
+		expectLockedSnapshot(mock, snapshotJSON(t, original[:1]), userActive)
 		mock.ExpectQuery("SELECT \\* FROM `user_weight_scores` WHERE .* FOR UPDATE").
 			WillReturnRows(sqlmock.NewRows(scoreColumns).
 				AddRow(5, 7, "s1", models.ScoreSourceChat, "技術志向", 70, "v2", t0, t1))
@@ -168,7 +200,7 @@ func TestRollbackSnapshot(t *testing.T) {
 	t.Run("控えも行も空なら控えだけ片付け、戻したことにしない（マッチングを作り直さない）", func(t *testing.T) {
 		repo, mock := newRollbackMock(t)
 		mock.ExpectBegin()
-		expectLockedSnapshot(mock, "[]", 1)
+		expectLockedSnapshot(mock, "[]", userActive)
 		mock.ExpectQuery("SELECT \\* FROM `user_weight_scores` WHERE .* FOR UPDATE").
 			WillReturnRows(sqlmock.NewRows(scoreColumns))
 		mock.ExpectExec("DELETE FROM `user_score_recalculation_snapshots`").WithArgs(uint(9)).WillReturnResult(sqlmock.NewResult(0, 1))
