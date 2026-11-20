@@ -18,6 +18,8 @@ export const SIDEBAR_NAV_ITEMS = [
   { href: '/es-rewrite', label: t('sidebar.esRewrite') },
   { href: '/schedule', label: t('sidebar.schedule') },
   { href: '/applications', label: t('sidebar.applications') },
+  // 企業を探す（SOCAIAGENT-612）。推薦とは別に、自分の条件で探す入口
+  { href: '/companies', label: t('sidebar.companySearch') },
   { href: '/scout', label: t('sidebar.scout') },
   { href: '/profile', label: t('sidebar.profile') },
 ] as const
@@ -54,6 +56,7 @@ export const HOME_SIDEBAR_GROUPS = [
     items: [
       { href: '/schedule', label: t('sidebar.schedule') },
       { href: '/applications', label: t('sidebar.applications') },
+      { href: '/companies', label: t('sidebar.companySearch') },
       { href: '/scout', label: t('sidebar.scout') },
     ],
   },

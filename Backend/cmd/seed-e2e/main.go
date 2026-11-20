@@ -71,7 +71,7 @@ func main() {
 		if err := db.Create(&user).Error; err != nil {
 			log.Fatalf("Failed to create e2e student user: %v", err)
 		}
-		log.Printf("Created e2e student user: %s (id=%d)", E2ETestStudentEmail, user.ID)
+		log.Printf("Created e2e student user: %s (id=%d)", E2ETestStudentEmail, user.ID) // logpolicy:ok E2E 用の固定の架空アドレス
 		return
 	}
 
@@ -84,5 +84,5 @@ func main() {
 	if err := db.Save(&user).Error; err != nil {
 		log.Fatalf("Failed to reset e2e student user: %v", err)
 	}
-	log.Printf("Reset e2e student user: %s (id=%d)", E2ETestStudentEmail, user.ID)
+	log.Printf("Reset e2e student user: %s (id=%d)", E2ETestStudentEmail, user.ID) // logpolicy:ok E2E 用の固定の架空アドレス
 }

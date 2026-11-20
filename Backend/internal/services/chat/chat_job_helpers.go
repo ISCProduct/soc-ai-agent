@@ -45,11 +45,11 @@ func (s *ChatService) completeJobAnalysisPhase(userID uint, sessionID string) er
 	return s.progressRepo.Update(progress)
 }
 
-func (s *ChatService) getJobCategoryCode(jobCategoryID uint) string {
+func (s *ChatService) getJobCategoryCode(ctx context.Context, jobCategoryID uint) string {
 	if jobCategoryID == 0 {
 		return ""
 	}
-	category, err := s.jobCategoryRepo.FindByID(jobCategoryID)
+	category, err := s.jobCategoryRepo.FindByID(ctx, jobCategoryID)
 	if err != nil || category == nil {
 		return ""
 	}
@@ -64,19 +64,19 @@ func (s *ChatService) getUserTargetLevel(userID uint) string {
 	return "新卒"
 }
 
-func (s *ChatService) getJobCategoryName(jobCategoryID uint) string {
+func (s *ChatService) getJobCategoryName(ctx context.Context, jobCategoryID uint) string {
 	if jobCategoryID == 0 {
 		return "未指定"
 	}
-	category, err := s.jobCategoryRepo.FindByID(jobCategoryID)
+	category, err := s.jobCategoryRepo.FindByID(ctx, jobCategoryID)
 	if err != nil || category == nil {
 		return "未指定"
 	}
 	return strings.TrimSpace(category.Name)
 }
 
-func (s *ChatService) getJobFitKeywords(jobCategoryID uint) ([]string, []string) {
-	code := s.getJobCategoryCode(jobCategoryID)
+func (s *ChatService) getJobFitKeywords(ctx context.Context, jobCategoryID uint) ([]string, []string) {
+	code := s.getJobCategoryCode(ctx, jobCategoryID)
 	switch {
 	case strings.HasPrefix(code, "ENG"):
 		return []string{"プログラミング", "開発", "コード", "設計", "デバッグ"},
@@ -102,9 +102,9 @@ func (s *ChatService) getJobFitKeywords(jobCategoryID uint) ([]string, []string)
 }
 
 func (s *ChatService) evaluateJobFitScoreWithAI(ctx context.Context, jobCategoryID uint, question, answer string, isChoice bool) (*jobFitEvaluation, error) {
-	jobName := s.getJobCategoryName(jobCategoryID)
-	jobCode := s.getJobCategoryCode(jobCategoryID)
-	coreKeywords, relatedKeywords := s.getJobFitKeywords(jobCategoryID)
+	jobName := s.getJobCategoryName(ctx, jobCategoryID)
+	jobCode := s.getJobCategoryCode(ctx, jobCategoryID)
+	coreKeywords, relatedKeywords := s.getJobFitKeywords(ctx, jobCategoryID)
 
 	questionType := "文章"
 	if isChoice {
