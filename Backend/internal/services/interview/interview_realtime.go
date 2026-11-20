@@ -115,10 +115,22 @@ func (s *InterviewService) GetTrend(userID uint, limit int) ([]InterviewTrendPoi
 		sessions[i], sessions[j] = sessions[j], sessions[i]
 	}
 
+	// レポートは1回でまとめて取得する。取得失敗時はレポート無し扱い(従来動作)
+	ids := make([]uint, len(sessions))
+	for i, session := range sessions {
+		ids[i] = session.ID
+	}
+	reportBySession := map[uint]*models.InterviewReport{}
+	if reports, err := s.reportRepo.FindBySessionIDs(ids); err == nil {
+		for i := range reports {
+			reportBySession[reports[i].SessionID] = &reports[i]
+		}
+	}
+
 	points := make([]InterviewTrendPoint, 0, len(sessions))
 	for _, session := range sessions {
-		report, err := s.reportRepo.FindBySessionID(session.ID)
-		if err != nil {
+		report, ok := reportBySession[session.ID]
+		if !ok {
 			// レポート未生成のセッションはスキップ
 			continue
 		}
