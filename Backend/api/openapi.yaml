@@ -4574,6 +4574,58 @@ paths:
         "200":
           description: 成功
 
+  /api/companies/{id}/correlation-map:
+    get:
+      tags: [companies]
+      summary: 企業相関図（学生向け）データを取得
+      description: |
+        起点企業を中心に、資本関係（子会社/関連会社を区別）と取引関係を返す。
+        カード用の短い事業説明・上場区分・出典、初期表示用の直接子会社リスト（読み仮名順）を含む。
+        資本の鏡像行（A→B と B→A）は1本に畳む。取引の `direction_known` は現状常に false
+        （from/to は取得起点→相手であり、提供側→利用側ではない）。
+        事業タグ専用データは未整備のため `business_tags` は空・`business_tags_status=unavailable`。
+        採用情報は含めない。審査前のゲスト投稿企業はノードから除外する。
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "404":
+          description: 企業が見つからない
+
+  /api/companies/{id}/correlation-map/compare:
+    get:
+      tags: [companies]
+      summary: 起点企業と選択企業の事業説明を並べて返す
+      description: |
+        組み合わせ専用の比較文は持たない。両社の short_business / main_business / description を返す。
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+          description: 起点企業ID
+        - in: query
+          name: with
+          required: true
+          schema:
+            type: integer
+          description: 選択企業ID
+      responses:
+        "200":
+          description: 成功
+        "400":
+          description: with が無い
+        "404":
+          description: 企業が見つからない
+
   /api/companies/web-search:
     get:
       tags: [companies]

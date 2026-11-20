@@ -410,6 +410,7 @@ func main() {
 	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
 	questionController := chatcontrollers.NewQuestionController(questionService)
 	relationController := companycontrollers.NewCompanyRelationController(companyQueryRepo, aiClient)
+	relationController.SetCorrelationMapService(company.NewCompanyCorrelationMapService(companyRepo, companyRelationRepo))
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
 	companyValidator.SetSearchFlight(companySearchFlight)
