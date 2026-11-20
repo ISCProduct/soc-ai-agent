@@ -55,7 +55,7 @@ func extractKanjiNumbers(s string) []string {
 		if r, size := utf8.DecodeLastRuneInString(s[:loc[0]]); size > 0 && strings.ContainsRune(approximatePrefixes, r) {
 			continue
 		}
-		if counter == "" && !(utf8RuneCount(digits) >= 2 && strings.ContainsAny(digits, "十百千万億")) {
+		if counter == "" && (utf8RuneCount(digits) < 2 || !strings.ContainsAny(digits, "十百千万億")) {
 			continue
 		}
 		if v, ok := parseKanjiNumber(digits); ok {
