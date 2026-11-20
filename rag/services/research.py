@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import re
-import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
@@ -24,6 +23,7 @@ from services.sanitize import (
     _sanitize_job_title,
     _wrap_untrusted_text,
 )
+from services import query_cache
 from services.settings import DEFAULT_SEARCH_LOG_DIR
 
 logger = logging.getLogger("main")
@@ -253,32 +253,15 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
     cache_ttl = int(os.getenv("RAG_QUERY_CACHE_TTL_SECONDS", "300"))
     cache_path = os.path.join(os.getenv("RAG_SEARCH_LOG_DIR", DEFAULT_SEARCH_LOG_DIR), "query_cache.json")
     cache_key = f"{safe_company}::{role_text}"
-    try:
-        if os.path.exists(cache_path):
-            with open(cache_path, "r", encoding="utf-8") as f:
-                cache = json.load(f)
-            entry = cache.get(cache_key)
-            if entry:
-                ts = entry.get("ts", 0)
-                if time.time() - ts < cache_ttl:
-                    # 上限を読み出し側にも掛ける。保存側だけだと、上限を下げても
-                    # キャッシュ済みの古い件数が TTL 切れまで返り続けてノブが効かない
-                    return entry.get("queries", [])[: max_search_queries()]
-    except Exception as exc:
-        logger.warning("query cache read failed error=%s", exc)
+    # 読み書きはロック付き・期限切れの掃除つき（services/query_cache.py、SOCAIAGENT-557）
+    cached = query_cache.get(cache_path, cache_key, cache_ttl)
+    if cached:
+        # 上限を読み出し側にも掛ける。保存側だけだと、上限を下げても
+        # キャッシュ済みの古い件数が TTL 切れまで返り続けてノブが効かない
+        return cached[: max_search_queries()]
 
     def save_to_cache(key: str, queries: List[str]) -> None:
-        try:
-            cache = {}
-            if os.path.exists(cache_path):
-                with open(cache_path, "r", encoding="utf-8") as f:
-                    cache = json.load(f)
-            cache[key] = {"ts": int(time.time()), "queries": queries}
-            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-            with open(cache_path, "w", encoding="utf-8") as f:
-                json.dump(cache, f, ensure_ascii=False)
-        except Exception as exc:
-            logger.warning("query cache save failed error=%s", exc)
+        query_cache.put(cache_path, key, queries, cache_ttl)
 
     # テンプレートベースのフォールバック
     def template_queries(cn: str, role: str) -> List[str]:
