@@ -1,9 +1,11 @@
 package chat
 
 import (
-	"Backend/internal/models"
+	"context"
 	"errors"
 	"testing"
+
+	"Backend/internal/models"
 )
 
 type jobCategoryRepoMock struct {
@@ -23,7 +25,7 @@ func (m *jobCategoryRepoMock) FindByID(id uint) (*models.JobCategory, error) {
 	return nil, nil
 }
 
-func (m *jobCategoryRepoMock) FindByIDs(ids []uint) ([]models.JobCategory, error) {
+func (m *jobCategoryRepoMock) FindByIDs(ctx context.Context, ids []uint) ([]models.JobCategory, error) {
 	m.byIDsCalls++
 	m.byIDsArgs = append([]uint(nil), ids...)
 	if m.byIDsErr != nil {
@@ -138,7 +140,7 @@ func TestLoadMatchedCategories_OneLookupKeepsOrderAndSkipsMissing(t *testing.T) 
 	}
 	v := &JobCategoryValidator{jobCategoryRepo: repo}
 
-	got, err := v.loadMatchedCategories([]uint{9, 2, 9, 3})
+	got, err := v.loadMatchedCategories(context.Background(), []uint{9, 2, 9, 3})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -153,7 +155,7 @@ func TestLoadMatchedCategories_OneLookupKeepsOrderAndSkipsMissing(t *testing.T) 
 func TestLoadMatchedCategories_EmptySkipsLookup(t *testing.T) {
 	repo := &jobCategoryRepoMock{}
 	v := &JobCategoryValidator{jobCategoryRepo: repo}
-	got, err := v.loadMatchedCategories(nil)
+	got, err := v.loadMatchedCategories(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -167,7 +169,7 @@ func TestLoadMatchedCategories_EmptySkipsLookup(t *testing.T) {
 
 func TestLoadMatchedCategories_ReturnsLookupError(t *testing.T) {
 	v := &JobCategoryValidator{jobCategoryRepo: &jobCategoryRepoMock{byIDsErr: errors.New("db down")}}
-	if _, err := v.loadMatchedCategories([]uint{1}); err == nil {
+	if _, err := v.loadMatchedCategories(context.Background(), []uint{1}); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }

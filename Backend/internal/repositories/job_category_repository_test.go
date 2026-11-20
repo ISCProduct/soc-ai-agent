@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -31,7 +32,7 @@ func TestFindByIDs_EmptySkipsQuery(t *testing.T) {
 	db, mock := newJobCategoryTestDB(t)
 	repo := NewJobCategoryRepository(db)
 
-	got, err := repo.FindByIDs(nil)
+	got, err := repo.FindByIDs(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestFindByIDs_OneQuery(t *testing.T) {
 			AddRow(uint(2), "営業").
 			AddRow(uint(9), "研究"))
 
-	got, err := repo.FindByIDs([]uint{9, 2})
+	got, err := repo.FindByIDs(context.Background(), []uint{9, 2})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestFindByIDs_ReturnsQueryError(t *testing.T) {
 	mock.ExpectQuery("SELECT .* FROM `job_categories` WHERE id IN").
 		WillReturnError(errors.New("db down"))
 
-	if _, err := repo.FindByIDs([]uint{1}); err == nil {
+	if _, err := repo.FindByIDs(context.Background(), []uint{1}); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

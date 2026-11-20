@@ -1,12 +1,16 @@
 package repository
 
-import "Backend/internal/models"
+import (
+	"context"
+
+	"Backend/internal/models"
+)
 
 // JobCategoryRepository は職種カテゴリの永続化インターフェース。
 type JobCategoryRepository interface {
 	FindAll() ([]models.JobCategory, error)
 	FindByID(id uint) (*models.JobCategory, error)
-	FindByIDs(ids []uint) ([]models.JobCategory, error)
+	FindByIDs(ctx context.Context, ids []uint) ([]models.JobCategory, error)
 	FindByName(name string) ([]models.JobCategory, error)
 	GetTopCategories() ([]models.JobCategory, error)
 }

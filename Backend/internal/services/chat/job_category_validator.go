@@ -175,7 +175,7 @@ JSONのみを返してください。説明は不要です。`, userAnswer, stri
 	}
 
 	// 5. マッチした職種の詳細を取得。IDごとに問い合わせると、候補の数だけ往復する。
-	matchedCategories, err := v.loadMatchedCategories(aiResponse.MatchedIDs)
+	matchedCategories, err := v.loadMatchedCategories(ctx, aiResponse.MatchedIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -190,11 +190,11 @@ JSONのみを返してください。説明は不要です。`, userAnswer, stri
 
 // loadMatchedCategories は候補IDを1回で読み、依頼された順に並べる。
 // マスタに無いIDは飛ばす。同じIDが複数回あれば、その回数だけ返す。
-func (v *JobCategoryValidator) loadMatchedCategories(ids []uint) ([]models.JobCategory, error) {
+func (v *JobCategoryValidator) loadMatchedCategories(ctx context.Context, ids []uint) ([]models.JobCategory, error) {
 	if len(ids) == 0 {
 		return []models.JobCategory{}, nil
 	}
-	rows, err := v.jobCategoryRepo.FindByIDs(ids)
+	rows, err := v.jobCategoryRepo.FindByIDs(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load matched job categories: %w", err)
 	}
