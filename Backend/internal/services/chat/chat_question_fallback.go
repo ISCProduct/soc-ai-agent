@@ -1,13 +1,14 @@
 package chat
 
 import (
+	"context"
 	"strings"
 )
 
-func (s *ChatService) fallbackQuestionForCategory(category string, jobCategoryID uint, targetLevel string) string {
+func (s *ChatService) fallbackQuestionForCategory(ctx context.Context, category string, jobCategoryID uint, targetLevel string) string {
 	switch category {
 	case "技術志向":
-		return s.techInterestQuestion(jobCategoryID, targetLevel)
+		return s.techInterestQuestion(ctx, jobCategoryID, targetLevel)
 	case "コミュニケーション力":
 		if targetLevel == "中途" {
 			return "業務で関係者と調整した経験はありますか？どんな場面で、どのように進めましたか？"
@@ -58,11 +59,11 @@ func (s *ChatService) fallbackQuestionForCategory(category string, jobCategoryID
 	}
 }
 
-func (s *ChatService) fallbackQuestionsForCategory(category string, jobCategoryID uint, targetLevel string) []string {
+func (s *ChatService) fallbackQuestionsForCategory(ctx context.Context, category string, jobCategoryID uint, targetLevel string) []string {
 	switch category {
 	case "技術志向":
 		return []string{
-			s.techInterestQuestion(jobCategoryID, targetLevel),
+			s.techInterestQuestion(ctx, jobCategoryID, targetLevel),
 			"最近触れた技術やツールはありますか？どんなことでも大丈夫です。",
 		}
 	case "コミュニケーション力":
@@ -165,12 +166,12 @@ func (s *ChatService) fallbackQuestionsForCategory(category string, jobCategoryI
 			"働くうえで大事にしたい時間の使い方はありますか？",
 		}
 	default:
-		return []string{s.fallbackQuestionForCategory(category, jobCategoryID, targetLevel)}
+		return []string{s.fallbackQuestionForCategory(ctx, category, jobCategoryID, targetLevel)}
 	}
 }
 
-func (s *ChatService) selectFallbackQuestion(category string, jobCategoryID uint, targetLevel string, askedTexts map[string]bool) string {
-	options := s.fallbackQuestionsForCategory(category, jobCategoryID, targetLevel)
+func (s *ChatService) selectFallbackQuestion(ctx context.Context, category string, jobCategoryID uint, targetLevel string, askedTexts map[string]bool) string {
+	options := s.fallbackQuestionsForCategory(ctx, category, jobCategoryID, targetLevel)
 	for _, q := range options {
 		if strings.TrimSpace(q) == "" {
 			continue
@@ -202,8 +203,8 @@ func (s *ChatService) selectFallbackQuestion(category string, jobCategoryID uint
 	return ""
 }
 
-func (s *ChatService) techInterestQuestion(jobCategoryID uint, targetLevel string) string {
-	code := s.getJobCategoryCode(jobCategoryID)
+func (s *ChatService) techInterestQuestion(ctx context.Context, jobCategoryID uint, targetLevel string) string {
+	code := s.getJobCategoryCode(ctx, jobCategoryID)
 	if targetLevel == "中途" {
 		switch {
 		case strings.HasPrefix(code, "ENG"):
@@ -240,7 +241,7 @@ func (s *ChatService) techInterestQuestion(jobCategoryID uint, targetLevel strin
 	}
 }
 
-func (s *ChatService) getCategoryOrder(jobCategoryID uint) []string {
+func (s *ChatService) getCategoryOrder(ctx context.Context, jobCategoryID uint) []string {
 	// 正典(domain/valueobject/match.go)の10種で並べる（#929）。
 	//
 	// 以前はここが正典とは別の10分類を返していたため、
@@ -260,7 +261,7 @@ func (s *ChatService) getCategoryOrder(jobCategoryID uint) []string {
 	if jobCategoryID == 0 {
 		return undecidedOrder
 	}
-	return categoryOrderForJobCode(s.getJobCategoryCode(jobCategoryID))
+	return categoryOrderForJobCode(s.getJobCategoryCode(ctx, jobCategoryID))
 }
 
 // categoryOrderForJobCode は職種コードごとの優先順位を返す純関数。
