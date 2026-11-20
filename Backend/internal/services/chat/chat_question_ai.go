@@ -52,7 +52,7 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 	}
 
 	// まだ評価されていないカテゴリを特定（職種に応じて並び順を調整）
-	allCategories := s.getCategoryOrder(jobCategoryID)
+	allCategories := s.getCategoryOrder(ctx, jobCategoryID)
 
 	unevaluatedCategories := []string{}
 	for _, cat := range allCategories {

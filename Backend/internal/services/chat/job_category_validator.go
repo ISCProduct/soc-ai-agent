@@ -47,14 +47,14 @@ func (v *JobCategoryValidator) ValidateJobCategory(ctx context.Context, userAnsw
 func (v *JobCategoryValidator) ValidateJobCategoryWithQuestion(
 	ctx context.Context, userAnswer, presentedQuestion string,
 ) (*JobValidationResult, error) {
-	normalizedAnswer, err := v.normalizeNumericAnswer(userAnswer, presentedQuestion)
+	normalizedAnswer, err := v.normalizeNumericAnswer(ctx, userAnswer, presentedQuestion)
 	if err != nil {
 		return nil, fmt.Errorf("failed to normalize numeric answer: %w", err)
 	}
 	userAnswer = normalizedAnswer
 
 	// 1. すべての職種を取得
-	allCategories, err := v.jobCategoryRepo.FindAll()
+	allCategories, err := v.jobCategoryRepo.FindAll(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get job categories: %w", err)
 	}
@@ -177,7 +177,7 @@ JSONのみを返してください。説明は不要です。`, userAnswer, stri
 	// 5. マッチした職種の詳細を取得
 	matchedCategories := []models.JobCategory{}
 	for _, id := range aiResponse.MatchedIDs {
-		category, err := v.jobCategoryRepo.FindByID(id)
+		category, err := v.jobCategoryRepo.FindByID(ctx, id)
 		if err == nil {
 			matchedCategories = append(matchedCategories, *category)
 		}
@@ -199,7 +199,7 @@ JSONのみを返してください。説明は不要です。`, userAnswer, stri
 // 大分類の一覧に当てるのは質問文が無いときだけ。初回の職種選択は
 // GenerateJobSelectionQuestion が大分類をその順で並べるので、
 // 質問文があるならそちらを解析すれば同じ結果になる。
-func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer, presentedQuestion string) (string, error) {
+func (v *JobCategoryValidator) normalizeNumericAnswer(ctx context.Context, userAnswer, presentedQuestion string) (string, error) {
 	trimmed := strings.TrimSpace(normalizeOptionText(userAnswer))
 	if trimmed == "" {
 		return userAnswer, nil
@@ -227,7 +227,7 @@ func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer, presentedQuest
 
 	// 質問文が無い場合だけ大分類の一覧に当てる。履歴が空の初回など、
 	// 画面側が独自に一覧を出しているケースを想定している。
-	topCategories, err := v.jobCategoryRepo.GetTopCategories()
+	topCategories, err := v.jobCategoryRepo.GetTopCategories(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -242,14 +242,14 @@ func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer, presentedQuest
 }
 
 // NormalizeNumericAnswer is an exported wrapper for normalizeNumericAnswer for use in external tests.
-func (v *JobCategoryValidator) NormalizeNumericAnswer(userAnswer, presentedQuestion string) (string, error) {
-	return v.normalizeNumericAnswer(userAnswer, presentedQuestion)
+func (v *JobCategoryValidator) NormalizeNumericAnswer(ctx context.Context, userAnswer, presentedQuestion string) (string, error) {
+	return v.normalizeNumericAnswer(ctx, userAnswer, presentedQuestion)
 }
 
 // GenerateJobSelectionQuestion 職種選択の質問を生成
 func (v *JobCategoryValidator) GenerateJobSelectionQuestion(ctx context.Context) (string, error) {
 	// 主要な職種カテゴリを取得
-	topCategories, err := v.jobCategoryRepo.GetTopCategories()
+	topCategories, err := v.jobCategoryRepo.GetTopCategories(ctx)
 	if err != nil {
 		return "", err
 	}
