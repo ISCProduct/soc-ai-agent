@@ -122,6 +122,15 @@ class ESStarBreakdown(BaseModel):
     result: str = ""
 
 
+class ESReviewModelUsage(BaseModel):
+    """モデルごとのトークン量（SOCAIAGENT-559）。評価と改善文でモデルが違うと単価も違う。"""
+
+    model: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    calls: int = 0
+
+
 class ESReviewUsage(BaseModel):
     """1リクエストで消費したトークン量(#1533)。
 
@@ -133,6 +142,9 @@ class ESReviewUsage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     calls: int = 0
+    # モデルごとの内訳（SOCAIAGENT-559）。Backend はこれがあればモデルごとに記録する。
+    # 上の model と合計は、内訳を読まない古い Backend 向けに残す（model は評価のモデル）。
+    by_model: List["ESReviewModelUsage"] = Field(default_factory=list)
 
 
 class ESReviewFeedbackItem(BaseModel):

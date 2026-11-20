@@ -664,6 +664,28 @@ def test_usage_totals_include_every_call(monkeypatch):
     assert result.usage.model == "gpt-4o"
 
 
+def test_improved_text_uses_light_model_and_usage_is_split_by_model(monkeypatch):
+    """評価は上位モデル、改善文（作り直しを含む）は軽量モデルで呼び、使用量をモデルごとに返す（SOCAIAGENT-559）。
+
+    モデルで単価が違うので、合計だけだと Backend のコスト記録がずれる。
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    for name in ("OPENAI_ES_REVIEW_MODEL", "OPENAI_ES_IMPROVE_MODEL", "AI_MODEL_PREMIUM", "AI_MODEL_LIGHT", "OPENAI_CHAT_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    client = _client([520, 390])
+
+    result = _run(client, char_limit=400)
+
+    models = [call.kwargs["model"] for call in client.chat.completions.create.call_args_list]
+    assert models == ["gpt-4o", "gpt-4o-mini", "gpt-4o-mini"]
+    by_model = {u.model: u for u in result.usage.by_model}
+    assert set(by_model) == {"gpt-4o", "gpt-4o-mini"}
+    assert by_model["gpt-4o"].calls == 1 and by_model["gpt-4o"].prompt_tokens == 100
+    assert by_model["gpt-4o-mini"].calls == 2 and by_model["gpt-4o-mini"].completion_tokens == 400
+    # 合計は内訳の和（内訳を読まない Backend 向け）
+    assert result.usage.calls == sum(u.calls for u in result.usage.by_model)
+
+
 def test_router_passes_char_limit_and_tech_stack(monkeypatch, client):
     """/es/review が char_limit / char_limit_mode / tech_stack を素通しする。"""
     import main
