@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"context"
 	"database/sql/driver"
 	"errors"
 	"strings"
@@ -54,7 +55,7 @@ func TestCompanySearchRepository_Search(t *testing.T) {
 		WithArgs(append(args, 20, 40)...).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "industry", "location", "description", "logo_url"}).
 			AddRow(1, "A社", "IT", "東京都渋谷区", "", ""))
-	rows, total, err := repo.Search(CompanySearchFilter{Name: "100%_A社", Industry: "IT", Prefecture: "東京都", JobCategoryID: 3, Limit: 20, Offset: 40})
+	rows, total, err := repo.Search(context.Background(), CompanySearchFilter{Name: "100%_A社", Industry: "IT", Prefecture: "東京都", JobCategoryID: 3, Limit: 20, Offset: 40})
 	if err != nil || total != 41 || len(rows) != 1 || rows[0].Name != "A社" {
 		t.Fatalf("rows=%+v total=%d err=%v", rows, total, err)
 	}
@@ -69,7 +70,7 @@ func TestCompanySearchRepository_Search_条件なし(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery(visibleCompanySQL).WithArgs(true, 20).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
-	if _, total, err := repo.Search(CompanySearchFilter{Limit: 20}); err != nil || total != 0 {
+	if _, total, err := repo.Search(context.Background(), CompanySearchFilter{Limit: 20}); err != nil || total != 0 {
 		t.Fatalf("total=%d err=%v", total, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -84,7 +85,7 @@ func TestCompanySearchRepository_SearchOptions(t *testing.T) {
 	// 職種は、公開中の企業の公開中の求人がある職種。シードの小分類は parent_id が無いので、階層では絞らない
 	mock.ExpectQuery("jc.id = top.id OR jc.parent_id = top.id|jp.data_status = 'published'|companies.is_active = true|companies.data_status = 'published'|c.is_guest_entry = true").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(1, "エンジニア"))
-	industries, cats, err := repo.SearchOptions()
+	industries, cats, err := repo.SearchOptions(context.Background())
 	if err != nil || len(industries) != 1 || len(cats) != 1 || cats[0].Name != "エンジニア" {
 		t.Fatalf("industries=%v cats=%v err=%v", industries, cats, err)
 	}
@@ -102,7 +103,7 @@ func TestCompanySearchRepository_FavoriteStates(t *testing.T) {
 	mock.ExpectQuery("FROM `user_company_matches`|user_id = ? AND session_id = ? AND company_id IN").
 		WithArgs(7, "s1", 1, 2).
 		WillReturnRows(sqlmock.NewRows([]string{"company_id", "match_id", "is_favorited"}).AddRow(2, 50, true))
-	got, err := repo.FavoriteStates(7, []uint{1, 2})
+	got, err := repo.FavoriteStates(context.Background(), 7, []uint{1, 2})
 	if err != nil || len(got) != 1 || got[0].MatchID != 50 || !got[0].IsFavorited {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
@@ -110,11 +111,11 @@ func TestCompanySearchRepository_FavoriteStates(t *testing.T) {
 	// 診断がまだ無ければ空
 	repo, mock = newCompanySearchMock(t)
 	mock.ExpectQuery("FROM `user_weight_scores`").WillReturnRows(sqlmock.NewRows([]string{"session_id"}))
-	if got, err := repo.FavoriteStates(7, []uint{1}); err != nil || len(got) != 0 || got == nil {
+	if got, err := repo.FavoriteStates(context.Background(), 7, []uint{1}); err != nil || len(got) != 0 || got == nil {
 		t.Fatalf("got=%v err=%v", got, err)
 	}
 	// 企業が空なら問い合わせない
-	if got, err := repo.FavoriteStates(7, nil); err != nil || len(got) != 0 {
+	if got, err := repo.FavoriteStates(context.Background(), 7, nil); err != nil || len(got) != 0 {
 		t.Fatalf("got=%v err=%v", got, err)
 	}
 }

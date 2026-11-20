@@ -6,6 +6,7 @@
 package companysearch
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,9 +20,9 @@ import (
 
 // Store は検索の永続化（repositories.CompanySearchRepository が満たす）。
 type Store interface {
-	Search(f repositories.CompanySearchFilter) ([]repositories.CompanySearchRow, int64, error)
-	SearchOptions() ([]string, []repositories.JobCategoryOption, error)
-	FavoriteStates(userID uint, companyIDs []uint) ([]repositories.FavoriteState, error)
+	Search(ctx context.Context, f repositories.CompanySearchFilter) ([]repositories.CompanySearchRow, int64, error)
+	SearchOptions(ctx context.Context) ([]string, []repositories.JobCategoryOption, error)
+	FavoriteStates(ctx context.Context, userID uint, companyIDs []uint) ([]repositories.FavoriteState, error)
 }
 
 type Controller struct {
@@ -76,7 +77,7 @@ func (c *Controller) Search(ctx echo.Context) error {
 		}
 		f.Offset = o
 	}
-	rows, total, err := c.store.Search(f)
+	rows, total, err := c.store.Search(ctx.Request().Context(), f)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -88,7 +89,7 @@ func (c *Controller) Search(ctx echo.Context) error {
 
 // Options は GET /api/companies/search-options（業界・都道府県・職種の選択肢）。
 func (c *Controller) Options(ctx echo.Context) error {
-	industries, cats, err := c.store.SearchOptions()
+	industries, cats, err := c.store.SearchOptions(ctx.Request().Context())
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -131,7 +132,7 @@ func (c *Controller) Favorites(ctx echo.Context) error {
 	if len(ids) > maxFavoriteIDs {
 		return badRequest("company_ids が多すぎます")
 	}
-	states, err := c.store.FavoriteStates(userID, ids)
+	states, err := c.store.FavoriteStates(ctx.Request().Context(), userID, ids)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
