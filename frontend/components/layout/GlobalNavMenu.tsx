@@ -27,6 +27,7 @@ import ManageAccountsIcon from '@mui/icons-material/ManageAccounts'
 import HomeIcon from '@mui/icons-material/Home'
 import FactCheckIcon from '@mui/icons-material/FactCheck'
 import QuizIcon from '@mui/icons-material/Quiz'
+import SearchIcon from '@mui/icons-material/Search'
 import {
   GLOBAL_NAV_HOME_ITEMS,
   SIDEBAR_NAV_ITEMS,
@@ -36,6 +37,7 @@ import {
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { useInterviewSessionActive } from '@/app/interview/sessionChrome'
 import { useTranslations } from '@/lib/i18n'
+import { useHasStoredUser } from './useHasStoredUser'
 
 type NavHref = (typeof SIDEBAR_NAV_ITEMS)[number]['href'] | (typeof GLOBAL_NAV_HOME_ITEMS)[number]['href']
 
@@ -52,6 +54,7 @@ const NAV_ICONS: Record<NavHref, React.ReactNode> = {
   '/es-rewrite': <EditNoteIcon color="primary" />,
   '/schedule': <CalendarMonthIcon color="primary" />,
   '/applications': <AssignmentIcon color="primary" />,
+  '/companies': <SearchIcon color="primary" />,
   '/scout': <MailOutlineIcon color="primary" />,
   '/profile': <ManageAccountsIcon color="primary" />,
 }
@@ -67,9 +70,12 @@ export function GlobalNavMenu() {
   // AI面接のセッション画面表示中はFabが操作ボタンに重なるため隠す（StudentBottomNavと同じ理由、#1569）
   const interviewSessionActive = useInterviewSessionActive()
   const t = useTranslations('nav')
+  // 未ログインの訪問者には出さない（下部ナビと同じ判定。#2222）。中の項目はどれも認証が要る画面
+  const { mounted, hasStoredUser } = useHasStoredUser()
 
   if (pathname === '/' || !shouldShowStudentBottomNav(pathname)) return null
   if (interviewSessionActive) return null
+  if (!mounted || !hasStoredUser) return null
 
   return (
     <>

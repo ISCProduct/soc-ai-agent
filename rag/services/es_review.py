@@ -11,6 +11,7 @@ from services.output_schemas import (
     is_schema_unsupported,
     json_response_format,
 )
+from services.prompt_versions import log_prompt_call, prompt_version
 
 from services.model_tiers import es_review_model
 import json
@@ -189,6 +190,8 @@ def _chat_json(
     # max_tokens が None の段（改善文 / #1564）はキー自体を送らない。null を送っても
     # OpenAI 側は既定扱いだが、OpenAI 互換サーバ（vLLM / llama.cpp）での解釈差を避ける。
     budget_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
+    # 評価・改善文のどちらの呼び出しでも、工程・版・モデルをログに出す（SOCAIAGENT-560）
+    log_prompt_call("es_review", model)
     json_mode = {"type": "json_object"}
     response_format = json_response_format(*schema) if schema else json_mode
 
