@@ -3,6 +3,7 @@ package logger_test
 // 実行: cd Backend && go test ./internal/logger/... -v
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"testing"
@@ -15,10 +16,10 @@ func TestSetup_DefaultIsInfo(t *testing.T) {
 	os.Unsetenv("LOG_LEVEL")
 	os.Unsetenv("LOG_FORMAT")
 	logger.Setup()
-	if !slog.Default().Enabled(nil, slog.LevelInfo) {
+	if !slog.Default().Enabled(context.TODO(), slog.LevelInfo) {
 		t.Error("INFO レベルが有効になっていない")
 	}
-	if slog.Default().Enabled(nil, slog.LevelDebug) {
+	if slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
 		t.Error("デフォルト設定では DEBUG レベルは無効であるべき")
 	}
 }
@@ -28,7 +29,7 @@ func TestSetup_DebugLevel(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "DEBUG")
 	os.Unsetenv("LOG_FORMAT")
 	logger.Setup()
-	if !slog.Default().Enabled(nil, slog.LevelDebug) {
+	if !slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
 		t.Error("DEBUG レベルが有効になっていない")
 	}
 }
@@ -37,10 +38,10 @@ func TestSetup_DebugLevel(t *testing.T) {
 func TestSetup_WarnLevel(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "WARN")
 	logger.Setup()
-	if slog.Default().Enabled(nil, slog.LevelInfo) {
+	if slog.Default().Enabled(context.TODO(), slog.LevelInfo) {
 		t.Error("WARN 設定では INFO レベルは無効であるべき")
 	}
-	if !slog.Default().Enabled(nil, slog.LevelWarn) {
+	if !slog.Default().Enabled(context.TODO(), slog.LevelWarn) {
 		t.Error("WARN レベルが有効になっていない")
 	}
 }
