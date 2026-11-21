@@ -54,8 +54,6 @@ tags:
     description: 学生・教員の認証とプロフィール
   - name: chat
     description: 診断チャットとスコア
-  - name: questions
-    description: 質問の生成・管理
 
   - name: interviews
     description: AI面接のセッション・発話・レポート
@@ -1222,8 +1220,6 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "503": { description: マッチングサービスが無い }
 
-  # ── questions ──────────────────────────────────────
-
   /api/chat/match-feedback:
     post:
       tags: [chat]
@@ -1250,64 +1246,6 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: 他人の推薦 }
         "404": { description: 推薦が無い }
-
-  # ── questions ──────────────────────────────────────
-  /api/questions/generate:
-    post:
-      tags: [questions]
-      summary: 質問を生成する
-      security: [{ userToken: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [category]
-              properties:
-                category:
-                  type: string
-                  description: 正典10カテゴリのいずれか
-      responses:
-        "200": { description: 生成した質問 }
-        "400": { description: category が無い }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-
-  /api/questions/create:
-    post:
-      tags: [questions]
-      summary: 質問を登録する
-      security: [{ userToken: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [question, weight_category]
-              properties:
-                question: { type: string }
-                weight_category:
-                  type: string
-                  description: 正典10カテゴリのいずれか
-      responses:
-        "200": { description: 登録した }
-        "400": { description: question か weight_category が無い }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-
-  /api/questions/list:
-    get:
-      tags: [questions]
-      summary: カテゴリ別に質問を取得する
-      security: [{ userToken: [] }]
-      parameters:
-        - in: query
-          name: category
-          required: true
-          schema: { type: string }
-      responses:
-        "200": { description: 質問一覧 }
-        "401": { $ref: "#/components/responses/Unauthorized" }
 
   # ── interviews ─────────────────────────────────────
   /api/interviews:
