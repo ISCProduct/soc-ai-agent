@@ -18,6 +18,9 @@ import dynamic from 'next/dynamic'
 import type { CapitalRelation, CompanyMarketInfo } from '@/lib/company/data'
 import type { Company } from '../types'
 import { CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
+import { TabPanel, tabA11yProps } from '@/components/common/TabPanel'
+
+const DETAIL_TABS_ID = 'company-detail'
 
 const CompanyRelationDiagram = dynamic(() => import('./CompanyRelationDiagram'), {
   ssr: false,
@@ -115,91 +118,89 @@ export default function CompanyDetailView({
               {/* タブ */}
               <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
                 <Tabs value={detailTab} onChange={(_e, newValue: number) => onDetailTabChange(newValue)}>
-                  <Tab label="基本情報" />
-                  <Tab label="資本関連図" />
-                  <Tab label="ビジネス関連図" />
+                  <Tab label="基本情報" {...tabA11yProps(DETAIL_TABS_ID, 0)} />
+                  <Tab label="資本関連図" {...tabA11yProps(DETAIL_TABS_ID, 1)} />
+                  <Tab label="ビジネス関連図" {...tabA11yProps(DETAIL_TABS_ID, 2)} />
                 </Tabs>
               </Box>
 
               {/* タブ0: 基本情報 */}
-              {detailTab === 0 && (
-                <>
+              <TabPanel idPrefix={DETAIL_TABS_ID} value={0} selectedValue={detailTab}>
+                <Box sx={{ mb: 4 }}>
+                  <Typography variant="h6" fontWeight="bold" gutterBottom>
+                    📍 基本情報
+                  </Typography>
+                  <Stack spacing={2}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <LocationOn color="action" />
+                      <Typography variant="body1">
+                        <strong>所在地:</strong> {company.location}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <People color="action" />
+                      <Typography variant="body1">
+                        <strong>従業員数:</strong> {company.employees}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TrendingUpIcon color="action" />
+                      <Typography variant="body1">
+                        <strong>業種:</strong> {company.industry}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Box>
+
+                {/*
+                  絵文字見出しとグレーの箱をやめた。
+                  ここは読ませる本文なので、箱で囲うと引用のように見えて
+                  かえって読み飛ばされる。見出しの重さと行長で階層を作る。
+                */}
+                <Box sx={{ mb: 4 }}>
+                  <Typography sx={{ fontSize: 17, fontWeight: 700, color: UI.ink, mb: 1 }}>
+                    この企業をすすめる理由
+                  </Typography>
+                  <Typography sx={{ fontSize: 15, lineHeight: 1.9, color: UI.ink, maxWidth: '68ch' }}>
+                    {company.description}
+                  </Typography>
+                </Box>
+
+                {company.techStack && company.techStack.length > 0 && (
                   <Box sx={{ mb: 4 }}>
                     <Typography variant="h6" fontWeight="bold" gutterBottom>
-                      📍 基本情報
+                      🛠️ 技術スタック
                     </Typography>
-                    <Stack spacing={2}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <LocationOn color="action" />
-                        <Typography variant="body1">
-                          <strong>所在地:</strong> {company.location}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <People color="action" />
-                        <Typography variant="body1">
-                          <strong>従業員数:</strong> {company.employees}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <TrendingUpIcon color="action" />
-                        <Typography variant="body1">
-                          <strong>業種:</strong> {company.industry}
-                        </Typography>
-                      </Box>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                      {company.techStack.map((tech, i) => (
+                        <Chip
+                          key={i}
+                          label={tech}
+                          color="primary"
+                          variant="filled"
+                          sx={{ fontSize: '0.95rem', py: 2.5 }}
+                        />
+                      ))}
                     </Stack>
                   </Box>
+                )}
 
-                  {/*
-                    絵文字見出しとグレーの箱をやめた。
-                    ここは読ませる本文なので、箱で囲うと引用のように見えて
-                    かえって読み飛ばされる。見出しの重さと行長で階層を作る。
-                  */}
+                {company.tags && company.tags.length > 0 && (
                   <Box sx={{ mb: 4 }}>
-                    <Typography sx={{ fontSize: 17, fontWeight: 700, color: UI.ink, mb: 1 }}>
-                      この企業をすすめる理由
+                    <Typography variant="h6" fontWeight="bold" gutterBottom>
+                      🏷️ 企業タグ
                     </Typography>
-                    <Typography sx={{ fontSize: 15, lineHeight: 1.9, color: UI.ink, maxWidth: '68ch' }}>
-                      {company.description}
-                    </Typography>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                      {company.tags.map((tag, i) => (
+                        <Chip key={i} label={tag} variant="outlined" />
+                      ))}
+                    </Stack>
                   </Box>
-
-                  {company.techStack && company.techStack.length > 0 && (
-                    <Box sx={{ mb: 4 }}>
-                      <Typography variant="h6" fontWeight="bold" gutterBottom>
-                        🛠️ 技術スタック
-                      </Typography>
-                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                        {company.techStack.map((tech, i) => (
-                          <Chip
-                            key={i}
-                            label={tech}
-                            color="primary"
-                            variant="filled"
-                            sx={{ fontSize: '0.95rem', py: 2.5 }}
-                          />
-                        ))}
-                      </Stack>
-                    </Box>
-                  )}
-
-                  {company.tags && company.tags.length > 0 && (
-                    <Box sx={{ mb: 4 }}>
-                      <Typography variant="h6" fontWeight="bold" gutterBottom>
-                        🏷️ 企業タグ
-                      </Typography>
-                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                        {company.tags.map((tag, i) => (
-                          <Chip key={i} label={tag} variant="outlined" />
-                        ))}
-                      </Stack>
-                    </Box>
-                  )}
-                </>
-              )}
+                )}
+              </TabPanel>
 
               {/* タブ1: 資本関連図 */}
-              {detailTab === 1 && (
+              <TabPanel idPrefix={DETAIL_TABS_ID} value={1} selectedValue={detailTab}>
                 <CompanyRelationDiagram
                   companyId={company.id}
                   type="capital"
@@ -208,10 +209,10 @@ export default function CompanyDetailView({
                   loading={diagramLoading}
                   error={diagramError}
                 />
-              )}
+              </TabPanel>
 
               {/* タブ2: ビジネス関連図 */}
-              {detailTab === 2 && (
+              <TabPanel idPrefix={DETAIL_TABS_ID} value={2} selectedValue={detailTab}>
                 <CompanyRelationDiagram
                   companyId={company.id}
                   type="business"
@@ -220,7 +221,7 @@ export default function CompanyDetailView({
                   loading={diagramLoading}
                   error={diagramError}
                 />
-              )}
+              </TabPanel>
             </CardContent>
           </Card>
         </Box>

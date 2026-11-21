@@ -195,7 +195,7 @@ func (s *ApplicationService) buildScoreSnapshot(userID uint, sessionID string) s
 	if err != nil || len(rows) == 0 {
 		return ""
 	}
-	snap := make(map[string]int, len(rows))
+	snap := make(map[string]float64, len(rows))
 	for _, sc := range rows {
 		snap[sc.WeightCategory] = sc.Score
 	}

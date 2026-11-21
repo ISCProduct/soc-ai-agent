@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
 from fastapi import APIRouter
@@ -47,9 +48,16 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
         if not context_docs and m.ALLOW_WEB_SEARCH_FALLBACK:
             logger.info("es review web search start company=%s", safe_company_name)
             try:
-                # 段階的に2回の軽量Web Searchパイプラインを実行して、採用情報（一般）とエンジニア向け観点を取得する
-                summary_general = m._run_async(m._run_web_search_pipeline, safe_company_name, "")
-                summary_engineer = m._run_async(m._run_web_search_pipeline, safe_company_name, "エンジニア")
+                # 軽量Web Searchパイプラインを2回（一般/エンジニア向け）同時に実行する。
+                # 検索件数・要約は従来どおり。片方が例外なら従来同様 except で握る。
+                # _run_async はスレッドごとに独立したイベントループを使うので並列にできる。
+                # 注意: 2本は同時に開始済みなので、片方が失敗してももう片方は最後まで走る
+                # （結果は捨てる）。従来は一般が失敗するとエンジニア側は実行されなかった。
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    f_general = pool.submit(m._run_async, m._run_web_search_pipeline, safe_company_name, "")
+                    f_engineer = pool.submit(m._run_async, m._run_web_search_pipeline, safe_company_name, "エンジニア")
+                    summary_general = f_general.result()
+                    summary_engineer = f_engineer.result()
                 parts = [s for s in (summary_general, summary_engineer) if s]
                 if parts:
                     combined = "\n\n".join(parts)
