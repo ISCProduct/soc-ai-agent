@@ -4,6 +4,7 @@ import (
 	"Backend/internal/models"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // TestMinMatchedAxisCount は根拠軸数の最小値の取り方を見る。
@@ -124,5 +125,62 @@ func TestDisplayableMatches_DropsUnresolvedCompany(t *testing.T) {
 	}
 	if BuildRecommendations(nil, nil) != nil {
 		t.Fatal("0件は nil（JSON で null）のまま。挙動を変えない")
+	}
+}
+
+func TestBuildRecommendations_JobTitle(t *testing.T) {
+	got := BuildRecommendations([]*models.UserCompanyMatch{
+		{
+			Company:     models.Company{ID: 1, Name: "A", Industry: "製造"},
+			JobPosition: &models.CompanyJobPosition{ID: 3, Title: "生産管理"},
+		},
+		{Company: models.Company{ID: 2, Name: "B", Industry: "IT"}},
+	}, nil)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].JobTitle != "生産管理" {
+		t.Fatalf("JobTitle = %q, want 生産管理", got[0].JobTitle)
+	}
+	if got[1].JobTitle != "" {
+		t.Fatalf("求人が無いマッチの職種は空のまま。got %q", got[1].JobTitle)
+	}
+}
+
+func TestDedupedFavorites_KeepsNewestRowPerCompany(t *testing.T) {
+	older := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newer := older.Add(time.Hour)
+	got := DedupedFavorites([]*models.UserCompanyMatch{
+		// 古い診断を後から閲覧しても、代表は新しい診断の行。
+		{ID: 1, CompanyID: 10, MatchScore: 90, CreatedAt: older, UpdatedAt: newer.Add(time.Hour), Company: models.Company{ID: 10}},
+		{ID: 2, CompanyID: 10, MatchScore: 40, CreatedAt: newer, UpdatedAt: newer, Company: models.Company{ID: 10}},
+		{ID: 3, CompanyID: 11, MatchScore: 70, CreatedAt: older, Company: models.Company{ID: 11}},
+		{ID: 4, CompanyID: 0, MatchScore: 99, CreatedAt: newer},
+	}, 50)
+
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2（同じ企業は1行、企業IDの無い行は捨てる）", len(got))
+	}
+	if got[0].CompanyID != 11 || got[0].MatchScore != 70 {
+		t.Fatalf("1行目 = company %d score %v, want 11 / 70", got[0].CompanyID, got[0].MatchScore)
+	}
+	if got[1].ID != 2 || got[1].MatchScore != 40 {
+		t.Fatalf("同じ企業は新しい診断の行を残す。got id %d score %v", got[1].ID, got[1].MatchScore)
+	}
+}
+
+func TestDedupedFavorites_TieKeepsHigherIDAndRespectsLimit(t *testing.T) {
+	at := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	got := DedupedFavorites([]*models.UserCompanyMatch{
+		{ID: 1, CompanyID: 5, MatchScore: 80, CreatedAt: at, Company: models.Company{ID: 5}},
+		{ID: 8, CompanyID: 5, MatchScore: 80, CreatedAt: at, Company: models.Company{ID: 5}},
+		{ID: 3, CompanyID: 6, MatchScore: 80, CreatedAt: at, Company: models.Company{ID: 6}},
+	}, 1)
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	// 同点は企業IDの昇順。5 の行は ID が大きい方。limit で 6 は落ちる。
+	if got[0].CompanyID != 5 || got[0].ID != 8 {
+		t.Fatalf("got company %d id %d, want company 5 id 8", got[0].CompanyID, got[0].ID)
 	}
 }

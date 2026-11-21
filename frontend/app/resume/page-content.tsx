@@ -158,6 +158,7 @@ function ResumeContent() {
             annotateError={annotateError}
             onDownload={handleDownload}
             ragReport={ragReport}
+            documentId={documentId}
           />
         )}
       </Box>

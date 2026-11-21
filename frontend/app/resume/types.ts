@@ -16,6 +16,8 @@ export type ReviewItem = {
   rewrite?: string
   /** low_ocr_confidence のとき、読み取りが不確かなので書き換え案を出していない */
   rewrite_withheld?: string
+  /** 書類の上の位置。{"bbox":[x0,y0,x1,y1],"page_width":W,"page_height":H} のJSON文字列（画素。左上が原点） */
+  bbox?: string
 }
 
 /** レビュー中に Backend が送る進み具合。percent は処理の節目ごとの目安 */

@@ -11,14 +11,15 @@ import (
 // ──────────────────────────────────────────────
 
 // AnswerValidationSystemPrompt は回答妥当性チェックのシステムプロンプトです。
-const AnswerValidationSystemPrompt = SystemRoleValidator + `
+// 出力形式は AnswerValidationOutput から作る（SOCAIAGENT-661）。
+var AnswerValidationSystemPrompt = SystemRoleValidator + `
 
 ## 重要な制約
 - 必ずJSON形式のみで応答してください
 - 他の説明文やコメントは一切含めないでください
 
 ## 出力形式（厳守）
-{"valid": true, "reason": "...", "confidence": 0.0} または {"valid": false, "reason": "...", "confidence": 0.0}
+` + outputExample(AnswerValidationOutput{}, true) + " または " + outputExample(AnswerValidationOutput{}, false) + `
 (キーは必須。confidence は 0.0〜1.0 の範囲の数値を返してください)`
 
 // BuildAnswerValidationUserPrompt は回答妥当性チェック用のユーザープロンプトを構築します。

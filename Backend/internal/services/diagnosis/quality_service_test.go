@@ -77,7 +77,7 @@ func TestHeuristicFlags_SingleMatch(t *testing.T) {
 func TestHeuristicFlags_Healthy(t *testing.T) {
 	scores := make([]models.UserWeightScore, 0, 8)
 	for i := 0; i < 8; i++ {
-		scores = append(scores, models.UserWeightScore{WeightCategory: "c", Score: 50 + i})
+		scores = append(scores, models.UserWeightScore{WeightCategory: "c", Score: float64(50 + i)})
 	}
 	matches := []*models.UserCompanyMatch{
 		{CompanyID: 1, MatchScore: 88, MatchedAxisCount: 8},

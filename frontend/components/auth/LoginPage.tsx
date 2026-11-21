@@ -21,6 +21,9 @@ import { BACKEND_URL } from '@/lib/backend-url'
 import { GUEST_LIMITATIONS } from '@/lib/guest-limits'
 import { StudentThemeToggle } from '@/components/layout/StudentThemeToggle'
 import { extractTenantSlug } from '@/lib/tenant'
+import { TabPanel, tabA11yProps } from '@/components/common/TabPanel'
+
+const AUTH_TABS_ID = 'auth'
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -167,11 +170,11 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
           )}
 
           <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)} sx={{ mb: 3 }}>
-            <Tab label="ログイン" />
-            <Tab label="新規登録" />
+            <Tab label="ログイン" {...tabA11yProps(AUTH_TABS_ID, 0)} />
+            <Tab label="新規登録" {...tabA11yProps(AUTH_TABS_ID, 1)} />
           </Tabs>
 
-          {tabValue === 0 ? (
+          <TabPanel idPrefix={AUTH_TABS_ID} value={0} selectedValue={tabValue}>
             <Box component="form" onSubmit={handleLogin}>
               <TextField
                 fullWidth
@@ -212,41 +215,45 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 ログイン
               </Button>
             </Box>
-          ) : registrationEmailSent ? (
-            <Alert severity="success">
-              <strong>確認メールを送信しました</strong><br />
-              {email} 宛に確認リンクを送りました。メールを確認して登録を完了してください。
-            </Alert>
-          ) : (
-            <Box component="form" onSubmit={handleRequestRegistration}>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                まずメールアドレスを入力してください。確認リンクをお送りします。
-              </Typography>
-              <TextField
-                fullWidth
-                label="メールアドレス"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onBlur={() => setEmailTouched(true)}
-                error={emailInvalid}
-                helperText={emailInvalid ? 'メールアドレスの形式が正しくありません' : ' '}
-                required
-                autoComplete="email"
-                slotProps={{ htmlInput: { inputMode: 'email' } }}
-                sx={{ mb: 3 }}
-              />
-              <Button
-                type="submit"
-                fullWidth
-                variant="contained"
-                size="large"
-                disabled={loading || emailInvalid}
-              >
-                確認メールを送る
-              </Button>
-            </Box>
-          )}
+          </TabPanel>
+
+          <TabPanel idPrefix={AUTH_TABS_ID} value={1} selectedValue={tabValue}>
+            {registrationEmailSent ? (
+              <Alert severity="success">
+                <strong>確認メールを送信しました</strong><br />
+                {email} 宛に確認リンクを送りました。メールを確認して登録を完了してください。
+              </Alert>
+            ) : (
+              <Box component="form" onSubmit={handleRequestRegistration}>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  まずメールアドレスを入力してください。確認リンクをお送りします。
+                </Typography>
+                <TextField
+                  fullWidth
+                  label="メールアドレス"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onBlur={() => setEmailTouched(true)}
+                  error={emailInvalid}
+                  helperText={emailInvalid ? 'メールアドレスの形式が正しくありません' : ' '}
+                  required
+                  autoComplete="email"
+                  slotProps={{ htmlInput: { inputMode: 'email' } }}
+                  sx={{ mb: 3 }}
+                />
+                <Button
+                  type="submit"
+                  fullWidth
+                  variant="contained"
+                  size="large"
+                  disabled={loading || emailInvalid}
+                >
+                  確認メールを送る
+                </Button>
+              </Box>
+            )}
+          </TabPanel>
 
           <Divider sx={{ my: 3 }}>または</Divider>
 

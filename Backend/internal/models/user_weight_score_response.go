@@ -13,7 +13,7 @@ type UserWeightScoreResponse struct {
 	UserID             uint
 	SessionID          string
 	WeightCategory     string
-	Score              int
+	Score              float64
 	CalculationVersion string
 	PromptVersion      string
 	CreatedAt          time.Time

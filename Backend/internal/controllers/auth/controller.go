@@ -7,7 +7,7 @@ import (
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/refreshtoken"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -63,6 +63,9 @@ func (c *AuthController) Register(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
+	if err := ctx.Validate(&req); err != nil {
+		return err
+	}
 
 	promoteGuestUserID, err := c.guestUserIDForPromotion(ctx, req)
 	if err != nil {
@@ -77,13 +80,13 @@ func (c *AuthController) Register(ctx echo.Context) error {
 		if err.Error() == "email already exists" {
 			if isProduction() {
 				// 経路の区別だけで足りる。メールアドレスは出さない（#1999）。
-				log.Printf("[Register] email already exists")
+				slog.WarnContext(ctx.Request().Context(), "register email already exists")
 				return httpapi.NewAPIError(http.StatusConflict, httpapi.ErrCodeDuplicateEmail, "Registration failed")
 			}
 			return httpapi.NewAPIError(http.StatusConflict, httpapi.ErrCodeDuplicateEmail, err.Error())
 		}
 		if isProduction() {
-			log.Printf("[Register] error: %v", err)
+			slog.WarnContext(ctx.Request().Context(), "register failed", "err", err)
 			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Registration failed")
 		}
 		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, err.Error())
@@ -97,6 +100,9 @@ func (c *AuthController) Login(ctx echo.Context) error {
 	var req auth.LoginRequest
 	if err := ctx.Bind(&req); err != nil {
 		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
+	}
+	if err := ctx.Validate(&req); err != nil {
+		return err
 	}
 
 	resp, err := c.authService.Login(req, tenantOrgID(ctx))
@@ -148,15 +154,18 @@ func (c *AuthController) GetUser(ctx echo.Context) error {
 // RequestRegistration メールアドレスに確認リンクを送信
 func (c *AuthController) RequestRegistration(ctx echo.Context) error {
 	var body struct {
-		Email string `json:"email"`
+		Email string `json:"email" validate:"required"`
 	}
 	if err := ctx.Bind(&body); err != nil {
 		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
+	if err := ctx.Validate(&body); err != nil {
+		return err
+	}
 
 	if err := c.authService.RequestRegistration(body.Email); err != nil {
 		if isProduction() {
-			log.Printf("[RequestRegistration] error for %s: %v", auth.MaskEmail(body.Email), err)
+			slog.WarnContext(ctx.Request().Context(), "request registration failed", "email", auth.MaskEmail(body.Email), "err", err)
 			return ctx.JSON(http.StatusOK, map[string]string{"message": "confirmation email sent"})
 		}
 		if err.Error() == "email already exists" {
@@ -229,7 +238,9 @@ func (c *AuthController) RequestPasswordReset(ctx echo.Context) error {
 	}
 
 	// エラーがあっても常に200を返す（情報漏洩防止）
-	c.authService.RequestPasswordReset(body.Email)
+	if err := c.authService.RequestPasswordReset(body.Email); err != nil {
+		slog.WarnContext(ctx.Request().Context(), "request password reset failed", "err", err)
+	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "パスワードリセットメールを送信しました"})
 }
@@ -247,7 +258,7 @@ func (c *AuthController) ResendVerification(ctx echo.Context) error {
 	// 結果にかかわらず、常に同じ応答を返す(アカウントの有無・認証済みか否かを漏らさない)。
 	// サーバー側の失敗はログに残して握りつぶす。
 	if err := c.authService.ResendVerificationEmail(body.Email); err != nil {
-		log.Printf("[AuthController] resend verification failed: %v", err)
+		slog.WarnContext(ctx.Request().Context(), "resend verification failed", "err", err)
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "該当するアカウントがある場合は、認証メールを送信しました。届かない場合は、迷惑メールフォルダもご確認ください。"})
