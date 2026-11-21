@@ -10,7 +10,9 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    padding-bottom: 56px;
+    /* 下部ナビの実高さ（lib/sidebar-nav.ts の BOTTOM_NAV_HEIGHT）と同じ式。
+       56px だけだと、iPhone などの下端の安全領域の分だけ入力欄が下部ナビに隠れる（#2222） */
+    padding-bottom: calc(56px + env(safe-area-inset-bottom));
 }
 
 @media (min-width: 900px) {

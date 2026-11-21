@@ -1,7 +1,7 @@
 /** @jest-environment node */
 
 import { readFileSync, existsSync } from 'fs'
-import { shouldShowStudentBottomNav } from '@/lib/sidebar-nav'
+import { BOTTOM_NAV_HEIGHT, shouldShowStudentBottomNav } from '@/lib/sidebar-nav'
 
 /**
  * 下部ナビが出る画面に余白があることを検査する（#1570）。
@@ -59,13 +59,24 @@ describe('下部ナビが出る画面の余白 (#1570)', () => {
     const withBottomSnackbar = [
       'app/applications/page-content.tsx',
       'app/results/components/ResultsListView.tsx',
+      // プロフィールの保存の通知（#2222）
+      'app/profile/page-content.tsx',
     ]
     for (const file of withBottomSnackbar) {
       const src = readFileSync(file, 'utf8')
       // MUI 既定は下から24pxで、56pxのナビと重なる
       expect(src).toContain("anchorOrigin={{ vertical: 'bottom'")
       expect(src).toContain('ABOVE_BOTTOM_NAV_SX')
+      // 表示時間は画面ごとに書かず、共通の値に揃える（#2222）
+      expect(src).toContain('autoHideDuration={SNACKBAR_AUTO_HIDE_MS}')
     }
+  })
+
+  it('ホームのチャットの下余白は、下部ナビの実高さ（安全領域を含む）と同じ式にする（#2222）', () => {
+    const css = readFileSync('app/page.module.css', 'utf8')
+    const mainContent = css.match(/\.mainContent\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(mainContent).toMatch(/padding-bottom:\s*calc\(56px \+ env\(safe-area-inset-bottom\)\)/)
+    expect(BOTTOM_NAV_HEIGHT).toBe('calc(56px + env(safe-area-inset-bottom))')
   })
 
   it('余白は手書きせず共通部品に寄せる', () => {

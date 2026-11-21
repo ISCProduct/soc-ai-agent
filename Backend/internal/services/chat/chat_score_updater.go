@@ -215,23 +215,23 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 
 	if existingScore == nil {
 		// 新規作成: 絶対値でセット
-		if err := s.userWeightScoreRepo.SetScoreWithPromptVersion(userID, sessionID, category, score, promptVersion); err != nil {
+		if err := s.userWeightScoreRepo.SetScoreWithPromptVersion(userID, sessionID, category, float64(score), promptVersion); err != nil {
 			return fmt.Errorf("failed to create score: %w", err)
 		}
 		log.Printf("[Choice Answer] Created new score: %s = %d\n", category, score)
 	} else {
 		// 移動平均で更新（直近回答の影響を反映）: 差分を加算
-		newScore := int(math.Round(float64(existingScore.Score)*0.7 + float64(score)*0.3))
+		newScore := math.Round((existingScore.Score*0.7+float64(score)*0.3)*100) / 100
 		delta := newScore - existingScore.Score
 		// スコアも版も変わらないなら UPDATE しない
-		if delta == 0 && (promptVersion == "" || promptVersion == existingScore.PromptVersion) {
-			log.Printf("[Choice Answer] Score unchanged: %s = %d\n", category, existingScore.Score)
+		if math.Abs(delta) < 0.005 && (promptVersion == "" || promptVersion == existingScore.PromptVersion) {
+			log.Printf("[Choice Answer] Score unchanged: %s = %.2f\n", category, existingScore.Score)
 			return nil
 		}
 		if err := s.userWeightScoreRepo.AddScoreWithPromptVersion(userID, sessionID, category, delta, promptVersion); err != nil {
 			return fmt.Errorf("failed to update score: %w", err)
 		}
-		log.Printf("[Choice Answer] Updated score: %s = %d (average)\n", category, newScore)
+		log.Printf("[Choice Answer] Updated score: %s = %.2f (average)\n", category, newScore)
 	}
 
 	return nil
@@ -243,7 +243,7 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 // ライブ採点（scoreAnswer）とは別の実装なので、同じ入力で同じ値になることを
 // chat_score_recalculation_test.go で突き合わせている。職種の選択状態（jobRoleSet）は
 // 履歴から復元できないので false を渡す。precheckHuman が現状未使用なので値は変わらない。
-func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, sessionID string) (map[string]int, error) {
+func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, sessionID string) (map[string]float64, error) {
 	ctx = s.withPIIGuard(ctx, userID)
 	messages, err := s.chatMessageRepo.FindBySessionIDForUser(sessionID, userID)
 	if err != nil {
@@ -257,7 +257,7 @@ func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, s
 		}
 	}
 
-	scores := make(map[string]int)
+	scores := make(map[string]float64)
 	for i, message := range messages {
 		if message.Role != "user" {
 			continue
@@ -289,7 +289,6 @@ func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, s
 				continue
 			}
 			result.Score, _ = AdjustChoiceAxisScore(result.Score, resolved.Reason)
-			scoreInput = resolved.Letter
 		} else {
 			if resolved.IsFreeText {
 				scoreInput = resolved.Text
@@ -309,9 +308,9 @@ func (s *ChatService) RecalculateChatSession(ctx context.Context, userID uint, s
 		}
 
 		if current, exists := scores[category]; exists {
-			scores[category] = int(math.Round(float64(current)*0.7 + float64(result.Score)*0.3))
+			scores[category] = math.Round((current*0.7+float64(result.Score)*0.3)*100) / 100
 		} else {
-			scores[category] = result.Score
+			scores[category] = float64(result.Score)
 		}
 	}
 	return scores, nil

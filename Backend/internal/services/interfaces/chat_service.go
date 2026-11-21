@@ -26,6 +26,8 @@ type MatchingService interface {
 	CalculateMatching(ctx context.Context, userID uint, sessionID string) error
 	GetTopMatches(ctx context.Context, userID uint, sessionID string, limit int) ([]*models.UserCompanyMatch, error)
 	ToggleFavorite(matchID uint, userID uint) error
+	ListFavoriteCompanies(ctx context.Context, userID uint, limit int) ([]*models.UserCompanyMatch, error)
+	UnfavoriteCompany(ctx context.Context, userID uint, companyID uint) error
 	GetDiagnostics(userID uint, sessionID string) (*matching.MatchingDiagnostics, error)
 	ReasonScores(userID uint, scores []models.UserWeightScore) []models.UserWeightScore
 }

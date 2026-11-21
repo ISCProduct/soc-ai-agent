@@ -1,6 +1,7 @@
 'use client'
 
-import type { MouseEvent } from 'react'
+import { useState, type MouseEvent, type ReactNode } from 'react'
+import type { SxProps, Theme } from '@mui/material/styles'
 import {
   Box,
   Typography,
@@ -29,6 +30,7 @@ import type { AnalysisScores, Company, MatchFeedbackVerdict, SnackbarState, Sugg
 import { buildEsRewriteQuery, buildInterviewQuery, getTopCategoryScores } from '../utils'
 import { withStableKeys } from '@/lib/list-keys'
 import AnalysisScoreCard from './AnalysisScoreCard'
+import FavoritesCompareList from './FavoritesCompareList'
 import {
   GUEST_REGISTER_CTA_LABEL,
   GUEST_REGISTER_PATH,
@@ -38,10 +40,15 @@ import {
 import { APPLY_CLOSED_LABEL, getApplyClosedButtonProps } from '@/lib/apply-availability'
 import { CONTENT_MAX_WIDTH, UI, leadSentences, scaleBand } from '@/lib/design/tokens'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
-import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
+import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
 
 export interface ResultsListViewProps {
   companies: Company[]
+  /** 診断をまたいで1社にまとめたお気に入り。並びは適合度の高い順 */
+  favoriteCompanies: Company[]
+  favoritesLoading: boolean
+  favoritesError: string | null
+  onRetryFavorites: () => void
   isProvisional: boolean
   diagnosisSummary?: string | null
   evaluatedCategories?: number | null
@@ -68,10 +75,28 @@ export interface ResultsListViewProps {
   onSendEmail: () => void
   onSelectCompany: (company: Company) => void
   onToggleFavorite: (e: MouseEvent, company: Company) => void
+  onUnfavoriteCompany: (e: MouseEvent, company: Company) => void
   /** 推薦への「合う／合わない」。省略すると、ボタンを出さない */
   onFeedback?: (e: MouseEvent, company: Company, verdict: MatchFeedbackVerdict) => void
   onApply: (e: MouseEvent, company: Company) => void
   onNavigate: (path: string) => void
+}
+
+// 押せない理由の文の id（ボタンの aria-describedby から指す）。同じ画面に2つあるメール送信ボタンは別の id にする
+const EMAIL_REASON_TOP_ID = 'results-email-disabled-reason-top'
+const EMAIL_REASON_BOTTOM_ID = 'results-email-disabled-reason-bottom'
+const APPLICATIONS_REASON_ID = 'results-applications-disabled-reason'
+
+/**
+ * 押せないボタンの理由を、常に見える文として出す（#2221）。
+ * 吹き出し（Tooltip）はマウスを乗せないと出ず、タッチ端末では読めないので、吹き出しは補助にとどめる。
+ */
+function DisabledReason({ id, children, sx }: { id: string; children: ReactNode; sx?: SxProps<Theme> }) {
+  return (
+    <Typography id={id} variant="caption" component="p" sx={[{ color: UI.inkSoft, mt: 0.5 }, ...(Array.isArray(sx) ? sx : [sx])]}>
+      {children}
+    </Typography>
+  )
 }
 
 /**
@@ -79,6 +104,10 @@ export interface ResultsListViewProps {
  */
 export default function ResultsListView({
   companies,
+  favoriteCompanies,
+  favoritesLoading,
+  favoritesError,
+  onRetryFavorites,
   isProvisional,
   diagnosisSummary = null,
   evaluatedCategories = null,
@@ -102,6 +131,7 @@ export default function ResultsListView({
   onSendEmail,
   onSelectCompany,
   onToggleFavorite,
+  onUnfavoriteCompany,
   onFeedback,
   feedbackingId = null,
   onApply,
@@ -110,8 +140,20 @@ export default function ResultsListView({
   const guestEmailProps = getGuestEmailButtonProps(isGuestUser)
   const guestApplicationsProps = getGuestApplicationsButtonProps(isGuestUser)
   const applyClosedProps = getApplyClosedButtonProps(applyEnabled)
-  // 一覧全体の幅。各社の位置はこの中で示す
-  const band = scaleBand(companies.map((c) => c.matchScore))
+  // お気に入りは過去の診断も含め、同じ企業は1行。中身は呼び出し側がまとめて渡す。
+  const [favoritesOnly, setFavoritesOnly] = useState(false)
+  const favoriteCount = favoriteCompanies.length
+  const listedCompanies = favoritesOnly ? favoriteCompanies : companies
+  // 「応募する」を押せない理由（応募済みは理由ではないので出さない）。ゲストの理由を先に出す
+  const applyReason = (company: Company): string => {
+    if (company.isApplied) return ''
+    if (guestApplicationsProps.disabled) return guestApplicationsProps.title
+    if (applyClosedProps.disabled) return applyClosedProps.title
+    return ''
+  }
+  const applyReasonId = (company: Company) => `results-apply-disabled-reason-${String(company.id).replace(/[^A-Za-z0-9_-]/g, '_')}`
+  // 一覧全体の幅。各社の位置はこの中で示す。並び順は渡されたまま（適合度順）。
+  const band = scaleBand(listedCompanies.map((c) => c.matchScore))
   // 一覧の中で最も多い根拠軸数。これを下回る行だけ印を出す
   const maxAxisCount = Math.max(
     0,
@@ -142,19 +184,25 @@ export default function ResultsListView({
           <Button variant="outlined" startIcon={<ArrowBack />} onClick={onBack}>
             チャットに戻る
           </Button>
-          <Tooltip title={guestEmailProps.title} disableHoverListener={!guestEmailProps.disabled}>
-            <span>
-              <Button
-                variant="contained"
-                startIcon={<Email />}
-                onClick={onSendEmail}
-                disabled={emailSending || guestEmailProps.disabled}
-                sx={{ width: { xs: '100%', sm: 'auto' } }}
-              >
-                {emailSending ? '送信中...' : '結果をメールで受け取る'}
-              </Button>
-            </span>
-          </Tooltip>
+          <Box sx={{ width: { xs: '100%', sm: 'auto' } }}>
+            <Tooltip title={guestEmailProps.title} disableHoverListener={!guestEmailProps.disabled}>
+              <span>
+                <Button
+                  variant="contained"
+                  startIcon={<Email />}
+                  onClick={onSendEmail}
+                  disabled={emailSending || guestEmailProps.disabled}
+                  aria-describedby={guestEmailProps.disabled ? EMAIL_REASON_TOP_ID : undefined}
+                  sx={{ width: { xs: '100%', sm: 'auto' } }}
+                >
+                  {emailSending ? '送信中...' : '結果をメールで受け取る'}
+                </Button>
+              </span>
+            </Tooltip>
+            {guestEmailProps.disabled && (
+              <DisabledReason id={EMAIL_REASON_TOP_ID}>{guestEmailProps.title}</DisabledReason>
+            )}
+          </Box>
         </Box>
         {isGuestUser && (
           <Alert
@@ -187,19 +235,37 @@ export default function ResultsListView({
               mb: 0.5,
             }}
           >
-            あなたに近い{companies.length}社
+            {favoritesOnly ? `お気に入りにした${listedCompanies.length}社` : `あなたに近い${companies.length}社`}
           </Typography>
           <Typography sx={{ fontSize: 15, color: UI.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 1.5 }}>
-            {isProvisional
-              ? 'ここまでの回答で並べています。会話を続けると根拠が増え、順番も変わります。'
-              : '回答の傾向と、企業が重視する人物像を突き合わせた順に並べています。'}
+            {favoritesOnly
+              ? '今までの診断でお気に入りにした企業です。同じ企業は1社にまとめています。適合度は、いちばん新しい診断のものです。'
+              : isProvisional
+                ? 'ここまでの回答で並べています。会話を続けると根拠が増え、順番も変わります。'
+                : '回答の傾向と、企業が重視する人物像を突き合わせた順に並べています。'}
           </Typography>
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" role="group" aria-label="表示する企業" sx={{ mb: 1.5 }}>
+            <Button
+              variant={favoritesOnly ? 'text' : 'contained'}
+              aria-pressed={!favoritesOnly}
+              onClick={() => setFavoritesOnly(false)}
+            >
+              すべて
+            </Button>
+            <Button
+              variant={favoritesOnly ? 'contained' : 'text'}
+              aria-pressed={favoritesOnly}
+              onClick={() => setFavoritesOnly(true)}
+            >
+              お気に入りだけ（{favoriteCount}）
+            </Button>
+          </Stack>
           {/*
             適合度の幅を一度だけ述べる。実測では候補が狭い帯に密集しており、
             78 と 71 の差は見た目ほど大きくない。各行に目盛りを並べるより、
             ここで一度「差は小さい」と言うほうが正直で、読む手間も少ない。
           */}
-          {companies.length > 1 && band.max - band.min <= 15 && (
+          {listedCompanies.length > 1 && band.max - band.min <= 15 && (
             <Typography sx={{ fontSize: 14, color: UI.inkSoft, mb: 1.5 }}>
               適合度は{band.min}〜{band.max}に収まっています。順位の差はわずかなので、
               上から順に決める必要はありません。
@@ -292,6 +358,39 @@ export default function ResultsListView({
             学生の用途は「見比べて絞る」ことなので、1社ずつ箱に入れると
             隣と比べにくく、どれも同じ重みに見える。
           */}
+          {favoritesOnly && favoritesLoading && listedCompanies.length === 0 ? (
+            <Typography sx={{ fontSize: 15, color: UI.inkSoft, py: 3 }}>
+              お気に入りを読み込んでいます
+            </Typography>
+          ) : favoritesOnly && favoritesError && listedCompanies.length === 0 ? (
+            <Box sx={{ py: 3 }}>
+              <Typography sx={{ fontSize: 16, fontWeight: 700, color: UI.ink, mb: 1 }}>
+                {favoritesError}
+              </Typography>
+              <Button variant="outlined" onClick={onRetryFavorites}>
+                再読み込み
+              </Button>
+            </Box>
+          ) : favoritesOnly && listedCompanies.length === 0 ? (
+            <Box sx={{ py: 3 }}>
+              <Typography sx={{ fontSize: 16, fontWeight: 700, color: UI.ink, mb: 1 }}>
+                お気に入りにした企業はまだありません
+              </Typography>
+              <Typography sx={{ fontSize: 15, color: UI.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 2 }}>
+                すべての企業に戻って、残しておきたい企業のハートを押してください。ここに残ります。
+              </Typography>
+              <Button variant="outlined" onClick={() => setFavoritesOnly(false)}>
+                すべての企業を見る
+              </Button>
+            </Box>
+          ) : favoritesOnly ? (
+            <FavoritesCompareList
+              companies={listedCompanies}
+              favoritingId={favoritingId}
+              onSelectCompany={onSelectCompany}
+              onToggleFavorite={onUnfavoriteCompany}
+            />
+          ) : (
           <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0 }}>
             {companies.map((company, index) => (
               <Box
@@ -339,7 +438,8 @@ export default function ResultsListView({
                         <IconButton
                           size="small"
                           onClick={(e) => onToggleFavorite(e, company)}
-                          aria-label="お気に入りの切り替え"
+                          aria-pressed={Boolean(company.isFavorited)}
+                          aria-label={company.isFavorited ? `${company.name}をお気に入りから外す` : `${company.name}をお気に入りに入れる`}
                           disabled={favoritingId === company.matchId}
                           sx={{ color: company.isFavorited ? UI.flag : UI.rule }}
                         >
@@ -491,6 +591,7 @@ export default function ResultsListView({
                           variant={company.isApplied ? 'contained' : 'outlined'}
                           size="small"
                           color="primary"
+                          aria-describedby={applyReason(company) ? applyReasonId(company) : undefined}
                           disabled={
                             company.isApplied ||
                             applyingId === company.matchId ||
@@ -510,9 +611,13 @@ export default function ResultsListView({
                       </span>
                     </Tooltip>
                   </Stack>
+                  {applyReason(company) && (
+                    <DisabledReason id={applyReasonId(company)}>{applyReason(company)}</DisabledReason>
+                  )}
               </Box>
             ))}
           </Box>
+          )}
 
           <Box sx={{ textAlign: 'center', mt: 4, mb: 4 }}>
             <Stack direction="row" spacing={2} justifyContent="center" flexWrap="wrap" useFlexGap>
@@ -523,6 +628,7 @@ export default function ResultsListView({
                     startIcon={<Email />}
                     onClick={onSendEmail}
                     disabled={emailSending || guestEmailProps.disabled}
+                    aria-describedby={guestEmailProps.disabled ? EMAIL_REASON_BOTTOM_ID : undefined}
                   >
                     {emailSending ? '送信中...' : '結果をメールで受け取る'}
                   </Button>
@@ -539,6 +645,7 @@ export default function ResultsListView({
                     variant="outlined"
                     size="large"
                     disabled={guestApplicationsProps.disabled}
+                    aria-describedby={guestApplicationsProps.disabled ? APPLICATIONS_REASON_ID : undefined}
                     onClick={() => onNavigate('/applications')}
                   >
                     選考管理を見る
@@ -549,6 +656,13 @@ export default function ResultsListView({
                 最初からやり直す
               </Button>
             </Stack>
+            {/* 押せない理由は吹き出しだけでなく、常に見える文で出す（タッチ端末では吹き出しが出ない。#2221） */}
+            {guestEmailProps.disabled && (
+              <DisabledReason id={EMAIL_REASON_BOTTOM_ID} sx={{ mt: 1.5 }}>{guestEmailProps.title}</DisabledReason>
+            )}
+            {guestApplicationsProps.disabled && (
+              <DisabledReason id={APPLICATIONS_REASON_ID}>{guestApplicationsProps.title}</DisabledReason>
+            )}
           </Box>
         </Box>
       </Box>
@@ -557,7 +671,7 @@ export default function ResultsListView({
       <BottomNavSpacer />
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={5000}
+        autoHideDuration={SNACKBAR_AUTO_HIDE_MS}
         onClose={onCloseSnackbar}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         sx={ABOVE_BOTTOM_NAV_SX}
