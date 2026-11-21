@@ -2,6 +2,8 @@ package admin
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/controllers/httpapi"
+	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"net/http"
 	"strconv"
@@ -9,9 +11,16 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// diagnosisQualityReader は診断品質レポートの読み取り口。
+// 一覧の limit がリポジトリへ渡る値をテストで固定するため、具象型ではなくこの形に依存する。
+type diagnosisQualityReader interface {
+	FindByUserAndSession(userID uint, sessionID string) (*models.DiagnosisQualityReport, error)
+	ListRecent(limit int) ([]models.DiagnosisQualityReport, error)
+}
+
 // AdminDiagnosisQualityController は診断妥当性レポートの参照API。
 type AdminDiagnosisQualityController struct {
-	repo *repositories.DiagnosisQualityRepository
+	repo diagnosisQualityReader
 }
 
 func NewAdminDiagnosisQualityController(repo *repositories.DiagnosisQualityRepository) *AdminDiagnosisQualityController {
@@ -43,7 +52,9 @@ func (c *AdminDiagnosisQualityController) List(ctx echo.Context) error {
 	if ctx.QueryParam("session_id") != "" {
 		return c.GetBySession(ctx)
 	}
-	limit, _ := strconv.Atoi(ctx.QueryParam("limit"))
+	// 他の管理系一覧と同じ 100 で頭打ちにする。未指定は 50。
+	// 上限が無いと limit=1000000 がそのまま一覧取得へ渡る（SOCAIAGENT-530）。
+	limit := httpapi.LimitQuery(ctx, "limit", 50)
 	rows, err := c.repo.ListRecent(limit)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
