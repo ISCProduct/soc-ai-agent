@@ -251,16 +251,16 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
     total: number,
   ) {
     // stubApi より後の route が優先される。
-    await page.route('**/api/interviews**', (route) => {
+    await page.route('**/api/bff/interviews**', (route) => {
       const { pathname } = new URL(route.request().url())
-      if (pathname === '/api/interviews') {
+      if (pathname === '/api/bff/interviews') {
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({ ...SESSION_RESPONSE, sessions, total }),
         })
       }
-      if (pathname === '/api/interviews/trend') {
+      if (pathname === '/api/bff/interviews/trend') {
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -353,13 +353,13 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
     // 教員用レポートはサーバーが実ロールで返すか決める(#1814)。教員として見る。
     await setupAuth(page, { ...TEST_USER, is_staff: true })
     await stubApi(page)
-    await page.route('**/api/interviews**', (route) => {
+    await page.route('**/api/bff/interviews**', (route) => {
       const { pathname } = new URL(route.request().url())
       const json = (body: unknown) =>
         route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
-      if (pathname === '/api/interviews') return json({ ...SESSION_RESPONSE })
-      if (pathname === '/api/interviews/trend') return json({ points: TREND_POINTS })
-      if (pathname === '/api/interviews/1') {
+      if (pathname === '/api/bff/interviews') return json({ ...SESSION_RESPONSE })
+      if (pathname === '/api/bff/interviews/trend') return json({ points: TREND_POINTS })
+      if (pathname === '/api/bff/interviews/1') {
         return json({ session: SESSION_RESPONSE.sessions[0], utterances: [], report: REPORT })
       }
       return route.fallback()
