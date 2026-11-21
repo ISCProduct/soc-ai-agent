@@ -4,6 +4,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services/diagnosis"
 	"encoding/json"
+	"slices"
 	"strings"
 )
 
@@ -33,6 +34,7 @@ type Recommendation struct {
 	Score          int            `json:"score"`         // マッチスコア
 	Reason         string         `json:"reason"`        // マッチ理由
 	Industry       string         `json:"industry"`
+	JobTitle       string         `json:"job_title,omitempty"`
 	Location       string         `json:"location"`
 	Employees      string         `json:"employees"`
 	TechStack      []string       `json:"tech_stack"`
@@ -138,6 +140,72 @@ func DisplayableMatches(matches []*models.UserCompanyMatch) []*models.UserCompan
 	return displayed
 }
 
+// DedupedFavorites はお気に入りを企業ごとに1行へまとめる。
+// 同じ企業は診断がいちばん新しい行（マッチの created_at。同点はIDが大きい方）を残す。
+// updated_at は再計算や閲覧でも進むので、代表行の判定には使わない。
+// 並びは適合度の高い順で、同点は企業IDの昇順。課金などで順位を上げない。
+// 1社にまとめたあとに limit を超えた分を捨てる。
+func DedupedFavorites(matches []*models.UserCompanyMatch, limit int) []*models.UserCompanyMatch {
+	ordered := append([]*models.UserCompanyMatch(nil), matches...)
+	slices.SortStableFunc(ordered, func(a, b *models.UserCompanyMatch) int {
+		if a == nil || b == nil {
+			if a == b {
+				return 0
+			}
+			if a == nil {
+				return 1
+			}
+			return -1
+		}
+		if !a.CreatedAt.Equal(b.CreatedAt) {
+			if a.CreatedAt.After(b.CreatedAt) {
+				return -1
+			}
+			return 1
+		}
+		if a.ID == b.ID {
+			return 0
+		}
+		if a.ID > b.ID {
+			return -1
+		}
+		return 1
+	})
+
+	seen := map[uint]struct{}{}
+	picked := make([]*models.UserCompanyMatch, 0)
+	for _, match := range ordered {
+		if match == nil || match.CompanyID == 0 {
+			continue
+		}
+		if _, ok := seen[match.CompanyID]; ok {
+			continue
+		}
+		seen[match.CompanyID] = struct{}{}
+		picked = append(picked, match)
+	}
+
+	slices.SortStableFunc(picked, func(a, b *models.UserCompanyMatch) int {
+		if a.MatchScore == b.MatchScore {
+			if a.CompanyID == b.CompanyID {
+				return 0
+			}
+			if a.CompanyID < b.CompanyID {
+				return -1
+			}
+			return 1
+		}
+		if a.MatchScore > b.MatchScore {
+			return -1
+		}
+		return 1
+	})
+	if limit >= 0 && len(picked) > limit {
+		picked = picked[:limit]
+	}
+	return picked
+}
+
 // BuildRecommendations は表示対象の match を推薦一覧に整形する。
 // 理由文はマッチ度と同じ合流後の適性(reasonScores)で書く。
 // 0件のときは nil を返す(JSON では null)。既存の挙動を保つため。
@@ -149,6 +217,11 @@ func BuildRecommendations(displayed []*models.UserCompanyMatch, reasonScores []m
 			employeeCount = label
 		}
 
+		jobTitle := ""
+		if match.JobPosition != nil && match.JobPosition.ID != 0 {
+			jobTitle = match.JobPosition.Title
+		}
+
 		items = append(items, Recommendation{
 			ID:               int(match.Company.ID),
 			MatchID:          match.ID,
@@ -156,6 +229,7 @@ func BuildRecommendations(displayed []*models.UserCompanyMatch, reasonScores []m
 			Score:            int(match.MatchScore),
 			Reason:           BuildMatchReason(match, reasonScores),
 			Industry:         match.Company.Industry,
+			JobTitle:         jobTitle,
 			Location:         match.Company.Location,
 			Employees:        employeeCount,
 			TechStack:        SplitTechStack(match.Company.TechStack),
