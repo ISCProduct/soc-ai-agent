@@ -14,7 +14,7 @@
 - カテゴリはスキーマの `enum` で縛り、保存前に `SanitizeCategoryBreakdown` で次を捨てる:
   知らないカテゴリ・0〜5 の範囲外・同じカテゴリの2件目。文が両方空でも、点数が範囲内なら行は残す（低い種類を比較から消さない。空の文は画面に出さない）。文は200字を超えたら、省略記号を含めて200字で切る。並びはカテゴリの定義順
 - ルーブリックのスコアが不正で捨てた場合（#795）も、カテゴリ別の評価は別に検証しているので残す
-- 保存先は `interview_reports.category_breakdown_json`（JSON、migration `20261120113320_interview_report_category_breakdown`）。
+- 保存先は `interview_reports.category_breakdown_json`（JSON、migration `20261122000059_interview_report_category_breakdown`）。
   内訳が1件も残らなければ NULL
 - 学生に返す（`GET /api/interviews/{id}` の `report.category_breakdown_json`）。教員専用の情報ではない
 
