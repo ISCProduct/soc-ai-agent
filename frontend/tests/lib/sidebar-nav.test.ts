@@ -26,6 +26,7 @@ describe('sidebar-nav', () => {
   it('選考管理・面接履歴（Bottom nav に無い主要機能）へのリンクを含む（#1011）', () => {
     const hrefs = SIDEBAR_NAV_ITEMS.map((i) => i.href)
     expect(hrefs).toContain('/applications')
+    expect(hrefs).toContain('/favorites')
     expect(hrefs).toContain('/interview/history')
     expect(hrefs).toContain('/scout')
   })
