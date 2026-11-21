@@ -37,7 +37,9 @@ type User struct {
 	EmailVerificationToken   string     `gorm:"size:255;column:email_verification_token"`                // メール認証トークン
 	EmailVerificationExpires *time.Time `gorm:"column:email_verification_expires"`                       // メール認証トークン有効期限（#330）
 	LastLoginAt              *time.Time `gorm:"column:last_login_at"`                                    // 最終ログイン日時
-	PasswordResetToken       string     `gorm:"size:255;column:password_reset_token"`                    // パスワードリセットトークン
+	// PasswordResetTokenHash はパスワード再設定トークンの SHA-256 hex（平文は保存しない。SOCAIAGENT-693）。
+	// 旧列 password_reset_token はモデルから外した（段階2のマイグレーションで削除する）。
+	PasswordResetTokenHash *string `gorm:"size:64;column:password_reset_token_hash" json:"-"`
 	PasswordResetExpiresAt   *time.Time `gorm:"column:password_reset_expires_at"`                        // パスワードリセットトークン有効期限
 	AllowCollectiveInsight   bool       `gorm:"default:true;column:allow_collective_insight"`            // 集合知レコメンドへの参加同意
 	AllowScoutVisibility     bool       `gorm:"default:false;column:allow_scout_visibility"`             // 企業スカウト向け分析データ公開同意（#1096）

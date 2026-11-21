@@ -857,11 +857,11 @@ paths:
               required: [token, password]
               properties:
                 token: { type: string }
-                password: { type: string, format: password, minLength: 8 }
+                password: { type: string, format: password, minLength: 8, description: 8文字以上・72バイト以下 }
       security: []
       responses:
         "200": { description: 再設定した }
-        "400": { description: トークンが無効か期限切れ }
+        "400": { description: トークンが無効か期限切れ、またはパスワードが8文字未満・72バイト超 }
 
   /api/auth/refresh:
     post:
