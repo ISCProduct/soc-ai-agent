@@ -53,6 +53,12 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 - `POST /api/auth/session` と `POST /api/company-auth/session` は、`Content-Type: application/json` と
   自サイトの `Origin` を必須にしています（違えば 415 / 403、JSON が壊れていれば 400）。
   フロント外から呼ぶ場合もこの2つを付けてください。
+- OAuth ログインはフロントの `GET /api/auth/oauth/start?provider=google|github` から始めます。
+  ログインを始めたブラウザだけが持つ照合値（verifier）を httpOnly Cookie `oauth_verifier` に入れ、
+  そのハッシュを `bind` として Backend の OAuth 開始へ渡します。
+- `/auth/callback?code=...` で戻ってきたら、フロントの `POST /api/auth/oauth/exchange` が
+  Cookie の verifier とコードを Backend の `/api/auth/oauth/exchange` に送り、セッション Cookie を張ります。
+  旧方式の `/auth/callback?user=...` も移行期間中は読みます。
 - フロントは7日固定（`frontend/lib/auth/admin-token.ts`）で期限を判定するため、
   `ADMIN_TOKEN_TTL_HOURS` を短縮するときはフロント側も同時に変更してください。
 
