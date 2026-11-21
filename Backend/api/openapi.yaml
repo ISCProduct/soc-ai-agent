@@ -5790,6 +5790,8 @@ paths:
       summary: 学生へスカウトを送る
       description: |
         審査完了（`is_verified`）まで 403。同一学生へは 24 時間のクールダウンがある。
+        企業ごとの送信上限（日本時間の暦日・暦月。既定 50通/日・500通/月、
+        `SCOUT_DAILY_LIMIT_PER_COMPANY` / `SCOUT_MONTHLY_LIMIT_PER_COMPANY`）に達すると 429（`remaining_ms` なし）。
       security: [{ companyCookie: [] }]
       responses:
         "201":

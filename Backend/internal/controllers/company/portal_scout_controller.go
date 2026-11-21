@@ -1,6 +1,7 @@
 package company
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -18,7 +19,7 @@ type portalScoutService interface {
 	CreateTemplate(companyID, companyUserID uint, in companyportal.ScoutTemplateInput) (*models.ScoutTemplate, error)
 	UpdateTemplate(companyID, id uint, in companyportal.ScoutTemplateInput) (*models.ScoutTemplate, error)
 	DeleteTemplate(companyID, id uint) error
-	Send(companyID, companyUserID uint, in companyportal.SendScoutInput) (*companyportal.SendScoutResult, error)
+	Send(ctx context.Context, companyID, companyUserID uint, in companyportal.SendScoutInput) (*companyportal.SendScoutResult, error)
 	ListCompanyScouts(companyID uint, limit, offset int) ([]companyportal.CompanyScoutView, int64, error)
 	CooldownRemaining(companyID, userID uint) (time.Duration, error)
 }
@@ -183,7 +184,7 @@ func (c *CompanyPortalScoutController) Send(ctx echo.Context) error {
 	if err := ctx.Bind(&body); err != nil {
 		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
-	res, err := c.scouts.Send(companyID, companyUserID, companyportal.SendScoutInput{
+	res, err := c.scouts.Send(ctx.Request().Context(), companyID, companyUserID, companyportal.SendScoutInput{
 		UserID:     body.UserID,
 		TemplateID: body.TemplateID,
 		Message:    body.Message,
@@ -257,6 +258,8 @@ func mapScoutError(err error) error {
 		return httpapi.NewAPIError(http.StatusNotFound, httpapi.ErrCodeNotFound, "対象が見つかりません")
 	case errors.Is(err, companyportal.ErrScoutNotVisible):
 		return httpapi.NewAPIError(http.StatusNotFound, httpapi.ErrCodeNotFound, "学生が見つかりません（公開されていない可能性があります）")
+	case errors.Is(err, companyportal.ErrScoutQuotaExceeded):
+		return httpapi.NewAPIError(http.StatusTooManyRequests, httpapi.ErrCodeTooManyRequests, "スカウトの送信上限（1日・1か月）に達しました。時間をおいて送ってください")
 	case errors.Is(err, companyportal.ErrScoutBlocked):
 		return httpapi.NewAPIError(http.StatusForbidden, httpapi.ErrCodeForbidden, "学生がこの企業をブロックしているため送れません")
 	case errors.As(err, &ve):
