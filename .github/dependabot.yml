@@ -89,3 +89,79 @@ updates:
       # #1804 がこれで develop に入ってビルドを壊したため明示的に除外する。
       # Echo v5 へ移行するときに、この行を消して手動で上げる。
       - dependency-name: "github.com/getsentry/sentry-go/echo"
+
+  # ベースイメージの更新。エントリが無いと既定ブランチ(main)宛になる。
+  - package-ecosystem: docker
+    directory: /Backend
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
+  - package-ecosystem: docker
+    directory: /frontend
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
+  - package-ecosystem: docker
+    directory: /rag
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
+
+  # Terraform プロバイダ。モジュール単体ではなく、実際に apply するルートを見る。
+  - package-ecosystem: terraform
+    directory: /infra/terraform/environments/prod
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - terraform
+  - package-ecosystem: terraform
+    directory: /infra/terraform/environments/staging
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - terraform
+  - package-ecosystem: terraform
+    directory: /infra/terraform/bootstrap
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - terraform

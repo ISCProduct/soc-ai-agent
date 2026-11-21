@@ -11,7 +11,7 @@ type Company struct {
 	ID          uint   `gorm:"primaryKey" json:"id"`
 	Name        string `gorm:"type:varchar(255);not null" json:"name"`
 	NameReading string `gorm:"type:varchar(255)" json:"name_reading"` // 企業名の読み仮名（ふりがな）
-	// NameReadingSource は読み仮名の出どころ（corporate_registry / website / manual。空は出どころ不明）。
+	// NameReadingSource は読み仮名の出どころ（gbizinfo / corporate_registry / website / manual。空は出どころ不明）。
 	NameReadingSource    string `gorm:"type:varchar(24);not null;default:''" json:"name_reading_source,omitempty"`
 	NameReadingSourceURL string `gorm:"type:varchar(500);not null;default:''" json:"name_reading_source_url,omitempty"`
 	Description          string `gorm:"type:text" json:"description"`

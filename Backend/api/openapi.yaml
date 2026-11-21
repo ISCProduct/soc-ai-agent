@@ -331,7 +331,7 @@ components:
             - challenge_seeking
             - detail_orientation
             - communication_skill
-        Score: { type: integer, minimum: 0, maximum: 100 }
+        Score: { type: number, minimum: 0, maximum: 100, description: 小数第2位まで（DECIMAL(5,2)）。表示側で丸める }
 
     PhaseProgress:
       type: object
@@ -1136,7 +1136,9 @@ paths:
     post:
       tags: [chat]
       summary: 企業マッチのお気に入りを切り替える
-      description: 対象は `match_id`（`UserCompanyMatch` のID）。`session_id` では切り替わらない。
+      description: >
+        対象は `match_id`（その診断の `UserCompanyMatch` 1行）。`session_id` では切り替わらない。
+        診断をまたいで外すときは `/api/chat/favorites/remove` を使う。
       security: [{ userToken: [] }]
       requestBody:
         required: true
@@ -1151,6 +1153,76 @@ paths:
         "200": { description: 切り替えた }
         "400": { description: match_id が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/chat/favorites:
+    get:
+      tags: [chat]
+      summary: お気に入り企業を診断をまたいで1社1行で返す
+      description: >
+        同じ企業は、その診断のマッチが作られた時刻がいちばん新しい行を残す。
+        閲覧や再計算で進む更新時刻では選ばない。並びは適合度の高い順。
+        重みプロファイルの無い企業は件数を数える前に外す。
+        `limit` は 1 以上 100 以下。未指定・0以下・数値でないときは 50。100 を超える指定は 100。
+      security: [{ userToken: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: お気に入り企業
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recommendations]
+                properties:
+                  recommendations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer, description: 企業ID }
+                        match_id: { type: integer, description: 代表にした診断のマッチID }
+                        category_name: { type: string }
+                        score: { type: integer }
+                        industry: { type: string }
+                        job_title: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { description: マッチングサービスが無い }
+
+  /api/chat/favorites/remove:
+    post:
+      tags: [chat]
+      summary: 企業のお気に入りを診断をまたいで外す
+      description: >
+        `company_id` の企業について、そのユーザーの全診断の `is_favorited` を外す。
+        `/api/chat/favorite` は1診断の1行だけを切り替える。こちらは全診断が対象。
+        もともと付いていなくても 200 を返す。
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [company_id]
+              properties:
+                company_id: { type: integer }
+      responses:
+        "200":
+          description: 外した（対象が無くても成功）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "400": { description: company_id が無い }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { description: マッチングサービスが無い }
+
+  # ── questions ──────────────────────────────────────
 
   /api/chat/match-feedback:
     post:
