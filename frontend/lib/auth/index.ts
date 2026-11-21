@@ -211,6 +211,9 @@ export const authService = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     })
+    if (res.status === 429) {
+      throw new Error('送信の回数が上限に達しました。時間をおいて再度お試しください。')
+    }
     if (!res.ok) {
       throw new Error(await extractErrorMessage(res, '確認メールの送信に失敗しました。時間をおいて再度お試しください。'))
     }
