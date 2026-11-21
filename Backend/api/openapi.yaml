@@ -4722,7 +4722,9 @@ paths:
         資本の鏡像行（A→B と B→A）は1本に畳む。取引の `direction_known` は現状常に false
         （from/to は取得起点→相手であり、提供側→利用側ではない）。
         事業タグ専用データは未整備のため `business_tags` は空・`business_tags_status=unavailable`。
-        採用情報は含めない。審査前のゲスト投稿企業はノードから除外する。
+        採用情報は含めない。審査前のゲスト投稿企業と停止中（is_active=false）の企業はノードから除外する。
+
+        レート制限は IP 単位 300回/10分（`CORRELATION_MAP_RATE_LIMIT_PER_IP`、compare と共通）。
       security: []
       parameters:
         - in: path
@@ -4735,6 +4737,8 @@ paths:
           description: 成功
         "404":
           description: 企業が見つからない
+        "429":
+          description: レート制限超過
 
   /api/companies/{id}/correlation-map/compare:
     get:
@@ -4763,6 +4767,8 @@ paths:
           description: with が無い
         "404":
           description: 企業が見つからない
+        "429":
+          description: レート制限超過
 
   /api/companies/web-search:
     get:

@@ -210,6 +210,11 @@ var GuestAIRateLimiter KeyRateLimiter = NewRateLimiter(10*time.Minute, envPositi
 // IPを変えれば per-IP 制限は回避できるため、実質的なコスト上限はこちらが担う。
 var GuestAIGlobalRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("GUEST_AI_RATE_LIMIT_GLOBAL", 1000))
 
+// CorrelationMapRateLimiter は企業相関図（未認証で叩ける）のIP単位制限（SOCAIAGENT-694）。
+// GuestAIRateLimiter と同じく、BFF 経由で送信元IPが収束しうるため緩めに取り、環境変数で調整できるようにする。
+// ponytail: インメモリのため ECS のタスクごとに数える。厳密にしたい場合は Redis 版に差し替える。
+var CorrelationMapRateLimiter KeyRateLimiter = NewRateLimiter(10*time.Minute, envPositiveInt("CORRELATION_MAP_RATE_LIMIT_PER_IP", 300))
+
 // envPositiveInt は環境変数を正の整数として読む。未設定・不正値は既定値。
 // 展示会中に上限へ当たった場合、再ビルドせずタスク定義の環境変数だけで緩められるようにするための調整つまみ。
 func envPositiveInt(key string, def int) int {
