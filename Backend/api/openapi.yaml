@@ -355,7 +355,7 @@ components:
       properties:
         user_id: { type: integer, description: サーバ側で X-User-Token から決まるため省略可 }
         session_id: { type: string }
-        message: { type: string }
+        message: { type: string, maxLength: 2000, description: 2000 文字（ルーン）を超えると 400「文字数が上限を超えています」 }
         industry_id: { type: integer }
         job_category_id: { type: integer }
         consult_intent:

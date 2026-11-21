@@ -261,6 +261,10 @@ func (c *ChatController) Chat(ctx echo.Context) error {
 	if req.SessionID == "" || req.Message == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Missing required fields")
 	}
+	// 長すぎる本文は AI へ渡す前に断る（SOCAIAGENT-702）
+	if err := chat.ValidateChatMessageLength(req.Message); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 	// 相談の意図（任意）。知らない値と、長すぎる自由記述は受け付けない
 	if err := chat.ValidateConsultIntent(req.ConsultIntent, req.Message); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())

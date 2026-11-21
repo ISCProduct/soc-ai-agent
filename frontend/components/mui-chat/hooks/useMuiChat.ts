@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { sendChatMessage, getChatHistory, type ChatRequest, type ChatResponse } from '@/lib/api'
 import type { ConsultIntent } from '@/lib/career-consult'
-import { UserFacingApiError, gatewayErrorPath } from '@/lib/user-facing-error'
+import { CHAT_TOO_LONG_MESSAGE, UserFacingApiError, gatewayErrorPath } from '@/lib/user-facing-error'
 import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import { buildChoiceOutgoingMessage, resolveChatOutgoingMessage } from '@/lib/chat-choices'
@@ -408,6 +408,12 @@ export function useMuiChat() {
         setMessages((prev) => [...prev, completionMessage])
       } else if (error instanceof UserFacingApiError && error.gateway) {
         router.replace(gatewayErrorPath(error.status))
+      } else if (error instanceof UserFacingApiError && error.message === CHAT_TOO_LONG_MESSAGE) {
+        // 原因が分かる失敗は、汎用の文言にせず原因を出す（SOCAIAGENT-702）
+        setMessages((prev) => [
+          ...prev,
+          { id: makeMessageId(), role: 'assistant', content: `${CHAT_TOO_LONG_MESSAGE}。短くしてもう一度送ってください。`, timestamp: new Date() },
+        ])
       } else {
         const errorMsg: Message = {
           id: makeMessageId(),

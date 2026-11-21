@@ -17,8 +17,12 @@ import (
 	"log"
 	"math"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/text/width"
 )
 
 type MatchingService struct {
@@ -566,8 +570,35 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *models
 	if reason == "" {
 		return BuildMatchReason(match, userScores), nil
 	}
+	if why := invalidMatchReason(reason, userPrompt); why != "" {
+		// 本文は出さない
+		log.Printf("[GenerateMatchReason] AI reason rejected (%s), fallback to template", why)
+		return BuildMatchReason(match, userScores), nil
+	}
 	match.MatchReasonPromptVersion = promptVersion
 	return reason, nil
+}
+
+// matchReasonMaxRunes は AI の理由文として使う上限。プロンプトの指定（120〜220字程度）に余裕を持たせた値（SOCAIAGENT-702）。
+const matchReasonMaxRunes = 300
+
+var reasonNumberPattern = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?`)
+
+// invalidMatchReason は AI の理由文を使えない理由を返す（使えるなら空）。
+// 長すぎる文と、入力（ユーザープロンプト）に無い数字を書いた文を弾く。年収・従業員数のように
+// 渡していない事実を数字付きで書く誤りを、学生に見せないため（SOCAIAGENT-702）。
+// ponytail: 事実の照合は数字だけ。数字を含まない創作（存在しない制度名など）は通る。必要になったら固有名詞の照合を足す。
+func invalidMatchReason(reason, userPrompt string) string {
+	if utf8.RuneCountInString(reason) > matchReasonMaxRunes {
+		return "too_long"
+	}
+	input := width.Narrow.String(userPrompt)
+	for _, n := range reasonNumberPattern.FindAllString(width.Narrow.String(reason), -1) {
+		if !strings.Contains(input, n) {
+			return "number_not_in_input"
+		}
+	}
+	return ""
 }
 
 // ReasonUsesAI はマッチング理由を AI で生成する設定かを返す。費用の見積もりに使う。

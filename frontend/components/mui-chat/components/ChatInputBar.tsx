@@ -15,7 +15,13 @@ import {
 import { Check, Mic, MicOff, Send } from '@mui/icons-material'
 import styles from '../MuiChat.module.css'
 import type { ChoiceOption } from '../types'
-import { CHAT_ACCENT, CHAT_ACCENT_HOVER, shouldSendChatOnKeyDown } from '../utils'
+import {
+  CHAT_ACCENT,
+  CHAT_ACCENT_HOVER,
+  CHAT_MESSAGE_MAX_CHARS,
+  countChatChars,
+  shouldSendChatOnKeyDown,
+} from '../utils'
 import { useSpeechInput } from '../hooks/useSpeechInput'
 
 type ChatInputBarProps = {
@@ -56,6 +62,11 @@ export function ChatInputBar({
 }: ChatInputBarProps) {
   // 音声で入れた内容は自動送信しない。音声認識は誤りが珍しくないので、
   // 送る前に直せるよう入力欄へ入れる。既に入力があれば後ろへ足す。
+  const charCount = countChatChars(input)
+  const overLimit = charCount > CHAT_MESSAGE_MAX_CHARS
+  // 上限を超えたら送らない（サーバーも 400 で断る / SOCAIAGENT-702）
+  const sendable = canSend && !overLimit
+
   const speech = useSpeechInput((text) => {
     onInputChange(input ? `${input}${input.endsWith('。') ? '' : ' '}${text}` : text)
     inputRef.current?.focus()
@@ -224,16 +235,26 @@ export function ChatInputBar({
               onKeyDown={(e) => {
                 if (shouldSendChatOnKeyDown(e)) {
                   e.preventDefault()
-                  if (canSend) onSend()
+                  if (sendable) onSend()
                 }
               }}
               disabled={isLoading || !!historyLoadError}
               size="small"
               inputRef={inputRef}
+              error={overLimit}
               helperText={
-                showChoiceButtons
-                  ? 'Ctrl+Enterで送信'
-                  : '改行: Enter　／　送信: Ctrl+Enter（Mac は ⌘+Enter）'
+                <Box component="span" sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
+                  <span>
+                    {overLimit
+                      ? `文字数が上限を超えています（${CHAT_MESSAGE_MAX_CHARS}字まで）`
+                      : showChoiceButtons
+                        ? 'Ctrl+Enterで送信'
+                        : '改行: Enter　／　送信: Ctrl+Enter（Mac は ⌘+Enter）'}
+                  </span>
+                  <Box component="span" sx={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+                    {`${charCount} / ${CHAT_MESSAGE_MAX_CHARS}`}
+                  </Box>
+                </Box>
               }
               FormHelperTextProps={{ sx: { mx: 0.5 } }}
               sx={{
@@ -246,7 +267,7 @@ export function ChatInputBar({
             <IconButton
               color="primary"
               onClick={() => onSend()}
-              disabled={!canSend || isLoading || !!historyLoadError}
+              disabled={!sendable || isLoading || !!historyLoadError}
               aria-label="メッセージを送信"
               sx={{
                 bgcolor: CHAT_ACCENT,
