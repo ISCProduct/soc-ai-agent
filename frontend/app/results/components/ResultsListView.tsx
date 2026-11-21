@@ -3,7 +3,7 @@
 import { useState, type MouseEvent } from 'react'
 import { Alert, Box, Button, Snackbar, Stack, useMediaQuery, useTheme } from '@mui/material'
 import type { AnalysisScores, Company, MatchFeedbackVerdict, SnackbarState, SuggestedRole } from '../types'
-import { CONTENT_MAX_WIDTH, UI, scaleBand } from '@/lib/design/tokens'
+import { CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
 import { AnalysisErrorAlert } from './list/AnalysisErrorAlert'
@@ -98,12 +98,16 @@ export default function ResultsListView({
   onApply,
   onNavigate,
 }: ResultsListViewProps) {
+  // この一覧は useResultsData の mounted 後にしか描画されない（page-content.tsx）。サーバー描画・hydration の最初の描画に
+  // 出ないので、noSsr: true で最初から実際の幅で PC / SP を分けても不一致は起きない。
   const isDesktop = useMediaQuery(useTheme().breakpoints.up('md'), { noSsr: true })
 
   // お気に入りは過去の診断も含め、同じ企業は1行。中身は呼び出し側がまとめて渡す（#2301）
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const listedCompanies = favoritesOnly ? favoriteCompanies : companies
-  const band = scaleBand(listedCompanies.map((c) => c.matchScore))
+  // 見出しの文には実際の最小・最大を渡す（scaleBand は描画用に同点の幅を広げるので使わない）
+  const scores = listedCompanies.map((c) => c.matchScore)
+  const band = { min: Math.min(...scores), max: Math.max(...scores) }
   const ctx: CompanyRowContext = {
     isDesktop, maxAxisCount: maxMatchedAxisCount(companies), isProvisional, isGuestUser, applyEnabled,
     favoritingId, applyingId, feedbackingId, onSelectCompany, onToggleFavorite, onFeedback, onApply, onNavigate,
@@ -113,8 +117,9 @@ export default function ResultsListView({
   const coverage = analysisScores ? <AnswerCoveragePanel scores={analysisScores} layout={isDesktop ? 'list' : 'row'} /> : null
   const roles = <RolesPanel jobSuitabilityComment={jobSuitabilityComment} suggestedRoles={suggestedRoles} />
 
+  // SP はヘッダーと「次にやること」が長くなると画面を超えるので、画面全体をスクロールさせる。PC は一覧だけをスクロールする
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: UI.paper }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflowY: { xs: 'auto', md: 'hidden' }, backgroundColor: UI.paper }}>
       <ResultsHeader
         companyCount={listedCompanies.length}
         favoritesOnly={favoritesOnly}
@@ -127,7 +132,7 @@ export default function ResultsListView({
         onNavigate={onNavigate}
       />
       <NextStepBar analysisScores={analysisScores} isProvisional={isProvisional} onBack={onBack} />
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', px: { xs: 2, md: 4 }, pt: { xs: 2, md: 4 }, pb: { xs: 2, md: 7 } }}>
+      <Box sx={{ flexGrow: 1, overflowY: { xs: 'visible', md: 'auto' }, px: { xs: 2, md: 4 }, pt: { xs: 2, md: 4 }, pb: { xs: 2, md: 7 } }}>
         <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
           <Box sx={{ flex: 1, minWidth: 0, display: 'grid', gap: { xs: 2, md: 2.5 } }}>
             <AnalysisErrorAlert analysisError={analysisError} onRetryAnalysis={onRetryAnalysis} />

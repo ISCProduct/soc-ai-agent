@@ -51,7 +51,9 @@ export function ResultsHeader({ companyCount, favoritesOnly, isProvisional, diag
           </Typography>
           {companyCount > 1 && band.max - band.min <= NARROW_BAND_SPAN && (
             <Typography sx={{ fontSize: { xs: 15, md: 16 }, color: UI.inkSoft, lineHeight: { xs: 1.85, md: '28px' } }}>
-              適合度は{band.min}〜{band.max}に収まっていて差はわずかです。上から順に決める必要はありません。
+              {band.min === band.max
+                ? `適合度はどれも${band.min}で、差はありません。上から順に決める必要はありません。`
+                : `適合度は${band.min}〜${band.max}に収まっていて差はわずかです。上から順に決める必要はありません。`}
             </Typography>
           )}
         </Box>

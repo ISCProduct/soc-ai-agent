@@ -126,6 +126,12 @@ describe('ResultsListView', () => {
     expect(screen.getByText('参考: 傾向が大きく離れています。')).toBeInTheDocument()
   })
 
+  it('適合度の幅は実際の最小・最大で述べ、全社同点なら補正した幅を出さない', () => {
+    renderList({ companies: [sampleCompany, { ...sampleCompany, id: '2', matchId: 11, name: '同点株式会社' }] })
+    expect(screen.getByText(/適合度はどれも92で、差はありません/)).toBeInTheDocument()
+    expect(screen.queryByText(/91〜93/)).not.toBeInTheDocument()
+  })
+
   it('onFeedback が無いときは、「合う／合わない」を出さない', () => {
     renderList()
     expect(screen.queryByRole('button', { name: '合わない' })).toBeNull()
