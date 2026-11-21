@@ -331,7 +331,7 @@ components:
             - challenge_seeking
             - detail_orientation
             - communication_skill
-        Score: { type: integer, minimum: 0, maximum: 100 }
+        Score: { type: number, minimum: 0, maximum: 100, description: 小数第2位まで（DECIMAL(5,2)）。表示側で丸める }
 
     PhaseProgress:
       type: object
@@ -1136,7 +1136,9 @@ paths:
     post:
       tags: [chat]
       summary: 企業マッチのお気に入りを切り替える
-      description: 対象は `match_id`（`UserCompanyMatch` のID）。`session_id` では切り替わらない。
+      description: >
+        対象は `match_id`（その診断の `UserCompanyMatch` 1行）。`session_id` では切り替わらない。
+        診断をまたいで外すときは `/api/chat/favorites/remove` を使う。
       security: [{ userToken: [] }]
       requestBody:
         required: true
@@ -1151,6 +1153,76 @@ paths:
         "200": { description: 切り替えた }
         "400": { description: match_id が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/chat/favorites:
+    get:
+      tags: [chat]
+      summary: お気に入り企業を診断をまたいで1社1行で返す
+      description: >
+        同じ企業は、その診断のマッチが作られた時刻がいちばん新しい行を残す。
+        閲覧や再計算で進む更新時刻では選ばない。並びは適合度の高い順。
+        重みプロファイルの無い企業は件数を数える前に外す。
+        `limit` は 1 以上 100 以下。未指定・0以下・数値でないときは 50。100 を超える指定は 100。
+      security: [{ userToken: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: お気に入り企業
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recommendations]
+                properties:
+                  recommendations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer, description: 企業ID }
+                        match_id: { type: integer, description: 代表にした診断のマッチID }
+                        category_name: { type: string }
+                        score: { type: integer }
+                        industry: { type: string }
+                        job_title: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { description: マッチングサービスが無い }
+
+  /api/chat/favorites/remove:
+    post:
+      tags: [chat]
+      summary: 企業のお気に入りを診断をまたいで外す
+      description: >
+        `company_id` の企業について、そのユーザーの全診断の `is_favorited` を外す。
+        `/api/chat/favorite` は1診断の1行だけを切り替える。こちらは全診断が対象。
+        もともと付いていなくても 200 を返す。
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [company_id]
+              properties:
+                company_id: { type: integer }
+      responses:
+        "200":
+          description: 外した（対象が無くても成功）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "400": { description: company_id が無い }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { description: マッチングサービスが無い }
+
+  # ── questions ──────────────────────────────────────
 
   /api/chat/match-feedback:
     post:
@@ -4507,6 +4579,50 @@ paths:
         "200":
           description: 成功
 
+  /api/companies/search:
+    get:
+      tags: [companies]
+      summary: 学生向けの企業検索（業界・地域・職種・名前で絞り込み）
+      description: |
+        SOCAIAGENT-612。並びは企業名順（推薦や課金で上位に固定しない）。有効で、審査前のゲスト投稿でない企業だけ。
+        `prefecture` は都道府県名（`/api/companies/search-options` の一覧にあるもの）で、所在地に含まれるかで絞る。
+        `job_category_id` は、その職種（または子の職種）の公開中の求人を持つ企業に絞る。
+      security: []
+      parameters:
+        - { in: query, name: name, description: 企業名の部分一致（100字まで）, schema: { type: string } }
+        - { in: query, name: industry, schema: { type: string } }
+        - { in: query, name: prefecture, schema: { type: string } }
+        - { in: query, name: job_category_id, schema: { type: integer } }
+        - { in: query, name: limit, description: 既定20・上限100, schema: { type: integer } }
+        - { in: query, name: offset, schema: { type: integer } }
+      responses:
+        "200": { description: "`companies`・`total`・`limit`・`offset`" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+
+  /api/companies/search-options:
+    get:
+      tags: [companies]
+      summary: 企業検索の絞り込みの選択肢（業界・都道府県・職種）
+      description: 業界は表示できる企業に付いているもの、職種は公開中の求人がある大分類だけ（SOCAIAGENT-612）。
+      security: []
+      responses:
+        "200": { description: "`industries`・`prefectures`・`job_categories`" }
+
+  /api/companies/search/favorites:
+    get:
+      tags: [companies]
+      summary: 検索結果の企業のお気に入りの状態（本人の推薦にある企業だけ）
+      description: |
+        SOCAIAGENT-612。お気に入りは推薦（`user_company_matches`）に付くので、本人の最新の診断の推薦にある企業だけ
+        `match_id` と `is_favorited` を返す。切り替えは `POST /api/chat/favorite`。`company_ids` は100件まで。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: company_ids, description: カンマ区切りの企業 ID, schema: { type: string } }
+      responses:
+        "200": { description: "`favorites`" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /api/companies/brief:
     get:
       tags: [companies]
@@ -4599,6 +4715,58 @@ paths:
       responses:
         "200":
           description: 成功
+
+  /api/companies/{id}/correlation-map:
+    get:
+      tags: [companies]
+      summary: 企業相関図（学生向け）データを取得
+      description: |
+        起点企業を中心に、資本関係（子会社/関連会社を区別）と取引関係を返す。
+        カード用の短い事業説明・上場区分・出典、初期表示用の直接子会社リスト（読み仮名順）を含む。
+        資本の鏡像行（A→B と B→A）は1本に畳む。取引の `direction_known` は現状常に false
+        （from/to は取得起点→相手であり、提供側→利用側ではない）。
+        事業タグ専用データは未整備のため `business_tags` は空・`business_tags_status=unavailable`。
+        採用情報は含めない。審査前のゲスト投稿企業はノードから除外する。
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "404":
+          description: 企業が見つからない
+
+  /api/companies/{id}/correlation-map/compare:
+    get:
+      tags: [companies]
+      summary: 起点企業と選択企業の事業説明を並べて返す
+      description: |
+        組み合わせ専用の比較文は持たない。両社の short_business / main_business / description を返す。
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+          description: 起点企業ID
+        - in: query
+          name: with
+          required: true
+          schema:
+            type: integer
+          description: 選択企業ID
+      responses:
+        "200":
+          description: 成功
+        "400":
+          description: with が無い
+        "404":
+          description: 企業が見つからない
 
   /api/companies/web-search:
     get:

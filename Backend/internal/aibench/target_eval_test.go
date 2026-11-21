@@ -250,6 +250,7 @@ func TestEvaluateInterviewResponse(t *testing.T) {
 			`"category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"数字を添える"}],` +
 			`"scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
 			`"evidence":{"logic":"文化祭の実行委員長として30人のチームをまとめ、来場者を前年の1.5倍にしました"},` +
+			`"evidence_utterance_ids":{"logic":2},` +
 			`"strengths":["主体性","巻き込み力"],"improvements":["結論を先に","数値の補足"],` +
 			`"teacher":{"overall_comment":"総評","detailed_evidence":{"logic":"文化祭の実行委員長として30人のチームをまとめました"},"coaching_points":["p1","p2"]}` +
 			extra + `}`
@@ -327,6 +328,27 @@ func TestEvaluateInterviewResponse(t *testing.T) {
 			name: "受験者が言っていない根拠は捏造として数える",
 			res: CallResult{Text: `{"summary":"s","category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"数字を添える"}],"scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
 				`"evidence":{"logic":"部活で全国大会に出場した経験を語っていました"},` +
+				`"strengths":["a","b"],"improvements":["c","d"],` +
+				`"teacher":{"overall_comment":"t","detailed_evidence":{},"coaching_points":["p"]}}`},
+			wantScore:      0.8,
+			wantViolations: []string{"evidence_not_spoken"},
+		},
+		{
+			// 引用は正しくても、引用元の utterance ID が別の発話なら本番は弾く
+			name: "引用元の発話IDが違う根拠は未照合として数える",
+			res: CallResult{Text: `{"summary":"s","category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"数字を添える"}],"scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
+				`"evidence":{"logic":"文化祭の実行委員長として30人のチームをまとめ、来場者を前年の1.5倍にしました"},` +
+				`"evidence_utterance_ids":{"logic":4},` +
+				`"strengths":["a","b"],"improvements":["c","d"],` +
+				`"teacher":{"overall_comment":"t","detailed_evidence":{},"coaching_points":["p"]}}`},
+			wantScore:      0.8,
+			wantViolations: []string{"evidence_not_spoken"},
+		},
+		{
+			name: "引用元の発話IDが無い根拠は未照合として数える",
+			res: CallResult{Text: `{"summary":"s","category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"数字を添える"}],"scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
+				`"evidence":{"logic":"文化祭の実行委員長として30人のチームをまとめ、来場者を前年の1.5倍にしました"},` +
+				`"evidence_utterance_ids":{"logic":null},` +
 				`"strengths":["a","b"],"improvements":["c","d"],` +
 				`"teacher":{"overall_comment":"t","detailed_evidence":{},"coaching_points":["p"]}}`},
 			wantScore:      0.8,
@@ -489,6 +511,9 @@ func TestUtterancesFromTranscript(t *testing.T) {
 	}
 	if got[0].Role != "ai" || got[1].Role != "user" {
 		t.Errorf("役割の復元に失敗: %+v", got)
+	}
+	if got[0].ID != 1 || got[1].ID != 2 || got[2].ID != 3 {
+		t.Errorf("連番のIDが振られていない: %+v", got)
 	}
 	if got[1].Text != "回答です\n続きの行" {
 		t.Errorf("複数行の発話が繋がっていない: %q", got[1].Text)

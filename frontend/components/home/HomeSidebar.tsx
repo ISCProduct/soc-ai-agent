@@ -12,12 +12,14 @@ import Business from '@mui/icons-material/Business'
 import CalendarMonth from '@mui/icons-material/CalendarMonth'
 import Description from '@mui/icons-material/Description'
 import EditNote from '@mui/icons-material/EditNote'
+import Favorite from '@mui/icons-material/Favorite'
 import History from '@mui/icons-material/History'
 import Home from '@mui/icons-material/Home'
 import MailOutline from '@mui/icons-material/MailOutline'
 import ManageAccounts from '@mui/icons-material/ManageAccounts'
 import Quiz from '@mui/icons-material/Quiz'
 import RecordVoiceOver from '@mui/icons-material/RecordVoiceOver'
+import Search from '@mui/icons-material/Search'
 import { authService, type User } from '@/lib/auth'
 import { HOME_COLORS, HOME_LAYOUT } from '@/lib/home-theme'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
@@ -71,7 +73,9 @@ const NAV_ICONS: Record<string, React.ComponentType<SvgIconProps>> = {
   '/interview': RecordVoiceOver,
   '/interview/history': Assessment,
   '/schedule': CalendarMonth,
+  '/favorites': Favorite,
   '/applications': Assignment,
+  '/companies': Search,
   '/scout': MailOutline,
   '/profile': ManageAccounts,
   '/admin': AdminPanelSettings,

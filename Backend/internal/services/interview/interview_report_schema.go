@@ -6,6 +6,10 @@ import (
 	"Backend/internal/openai"
 )
 
+// ReportResponseSchema は面接レポート採点の strict JSON Schema を返す。
+// 評価ハーネス（aibench）が本番と同じスキーマで呼ぶために公開している。
+func ReportResponseSchema() *openai.ResponseSchema { return interviewReportResponseSchema }
+
 var interviewReportResponseSchema = &openai.ResponseSchema{
 	Name: "interview_report",
 	Schema: json.RawMessage(`{

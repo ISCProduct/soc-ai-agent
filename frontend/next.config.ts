@@ -59,7 +59,6 @@ const interviewCspHeader = {
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
   // zod v4 は ESM-first ("type":"module") のため Webpack が解決できない場合がある
   transpilePackages: ['zod'],
   // MUI emotion CSS-in-JS のSSR対応

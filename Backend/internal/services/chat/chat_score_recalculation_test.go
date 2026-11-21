@@ -37,25 +37,25 @@ func (r recalculationChatMessageRepository) GetUserSessions(uint) ([]models.Chat
 // parityScoreRepository はライブ採点の書き込みをメモリに保持する。
 type parityScoreRepository struct {
 	repository.UserWeightScoreRepository
-	scores map[string]int
+	scores map[string]float64
 }
 
-func (r *parityScoreRepository) SetScore(_ uint, _, category string, absoluteScore int) error {
+func (r *parityScoreRepository) SetScore(_ uint, _, category string, absoluteScore float64) error {
 	r.scores[category] = max(0, min(100, absoluteScore))
 	return nil
 }
 
-func (r *parityScoreRepository) AddScore(_ uint, _, category string, delta int) error {
+func (r *parityScoreRepository) AddScore(_ uint, _, category string, delta float64) error {
 	r.scores[category] = max(0, min(100, r.scores[category]+delta))
 	return nil
 }
 
 // ライブ採点は評価に使ったプロンプト版も一緒に保存する（#1778）。スコアの突き合わせでは版は見ない。
-func (r *parityScoreRepository) SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore int, _ string) error {
+func (r *parityScoreRepository) SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore float64, _ string) error {
 	return r.SetScore(userID, sessionID, category, absoluteScore)
 }
 
-func (r *parityScoreRepository) AddScoreWithPromptVersion(userID uint, sessionID, category string, delta int, _ string) error {
+func (r *parityScoreRepository) AddScoreWithPromptVersion(userID uint, sessionID, category string, delta float64, _ string) error {
 	return r.AddScore(userID, sessionID, category, delta)
 }
 
@@ -157,7 +157,7 @@ func TestRecalculateChatSession_MatchesLiveScoring(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			live := &parityScoreRepository{scores: map[string]int{}}
+			live := &parityScoreRepository{scores: map[string]float64{}}
 			liveService := NewChatService(nil, nil, nil, live, parityAIQuestionRepository{},
 				nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			for i, message := range tt.messages {
@@ -200,8 +200,8 @@ func TestRecalculateChatSession_ReplaysAnswersWithMovingAverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RecalculateChatSession returned error: %v", err)
 	}
-	if got["チームワーク志向"] != want {
-		t.Fatalf("recalculated score = %d, want moving average %d", got["チームワーク志向"], want)
+	if got["チームワーク志向"] != float64(want) {
+		t.Fatalf("recalculated score = %v, want moving average %d", got["チームワーク志向"], want)
 	}
 }
 
@@ -242,8 +242,8 @@ func TestRecalculateChatSession_IgnoresAnswersFollowedByValidationFeedback(t *te
 	if err != nil {
 		t.Fatalf("RecalculateChatSession returned error: %v", err)
 	}
-	if got["チームワーク志向"] != want {
-		t.Fatalf("recalculated score = %d, want valid answer score %d", got["チームワーク志向"], want)
+	if got["チームワーク志向"] != float64(want) {
+		t.Fatalf("recalculated score = %v, want valid answer score %d", got["チームワーク志向"], want)
 	}
 }
 
