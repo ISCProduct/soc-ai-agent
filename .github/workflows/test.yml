@@ -267,6 +267,11 @@ jobs:
       - name: 静的エラーページの検査
         run: ./infra/scripts/verify-error-pages.sh
 
+      # develop が進んでも、開いている PR の版番号検査は勝手には再実行されない。
+      # 再検査ワークフローが落ちると、同じ番号の先行マージに気づけない。
+      - name: develop 最新との版番号再検査
+        run: ./automation/test/migration-vs-develop-test.sh
+
       # automation/test のスクリプトがワークフローから呼ばれていること。
       # 手で並べているため、足して登録を忘れると CI で一度も走らない。
       - name: 検査スクリプトの登録漏れ検査
