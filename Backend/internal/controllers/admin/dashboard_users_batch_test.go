@@ -13,6 +13,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -123,4 +124,49 @@ func TestAdminDashboardController_UsersBatch_ExportCSV_ChunkedPartialFailure(t *
 	assert.Contains(t, out, ",4.00\n")
 	assert.Contains(t, out, ",2.00\n")
 	sessRepo.AssertNumberOfCalls(t, "ListFinishedSessionIDsByUsers", 3)
+}
+
+// セッションIDが1000件を超えてもレポートを1000件ずつ取得する。
+// 2つ目の範囲の取得に失敗したとき、CSVは失敗した範囲のユーザーだけ空欄にし、一覧は500を返す。
+func TestAdminDashboardController_UsersBatch_ReportsChunkedPartialFailure(t *testing.T) {
+	// ユーザー1: セッション1〜1000(全てスコア4) / ユーザー2: セッション1001(取得失敗する範囲)
+	sessIDs1 := make([]uint, 1000)
+	for i := range sessIDs1 {
+		sessIDs1[i] = uint(i + 1)
+	}
+	reports1 := make([]models.InterviewReport, len(sessIDs1))
+	for i, id := range sessIDs1 {
+		reports1[i] = scoreReport(id, 4)
+	}
+	setup := func() (*mocks.UserRepositoryMock, *mocks.DashboardSessionRepoMock, *mocks.DashboardReportRepoMock) {
+		userRepo := &mocks.UserRepositoryMock{}
+		sessRepo := &mocks.DashboardSessionRepoMock{}
+		repRepo := &mocks.DashboardReportRepoMock{}
+		userRepo.On("ListUsersPaged", mock.Anything, 0, "", mock.Anything).
+			Return([]models.User{{ID: 1, Name: "u1"}, {ID: 2, Name: "u2"}}, int64(2), nil)
+		sessRepo.On("GetUserStatsBatch", []uint{1, 2}).Return(map[uint]repositories.UserSessionStat{}, nil)
+		sessRepo.On("ListFinishedSessionIDsByUsers", []uint{1, 2}).Return(map[uint][]uint{1: sessIDs1, 2: {1001}}, nil)
+		repRepo.On("FindBySessionIDs", sessIDs1).Return(reports1, nil)
+		repRepo.On("FindBySessionIDs", []uint{1001}).Return([]models.InterviewReport(nil), errors.New("db error"))
+		return userRepo, sessRepo, repRepo
+	}
+
+	t.Run("CSV", func(t *testing.T) {
+		userRepo, sessRepo, repRepo := setup()
+		req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), nil)
+		rec := httptest.NewRecorder()
+		testsupport.AssertStatus(t, newAdminDashboardController(userRepo, sessRepo, repRepo).ExportCSV, testsupport.NewCtx(req, rec), http.StatusOK)
+		lines := strings.Split(rec.Body.String(), "\n")
+		if assert.GreaterOrEqual(t, len(lines), 3) {
+			assert.True(t, strings.HasPrefix(lines[1], "1,u1,") && strings.HasSuffix(lines[1], ",4.00"), lines[1])
+			assert.True(t, strings.HasPrefix(lines[2], "2,u2,") && strings.HasSuffix(lines[2], ","), lines[2])
+		}
+		repRepo.AssertNumberOfCalls(t, "FindBySessionIDs", 2)
+	})
+	t.Run("一覧", func(t *testing.T) {
+		userRepo, sessRepo, repRepo := setup()
+		req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users", nil), nil)
+		rec := httptest.NewRecorder()
+		testsupport.AssertStatus(t, newAdminDashboardController(userRepo, sessRepo, repRepo).ListUsers, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
+	})
 }
