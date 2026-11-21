@@ -43,6 +43,10 @@ func TestStringGetters(t *testing.T) {
 		{"OpenAI Discord", "OPENAI_COST_ALERT_DISCORD_WEBHOOK_URL", OpenAICostAlertDiscordWebhookURL, " http://od ", "http://od"},
 		{"企業検索 Slack", "COMPANY_SEARCH_ALERT_SLACK_WEBHOOK_URL", CompanySearchAlertSlackWebhookURL, " http://cs ", "http://cs"},
 		{"企業検索 Discord", "COMPANY_SEARCH_ALERT_DISCORD_WEBHOOK_URL", CompanySearchAlertDiscordWebhookURL, " http://cd ", "http://cd"},
+		// モデル名は元の実装どおり空白を除かない
+		{"Whisper モデル", "OPENAI_WHISPER_MODEL", OpenAIWhisperModel, "whisper-x", "whisper-x"},
+		{"Whisper 未設定は空", "OPENAI_WHISPER_MODEL", OpenAIWhisperModel, "", ""},
+		{"TTS モデル", "OPENAI_TTS_MODEL", OpenAITTSModel, " tts-x", " tts-x"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
