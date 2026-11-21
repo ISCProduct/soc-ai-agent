@@ -2,6 +2,7 @@ package repository
 
 import (
 	"Backend/internal/models"
+	"context"
 )
 
 // UserWeightScoreRepository はユーザースコアの永続化インターフェース。
@@ -40,9 +41,14 @@ type UserCompanyMatchRepository interface {
 	// CreateOrUpdateBatch は同一 user/session のマッチ結果を一括 upsert する（既存のお気に入り等フラグは保持）。
 	CreateOrUpdateBatch(matches []*models.UserCompanyMatch) (int, error)
 	FindTopMatchesByUserAndSession(userID uint, sessionID string, limit int) ([]*models.UserCompanyMatch, error)
+	// FindFavoritedByUser はユーザーがお気に入りにしたマッチを、更新が新しい順で返す。
+	// 同じ企業の行が診断ごとに複数ある。呼び出し側で1社にまとめる。
+	FindFavoritedByUser(ctx context.Context, userID uint) ([]*models.UserCompanyMatch, error)
 	FindByID(id uint) (*models.UserCompanyMatch, error)
 	MarkAsViewed(matchID uint) error
 	ToggleFavorite(matchID uint) error
+	// UnfavoriteCompany はそのユーザーの、その企業のお気に入りを診断をまたいで外す。
+	UnfavoriteCompany(ctx context.Context, userID uint, companyID uint) error
 	MarkAsApplied(matchID uint) error
 	GetMatchStatistics(userID uint, sessionID string) (map[string]any, error)
 }

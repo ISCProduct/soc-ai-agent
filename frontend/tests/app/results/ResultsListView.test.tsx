@@ -27,6 +27,10 @@ describe('ResultsListView', () => {
     return render(
       <ResultsListView
         companies={[sampleCompany]}
+        favoriteCompanies={[]}
+        favoritesLoading={false}
+        favoritesError={null}
+        onRetryFavorites={noop}
         isProvisional={false}
         analysisScores={null}
         scoreComment=""
@@ -46,6 +50,7 @@ describe('ResultsListView', () => {
         onSendEmail={noop}
         onSelectCompany={noop}
         onToggleFavorite={noop}
+        onUnfavoriteCompany={noop}
         onApply={noop}
         onNavigate={noop}
         {...overrides}
@@ -63,6 +68,10 @@ describe('ResultsListView', () => {
     rerender(
       <ResultsListView
         companies={[{ ...sampleCompany, feedback: 'fit' }]}
+        favoriteCompanies={[]}
+        favoritesLoading={false}
+        favoritesError={null}
+        onRetryFavorites={() => {}}
         isProvisional={false}
         analysisScores={null}
         scoreComment=""
@@ -82,6 +91,7 @@ describe('ResultsListView', () => {
         onSendEmail={noop}
         onSelectCompany={noop}
         onToggleFavorite={noop}
+        onUnfavoriteCompany={() => {}}
         onFeedback={onFeedback}
         onApply={noop}
         onNavigate={noop}
@@ -213,6 +223,67 @@ describe('ResultsListView', () => {
     expect(screen.queryByText('応募は準備中')).not.toBeInTheDocument()
   })
 
+  it('お気に入りだけを選ぶと、診断をまたいだ企業を業界と職種で並べる', () => {
+    const favorited = {
+      ...sampleCompany,
+      id: '2',
+      matchId: 11,
+      name: 'お気に入り株式会社',
+      industry: '製造',
+      jobTitle: '生産管理',
+      matchScore: 70,
+      isFavorited: true,
+      categoryScores: {
+        technical: 81.2,
+        teamwork: 0,
+        leadership: 0,
+        creativity: 0,
+        stability: 0,
+        growth: 0,
+        work_life: 0,
+        challenge: 0,
+        detail: 0,
+        communication: 0,
+      },
+    }
+    const noJob = {
+      ...sampleCompany,
+      id: '3',
+      matchId: 12,
+      name: '職種なし株式会社',
+      isFavorited: true,
+      matchScore: 60,
+    }
+    renderList({
+      companies: [sampleCompany],
+      favoriteCompanies: [favorited, noJob],
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'お気に入りだけ（2）' }))
+
+    expect(screen.queryByText('サンプル株式会社')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'お気に入り株式会社' })).toBeInTheDocument()
+    expect(screen.getByText('製造')).toBeInTheDocument()
+    expect(screen.getByText('生産管理')).toBeInTheDocument()
+    expect(screen.getByText('職種なし株式会社')).toBeInTheDocument()
+    expect(screen.getByText('技術力')).toBeInTheDocument()
+    expect(screen.getByText('81')).toBeInTheDocument()
+    expect(screen.getAllByText('未設定').length).toBeGreaterThan(0)
+    // 渡された順のまま。適合度の高いお気に入りが先。
+    const names = screen.getAllByRole('button', { name: /株式会社$/ }).map((node) => node.textContent)
+    expect(names).toEqual(['お気に入り株式会社', '職種なし株式会社'])
+  })
+
+  it('お気に入りが無いときは、すべての企業へ戻れる', () => {
+    renderList()
+
+    fireEvent.click(screen.getByRole('button', { name: 'お気に入りだけ（0）' }))
+    expect(screen.getByText('お気に入りにした企業はまだありません')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'すべての企業を見る' }))
+    expect(screen.getByText('サンプル株式会社')).toBeInTheDocument()
+  })
+
   // #2088: 位置（index）を key にすると、並べ替えたときに React が位置で要素を使い回し、別の値の状態を引き継いでしまう
   it('技術スタックを並べ替えても、同じ値の要素は同じ DOM のまま移動する', () => {
     const { rerender } = renderList({ companies: [{ ...sampleCompany, techStack: ['Go', 'AWS'] }] })
@@ -220,6 +291,10 @@ describe('ResultsListView', () => {
     rerender(
       <ResultsListView
         companies={[{ ...sampleCompany, techStack: ['AWS', 'Go'] }]}
+        favoriteCompanies={[]}
+        favoritesLoading={false}
+        favoritesError={null}
+        onRetryFavorites={() => {}}
         isProvisional={false}
         analysisScores={null}
         scoreComment=""
@@ -239,6 +314,7 @@ describe('ResultsListView', () => {
         onSendEmail={() => {}}
         onSelectCompany={() => {}}
         onToggleFavorite={() => {}}
+        onUnfavoriteCompany={() => {}}
         onApply={() => {}}
         onNavigate={() => {}}
       />,
