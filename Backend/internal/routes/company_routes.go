@@ -24,4 +24,7 @@ func SetupCompanyRoutes(api *echo.Group, relationController *companycontrollers.
 	companies.GET("/:id/job-positions", relationController.GetCompanyJobPositions)
 	companies.GET("/:id/relations", relationController.GetCompanyRelations)
 	companies.GET("/:id/market-info", relationController.GetCompanyMarketInfo)
+	// 企業相関図（学生向け）。既存の関係・企業プロフィールを画面用に組み立てる。
+	companies.GET("/:id/correlation-map", relationController.GetCompanyCorrelationMap)
+	companies.GET("/:id/correlation-map/compare", relationController.CompareCompanyBusiness)
 }
