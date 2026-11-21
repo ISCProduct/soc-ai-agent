@@ -85,6 +85,13 @@ describe('セッションCookie発行 POST の呼び出し元検証 (SOCAIAGENT-
     { name: 'ポート違いの Origin は 403', headers: { ...SAME_SITE, origin: 'http://localhost:4000' }, status: 403 },
     { name: 'Origin なしは 403', headers: { 'content-type': 'application/json' }, status: 403 },
     { name: '不正な Origin は 403', headers: { ...SAME_SITE, origin: 'null' }, status: 403 },
+    { name: 'サブドメインの Origin は 403', headers: { ...SAME_SITE, origin: 'http://sub.localhost:3000' }, status: 403 },
+    {
+      name: 'X-Forwarded-Host を合わせても Host と違えば 403',
+      headers: { ...SAME_SITE, origin: 'https://evil.example', 'x-forwarded-host': 'evil.example' },
+      status: 403,
+    },
+    { name: '大文字の Origin は正規化して通す', headers: { ...SAME_SITE, origin: 'http://LOCALHOST:3000' }, status: 200 },
     { name: '壊れた JSON は 400', headers: SAME_SITE, raw: '{', status: 400 },
     { name: '配列の JSON は 400', headers: SAME_SITE, raw: '[]', status: 400 },
   ]
