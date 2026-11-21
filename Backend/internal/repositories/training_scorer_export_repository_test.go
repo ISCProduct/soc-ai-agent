@@ -138,7 +138,7 @@ func TestTrainingScorerExportRepository_StartAndFinishRun(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO `training_scorer_export_runs`").
-		WithArgs(models.TrainingScorerExportRunning, started, nil, 0, 0, "s3://b/p/runs/x/", "", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(models.TrainingScorerRunKindExport, models.TrainingScorerExportRunning, started, nil, 0, 0, 0, "s3://b/p/runs/x/", "", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(9, 1))
 	mock.ExpectCommit()
 	mock.ExpectBegin()
@@ -162,6 +162,66 @@ func TestTrainingScorerExportRepository_StartRun_Error(t *testing.T) {
 	mock.ExpectRollback()
 
 	id, err := NewTrainingScorerExportRepository(db).StartTrainingExportRun(context.Background(), "s3://b/p/", time.Now())
+	require.Error(t, err)
+	assert.Zero(t, id)
+}
+
+// TestTrainingScorerExportRepository_ListTrainingEligibleUserIDs は、削除（Sweep）が「残す学生」の一覧に使う ID が、
+// 「学習に使ってよい学生」の4つの条件をすべて通ることを確かめる。条件が欠けると、取り消した・退会した学生の
+// ファイルを残してしまう。
+func TestTrainingScorerExportRepository_ListTrainingEligibleUserIDs(t *testing.T) {
+	db, mock := newSearchMockDB(t)
+	mock.ExpectQuery(trainingGuards + ".*ORDER BY u.id").
+		WithArgs(trainingGuardArgs...).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(3).AddRow(8))
+
+	ids, err := NewTrainingScorerExportRepository(db).ListTrainingEligibleUserIDs(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []uint{3, 8}, ids)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestTrainingScorerExportRepository_ListTrainingEligibleUserIDs_Error(t *testing.T) {
+	db, mock := newSearchMockDB(t)
+	mock.ExpectQuery(trainingGuards).WillReturnError(errors.New("db down"))
+
+	ids, err := NewTrainingScorerExportRepository(db).ListTrainingEligibleUserIDs(context.Background())
+	require.Error(t, err)
+	assert.Empty(t, ids)
+}
+
+// TestTrainingScorerExportRepository_SweepRun は、削除の監査ログを kind=sweep で作り、消したファイルの数を
+// sweep の行にだけ書くことを確かめる（書き出しの行を書き換えない）。
+func TestTrainingScorerExportRepository_SweepRun(t *testing.T) {
+	db, mock := newSearchMockDB(t)
+	started := time.Date(2026, 11, 17, 7, 0, 0, 0, time.UTC)
+	finished := started.Add(time.Minute)
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO `training_scorer_export_runs`").
+		WithArgs(models.TrainingScorerRunKindSweep, models.TrainingScorerExportRunning, started, nil, 0, 0, 0, "s3://b/p/runs/", "", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(11, 1))
+	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE `training_scorer_export_runs` SET `deleted_file_count`=?,`error_message`=?,`finished_at`=?,`status`=?,`updated_at`=? WHERE id = ? AND kind = ?")).
+		WithArgs(3, "", finished, models.TrainingScorerExportSucceeded, sqlmock.AnyArg(), uint(11), models.TrainingScorerRunKindSweep).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	repo := NewTrainingScorerExportRepository(db)
+	id, err := repo.StartTrainingSweepRun(context.Background(), "s3://b/p/runs/", started)
+	require.NoError(t, err)
+	assert.Equal(t, uint(11), id)
+	require.NoError(t, repo.FinishTrainingSweepRun(context.Background(), id, models.TrainingScorerExportSucceeded, 3, "", finished))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestTrainingScorerExportRepository_StartSweepRun_Error(t *testing.T) {
+	db, mock := newSearchMockDB(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO `training_scorer_export_runs`").WillReturnError(errors.New("db down"))
+	mock.ExpectRollback()
+
+	id, err := NewTrainingScorerExportRepository(db).StartTrainingSweepRun(context.Background(), "s3://b/p/runs/", time.Now())
 	require.Error(t, err)
 	assert.Zero(t, id)
 }

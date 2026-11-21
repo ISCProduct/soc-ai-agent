@@ -21,6 +21,8 @@ func SetupChatRoutes(api *echo.Group, chatController *chatcontrollers.ChatContro
 	chat.POST("/favorite", chatController.ToggleFavorite)
 	chat.GET("/favorites", chatController.GetFavorites)
 	chat.POST("/favorites/remove", chatController.RemoveFavoriteCompany)
+	// 推薦への「合う／合わない」（SOCAIAGENT-670）
+	chat.POST("/match-feedback", chatController.SubmitMatchFeedback)
 
 	// 質問管理エンドポイント（認証必須）
 	questions := api.Group("/questions", EchoUserAuth(userSecret, access, orgs))

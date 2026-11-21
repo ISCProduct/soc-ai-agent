@@ -29,6 +29,8 @@ import { PageLoading } from '@/components/common/PageLoading'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import { CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
 import { createTextDiff, findUniqueTextRange, type DiffSegment } from './text-diff'
+import EsTemplatePanel from '@/components/es/EsTemplatePanel'
+import { PLACEHOLDER_PATTERN } from '@/lib/es-templates'
 
 const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
 
@@ -566,6 +568,15 @@ function ESRewriteContent() {
               </Box>
             </Box>
 
+            {/* 書き出しガイドと例文（SOCAIAGENT-613）。種別を変えたら例文の絞り込みも戻す */}
+            <EsTemplatePanel
+              key={questionType}
+              questionType={questionType}
+              draft={originalText}
+              maxLength={ES_TEXT_MAX_LENGTH}
+              onInsert={setOriginalText}
+            />
+
             {/* 設問（#1531） */}
             <Box sx={{ mb: 2.5 }}>
               <TextField
@@ -718,6 +729,13 @@ function ESRewriteContent() {
                   </Box>
                 )}
               </>
+            )}
+
+            {/* ひな形・例文の【 】が残ったまま送ると、AI がそのまま書き直してしまう */}
+            {PLACEHOLDER_PATTERN.test(originalText) && (
+              <Alert severity="warning" role="status" sx={{ mb: 2, borderRadius: 2, fontSize: 13 }}>
+                【 】の部分が残っています。自分の経験に置き換えてから送ってください。
+              </Alert>
             )}
 
             <Button

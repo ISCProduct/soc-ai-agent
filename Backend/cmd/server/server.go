@@ -14,6 +14,7 @@ import (
 	"Backend/internal/services/maintenance"
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/organization"
+	"Backend/internal/services/prompts"
 	"Backend/migrations"
 	"context"
 	"log"
@@ -39,6 +40,13 @@ func bootstrap() (*config.Config, *gorm.DB, *openai.Client, *config.OAuthConfig)
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// プロンプト版の環境変数が本文のある版を指しているかを確かめる（SOCAIAGENT-661）。
+	// 本文の無い版のまま動くと、使用量ログの版が実際の本文を指さなくなるので起動を止める。
+	// デプロイ前の確認は cmd/promptcheck で同じ検証だけを実行する。
+	if err := prompts.ValidateSettings(); err != nil {
+		log.Fatalf("Invalid prompt version settings: %v", err)
 	}
 
 	// データベース接続
@@ -160,7 +168,7 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 	safego.Every(24*time.Hour, true, func() {
 		// 退会時のベクトル削除はRAG障害でも退会を失敗させないためエラーを飲む。
 		// 取りこぼしをここで消し直す(#1204)。パージより先に実行して、
-		// 30日待たずに個人データを消す。
+		// パージ期限を待たずに個人データを消す。
 		if attempted, failed, err := userDeletionService.ReconcileScoutIndex(context.Background()); err != nil {
 			slog.Error("scout index reconcile failed", "error", err)
 		} else if failed > 0 {
@@ -198,7 +206,7 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 				return
 			}
 			if res != nil {
-				slog.Info("auto score calibration applied", "version", res.Version, "categories", len(res.Weights), "message", res.Message)
+				slog.Info("auto score calibration applied", "version", res.Version, "categories", len(res.Weights), "message", res.Message) // logpolicy:ok キャリブレーション結果の文言で、個人情報を含まない
 			}
 		})
 	}

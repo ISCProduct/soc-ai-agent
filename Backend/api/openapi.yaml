@@ -331,7 +331,7 @@ components:
             - challenge_seeking
             - detail_orientation
             - communication_skill
-        Score: { type: integer, minimum: 0, maximum: 100 }
+        Score: { type: number, minimum: 0, maximum: 100, description: 小数第2位まで（DECIMAL(5,2)）。表示側で丸める }
 
     PhaseProgress:
       type: object
@@ -358,6 +358,13 @@ components:
         message: { type: string }
         industry_id: { type: integer }
         job_category_id: { type: integer }
+        consult_intent:
+          type: string
+          enum: [find_job, learn_industry, how_to_proceed, organize_strengths, free]
+          description: |
+            ホームの「キャリア相談」で選んだ意図（任意。送らない既存のクライアントは従来どおり動く）。
+            セッションの最初の回答でだけ使い、意図を保存して、次の質問で職種を聞く。
+            free のときの message は 1〜1000 文字。知らない値・長すぎる自由記述は 400。
 
     ChatResponse:
       type: object
@@ -382,6 +389,16 @@ components:
         answered_questions: { type: integer }
         evaluated_categories: { type: integer }
         total_categories: { type: integer }
+        judgment_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: |
+            判定の進み具合（%）。質問数は固定しないので、画面の進捗はこれを使う。
+            判定できた（is_complete）ときだけ 100。
+        suggest_provisional:
+          type: boolean
+          description: 目安の回答数（30）を超えても判定できていないとき true。画面は「いまの暫定の結果を見る」を出す（質問は続けられる）。
 
     InterviewSession:
       type: object
@@ -1206,6 +1223,35 @@ paths:
         "503": { description: マッチングサービスが無い }
 
   # ── questions ──────────────────────────────────────
+
+  /api/chat/match-feedback:
+    post:
+      tags: [chat]
+      summary: 推薦への「合う／合わない」を記録する
+      description: |
+        対象は `match_id`（`UserCompanyMatch` のID）。本人の推薦だけに付けられる。
+        `verdict` は `fit`（合う）/ `unfit`（合わない）/ `none`（取り消し）。自由記述は受け付けない。
+        精度の評価に使うため、押した時点の適合度・ずれる軸・職種の加点を写しで保存する。
+        `GET /api/chat/recommendations` の各推薦に、本人の判定が `feedback` として付く。
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [match_id, verdict]
+              properties:
+                match_id: { type: integer }
+                verdict: { type: string, enum: [fit, unfit, none] }
+      responses:
+        "200": { description: 記録した }
+        "400": { description: match_id・verdict が無い、または verdict が知らない値 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: 他人の推薦 }
+        "404": { description: 推薦が無い }
+
+  # ── questions ──────────────────────────────────────
   /api/questions/generate:
     post:
       tags: [questions]
@@ -1836,6 +1882,28 @@ paths:
       responses:
         "200": { description: 注釈付きデータ }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/resume/document:
+    get:
+      tags: [resume]
+      summary: レビュー画面が描く、PDFに揃えた元の書類を取得する
+      description: |
+        DOCX・Google Docs もレビュー時に PDF へ変換してあるので、どれも PDF で返す。
+        注釈PDFと違い、指摘の強調は入っていない（画面が番号つきで重ねる）。
+        本人の書類だけ返し、共有キャッシュには残さない（`Cache-Control: private, no-store`）。
+      security: [{ userToken: [] }]
+      parameters:
+        - { name: document_id, in: query, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "400": { description: document_id が無い・不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: 他の利用者の書類 }
+        "404": { description: レビュー前で、まだ書類が用意できていない }
 
   # ── es（認証なし。レート制限のみ）────────────────────
   /api/es/rewrite:
@@ -4507,6 +4575,50 @@ paths:
         "200":
           description: 成功
 
+  /api/companies/search:
+    get:
+      tags: [companies]
+      summary: 学生向けの企業検索（業界・地域・職種・名前で絞り込み）
+      description: |
+        SOCAIAGENT-612。並びは企業名順（推薦や課金で上位に固定しない）。有効で、審査前のゲスト投稿でない企業だけ。
+        `prefecture` は都道府県名（`/api/companies/search-options` の一覧にあるもの）で、所在地に含まれるかで絞る。
+        `job_category_id` は、その職種（または子の職種）の公開中の求人を持つ企業に絞る。
+      security: []
+      parameters:
+        - { in: query, name: name, description: 企業名の部分一致（100字まで）, schema: { type: string } }
+        - { in: query, name: industry, schema: { type: string } }
+        - { in: query, name: prefecture, schema: { type: string } }
+        - { in: query, name: job_category_id, schema: { type: integer } }
+        - { in: query, name: limit, description: 既定20・上限100, schema: { type: integer } }
+        - { in: query, name: offset, schema: { type: integer } }
+      responses:
+        "200": { description: "`companies`・`total`・`limit`・`offset`" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+
+  /api/companies/search-options:
+    get:
+      tags: [companies]
+      summary: 企業検索の絞り込みの選択肢（業界・都道府県・職種）
+      description: 業界は表示できる企業に付いているもの、職種は公開中の求人がある大分類だけ（SOCAIAGENT-612）。
+      security: []
+      responses:
+        "200": { description: "`industries`・`prefectures`・`job_categories`" }
+
+  /api/companies/search/favorites:
+    get:
+      tags: [companies]
+      summary: 検索結果の企業のお気に入りの状態（本人の推薦にある企業だけ）
+      description: |
+        SOCAIAGENT-612。お気に入りは推薦（`user_company_matches`）に付くので、本人の最新の診断の推薦にある企業だけ
+        `match_id` と `is_favorited` を返す。切り替えは `POST /api/chat/favorite`。`company_ids` は100件まで。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: company_ids, description: カンマ区切りの企業 ID, schema: { type: string } }
+      responses:
+        "200": { description: "`favorites`" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /api/companies/brief:
     get:
       tags: [companies]
@@ -4599,6 +4711,58 @@ paths:
       responses:
         "200":
           description: 成功
+
+  /api/companies/{id}/correlation-map:
+    get:
+      tags: [companies]
+      summary: 企業相関図（学生向け）データを取得
+      description: |
+        起点企業を中心に、資本関係（子会社/関連会社を区別）と取引関係を返す。
+        カード用の短い事業説明・上場区分・出典、初期表示用の直接子会社リスト（読み仮名順）を含む。
+        資本の鏡像行（A→B と B→A）は1本に畳む。取引の `direction_known` は現状常に false
+        （from/to は取得起点→相手であり、提供側→利用側ではない）。
+        事業タグ専用データは未整備のため `business_tags` は空・`business_tags_status=unavailable`。
+        採用情報は含めない。審査前のゲスト投稿企業はノードから除外する。
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "404":
+          description: 企業が見つからない
+
+  /api/companies/{id}/correlation-map/compare:
+    get:
+      tags: [companies]
+      summary: 起点企業と選択企業の事業説明を並べて返す
+      description: |
+        組み合わせ専用の比較文は持たない。両社の short_business / main_business / description を返す。
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+          description: 起点企業ID
+        - in: query
+          name: with
+          required: true
+          schema:
+            type: integer
+          description: 選択企業ID
+      responses:
+        "200":
+          description: 成功
+        "400":
+          description: with が無い
+        "404":
+          description: 企業が見つからない
 
   /api/companies/web-search:
     get:

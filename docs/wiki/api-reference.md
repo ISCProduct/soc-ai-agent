@@ -162,7 +162,8 @@ Referer に user_id が残るだけです。
 
 | メソッド | パス | パラメータ | 概要 |
 |---------|------|-----------|------|
-| POST | `/api/chat` | body: session_id, message | 発言・スコア更新・次の質問 |
+| POST | `/api/chat/match-feedback` | body: match_id, verdict（fit / unfit / none） | 推薦への「合う／合わない」を記録（SOCAIAGENT-670） |
+| POST | `/api/chat` | body: session_id, message, consult_intent（任意） | 発言・スコア更新・次の質問。応答に `judgment_percent`（判定の進み具合）・`suggest_provisional` |
 | GET | `/api/chat/history` | ?session_id | 履歴 |
 | GET | `/api/chat/scores` | ?session_id | 10カテゴリスコア取得 |
 | GET | `/api/chat/recommendations` | ?session_id | マッチング企業一覧 |
@@ -215,6 +216,7 @@ Referer に user_id が残るだけです。
 | POST | `/api/resume/{id}/review` | レビュー実行（スコア更新も実施） |
 | GET | `/api/resume/{id}/review/stream` | レビューSSEストリーミング |
 | GET | `/api/resume/{id}/annotated` | 注釈済みPDF取得 |
+| GET | `/api/resume/document?document_id=` | レビュー画面が描く、PDFに揃えた元の書類（本人のみ・`Cache-Control: private, no-store`。レビュー前は404） |
 | GET | `/api/resume/status` | 自分の履歴書の対応要否（リマインダー用、#1030） |
 
 ---

@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"Backend/internal/controllers/mocks"
@@ -161,6 +162,69 @@ func TestResumeController_Annotated_NotFound(t *testing.T) {
 	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
 	testsupport.AssertStatus(t, newResumeController(svc).Annotated, testsupport.NewCtx(req, rec), http.StatusNotFound)
+	svc.AssertExpectations(t)
+}
+
+// ---- Document（レビュー画面が描く、PDFに揃えた元の書類） ----
+
+func TestResumeController_Document_MissingDocumentID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/resume/document", nil)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, resumecontrollers.NewResumeController(nil).Document, testsupport.NewCtx(req, rec), http.StatusBadRequest)
+}
+
+func TestResumeController_Document_Unauthorized(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/resume/document?document_id=1", nil)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, resumecontrollers.NewResumeController(nil).Document, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
+}
+
+// 他人の書類は見せない
+func TestResumeController_Document_Forbidden(t *testing.T) {
+	svc := &mocks.ResumeServiceMock{}
+	svc.On("OpenNormalizedFile", uint(1), uint(2)).Return(nil, shared.ErrForbidden)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/resume/document?document_id=1", nil)
+	req = testsupport.WithUserID(req, 2)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, newResumeController(svc).Document, testsupport.NewCtx(req, rec), http.StatusForbidden)
+	svc.AssertExpectations(t)
+}
+
+func TestResumeController_Document_NotReady(t *testing.T) {
+	svc := &mocks.ResumeServiceMock{}
+	svc.On("OpenNormalizedFile", uint(1), uint(1)).Return(nil, errors.New("document file not ready"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/resume/document?document_id=1", nil)
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, newResumeController(svc).Document, testsupport.NewCtx(req, rec), http.StatusNotFound)
+	svc.AssertExpectations(t)
+}
+
+func TestResumeController_Document_ServesPDFWithoutSharedCache(t *testing.T) {
+	svc := &mocks.ResumeServiceMock{}
+	body := "%PDF-1.4 test"
+	svc.On("OpenNormalizedFile", uint(1), uint(1)).Return(&resume.AnnotatedFile{
+		Reader:      strings.NewReader(body),
+		Size:        int64(len(body)),
+		ContentType: "application/pdf",
+		Filename:    "normalized.pdf",
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/resume/document?document_id=1", nil)
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, newResumeController(svc).Document, testsupport.NewCtx(req, rec), http.StatusOK)
+	if got := rec.Header().Get("Content-Type"); got != "application/pdf" {
+		t.Errorf("Content-Type=%q", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, no-store" {
+		t.Errorf("Cache-Control=%q", got)
+	}
+	if rec.Body.String() != body {
+		t.Errorf("body=%q", rec.Body.String())
+	}
 	svc.AssertExpectations(t)
 }
 

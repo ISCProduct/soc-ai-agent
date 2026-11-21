@@ -2,6 +2,9 @@
  * マッチング結果ページ向けの共有型。
  */
 
+/** 推薦への「合う／合わない」の判定 */
+export type MatchFeedbackVerdict = 'fit' | 'unfit'
+
 export interface CategoryScores {
   technical: number
   teamwork: number
@@ -28,6 +31,14 @@ export interface Company {
   matchScore: number
   /** matchScore の算出に使えた軸の数（0-10、#1124）。少ないほど根拠が薄い */
   matchedAxisCount?: number
+  /** 本人の傾向と企業の重視点が大きく離れた軸が複数ある提案（SOCAIAGENT-670）。適合度は下げてある */
+  isReference?: boolean
+  /** 参考の理由（例:「参考: 技術志向・安定志向で、…」）。参考でなければ無い */
+  fitNote?: string
+  /** 本人が選んだ職種の募集がある企業（SOCAIAGENT-670）。適合度は加点してある */
+  jobMatched?: boolean
+  /** 本人の「合う／合わない」（SOCAIAGENT-670）。未回答は無い */
+  feedback?: MatchFeedbackVerdict
   tags: string[]
   techStack: string[]
   categoryScores?: CategoryScores
