@@ -274,6 +274,16 @@ describe('useResumePage handleReview のストリーム中断 (SOCAIAGENT-664)',
     expect(result.current.reviewProgress).toEqual({ stage: 1, percent: 30 })
   })
 
+  it('前より小さい％や前の段階が届いても、進み具合を逆戻りさせない', async () => {
+    const result = await setup(() =>
+      sse({ type: 'progress', stage: 2, percent: 50 }, { type: 'progress', stage: 1, percent: 30 }, { type: 'progress', stage: 1.5, percent: 60 }),
+    )
+    await act(async () => {
+      await result.current.handleReview()
+    })
+    expect(result.current.reviewProgress).toEqual({ stage: 2, percent: 50 })
+  })
+
   it('もう一度レビューを始めたら、前回の進み具合を消す', async () => {
     let first = true
     const result = await setup(() => {

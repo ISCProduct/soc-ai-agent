@@ -390,8 +390,10 @@ export function useResumePage() {
           }
 
           if (data.type === 'progress') {
-            if (Number.isFinite(data.stage) && Number.isFinite(data.percent)) {
-              setReviewProgress({ stage: data.stage as number, percent: Math.min(100, Math.max(0, data.percent as number)) })
+            if (Number.isInteger(data.stage) && Number.isFinite(data.percent)) {
+              const next = { stage: data.stage as number, percent: Math.round(Math.min(100, Math.max(0, data.percent as number))) }
+              // 届く順が前後しても、％と段階は逆戻りさせない
+              setReviewProgress((prev) => (prev && (next.percent < prev.percent || next.stage < prev.stage) ? prev : next))
             }
           } else if (data.type === 'chunk') {
             setRagReport((prev) => prev + (data.text ?? ''))

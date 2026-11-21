@@ -31,6 +31,12 @@ describe('ResumeRunningCard', () => {
     expect(screen.getByRole('status')).toHaveTextContent('書類を読み取っています')
   })
 
+  it('範囲外の段階番号は最終段階として表示する', () => {
+    renderCard({ stage: 9, percent: 85 })
+    expect(screen.getByRole('status')).toHaveTextContent('仕上げをしています')
+    expect(screen.getByText('進み具合の目安（4 / 4 段階目）')).toBeInTheDocument()
+  })
+
   it('目安の60秒を超えたら「お知らせ」を出す', () => {
     jest.useFakeTimers()
     renderCard({ stage: 3, percent: 85 })
@@ -38,7 +44,8 @@ describe('ResumeRunningCard', () => {
     act(() => {
       jest.advanceTimersByTime(61_000)
     })
-    expect(screen.getByText('お知らせ')).toBeInTheDocument()
+    // 読み上げのため、常設のライブリージョンの中に出す
+    expect(screen.getByText('お知らせ').closest('[aria-live="polite"]')).not.toBeNull()
     expect(screen.getByText('目安 30〜60秒を超えています')).toBeInTheDocument()
   })
 })

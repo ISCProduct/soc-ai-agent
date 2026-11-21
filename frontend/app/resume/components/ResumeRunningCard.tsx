@@ -69,7 +69,8 @@ export function ResumeRunningCard({ progress, fileName, targetLabel, candidateLa
     return () => clearInterval(timer)
   }, [])
 
-  const stage = progress?.stage ?? 0
+  // 想定外の段階番号が来ても表示が崩れないよう 0〜最終段階に収める
+  const stage = Math.min(Math.max(progress?.stage ?? 0, 0), REVIEW_STAGES.length - 1)
   const percent = progress?.percent ?? 0
   const over = elapsed > EXPECTED_SECONDS.max
   const rows = [
@@ -94,7 +95,7 @@ export function ResumeRunningCard({ progress, fileName, targetLabel, candidateLa
         }}
       >
         <Typography role="status" sx={{ fontSize: { xs: 20, md: 22 }, lineHeight: '32px', fontWeight: 700, color: UI.ink, textAlign: 'center' }}>
-          {HEADLINES[stage] ?? HEADLINES[0]}
+          {HEADLINES[stage]}
         </Typography>
         <Box aria-hidden sx={{ display: 'flex', alignItems: 'flex-end', gap: 0.5, color: UI.mark }}>
           <Typography component="span" sx={{ fontSize: 56, lineHeight: '64px', fontWeight: 700 }}>
@@ -105,7 +106,7 @@ export function ResumeRunningCard({ progress, fileName, targetLabel, candidateLa
           </Typography>
         </Box>
         <Typography sx={{ fontSize: 16, color: UI.inkSoft, textAlign: 'center' }}>
-          進み具合の目安（{Math.min(stage + 1, REVIEW_STAGES.length)} / {REVIEW_STAGES.length} 段階目）
+          進み具合の目安（{stage + 1} / {REVIEW_STAGES.length} 段階目）
         </Typography>
         <Box
           role="progressbar"
@@ -113,7 +114,7 @@ export function ResumeRunningCard({ progress, fileName, targetLabel, candidateLa
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={percent}
-          aria-valuetext={`${percent}%（${REVIEW_STAGES[stage] ?? REVIEW_STAGES[0]}）`}
+          aria-valuetext={`${percent}%（${REVIEW_STAGES[stage]}）`}
           sx={{ width: '100%', height: 16, borderRadius: '8px', bgcolor: UI.rule, border: `1px solid ${UI.inkFaint}`, overflow: 'hidden' }}
         >
           <Box sx={{ width: `${percent}%`, height: '100%', bgcolor: UI.mark, transition: 'width 0.4s ease' }} />
@@ -124,14 +125,17 @@ export function ResumeRunningCard({ progress, fileName, targetLabel, candidateLa
             {over ? `目安 ${EXPECTED_SECONDS.min}〜${EXPECTED_SECONDS.max}秒を超えています` : `目安 ${EXPECTED_SECONDS.min}〜${EXPECTED_SECONDS.max}秒`}
           </Typography>
         </Stack>
-        {over && (
-          <Box sx={{ width: '100%', px: 2, py: 1.5, bgcolor: UI.flagTint, border: `1px solid ${UI.flag}`, borderRadius: '8px' }}>
-            <Typography sx={{ fontSize: 16, fontWeight: 700, color: UI.ink }}>お知らせ</Typography>
-            <Typography sx={{ fontSize: 16, color: UI.ink }}>
-              いつもより時間がかかっています。混み合っているときは2〜3分かかることがあります。この画面を開いたままお待ちください。
-            </Typography>
-          </Box>
-        )}
+        {/* 超過の案内を読み上げるため、ライブリージョンは常に置いておき中身だけ差し込む。毎秒変わる経過時間は外に置く */}
+        <Box aria-live="polite" sx={{ width: '100%', '&:empty': { display: 'none' } }}>
+          {over && (
+            <Box sx={{ px: 2, py: 1.5, bgcolor: UI.flagTint, border: `1px solid ${UI.flag}`, borderRadius: '8px' }}>
+              <Typography sx={{ fontSize: 16, fontWeight: 700, color: UI.ink }}>お知らせ</Typography>
+              <Typography sx={{ fontSize: 16, color: UI.ink }}>
+                いつもより時間がかかっています。混み合っているときは2〜3分かかることがあります。この画面を開いたままお待ちください。
+              </Typography>
+            </Box>
+          )}
+        </Box>
         <Stack component="ol" sx={{ width: '100%', listStyle: 'none', m: 0, p: 0 }}>
           {REVIEW_STAGES.map((label, i) => (
             <StageRow key={label} index={i} current={stage} />
