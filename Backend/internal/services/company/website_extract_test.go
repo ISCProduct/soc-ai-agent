@@ -21,6 +21,10 @@ func TestWebsite_会社概要ページを辿って本文を集める(t *testing.
 	var gotPaths []string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r) // robots.txt が無いサイト = 制限なし
+			return
+		}
 		gotPaths = append(gotPaths, r.URL.Path)
 		switch r.URL.Path {
 		case "/":

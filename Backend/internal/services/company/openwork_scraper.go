@@ -2,6 +2,7 @@ package company
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"bytes"
 	"encoding/json"
@@ -296,7 +297,7 @@ func fetchOpenworkBytes(url string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SocAI/1.0; +https://example.com/bot)")
+	req.Header.Set("User-Agent", companyfetch.UserAgent())
 	req.Header.Set("Accept-Language", "ja,en;q=0.9")
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)

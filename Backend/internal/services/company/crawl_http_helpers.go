@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"Backend/internal/companyfetch"
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
 )
@@ -19,7 +20,7 @@ func fetchBytes(url string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SocAI/1.0; +https://example.com/bot)")
+	req.Header.Set("User-Agent", companyfetch.UserAgent())
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -69,7 +70,7 @@ func fetchText(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SocAI/1.0; +https://example.com/bot)")
+	req.Header.Set("User-Agent", companyfetch.UserAgent())
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

@@ -22,6 +22,7 @@ package company
 // 減らさないことを優先している。
 //
 // この経路は既定で無効（#1345）。有効化の条件は enrichGapsWithAI 側のコメントを見ること。
+// 読む前に robots.txt を確認し、禁止されたページは読まない(website_robots.go)。
 //
 // 数値はプロンプト文面・抽出モデル・minWebsiteTextRunes に依存する。
 // そのどれかを変えたら測り直すこと。
@@ -75,6 +76,14 @@ func collectWebsiteText(ctx context.Context, websiteURL string) (string, error) 
 		return "", fmt.Errorf("公式サイトURLが空です")
 	}
 
+	robots, err := fetchRobots(ctx, top)
+	if err != nil {
+		return "", fmt.Errorf("robots.txt を確認できないため取得しません: %w", err)
+	}
+	if !robots.allows(top) {
+		return "", fmt.Errorf("robots.txt で取得が禁止されています: %s", top)
+	}
+
 	rawTop, err := fetchPageHTML(ctx, top)
 	if err != nil {
 		return "", fmt.Errorf("公式サイトの取得に失敗しました: %w", err)
@@ -83,10 +92,15 @@ func collectWebsiteText(ctx context.Context, websiteURL string) (string, error) 
 	var sb strings.Builder
 	sb.WriteString(normalizeHTMLText(rawTop))
 
-	for i, link := range rankAboutLinks(rawTop, top) {
-		if i >= maxAboutPages {
+	read := 0
+	for _, link := range rankAboutLinks(rawTop, top) {
+		if read >= maxAboutPages {
 			break
 		}
+		if !robots.allows(link) {
+			continue
+		}
+		read++
 		// 相手は自社サーバではない。連続アクセスは間隔を空ける。
 		select {
 		case <-ctx.Done():
