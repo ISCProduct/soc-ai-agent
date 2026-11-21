@@ -54,6 +54,18 @@ curl http://localhost:8080/healthz
 # → {"status":"ok"}
 ```
 
+### プロセス停止（SIGTERM）
+
+ECS の `stopTimeout` は未指定で、既定の 30 秒です。SIGTERM を受けたら、その内側（25 秒）で次を同時に止めます。
+
+1. 受け付け済みの HTTP（`Shutdown`）。途中で切れた接続はエラーログに残します。
+2. フォールバックの面接レポート生成。期限内に終わらない sessionID はログに残して諦めます。Redis 上の asynq ジョブは別途、同じ期限で停止します。
+3. 2 回目の SIGINT / SIGTERM は、この待ちを中断してプロセスを終わらせます。
+
+`jobCh` は閉じません。HTTP の待ちが先にタイムアウトしたあと、残ったハンドラが閉じたチャネルへ送ると panic になるためです。
+
+ALB の `deregistration_delay`（10 秒）は SIGTERM と同時に始まります。解除直後の短いあいだ、新規リクエストがリスナーを閉じたあとのタスクへ届くことがあります。遅延は 10 秒に短縮済みです。
+
 ### マイグレーション
 
 バージョン管理型マイグレーション（`Backend/migrations/`、`cmd/migrate`）を使用（GORMの `AutoMigrate` は禁止）。CI/CD（`.github/workflows/deployment.yml`）で以下の通り自動適用される（#618）。
