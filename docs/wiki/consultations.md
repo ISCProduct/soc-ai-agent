@@ -4,7 +4,7 @@
 
 ## しくみ
 
-- 案内（`teacher_student_guidances`）を1つのスレッドとし、発言を `guidance_messages`（`Backend/migrations/20261120113420_guidance_messages.up.sql`）に積む
+- 案内（`teacher_student_guidances`）を1つのスレッドとし、発言を `guidance_messages`（`Backend/migrations/20261122000027_guidance_messages.up.sql`）に積む
 - 学生からの質問は、種類 `question` の案内（`teacher_user_id = 0`）として作り、最初の発言も `guidance_messages` に入れる。担当校の先生なら誰でも答えられる
 - `read_at` は相手側が読んだ日時。スレッドを開くと、**その応答に含めた最後の発言の ID まで**の相手の発言が既読になる（取得のあとに届いた発言は未読のまま）
 - 先生が返信するときは、画面に出ていた最後の発言の ID（`seen_message_id`）までの学生の発言を、返信と同じトランザクションで既読にする。画面を開いたあとに学生が追記した発言は未読のまま残る
