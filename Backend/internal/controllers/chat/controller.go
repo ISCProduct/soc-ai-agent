@@ -500,7 +500,7 @@ func (c *ChatController) GetFavorites(ctx echo.Context) error {
 	}
 
 	limit := httpapi.LimitQuery(ctx, "limit", 50)
-	matches, err := c.matchingService.ListFavoriteCompanies(userID, limit)
+	matches, err := c.matchingService.ListFavoriteCompanies(ctx.Request().Context(), userID, limit)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -526,7 +526,7 @@ func (c *ChatController) RemoveFavoriteCompany(ctx echo.Context) error {
 	if c.matchingService == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "matching service not available")
 	}
-	if err := c.matchingService.UnfavoriteCompany(userID, req.CompanyID); err != nil {
+	if err := c.matchingService.UnfavoriteCompany(ctx.Request().Context(), userID, req.CompanyID); err != nil {
 		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]bool{"ok": true})

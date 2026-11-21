@@ -480,8 +480,8 @@ func (s *MatchingService) ToggleFavorite(matchID uint, userID uint) error {
 }
 
 // ListFavoriteCompanies は過去の診断を含め、お気に入り企業を1社1行で返す。
-func (s *MatchingService) ListFavoriteCompanies(userID uint, limit int) ([]*models.UserCompanyMatch, error) {
-	rows, err := s.matchRepo.FindFavoritedByUser(userID)
+func (s *MatchingService) ListFavoriteCompanies(ctx context.Context, userID uint, limit int) ([]*models.UserCompanyMatch, error) {
+	rows, err := s.matchRepo.FindFavoritedByUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -490,11 +490,11 @@ func (s *MatchingService) ListFavoriteCompanies(userID uint, limit int) ([]*mode
 
 // UnfavoriteCompany はそのユーザーの、その企業のお気に入りを診断をまたいで外す。
 // 対象が無いときも成功にする。解除は何度呼んでも同じ結果になる。
-func (s *MatchingService) UnfavoriteCompany(userID uint, companyID uint) error {
+func (s *MatchingService) UnfavoriteCompany(ctx context.Context, userID uint, companyID uint) error {
 	if companyID == 0 {
 		return nil
 	}
-	return s.matchRepo.UnfavoriteCompany(userID, companyID)
+	return s.matchRepo.UnfavoriteCompany(ctx, userID, companyID)
 }
 
 type MatchingDiagnostics struct {

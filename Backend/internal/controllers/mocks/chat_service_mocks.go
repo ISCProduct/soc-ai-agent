@@ -84,7 +84,7 @@ func (m *MatchingServiceMock) ToggleFavorite(matchID uint, userID uint) error {
 	return args.Error(0)
 }
 
-func (m *MatchingServiceMock) ListFavoriteCompanies(userID uint, limit int) ([]*models.UserCompanyMatch, error) {
+func (m *MatchingServiceMock) ListFavoriteCompanies(_ context.Context, userID uint, limit int) ([]*models.UserCompanyMatch, error) {
 	args := m.Called(userID, limit)
 	if v := args.Get(0); v != nil {
 		return v.([]*models.UserCompanyMatch), args.Error(1)
@@ -92,7 +92,7 @@ func (m *MatchingServiceMock) ListFavoriteCompanies(userID uint, limit int) ([]*
 	return nil, args.Error(1)
 }
 
-func (m *MatchingServiceMock) UnfavoriteCompany(userID uint, companyID uint) error {
+func (m *MatchingServiceMock) UnfavoriteCompany(_ context.Context, userID uint, companyID uint) error {
 	args := m.Called(userID, companyID)
 	return args.Error(0)
 }

@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"context"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -131,11 +132,11 @@ func (r *UserCompanyMatchRepository) FindTopMatchesByUserAndSession(
 // 切ると、適合度が上位の企業が窓の外に落ちる。
 // プロファイルの無い企業はここで外す。後段で落とすと件数を食ったまま画面に出ず、
 // 学生から外せなくなる。
-func (r *UserCompanyMatchRepository) FindFavoritedByUser(userID uint) ([]*models.UserCompanyMatch, error) {
+func (r *UserCompanyMatchRepository) FindFavoritedByUser(ctx context.Context, userID uint) ([]*models.UserCompanyMatch, error) {
 	var picked []struct {
 		ID uint
 	}
-	err := r.db.Raw(`
+	err := r.db.WithContext(ctx).Raw(`
 SELECT id FROM (
   SELECT id,
          ROW_NUMBER() OVER (
@@ -158,7 +159,7 @@ WHERE rn = 1`, userID, true).Scan(&picked).Error
 	}
 
 	var ms []*models.UserCompanyMatch
-	err = r.db.Where("id IN ?", ids).
+	err = r.db.WithContext(ctx).Where("id IN ?", ids).
 		Preload("Company").
 		Preload("JobPosition").
 		Find(&ms).Error
@@ -169,8 +170,8 @@ WHERE rn = 1`, userID, true).Scan(&picked).Error
 }
 
 // UnfavoriteCompany はそのユーザーの、その企業のお気に入りをすべて外す。
-func (r *UserCompanyMatchRepository) UnfavoriteCompany(userID uint, companyID uint) error {
-	return r.db.Model(&models.UserCompanyMatch{}).
+func (r *UserCompanyMatchRepository) UnfavoriteCompany(ctx context.Context, userID uint, companyID uint) error {
+	return r.db.WithContext(ctx).Model(&models.UserCompanyMatch{}).
 		Where("user_id = ? AND company_id = ? AND is_favorited = ?", userID, companyID, true).
 		Update("is_favorited", false).Error
 }

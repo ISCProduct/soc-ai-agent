@@ -2,6 +2,7 @@ package repositories_test
 
 import (
 	"Backend/internal/models"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -281,7 +282,7 @@ func TestFindFavoritedByUser_PicksNewestSessionAndRequiresProfile(t *testing.T) 
 		WithArgs(uint(7), true).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
-	if _, err := repo.FindFavoritedByUser(7); err != nil {
+	if _, err := repo.FindFavoritedByUser(context.Background(), 7); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(*captured) == 0 {
@@ -327,7 +328,7 @@ func TestFindFavoritedByUser_LoadsPickedRowsWithCompany(t *testing.T) {
 			AddRow(10, "北見工業").
 			AddRow(12, "函館工業"))
 
-	got, err := repo.FindFavoritedByUser(7)
+	got, err := repo.FindFavoritedByUser(context.Background(), 7)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -358,7 +359,7 @@ func TestUnfavoriteCompany_ScopesUserAndCompany(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	if err := repo.UnfavoriteCompany(7, 3); err != nil {
+	if err := repo.UnfavoriteCompany(context.Background(), 7, 3); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
