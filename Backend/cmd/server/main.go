@@ -314,6 +314,7 @@ func main() {
 		return piimask.Subject{Name: u.Name, Email: u.Email, SchoolName: u.SchoolName}, nil
 	})
 	resumeService.SetSubjectReader(subjectReader)
+	githubService.SetSubjectReader(subjectReader) // GitHub 要約の README も、外の LLM へ送る前に同じ辞書で伏字にする
 	escontrollers.SetSubjectReader(subjectReader) // ES 添削・リライトも、外の LLM へ送る前に同じ辞書で伏字にする
 	crawlService := company.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 	gbizInfoRepo := repositories.NewGBizInfoRepository(db)
