@@ -1953,6 +1953,142 @@ paths:
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   # ── schedule ───────────────────────────────────────
+  /api/user/consultations:
+    get:
+      tags: [schedule]
+      summary: 自分の相談（先生からの案内と自分の質問）の一覧
+      description: |
+        #2028。新しく動いた順（`updated_at`, `id` の降順）。閉じた案内も含む（ホームの案内一覧とは別）。
+        続きは、前のページの `next_cursor` を `cursor` に渡して取る（空なら最後のページ）。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: limit, description: 件数（既定30・上限100）, schema: { type: integer } }
+        - { in: query, name: cursor, description: 前のページの next_cursor, schema: { type: string } }
+      responses:
+        "200": { description: "`items`（スレッドごとの未読数を含む）と `next_cursor`" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [schedule]
+      summary: 学生から先生への質問のスレッドを作る
+      description: |
+        #2028。学生は `X-User-Token` から決まる。本文は前後の空白を除いて1000文字（Unicode のコードポイント）まで。
+        学生でない（ゲスト・管理者・職員）なら 403。学校が未登録・学校の学園が本人と違うなら 400（どの先生にも届かないため）。
+        先生がまだ答えていない質問が5件あれば 429。
+        保存のあとのスレッドの読み直しに失敗しても 201 で `stale: true` を返す（再送で二重にしない）。
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [body], properties: { body: { type: string, maxLength: 1000 } } }
+      responses:
+        "201": { description: 作成したスレッド }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/user/consultations/unread:
+    get:
+      tags: [schedule]
+      summary: 自分のスレッドごとの、先生の未読の発言の数
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: スレッドごとの未読の数と合計 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/user/consultations/{id}:
+    get:
+      tags: [schedule]
+      summary: 自分のスレッド（案内または質問）と発言。表示した先生の発言を既読にする
+      description: 他人の案内は 404。既読にするのは、この応答に含めた最後の発言の ID まで。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: スレッド }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 相談が見つからない }
+
+  /api/user/consultations/{id}/messages:
+    post:
+      tags: [schedule]
+      summary: 自分のスレッドに返信する
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [body], properties: { body: { type: string, maxLength: 1000 } } }
+      responses:
+        "201": { description: 返信後のスレッド }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 相談が見つからない }
+
+  /api/admin/teacher/consultations:
+    get:
+      tags: [admin-analytics]
+      summary: 先生の受信一覧（学生の発言があるスレッド）
+      description: |
+        担当校スコープが掛かる（#2028）。担当校を持つ管理者・職員は `school_id` が必須で、担当校以外は 403。
+        学生（学生ロール・管理者でない・ゲストでない・退会していない）の相談だけを、最後の発言の新しい順に返す。
+        続きは、前のページの `next_before_id` を `before_id` に渡して取る（無ければ最後のページ）。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - { in: query, name: school_id, schema: { type: integer } }
+        - { in: query, name: limit, description: 件数（既定30・上限100）, schema: { type: integer } }
+        - { in: query, name: before_id, description: 前のページの next_before_id, schema: { type: integer } }
+      responses:
+        "200": { description: "`items` と `next_before_id`" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/teacher/consultations/{id}:
+    get:
+      tags: [admin-analytics]
+      summary: スレッドを見る（表示した学生の発言を既読にする）
+      description: |
+        スレッドの学生の学校が担当校でなければ、存在しない ID と同じく 404（他校の相談の有無を探らせない）。
+        既読にするのは、この応答に含めた最後の発言の ID まで。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: スレッド }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 相談が見つからない（担当校以外を含む） }
+
+  /api/admin/teacher/consultations/{id}/messages:
+    post:
+      tags: [admin-analytics]
+      summary: スレッドに先生が返信する
+      description: |
+        スレッドの学生の学校が担当校でなければ 404。`seen_message_id`（返信を書いた画面に出ていた最後の発言の ID）までの
+        学生の発言を、返信と同じトランザクションで既読にする（省略・0 なら既読にしない）。
+        保存のあとのスレッドの読み直しに失敗しても 201 で `stale: true` を返す（再送で二重にしない）。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, maxLength: 1000 }
+                seen_message_id: { type: integer }
+      responses:
+        "201": { description: 返信後のスレッド }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 相談が見つからない（担当校以外を含む） }
   /api/portfolio:
     get:
       tags: [portfolio]

@@ -116,6 +116,7 @@ var hardDeleteTargets = []string{
 	"ESReview",
 	"Notification",
 	"TrainingConsentEvent",
+	"GuidanceMessage",
 	"TeacherStudentGuidance",
 	"OrganizationMembership",
 	"CollectiveInsightLog",
