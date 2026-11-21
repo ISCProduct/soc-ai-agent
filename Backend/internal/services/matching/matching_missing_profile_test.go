@@ -30,7 +30,7 @@ func scoresFor(v int) []models.UserWeightScore {
 	}
 	out := make([]models.UserWeightScore, 0, len(categories))
 	for _, c := range categories {
-		out = append(out, models.UserWeightScore{WeightCategory: c, Score: v})
+		out = append(out, models.UserWeightScore{WeightCategory: c, Score: float64(v)})
 	}
 	return out
 }

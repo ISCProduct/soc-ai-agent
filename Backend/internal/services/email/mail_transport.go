@@ -1,6 +1,7 @@
 package email
 
 import (
+	"Backend/internal/logsafe"
 	"fmt"
 	"log"
 	"net/smtp"
@@ -34,7 +35,7 @@ func (t *logMailTransport) Send(msg mailMessage) error {
 	if bodyLen == 0 {
 		bodyLen = len(msg.Text)
 	}
-	log.Printf("[EmailService] provider=log simulating send to %v subject=%q body=%d bytes\n", msg.To, msg.Subject, bodyLen)
+	log.Printf("[EmailService] provider=log simulating send to %v subject=%q body=%d bytes\n", logsafe.MaskEmails(msg.To), msg.Subject, bodyLen)
 	return nil
 }
 
@@ -68,7 +69,7 @@ func (t *smtpMailTransport) Send(msg mailMessage) error {
 	if err := smtp.SendMail(addr, auth, msg.From, msg.To, []byte(raw)); err != nil {
 		return fmt.Errorf("smtp send failed: %w", err)
 	}
-	log.Printf("[EmailService] provider=smtp sent to %v subject=%q\n", msg.To, msg.Subject)
+	log.Printf("[EmailService] provider=smtp sent to %v subject=%q\n", logsafe.MaskEmails(msg.To), msg.Subject)
 	return nil
 }
 
@@ -105,7 +106,7 @@ func (t *resendMailTransport) Send(msg mailMessage) error {
 	if sent != nil {
 		id = sent.Id
 	}
-	log.Printf("[EmailService] provider=resend sent to %v subject=%q id=%s\n", msg.To, msg.Subject, id)
+	log.Printf("[EmailService] provider=resend sent to %v subject=%q id=%s\n", logsafe.MaskEmails(msg.To), msg.Subject, id)
 	return nil
 }
 

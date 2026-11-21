@@ -64,7 +64,8 @@ func TestAssessmentRepository_SubmitTwiceRollsBack(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-// 成功時は結果とスコアを同じトランザクションで書く。スコアは source=assessment の新しい行で、
+// 成功時は結果とスコアを同じトランザクションで書く。DECIMAL 化（SOCAIAGENT-513）により 62.5 は 63 に丸めず小数のまま保存する。
+// スコアは source=assessment の新しい行で、
 // チャット由来の行には UPDATE も DELETE も発行しない（sqlmock は想定外の SQL で失敗する）。
 func TestAssessmentRepository_SubmitWritesAssessmentRowsOnly(t *testing.T) {
 	repo, mock := newAssessmentRepo(t)
@@ -75,7 +76,7 @@ func TestAssessmentRepository_SubmitWritesAssessmentRowsOnly(t *testing.T) {
 	mock.ExpectQuery("SELECT .*organization_id.* FROM `users`").
 		WillReturnRows(sqlmock.NewRows([]string{"organization_id"}).AddRow(1))
 	mock.ExpectExec("INSERT INTO `user_weight_scores` \\(`organization_id`,`user_id`,`session_id`,`source`,`weight_category`,`score`,`calculation_version`,`prompt_version`,`created_at`,`updated_at`\\)").
-		WithArgs(1, 7, "assessment:x", models.ScoreSourceAssessment, "技術志向", 63, models.CurrentUserScoreCalculationVersion, "", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(1, 7, "assessment:x", models.ScoreSourceAssessment, "技術志向", 62.5, models.CurrentUserScoreCalculationVersion, "", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
