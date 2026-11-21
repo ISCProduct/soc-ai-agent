@@ -16,6 +16,7 @@ import (
 	"Backend/internal/controllers/mocks"
 	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
+	"Backend/internal/services/company"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -146,6 +147,19 @@ func TestAdminCrawlController_Runs_Success(t *testing.T) {
 }
 
 // ===== RunSource =====
+
+func TestAdminCrawlController_RunSource_Busy(t *testing.T) {
+	svc := &mocks.CrawlServiceMock{}
+	svc.On("RunSource", uint(1)).Return(nil, company.ErrCrawlSourceBusy)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/crawl-sources/1/run", nil)
+	rec := httptest.NewRecorder()
+	ctx := testsupport.NewCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("1")
+	testsupport.AssertStatus(t, newAdminCrawlController(svc, nil).RunSource, ctx, http.StatusConflict)
+	svc.AssertExpectations(t)
+}
 
 func TestAdminCrawlController_RunSource_ServiceError(t *testing.T) {
 	svc := &mocks.CrawlServiceMock{}

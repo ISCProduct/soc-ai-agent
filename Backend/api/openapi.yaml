@@ -2966,6 +2966,8 @@ paths:
       responses:
         "200":
           description: 成功
+        "409":
+          description: 他の実行体が実行中（確保中）のため実行しなかった
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 

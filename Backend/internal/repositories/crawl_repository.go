@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"context"
 	"time"
 
 	"gorm.io/gorm"
@@ -45,6 +46,22 @@ func (r *CrawlRepository) ListDueSources(now time.Time) ([]models.CrawlSource, e
 		Order("next_run_at asc").
 		Find(&sources).Error
 	return sources, err
+}
+
+// ClaimSource は条件付き UPDATE でソースを確保し、next_run_at を now+lease へ先送りする。
+// 定期実行（onlyIfDue）は期限到来分だけを確保する。手動実行は next_run_at が (now, now+lease] に
+// あるものを他の実行体が確保中とみなし、それ以外を確保する。
+// ponytail: 手動実行では、先送り時間内に予定された定期実行も「確保中」と区別できない（409 になる）。区別が要るなら claimed_until 列を足す。
+func (r *CrawlRepository) ClaimSource(ctx context.Context, id uint, now time.Time, lease time.Duration, onlyIfDue bool) (bool, error) {
+	until := now.Add(lease)
+	q := r.db.WithContext(ctx).Model(&models.CrawlSource{})
+	if onlyIfDue {
+		q = q.Where("id = ? AND next_run_at <= ?", id, now)
+	} else {
+		q = q.Where("id = ? AND (next_run_at IS NULL OR next_run_at <= ? OR next_run_at > ?)", id, now, until)
+	}
+	res := q.Update("next_run_at", until)
+	return res.RowsAffected == 1, res.Error
 }
 
 func (r *CrawlRepository) CreateRun(run *models.CrawlRun) error {
