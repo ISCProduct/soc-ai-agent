@@ -1,7 +1,7 @@
 'use client'
 
 import type { MouseEvent } from 'react'
-import { Box, IconButton, Tooltip, Typography } from '@mui/material'
+import { Box, Button, IconButton, Tooltip, Typography } from '@mui/material'
 import { Favorite, FavoriteBorder } from '@mui/icons-material'
 import type { Company } from '../../types'
 import { leadSentences, UI } from '@/lib/design/tokens'
@@ -64,6 +64,13 @@ export function CompanyRow({ company, rank, ctx }: { company: Company; rank: num
 
       <Box sx={{ pl: { xs: 5, md: 5.25 }, display: 'grid', gap: 1.25, mt: { xs: 0.5, md: 1.25 } }}>
         {!isDesktop && <FitScore score={company.matchScore} />}
+        {company.jobMatched && (
+          <Typography sx={{ fontSize: 14, lineHeight: '22px', color: UI.inkSoft }}>選んだ職種の募集があります。</Typography>
+        )}
+        {/* 参考の印は文字で出す（色だけで伝えない）。理由は文頭の「参考:」から続けて読める */}
+        {company.isReference && company.fitNote && (
+          <Typography sx={{ fontSize: 14, lineHeight: '22px', color: UI.flag }}>{company.fitNote}</Typography>
+        )}
         <Typography sx={{ fontSize: { xs: 15, md: 16 }, lineHeight: { xs: 1.85, md: '28px' }, color: UI.ink }}>
           {leadSentences(company.description)}
         </Typography>
@@ -73,6 +80,24 @@ export function CompanyRow({ company, rank, ctx }: { company: Company; rank: num
           </Typography>
         )}
         <MatchedAxisLine categoryScores={company.categoryScores} />
+        {ctx.onFeedback && company.matchId && (
+          <Box role="group" aria-label={`${company.name}の提案への回答`} sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+            <Typography component="span" sx={{ fontSize: 13, color: UI.inkSoft }}>この提案は？</Typography>
+            {(['fit', 'unfit'] as const).map((verdict) => (
+              <Button
+                key={verdict}
+                size="small"
+                variant={company.feedback === verdict ? 'contained' : 'outlined'}
+                aria-pressed={company.feedback === verdict}
+                disabled={ctx.feedbackingId === company.matchId}
+                onClick={(e) => ctx.onFeedback?.(e, company, verdict)}
+                sx={{ minHeight: 44, minWidth: 64 }}
+              >
+                {verdict === 'fit' ? '合う' : '合わない'}
+              </Button>
+            ))}
+          </Box>
+        )}
         <CompanyActions company={company} ctx={ctx} />
       </Box>
     </Box>

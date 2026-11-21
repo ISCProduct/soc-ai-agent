@@ -1,16 +1,17 @@
 'use client'
 
-import type { MouseEvent } from 'react'
-import { Alert, Box, Button, Snackbar, useMediaQuery, useTheme } from '@mui/material'
-import type { AnalysisScores, Company, SnackbarState, SuggestedRole } from '../types'
+import { useState, type MouseEvent } from 'react'
+import { Alert, Box, Button, Snackbar, Stack, useMediaQuery, useTheme } from '@mui/material'
+import type { AnalysisScores, Company, MatchFeedbackVerdict, SnackbarState, SuggestedRole } from '../types'
 import { CONTENT_MAX_WIDTH, UI, scaleBand } from '@/lib/design/tokens'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
-import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
+import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
 import { AnalysisErrorAlert } from './list/AnalysisErrorAlert'
 import { AnswerCoveragePanel } from './list/AnswerCoveragePanel'
 import { CompanyList } from './list/CompanyList'
 import { maxMatchedAxisCount } from './list/companyRules'
 import { EmailButton } from './list/EmailButton'
+import { FavoritesSection } from './list/FavoritesSection'
 import { NextStepBar } from './list/NextStepBar'
 import { ResultsFooterLinks } from './list/ResultsFooterLinks'
 import { ResultsHeader } from './list/ResultsHeader'
@@ -19,6 +20,11 @@ import type { CompanyRowContext } from './list/rowContext'
 
 export interface ResultsListViewProps {
   companies: Company[]
+  /** 診断をまたいで1社にまとめたお気に入り。並びは適合度の高い順 */
+  favoriteCompanies: Company[]
+  favoritesLoading: boolean
+  favoritesError: string | null
+  onRetryFavorites: () => void
   isProvisional: boolean
   diagnosisSummary?: string | null
   evaluatedCategories?: number | null
@@ -32,6 +38,8 @@ export interface ResultsListViewProps {
   suggestedRoles: SuggestedRole[]
   emailSending: boolean
   favoritingId: number | null
+  /** 「合う／合わない」を送信中の推薦。送信中は押せない */
+  feedbackingId?: number | null
   applyingId: number | null
   snackbar: SnackbarState
   isGuestUser: boolean
@@ -43,6 +51,9 @@ export interface ResultsListViewProps {
   onSendEmail: () => void
   onSelectCompany: (company: Company) => void
   onToggleFavorite: (e: MouseEvent, company: Company) => void
+  onUnfavoriteCompany: (e: MouseEvent, company: Company) => void
+  /** 推薦への「合う／合わない」。省略すると、ボタンを出さない */
+  onFeedback?: (e: MouseEvent, company: Company, verdict: MatchFeedbackVerdict) => void
   onApply: (e: MouseEvent, company: Company) => void
   onNavigate: (path: string) => void
 }
@@ -54,6 +65,10 @@ export interface ResultsListViewProps {
  */
 export default function ResultsListView({
   companies,
+  favoriteCompanies,
+  favoritesLoading,
+  favoritesError,
+  onRetryFavorites,
   isProvisional,
   diagnosisSummary = null,
   minMatchedAxisCount: _minMatchedAxisCount = null,
@@ -67,6 +82,7 @@ export default function ResultsListView({
   suggestedRoles,
   emailSending,
   favoritingId,
+  feedbackingId = null,
   applyingId,
   snackbar,
   isGuestUser,
@@ -77,16 +93,22 @@ export default function ResultsListView({
   onSendEmail,
   onSelectCompany,
   onToggleFavorite,
+  onUnfavoriteCompany,
+  onFeedback,
   onApply,
   onNavigate,
 }: ResultsListViewProps) {
   const isDesktop = useMediaQuery(useTheme().breakpoints.up('md'), { noSsr: true })
 
-  const band = scaleBand(companies.map((c) => c.matchScore))
+  // お気に入りは過去の診断も含め、同じ企業は1行。中身は呼び出し側がまとめて渡す（#2301）
+  const [favoritesOnly, setFavoritesOnly] = useState(false)
+  const listedCompanies = favoritesOnly ? favoriteCompanies : companies
+  const band = scaleBand(listedCompanies.map((c) => c.matchScore))
   const ctx: CompanyRowContext = {
     isDesktop, maxAxisCount: maxMatchedAxisCount(companies), isProvisional, isGuestUser, applyEnabled,
-    favoritingId, applyingId, onSelectCompany, onToggleFavorite, onApply, onNavigate,
+    favoritingId, applyingId, feedbackingId, onSelectCompany, onToggleFavorite, onFeedback, onApply, onNavigate,
   }
+  // PC はヘッダー右上、SP は一覧の下に1つだけ出す
   const email = <EmailButton isGuestUser={isGuestUser} emailSending={emailSending} onSendEmail={onSendEmail} fullWidth={!isDesktop} />
   const coverage = analysisScores ? <AnswerCoveragePanel scores={analysisScores} layout={isDesktop ? 'list' : 'row'} /> : null
   const roles = <RolesPanel jobSuitabilityComment={jobSuitabilityComment} suggestedRoles={suggestedRoles} />
@@ -94,7 +116,8 @@ export default function ResultsListView({
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: UI.paper }}>
       <ResultsHeader
-        companyCount={companies.length}
+        companyCount={listedCompanies.length}
+        favoritesOnly={favoritesOnly}
         isProvisional={isProvisional}
         diagnosisSummary={diagnosisSummary}
         band={band}
@@ -109,7 +132,28 @@ export default function ResultsListView({
           <Box sx={{ flex: 1, minWidth: 0, display: 'grid', gap: { xs: 2, md: 2.5 } }}>
             <AnalysisErrorAlert analysisError={analysisError} onRetryAnalysis={onRetryAnalysis} />
             {!isDesktop && coverage}
-            <CompanyList companies={companies} ctx={ctx} />
+            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" role="group" aria-label="表示する企業">
+              <Button variant={favoritesOnly ? 'text' : 'contained'} aria-pressed={!favoritesOnly} onClick={() => setFavoritesOnly(false)} sx={{ minHeight: 44 }}>
+                すべて
+              </Button>
+              <Button variant={favoritesOnly ? 'contained' : 'text'} aria-pressed={favoritesOnly} onClick={() => setFavoritesOnly(true)} sx={{ minHeight: 44 }}>
+                お気に入りだけ（{favoriteCompanies.length}）
+              </Button>
+            </Stack>
+            {favoritesOnly ? (
+              <FavoritesSection
+                companies={favoriteCompanies}
+                loading={favoritesLoading}
+                error={favoritesError}
+                favoritingId={favoritingId}
+                onRetry={onRetryFavorites}
+                onShowAll={() => setFavoritesOnly(false)}
+                onSelectCompany={onSelectCompany}
+                onUnfavorite={onUnfavoriteCompany}
+              />
+            ) : (
+              <CompanyList companies={companies} ctx={ctx} />
+            )}
             {!isDesktop && roles}
             <ResultsFooterLinks isGuestUser={isGuestUser} emailAction={isDesktop ? null : email} onReset={onReset} onNavigate={onNavigate} />
           </Box>
@@ -126,7 +170,7 @@ export default function ResultsListView({
       <BottomNavSpacer />
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={5000}
+        autoHideDuration={SNACKBAR_AUTO_HIDE_MS}
         onClose={onCloseSnackbar}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         sx={ABOVE_BOTTOM_NAV_SX}

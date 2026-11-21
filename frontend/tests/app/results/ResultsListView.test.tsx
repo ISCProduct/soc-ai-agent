@@ -47,6 +47,10 @@ describe('ResultsListView', () => {
     return render(
       <ResultsListView
         companies={[sampleCompany]}
+        favoriteCompanies={[]}
+        favoritesLoading={false}
+        favoritesError={null}
+        onRetryFavorites={noop}
         isProvisional={false}
         analysisScores={null}
         scoreComment=""
@@ -66,12 +70,66 @@ describe('ResultsListView', () => {
         onSendEmail={noop}
         onSelectCompany={noop}
         onToggleFavorite={noop}
+        onUnfavoriteCompany={noop}
         onApply={noop}
         onNavigate={noop}
         {...overrides}
       />,
     )
   }
+
+  it('「合う／合わない」は、押すと判定を渡し、回答済みは押された状態で示す。省略すると出さない（SOCAIAGENT-670）', () => {
+    const onFeedback = jest.fn()
+    const { rerender } = renderList({ onFeedback })
+    fireEvent.click(screen.getByRole('button', { name: '合わない' }))
+    expect(onFeedback).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ matchId: 10 }), 'unfit')
+    expect(screen.getByRole('button', { name: '合う' })).toHaveAttribute('aria-pressed', 'false')
+
+    rerender(
+      <ResultsListView
+        companies={[{ ...sampleCompany, feedback: 'fit' }]}
+        favoriteCompanies={[]}
+        favoritesLoading={false}
+        favoritesError={null}
+        onRetryFavorites={() => {}}
+        isProvisional={false}
+        analysisScores={null}
+        scoreComment=""
+        analysisError={null}
+        onRetryAnalysis={noop}
+        jobSuitabilityComment=""
+        suggestedRoles={[]}
+        emailSending={false}
+        favoritingId={null}
+        applyingId={null}
+        snackbar={{ open: false, message: '', severity: 'success' }}
+        isGuestUser={false}
+        applyEnabled
+        onCloseSnackbar={noop}
+        onBack={noop}
+        onReset={noop}
+        onSendEmail={noop}
+        onSelectCompany={noop}
+        onToggleFavorite={noop}
+        onUnfavoriteCompany={() => {}}
+        onFeedback={onFeedback}
+        onApply={noop}
+        onNavigate={noop}
+      />,
+    )
+    expect(screen.getByRole('button', { name: '合う' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('選んだ職種の募集と「参考」の理由を、行の中に文字で出す（SOCAIAGENT-670）', () => {
+    renderList({ companies: [{ ...sampleCompany, jobMatched: true, isReference: true, fitNote: '参考: 傾向が大きく離れています。' }] })
+    expect(screen.getByText('選んだ職種の募集があります。')).toBeInTheDocument()
+    expect(screen.getByText('参考: 傾向が大きく離れています。')).toBeInTheDocument()
+  })
+
+  it('onFeedback が無いときは、「合う／合わない」を出さない', () => {
+    renderList()
+    expect(screen.queryByRole('button', { name: '合わない' })).toBeNull()
+  })
 
   it('企業名と適合度・応募ボタンを表示する', () => {
     renderList()
@@ -294,5 +352,137 @@ describe('ResultsListView', () => {
 
     expect(screen.getByRole('button', { name: '応募済み' })).toBeDisabled()
     expect(screen.queryByText('応募は準備中')).not.toBeInTheDocument()
+  })
+
+  it('お気に入りだけを選ぶと、診断をまたいだ企業を業界と職種で並べる', () => {
+    const favorited = {
+      ...sampleCompany,
+      id: '2',
+      matchId: 11,
+      name: 'お気に入り株式会社',
+      industry: '製造',
+      jobTitle: '生産管理',
+      matchScore: 70,
+      isFavorited: true,
+      categoryScores: {
+        technical: 81.2,
+        teamwork: 0,
+        leadership: 0,
+        creativity: 0,
+        stability: 0,
+        growth: 0,
+        work_life: 0,
+        challenge: 0,
+        detail: 0,
+        communication: 0,
+      },
+    }
+    const noJob = {
+      ...sampleCompany,
+      id: '3',
+      matchId: 12,
+      name: '職種なし株式会社',
+      isFavorited: true,
+      matchScore: 60,
+    }
+    renderList({
+      companies: [sampleCompany],
+      favoriteCompanies: [favorited, noJob],
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'お気に入りだけ（2）' }))
+
+    expect(screen.queryByText('サンプル株式会社')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'お気に入り株式会社' })).toBeInTheDocument()
+    expect(screen.getByText('製造')).toBeInTheDocument()
+    expect(screen.getByText('生産管理')).toBeInTheDocument()
+    expect(screen.getByText('職種なし株式会社')).toBeInTheDocument()
+    expect(screen.getByText('技術力')).toBeInTheDocument()
+    expect(screen.getByText('81')).toBeInTheDocument()
+    expect(screen.getAllByText('未設定').length).toBeGreaterThan(0)
+    // 渡された順のまま。適合度の高いお気に入りが先。
+    const names = screen.getAllByRole('button', { name: /株式会社$/ }).map((node) => node.textContent)
+    expect(names).toEqual(['お気に入り株式会社', '職種なし株式会社'])
+  })
+
+  it('お気に入りが無いときは、すべての企業へ戻れる', () => {
+    renderList()
+
+    fireEvent.click(screen.getByRole('button', { name: 'お気に入りだけ（0）' }))
+    expect(screen.getByText('お気に入りにした企業はまだありません')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'すべての企業を見る' }))
+    expect(screen.getByText('サンプル株式会社')).toBeInTheDocument()
+  })
+
+  // 値から作った key は、同じ値が重なっても重ならない（React の警告が出ない）
+  // 技術スタック・タグは v4 のカードに無いので、職種の提案だけを確かめる
+  it('職種の提案に同じ値が重なっても、key の重複の警告を出さずに全部描く', () => {
+    const errors = jest.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      renderList({
+        suggestedRoles: [
+          { title: 'バックエンド', reason: 'a' },
+          { title: 'バックエンド', reason: 'b' },
+        ],
+      })
+      expect(screen.getAllByText('バックエンド')).toHaveLength(2)
+      const keyWarnings = errors.mock.calls.filter((args) => String(args[0]).includes('same key'))
+      expect(keyWarnings).toEqual([])
+    } finally {
+      errors.mockRestore()
+    }
+  })
+
+  // #2221: 押せない理由は吹き出し（Tooltip）だけでなく、常に見える文で出し、aria-describedby で結ぶ
+  describe('押せない理由の文', () => {
+    const describedText = (button: HTMLElement) => {
+      const id = button.getAttribute('aria-describedby')
+      expect(id).toBeTruthy()
+      return document.getElementById(id as string)?.textContent
+    }
+
+    it('ゲストには、メール送信と選考管理が使えない理由を画面の文で出す', () => {
+      renderList({ isGuestUser: true })
+      // v4 ではメール送信ボタンは1つ（PC はヘッダー、SP は一覧の下）
+      const email = screen.getByRole('button', { name: '結果をメールで受け取る' })
+      expect(email).toBeDisabled()
+      expect(describedText(email)).toBe('ゲストユーザーはメール送信できません。アカウント登録後にご利用ください。')
+      const applications = screen.getByRole('button', { name: '選考管理を見る' })
+      expect(describedText(applications)).toContain('応募・選考管理を利用できません')
+      // 登録への導線も近くにある
+      expect(screen.getAllByRole('button', { name: 'アカウント登録して機能を解放' }).length).toBeGreaterThan(0)
+    })
+
+    it('ゲストの「応募する」は、行の近くの文で理由を示す', () => {
+      renderList({ isGuestUser: true })
+      const apply = screen.getByRole('button', { name: '応募する' })
+      expect(apply).toBeDisabled()
+      expect(describedText(apply)).toContain('応募・選考管理を利用できません')
+    })
+
+    it('応募が準備中なら、「応募は準備中」の理由を行の近くの文で示す', () => {
+      renderList({ applyEnabled: false })
+      const apply = screen.getByRole('button', { name: '応募は準備中' })
+      expect(describedText(apply)).toBe('応募機能は現在準備中です。公開までお待ちください。')
+      expect(screen.getByText('応募機能は現在準備中です。公開までお待ちください。')).toBeVisible()
+    })
+
+    it('通常のユーザーには理由の文を出さない（aria-describedby も付けない）', () => {
+      renderList()
+      expect(screen.queryByText(/アカウント登録後にご利用ください/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/準備中です/)).not.toBeInTheDocument()
+      for (const name of ['結果をメールで受け取る', '応募する', '選考管理を見る']) {
+        for (const button of screen.getAllByRole('button', { name })) {
+          expect(button).not.toHaveAttribute('aria-describedby')
+        }
+      }
+    })
+
+    it('応募済みの企業には、応募が準備中でも理由の文を出さない', () => {
+      renderList({ applyEnabled: false, companies: [{ ...sampleCompany, isApplied: true }] })
+      expect(screen.getByRole('button', { name: '応募済み' })).not.toHaveAttribute('aria-describedby')
+      expect(screen.queryByText('応募機能は現在準備中です。公開までお待ちください。')).not.toBeInTheDocument()
+    })
   })
 })

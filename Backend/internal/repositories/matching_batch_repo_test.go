@@ -2,6 +2,7 @@ package repositories_test
 
 import (
 	"Backend/internal/models"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -115,7 +116,7 @@ func TestCreateOrUpdateBatch_SingleUpsert(t *testing.T) {
 	assignments := sql[idx:]
 
 	// スコア・理由・更新時刻は再計算で上書きされる（このIssueの目的）
-	for _, col := range []string{"match_score", "matched_axis_count", "match_reason", "updated_at"} {
+	for _, col := range []string{"match_score", "matched_axis_count", "fit_mismatch_axes", "job_matched", "match_reason", "updated_at"} {
 		if !strings.Contains(assignments, col) {
 			t.Errorf("%s が衝突時の更新対象に含まれていない: %s", col, assignments)
 		}
@@ -130,10 +131,10 @@ func TestCreateOrUpdateBatch_SingleUpsert(t *testing.T) {
 	}
 	// 10カテゴリのスコア列や job_position_id が upsertAssignments から抜け落ちても
 	// 上のアサートだけでは気づけないため、更新対象列の本数も固定する
-	// (job_position_id + match_score + 10カテゴリ + matched_axis_count
-	//  + match_reason + match_reason_prompt_version + updated_at = 16)。
-	if n := strings.Count(assignments, "=VALUES("); n != 16 {
-		t.Errorf("衝突時の更新対象列=%d want 16: %s", n, assignments)
+	// (job_position_id + match_score + 10カテゴリ + matched_axis_count + fit_mismatch_axes
+	//  + job_matched + match_reason + match_reason_prompt_version + updated_at = 18)。
+	if n := strings.Count(assignments, "=VALUES("); n != 18 {
+		t.Errorf("衝突時の更新対象列=%d want 18: %s", n, assignments)
 	}
 	// ユーザー操作の結果と作成時刻は再計算で消さない
 	for _, col := range []string{"is_viewed", "is_favorited", "is_applied", "created_at"} {
@@ -274,6 +275,107 @@ func TestFindTopMatchesByUserAndSession_ExcludesCompaniesWithoutProfile(t *testi
 	}
 }
 
+func TestFindFavoritedByUser_PicksNewestSessionAndRequiresProfile(t *testing.T) {
+	repo, mock, captured := newMatchRepoMock(t)
+
+	mock.ExpectQuery("SELECT id FROM").
+		WithArgs(uint(7), true).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	if _, err := repo.FindFavoritedByUser(context.Background(), 7); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(*captured) == 0 {
+		t.Fatal("SQLが記録されていない")
+	}
+	sql := (*captured)[0]
+	for _, want := range []string{
+		"ROW_NUMBER()",
+		"PARTITION BY company_id",
+		"ORDER BY created_at DESC, id DESC",
+		"WHERE rn = 1",
+		"user_id = ?",
+		"is_favorited = ?",
+		"company_weight_profiles",
+		"job_position_id IS NULL",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("発行SQLに %q が無い:\n%s", want, sql)
+		}
+	}
+	if strings.Contains(sql, "updated_at") {
+		t.Errorf("代表行を updated_at で選んでいる:\n%s", sql)
+	}
+	if strings.Contains(sql, "LIMIT") {
+		t.Errorf("1社にまとめる前に件数で切っている:\n%s", sql)
+	}
+}
+
+func TestFindFavoritedByUser_LoadsPickedRowsWithCompany(t *testing.T) {
+	repo, mock, captured := newMatchRepoMock(t)
+
+	mock.ExpectQuery("SELECT id FROM").
+		WithArgs(uint(7), true).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(11).AddRow(22))
+	mock.ExpectQuery("SELECT \\* FROM `user_company_matches` WHERE id IN").
+		WithArgs(uint(11), uint(22)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "company_id", "match_score"}).
+			AddRow(11, 7, 10, 80).
+			AddRow(22, 7, 12, 70))
+	mock.ExpectQuery("SELECT \\* FROM `companies`").
+		WithArgs(uint(10), uint(12)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).
+			AddRow(10, "北見工業").
+			AddRow(12, "函館工業"))
+
+	got, err := repo.FindFavoritedByUser(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2（窓で選んだ id を1社1行で読む）", len(got))
+	}
+	byID := map[uint]string{}
+	for _, match := range got {
+		byID[match.ID] = match.Company.Name
+	}
+	if byID[11] != "北見工業" || byID[22] != "函館工業" {
+		t.Fatalf("got %#v", byID)
+	}
+	if len(*captured) < 2 || !strings.Contains((*captured)[1], "id IN") {
+		t.Fatalf("2本目が id の読み出しではない: %#v", *captured)
+	}
+}
+
+func TestUnfavoriteCompany_ScopesUserAndCompany(t *testing.T) {
+	repo, mock, captured := newMatchRepoMock(t)
+
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `user_company_matches`").
+		WithArgs(false, sqlmock.AnyArg(), uint(7), uint(3), true).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := repo.UnfavoriteCompany(context.Background(), 7, 3); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if len(*captured) == 0 {
+		t.Fatal("SQLが記録されていない")
+	}
+	sql := (*captured)[0]
+	for _, want := range []string{"user_id", "company_id", "is_favorited"} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("発行SQLに %q が無い:\n%s", want, sql)
+		}
+	}
+}
+
 // TestCreateOrUpdateBatch_OnlyWritesMatchRows は、企業を持つマッチを保存しても
 // user_company_matches の行だけが書かれ、企業の行へは触れないことと、
 // 呼び出し元のマッチの主キーを書き換えないことを検証する。
@@ -298,5 +400,44 @@ func TestCreateOrUpdateBatch_OnlyWritesMatchRows(t *testing.T) {
 	}
 	if match.ID != 55 {
 		t.Errorf("呼び出し元のマッチの主キーが書き換わった: %d", match.ID)
+	}
+}
+
+func TestGetMatchStatistics_OneQuery(t *testing.T) {
+	repo, mock, captured := newMatchRepoMock(t)
+
+	mock.ExpectQuery("SELECT").
+		WithArgs(uint(7), "s1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"total_matches", "viewed_count", "favorited_count", "applied_count", "avg_match_score",
+		}).AddRow(4, 3, 2, 1, 80.5))
+
+	got, err := repo.GetMatchStatistics(7, "s1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if len(*captured) != 1 {
+		t.Fatalf("クエリ数 = %d, want 1\n%#v", len(*captured), *captured)
+	}
+	sql := (*captured)[0]
+	for _, want := range []string{"COUNT(*)", "is_viewed", "is_favorited", "is_applied", "AVG(match_score)", "user_id", "session_id"} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("発行SQLに %q が無い:\n%s", want, sql)
+		}
+	}
+	if got["total_matches"] != int64(4) || got["viewed_count"] != int64(3) || got["avg_match_score"] != 80.5 {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestGetMatchStatistics_ReturnsQueryError(t *testing.T) {
+	repo, mock, _ := newMatchRepoMock(t)
+	mock.ExpectQuery("SELECT").WillReturnError(errors.New("db down"))
+
+	if _, err := repo.GetMatchStatistics(7, "s1"); err == nil {
+		t.Fatal("DBエラーを握りつぶしている")
 	}
 }

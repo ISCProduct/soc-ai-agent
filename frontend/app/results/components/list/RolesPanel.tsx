@@ -3,6 +3,7 @@
 import { Box, Typography } from '@mui/material'
 import type { SuggestedRole } from '../../types'
 import { UI } from '@/lib/design/tokens'
+import { withStableKeys } from '@/lib/list-keys'
 import { panelSx } from './panelStyles'
 
 interface Props {
@@ -22,8 +23,8 @@ export function RolesPanel({ jobSuitabilityComment, suggestedRoles }: Props) {
         <Typography sx={{ fontSize: 14, lineHeight: 1.85, color: UI.inkSoft }}>{jobSuitabilityComment}</Typography>
       ) : (
         <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0 }}>
-          {suggestedRoles.map((role, i) => (
-            <Box component="li" key={i} sx={{ pt: i === 0 ? 0 : 1.75, pb: 1.75, '&:last-of-type': { pb: 0 }, borderTop: i === 0 ? 'none' : `1px solid ${UI.ruleSoft}` }}>
+          {withStableKeys(suggestedRoles, (r) => r.title).map(({ key, item: role, index: i }) => (
+            <Box component="li" key={key} sx={{ pt: i === 0 ? 0 : 1.75, pb: 1.75, '&:last-of-type': { pb: 0 }, borderTop: i === 0 ? 'none' : `1px solid ${UI.ruleSoft}` }}>
               <Typography sx={{ fontSize: 16, lineHeight: '24px', fontWeight: 700, color: UI.ink }}>{role.title}</Typography>
               {role.reason && <Typography sx={{ fontSize: 14, lineHeight: '23px', color: UI.inkSoft, mt: 0.5 }}>{role.reason}</Typography>}
             </Box>

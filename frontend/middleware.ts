@@ -377,6 +377,6 @@ export const config = {
   // admin.shukatsu-ai.jpのrewriteはページ遷移でも必要なため、静的アセットを除く全パスに
   // マッチさせる。public/配下の拡張子付きファイル(3Dモデル・画像等)も対象外にする。
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|glb|gltf|mp3|mp4|woff|woff2)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|glb|gltf|mp3|mp4|woff|woff2|bcmap|pfb|ttf)$).*)',
   ],
 }

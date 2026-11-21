@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"Backend/internal/logsafe"
 	"Backend/internal/models"
 	"Backend/internal/services/prompts"
 	"Backend/internal/usagectx"
@@ -167,7 +168,7 @@ func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.
 	// 「その他」を押しただけで3回の打ち切りに近づいてしまう。
 	// カウントには触れず、書き方だけ伝えて同じ質問に留める。
 	if isEmptyOtherChoiceAnswer(questionText, userMessage) {
-		log.Printf("[Validation] Empty 'other' choice answer: %s\n", userMessage)
+		log.Printf("[Validation] Empty 'other' choice answer: chars=%d\n", logsafe.Chars(userMessage))
 		assistantText := validationOtherNeedsTextMessage()
 		if err := s.saveAssistantMessage(sessionID, userID, assistantText); err != nil {
 			return true, "", fmt.Errorf("failed to save assistant message for empty other choice: %w", err)
@@ -194,9 +195,9 @@ func (s *ChatService) isAnswerValid(ctx context.Context, questionText, userMessa
 	if err != nil {
 		log.Printf("[Validation] AI validation failed: %v, using basic validation\n", err)
 		isValid = isLikelyAnswer(userMessage, questionText)
-		log.Printf("[Validation] Basic validation result: %v for message: %s\n", isValid, userMessage)
+		log.Printf("[Validation] Basic validation result: %v chars=%d\n", isValid, logsafe.Chars(userMessage))
 	} else {
-		log.Printf("[Validation] AI validation result: %v for message: %s\n", isValid, userMessage)
+		log.Printf("[Validation] AI validation result: %v chars=%d\n", isValid, logsafe.Chars(userMessage))
 	}
 	return isValid
 }
@@ -204,7 +205,7 @@ func (s *ChatService) isAnswerValid(ctx context.Context, questionText, userMessa
 // rejectInvalidAnswer は無効な回答を数え、警告か打ち切りの案内を保存する。
 // 3回目の無効回答ではセッションを強制終了する。
 func (s *ChatService) rejectInvalidAnswer(sessionID string, userID uint, userMessage string) (bool, string, error) {
-	log.Printf("[Validation] Invalid answer detected for message: %s\n", userMessage)
+	log.Printf("[Validation] Invalid answer detected chars=%d\n", logsafe.Chars(userMessage))
 	validation, err := s.sessionValidationRepo.IncrementInvalidCount(sessionID)
 	if err != nil {
 		return true, "", fmt.Errorf("failed to increment invalid count: %w", err)
@@ -284,10 +285,15 @@ func (s *ChatService) answerSimilarity(ctx context.Context, question, answer str
 	}
 	// 埋め込みは回答チェック（chat_answer_check）と別に数える（#1993）
 	embCtx := usagectx.WithFeature(ctx, usagectx.FeatureEmbedding)
-	qEmb, err := s.aiClient.Embedding(embCtx, qText)
-	if err != nil {
-		log.Printf("[Validation] Embedding error for question: %v\n", err)
-		return 0, false
+	qEmb, hit := s.questionEmb.get(qText)
+	if !hit {
+		var err error
+		qEmb, err = s.aiClient.Embedding(embCtx, qText)
+		if err != nil {
+			log.Printf("[Validation] Embedding error for question: %v\n", err)
+			return 0, false
+		}
+		s.questionEmb.put(qText, qEmb)
 	}
 	aEmb, err := s.aiClient.Embedding(embCtx, answer)
 	if err != nil {
@@ -355,9 +361,8 @@ func parseAnswerValidity(response string) bool {
 	response = strings.TrimSuffix(response, "```")
 	response = strings.TrimSpace(response)
 
-	var result struct {
-		Valid bool `json:"valid"`
-	}
+	// プロンプトの出力形式と同じ定義で読む（SOCAIAGENT-661）
+	var result prompts.AnswerValidationOutput
 	if err := json.Unmarshal([]byte(response), &result); err != nil {
 		log.Printf("Warning: Failed to parse AI validation response: %v, response: %s\n", err, response)
 		return false

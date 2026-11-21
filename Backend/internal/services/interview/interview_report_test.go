@@ -64,6 +64,10 @@ func (r *reportRepoStub) ReleaseScoresApplication(uint) error {
 	return nil
 }
 
+func (r *reportRepoStub) FindBySessionIDs([]uint) ([]models.InterviewReport, error) {
+	return nil, nil
+}
+
 func (r *reportRepoStub) FindBySessionID(sessionID uint) (*models.InterviewReport, error) {
 	if r.findErr != nil {
 		return nil, r.findErr

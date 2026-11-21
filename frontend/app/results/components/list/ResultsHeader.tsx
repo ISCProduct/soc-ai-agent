@@ -8,6 +8,8 @@ import { CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
 
 interface Props {
   companyCount: number
+  /** 「お気に入りだけ」を表示中か（#2301） */
+  favoritesOnly: boolean
   isProvisional: boolean
   diagnosisSummary: string | null
   band: { min: number; max: number }
@@ -21,7 +23,7 @@ interface Props {
 /** 適合度の幅がこの値以内なら「差はわずか」と一度だけ述べる */
 const NARROW_BAND_SPAN = 15
 
-export function ResultsHeader({ companyCount, isProvisional, diagnosisSummary, band, isGuestUser, emailAction, onBack, onNavigate }: Props) {
+export function ResultsHeader({ companyCount, favoritesOnly, isProvisional, diagnosisSummary, band, isGuestUser, emailAction, onBack, onNavigate }: Props) {
   return (
     <Box component="header" sx={{ px: { xs: 2, md: 4 }, pt: { xs: 1.5, md: 3.5 }, pb: { xs: 2.5, md: 3.25 }, backgroundColor: UI.field, borderBottom: `1px solid ${UI.rule}`, flexShrink: 0 }}>
       <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto' }}>
@@ -39,11 +41,13 @@ export function ResultsHeader({ companyCount, isProvisional, diagnosisSummary, b
           </Alert>
         )}
         <Typography component="h1" sx={{ fontSize: { xs: 24, md: 28 }, fontWeight: 700, color: UI.ink, lineHeight: 1.35, mb: 1.5 }}>
-          あなたに近い{companyCount}社
+          {favoritesOnly ? `お気に入りにした${companyCount}社` : `あなたに近い${companyCount}社`}
         </Typography>
         <Box sx={{ display: 'grid', gap: 0.5, maxWidth: { md: 780 } }}>
           <Typography sx={{ fontSize: { xs: 15, md: 16 }, color: UI.inkSoft, lineHeight: { xs: 1.85, md: '28px' } }}>
-            回答の傾向と、企業が重視する点を突き合わせた順に並べています。順位はAIが回答から推定したもので、企業の良し悪しを決めるものではありません。
+            {favoritesOnly
+              ? '今までの診断でお気に入りにした企業です。同じ企業は1社にまとめています。適合度は、いちばん新しい診断のものです。'
+              : '回答の傾向と、企業が重視する点を突き合わせた順に並べています。順位はAIが回答から推定したもので、企業の良し悪しを決めるものではありません。'}
           </Typography>
           {companyCount > 1 && band.max - band.min <= NARROW_BAND_SPAN && (
             <Typography sx={{ fontSize: { xs: 15, md: 16 }, color: UI.inkSoft, lineHeight: { xs: 1.85, md: '28px' } }}>

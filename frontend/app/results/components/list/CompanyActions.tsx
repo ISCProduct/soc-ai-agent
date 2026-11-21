@@ -8,6 +8,7 @@ import { buildEsRewriteQuery, buildInterviewQuery } from '../../utils'
 import { getGuestApplicationsButtonProps } from '@/lib/guest-limits'
 import { APPLY_CLOSED_LABEL, getApplyClosedButtonProps } from '@/lib/apply-availability'
 import { UI } from '@/lib/design/tokens'
+import { DisabledReason } from './DisabledReason'
 import type { CompanyRowContext } from './rowContext'
 
 /** 応募の文言。応募済み > 受付停止 > 応募中 > 通常 の優先順。 */
@@ -39,8 +40,12 @@ export function CompanyActions({ company, ctx }: { company: Company; ctx: Compan
   const applying = ctx.applyingId === company.matchId
   const menuId = `company-menu-${company.id}`
   const go = (path: string) => () => { setAnchor(null); ctx.onNavigate(path) }
+  // 「応募する」を押せない理由（応募済みは理由ではないので出さない）。ゲストの理由を先に出す
+  const applyReason = company.isApplied ? '' : guest.disabled ? guest.title : closed.disabled ? closed.title : ''
+  const applyReasonId = `results-apply-disabled-reason-${String(company.id).replace(/[^A-Za-z0-9_-]/g, '_')}`
 
   return (
+    <>
     <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, alignItems: { xs: 'stretch', md: 'center' }, columnGap: 3, rowGap: 0.5, pt: 0.75 }}>
       <Button
         variant="contained"
@@ -59,6 +64,7 @@ export function CompanyActions({ company, ctx }: { company: Company; ctx: Compan
           disableHoverListener={!guest.disabled && (company.isApplied || !closed.disabled)}>
           <span>
             <Button variant="text" disabled={company.isApplied || applying || guest.disabled || closed.disabled}
+              aria-describedby={applyReason ? applyReasonId : undefined}
               onClick={(e) => ctx.onApply(e, company)} sx={linkSx}>
               {applyLabel(company, closed.disabled, applying)}
             </Button>
@@ -75,5 +81,7 @@ export function CompanyActions({ company, ctx }: { company: Company; ctx: Compan
         <MenuItem onClick={go(`/es-rewrite?${buildEsRewriteQuery(company)}`)}>ES添削・リライト</MenuItem>
       </Menu>
     </Box>
+    {applyReason && <DisabledReason id={applyReasonId} sx={{ mt: 0 }}>{applyReason}</DisabledReason>}
+    </>
   )
 }

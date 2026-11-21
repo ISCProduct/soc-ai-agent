@@ -88,5 +88,6 @@ func runeLen(s string) int { return len([]rune(s)) }
 // 入力の文字数をここで引いておく。集計側（Aggregate）はケースを受け取らないので、
 // ラベルと同じように Observation へ持たせないと文字数との交絡が測れない。
 func newObservation(c Case) Observation {
-	return Observation{CaseID: c.ID, Label: c.Label, InputChars: c.InputChars()}
+	return Observation{CaseID: c.ID, Label: c.Label, InputChars: c.InputChars(),
+		AxisLabels: c.AxisLabels, FairnessPair: c.FairnessPair, ContextVariant: c.ContextVariant}
 }
