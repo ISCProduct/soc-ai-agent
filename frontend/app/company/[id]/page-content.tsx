@@ -39,6 +39,18 @@ import { fetchWithTimeout } from '@/lib/fetch-timeout'
 import { ProvenanceBadge } from '@/components/company/ProvenanceBadge'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 
+type RelationTab = 'capital' | 'business'
+
+const RELATION_TABS_ID = 'company-relation'
+/**
+ * 資本関連図とビジネス関連図は、1つの tabpanel を2つのタブで共有する
+ * （共通の TabPanel は使わない）。タブごとに中身を分けると、切り替えのたびに
+ * CompanyDiagram が作り直されて、データの取得と「読み込み中」の表示が
+ * やり直しになるため。
+ */
+const RELATION_TABPANEL_ID = `${RELATION_TABS_ID}-tabpanel`
+const relationTabId = (tab: RelationTab) => `${RELATION_TABS_ID}-tab-${tab}`
+
 const CompanyDiagram = dynamic(() => import('@/components/diagram/CompanyDiagram'), {
   ssr: false,
   loading: () => (
@@ -64,7 +76,7 @@ export default function PageContent() {
   const router = useRouter()
   const [company, setCompany] = useState<CompanyDetailViewModel | null>(null)
   const [loadStatus, setLoadStatus] = useState<LoadStatus>('loading')
-  const [activeTab, setActiveTab] = useState<'capital' | 'business'>('capital')
+  const [activeTab, setActiveTab] = useState<RelationTab>('capital')
   const [jobPositions, setJobPositions] = useState<JobPosition[]>([])
 
   const fetchCompanyDetail = useCallback(async () => {
@@ -456,34 +468,50 @@ export default function PageContent() {
 
             <Tabs
               value={activeTab}
-              onChange={(_, v: 'capital' | 'business') => setActiveTab(v)}
+              onChange={(_, v: RelationTab) => setActiveTab(v)}
               sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}
             >
-              <Tab value="capital" icon={<AccountTreeIcon />} iconPosition="start" label="資本関連図" />
-              <Tab value="business" icon={<HubIcon />} iconPosition="start" label="ビジネス関連図" />
+              <Tab
+                value="capital"
+                icon={<AccountTreeIcon />}
+                iconPosition="start"
+                label="資本関連図"
+                id={relationTabId('capital')}
+                aria-controls={RELATION_TABPANEL_ID}
+              />
+              <Tab
+                value="business"
+                icon={<HubIcon />}
+                iconPosition="start"
+                label="ビジネス関連図"
+                id={relationTabId('business')}
+                aria-controls={RELATION_TABPANEL_ID}
+              />
             </Tabs>
 
-            {activeTab === 'capital' ? (
-              <Box>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                  • 黄色でハイライトされた企業が現在表示中の企業です
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                  • 実線：子会社（出資比率50%以上）、破線：関連会社（出資比率50%未満）
-                </Typography>
-                <CompanyDiagram companyId={company.id} diagramType="capital" />
-              </Box>
-            ) : (
-              <Box>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                  • 黄色でハイライトされた企業が現在表示中の企業です
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                  • 青い矢印：ビジネス取引関係、灰色の点線：資本関係（親会社）
-                </Typography>
-                <CompanyDiagram companyId={company.id} diagramType="business" />
-              </Box>
-            )}
+            <div role="tabpanel" id={RELATION_TABPANEL_ID} aria-labelledby={relationTabId(activeTab)}>
+              {activeTab === 'capital' ? (
+                <Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                    • 黄色でハイライトされた企業が現在表示中の企業です
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                    • 実線：子会社（出資比率50%以上）、破線：関連会社（出資比率50%未満）
+                  </Typography>
+                  <CompanyDiagram companyId={company.id} diagramType="capital" />
+                </Box>
+              ) : (
+                <Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                    • 黄色でハイライトされた企業が現在表示中の企業です
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                    • 青い矢印：ビジネス取引関係、灰色の点線：資本関係（親会社）
+                  </Typography>
+                  <CompanyDiagram companyId={company.id} diagramType="business" />
+                </Box>
+              )}
+            </div>
           </CardContent>
         </Card>
 

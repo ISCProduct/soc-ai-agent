@@ -1,11 +1,11 @@
 package chat
 
 import (
+	"Backend/internal/logsafe"
 	"Backend/internal/models"
 	"context"
 	"fmt"
 	"log"
-	"unicode/utf8"
 )
 
 type jobCategoryResolutionResult struct {
@@ -50,7 +50,7 @@ func (s *ChatService) resolveJobCategoryForChat(ctx context.Context, req ChatReq
 	}
 
 	if jobCategoryID == 0 && s.shouldValidateJobCategory(history) {
-		log.Printf("[JobValidation] Validating job category answer: %s\n", req.Message)
+		log.Printf("[JobValidation] Validating job category answer: chars=%d\n", logsafe.Chars(req.Message))
 		// 直前に提示した質問文を渡す。番号だけの回答は、そのとき並んでいた
 		// 選択肢に対して解釈しないと別の職種になる（#1330）。
 		presentedQuestion := findLastAssistantQuestion(history)
@@ -119,7 +119,7 @@ func (s *ChatService) handleConsultIntent(ctx context.Context, req ChatRequest) 
 		}
 	}
 	// 本文はログに出さない（文字数だけ）
-	log.Printf("[ConsultIntent] saved intent=%s chars=%d\n", req.ConsultIntent, utf8.RuneCountInString(req.Message))
+	log.Printf("[ConsultIntent] saved intent=%s chars=%d\n", req.ConsultIntent, logsafe.Chars(req.Message))
 
 	jobQuestion, err := s.jobValidator.GenerateJobSelectionQuestion(ctx)
 	if err != nil {

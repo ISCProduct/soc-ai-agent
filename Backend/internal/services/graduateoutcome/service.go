@@ -8,6 +8,7 @@
 package graduateoutcome
 
 import (
+	"context"
 	"errors"
 	"sort"
 
@@ -26,11 +27,11 @@ var (
 
 // Store は進路実績の集計（repositories.GraduateOutcomeRepository が満たす）。
 type Store interface {
-	StudentSchoolID(userID uint) (*uint, error)
-	CompanyVisible(companyID uint) (bool, error)
-	CountsByCompanyYear(schoolID uint, f repositories.GraduateOutcomeFilter) ([]repositories.GraduateOutcomeRow, error)
-	FilterOptions(schoolID uint) ([]int, []string, error)
-	CompanyCounts(schoolID, companyID uint) ([]repositories.GraduateOutcomeRow, []repositories.GraduatePositionCount, error)
+	StudentSchoolID(ctx context.Context, userID uint) (*uint, error)
+	CompanyVisible(ctx context.Context, companyID uint) (bool, error)
+	CountsByCompanyYear(ctx context.Context, schoolID uint, f repositories.GraduateOutcomeFilter) ([]repositories.GraduateOutcomeRow, error)
+	FilterOptions(ctx context.Context, schoolID uint) ([]int, []string, error)
+	CompanyCounts(ctx context.Context, schoolID, companyID uint) ([]repositories.GraduateOutcomeRow, []repositories.GraduatePositionCount, error)
 }
 
 // Filter は一覧の絞り込み。0・空は絞らない。
@@ -89,8 +90,8 @@ func NewService(store Store) *Service {
 	return &Service{store: store}
 }
 
-func (s *Service) schoolID(userID uint) (*uint, error) {
-	id, err := s.store.StudentSchoolID(userID)
+func (s *Service) schoolID(ctx context.Context, userID uint) (*uint, error) {
+	id, err := s.store.StudentSchoolID(ctx, userID)
 	if errors.Is(err, repositories.ErrGraduateOutcomeUserNotFound) {
 		return nil, ErrUserNotFound
 	}
@@ -98,8 +99,8 @@ func (s *Service) schoolID(userID uint) (*uint, error) {
 }
 
 // List は学生の学校の進路実績を、企業ごとにまとめて返す。
-func (s *Service) List(userID uint, f Filter) (*List, error) {
-	schoolID, err := s.schoolID(userID)
+func (s *Service) List(ctx context.Context, userID uint, f Filter) (*List, error) {
+	schoolID, err := s.schoolID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +109,7 @@ func (s *Service) List(userID uint, f Filter) (*List, error) {
 		return out, nil
 	}
 	out.SchoolLinked = true
-	rows, err := s.store.CountsByCompanyYear(*schoolID, repositories.GraduateOutcomeFilter{Year: f.Year, Industry: f.Industry})
+	rows, err := s.store.CountsByCompanyYear(ctx, *schoolID, repositories.GraduateOutcomeFilter{Year: f.Year, Industry: f.Industry})
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +153,7 @@ func (s *Service) List(userID uint, f Filter) (*List, error) {
 		}
 		return a.CompanyID < b.CompanyID
 	})
-	years, industries, err := s.store.FilterOptions(*schoolID)
+	years, industries, err := s.store.FilterOptions(ctx, *schoolID)
 	if err != nil {
 		return nil, err
 	}
@@ -166,12 +167,12 @@ func (s *Service) List(userID uint, f Filter) (*List, error) {
 }
 
 // Company は学生の学校の、1社への進路実績を返す。企業が無い（見せない）なら ErrCompanyNotFound。
-func (s *Service) Company(userID, companyID uint) (*CompanyDetail, error) {
-	schoolID, err := s.schoolID(userID)
+func (s *Service) Company(ctx context.Context, userID, companyID uint) (*CompanyDetail, error) {
+	schoolID, err := s.schoolID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	visible, err := s.store.CompanyVisible(companyID)
+	visible, err := s.store.CompanyVisible(ctx, companyID)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +184,7 @@ func (s *Service) Company(userID, companyID uint) (*CompanyDetail, error) {
 		return out, nil
 	}
 	out.SchoolLinked = true
-	byYear, byPosition, err := s.store.CompanyCounts(*schoolID, companyID)
+	byYear, byPosition, err := s.store.CompanyCounts(ctx, *schoolID, companyID)
 	if err != nil {
 		return nil, err
 	}

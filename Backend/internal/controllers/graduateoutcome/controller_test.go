@@ -22,14 +22,14 @@ type fakeService struct {
 	err     error
 }
 
-func (f *fakeService) List(userID uint, filter svc.Filter) (*svc.List, error) {
+func (f *fakeService) List(_ context.Context, userID uint, filter svc.Filter) (*svc.List, error) {
 	f.user, f.filter = userID, filter
 	if f.err != nil {
 		return nil, f.err
 	}
 	return &svc.List{}, nil
 }
-func (f *fakeService) Company(userID, companyID uint) (*svc.CompanyDetail, error) {
+func (f *fakeService) Company(_ context.Context, userID, companyID uint) (*svc.CompanyDetail, error) {
 	f.user, f.company = userID, companyID
 	if f.err != nil {
 		return nil, f.err

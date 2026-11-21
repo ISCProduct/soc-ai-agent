@@ -9,6 +9,7 @@ import (
 	authcontrollers "Backend/internal/controllers/auth"
 	chatcontrollers "Backend/internal/controllers/chat"
 	companycontrollers "Backend/internal/controllers/company"
+	companysearchcontrollers "Backend/internal/controllers/companysearch"
 	escontrollers "Backend/internal/controllers/es"
 	githubcontrollers "Backend/internal/controllers/github"
 	graduateoutcomecontrollers "Backend/internal/controllers/graduateoutcome"
@@ -67,6 +68,8 @@ import (
 	"Backend/internal/services/storage"
 	"Backend/internal/services/teacher"
 	"Backend/internal/services/training"
+	"Backend/internal/services/training/scorerexport"
+	"context"
 	"log"
 	"log/slog"
 	"net/http"
@@ -195,6 +198,7 @@ func checkAnnotationFont() {
 func main() {
 	// 構造化ログの初期化（LOG_LEVEL / LOG_FORMAT 環境変数で制御）
 	logger.Setup()
+	middleware.UseRequestIDLogger()
 
 	flushSentry, sentryOn := observability.InitSentry()
 	defer flushSentry()
@@ -410,6 +414,7 @@ func main() {
 	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
 	questionController := chatcontrollers.NewQuestionController(questionService)
 	relationController := companycontrollers.NewCompanyRelationController(companyQueryRepo, aiClient)
+	relationController.SetCorrelationMapService(company.NewCompanyCorrelationMapService(companyRepo, companyRelationRepo))
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
 	companyValidator.SetSearchFlight(companySearchFlight)
@@ -461,6 +466,16 @@ func main() {
 		logger.EnableS3ErrorArchive(s3UploadService)
 	}
 	userDeletionService := auth.NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), objectDeleter, auditLogService)
+	// パージのときに、採点モデルの学習用に書き出し済みのデータ（S3）も消す（#2168）。
+	// 書き出しの設定（TRAINING_EXPORT_HMAC_KEY・TRAINING_EXPORT_S3_URI）が無ければ消さない（書き出しも動かない）。
+	if trainingDeleter, err := scorerexport.NewUserDataDeleterFromEnv(context.Background(), os.Getenv,
+		func(ctx context.Context, bucket string) (scorerexport.ObjectStore, error) {
+			return scorerexport.NewS3Writer(ctx, bucket)
+		}); err != nil {
+		slog.Error("学習データの削除を設定できませんでした。パージで書き出し済みの学習データを消せません（cmd/training-export -sweep-only で消してください）", "error", err)
+	} else if trainingDeleter != nil {
+		userDeletionService.SetTrainingDataDeleter(trainingDeleter)
+	}
 	// 本人退会も、管理者による退会・日次のパージ・アクセス遮断と同じインスタンスを使う。
 	authService.SetDeletionService(userDeletionService)
 	adminOrganizationController := admincontrollers.NewAdminOrganizationController(organizationService)
@@ -589,6 +604,8 @@ func main() {
 	aiBudgetGuards := routes.NewAIBudgetGuards(aiBudgetService)
 	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupCompanyRoutes(api, relationController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
+	// 学生向けの企業検索（SOCAIAGENT-612）。業界・地域・職種で絞り込み、企業名順で返す
+	routes.SetupCompanySearchRoutes(api, companysearchcontrollers.NewController(repositories.NewCompanySearchRepository(db)), cfg.UserSecret, userDeletionService, organizationService)
 	industryWeightProfileRepo := repositories.NewIndustryWeightProfileRepository(db)
 	teacherInsightService := teacher.NewStudentInsightService(userRepo, userWeightScoreRepo, industryRepo, industryWeightProfileRepo)
 	// 低マッチのまま進行中の応募を教員一覧に出す（#1028）

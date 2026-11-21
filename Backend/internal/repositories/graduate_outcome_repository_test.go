@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -61,7 +62,7 @@ func TestGraduateOutcomeRepository_CountsByCompanyYear(t *testing.T) {
 		WithArgs(5, 2025, "製造業").
 		WillReturnRows(sqlmock.NewRows([]string{"company_id", "company_name", "industry", "graduation_year", "count"}).
 			AddRow(1, "A社", "製造業", 2025, 3))
-	rows, err := repo.CountsByCompanyYear(5, GraduateOutcomeFilter{Year: 2025, Industry: "製造業"})
+	rows, err := repo.CountsByCompanyYear(context.Background(), 5, GraduateOutcomeFilter{Year: 2025, Industry: "製造業"})
 	if err != nil || len(rows) != 1 || rows[0].CompanyName != "A社" || rows[0].Count != 3 {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
@@ -78,7 +79,7 @@ func TestGraduateOutcomeRepository_FilterOptions(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"graduation_year"}).AddRow(2025).AddRow(2024))
 	mock.ExpectQuery(outcomeScope + "|c.industry <> ''").WithArgs(5).
 		WillReturnRows(sqlmock.NewRows([]string{"industry"}).AddRow("製造業"))
-	years, industries, err := repo.FilterOptions(5)
+	years, industries, err := repo.FilterOptions(context.Background(), 5)
 	if err != nil || len(years) != 2 || len(industries) != 1 {
 		t.Fatalf("years=%v industries=%v err=%v", years, industries, err)
 	}
@@ -96,7 +97,7 @@ func TestGraduateOutcomeRepository_CompanyCounts(t *testing.T) {
 	// 職種はその企業のものだけ結ぶ。同数は職種名順で並びを決める
 	mock.ExpectQuery(outcomeScope+"|jp.company_id = ge.company_id|ORDER BY count DESC, title").WithArgs(5, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"title", "count"}).AddRow("SE", 3))
-	byYear, byPosition, err := repo.CompanyCounts(5, 1)
+	byYear, byPosition, err := repo.CompanyCounts(context.Background(), 5, 1)
 	if err != nil || len(byYear) != 1 || len(byPosition) != 1 || byPosition[0].Title != "SE" {
 		t.Fatalf("byYear=%+v byPosition=%+v err=%v", byYear, byPosition, err)
 	}
@@ -110,7 +111,7 @@ func TestGraduateOutcomeRepository_CompanyVisible(t *testing.T) {
 	repo, mock, _ := newGraduateOutcomeMock(t)
 	mock.ExpectQuery("c.id = ?|c.is_active = true AND c.deleted_at IS NULL|c.is_guest_entry = true").WithArgs(9).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	ok, err := repo.CompanyVisible(9)
+	ok, err := repo.CompanyVisible(context.Background(), 9)
 	if err != nil || ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
@@ -133,7 +134,7 @@ func TestGraduateOutcomeRepository_StudentSchoolID(t *testing.T) {
 		repo, mock, _ := newGraduateOutcomeMock(t)
 		user(mock, 5, 2)
 		school(mock, 2)
-		got, err := repo.StudentSchoolID(7)
+		got, err := repo.StudentSchoolID(context.Background(), 7)
 		if err != nil || got == nil || *got != 5 {
 			t.Fatalf("got=%v err=%v", got, err)
 		}
@@ -142,7 +143,7 @@ func TestGraduateOutcomeRepository_StudentSchoolID(t *testing.T) {
 		repo, mock, _ := newGraduateOutcomeMock(t)
 		user(mock, 5, 2)
 		school(mock, 3)
-		if got, err := repo.StudentSchoolID(7); err != nil || got != nil {
+		if got, err := repo.StudentSchoolID(context.Background(), 7); err != nil || got != nil {
 			t.Fatalf("got=%v err=%v", got, err)
 		}
 	})
@@ -150,21 +151,21 @@ func TestGraduateOutcomeRepository_StudentSchoolID(t *testing.T) {
 		repo, mock, _ := newGraduateOutcomeMock(t)
 		user(mock, 5, 2)
 		mock.ExpectQuery("FROM `schools`").WillReturnRows(sqlmock.NewRows([]string{"organization_id"}))
-		if got, err := repo.StudentSchoolID(7); err != nil || got != nil {
+		if got, err := repo.StudentSchoolID(context.Background(), 7); err != nil || got != nil {
 			t.Fatalf("got=%v err=%v", got, err)
 		}
 	})
 	t.Run("学校が未登録", func(t *testing.T) {
 		repo, mock, _ := newGraduateOutcomeMock(t)
 		user(mock, nil, 2)
-		if got, err := repo.StudentSchoolID(7); err != nil || got != nil {
+		if got, err := repo.StudentSchoolID(context.Background(), 7); err != nil || got != nil {
 			t.Fatalf("got=%v err=%v", got, err)
 		}
 	})
 	t.Run("学生が存在しない", func(t *testing.T) {
 		repo, mock, _ := newGraduateOutcomeMock(t)
 		mock.ExpectQuery("FROM `users`").WillReturnRows(sqlmock.NewRows([]string{"school_id", "organization_id"}))
-		if _, err := repo.StudentSchoolID(7); !errors.Is(err, ErrGraduateOutcomeUserNotFound) {
+		if _, err := repo.StudentSchoolID(context.Background(), 7); !errors.Is(err, ErrGraduateOutcomeUserNotFound) {
 			t.Fatalf("err=%v", err)
 		}
 	})

@@ -1,6 +1,7 @@
 package graduateoutcome
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -20,16 +21,18 @@ type fakeStore struct {
 	gotFilter  repositories.GraduateOutcomeFilter
 }
 
-func (f *fakeStore) StudentSchoolID(uint) (*uint, error) { return f.school, f.schoolErr }
-func (f *fakeStore) CompanyVisible(uint) (bool, error)   { return !f.invisible, nil }
-func (f *fakeStore) CountsByCompanyYear(schoolID uint, filter repositories.GraduateOutcomeFilter) ([]repositories.GraduateOutcomeRow, error) {
+func (f *fakeStore) StudentSchoolID(context.Context, uint) (*uint, error) {
+	return f.school, f.schoolErr
+}
+func (f *fakeStore) CompanyVisible(context.Context, uint) (bool, error) { return !f.invisible, nil }
+func (f *fakeStore) CountsByCompanyYear(_ context.Context, schoolID uint, filter repositories.GraduateOutcomeFilter) ([]repositories.GraduateOutcomeRow, error) {
 	f.gotSchool, f.gotFilter = schoolID, filter
 	return f.rows, nil
 }
-func (f *fakeStore) FilterOptions(uint) ([]int, []string, error) {
+func (f *fakeStore) FilterOptions(context.Context, uint) ([]int, []string, error) {
 	return []int{2025, 2024}, []string{"製造業", "情報通信業"}, f.optionsErr
 }
-func (f *fakeStore) CompanyCounts(schoolID, companyID uint) ([]repositories.GraduateOutcomeRow, []repositories.GraduatePositionCount, error) {
+func (f *fakeStore) CompanyCounts(_ context.Context, schoolID, companyID uint) ([]repositories.GraduateOutcomeRow, []repositories.GraduatePositionCount, error) {
 	f.gotSchool = schoolID
 	return f.rows, f.positions, nil
 }
@@ -48,7 +51,7 @@ func TestList(t *testing.T) {
 		row(1, "B社", 2024, 3), row(2, "A社", 2025, 3), row(1, "B社", 2025, 1),
 		row(3, "D社", 2025, 1), row(4, "C社", 2025, 2),
 	}}
-	out, err := NewService(store).List(9, Filter{Year: 2025, Industry: "製造業"})
+	out, err := NewService(store).List(context.Background(), 9, Filter{Year: 2025, Industry: "製造業"})
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -81,7 +84,7 @@ func TestList_最小人数の境界(t *testing.T) {
 		wantShown bool
 	}{{1, false}, {MinCount - 1, false}, {MinCount, true}} {
 		store := &fakeStore{school: linked(), rows: []repositories.GraduateOutcomeRow{row(1, "A社", 2025, tt.n)}}
-		out, err := NewService(store).List(9, Filter{})
+		out, err := NewService(store).List(context.Background(), 9, Filter{})
 		if err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -99,7 +102,7 @@ func TestList_最小人数の境界(t *testing.T) {
 }
 
 func TestList_学校が未登録なら実績を出さない(t *testing.T) {
-	out, err := NewService(&fakeStore{}).List(9, Filter{})
+	out, err := NewService(&fakeStore{}).List(context.Background(), 9, Filter{})
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -109,15 +112,15 @@ func TestList_学校が未登録なら実績を出さない(t *testing.T) {
 }
 
 func TestList_エラー(t *testing.T) {
-	out, err := NewService(&fakeStore{schoolErr: repositories.ErrGraduateOutcomeUserNotFound}).List(9, Filter{})
+	out, err := NewService(&fakeStore{schoolErr: repositories.ErrGraduateOutcomeUserNotFound}).List(context.Background(), 9, Filter{})
 	if !errors.Is(err, ErrUserNotFound) || out != nil {
 		t.Fatalf("存在しない学生: out=%+v err=%v", out, err)
 	}
 	boom := errors.New("db")
-	if out, err := NewService(&fakeStore{schoolErr: boom}).List(9, Filter{}); !errors.Is(err, boom) || out != nil {
+	if out, err := NewService(&fakeStore{schoolErr: boom}).List(context.Background(), 9, Filter{}); !errors.Is(err, boom) || out != nil {
 		t.Fatalf("学校の取得に失敗: out=%+v err=%v", out, err)
 	}
-	if out, err := NewService(&fakeStore{school: linked(), optionsErr: boom}).List(9, Filter{}); !errors.Is(err, boom) || out != nil {
+	if out, err := NewService(&fakeStore{school: linked(), optionsErr: boom}).List(context.Background(), 9, Filter{}); !errors.Is(err, boom) || out != nil {
 		t.Fatalf("選択肢の取得に失敗: out=%+v err=%v", out, err)
 	}
 }
@@ -130,7 +133,7 @@ func TestCompany(t *testing.T) {
 			{Title: "SE", Count: 4}, {Title: "", Count: 3}, {Title: "営業", Count: 2},
 		},
 	}
-	out, err := NewService(store).Company(9, 1)
+	out, err := NewService(store).Company(context.Background(), 9, 1)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -150,28 +153,28 @@ func TestCompany_最小人数の境界(t *testing.T) {
 	for _, n := range []int{1, MinCount - 1} {
 		store := &fakeStore{school: linked(), rows: []repositories.GraduateOutcomeRow{row(1, "A社", 2025, n)},
 			positions: []repositories.GraduatePositionCount{{Title: "SE", Count: n}}}
-		out, err := NewService(store).Company(9, 1)
+		out, err := NewService(store).Company(context.Background(), 9, 1)
 		if err != nil || out.Total != nil || len(out.ByYear) != 0 || len(out.ByPosition) != 0 {
 			t.Fatalf("n=%d: 少数なのに人数を出している out=%+v err=%v", n, out, err)
 		}
 	}
 	store := &fakeStore{school: linked(), rows: []repositories.GraduateOutcomeRow{row(1, "A社", 2025, MinCount)},
 		positions: []repositories.GraduatePositionCount{{Title: "SE", Count: MinCount}}}
-	out, err := NewService(store).Company(9, 1)
+	out, err := NewService(store).Company(context.Background(), 9, 1)
 	if err != nil || *out.Total != MinCount || out.ByYear[0].Count != MinCount || out.ByPosition[0].Count != MinCount || out.ByYearFew || out.ByPositionFew {
 		t.Fatalf("n=k: out=%+v err=%v", out, err)
 	}
 }
 
 func TestCompany_実績なし_企業なし_学生なし(t *testing.T) {
-	out, err := NewService(&fakeStore{school: linked()}).Company(9, 1)
+	out, err := NewService(&fakeStore{school: linked()}).Company(context.Background(), 9, 1)
 	if err != nil || out.Total == nil || *out.Total != 0 {
 		t.Fatalf("実績なしは 0 人: out=%+v err=%v", out, err)
 	}
-	if _, err := NewService(&fakeStore{school: linked(), invisible: true}).Company(9, 1); !errors.Is(err, ErrCompanyNotFound) {
+	if _, err := NewService(&fakeStore{school: linked(), invisible: true}).Company(context.Background(), 9, 1); !errors.Is(err, ErrCompanyNotFound) {
 		t.Fatalf("見せない企業: err=%v", err)
 	}
-	if _, err := NewService(&fakeStore{schoolErr: repositories.ErrGraduateOutcomeUserNotFound}).Company(9, 1); !errors.Is(err, ErrUserNotFound) {
+	if _, err := NewService(&fakeStore{schoolErr: repositories.ErrGraduateOutcomeUserNotFound}).Company(context.Background(), 9, 1); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("存在しない学生: err=%v", err)
 	}
 }

@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"context"
 	"errors"
 
 	"gorm.io/gorm"
@@ -27,12 +28,12 @@ var ErrGraduateOutcomeUserNotFound = errors.New("graduate outcome: user not foun
 // users.school_id をそのまま信用せず、学校の学園が本人の学園と一致するときだけ返す
 // （一致しない・学校が消えている場合は nil = 実績を出さない）。AssessmentRepository.FindUserSchoolID
 // （#1675）と同じ fail-close。学生が存在しなければ ErrGraduateOutcomeUserNotFound。
-func (r *GraduateOutcomeRepository) StudentSchoolID(userID uint) (*uint, error) {
+func (r *GraduateOutcomeRepository) StudentSchoolID(ctx context.Context, userID uint) (*uint, error) {
 	var u struct {
 		SchoolID       *uint
 		OrganizationID uint
 	}
-	err := r.db.Table("users").Select("school_id", "organization_id").
+	err := r.db.WithContext(ctx).Table("users").Select("school_id", "organization_id").
 		Where("id = ? AND withdrawn_at IS NULL", userID).Take(&u).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrGraduateOutcomeUserNotFound
@@ -44,7 +45,7 @@ func (r *GraduateOutcomeRepository) StudentSchoolID(userID uint) (*uint, error) 
 		return nil, nil
 	}
 	var sc struct{ OrganizationID uint }
-	err = r.db.Table("schools").Select("organization_id").Where("id = ?", *u.SchoolID).Take(&sc).Error
+	err = r.db.WithContext(ctx).Table("schools").Select("organization_id").Where("id = ?", *u.SchoolID).Take(&sc).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -65,9 +66,9 @@ const visibleCompany = `c.is_active = true AND c.deleted_at IS NULL AND NOT (
 )`
 
 // CompanyVisible は企業が存在し、学生に見せてよいかを返す。
-func (r *GraduateOutcomeRepository) CompanyVisible(companyID uint) (bool, error) {
+func (r *GraduateOutcomeRepository) CompanyVisible(ctx context.Context, companyID uint) (bool, error) {
 	var n int64
-	err := r.db.Table("companies c").Where("c.id = ?", companyID).Where(visibleCompany).Count(&n).Error
+	err := r.db.WithContext(ctx).Table("companies c").Where("c.id = ?", companyID).Where(visibleCompany).Count(&n).Error
 	return n > 0, err
 }
 
@@ -86,8 +87,8 @@ type GraduateOutcomeFilter struct {
 	Industry string
 }
 
-func (r *GraduateOutcomeRepository) base(schoolID uint) *gorm.DB {
-	return r.db.Table("graduate_employments ge").
+func (r *GraduateOutcomeRepository) base(ctx context.Context, schoolID uint) *gorm.DB {
+	return r.db.WithContext(ctx).Table("graduate_employments ge").
 		Joins("JOIN companies c ON c.id = ge.company_id").
 		Where("ge.school_id = ? AND ge.deleted_at IS NULL", schoolID).
 		Where(visibleCompany)
@@ -97,8 +98,8 @@ const outcomeRowSelect = "ge.company_id AS company_id, c.name AS company_name, C
 const outcomeRowGroup = "ge.company_id, c.name, c.industry, COALESCE(ge.graduation_year, 0)"
 
 // CountsByCompanyYear は学校の卒業生の就職先を、企業・年度ごとの人数で返す。
-func (r *GraduateOutcomeRepository) CountsByCompanyYear(schoolID uint, f GraduateOutcomeFilter) ([]GraduateOutcomeRow, error) {
-	q := r.base(schoolID).Select(outcomeRowSelect)
+func (r *GraduateOutcomeRepository) CountsByCompanyYear(ctx context.Context, schoolID uint, f GraduateOutcomeFilter) ([]GraduateOutcomeRow, error) {
+	q := r.base(ctx, schoolID).Select(outcomeRowSelect)
 	if f.Year > 0 {
 		q = q.Where("ge.graduation_year = ?", f.Year)
 	}
@@ -113,13 +114,13 @@ func (r *GraduateOutcomeRepository) CountsByCompanyYear(schoolID uint, f Graduat
 }
 
 // FilterOptions は学校の実績にある年度と業界を返す（絞り込みの選択肢）。年度が未登録の行は選択肢に出さない。
-func (r *GraduateOutcomeRepository) FilterOptions(schoolID uint) ([]int, []string, error) {
+func (r *GraduateOutcomeRepository) FilterOptions(ctx context.Context, schoolID uint) ([]int, []string, error) {
 	var years []int
-	if err := r.base(schoolID).Where("ge.graduation_year > 0").Distinct().Order("ge.graduation_year DESC").Pluck("ge.graduation_year", &years).Error; err != nil {
+	if err := r.base(ctx, schoolID).Where("ge.graduation_year > 0").Distinct().Order("ge.graduation_year DESC").Pluck("ge.graduation_year", &years).Error; err != nil {
 		return nil, nil, err
 	}
 	var industries []string
-	if err := r.base(schoolID).Where("c.industry <> ''").Distinct().Order("c.industry").Pluck("c.industry", &industries).Error; err != nil {
+	if err := r.base(ctx, schoolID).Where("c.industry <> ''").Distinct().Order("c.industry").Pluck("c.industry", &industries).Error; err != nil {
 		return nil, nil, err
 	}
 	return years, industries, nil
@@ -132,16 +133,16 @@ type GraduatePositionCount struct {
 }
 
 // CompanyCounts は1社について、学校の卒業生の年度別と職種別の人数を返す。
-func (r *GraduateOutcomeRepository) CompanyCounts(schoolID, companyID uint) ([]GraduateOutcomeRow, []GraduatePositionCount, error) {
+func (r *GraduateOutcomeRepository) CompanyCounts(ctx context.Context, schoolID, companyID uint) ([]GraduateOutcomeRow, []GraduatePositionCount, error) {
 	var byYear []GraduateOutcomeRow
-	if err := r.base(schoolID).Where("ge.company_id = ?", companyID).
+	if err := r.base(ctx, schoolID).Where("ge.company_id = ?", companyID).
 		Select(outcomeRowSelect).Group(outcomeRowGroup).
 		Order("graduation_year DESC").Scan(&byYear).Error; err != nil {
 		return nil, nil, err
 	}
 	var byPosition []GraduatePositionCount
 	// 職種はその企業のものだけ結ぶ（別企業の求人 ID が入った行は「職種の登録なし」に寄せる）
-	if err := r.base(schoolID).Where("ge.company_id = ?", companyID).
+	if err := r.base(ctx, schoolID).Where("ge.company_id = ?", companyID).
 		Joins("LEFT JOIN company_job_positions jp ON jp.id = ge.job_position_id AND jp.company_id = ge.company_id").
 		Select("COALESCE(jp.title, '') AS title, COUNT(*) AS count").
 		Group("COALESCE(jp.title, '')").Order("count DESC, title").Scan(&byPosition).Error; err != nil {

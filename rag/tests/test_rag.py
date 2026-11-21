@@ -423,7 +423,7 @@ class TestFailureCases:
         """ChromaDB 接続で例外が出てもエンドポイントが 200 を返すことを確認する。"""
 
         with patch("main.get_cached_context", side_effect=Exception("ChromaDB connection failed")), \
-             patch("routers.resume.generate_resume_report", return_value="外部依存失敗時のレポート") as mock_crewai:
+             patch("routers.resume.generate_resume_report", return_value="外部依存失敗時のレポート"):
 
             client = _auth_client()
             resp = client.post("/resume/review", json={

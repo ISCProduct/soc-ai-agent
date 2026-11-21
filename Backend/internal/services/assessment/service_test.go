@@ -396,7 +396,7 @@ func TestService_SchoolTemplateSessionBlockedAfterSchoolChange(t *testing.T) {
 	}
 
 	// 前提: 在籍中は読める（この確認が無いと、下の4件は常に通る無意味なテストになる）
-	svc, repo, publicID := setup()
+	svc, _, publicID := setup()
 	if _, err := svc.Get(student, publicID); err != nil {
 		t.Fatalf("A校在籍中は受検を開けるはず: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestService_SchoolTemplateSessionBlockedAfterSchoolChange(t *testing.T) {
 	}
 
 	// 所属校が消えた（nil）場合も続けさせない
-	svc, repo, publicID = setup()
+	svc, repo, publicID := setup()
 	delete(repo.userSchools, student)
 	if _, err := svc.Get(student, publicID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("所属校なしで受検を開けた err=%v want %v", err, ErrNotFound)

@@ -58,7 +58,7 @@ func (t *companyExtractTarget) Run(ctx context.Context, c Case) Observation {
 		res = CallChatCompletions(ctx, t.model, system, user, companyExtractTemperature, company.CompanyInfoExtractMaxTokens, true)
 	} else {
 		res = CallChatCompletionsWithSchema(ctx, t.model, system, user, companyExtractTemperature,
-			company.CompanyInfoExtractMaxTokens, schema.Name, schema.Schema)
+			company.CompanyInfoExtractMaxTokens, schema.Name, schema.Schema, nil)
 	}
 	return evaluateCompanyExtractResponse(newObservation(c), *c.Input.Expected, res)
 }

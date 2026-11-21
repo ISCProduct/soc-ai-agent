@@ -17,9 +17,12 @@ export const SIDEBAR_NAV_ITEMS = [
   { href: '/interview/history', label: t('sidebar.interviewHistory') },
   { href: '/es-rewrite', label: t('sidebar.esRewrite') },
   { href: '/schedule', label: t('sidebar.schedule') },
+  { href: '/favorites', label: t('sidebar.favorites') },
   { href: '/applications', label: t('sidebar.applications') },
   // 卒業生の進路実績（#2032）。ほかに入口が無いので共通メニューから行けるようにする
   { href: '/graduate-outcomes', label: t('sidebar.graduateOutcomes') },
+  // 企業を探す（SOCAIAGENT-612）。推薦とは別に、自分の条件で探す入口
+  { href: '/companies', label: t('sidebar.companySearch') },
   { href: '/scout', label: t('sidebar.scout') },
   { href: '/profile', label: t('sidebar.profile') },
 ] as const
@@ -55,8 +58,10 @@ export const HOME_SIDEBAR_GROUPS = [
     heading: t('groups.proceed'),
     items: [
       { href: '/schedule', label: t('sidebar.schedule') },
+      { href: '/favorites', label: t('sidebar.favorites') },
       { href: '/applications', label: t('sidebar.applications') },
       { href: '/graduate-outcomes', label: t('sidebar.graduateOutcomes') },
+      { href: '/companies', label: t('sidebar.companySearch') },
       { href: '/scout', label: t('sidebar.scout') },
     ],
   },
@@ -134,3 +139,9 @@ export const BOTTOM_NAV_HEIGHT = 'calc(56px + env(safe-area-inset-bottom))'
 export const ABOVE_BOTTOM_NAV_SX = {
   bottom: { xs: `calc(${BOTTOM_NAV_HEIGHT} + 16px)`, md: 24 },
 } as const
+
+/**
+ * 保存・送信の結果を知らせる Snackbar の表示時間（ミリ秒）。画面ごとに 3000・4000・5000 とばらばらだったので揃える（#2222）。
+ * 読み終える前に消えないよう、使っていた中で一番長い値にした。
+ */
+export const SNACKBAR_AUTO_HIDE_MS = 5000

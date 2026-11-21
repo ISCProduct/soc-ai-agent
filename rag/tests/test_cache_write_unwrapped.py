@@ -98,10 +98,16 @@ def test_vector_reembed_cache_writes_unwrapped_context(monkeypatch, doc_type: st
     from routers import vector as vector_router
     from models import VectorReembedRequest
 
-    writes = _cache_recorder(monkeypatch)
-    monkeypatch.setattr(
-        vector_router, "delete_company_documents", lambda *_args, **_kwargs: {"deleted": 0}
-    )
+    # 再埋め込みは replace_documents で書く（SOCAIAGENT-658）。囲む前の本文を渡していることを見る
+    writes: list[list[str]] = []
+
+    def record_replace(cache_key, docs, embeddings, **kwargs):
+        _assert_unwrapped(docs)
+        writes.append(docs)
+        return {"collection": "c", "replaced": len(docs), "deleted": 0}
+
+    monkeypatch.setattr(vector_router, "replace_documents", record_replace)
+    monkeypatch.setattr(main, "embed_texts", lambda docs: [[0.1] for _ in docs])
     monkeypatch.setattr(main, "_run_async", lambda *_args, **_kwargs: _EXTERNAL_CONTEXT)
     monkeypatch.setattr(main, "_run_hints_web_search", lambda *_args: _EXTERNAL_CONTEXT)
 

@@ -3,6 +3,7 @@
 package graduateoutcome
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -16,8 +17,8 @@ import (
 )
 
 type Service interface {
-	List(userID uint, f svc.Filter) (*svc.List, error)
-	Company(userID, companyID uint) (*svc.CompanyDetail, error)
+	List(ctx context.Context, userID uint, f svc.Filter) (*svc.List, error)
+	Company(ctx context.Context, userID, companyID uint) (*svc.CompanyDetail, error)
 }
 
 type Controller struct {
@@ -51,7 +52,7 @@ func (c *Controller) List(ctx echo.Context) error {
 		f.Year = y
 	}
 	f.Industry = strings.TrimSpace(ctx.QueryParam("industry"))
-	out, err := c.svc.List(userID, f)
+	out, err := c.svc.List(ctx.Request().Context(), userID, f)
 	if err != nil {
 		return toHTTPError(err)
 	}
@@ -68,7 +69,7 @@ func (c *Controller) Company(ctx echo.Context) error {
 	if err != nil || id == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "id が不正です")
 	}
-	out, err := c.svc.Company(userID, uint(id))
+	out, err := c.svc.Company(ctx.Request().Context(), userID, uint(id))
 	if err != nil {
 		return toHTTPError(err)
 	}
