@@ -4,6 +4,7 @@ package middleware
 // state をサーバー側の HttpOnly Cookie に保存し、コールバック時に HMAC 署名付きで検証する。
 
 import (
+	"Backend/internal/config"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -32,7 +33,7 @@ func GenerateOAuthState(w http.ResponseWriter) (string, error) {
 	state := base64.URLEncoding.EncodeToString(b)
 	signed := signState(state)
 
-	secure := os.Getenv("APP_ENV") == "production"
+	secure := config.IsProduction()
 	http.SetCookie(w, &http.Cookie{
 		Name:     oauthStateCookieName,
 		Value:    signed,
@@ -58,7 +59,7 @@ func VerifyOAuthState(w http.ResponseWriter, r *http.Request) bool {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   os.Getenv("APP_ENV") == "production",
+		Secure:   config.IsProduction(),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -83,7 +84,7 @@ func SetOAuthTenantSlug(w http.ResponseWriter, slug string) {
 		Path:     "/",
 		MaxAge:   int(oauthStateTTL.Seconds()),
 		HttpOnly: true,
-		Secure:   os.Getenv("APP_ENV") == "production",
+		Secure:   config.IsProduction(),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -98,7 +99,7 @@ func ConsumeOAuthTenantSlug(w http.ResponseWriter, r *http.Request) string {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   os.Getenv("APP_ENV") == "production",
+		Secure:   config.IsProduction(),
 		SameSite: http.SameSiteLaxMode,
 	})
 	if err != nil {

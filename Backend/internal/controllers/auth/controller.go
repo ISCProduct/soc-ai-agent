@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"Backend/internal/config"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/services/auth"
@@ -9,7 +10,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -22,7 +22,7 @@ func tenantOrgID(ctx echo.Context) uint {
 }
 
 // isProduction は APP_ENV=production のときのみ true を返す。
-func isProduction() bool { return os.Getenv("APP_ENV") == "production" }
+func isProduction() bool { return config.IsProduction() }
 
 type AuthController struct {
 	authService interfaces.AuthService
