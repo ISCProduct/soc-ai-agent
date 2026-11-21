@@ -55,6 +55,13 @@ type Observation struct {
 	// RawScore は正規化前の値（ES: 1-10、履歴書: 0-100、面接: 0-5）。
 	RawScore float64 `json:"raw_score"`
 
+	// AxisScores は軸別の採点（面接レポート、0-5）。AxisLabels は軸別の人手ラベル（任意）。
+	AxisScores map[string]float64 `json:"axis_scores,omitempty"`
+	AxisLabels map[string]float64 `json:"axis_labels,omitempty"`
+	// FairnessPair / ContextVariant は公平性回帰ケースの組と企業文脈の種類。
+	FairnessPair   string `json:"fairness_pair,omitempty"`
+	ContextVariant string `json:"context_variant,omitempty"`
+
 	// Violations は指示違反の内容。空なら指示を守れている。
 	Violations []string `json:"violations,omitempty"`
 
@@ -157,6 +164,21 @@ type Summary struct {
 	PairwiseAgreement  float64            `json:"pairwise_agreement"`
 	PairwiseComparable int                `json:"pairwise_comparable"`
 	MeanScoreByLabel   map[string]float64 `json:"mean_score_by_label"`
+	// 妥当性（面接レポート）: 人手ラベル（3段階を数値化、LabelTargetScore）と採点の一致。
+	// ValidityCases はその計算に使ったケース数。0 は未計測（旧JSON・ラベルなし）で、
+	// MAE 0.000 を「完全一致」と読まないこと。
+	ValidityCases int `json:"validity_cases"`
+	// LabelMAE は正規化スコア(0-1)の平均絶対誤差。LabelPearson は線形相関。
+	LabelMAE     float64 `json:"label_mae"`
+	LabelPearson float64 `json:"label_pearson"`
+	// AxisMAE は軸別の人手ラベルがあるケースだけの軸別 MAE（0-5 の点）。AxisMAECases は軸ごとの件数。
+	AxisMAE      map[string]float64 `json:"axis_mae,omitempty"`
+	AxisMAECases map[string]int     `json:"axis_mae_cases,omitempty"`
+	// 公平性: 回答が同一で企業文脈だけ違うペアの、正規化スコア差（組内の最大-最小）。
+	FairnessPairs   int     `json:"fairness_pairs"`
+	FairnessMeanGap float64 `json:"fairness_mean_gap"`
+	FairnessMaxGap  float64 `json:"fairness_max_gap"`
+
 	// MeanScore は全ケースの平均スコア（ケースごとの平均の平均）。ラベルなしの target（#1782）では
 	// 正解との一致・指示の遵守の割合そのもので、劣化判定に使う。
 	MeanScore float64 `json:"mean_score"`
@@ -292,6 +314,8 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	stddevs := make([]float64, 0, len(byCase))
 	scoresByLabel := map[string][]float64{}
 	caseMeans := make([]float64, 0, len(byCase))
+	axisPred, axisTrue := map[string][]float64{}, map[string][]float64{}
+	pairMeans := map[string][]float64{}
 	for _, id := range caseOrder {
 		runs := byCase[id]
 		scores := make([]float64, 0, len(runs))
@@ -310,6 +334,21 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 		if len(scores) > 0 {
 			cs.MeanScore = Mean(scores)
 			caseMeans = append(caseMeans, cs.MeanScore)
+			if pair := runs[0].FairnessPair; pair != "" {
+				pairMeans[pair] = append(pairMeans[pair], cs.MeanScore)
+			}
+			for axis, want := range runs[0].AxisLabels {
+				var got []float64
+				for _, o := range runs {
+					if v, ok := o.AxisScores[axis]; ok && !o.Broken {
+						got = append(got, v)
+					}
+				}
+				if len(got) > 0 {
+					axisPred[axis] = append(axisPred[axis], Mean(got))
+					axisTrue[axis] = append(axisTrue[axis], want)
+				}
+			}
 			cs.ScoreStdDev = StdDev(scores)
 			stddevs = append(stddevs, cs.ScoreStdDev)
 			if cs.ScoreStdDev > UnstableStdDevThreshold {
@@ -342,6 +381,25 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	for label, xs := range scoresByLabel {
 		s.MeanScoreByLabel[label] = Mean(xs)
 	}
+	if target == TargetInterviewReport {
+		var want, got []float64
+		for _, c := range scored {
+			if v, ok := LabelTargetScore(c.Label); ok {
+				want, got = append(want, v), append(got, c.MeanScore)
+			}
+		}
+		s.ValidityCases = len(want)
+		s.LabelMAE = MeanAbsError(want, got)
+		s.LabelPearson = PearsonCorrelation(want, got)
+	}
+	for axis, want := range axisTrue {
+		if s.AxisMAE == nil {
+			s.AxisMAE, s.AxisMAECases = map[string]float64{}, map[string]int{}
+		}
+		s.AxisMAE[axis] = MeanAbsError(want, axisPred[axis])
+		s.AxisMAECases[axis] = len(want)
+	}
+	s.FairnessPairs, s.FairnessMeanGap, s.FairnessMaxGap = FairnessGaps(pairMeans)
 
 	s.TotalCostUSD = costs.EstimateCostUSD(model, promptTokens, completionTokens)
 	// 1件あたりは計測できた回数で割る。課金は破損した呼び出しにも発生するが、

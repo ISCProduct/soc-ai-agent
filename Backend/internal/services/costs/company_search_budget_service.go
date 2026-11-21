@@ -120,7 +120,7 @@ func (s *CompanySearchBudgetService) notifyIfNeeded(status CompanySearchBudgetSt
 		"Company Search monthly budget threshold exceeded.\nmonth=%s\ncount=%d\nlimit=%d\nalert_threshold=%d\nenforce=%v\n",
 		status.Month, status.Count, s.limit, s.alertThreshold, s.enforce,
 	)
-	log.Printf("[CompanySearchBudget] ALERT %s", strings.ReplaceAll(body, "\n", " "))
+	log.Printf("[CompanySearchBudget] ALERT %s", strings.ReplaceAll(body, "\n", " ")) // logpolicy:ok 企業検索の予算アラート本文で、個人情報を含まない
 
 	if webhook := strings.TrimSpace(os.Getenv("COMPANY_SEARCH_ALERT_SLACK_WEBHOOK_URL")); webhook != "" {
 		if err := postCompanySearchSlackAlert(webhook, subject+"\n"+body); err != nil {

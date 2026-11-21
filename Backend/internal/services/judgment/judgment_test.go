@@ -3,11 +3,11 @@ package judgment
 import "testing"
 
 // 合成のプロファイル。実データは使わない。
-func scores(vals ...int) map[string]int {
+func scores(vals ...int) map[string]float64 {
 	cats := []string{"c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10"}
-	m := map[string]int{}
+	m := map[string]float64{}
 	for i, v := range vals {
-		m[cats[i]] = v
+		m[cats[i]] = float64(v)
 	}
 	return m
 }

@@ -38,8 +38,8 @@ type AxisScore struct {
 }
 
 type CategoryRecommendation struct {
-	Category string `json:"category"`
-	Score    int    `json:"score"`
+	Category string  `json:"category"`
+	Score    float64 `json:"score"`
 }
 
 type CompanyRecommendation struct {

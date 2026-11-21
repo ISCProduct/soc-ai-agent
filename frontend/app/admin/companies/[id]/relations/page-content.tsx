@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { formatDateTime } from '@/lib/i18n/format'
 import { useParams } from 'next/navigation'
 import {
@@ -26,8 +27,16 @@ import { AdminPanel } from '@/components/admin/AdminPanel'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { CompanyAspectTabs } from '@/components/admin/CompanyAspectTabs'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
-import CompanyRelationGraph from '@/components/admin/CompanyRelationGraph'
 import { groupRelationsByCategory, RELATION_CATEGORY_LABELS } from '@/lib/relation-graph'
+
+const CompanyRelationGraph = dynamic(() => import('@/components/admin/CompanyRelationGraph'), {
+  ssr: false,
+  loading: () => (
+    <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary' }}>
+      相関図を読み込み中...
+    </Box>
+  ),
+})
 
 type RelationEntry = {
   name: string

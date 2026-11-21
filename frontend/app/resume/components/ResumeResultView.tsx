@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { Box, Button, ButtonBase, Collapse, Stack, Typography, useMediaQuery, useTheme } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import ScoreUpdateBanner, { type WeightScore } from '@/components/feedback/ScoreUpdateBanner'
@@ -13,6 +14,9 @@ import { ResumeFindingsPane, type FindingFilter } from './ResumeFindingsPane'
 import { ResumeResultSummary } from './ResumeResultSummary'
 import { ResumeSegmented } from './ResumeSegmented'
 
+// PDF.js は大きく、ブラウザでしか動かないので、結果画面を開いたときに読み込む
+const ResumePdfPage = dynamic(() => import('./ResumePdfPage'), { ssr: false })
+
 type ResumeResultViewProps = {
   review: ReviewResult
   scoresBefore: WeightScore[] | null
@@ -21,19 +25,25 @@ type ResumeResultViewProps = {
   onDownload: () => void
   /** 企業別レビューレポート（長文）。あれば末尾で開いて読める */
   ragReport: string
+  /** 実際の書類を描くための書類ID。無いとき・読み込めないときは、指摘の原文を並べた表示にする */
+  documentId?: number | null
 }
 
 /**
  * 結果。PC は書類（左）と指摘（右）の分割、スマホは「指摘」「書類」のタブ。
  * 書類の強調と指摘は同じ番号で結ぶ。
  */
-export function ResumeResultView({ review, scoresBefore, scoresAfter, annotateError, onDownload, ragReport }: ResumeResultViewProps) {
+export function ResumeResultView({ review, scoresBefore, scoresAfter, annotateError, onDownload, ragReport, documentId = null }: ResumeResultViewProps) {
   const theme = useTheme()
   const compact = useMediaQuery(theme.breakpoints.down('md'))
 
   const findings = useMemo(() => buildFindings(review), [review])
   const counts = useMemo(() => countBySeverity(findings), [findings])
-  const pageCount = pageCountOf(findings)
+  const [numPages, setNumPages] = useState<number | null>(null)
+  const [pdfFailed, setPdfFailed] = useState(false)
+  // 書類のページ数が分かればそれを使う。分からないうちは、指摘があるページから数える
+  const pageCount = Math.max(numPages ?? 1, pageCountOf(findings))
+  const showPdf = documentId !== null && !pdfFailed
 
   const [filter, setFilter] = useState<FindingFilter>('all')
   const [selectedNo, setSelectedNo] = useState<number | null>(findings[0]?.no ?? null)
@@ -95,7 +105,27 @@ export function ResumeResultView({ review, scoresBefore, scoresAfter, annotateEr
     />
   )
   const viewer = (
-    <ResumeDocumentViewer page={page} pageCount={pageCount} findings={pageFindings} selectedNo={selectedNo} onSelect={select} onPageChange={changePage} />
+    <ResumeDocumentViewer
+      page={page}
+      pageCount={pageCount}
+      findings={pageFindings}
+      selectedNo={selectedNo}
+      onSelect={select}
+      onPageChange={changePage}
+      pageContent={
+        showPdf ? (
+          <ResumePdfPage
+            documentId={documentId}
+            page={page}
+            findings={pageFindings}
+            selectedNo={selectedNo}
+            onSelect={select}
+            onNumPages={setNumPages}
+            onError={() => setPdfFailed(true)}
+          />
+        ) : undefined
+      }
+    />
   )
 
   return (

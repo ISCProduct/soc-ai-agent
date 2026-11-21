@@ -482,10 +482,10 @@ func applyCompanyDefaults(company *models.Company) {
 		now := time.Now()
 		company.SourceFetchedAt = &now
 	}
-	if company.IsProvisional == false && strings.TrimSpace(company.SourceURL) == "" {
+	if !company.IsProvisional && strings.TrimSpace(company.SourceURL) == "" {
 		company.IsProvisional = true
 	}
-	if strings.TrimSpace(company.Name) != "" && company.IsProvisional == false {
+	if strings.TrimSpace(company.Name) != "" && !company.IsProvisional {
 		company.IsVerified = true
 	}
 }
