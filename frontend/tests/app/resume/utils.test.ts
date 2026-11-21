@@ -3,7 +3,12 @@
  */
 import type { CompanyCandidate } from '@/app/resume/types'
 import {
+  buildFindings,
+  overlayRect,
+  parseBBox,
+  countBySeverity,
   getSeverityConfig,
+  pageCountOf,
   isAnnotatedPdfResponse,
   mapDbCompanyResults,
   mapWebSearchResults,
@@ -215,5 +220,89 @@ describe('parseItemScores', () => {
       'readability',
     ])
     expect(RUBRIC_SCORE_MAX).toBe(5)
+  })
+})
+
+describe('buildFindings', () => {
+  const item = (id: number, page: number, severity: string, message = `指摘${id}`) => ({ id, page_number: page, severity, message })
+
+  it('ページ順に並べ、同じページではAI→ルールの順で通し番号を振る', () => {
+    const findings = buildFindings({
+      items: [item(1, 2, 'warning'), item(2, 1, 'critical')],
+      format_findings: [{ rule: 'r', severity: 'warning', start: 0, end: 1, message: 'ルール', fix: '直す', page_hint: 1 }],
+    })
+    expect(findings.map((f) => [f.no, f.page, f.source])).toEqual([
+      [1, 1, 'ai'],
+      [2, 1, 'rule'],
+      [3, 2, 'ai'],
+    ])
+  })
+
+  it('読み取りが不確かな行は書き換え案を空にし、書き換え案と同じ補足は繰り返さない', () => {
+    const [a, b] = buildFindings({
+      items: [
+        { ...item(1, 1, 'info'), rewrite: '直した文', rewrite_withheld: 'low_ocr_confidence', suggestion: '補足' },
+        { ...item(2, 1, 'info'), rewrite: '直した文', suggestion: '直した文' },
+      ],
+    })
+    expect(a.withheld).toBe(true)
+    expect(a.rewrite).toBe('')
+    expect(a.supplement).toBe('補足')
+    expect(b.supplement).toBe('')
+  })
+
+  it('知らない重要度は注意として扱い、ページ番号が無ければ1ページ目にする', () => {
+    const [f] = buildFindings({ items: [item(1, 0, 'mystery')] })
+    expect(f.severity).toBe('warning')
+    expect(f.page).toBe(1)
+  })
+
+  it('重要度ごとの件数とページ数を数える', () => {
+    const findings = buildFindings({ items: [item(1, 1, 'critical'), item(2, 3, 'info'), item(3, 3, 'info')] })
+    expect(countBySeverity(findings)).toEqual({ critical: 1, warning: 0, info: 2 })
+    expect(pageCountOf(findings)).toBe(3)
+    expect(pageCountOf([])).toBe(1)
+  })
+})
+
+describe('parseBBox / overlayRect（書類の上の位置）', () => {
+  const raw = JSON.stringify({ bbox: [124, 434, 625, 463], page_width: 1240, page_height: 1755 })
+
+  it('Backend が保存する形式を読む', () => {
+    expect(parseBBox(raw)).toEqual({ x0: 124, y0: 434, x1: 625, y1: 463, pageWidth: 1240, pageHeight: 1755 })
+  })
+
+  it('ページの大きさが無い・壊れている・向きが逆なら null（間違った場所を指さない）', () => {
+    expect(parseBBox(undefined)).toBeNull()
+    expect(parseBBox('')).toBeNull()
+    expect(parseBBox('not json')).toBeNull()
+    expect(parseBBox(JSON.stringify([1, 2, 3, 4]))).toBeNull() // ページの大きさが無い古い形式
+    expect(parseBBox(JSON.stringify({ bbox: [1, 2, 3], page_width: 10, page_height: 10 }))).toBeNull()
+    expect(parseBBox(JSON.stringify({ bbox: [5, 5, 1, 9], page_width: 10, page_height: 10 }))).toBeNull()
+    expect(parseBBox(JSON.stringify({ bbox: [1, 1, 5, 9], page_width: 0, page_height: 10 }))).toBeNull()
+    expect(parseBBox(JSON.stringify({ bbox: ['a', 1, 5, 9], page_width: 10, page_height: 10 }))).toBeNull()
+  })
+
+  it('ページに対する割合にする。描く大きさによらず同じ場所を指す', () => {
+    const r = overlayRect({ x0: 100, y0: 200, x1: 300, y1: 260, pageWidth: 1000, pageHeight: 2000 })
+    expect(r.left).toBeCloseTo(10)
+    expect(r.top).toBeCloseTo(10)
+    expect(r.width).toBeCloseTo(20)
+    expect(r.height).toBeCloseTo(3)
+  })
+
+  it('ページの外にはみ出す分は切る', () => {
+    const r = overlayRect({ x0: -50, y0: 10, x1: 1200, y1: 20, pageWidth: 1000, pageHeight: 100 })
+    expect(r.left).toBe(0)
+    expect(r.width).toBe(100)
+  })
+
+  it('buildFindings は AI の指摘に位置を付け、ルールの指摘には付けない', () => {
+    const [ai, rule] = buildFindings({
+      items: [{ id: 1, page_number: 1, severity: 'warning', message: 'm', bbox: raw }],
+      format_findings: [{ rule: 'r', severity: 'warning', start: 0, end: 1, message: 'ルール', fix: '', page_hint: 1 }],
+    })
+    expect(ai.box).not.toBeNull()
+    expect(rule.box).toBeNull()
   })
 })

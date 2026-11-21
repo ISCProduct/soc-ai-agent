@@ -1,0 +1,51 @@
+name: RAG Lint
+
+# RAG（Python）の lint と型チェック（SOCAIAGENT-575）。テスト（rag-tests.yml）とは別のワークフローにして、
+# どちらが落ちたかを分けて見られるようにする。
+on:
+  push:
+    paths:
+      - 'rag/**'
+      - '.github/workflows/rag-lint.yml'
+  # PR ではパスで絞らず毎回動かす。必須チェックにしているため、絞ると rag を触らない PR で
+  # 結果が返らず「待機中」のままマージできなくなる。必須でなかった間は、赤いままマージされて
+  # develop が壊れた（#2426 と #2429 の組み合わせ。#2462 で修正）。
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint and type check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: rag
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # 本番のイメージ（rag/Dockerfile の python:3.12-slim）と同じ版
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            rag/requirements.txt
+            rag/constraints.txt
+
+      # 設定は rag/ruff.toml（F・E9 だけ）
+      - name: Lint (ruff)
+        run: |
+          python -m pip install ruff==0.8.4
+          ruff check --output-format github .
+
+      # 型を解決するために本番と同じ依存を入れる。設定は rag/mypy.ini
+      - name: Type check (mypy)
+        run: |
+          pip install -r requirements.txt -c constraints.txt
+          pip install mypy==1.13.0
+          mypy .

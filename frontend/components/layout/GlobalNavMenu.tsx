@@ -22,11 +22,13 @@ import AssessmentIcon from '@mui/icons-material/Assessment'
 import EditNoteIcon from '@mui/icons-material/EditNote'
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
 import AssignmentIcon from '@mui/icons-material/Assignment'
+import FavoriteIcon from '@mui/icons-material/Favorite'
 import MailOutlineIcon from '@mui/icons-material/MailOutline'
 import ManageAccountsIcon from '@mui/icons-material/ManageAccounts'
 import HomeIcon from '@mui/icons-material/Home'
 import FactCheckIcon from '@mui/icons-material/FactCheck'
 import QuizIcon from '@mui/icons-material/Quiz'
+import SearchIcon from '@mui/icons-material/Search'
 import {
   GLOBAL_NAV_HOME_ITEMS,
   SIDEBAR_NAV_ITEMS,
@@ -36,6 +38,7 @@ import {
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { useInterviewSessionActive } from '@/app/interview/sessionChrome'
 import { useTranslations } from '@/lib/i18n'
+import { useHasStoredUser } from './useHasStoredUser'
 
 type NavHref = (typeof SIDEBAR_NAV_ITEMS)[number]['href'] | (typeof GLOBAL_NAV_HOME_ITEMS)[number]['href']
 
@@ -51,14 +54,16 @@ const NAV_ICONS: Record<NavHref, React.ReactNode> = {
   '/interview/history': <AssessmentIcon color="primary" />,
   '/es-rewrite': <EditNoteIcon color="primary" />,
   '/schedule': <CalendarMonthIcon color="primary" />,
+  '/favorites': <FavoriteIcon color="primary" />,
   '/applications': <AssignmentIcon color="primary" />,
+  '/companies': <SearchIcon color="primary" />,
   '/scout': <MailOutlineIcon color="primary" />,
   '/profile': <ManageAccountsIcon color="primary" />,
 }
 
 /**
  * ホーム画面以外のページから主要機能（ES・スケジュール・選考管理・相関図・面接履歴など）へ
- * 到達するための共通メニュー。ホームは AnalysisSidebar が同等の導線を持つため表示しない。
+ * 到達するための共通メニュー。ホームは HomeSidebar が同等の導線を持つため表示しない。
  * チャット進捗などホーム固有の責務は持たせず、ナビ項目のみを共通化する。
  */
 export function GlobalNavMenu() {
@@ -67,9 +72,12 @@ export function GlobalNavMenu() {
   // AI面接のセッション画面表示中はFabが操作ボタンに重なるため隠す（StudentBottomNavと同じ理由、#1569）
   const interviewSessionActive = useInterviewSessionActive()
   const t = useTranslations('nav')
+  // 未ログインの訪問者には出さない（下部ナビと同じ判定。#2222）。中の項目はどれも認証が要る画面
+  const { mounted, hasStoredUser } = useHasStoredUser()
 
   if (pathname === '/' || !shouldShowStudentBottomNav(pathname)) return null
   if (interviewSessionActive) return null
+  if (!mounted || !hasStoredUser) return null
 
   return (
     <>
@@ -80,6 +88,8 @@ export function GlobalNavMenu() {
         onClick={() => setOpen(true)}
         sx={{
           position: 'fixed',
+          // 印刷（ポートフォリオの PDF など）に載せない
+          '@media print': { display: 'none' },
           right: 16,
           bottom: { xs: 'calc(72px + env(safe-area-inset-bottom))', md: 16 },
           zIndex: (t) => t.zIndex.appBar,

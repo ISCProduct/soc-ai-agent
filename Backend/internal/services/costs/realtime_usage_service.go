@@ -307,7 +307,7 @@ func (s *RealtimeUsageService) checkAndNotifyThreshold() {
 		"Realtime API monthly cost exceeded threshold.\nmonth=%s\ntotal_usd=%.4f\nthreshold_usd=%.4f\nactive_limit=%d\n",
 		monthID, total, s.alertThresholdUSD, s.maxConcurrent,
 	)
-	log.Printf("[RealtimeUsage] ALERT %s", strings.ReplaceAll(body, "\n", " "))
+	log.Printf("[RealtimeUsage] ALERT %s", strings.ReplaceAll(body, "\n", " ")) // logpolicy:ok 利用量のアラート本文で、個人情報を含まない
 
 	if webhook := config.RealtimeAlertSlackWebhookURL(); webhook != "" {
 		if err := postSlackAlert(webhook, subject+"\n"+body); err != nil {

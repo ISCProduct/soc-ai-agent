@@ -2,6 +2,7 @@ package auth
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/logsafe"
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"context"
@@ -17,11 +18,24 @@ import (
 	"time"
 )
 
-const WithdrawalRetentionDays = 30
+// WithdrawalRetentionMonths は退会日から物理削除までの月数。
+// 退会ボタンを押した瞬間には消さない。再計算の控えもスコア本体と同じ日に消す（SOCAIAGENT-633）。
+const WithdrawalRetentionMonths = 12
+
+// WithdrawalPurgeAfter は退会日時から物理削除する日時を返す。
+func WithdrawalPurgeAfter(withdrawnAt time.Time) time.Time {
+	return withdrawnAt.UTC().AddDate(0, WithdrawalRetentionMonths, 0)
+}
 
 // ObjectDeleter は S3 等のオブジェクト削除インターフェース。
 type ObjectDeleter interface {
 	DeleteObject(ctx context.Context, key string) error
+}
+
+// TrainingDataDeleter は、採点モデルの学習用に書き出し済みのデータ（S3）から、1人ぶんを消す（#2168）。
+// 実装は scorerexport.Sweeper。消した数と、subject を伏せたエラーを返す。
+type TrainingDataDeleter interface {
+	DeleteUser(ctx context.Context, userID uint) (int, error)
 }
 
 // auditRecorder は循環 import を避けるための最小監査インターフェース。
@@ -41,6 +55,7 @@ type UserDeletionService struct {
 	object           ObjectDeleter
 	audit            auditRecorder
 	scoutIndexSyncer ScoutIndexSyncer
+	trainingData     TrainingDataDeleter
 }
 
 func NewUserDeletionService(repo repository.UserWithdrawalRepository, object ObjectDeleter, audit auditRecorder) *UserDeletionService {
@@ -51,6 +66,13 @@ func NewUserDeletionService(repo repository.UserWithdrawalRepository, object Obj
 // 未設定なら同期しない（RAG未設定環境でも退会は成功する）。
 func (s *UserDeletionService) SetScoutIndexSyncer(syncer ScoutIndexSyncer) {
 	s.scoutIndexSyncer = syncer
+}
+
+// SetTrainingDataDeleter は、パージのときに学習用に書き出し済みのデータを消す処理を注入する（#2168）。
+// 未設定（書き出しの設定が無い環境）なら消さない。書き出しの設定が無ければ書き出しも動かないので、消すものも無い。
+// 設定があってここで消し損ねたものは、書き出しのたびと定期実行の Sweep（cmd/training-export）が消す。
+func (s *UserDeletionService) SetTrainingDataDeleter(d TrainingDataDeleter) {
+	s.trainingData = d
 }
 
 var (
@@ -71,7 +93,7 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 	}
 
 	now := time.Now().UTC()
-	purgeAfter := now.AddDate(0, 0, WithdrawalRetentionDays)
+	purgeAfter := WithdrawalPurgeAfter(now)
 	var email string
 	var keyCount int
 
@@ -118,7 +140,7 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 			"deleted_user_email_masked": maskEmail(email),
 			"purge_after":               purgeAfter.Format(time.RFC3339),
 			"s3_object_count":           keyCount,
-			"retention_days":            WithdrawalRetentionDays,
+			"retention_months":          WithdrawalRetentionMonths,
 		})
 	}
 
@@ -196,7 +218,7 @@ type scoutIndexDeleter interface {
 // 検索結果は DB 側で再フィルタされるため情報漏洩は起きないが、
 // 個人データが消えない状態が誰にも気づかれずに続く。
 //
-// 物理パージ(30日)を待つと窓が広すぎるので、パージと同じ日次ジョブで消し直す。
+// 物理パージ（12ヶ月）を待つと窓が広すぎるので、パージと同じ日次ジョブで消し直す。
 // 削除は冪等なので、既に消えているユーザーに対して繰り返し呼んでも副作用はない。
 //
 // 戻り値: (試行件数, 失敗件数, エラー)。エラーは対象の取得に失敗した場合のみ。
@@ -235,6 +257,9 @@ func (s *UserDeletionService) purgeOne(w models.WithdrawnUser) error {
 	}
 
 	s3Errs := s.deleteObjectsBestEffort(keys)
+	// 学習用に書き出し済みのデータも消す（#2168 の受け入れ条件「退会する → パージが走る → S3 からも消える」）。
+	// 面接動画などと同じく DB のコミット後の best-effort で、失敗は監査ログに残す。
+	trainingDeleted, trainingErr := s.deleteTrainingData(w.UserID)
 	now := time.Now().UTC()
 	// 物理削除はもうコミット済みなので、記録に失敗しても成功として扱う（エラーを返すと「削除失敗」と記録され実態とずれる）。
 	// purged_at が残らないと次回のパージでもう一度対象になるが、消えたデータを消し直すだけなので害は無い。
@@ -252,9 +277,27 @@ func (s *UserDeletionService) purgeOne(w models.WithdrawnUser) error {
 		if len(s3Errs) > 0 {
 			meta["s3_errors"] = s3Errs
 		}
+		if s.trainingData != nil {
+			meta["training_data_deleted_files"] = trainingDeleted
+		}
+		if trainingErr != nil {
+			meta["training_data_error"] = trainingErr.Error()
+		}
 		s.audit.Record("system", "user.purge", "user", w.UserID, meta)
 	}
 	return nil
+}
+
+// deleteTrainingData は、学習用に書き出し済みのデータから1人ぶんを消す。未設定なら何もしない。
+func (s *UserDeletionService) deleteTrainingData(userID uint) (int, error) {
+	if s.trainingData == nil {
+		return 0, nil
+	}
+	n, err := s.trainingData.DeleteUser(context.Background(), userID)
+	if err != nil {
+		log.Printf("[UserDeletion] training data delete failed user_id=%d: %v", userID, err)
+	}
+	return n, err
 }
 
 func (s *UserDeletionService) deleteObjectsBestEffort(keys []string) []string {
@@ -326,15 +369,5 @@ func MaskEmail(email string) string {
 }
 
 func maskEmail(email string) string {
-	email = strings.TrimSpace(email)
-	at := strings.Index(email, "@")
-	if at <= 0 {
-		return "***"
-	}
-	local := email[:at]
-	domain := email[at:]
-	if len(local) == 1 {
-		return local + "***" + domain
-	}
-	return string(local[0]) + "***" + domain
+	return logsafe.MaskEmail(email)
 }

@@ -19,6 +19,10 @@ const (
 	StageScoreEvaluation    Stage = "score_evaluation"
 	StageMatchingReason     Stage = "matching_reason"
 	StageCompanyExtraction  Stage = "company_extraction"
+
+	// StageESReview は ES 添削（リライトも同じプロンプト）。版は RAG が本文と一緒に持ち、
+	// 使用量（usage.prompt_version）で返す。環境変数では指定しない（SOCAIAGENT-661）。
+	StageESReview Stage = "es_review"
 )
 
 const defaultPromptVersion = "v2"

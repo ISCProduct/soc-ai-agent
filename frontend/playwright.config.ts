@@ -16,6 +16,7 @@ export default defineConfig({
     'student-theme-contrast.spec.ts',
     'list-loading-empty.spec.ts',
     'home-next-actions.spec.ts',
+    'home-consult.spec.ts',
     'chat-ui-states.spec.ts',
     'correlation-diagram-a11y.spec.ts',
     'assessments.spec.ts',
@@ -58,7 +59,7 @@ export default defineConfig({
 
   webServer: {
     command: process.env.CI
-      ? 'npm run build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && node .next/standalone/server.js'
+      ? 'npm run build && npm start'
       : 'npm run dev',
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,

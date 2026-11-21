@@ -3,6 +3,7 @@ package resume
 import (
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/interfaces"
+	"Backend/internal/services/resume"
 	"Backend/internal/services/shared"
 	"errors"
 	"log"
@@ -193,6 +194,20 @@ func (c *ResumeController) ReviewStream(ctx echo.Context) error {
 }
 
 func (c *ResumeController) Annotated(ctx echo.Context) error {
+	return c.serveDocumentFile(ctx, func(documentID uint, userID uint) (*resume.AnnotatedFile, error) {
+		return c.resumeService.OpenAnnotatedFile(documentID, userID)
+	})
+}
+
+// Document は、レビュー画面が書類そのものを描くための、PDFに揃えた元の書類を返す。
+// 注釈PDFと違い、指摘の強調は入っていない（画面が番号つきで重ねる）。
+func (c *ResumeController) Document(ctx echo.Context) error {
+	return c.serveDocumentFile(ctx, func(documentID uint, userID uint) (*resume.AnnotatedFile, error) {
+		return c.resumeService.OpenNormalizedFile(documentID, userID)
+	})
+}
+
+func (c *ResumeController) serveDocumentFile(ctx echo.Context, open func(documentID uint, requestingUserID uint) (*resume.AnnotatedFile, error)) error {
 	docIDStr := ctx.QueryParam("document_id")
 	if docIDStr == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "document_id is required")
@@ -206,7 +221,7 @@ func (c *ResumeController) Annotated(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "user_id is required")
 	}
 
-	file, err := c.resumeService.OpenAnnotatedFile(uint(docID), userID)
+	file, err := open(uint(docID), userID)
 	if err != nil {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
@@ -214,12 +229,18 @@ func (c *ResumeController) Annotated(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
 	if file.CloseFunc != nil {
-		defer file.CloseFunc()
+		defer func() {
+			if err := file.CloseFunc(); err != nil {
+				log.Printf("[ResumeController] file close failed: %v", err)
+			}
+		}()
 	}
 
 	w := ctx.Response().Writer
 	r := ctx.Request()
 	w.Header().Set("Content-Type", file.ContentType)
+	// 本人の書類なので、共有キャッシュに残さない
+	w.Header().Set("Cache-Control", "private, no-store")
 	if file.Size > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
 	}

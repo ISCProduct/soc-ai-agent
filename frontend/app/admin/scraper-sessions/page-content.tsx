@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { formatDateTime } from '@/lib/i18n/format'
 import {
   Alert,
   Button,
@@ -15,7 +16,6 @@ import {
   Divider,
   IconButton,
   Stack,
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -27,6 +27,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import { authService } from '@/lib/auth'
 import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
 type ScraperSession = {
@@ -164,7 +165,7 @@ export default function PageContent() {
             ) : sessions.length === 0 ? (
               <Typography variant="body2" color="text.secondary">登録されたセッションはありません</Typography>
             ) : (
-              <Table size="small">
+              <AdminTableWrapper>
                 <TableHead>
                   <TableRow>
                     <TableCell>サイトキー</TableCell>
@@ -180,7 +181,7 @@ export default function PageContent() {
                       <TableCell>
                         {s.expires_at ? (
                           <Chip
-                            label={new Date(s.expires_at).toLocaleString('ja-JP')}
+                            label={formatDateTime(s.expires_at)}
                             color={isExpired(s.expires_at) ? 'error' : 'success'}
                             size="small"
                           />
@@ -188,7 +189,7 @@ export default function PageContent() {
                           <Typography variant="body2" color="text.secondary">なし</Typography>
                         )}
                       </TableCell>
-                      <TableCell>{new Date(s.updated_at).toLocaleString('ja-JP')}</TableCell>
+                      <TableCell>{formatDateTime(s.updated_at)}</TableCell>
                       <TableCell>
                         <IconButton
                           size="small"
@@ -202,7 +203,7 @@ export default function PageContent() {
                     </TableRow>
                   ))}
                 </TableBody>
-              </Table>
+              </AdminTableWrapper>
             )}
           </CardContent>
         </Card>

@@ -9,11 +9,13 @@ import (
 	authcontrollers "Backend/internal/controllers/auth"
 	chatcontrollers "Backend/internal/controllers/chat"
 	companycontrollers "Backend/internal/controllers/company"
+	companysearchcontrollers "Backend/internal/controllers/companysearch"
 	escontrollers "Backend/internal/controllers/es"
 	githubcontrollers "Backend/internal/controllers/github"
 	insightcontrollers "Backend/internal/controllers/insight"
 	interviewcontrollers "Backend/internal/controllers/interview"
 	notificationcontrollers "Backend/internal/controllers/notification"
+	portfoliocontrollers "Backend/internal/controllers/portfolio"
 	releasecontrollers "Backend/internal/controllers/release"
 	resumecontrollers "Backend/internal/controllers/resume"
 	schedulecontrollers "Backend/internal/controllers/schedule"
@@ -51,6 +53,8 @@ import (
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/oauth"
 	"Backend/internal/services/organization"
+	"Backend/internal/services/piimask"
+	portfoliosvc "Backend/internal/services/portfolio"
 	"Backend/internal/services/refreshtoken"
 	"Backend/internal/services/release"
 	"Backend/internal/services/resume"
@@ -62,6 +66,8 @@ import (
 	"Backend/internal/services/storage"
 	"Backend/internal/services/teacher"
 	"Backend/internal/services/training"
+	"Backend/internal/services/training/scorerexport"
+	"context"
 	"log"
 	"log/slog"
 	"net/http"
@@ -190,6 +196,7 @@ func checkAnnotationFont() {
 func main() {
 	// 構造化ログの初期化（LOG_LEVEL / LOG_FORMAT 環境変数で制御）
 	logger.Setup()
+	middleware.UseRequestIDLogger()
 
 	flushSentry, sentryOn := observability.InitSentry()
 	defer flushSentry()
@@ -298,6 +305,16 @@ func main() {
 	questionService := chat.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := matching.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
 	resumeService := resume.NewResumeService(resumeRepo, "storage/resumes", aiClient)
+	// 履歴書を外部の LLM へ送る前の伏字の辞書に、その学生の氏名・メール・学校名を使う。読めないときは送らない
+	subjectReader := piimask.SubjectReaderFunc(func(userID uint) (piimask.Subject, error) {
+		u, err := userRepo.GetUserByID(userID)
+		if err != nil {
+			return piimask.Subject{}, err
+		}
+		return piimask.Subject{Name: u.Name, Email: u.Email, SchoolName: u.SchoolName}, nil
+	})
+	resumeService.SetSubjectReader(subjectReader)
+	escontrollers.SetSubjectReader(subjectReader) // ES 添削・リライトも、外の LLM へ送る前に同じ辞書で伏字にする
 	crawlService := company.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 	gbizInfoRepo := repositories.NewGBizInfoRepository(db)
 	gbizInfoService := gbizinfo.NewGBizInfoService(cfg, gbizInfoRepo, companyRepo, companyRelationRepo)
@@ -336,6 +353,7 @@ func main() {
 		aiClient,
 		nil,
 	)
+	analysisService.SetSubjectReader(subjectReader) // 直近の発言を外の LLM へ送る前に、同じ辞書で伏字にする
 	interviewService := interview.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
 	// 面接1回ごとに STT / LLM / TTS を叩くため、セッション数がそのまま費用に効く。
 	// 既定は監視のみで、止めるのは INTERVIEW_BUDGET_ENFORCE を明示したときだけ。
@@ -353,6 +371,7 @@ func main() {
 		matchRepo,
 		aiClient,
 	)
+	diagnosisQualityService.SetSubjectReader(subjectReader) // 会話の抜粋を外の LLM へ送る前に、同じ辞書で伏字にする
 
 	if rdb != nil {
 		queueServer = queue.NewServer(rdb)
@@ -384,6 +403,8 @@ func main() {
 	authController := authcontrollers.NewAuthController(authService, cfg.UserSecret)
 	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService)
 	chatController := chatcontrollers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
+	// 推薦への「合う／合わない」（SOCAIAGENT-670）
+	chatController.SetMatchFeedback(matching.NewMatchFeedbackService(repositories.NewUserMatchFeedbackRepository(db)))
 	chatController.SetAIBudget(aiBudgetService)
 	if jobEnqueuer != nil {
 		chatController.SetJobEnqueuer(jobEnqueuer)
@@ -391,6 +412,7 @@ func main() {
 	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
 	questionController := chatcontrollers.NewQuestionController(questionService)
 	relationController := companycontrollers.NewCompanyRelationController(companyQueryRepo, aiClient)
+	relationController.SetCorrelationMapService(company.NewCompanyCorrelationMapService(companyRepo, companyRelationRepo))
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
 	companyValidator.SetSearchFlight(companySearchFlight)
@@ -442,6 +464,16 @@ func main() {
 		logger.EnableS3ErrorArchive(s3UploadService)
 	}
 	userDeletionService := auth.NewUserDeletionService(repositories.NewUserWithdrawalRepository(db), objectDeleter, auditLogService)
+	// パージのときに、採点モデルの学習用に書き出し済みのデータ（S3）も消す（#2168）。
+	// 書き出しの設定（TRAINING_EXPORT_HMAC_KEY・TRAINING_EXPORT_S3_URI）が無ければ消さない（書き出しも動かない）。
+	if trainingDeleter, err := scorerexport.NewUserDataDeleterFromEnv(context.Background(), os.Getenv,
+		func(ctx context.Context, bucket string) (scorerexport.ObjectStore, error) {
+			return scorerexport.NewS3Writer(ctx, bucket)
+		}); err != nil {
+		slog.Error("学習データの削除を設定できませんでした。パージで書き出し済みの学習データを消せません（cmd/training-export -sweep-only で消してください）", "error", err)
+	} else if trainingDeleter != nil {
+		userDeletionService.SetTrainingDataDeleter(trainingDeleter)
+	}
 	// 本人退会も、管理者による退会・日次のパージ・アクセス遮断と同じインスタンスを使う。
 	authService.SetDeletionService(userDeletionService)
 	adminOrganizationController := admincontrollers.NewAdminOrganizationController(organizationService)
@@ -539,6 +571,7 @@ func main() {
 	userPreferenceRepo := repositories.NewUserPreferenceRepository(db)
 	// 希望条件の保存とプロフィール更新の両方から同じ同期処理を呼ぶ (#1094)
 	scoutIndexSyncer := hr.NewStudentIndexSyncer(userPreferenceRepo, studentSemanticClient)
+	scoutIndexSyncer.SetSubjectReader(subjectReader) // 自己PRなどの自由記述を、外の埋め込み API へ送る前に伏字にする
 	authService.SetScoutIndexSyncer(scoutIndexSyncer)
 	// 退会時のベクトル削除と、日次のリコンサイル(ReconcileScoutIndex)も同じ同期処理を使う（#1094, #1204）。
 	userDeletionService.SetScoutIndexSyncer(scoutIndexSyncer)
@@ -569,6 +602,8 @@ func main() {
 	aiBudgetGuards := routes.NewAIBudgetGuards(aiBudgetService)
 	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupCompanyRoutes(api, relationController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
+	// 学生向けの企業検索（SOCAIAGENT-612）。業界・地域・職種で絞り込み、企業名順で返す
+	routes.SetupCompanySearchRoutes(api, companysearchcontrollers.NewController(repositories.NewCompanySearchRepository(db)), cfg.UserSecret, userDeletionService, organizationService)
 	industryWeightProfileRepo := repositories.NewIndustryWeightProfileRepository(db)
 	teacherInsightService := teacher.NewStudentInsightService(userRepo, userWeightScoreRepo, industryRepo, industryWeightProfileRepo)
 	// 低マッチのまま進行中の応募を教員一覧に出す（#1028）
@@ -589,6 +624,8 @@ func main() {
 	// 適性検査 第1段（#1678）。結果は source=assessment で user_weight_scores へ入り、マッチングへ合流する
 	assessmentRepo := repositories.NewAssessmentRepository(db)
 	matchingService.SetAssessmentScoreReader(assessmentRepo)
+	// 本人が選んだ職種の募集がある企業を加点する（SOCAIAGENT-670。加点のみ・除外なし）
+	matchingService.SetJobPreferenceReader(repositories.NewJobPreferenceRepository(db))
 	assessmentService := assessmentsvc.NewService(assessmentRepo, matchingService, userWeightScoreRepo)
 	routes.SetupAssessmentRoutes(api, assessmentcontrollers.NewController(assessmentService), cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 適性検査 第2段（#1675）。学校独自テンプレートはマッチングに合流させない
@@ -603,6 +640,8 @@ func main() {
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupESRoutes(api, esRewriteController, esReviewController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
+	// 自己分析ポートフォリオ（#2030）。本人の診断・面接・ES・適性検査をまとめる
+	routes.SetupPortfolioRoutes(api, portfoliocontrollers.NewController(portfoliosvc.NewService(repositories.NewPortfolioRepository(db), repositories.NewUserWeightScoreRepository(db))), cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupNotificationRoutes(api, notificationcontrollers.NewController(notificationService), cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)
@@ -661,7 +700,7 @@ func main() {
 
 	startMaintenanceJobs(crawlService, userDeletionService, notificationService, pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, scoreValidationService)
 
-	startServer(e, cfg.ServerPort)
+	startServer(e, cfg.ServerPort, interviewService, queueServer)
 }
 
 func echoCompanyEntryRateLimit() echo.MiddlewareFunc {

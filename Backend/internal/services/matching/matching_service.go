@@ -29,6 +29,8 @@ type MatchingService struct {
 	assessmentScores AssessmentScoreReader
 	// キャリブレーション重み（#203）。未注入・未アクティブなら全軸 1.0。
 	calibration CalibrationWeightReader
+	// 本人が選んだ職種の希望（SOCAIAGENT-670）。未注入なら加点しない。
+	jobPref JobPreferenceReader
 }
 
 // AssessmentScoreReader は最新の標準適性検査のカテゴリ別スコアを返す。未受検なら nil。
@@ -83,7 +85,7 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 	// スコアをマップに変換
 	scoreMap := make(map[string]float64)
 	for _, score := range userScores {
-		scoreMap[score.WeightCategory] = float64(score.Score)
+		scoreMap[score.WeightCategory] = score.Score
 	}
 
 	log.Printf("[CalculateMatching] User scores: %v\n", scoreMap)
@@ -112,6 +114,17 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 	}
 	log.Printf("[CalculateMatching] Loaded %d weight profiles\n", len(profiles))
 
+	profileList := make([]*models.CompanyWeightProfile, 0, len(profiles))
+	for _, p := range profiles {
+		if p != nil {
+			profileList = append(profileList, p)
+		}
+	}
+	informative := InformativeAxes(profileList)
+
+	// 本人が選んだ職種の募集がある企業（加点のみ。取得に失敗しても推薦は続ける）
+	hiring := s.companiesHiringSelectedJob(sessionID, companyIDs)
+
 	axisWeights := s.loadCalibrationAxisWeights()
 	if len(axisWeights) > 0 {
 		log.Printf("[CalculateMatching] applying calibration axis weights (%d categories)\n", len(axisWeights))
@@ -138,9 +151,15 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 			continue
 		}
 
-		match := s.calculateMatchScore(scoreMap, profile, axisWeights)
+		match := s.calculateMatchScoreFor(scoreMap, profile, axisWeights, &informative)
+		if hiring[company.ID] {
+			match.JobMatched = true
+			if jobBonusEnabled() {
+				match.MatchScore = applyJobBonus(match.MatchScore)
+			}
+		}
 		if merged {
-			before = append(before, s.calculateMatchScore(chatOnly, profile, axisWeights).MatchScore)
+			before = append(before, s.calculateMatchScoreFor(chatOnly, profile, axisWeights, &informative).MatchScore)
 			after = append(after, match.MatchScore)
 		}
 		match.UserID = userID
@@ -189,6 +208,26 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 
 	log.Printf("[CalculateMatching] Completed: %d matches created for user %d, session %s\n", matchCount, userID, sessionID)
 	return nil
+}
+
+// companiesHiringSelectedJob は、本人が選んだ職種の募集がある企業。職種を選んでいない・読めないときは空。
+func (s *MatchingService) companiesHiringSelectedJob(sessionID string, companyIDs []uint) map[uint]bool {
+	if s.jobPref == nil {
+		return nil
+	}
+	jobCategoryID, err := s.jobPref.SessionJobCategoryID(sessionID)
+	if err != nil || jobCategoryID == 0 {
+		if err != nil {
+			log.Printf("[CalculateMatching] job preference unavailable: %v\n", err)
+		}
+		return nil
+	}
+	hiring, err := s.jobPref.CompanyIDsHiringCategory(companyIDs, jobCategoryID)
+	if err != nil {
+		log.Printf("[CalculateMatching] job hiring lookup failed: %v\n", err)
+		return nil
+	}
+	return hiring
 }
 
 // applyAIReasonsToTopMatches はマッチ度上位N件だけ AI 理由で上書きする（#1061）。
@@ -285,6 +324,17 @@ func (s *MatchingService) calculateMatchScore(
 	companyProfile *models.CompanyWeightProfile,
 	axisWeights map[string]float64,
 ) *models.UserCompanyMatch {
+	return s.calculateMatchScoreFor(userScores, companyProfile, axisWeights, nil)
+}
+
+// calculateMatchScoreFor は calculateMatchScore に、ばらつきのある軸（InformativeAxes）を渡せる版。
+// nil のときは全軸を「ずれる軸」の対象にする。
+func (s *MatchingService) calculateMatchScoreFor(
+	userScores map[string]float64,
+	companyProfile *models.CompanyWeightProfile,
+	axisWeights map[string]float64,
+	informative *AxisFlags,
+) *models.UserCompanyMatch {
 	match := &models.UserCompanyMatch{}
 	evaluatedCount := 0
 	weightedTotal := 0.0
@@ -309,6 +359,14 @@ func (s *MatchingService) calculateMatchScore(
 		match.MatchScore = weightedTotal / weightSum
 	} else {
 		match.MatchScore = 0
+	}
+
+	// 大きくずれる軸がある企業は、その数だけ下げる（SOCAIAGENT-670。fit.go）。
+	// 企業間でばらつきのある軸だけを数える（全社で同じ値の軸は、企業を区別する根拠にならない）。
+	mismatch := MismatchAxes(axisMatchesOf(match), informative)
+	match.FitMismatchAxes = strings.Join(mismatch, ",")
+	if fitPenaltyEnabled() {
+		match.MatchScore = math.Max(0, match.MatchScore-FitPenalty(len(mismatch)))
 	}
 
 	return match
@@ -418,6 +476,24 @@ func (s *MatchingService) ToggleFavorite(matchID uint, userID uint) error {
 		return shared.ErrForbidden
 	}
 	return s.matchRepo.ToggleFavorite(matchID)
+}
+
+// ListFavoriteCompanies は過去の診断を含め、お気に入り企業を1社1行で返す。
+func (s *MatchingService) ListFavoriteCompanies(ctx context.Context, userID uint, limit int) ([]*models.UserCompanyMatch, error) {
+	rows, err := s.matchRepo.FindFavoritedByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return DedupedFavorites(rows, limit), nil
+}
+
+// UnfavoriteCompany はそのユーザーの、その企業のお気に入りを診断をまたいで外す。
+// 対象が無いときも成功にする。解除は何度呼んでも同じ結果になる。
+func (s *MatchingService) UnfavoriteCompany(ctx context.Context, userID uint, companyID uint) error {
+	if companyID == 0 {
+		return nil
+	}
+	return s.matchRepo.UnfavoriteCompany(ctx, userID, companyID)
 }
 
 type MatchingDiagnostics struct {
@@ -554,7 +630,7 @@ func formatTopUserScores(scores []models.UserWeightScore) string {
 		if sorted[i].Score <= 0 {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s:%d", sorted[i].WeightCategory, sorted[i].Score))
+		parts = append(parts, fmt.Sprintf("%s:%.0f", sorted[i].WeightCategory, sorted[i].Score))
 	}
 	if len(parts) == 0 {
 		return "有効なスコアなし"
@@ -628,7 +704,7 @@ func (s *MatchingService) mergeAssessmentScores(userID uint, chat map[string]flo
 func (s *MatchingService) ReasonScores(userID uint, scores []models.UserWeightScore) []models.UserWeightScore {
 	chat := make(map[string]float64, len(scores))
 	for _, sc := range scores {
-		chat[sc.WeightCategory] = float64(sc.Score)
+		chat[sc.WeightCategory] = sc.Score
 	}
 	merged := s.mergeAssessmentScores(userID, chat)
 	if len(merged) == len(chat) && sameScores(merged, chat) {
@@ -645,7 +721,7 @@ func scoresFromMap(userID uint, sessionID string, m map[string]float64) []models
 	out := make([]models.UserWeightScore, 0, len(m))
 	for _, c := range valueobject.AllWeightCategories() {
 		if v, ok := m[string(c)]; ok {
-			out = append(out, models.UserWeightScore{UserID: userID, SessionID: sessionID, WeightCategory: string(c), Score: int(math.Round(v))})
+			out = append(out, models.UserWeightScore{UserID: userID, SessionID: sessionID, WeightCategory: string(c), Score: math.Round(v*100) / 100})
 		}
 	}
 	return out

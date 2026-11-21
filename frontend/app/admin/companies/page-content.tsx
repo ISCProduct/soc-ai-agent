@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { formatNumber } from '@/lib/i18n/format'
 import Link from 'next/link'
 import {
   Accordion,
@@ -31,6 +32,7 @@ import {
   ListItemText,
 } from '@mui/material'
 import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin/fetch'
+import { runCompanyListReload, type CompanyListReloadKind } from './company-list-reload'
 import { approvalChipState, canToggleApproval } from '@/lib/admin/company-approval'
 import SearchIcon from '@mui/icons-material/Search'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -392,10 +394,13 @@ export default function PageContent() {
     setPage(value)
   }
 
-  const reloadCurrentList = async () => {
-    await fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry, schoolId)
-    await fetchIndustries()
-  }
+  const reloadCurrentList = (kind: CompanyListReloadKind) =>
+    runCompanyListReload(kind, {
+      companies: () =>
+        fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry, schoolId),
+      industries: () => fetchIndustries(),
+      coverage: () => fetchCoverage(),
+    })
 
   const resetFilters = () => {
     setSearchInput('')
@@ -446,8 +451,7 @@ export default function PageContent() {
       setWarmMessage(
         `準備完了: 新規 ${data.created ?? 0} 社 / 更新 ${data.updated ?? 0} 社 / 変更なし ${data.skipped ?? 0} 社`,
       )
-      await fetchCoverage()
-      await reloadCurrentList()
+      await reloadCurrentList('catalog')
     } finally {
       setWarming(false)
     }
@@ -624,8 +628,7 @@ export default function PageContent() {
           )
         }
       }
-      await reloadCurrentList()
-      await fetchCoverage()
+      await reloadCurrentList('catalog')
     } finally {
       setMissingBatchLoading(false)
     }
@@ -650,7 +653,7 @@ export default function PageContent() {
     setFetchSeverity('success')
     setFetchMessage('企業を学生に公開しました。')
     setSelectedIds((prev) => prev.filter((id) => id !== companyId))
-    await reloadCurrentList()
+    await reloadCurrentList('status')
   }
 
   const handleBulkPublish = async () => {
@@ -683,7 +686,7 @@ export default function PageContent() {
         setFetchSeverity('success')
         setFetchMessage(`${success} 社を学生に公開しました。`)
       }
-      await reloadCurrentList()
+      await reloadCurrentList('status')
     } finally {
       setBulkPublishing(false)
     }
@@ -737,7 +740,7 @@ export default function PageContent() {
         ? '学生検索の審査を完了しました。この企業は学生の検索とスカウト送信ができます。'
         : '学生検索の審査を取り消しました。学生の検索とスカウト送信はできません。',
     )
-    await reloadCurrentList()
+    await reloadCurrentList('status')
   }
 
   const handleReject = async (companyId: number) => {
@@ -754,7 +757,7 @@ export default function PageContent() {
     }
     setFetchSeverity('success')
     setFetchMessage('企業を非公開にしました。学生には表示されません。')
-    await reloadCurrentList()
+    await reloadCurrentList('reject')
   }
 
   const handleFetchPrimary = async (companyId: number, force = false) => {
@@ -816,8 +819,7 @@ export default function PageContent() {
             : `情報を取得しました（${fetched} 項目）。${summary} 内容を確認して問題なければ「学生に公開」できます。`,
         )
       }
-      await reloadCurrentList()
-      await fetchCoverage()
+      await reloadCurrentList('catalog')
     } catch {
       setError('企業情報の取得中に通信エラーが発生しました。時間をおいて再度お試しください。')
     } finally {
@@ -856,8 +858,8 @@ export default function PageContent() {
         title="企業情報の管理"
         description={
           filterSummary
-            ? `${filterSummary} の結果 ${total.toLocaleString()} 件`
-            : `学生課の先生が、学生に見せる企業情報を登録・確認・公開するための画面です。登録 ${total.toLocaleString()} 社`
+            ? `${filterSummary} の結果 ${formatNumber(total)} 件`
+            : `学生課の先生が、学生に見せる企業情報を登録・確認・公開するための画面です。登録 ${formatNumber(total)} 社`
         }
         backHref={busy ? undefined : '/admin'}
         actions={

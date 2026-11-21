@@ -3,6 +3,7 @@ package interview
 import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/models"
+	"Backend/internal/openai"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
@@ -44,30 +45,15 @@ func (s *InterviewService) fetchSkillScores(userID uint) []models.SkillScore {
 	return scores
 }
 
-// fetchStudentName は応募者の登録氏名を取得する。
-// 自己紹介の音声認識結果だけで氏名を判定すると、聞き間違い（例:
-// 「田中優希」→「玉川」）がそのまま面接官の呼び方として固定されてしまう
-// （履歴に残り続けるため以降のターンでも引きずる）。登録済みの氏名を
-// システムプロンプトへ正として渡し、以後はそちらを使わせる。
-func (s *InterviewService) fetchStudentName(userID uint) string {
-	if s.userRepo == nil {
-		return ""
-	}
-	user, err := s.userRepo.GetUserByID(userID)
-	if err != nil {
-		log.Printf("[Interview] fetchStudentName error: %v", err)
-		return ""
-	}
-	return strings.TrimSpace(user.Name)
-}
-
 // lookupCompanyReading はAIモデルの知識から企業名の日本語読み（ふりがな）を取得します。
 // 取得に失敗した場合はエラーを返し、不明な場合は空文字とnilを返します。
 func (s *InterviewService) lookupCompanyReading(ctx context.Context, companyName string) (string, error) {
 	systemPrompt := "あなたは日本企業の名称に詳しいアシスタントです。確実に知っている場合のみ答え、不明なら空文字を返してください。"
 	// 企業名は企業行（自動収集・ゲスト投稿）由来。「」の中に置くので整える（#1970 のレビュー）
 	query := fmt.Sprintf("「%s」の正しい日本語読み（ふりがな）をカタカナで1行だけ答えてください。", shared.InlinePromptName(companyName))
-	ctxTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
+	// 送るのは企業名だけで、学生の文章は含まない。ガードをかけると、学生の氏名の一部を含む企業名が伏字になり、
+	// 全員で共有する読み仮名のキャッシュに誤った結果が残るため、外す。
+	ctxTimeout, cancel := context.WithTimeout(openai.WithoutInputGuard(ctx), 15*time.Second)
 	defer cancel()
 	ctxTimeout = usagectx.WithFeature(ctxTimeout, usagectx.FeatureInterviewTurn)
 	result, err := s.openaiClient.ResponsesWithTemperature(ctxTimeout, systemPrompt, query, 0.0, companyfetch.ExtractModel())

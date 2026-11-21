@@ -27,6 +27,7 @@ import { POSITIONS } from '../constants'
 import type { InterviewCompany, Position } from '../types'
 import { resolveCompanyByName, mergeResolvedCompany } from '../utils'
 import { UI } from '@/lib/design/tokens'
+import { withStableKeys } from '@/lib/list-keys'
 
 const COMPANY_RESOLVE_DEBOUNCE_MS = 400
 // ヘッダー帯と本文の列幅。#1761のCONTENT_MAX_WIDTH(1200)とは別に、
@@ -350,7 +351,7 @@ export default function SelectionScreen({
                       <LinearProgress sx={{ borderRadius: 1 }} />
                     ) : (
                       <Stack spacing={1} role="listbox" aria-label="検索結果">
-                        {webSearchResults.map((result, i) => {
+                        {withStableKeys(webSearchResults, (r) => r.name).map(({ key, item: result }) => {
                           const isSelected = interviewCompany?.name === result.name
                           const selectResult = () => {
                             setCompanySearch(result.name)
@@ -368,7 +369,7 @@ export default function SelectionScreen({
                           }
                           return (
                             <Box
-                              key={i}
+                              key={key}
                               role="option"
                               aria-selected={isSelected}
                               tabIndex={0}
@@ -571,8 +572,8 @@ export default function SelectionScreen({
                         <Box>
                           <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#b45309', mb: 0.5 }}>面接スタイル</Typography>
                           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                            {companyHints.style_tags.map((tag, i) => (
-                              <Chip key={i} label={tag} size="small" sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 600, fontSize: 11, border: '1px solid #fcd34d' }} />
+                            {withStableKeys(companyHints.style_tags).map(({ key, item: tag }) => (
+                              <Chip key={key} label={tag} size="small" sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 600, fontSize: 11, border: '1px solid #fcd34d' }} />
                             ))}
                           </Box>
                         </Box>
@@ -581,8 +582,8 @@ export default function SelectionScreen({
                         <Box>
                           <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#b45309', mb: 0.5 }}>よく聞かれる質問</Typography>
                           <Stack spacing={0.5}>
-                            {companyHints.top_questions.map((q, i) => (
-                              <Box key={i} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+                            {withStableKeys(companyHints.top_questions).map(({ key, item: q, index: i }) => (
+                              <Box key={key} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
                                 <Typography sx={{ fontSize: 11, fontWeight: 700, color: UI.mark, minWidth: 16 }}>{i + 1}.</Typography>
                                 <Typography sx={{ fontSize: 12, color: '#78350f', lineHeight: 1.5 }}>{q}</Typography>
                               </Box>

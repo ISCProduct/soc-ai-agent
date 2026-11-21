@@ -145,10 +145,10 @@ func CallChatCompletions(ctx context.Context, model, systemPrompt, userPrompt st
 	if jsonMode {
 		responseFormat = map[string]string{"type": "json_object"}
 	}
-	return callChatCompletions(ctx, model, systemPrompt, userPrompt, temperature, maxTokens, responseFormat)
+	return callChatCompletions(ctx, model, systemPrompt, userPrompt, temperature, maxTokens, responseFormat, nil)
 }
 
-func callChatCompletions(ctx context.Context, model, systemPrompt, userPrompt string, temperature float64, maxTokens int, responseFormat any) CallResult {
+func callChatCompletions(ctx context.Context, model, systemPrompt, userPrompt string, temperature float64, maxTokens int, responseFormat any, seed *int) CallResult {
 	key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if key == "" {
 		return CallResult{Err: ErrNoAPIKey, Fatal: true}
@@ -164,6 +164,9 @@ func callChatCompletions(ctx context.Context, model, systemPrompt, userPrompt st
 	}
 	if responseFormat != nil {
 		payload["response_format"] = responseFormat
+	}
+	if seed != nil {
+		payload["seed"] = *seed
 	}
 
 	start := time.Now()
@@ -212,7 +215,9 @@ func callChatCompletions(ctx context.Context, model, systemPrompt, userPrompt st
 // スキーマ以外は CallChatCompletions と同じ。本番（openai.Client.ChatCompletionWithSchema）と
 // 同じスキーマを渡すこと。JSON mode で測ると、スキーマが守らせている型・列挙値の違反まで
 // 破損に数え、本番より悪く見える。
-func CallChatCompletionsWithSchema(ctx context.Context, model, systemPrompt, userPrompt string, temperature float64, maxTokens int, schemaName string, schema json.RawMessage) CallResult {
+//
+// seed は本番が seed を固定している経路（面接レポート）だけ渡す。nil なら送らない。
+func CallChatCompletionsWithSchema(ctx context.Context, model, systemPrompt, userPrompt string, temperature float64, maxTokens int, schemaName string, schema json.RawMessage, seed *int) CallResult {
 	return callChatCompletions(ctx, model, systemPrompt, userPrompt, temperature, maxTokens, map[string]any{
 		"type": "json_schema",
 		"json_schema": map[string]any{
@@ -220,7 +225,7 @@ func CallChatCompletionsWithSchema(ctx context.Context, model, systemPrompt, use
 			"schema": schema,
 			"strict": true,
 		},
-	})
+	}, seed)
 }
 
 // CallResponses は /responses を1回だけ叩く（履歴書レビューの本番経路）。

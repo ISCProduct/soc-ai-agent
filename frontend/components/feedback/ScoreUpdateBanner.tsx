@@ -21,15 +21,18 @@ export type ScoreDelta = {
 }
 
 export function computeScoreDeltas(before: WeightScore[], after: WeightScore[]): ScoreDelta[] {
-  const beforeMap = new Map(before.map(s => [s.weight_category, s.score]))
+  // score は小数（DECIMAL(5,2)）で来うる。表示と整合するよう整数へ丸めてから差を取る
+  // （生値で引くと 62.35-60=2.3500000000000014 のような表示になる）
+  const beforeMap = new Map(before.map(s => [s.weight_category, Math.round(s.score)]))
   return after
     .map(s => {
       const prev = beforeMap.get(s.weight_category) ?? 0
+      const next = Math.round(s.score)
       return {
         category: s.weight_category,
         before: prev,
-        after: s.score,
-        delta: s.score - prev,
+        after: next,
+        delta: next - prev,
       }
     })
     .filter(d => d.delta !== 0)

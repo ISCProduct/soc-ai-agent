@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, Suspense, useCallback } from 'react'
+import { formatDate } from '@/lib/i18n/format'
 import { useRouter } from 'next/navigation'
 import {
   Box,
@@ -25,7 +26,7 @@ import { authService } from '@/lib/auth'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { fetchWithTimeout } from '@/lib/fetch-timeout'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
-import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
+import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
 import {
   STATUS_COLORS,
   STATUS_LABELS,
@@ -180,7 +181,7 @@ function ApplicationsContent() {
                     </Typography>
                     {app.applied_at && (
                       <Typography variant="caption" color="text.secondary">
-                        応募日: {new Date(app.applied_at).toLocaleDateString('ja-JP')}
+                        応募日: {formatDate(app.applied_at)}
                       </Typography>
                     )}
                   </Box>
@@ -255,7 +256,7 @@ function ApplicationsContent() {
 
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={4000}
+        autoHideDuration={SNACKBAR_AUTO_HIDE_MS}
         onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         sx={ABOVE_BOTTOM_NAV_SX}

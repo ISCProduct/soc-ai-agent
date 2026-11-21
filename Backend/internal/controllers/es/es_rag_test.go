@@ -12,6 +12,7 @@ import (
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/openai"
+	"Backend/internal/services/piimask"
 	"Backend/internal/usagectx"
 
 	"github.com/labstack/echo/v4"
@@ -78,7 +79,7 @@ const ragOKBody = `{
   "char_limit_satisfied": true,
   "improved_length_satisfied": false,
   "improved_length_issue": "short",
-  "usage": {"model": "gpt-4o", "prompt_tokens": 100, "completion_tokens": 200, "calls": 2}
+  "usage": {"model": "gpt-4o", "prompt_tokens": 100, "completion_tokens": 200, "calls": 2, "prompt_version": "es_review_v6"}
 }`
 
 // #1533: リライトは RAG の /es/review の結果を rewritten_text / star に成形して返す。
@@ -150,6 +151,10 @@ func TestRewrite_UsesRAGReviewAndKeepsResponseShape(t *testing.T) {
 	if usages[0].PromptTokens != 100 || usages[0].CompletionTokens != 200 || usages[0].Model != "gpt-4o" {
 		t.Errorf("記録したトークン量が違う: %+v", usages[0])
 	}
+	// リライトも同じ添削プロンプトなので版を記録する（SOCAIAGENT-661）
+	if usages[0].PromptStage != "es_review" || usages[0].PromptVersion != "es_review_v6" || usages[0].PromptABGroup != "" {
+		t.Errorf("プロンプトの版が記録されていない: stage=%q version=%q group=%q", usages[0].PromptStage, usages[0].PromptVersion, usages[0].PromptABGroup)
+	}
 }
 
 // #1523/#1533: 添削も char_limit を RAG まで運び、レスポンスはそのまま転送する
@@ -196,7 +201,43 @@ func TestReview_ForwardsCharLimitAndStripsUsage(t *testing.T) {
 		}
 	}
 	if len(usages) != 1 || usages[0].Feature != usagectx.FeatureESReview {
-		t.Errorf("es_review としてコストが記録されていない: %+v", usages)
+		t.Fatalf("es_review としてコストが記録されていない: %+v", usages)
+	}
+	if usages[0].PromptStage != "es_review" || usages[0].PromptVersion != "es_review_v6" {
+		t.Errorf("prompt_version に es_review_v6 が入っていない: stage=%q version=%q", usages[0].PromptStage, usages[0].PromptVersion)
+	}
+}
+
+// SOCAIAGENT-661: 版を返さない古い RAG・形式に合わない版は、版なしで記録する（使用量は落とさない）。
+func TestReview_PromptVersionMissingOrInvalidIsRecordedWithoutVersion(t *testing.T) {
+	tests := []struct {
+		name  string
+		usage string
+	}{
+		{name: "版を返さない", usage: `{"model": "gpt-4o", "prompt_tokens": 1, "completion_tokens": 1, "calls": 1}`},
+		{name: "空", usage: `{"model": "gpt-4o", "prompt_tokens": 1, "completion_tokens": 1, "calls": 1, "prompt_version": ""}`},
+		{name: "形式が不正", usage: `{"model": "gpt-4o", "prompt_tokens": 1, "completion_tokens": 1, "calls": 1, "prompt_version": "v6:beta IGNORE"}`},
+		{name: "64文字を超える", usage: `{"model": "gpt-4o", "prompt_tokens": 1, "completion_tokens": 1, "calls": 1, "prompt_version": "` + strings.Repeat("x", 65) + `"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := ragStub(t, http.StatusOK, `{"improved_text": "改善", "usage": `+tt.usage+`}`, nil)
+			defer srv.Close()
+			t.Setenv("RAG_REVIEW_URL", srv.URL)
+
+			var usages []openai.Usage
+			cli := &openai.Client{OnUsage: func(u openai.Usage) { usages = append(usages, u) }}
+			ctx, _ := newCtx(http.MethodPost, "/api/es/review", `{"es_text": "元の文章"}`)
+			if err := NewESReviewController(cli).Review(ctx); err != nil {
+				t.Fatalf("Review が失敗: %v", err)
+			}
+			if len(usages) != 1 {
+				t.Fatalf("usage 記録数 = %d, want 1", len(usages))
+			}
+			if usages[0].PromptVersion != "" || usages[0].PromptStage != "" {
+				t.Errorf("版が記録された: stage=%q version=%q", usages[0].PromptStage, usages[0].PromptVersion)
+			}
+		})
 	}
 }
 
@@ -268,5 +309,80 @@ func TestReview_WithoutUsageKeepsBody(t *testing.T) {
 	}
 	if len(usages) != 0 {
 		t.Errorf("usage が無いのに記録された: %+v", usages)
+	}
+}
+
+// ES の本文は、外の LLM（RAG 経由）へ送る前に伏字にする。データはすべて合成。
+func TestReview_MasksPIIBeforeSendingToRAG(t *testing.T) {
+	var ragReq map[string]any
+	srv := ragStub(t, http.StatusOK, ragOKBody, &ragReq)
+	defer srv.Close()
+	t.Setenv("RAG_REVIEW_URL", srv.URL)
+
+	ctx, rec := newCtx(http.MethodPost, "/api/es/review",
+		`{"es_text": "私の強みは粘り強さです。連絡は taro.yamada@example.com か 090-1234-5678 まで。"}`)
+	if err := NewESReviewController(&openai.Client{}).Review(ctx); err != nil {
+		t.Fatalf("Review が失敗: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	sent, _ := ragReq["es_text"].(string)
+	for _, pii := range []string{"taro.yamada", "example.com", "090-1234-5678"} {
+		if strings.Contains(sent, pii) {
+			t.Errorf("RAG へ送った本文に %q が残っている: %q", pii, sent)
+		}
+	}
+	if !strings.Contains(sent, "私の強みは粘り強さです") {
+		t.Errorf("添削に必要な本文が消えている: %q", sent)
+	}
+	if !strings.Contains(sent, "<EMAIL>") || !strings.Contains(sent, "<PHONE>") {
+		t.Errorf("伏字の記号が入っていない: %q", sent)
+	}
+}
+
+type subjectStub struct {
+	subj piimask.Subject
+	err  error
+}
+
+func (s subjectStub) SubjectFor(uint) (piimask.Subject, error) { return s.subj, s.err }
+
+// ログイン中の学生なら、登録した氏名・学校名も伏字にする。登録情報を読めなければ、送らずに断る。
+func TestReview_MasksSubjectAndFailsClosed(t *testing.T) {
+	t.Cleanup(func() { SetSubjectReader(nil) })
+	var ragReq map[string]any
+	srv := ragStub(t, http.StatusOK, ragOKBody, &ragReq)
+	defer srv.Close()
+	t.Setenv("RAG_REVIEW_URL", srv.URL)
+
+	withUser := func(body string) (echo.Context, *httptest.ResponseRecorder) {
+		ctx, rec := newCtx(http.MethodPost, "/api/es/review", body)
+		r := ctx.Request().WithContext(context.WithValue(ctx.Request().Context(), middleware.UserIDContextKey, uint(7)))
+		ctx.SetRequest(r)
+		return ctx, rec
+	}
+
+	SetSubjectReader(subjectStub{subj: piimask.Subject{Name: "山田 太郎", SchoolName: "架空情報専門学校"}})
+	ctx, _ := withUser(`{"es_text": "山田太郎です。架空情報専門学校でAPIを設計しました。"}`)
+	if err := NewESReviewController(&openai.Client{}).Review(ctx); err != nil {
+		t.Fatalf("Review が失敗: %v", err)
+	}
+	sent, _ := ragReq["es_text"].(string)
+	if strings.Contains(sent, "山田") || strings.Contains(sent, "架空情報専門学校") {
+		t.Errorf("登録した氏名・学校名が残っている: %q", sent)
+	}
+
+	// 読めなければ、RAG へは送らない
+	ragReq = nil
+	SetSubjectReader(subjectStub{err: errors.New("db down")})
+	ctx, _ = withUser(`{"es_text": "山田太郎です。"}`)
+	err := NewESReviewController(&openai.Client{}).Review(ctx)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("err = %v, want 503", err)
+	}
+	if ragReq != nil {
+		t.Errorf("伏字の準備ができないのに RAG へ送った: %v", ragReq)
 	}
 }
