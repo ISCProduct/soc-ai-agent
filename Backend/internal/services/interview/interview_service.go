@@ -13,6 +13,7 @@ import (
 	"context"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -42,11 +43,26 @@ type InterviewService struct {
 	skillScoreRepo       SkillScoreReader
 	companyRepo          shared.CompanyBriefReader
 	jobCh                chan uint
+	// workerStop を閉じると、処理中の1件が終わったあとでワーカーが抜ける。
+	// jobCh 自体は閉じない。閉じると、停止後に残った FinishSession が
+	// closed channel へ送って panic する。
+	workerStop chan struct{}
+	stopping   atomic.Bool
+	// shutdownCtx は StopWorker の期限。nil のときは打ち切らない。
+	shutdownCtx context.Context
+	// reportJob はテストが生成処理を差し替える。nil なら generateReport。
+	reportJob func(ctx context.Context, sessionID uint) error
+	// activeReport は今生成している sessionID。0 は処理中でない。
+	activeReport uint
 	// inFlightJobs はフォールバック channel 経路の重複排除（Redis 経路の TaskID 相当、#1476）。
 	// 投入時に登録し、worker が処理し終えるまで保持する。
 	inFlightJobs         map[uint]struct{}
 	inFlightMu           sync.Mutex
 	workerOnce           sync.Once
+	stopOnce             sync.Once
+	workerWG             sync.WaitGroup
+	workerStarted        atomic.Bool
+	workerFinished       chan struct{}
 	jobs                 shared.JobEnqueuer
 	ownsCompany          func(userID, companyID uint) (bool, error)
 	companyReadingCache  companyReadingCache
@@ -77,6 +93,8 @@ func NewInterviewService(
 		speech:               newSpeechFailover(openaiClient),
 		realtimeUsageService: realtimeUsageService,
 		jobCh:                make(chan uint, jobChBufferSize),
+		workerStop:           make(chan struct{}),
+		workerFinished:       make(chan struct{}),
 		inFlightJobs:         map[uint]struct{}{},
 	}
 }
@@ -170,10 +188,19 @@ func (s *InterviewService) enqueueReportGeneration(sessionID uint) bool {
 // 超えて走っている間に再試行ボタンを押されると、レポート未保存のまま再投入できてしまう。
 // 単一 worker でも2件目が続けて走るため、LLM 費用・レポート上書き・スコアの二重反映が起きる。
 func (s *InterviewService) offerReportJob(sessionID uint) bool {
+	if s.stopping.Load() {
+		log.Printf("[Interview] shutdown 中のため session %d のレポート生成を見送りました", sessionID)
+		return false
+	}
 	if !s.markReportJobInFlight(sessionID) {
 		log.Printf("[Interview] report job already queued for session %d, skipped", sessionID)
 		// 既に控えている＝望む状態なので、投入できたものとして扱う。
 		return true
+	}
+	if s.stopping.Load() {
+		s.clearReportJobInFlight(sessionID)
+		log.Printf("[Interview] shutdown 中のため session %d のレポート生成を見送りました", sessionID)
+		return false
 	}
 	select {
 	case s.jobCh <- sessionID:
