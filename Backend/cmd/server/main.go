@@ -497,6 +497,7 @@ func main() {
 	adminInterviewController.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	adminInterviewController.SetCompanyRepo(companyRepo)
 	adminInterviewController.SetOpenAIClient(aiClient)
+	adminInterviewController.SetAIBudget(aiBudgetService)
 	adminInterviewController.SetUserAccessGuard(userDeletionService)
 	adminInterviewController.SetSchoolAccess(userRepo, interviewSessionRepo, schoolService)
 	adminJobController.SetSchoolAccess(schoolService)

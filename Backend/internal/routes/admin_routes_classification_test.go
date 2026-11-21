@@ -89,22 +89,20 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"DELETE /schools/:id/members/:user_id": classRequireAdmin,
 	},
 	// ── 意図的に staff へ開放(要判断) ──
-	// 掲載申請の審査(#1507)で担当校の職員も企業情報・面接質問・求人を触る可能性があり、
-	// 現状は platform を掛けていない。ただし企業(PUT)・求人(POST)は全テナント共通データを
-	// 書き換え、generate は OpenAI を呼ぶ(AIコスト発生)。
-	// 締める場合は admin_routes.go の該当ルートへ platform を付け、ここの分類を
-	// classPlatform へ移すこと(テストが両者のずれを検出する)。
+	// 求人(POST)は全テナント共通データを書き換える。締める場合は admin_routes.go の該当ルートへ
+	// platform を付け、ここの分類を classPlatform へ移すこと(テストが両者のずれを検出する)。
 	map[string]routeClass{
-		"PUT /companies/:id":                               classStaffPendingReview,
-		"GET /companies/:id/relation-graph":                classStaffPendingReview,
-		"POST /companies/:id/interview-questions":          classStaffPendingReview,
-		"POST /companies/:id/interview-questions/generate": classStaffPendingReview,
-		"PUT /companies/:id/interview-questions/:qid":      classStaffPendingReview,
-		"DELETE /companies/:id/interview-questions/:qid":   classStaffPendingReview,
-		"POST /job-positions":                              classStaffPendingReview,
+		"GET /companies/:id/relation-graph": classStaffPendingReview,
+		"POST /job-positions":               classStaffPendingReview,
 	},
 	map[string]routeClass{
 		// ── 運用系(platform専用) ──
+		// 企業マスタと面接質問は全校共有のため書き込みは platform のみ(SOCAIAGENT-692)。
+		"PUT /companies/:id":                                   classPlatform,
+		"POST /companies/:id/interview-questions":              classPlatform,
+		"POST /companies/:id/interview-questions/generate":     classPlatform,
+		"PUT /companies/:id/interview-questions/:qid":          classPlatform,
+		"DELETE /companies/:id/interview-questions/:qid":       classPlatform,
 		"PATCH /companies/:id/publish":                         classPlatform,
 		"PATCH /companies/:id/verify":                          classPlatform,
 		"PATCH /companies/:id/reject":                          classPlatform,

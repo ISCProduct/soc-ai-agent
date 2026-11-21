@@ -2348,10 +2348,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Company"
+        "400":
+          description: 入力が不正（website_url / logo_url が http/https 以外など）
         "404":
           description: 存在しない
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 
   /api/admin/companies/{id}/publish:
     patch:
@@ -2475,7 +2477,7 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 
   /api/admin/companies/{id}/interview-questions/generate:
     post:
@@ -2492,7 +2494,8 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/admin/companies/{id}/interview-questions/{qid}:
     put:
@@ -2519,7 +2522,7 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
     delete:
       tags: [admin-companies]
       summary: 企業の面接質問を削除
@@ -2539,7 +2542,7 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 
   /api/admin/companies/{id}/fetch-info:
     post:

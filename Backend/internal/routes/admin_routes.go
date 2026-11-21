@@ -97,12 +97,13 @@ func SetupAdminRoutes(
 	admin.POST("/schools/:id/job-suppressions", adminSchoolJobSuppressionController.Create)
 	admin.DELETE("/schools/:id/job-suppressions/:jobId", adminSchoolJobSuppressionController.Delete)
 
-	// 企業・求人カタログの閲覧と基本編集（掲載承認のため全件閲覧は担当校管理者にも必要）
+	// 企業・求人カタログの閲覧（掲載承認のため全件閲覧は担当校管理者にも必要）。
+	// 企業マスタと面接質問は全校共有のため、書き込みはシステム管理者専用（SOCAIAGENT-692）。
 	admin.GET("/companies", adminCompanyController.List)
 	admin.GET("/companies/industries", adminCompanyController.Industries)
 	admin.GET("/companies/names", adminCompanyController.Names)
 	admin.GET("/companies/:id", adminCompanyController.Get)
-	admin.PUT("/companies/:id", adminCompanyController.Update)
+	admin.PUT("/companies/:id", adminCompanyController.Update, platform)
 	// 掲載公開・非公開は全テナント共通の DataStatus / IsActive を書き換えるのでシステム管理者専用。
 	// 担当校ごとの掲載可否は /schools/:id/company-approvals で扱う。
 	admin.PATCH("/companies/:id/publish", adminCompanyController.Publish, platform)
@@ -110,10 +111,10 @@ func SetupAdminRoutes(
 	admin.PATCH("/companies/:id/reject", adminCompanyController.Reject, platform)
 	admin.GET("/companies/:id/relation-graph", adminCompanyGraphController.RelationGraph)
 	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
-	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion)
-	admin.POST("/companies/:id/interview-questions/generate", adminInterviewController.GenerateCompanyQuestions)
-	admin.PUT("/companies/:id/interview-questions/:qid", adminInterviewController.UpdateCompanyQuestion)
-	admin.DELETE("/companies/:id/interview-questions/:qid", adminInterviewController.DeleteCompanyQuestion)
+	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion, platform)
+	admin.POST("/companies/:id/interview-questions/generate", adminInterviewController.GenerateCompanyQuestions, platform)
+	admin.PUT("/companies/:id/interview-questions/:qid", adminInterviewController.UpdateCompanyQuestion, platform)
+	admin.DELETE("/companies/:id/interview-questions/:qid", adminInterviewController.DeleteCompanyQuestion, platform)
 	admin.GET("/job-categories", adminJobController.JobCategories)
 	admin.GET("/job-positions", adminJobController.JobPositions)
 	admin.POST("/job-positions", adminJobController.CreateJobPosition)
