@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { sendChatMessage, getChatHistory, type ChatRequest, type ChatResponse } from '@/lib/api'
+import type { ConsultIntent } from '@/lib/career-consult'
 import { UserFacingApiError, gatewayErrorPath } from '@/lib/user-facing-error'
 import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
@@ -39,6 +40,9 @@ export function useMuiChat() {
   const [userId, setUserId] = useState<number>(0)
   const [questionCount, setQuestionCount] = useState(0)
   const [totalQuestions, setTotalQuestions] = useState(15)
+  /** 判定の進み具合（サーバーの値）。まだ届いていなければ null で、質問数から出した割合を使う */
+  const [judgmentPercent, setJudgmentPercent] = useState<number | null>(null)
+  const [suggestProvisional, setSuggestProvisional] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [showCompletionModal, setShowCompletionModal] = useState(false)
   const [showEndChatModal, setShowEndChatModal] = useState(false)
@@ -64,6 +68,7 @@ export function useMuiChat() {
     phases: phaseProgresses,
     questionCount,
     totalQuestions,
+    judgmentPercent,
   })
 
   // セッション切れ(401)を検知した際、無効な認証情報を破棄してログイン画面へ戻す
@@ -86,6 +91,11 @@ export function useMuiChat() {
       const savedTotalQuestions = sessionStorage.getItem('totalQuestions')
       const restoredTotalQuestions = savedTotalQuestions ? parseInt(savedTotalQuestions) : 15
       setTotalQuestions(restoredTotalQuestions)
+      const savedJudgment = sessionStorage.getItem('judgmentPercent')
+      const restoredJudgment = savedJudgment !== null && savedJudgment !== '' ? Number(savedJudgment) : null
+      if (restoredJudgment !== null && Number.isFinite(restoredJudgment)) {
+        setJudgmentPercent(restoredJudgment)
+      }
       const savedPhases = sessionStorage.getItem('phaseProgress')
       const restoredPhases: PhaseProgress[] | null = savedPhases
         ? (JSON.parse(savedPhases) as PhaseProgress[])
@@ -101,6 +111,7 @@ export function useMuiChat() {
               messageCount: restoredMessages.length,
               questionCount: userQuestionCount,
               totalQuestions: restoredTotalQuestions,
+              judgmentPercent: restoredJudgment,
               phases: restoredPhases,
             },
           }),
@@ -213,7 +224,7 @@ export function useMuiChat() {
     // マウント時のみ初期化（loadChatHistory / router は安定参照）
   }, [])
 
-  const handleSend = async (overrideMessage?: string) => {
+  const handleSend = async (overrideMessage?: string, options?: { consultIntent?: ConsultIntent }) => {
     if (isLoading || !sessionId || !userId || historyLoadError) return
 
     // 分析完了後はメッセージ送信を無効化
@@ -257,6 +268,7 @@ export function useMuiChat() {
         message: messageText,
         industry_id: 1, // IT業界
         job_category_id: jobCategoryId,
+        ...(options?.consultIntent ? { consult_intent: options.consultIntent } : {}),
       }
 
       const response: ChatResponse = await sendChatMessage(chatRequest)
@@ -300,6 +312,13 @@ export function useMuiChat() {
           const newTotalQuestions = response.total_questions ?? 15
           setTotalQuestions(newTotalQuestions)
 
+          // 判定の進み具合（旧いバックエンドは返さないので、その間は質問数から出した割合のまま）
+          const newJudgment = typeof response.judgment_percent === 'number' ? response.judgment_percent : null
+          setJudgmentPercent(newJudgment)
+          setSuggestProvisional(response.suggest_provisional === true)
+          if (newJudgment !== null) sessionStorage.setItem('judgmentPercent', String(newJudgment))
+          else sessionStorage.removeItem('judgmentPercent')
+
           // totalQuestionsをsessionStorageに保存
           sessionStorage.setItem('totalQuestions', String(newTotalQuestions))
           if (response.all_phases) {
@@ -315,6 +334,7 @@ export function useMuiChat() {
                   messageCount: newMessages.length,
                   questionCount: newCount,
                   totalQuestions: newTotalQuestions,
+                  judgmentPercent: newJudgment,
                   phases: response.all_phases ?? null,
                 },
               }),
@@ -345,7 +365,8 @@ export function useMuiChat() {
           if (response.is_complete === true) {
             setTimeout(() => {
               setAnalysisComplete(true)
-              setAllPhasesCompleted(allCompleted)
+              // 判定できたときの完了は、フェーズを消化していなくても「完了」として扱う
+              setAllPhasesCompleted(allCompleted || response.is_complete === true)
               setShowCompletionModal(true)
             }, 300)
           } else {
@@ -407,6 +428,9 @@ export function useMuiChat() {
     setAnalysisComplete(false)
     setQuestionCount(0)
     setTotalQuestions(15)
+    setJudgmentPercent(null)
+    setSuggestProvisional(false)
+    sessionStorage.removeItem('judgmentPercent')
 
     // セッションIDも新しく生成
     const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`
@@ -429,7 +453,7 @@ export function useMuiChat() {
     setTimeout(() => {
       window.dispatchEvent(
         new CustomEvent('chatProgress', {
-          detail: { messageCount: 1, questionCount: 0, totalQuestions: 15 },
+          detail: { messageCount: 1, questionCount: 0, totalQuestions: 15, judgmentPercent: null },
         }),
       )
     }, 0)
@@ -538,6 +562,7 @@ export function useMuiChat() {
     messagesAreaRef,
     inputRef,
     progressTotals,
+    suggestProvisional,
     choiceOptions,
     showChoiceButtons,
     inputPlaceholder,

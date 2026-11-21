@@ -7,6 +7,7 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/services/company"
 	"Backend/internal/services/costs"
+	"Backend/internal/services/piimask"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"bytes"
@@ -136,6 +137,8 @@ type ResumeService struct {
 	companyRepo    shared.CompanyBriefReader
 	persona        PersonaEnsurer
 	provisioner    CompanyProvisioner
+	// subjects は伏字の辞書に使う、学生の登録情報（氏名・メール・学校名）を読む。無ければ規則だけで伏字にする
+	subjects piimask.SubjectReader
 
 	// personaFailures は求める人材像の生成に失敗した企業の記録。
 	// 記録しないとレビューのたびに再試行する（1レビューで最大2回）。

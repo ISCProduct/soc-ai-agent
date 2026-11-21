@@ -10,7 +10,7 @@ export default function PrivacyPage() {
         プライバシーポリシー
       </Typography>
       <Typography variant="body2" color="text.secondary" gutterBottom>
-        最終更新日: 2025年1月1日
+        最終更新日: 2026年11月19日
       </Typography>
       <Divider sx={{ my: 3 }} />
 
@@ -34,6 +34,7 @@ export default function PrivacyPage() {
         <Typography variant="body1" component="ul" sx={{ pl: 3 }}>
           <li>就職軸の分析・企業マッチング機能の提供</li>
           <li>面接練習のフィードバック生成</li>
+          <li>同意いただいた場合に限り、面接の記録（発話・スコア・録画した動画）を面接の採点モデルの学習に使用（プロフィールの設定でいつでも変更できます）</li>
           <li>サービスの改善・不具合対応</li>
           <li>利用状況の集計（個人を特定しない統計情報として）</li>
         </Typography>
@@ -47,6 +48,11 @@ export default function PrivacyPage() {
         <Typography variant="body1" component="ul" sx={{ pl: 3 }}>
           <li>法令に基づく場合</li>
           <li>ユーザー本人の同意がある場合</li>
+          <li>機能の提供のため、生成AI・音声認識・音声合成を行う外部の事業者へ、処理を委託する場合（下記）</li>
+        </Typography>
+        <Typography variant="body1">
+          チャット・面接・ES・職務経歴書の文章は、氏名・メールアドレス・電話番号・住所・生年月日などの個人を特定できる情報を、送信前に伏字にしたうえで、外部のAI事業者へ送って処理します。伏字にできない場合は送信しません。
+          面接の音声は、文字起こしのために外部のAI事業者へ送信します。音声は伏字にできないため、面接中にお名前や連絡先を話された場合、その内容が送信先に渡ります。
         </Typography>
         <Typography variant="body1" color="error.main" fontWeight="bold">
           ※ 面接動画・職務経歴書は企業に提供しません。当サービス内での分析にのみ使用します。
@@ -56,8 +62,8 @@ export default function PrivacyPage() {
           4. データの保持期間
         </Typography>
         <Typography variant="body1">
-          アカウントが有効な期間中、データを保持します。退会後は即座にログイン・閲覧ができなくなり、約30日後にすべてのデータを完全削除します。
-          面接動画は録画後90日で自動削除されます。
+          アカウントが有効な期間中、データを保持します。退会後は即座にログイン・閲覧ができなくなり、12ヶ月後にすべてのデータを完全削除します。
+          面接動画は、アカウントが有効な間保管し、退会後12ヶ月で削除します。
         </Typography>
 
         <Typography variant="h6" component="h2" fontWeight="bold">

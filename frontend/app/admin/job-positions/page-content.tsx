@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { formatDate as formatLocaleDate } from '@/lib/i18n/format'
 import Link from 'next/link'
 import {
   Box,
@@ -25,6 +26,7 @@ import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminListCard } from '@/components/admin/AdminListCard'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { isCompanyUnpublished } from '@/lib/company/draft'
+import { withStableKeys } from '@/lib/list-keys'
 import styles from './page-content.module.css'
 
 type JobPosition = {
@@ -55,7 +57,7 @@ type JobPosition = {
 
 const formatDate = (dateStr?: string) => {
   if (!dateStr) return null
-  return new Date(dateStr).toLocaleDateString('ja-JP', {
+  return formatLocaleDate(dateStr, {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit',
   })
@@ -213,8 +215,8 @@ function JobPositionCard({
                 必須スキル
               </Typography>
               <Stack direction="row" flexWrap="wrap" gap={0.5}>
-                {reqSkills.map((s, i) => (
-                  <Chip key={i} label={s} size="small" color="primary" variant="outlined" />
+                {withStableKeys(reqSkills).map(({ key, item: s }) => (
+                  <Chip key={key} label={s} size="small" color="primary" variant="outlined" />
                 ))}
               </Stack>
             </Box>
@@ -227,8 +229,8 @@ function JobPositionCard({
                 歓迎スキル
               </Typography>
               <Stack direction="row" flexWrap="wrap" gap={0.5}>
-                {prefSkills.map((s, i) => (
-                  <Chip key={i} label={s} size="small" variant="outlined" />
+                {withStableKeys(prefSkills).map(({ key, item: s }) => (
+                  <Chip key={key} label={s} size="small" variant="outlined" />
                 ))}
               </Stack>
             </Box>

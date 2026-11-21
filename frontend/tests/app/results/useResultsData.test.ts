@@ -76,6 +76,44 @@ describe('useResultsData fetchCompanies race condition (#988)', () => {
   })
 })
 
+// #2220: 推薦が0件はエラーではない。error ではなく emptyReason に分ける。
+describe('useResultsData 推薦0件とエラーの区別', () => {
+  beforeEach(() => {
+    params = new URLSearchParams({ user_id: '1', session_id: 's1' })
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) } as unknown as Response)
+  })
+
+  const respond = async (response: unknown) => {
+    const { result } = renderHook(() => useResultsData())
+    await act(async () => {
+      recommendationResolvers['s1'](response)
+    })
+    return result
+  }
+
+  it('recommendations: [] は error にせず、理由を emptyReason に入れる', async () => {
+    const result = await respond({
+      ok: true,
+      json: async () => ({ recommendations: [], reason: 'insufficient_user_scores' }),
+    })
+    expect(result.current.error).toBeNull()
+    expect(result.current.emptyReason).toBe('insufficient_user_scores')
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('理由が無い0件は matching_results_empty として扱う', async () => {
+    const result = await respond({ ok: true, json: async () => ({ recommendations: [] }) })
+    expect(result.current.error).toBeNull()
+    expect(result.current.emptyReason).toBe('matching_results_empty')
+  })
+
+  it('推薦 API の失敗（500）は error にし、emptyReason は入れない', async () => {
+    const result = await respond({ ok: false, status: 500, json: async () => ({}) })
+    expect(result.current.error).toBe('企業データの取得に失敗しました')
+    expect(result.current.emptyReason).toBeNull()
+  })
+})
+
 // SOCAIAGENT-403: 応募を閉じている間は、画面側でも応募APIを呼ばない。
 describe('useResultsData handleApply と応募の開閉', () => {
   const company = {
@@ -152,5 +190,178 @@ describe('useResultsData handleApply と応募の開閉', () => {
       await result.current.handleApply(event, company)
     })
     expect(result.current.applyEnabled).toBe(false)
+  })
+})
+
+describe('useResultsData お気に入りの解除', () => {
+  const event = { stopPropagation: jest.fn() } as unknown as Parameters<ReturnType<typeof useResultsData>['handleUnfavoriteCompany']>[0]
+  const favorite = {
+    id: 7,
+    match_id: 20,
+    category_name: '北見工業',
+    score: 80,
+    is_favorited: true,
+  }
+
+  beforeEach(() => {
+    params = new URLSearchParams({ user_id: '1', session_id: 's1' })
+  })
+
+  it('解除に成功したら、一覧を取り直す前でもハートを戻さない', async () => {
+    let favoritesCalls = 0
+    global.fetch = jest.fn((url: string) => {
+      if (String(url).startsWith('/api/chat/favorites?')) {
+        favoritesCalls += 1
+        if (favoritesCalls === 1) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ recommendations: [favorite] }),
+          })
+        }
+        return new Promise(() => {})
+      }
+      if (url === '/api/chat/favorites/remove') {
+        return Promise.resolve({ ok: true, json: async () => ({ ok: true }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    }) as unknown as typeof fetch
+
+    const { result, rerender } = renderHook(() => useResultsData())
+    await act(async () => {})
+    expect(result.current.favoriteCompanies.map((company) => company.id)).toEqual(['7'])
+
+    await act(async () => {
+      recommendationResolvers.s1({
+        ok: true,
+        json: async () => ({ recommendations: [{ ...favorite, is_favorited: false }] }),
+      })
+    })
+    expect(result.current.companies[0]?.isFavorited).toBe(true)
+
+    await act(async () => {
+      await result.current.handleUnfavoriteCompany(event, result.current.companies[0])
+    })
+
+    await act(async () => {
+      params = new URLSearchParams({ user_id: '1', session_id: 's2' })
+      rerender()
+    })
+    await act(async () => {
+      recommendationResolvers.s2({
+        ok: true,
+        json: async () => ({ recommendations: [{ ...favorite, match_id: 21, is_favorited: false }] }),
+      })
+    })
+    expect(result.current.companies[0]?.isFavorited).toBe(false)
+  })
+
+  it('初回の取得が終わる前に解除が失敗しても、一覧を取り直す', async () => {
+    let favoritesCalls = 0
+    let resolveFirst: (value: unknown) => void = () => {}
+    global.fetch = jest.fn((url: string) => {
+      if (String(url).startsWith('/api/chat/favorites?')) {
+        favoritesCalls += 1
+        if (favoritesCalls === 1) {
+          return new Promise((resolve) => {
+            resolveFirst = resolve
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ recommendations: [favorite] }),
+        })
+      }
+      if (url === '/api/chat/favorites/remove') {
+        return Promise.resolve({ ok: false, json: async () => ({}) })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    }) as unknown as typeof fetch
+
+    const { result } = renderHook(() => useResultsData())
+    await act(async () => {})
+    expect(result.current.favoriteCompanies).toEqual([])
+
+    const company = {
+      id: '7',
+      matchId: 20,
+      name: '北見工業',
+      industry: '',
+      location: '',
+      employees: '',
+      description: '',
+      matchScore: 80,
+      tags: [],
+      techStack: [],
+      isFavorited: true,
+    }
+    await act(async () => {
+      await result.current.handleUnfavoriteCompany(event, company)
+    })
+    expect(result.current.favoriteCompanies.map((item) => item.name)).toEqual(['北見工業'])
+    expect(result.current.snackbar.message).toBe('お気に入りの更新に失敗しました')
+
+    await act(async () => {
+      resolveFirst({ ok: true, json: async () => ({ recommendations: [] }) })
+    })
+    expect(result.current.favoriteCompanies.map((item) => item.name)).toEqual(['北見工業'])
+  })
+})
+
+// SOCAIAGENT-670: 推薦への「合う／合わない」。同じ判定をもう一度押すと取り消す。
+describe('useResultsData handleFeedback', () => {
+  const event = { stopPropagation: jest.fn() } as unknown as Parameters<ReturnType<typeof useResultsData>['handleFeedback']>[0]
+
+  async function setup(ok = true) {
+    params = new URLSearchParams({ user_id: '1', session_id: 'fb1' })
+    const fetchMock = jest.fn(async () => ({ ok, json: async () => ({}) }))
+    global.fetch = fetchMock as unknown as typeof fetch
+    const hook = renderHook(() => useResultsData())
+    await act(async () => {
+      recommendationResolvers['fb1']({
+        ok: true,
+        json: async () => ({ recommendations: [{ id: 1, category_name: 'A社', match_id: 10, score: 80 }] }),
+      })
+    })
+    return { hook, fetchMock }
+  }
+
+  const bodies = (fetchMock: jest.Mock) =>
+    fetchMock.mock.calls
+      .filter((c) => c[0] === '/api/chat/match-feedback')
+      .map((c) => JSON.parse((c[1] as { body: string }).body))
+
+  it('押した判定を送り、その企業に反映する。もう一度押すと none で取り消す', async () => {
+    const { hook, fetchMock } = await setup()
+    const company = () => hook.result.current.companies[0]
+
+    await act(async () => {
+      await hook.result.current.handleFeedback(event, company(), 'unfit')
+    })
+    expect(bodies(fetchMock)).toEqual([{ match_id: 10, verdict: 'unfit' }])
+    expect(company().feedback).toBe('unfit')
+
+    await act(async () => {
+      await hook.result.current.handleFeedback(event, company(), 'unfit')
+    })
+    expect(bodies(fetchMock)[1]).toEqual({ match_id: 10, verdict: 'none' })
+    expect(company().feedback).toBeUndefined()
+
+    // 判定を切り替える（合わない → 合う）
+    await act(async () => {
+      await hook.result.current.handleFeedback(event, company(), 'unfit')
+    })
+    await act(async () => {
+      await hook.result.current.handleFeedback(event, company(), 'fit')
+    })
+    expect(company().feedback).toBe('fit')
+  })
+
+  it('保存に失敗したら、表示は変えず、エラーを知らせる', async () => {
+    const { hook } = await setup(false)
+    await act(async () => {
+      await hook.result.current.handleFeedback(event, hook.result.current.companies[0], 'fit')
+    })
+    expect(hook.result.current.companies[0].feedback).toBeUndefined()
+    expect(hook.result.current.snackbar).toMatchObject({ open: true, severity: 'error' })
   })
 })

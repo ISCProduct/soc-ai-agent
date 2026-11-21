@@ -8,6 +8,8 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/ragclient"
 	"Backend/internal/services/esreview"
+	"Backend/internal/services/piimask"
+	"Backend/internal/services/prompts"
 	"Backend/internal/usagectx"
 	"bytes"
 	"context"
@@ -17,6 +19,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -70,6 +73,8 @@ type esReviewRAGUsage struct {
 	PromptTokens     int    `json:"prompt_tokens"`
 	CompletionTokens int    `json:"completion_tokens"`
 	Calls            int    `json:"calls"`
+	// PromptVersion は RAG が使ったプロンプトの版（例: es_review_v6）。古い RAG は返さないので空がありうる（SOCAIAGENT-661）
+	PromptVersion string `json:"prompt_version"`
 }
 
 // esReviewRAGResponse は RAG の /es/review レスポンスのうち Go が読む項目。
@@ -203,6 +208,45 @@ func (c *ESReviewController) persist(ctx echo.Context, req esReviewRequest, body
 	return withPrevious(body, previous)
 }
 
+// errESMaskUnavailable は、伏字の準備ができず、添削を断るときの利用者向けの文言。
+const errESMaskUnavailable = "個人情報を安全に処理できなかったため、添削できませんでした。しばらくしてからもう一度お試しください。"
+
+var (
+	subjectReaderMu sync.RWMutex
+	subjectReader   piimask.SubjectReader
+)
+
+// SetSubjectReader は、伏字の辞書に使う、学生の登録情報（氏名・メール・学校名）を読む処理を注入する。
+// 起動時に1度だけ呼ぶ。注入しなくても、未ログインのときと同じく、規則（メール・電話・住所など）で伏字にする。
+func SetSubjectReader(r piimask.SubjectReader) {
+	subjectReaderMu.Lock()
+	defer subjectReaderMu.Unlock()
+	subjectReader = r
+}
+
+// maskESForLLM は ES の本文を、外の LLM へ送る前に伏字にする。
+// ログイン中の学生なら、登録情報で辞書を作る。読めなかったらエラー（送ってはならない）。
+func maskESForLLM(ctx echo.Context, text string) (string, error) {
+	var subj piimask.Subject
+	if userID, ok := middleware.UserIDFromContext(ctx.Request().Context()); ok {
+		subjectReaderMu.RLock()
+		r := subjectReader
+		subjectReaderMu.RUnlock()
+		if r != nil {
+			got, err := r.SubjectFor(userID)
+			if err != nil {
+				return "", err
+			}
+			subj = got
+		}
+	}
+	m, err := piimask.ForLLM(subj)
+	if err != nil {
+		return "", err
+	}
+	return m.Mask(text), nil
+}
+
 // esReviewPrevious は前回の添削のうち差分表示に使う項目だけ(#1531)。
 //
 // models.ESReview をそのまま返すと ES本文・改善文・フィードバック全文まで
@@ -253,6 +297,14 @@ func withPrevious(body []byte, previous *models.ESReview) []byte {
 // ES添削・ESリライトの唯一の生成経路。プロンプトとインジェクション対策は RAG 側の
 // services/es_review.py に一本化してあるので、ここでプロンプトを組み立てないこと。
 func postESReview(ctx echo.Context, payload esReviewRAGRequest, cli *openai.Client, feature string) (int, []byte, error) {
+	// 外の LLM へ送るのは伏字にした本文だけ。伏字の準備ができなければ送らない（失敗したら送らない）
+	masked, err := maskESForLLM(ctx, payload.ESText)
+	if err != nil {
+		log.Printf("es_review: mask failed: %v", err)
+		return 0, nil, echo.NewHTTPError(http.StatusServiceUnavailable, errESMaskUnavailable)
+	}
+	payload.ESText = masked
+
 	ragURL := config.RAGReviewURL()
 	if ragURL == "" {
 		return 0, nil, echo.NewHTTPError(http.StatusServiceUnavailable, "RAG_REVIEW_URL is not configured")
@@ -334,7 +386,13 @@ func consumeRAGUsage(ctx echo.Context, cli *openai.Client, feature string, body 
 	if err := json.Unmarshal(usageRaw, &usage); err == nil && usage.Calls > 0 {
 		// 機能名は呼び出し元が定数で渡す（#1294 の方針）。実行主体はリクエストの
 		// コンテキストから取る（未ログイン利用も仕様の経路なので無ければ NULL）。
-		cli.ReportProxyUsage(usagectx.WithFeature(ctx.Request().Context(), feature), openai.ProxyUsage{
+		reqCtx := usagectx.WithFeature(ctx.Request().Context(), feature)
+		// プロンプトの版は es_review / es_rewrite のどちらでも記録する（同じ添削プロンプト。SOCAIAGENT-661）。
+		// 形式に合わない値は api_call_logs.prompt_version（varchar(64)）に入れない
+		if v := strings.TrimSpace(usage.PromptVersion); prompts.ValidPromptVersion(v) {
+			reqCtx = usagectx.WithPromptAssignment(reqCtx, string(prompts.StageESReview), v, "")
+		}
+		cli.ReportProxyUsage(reqCtx, openai.ProxyUsage{
 			Model:            usage.Model,
 			PromptTokens:     usage.PromptTokens,
 			CompletionTokens: usage.CompletionTokens,

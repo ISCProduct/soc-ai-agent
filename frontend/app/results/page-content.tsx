@@ -8,6 +8,7 @@ import { CONTENT_MAX_WIDTH } from '@/lib/design/tokens'
 import { useResultsData } from './hooks/useResultsData'
 import {
   ResultsLoadingView,
+  ResultsEmptyView,
   ResultsErrorView,
   ResultsNoMatchView,
 } from './components/ResultsStatusViews'
@@ -49,8 +50,13 @@ function ResultsContent() {
     userId,
     sessionId,
     companies,
+    favoriteCompanies,
+    favoritesLoading,
+    favoritesError,
+    retryFavorites,
     loading,
     error,
+    emptyReason,
     isProvisional,
     diagnosisSummary,
     evaluatedCategories,
@@ -72,6 +78,8 @@ function ResultsContent() {
     diagramError,
     emailSending,
     favoritingId,
+    feedbackingId,
+    handleFeedback,
     applyingId,
     snackbar,
     isGuestUser,
@@ -80,6 +88,7 @@ function ResultsContent() {
     handleBack,
     handleReset,
     handleToggleFavorite,
+    handleUnfavoriteCompany,
     handleApply,
     lowMatchTarget,
     cancelLowMatchApply,
@@ -109,8 +118,22 @@ function ResultsContent() {
         <ResultsErrorView
           error={error}
           onBack={handleBack}
-          onReset={handleReset}
         />
+      </ResultsFallbackColumn>
+    )
+  }
+
+  // 推薦が0件（エラーではない。#2220）
+  if (emptyReason) {
+    return (
+      <ResultsFallbackColumn>
+        <AnalysisScoreCard
+          analysisScores={analysisScores}
+          scoreComment={scoreComment}
+          analysisError={analysisError}
+          onRetryAnalysis={handleRetryAnalysis}
+        />
+        <ResultsEmptyView reason={emptyReason} onBackToChat={handleBack} />
       </ResultsFallbackColumn>
     )
   }
@@ -148,6 +171,10 @@ function ResultsContent() {
     <>
     <ResultsListView
       companies={companies}
+      favoriteCompanies={favoriteCompanies}
+      favoritesLoading={favoritesLoading}
+      favoritesError={favoritesError}
+      onRetryFavorites={retryFavorites}
       isProvisional={isProvisional}
       diagnosisSummary={diagnosisSummary}
       evaluatedCategories={evaluatedCategories}
@@ -161,6 +188,8 @@ function ResultsContent() {
       suggestedRoles={suggestedRoles}
       emailSending={emailSending}
       favoritingId={favoritingId}
+      feedbackingId={feedbackingId}
+      onFeedback={handleFeedback}
       applyingId={applyingId}
       snackbar={snackbar}
       isGuestUser={isGuestUser}
@@ -171,6 +200,7 @@ function ResultsContent() {
       onSendEmail={handleSendEmail}
       onSelectCompany={setSelectedCompany}
       onToggleFavorite={handleToggleFavorite}
+      onUnfavoriteCompany={handleUnfavoriteCompany}
       onApply={handleApply}
       onNavigate={navigate}
     />

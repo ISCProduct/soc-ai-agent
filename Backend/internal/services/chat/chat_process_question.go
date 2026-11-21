@@ -2,6 +2,7 @@ package chat
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/judgment"
 	"context"
 	"fmt"
 	"log"
@@ -17,6 +18,8 @@ type processQuestionInput struct {
 	allPhases           []models.AnalysisPhase
 	completedProgresses []models.UserAnalysisProgress
 	phaseByID           map[uint]*models.AnalysisPhase
+	// extraRound は、全フェーズを終えても判定できず、最後のフェーズの枠で続けている質問。
+	extraRound bool
 }
 
 func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input processQuestionInput) (*ChatResponse, error) {
@@ -58,7 +61,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	}
 
 	// スコア分布を分析
-	scoreMap := make(map[string]int)
+	scoreMap := make(map[string]float64)
 	evaluatedCategories := make(map[string]bool)
 	for _, score := range scores {
 		scoreMap[score.WeightCategory] = score.Score
@@ -68,13 +71,14 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	}
 
 	// 全カテゴリ（職種に応じて並び順を調整）
-	allCategories := s.getCategoryOrder(jobCategoryID)
+	allCategories := s.getCategoryOrder(ctx, jobCategoryID)
 
 	// フェーズの質問枠を、先頭の未評価軸が使い切らないように配る（SOCAIAGENT-473）。
 	phaseNameForPick := ""
-	if currentPhase != nil && currentPhase.Phase != nil {
+	if currentPhase != nil && currentPhase.Phase != nil && !input.extraRound {
 		phaseNameForPick = currentPhase.Phase.PhaseName
 	}
+	// 延長ラウンドは、フェーズで絞らず全軸から選ぶ（判定に足りない軸を埋めるため）。
 	targetCategory, _ := pickPhaseTarget(
 		allowedCategoriesForPhase(phaseNameForPick, allCategories),
 		scoreMap,
@@ -122,7 +126,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		if err != nil {
 			// エラーは致命的にせずフォールバック質問を設定
 			log.Printf("Warning: failed to generate question via AI: %v\n", err)
-			fallbackQuestion := s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
+			fallbackQuestion := s.selectFallbackQuestion(ctx, targetCategory, jobCategoryID, targetLevel, askedTexts)
 			if fallbackQuestion != "" {
 				aiResponse = fallbackQuestion
 			} else {
@@ -155,8 +159,10 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	answeredCount := countUserAnswers(history)
 	_ = allPhasesReachedMax(completedProgresses, allPhases)
 
-	// 完了判定: 全フェーズが完了していれば終了
-	isComplete := completedPhaseCount == len(allPhases)
+	// 完了判定: 質問数やフェーズの消化ではなく、判定できたかで決める（SOCAIAGENT-668）。
+	// 15 問に満たなくても、判定できていれば完了。15 問を超えても、判定できなければ続ける。
+	judged := s.judgmentFor(req.UserID, req.SessionID)
+	isComplete := judged.Ready
 
 	log.Printf("Diagnosis progress: %d phases completed out of %d, %d questions asked, %d/10 categories evaluated, complete: %v\n",
 		completedPhaseCount, len(allPhases), answeredCount, len(evaluatedCategories), isComplete)
@@ -172,7 +178,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		if targetLevel == "新卒" && isVerboseQuestion(aiResponse) && isTextBasedQuestion(aiResponse) {
 			simple, err := s.simplifyQuestionWithAI(ctx, aiResponse)
 			if err != nil || strings.TrimSpace(simple) == "" {
-				simple = s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
+				simple = s.selectFallbackQuestion(ctx, targetCategory, jobCategoryID, targetLevel, askedTexts)
 			}
 			if strings.TrimSpace(simple) == "" {
 				simple = simplifyNewGradQuestion(aiResponse)
@@ -247,6 +253,8 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		TotalCategories:     10,
 		Summary:             sessionSummary,
 		JobCategoryID:       jobCategoryID,
+		JudgmentPercent:     judged.Percent,
+		SuggestProvisional:  judgment.SuggestProvisional(answeredCount, judged.Ready),
 	}, nil
 }
 

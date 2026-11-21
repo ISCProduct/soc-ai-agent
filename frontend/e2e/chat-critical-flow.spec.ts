@@ -82,11 +82,15 @@ test.describe('チャット主要機能（職種・選択肢・送信）', () =>
     expect(inputBox!.height).toBeLessThan(56)
 
     await page.setViewportSize({ width: 375, height: 700 })
-    const narrowA = await choiceA.boundingBox()
-    const narrowB = await choiceB.boundingBox()
-    expect(narrowA).not.toBeNull()
-    expect(narrowB).not.toBeNull()
-    expect(narrowB!.y).toBeGreaterThan(narrowA!.y + narrowA!.height / 2)
+    // 幅を変えると、右パネルが外れて上に積む表示へ切り替わる。切り替わりが落ち着くのを待ってから測る
+    await expect(page.getByRole('complementary', { name: '先生からの案内・予定・お知らせ' })).toHaveCount(0)
+    await expect
+      .poll(async () => {
+        const a = await choiceA.boundingBox()
+        const b = await choiceB.boundingBox()
+        return a !== null && b !== null && b.y > a.y + a.height / 2
+      })
+      .toBe(true)
     const log = page.getByRole('log', { name: '自己分析チャットのやり取り' })
     const logBox = await log.boundingBox()
     expect(logBox).not.toBeNull()
@@ -236,7 +240,8 @@ test.describe('チャット主要機能（職種・選択肢・送信）', () =>
   })
 
   test('Enter単独では送信せず Ctrl+Enter で送信する', async ({ page }) => {
-    await mockChatHistory(page, [])
+    // 履歴が0件だと初回の相談画面（1行の入力は Enter で送る）になるので、履歴ありのチャット表示で検査する
+    await mockChatHistory(page, [historyItem(1, 'assistant', 'どのようなIT職種に興味がありますか？')])
 
     const posted: string[] = []
     await mockChatPost(page, (body) => {

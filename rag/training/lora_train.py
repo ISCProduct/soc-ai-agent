@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import sys
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, List
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("lora_train")
@@ -53,9 +53,9 @@ def prepare_prompt_completion(examples: List[Dict[str, Any]]) -> List[Dict[str, 
 
 def check_dependencies() -> bool:
     try:
-        import transformers  # type: ignore
-        import peft  # type: ignore
-        import torch  # type: ignore
+        import transformers  # type: ignore  # noqa: F401  インストールされているかを確かめるだけ
+        import peft  # type: ignore  # noqa: F401  インストールされているかを確かめるだけ
+        import torch  # type: ignore  # noqa: F401  インストールされているかを確かめるだけ
         return True
     except Exception:
         return False

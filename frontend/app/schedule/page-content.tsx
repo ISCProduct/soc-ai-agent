@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { formatDateTime } from '@/lib/i18n/format'
 import { useRouter } from 'next/navigation'
 import {
   Alert,
@@ -394,7 +395,7 @@ export default function PageContent() {
                     <Chip label={ev.stage} size="small" sx={{ bgcolor: stageColor(ev.stage), color: '#fff', height: 20, fontSize: '0.7rem', flexShrink: 0 }} />
                   </Stack>
                   <Typography variant="body2" color="text.secondary">
-                    {new Date(ev.scheduled_at).toLocaleString('ja-JP', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    {formatDateTime(ev.scheduled_at, { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </Typography>
                   {ev.title && (
                     <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>

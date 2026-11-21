@@ -33,7 +33,9 @@ func (e *AnswerEvaluator) evaluateRule(rule models.ScoreRule, answer string, ans
 		// 文字数が指定値より大きい
 		if len(rule.Keywords) > 0 {
 			threshold := 0
-			fmt.Sscanf(rule.Keywords[0], "%d", &threshold)
+			if _, err := fmt.Sscanf(rule.Keywords[0], "%d", &threshold); err != nil {
+				return false
+			}
 			return answerLength > threshold
 		}
 		return false
@@ -42,7 +44,9 @@ func (e *AnswerEvaluator) evaluateRule(rule models.ScoreRule, answer string, ans
 		// 文字数が指定値より小さい
 		if len(rule.Keywords) > 0 {
 			threshold := 0
-			fmt.Sscanf(rule.Keywords[0], "%d", &threshold)
+			if _, err := fmt.Sscanf(rule.Keywords[0], "%d", &threshold); err != nil {
+				return false
+			}
 			return answerLength < threshold
 		}
 		return false

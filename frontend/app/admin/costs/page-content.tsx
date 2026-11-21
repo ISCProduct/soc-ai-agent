@@ -1,16 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { formatNumber } from '@/lib/i18n/format'
 import Link from 'next/link'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import dynamic from 'next/dynamic'
 import { ArrowLeft, Info } from 'lucide-react'
 import { authService } from '@/lib/auth'
 import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
@@ -166,46 +159,12 @@ function KpiCard({
   )
 }
 
-function CostBarChart({
-  data,
-  valueKey,
-  labelKey,
-}: {
-  data: Record<string, unknown>[]
-  valueKey: string
-  labelKey: string
-}) {
-  if (data.length === 0) {
-    return <p className="text-center text-sm text-muted-foreground py-8">データなし</p>
-  }
-  return (
-    <div className="h-56 mt-2">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
-          <XAxis
-            dataKey={labelKey}
-            tick={{ fontSize: 11 }}
-            tickLine={false}
-            axisLine={{ className: 'stroke-border' } as never}
-          />
-          <YAxis
-            tick={{ fontSize: 11 }}
-            tickLine={false}
-            axisLine={false}
-            width={64}
-            tickFormatter={(v: number) => `$${v.toFixed(2)}`}
-          />
-          <Tooltip
-            formatter={(value: number) => [`$${value.toFixed(4)}`, 'コスト']}
-            contentStyle={{ fontSize: 12, borderRadius: 8 }}
-          />
-          <Bar dataKey={valueKey} fill="var(--chart-1)" radius={[3, 3, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  )
-}
+const CostBarChart = dynamic(() => import('./cost-bar-chart'), {
+  ssr: false,
+  loading: () => (
+    <p className="text-center text-sm text-muted-foreground py-8">グラフを読み込み中</p>
+  ),
+})
 
 export default function PageContent() {
   const platformReady = useRequirePlatformAdmin()
@@ -323,7 +282,7 @@ export default function PageContent() {
         <KpiCard label={`過去${dailyDays}日合計コスト`} value={`$${totalDailyCost.toFixed(4)}`} />
         <KpiCard
           label={`過去${dailyDays}日 APIコール数`}
-          value={daily.reduce((s, r) => s + r.call_count, 0).toLocaleString()}
+          value={formatNumber(daily.reduce((s, r) => s + r.call_count, 0))}
         />
         <KpiCard
           label="Realtime 今月コスト"
@@ -334,9 +293,9 @@ export default function PageContent() {
           label="企業 Search 今月"
           value={
             <>
-              {(summary?.company_search?.count ?? 0).toLocaleString()}
+              {formatNumber(summary?.company_search?.count ?? 0)}
               <span className="text-base text-muted-foreground font-normal">
-                {' '}/ {(summary?.company_search?.limit ?? 2000).toLocaleString()}
+                {' '}/ {formatNumber(summary?.company_search?.limit ?? 2000)}
               </span>
             </>
           }
@@ -390,8 +349,8 @@ export default function PageContent() {
                   <TableRow key={row.date}>
                     <TableCell>{row.date}</TableCell>
                     <TableCell className="text-right">${row.total_cost_usd.toFixed(6)}</TableCell>
-                    <TableCell className="text-right">{row.total_tokens.toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{row.call_count.toLocaleString()}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.total_tokens)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.call_count)}</TableCell>
                   </TableRow>
                 ))}
                 {daily.length === 0 && (
@@ -429,8 +388,8 @@ export default function PageContent() {
                   <TableRow key={row.month}>
                     <TableCell>{row.month}</TableCell>
                     <TableCell className="text-right">${row.total_cost_usd.toFixed(4)}</TableCell>
-                    <TableCell className="text-right">{row.total_tokens.toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{row.call_count.toLocaleString()}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.total_tokens)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.call_count)}</TableCell>
                   </TableRow>
                 ))}
                 {monthly.length === 0 && (
@@ -485,12 +444,12 @@ export default function PageContent() {
                     <TableCell>{row.date}</TableCell>
                     <TableCell className="text-right">${row.total_cost_usd.toFixed(4)}</TableCell>
                     <TableCell className="text-right">{(row.total_duration_seconds / 60).toFixed(1)}</TableCell>
-                    <TableCell className="text-right">{row.session_count.toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{row.user_count.toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{(row.total_input_audio_tokens ?? 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{(row.total_output_audio_tokens ?? 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{(row.total_input_text_tokens ?? 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{(row.total_output_text_tokens ?? 0).toLocaleString()}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.session_count)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.user_count)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.total_input_audio_tokens ?? 0)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.total_output_audio_tokens ?? 0)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.total_input_text_tokens ?? 0)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.total_output_text_tokens ?? 0)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -525,11 +484,11 @@ export default function PageContent() {
                     <TableCell>{row.user_id}</TableCell>
                     <TableCell className="text-right">${row.total_cost_usd.toFixed(4)}</TableCell>
                     <TableCell className="text-right">{(row.total_duration_seconds / 60).toFixed(1)}</TableCell>
-                    <TableCell className="text-right">{row.session_count.toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{(row.total_input_audio_tokens ?? 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{(row.total_output_audio_tokens ?? 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{(row.total_input_text_tokens ?? 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{(row.total_output_text_tokens ?? 0).toLocaleString()}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.session_count)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.total_input_audio_tokens ?? 0)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.total_output_audio_tokens ?? 0)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.total_input_text_tokens ?? 0)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(row.total_output_text_tokens ?? 0)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -585,12 +544,12 @@ export default function PageContent() {
                         <Badge variant="outline">{row.key}</Badge>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">${row.total_cost_usd.toFixed(4)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{row.call_count.toLocaleString()}</TableCell>
-                      <TableCell className="text-right tabular-nums">{row.total_tokens.toLocaleString()}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(row.call_count)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(row.total_tokens)}</TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {Math.round(row.avg_latency_ms).toLocaleString()} ms
+                        {formatNumber(Math.round(row.avg_latency_ms))} ms
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">{row.cache_hit_count.toLocaleString()}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(row.cache_hit_count)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -620,7 +579,7 @@ export default function PageContent() {
                     <Badge variant="outline">{row.model}</Badge>
                     <PriceBasisBadge basis={row.price_basis} />
                     <span className="text-xs text-muted-foreground">
-                      {row.call_count.toLocaleString()} calls / {row.total_tokens.toLocaleString()} tokens
+                      {formatNumber(row.call_count)} calls / {formatNumber(row.total_tokens)} tokens
                     </span>
                   </div>
                   <div className="flex items-center gap-2">

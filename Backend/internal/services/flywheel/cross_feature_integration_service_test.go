@@ -73,13 +73,13 @@ func TestUpdateScoresFromInterviewReport_SavedValues(t *testing.T) {
 		evidenceJSON string
 		stats        InterviewTranscriptStats
 		// want は「保存されるべき絶対値」。evidence・発話が無いときは補正0で ×20 のまま。
-		want map[string]int
+		want map[string]float64
 	}{
 		{
 			name:         "evidenceも発話統計も無い（記録漏れ）",
 			evidenceJSON: "",
 			stats:        InterviewTranscriptStats{},
-			want: map[string]int{
+			want: map[string]float64{
 				"コミュニケーション力": 100, // communication=5
 				"技術志向":       80,  // logic=4
 				"細部志向":       60,  // specificity=3
@@ -93,7 +93,7 @@ func TestUpdateScoresFromInterviewReport_SavedValues(t *testing.T) {
 			name:         "evidence_jsonが壊れている（nil mapになる）",
 			evidenceJSON: `{"logic":`,
 			stats:        InterviewTranscriptStats{},
-			want: map[string]int{
+			want: map[string]float64{
 				"コミュニケーション力": 100,
 				"技術志向":       80,
 				"細部志向":       60,
@@ -107,7 +107,7 @@ func TestUpdateScoresFromInterviewReport_SavedValues(t *testing.T) {
 			name:         "evidenceも発話も十分（補正は上限の+5点）",
 			evidenceJSON: string(fullEvidenceJSON),
 			stats:        InterviewTranscriptStats{UserTurns: 10, AvgAnswerRunes: 120},
-			want: map[string]int{
+			want: map[string]float64{
 				"コミュニケーション力": 100, // 105 を 100 で clamp
 				"技術志向":       85,
 				"細部志向":       65,
@@ -161,8 +161,8 @@ func TestUpdateScoresFromInterviewReport_ExistingRowBlends(t *testing.T) {
 	// delta = round(既存*0.7 + 新*0.3) - 既存 を期待する。
 	tests := []struct {
 		category string
-		newValue int
-		delta    int // 0 なら書き込み自体が起きない
+		newValue float64
+		delta    float64 // 0 なら書き込み自体が起きない
 	}{
 		{category: "コミュニケーション力", newValue: 100, delta: 12},
 		{category: "技術志向", newValue: 80, delta: 6},
@@ -178,7 +178,7 @@ func TestUpdateScoresFromInterviewReport_ExistingRowBlends(t *testing.T) {
 		rowID := i + 1
 		// 期待する delta を写像から導き直して、移動平均の定数のズレも検出する。
 		if want := blendScore(existing, tt.newValue) - existing; want != tt.delta {
-			t.Fatalf("%s: delta の期待値が写像と合っていない: %d, want %d", tt.category, tt.delta, want)
+			t.Fatalf("%s: delta の期待値が写像と合っていない: %v, want %v", tt.category, tt.delta, want)
 		}
 		row := func() *sqlmock.Rows {
 			return sqlmock.NewRows([]string{"id", "user_id", "session_id", "weight_category", "score"}).
@@ -206,6 +206,41 @@ func TestUpdateScoresFromInterviewReport_ExistingRowBlends(t *testing.T) {
 		newInterviewReport(scoresJSON, ""), InterviewTranscriptStats{})
 	require.NoError(t, err)
 	// delta==0 の細部志向に UPDATE が来ていたら「予期しないExec」で落ちる。
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestApplyMovingAverage_SubIntegerContributionIsKept は、整数丸めで消えていた小さな寄与が
+// DECIMAL 化後は差分として書かれることを固定する（SOCAIAGENT-513 / #1555）。
+// 既存60・新61 の移動平均は 60.3。旧実装は round で 60 に戻り delta==0 で書き込みを捨てていた。
+func TestApplyMovingAverage_SubIntegerContributionIsKept(t *testing.T) {
+	svc, mock := newCrossFeatureService(t)
+	row := func() *sqlmock.Rows {
+		return sqlmock.NewRows([]string{"id", "user_id", "session_id", "weight_category", "score"}).
+			AddRow(1, testUserID, testSessionID, "技術志向", 60.0)
+	}
+	mock.ExpectQuery("SELECT \\* FROM `user_weight_scores`").
+		WithArgs(testUserID, testSessionID, "技術志向", 1).WillReturnRows(row())
+	mock.ExpectQuery("SELECT \\* FROM `user_weight_scores`").
+		WithArgs(testUserID, testSessionID, "技術志向", 1).WillReturnRows(row())
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `user_weight_scores` SET `score`=GREATEST").
+		WithArgs(0.3, sqlmock.AnyArg(), 1).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	require.NoError(t, svc.applyMovingAverage(testUserID, testSessionID, "技術志向", 61))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 実質0（|delta|<0.005）の差分だけは書かない。
+func TestApplyMovingAverage_NegligibleDeltaIsSkipped(t *testing.T) {
+	svc, mock := newCrossFeatureService(t)
+	mock.ExpectQuery("SELECT \\* FROM `user_weight_scores`").
+		WithArgs(testUserID, testSessionID, "技術志向", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "session_id", "weight_category", "score"}).
+			AddRow(1, testUserID, testSessionID, "技術志向", 60.0))
+
+	require.NoError(t, svc.applyMovingAverage(testUserID, testSessionID, "技術志向", 60))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -244,7 +279,7 @@ func TestUpdateScoresFromResumeReview_SavedValues(t *testing.T) {
 	svc, mock := newCrossFeatureService(t)
 
 	// score=85 / critical=3 → 細部志向 50+(35-15)*1.0=70、コミュニケーション力 50+(35-15)*0.6=62
-	want := map[string]int{"細部志向": 70, "コミュニケーション力": 62}
+	want := map[string]float64{"細部志向": 70, "コミュニケーション力": 62}
 	for category, score := range want {
 		mock.ExpectQuery("SELECT \\* FROM `user_weight_scores`").
 			WithArgs(testUserID, testSessionID, category, 1).

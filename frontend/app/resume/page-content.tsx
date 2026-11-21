@@ -1,34 +1,39 @@
 'use client'
 
-import { Suspense } from 'react'
+import { Suspense, useEffect } from 'react'
 import { Box } from '@mui/material'
 import { PageLoading } from '@/components/common/PageLoading'
+import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
+import { UI } from '@/lib/design/tokens'
 import { useResumePage } from './hooks/useResumePage'
 import { ResumePageHeader } from './components/ResumePageHeader'
-import { ResumeUploadForm } from './components/ResumeUploadForm'
-import { ResumeReviewForm } from './components/ResumeReviewForm'
-import { ResumeRagReport } from './components/ResumeRagReport'
-import { ResumeReviewResults } from './components/ResumeReviewResults'
-import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
+import { ResumeDocumentCard } from './components/ResumeDocumentCard'
+import { ResumeTargetCard } from './components/ResumeTargetCard'
+import { ResumeStartBar } from './components/ResumeStartBar'
+import { ResumeRunningCard } from './components/ResumeRunningCard'
+import { ResumeReviewNotice } from './components/ResumeReviewNotice'
+import { ResumeResultView } from './components/ResumeResultView'
 
 /**
- * 履歴書レビューページのオーケストレーション。
+ * 履歴書・ES レビューのオーケストレーション。
+ * 入力 → レビュー中 → 結果 の3つの状態を切り替える（Figma: 履歴書レビュー 改善案）。
  * データ取得・操作は useResumePage、表示は各コンポーネントに委譲する。
  */
 function ResumeContent() {
   const {
     prefilledCompany,
     prefilledIndustry,
-    sourceType,
-    setSourceType,
     sourceUrl,
-    setSourceUrl,
     file,
-    setFile,
     loading,
     uploadError,
     documentId,
-    handleUpload,
+    selectFile,
+    loadFromUrl,
+    resetDocument,
+    cancelReview,
+    targetMode,
+    chooseTargetMode,
     companyQuery,
     handleCompanyQueryChange,
     companyName,
@@ -38,7 +43,6 @@ function ResumeContent() {
     selectedCompanyMeta,
     companyCandidates,
     selectCompany,
-    clearSelectedCompany,
     handleSearchCompanies,
     jobTitle,
     setJobTitle,
@@ -46,6 +50,7 @@ function ResumeContent() {
     setCandidateType,
     reviewLoading,
     reviewError,
+    reviewInterrupted,
     review,
     ragReport,
     handleReview,
@@ -55,59 +60,116 @@ function ResumeContent() {
     handleDownload,
   } = useResumePage()
 
+  const phase = reviewLoading ? 'running' : review ? 'result' : 'input'
+  const step = phase === 'input' ? (documentId === null ? 1 : 2) : 3
+
+  const fileName = file?.name ?? (sourceUrl ? 'Google Docs の書類' : '')
+  const targetLabel = targetMode === 'company' ? companyName : jobTitle.trim()
+  const candidateLabel = candidateType === 'mid_career' ? '中途' : '新卒'
+
+  const targetReady = targetMode === 'company' ? companyValidated && !!companyName.trim() : !!jobTitle.trim()
+  const ready = documentId !== null && targetReady
+  const hint =
+    documentId === null
+      ? '書類を選ぶと、レビューを始められます'
+      : targetMode === 'company'
+        ? '応募先の企業を選ぶと、レビューを始められます'
+        : '応募職種を入力すると、レビューを始められます'
+
+  // 状態が変わったら先頭へ戻す（結果が画面の途中から始まらないように）
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [phase])
+
   return (
-    <Box sx={{ p: { xs: 2, sm: 4 }, maxWidth: 900, mx: 'auto' }}>
-      <ResumePageHeader
-        prefilledCompany={prefilledCompany}
-        prefilledIndustry={prefilledIndustry}
-      />
+    <Box sx={{ minHeight: '100%', bgcolor: UI.paper }}>
+      <Box sx={{ maxWidth: 1200, mx: 'auto', px: { xs: 2, md: 0 } }}>
+        <ResumePageHeader
+          phase={phase}
+          step={step}
+          prefilledCompany={prefilledCompany}
+          prefilledIndustry={prefilledIndustry}
+          fileName={fileName}
+          targetLabel={targetLabel}
+          candidateLabel={candidateLabel}
+          onReset={resetDocument}
+        />
 
-      <ResumeUploadForm
-        sourceType={sourceType}
-        onSourceTypeChange={setSourceType}
-        sourceUrl={sourceUrl}
-        onSourceUrlChange={setSourceUrl}
-        file={file}
-        onFileChange={setFile}
-        loading={loading}
-        uploadError={uploadError}
-        documentId={documentId}
-        onUpload={handleUpload}
-      />
+        {phase === 'input' && (
+          <>
+            <ResumeReviewNotice error={reviewError} interrupted={reviewInterrupted} canRetry={documentId !== null} onRetry={handleReview} />
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'minmax(0, 540px) minmax(0, 1fr)' },
+                gap: { xs: 2, md: 3 },
+                alignItems: 'start',
+                pb: { xs: 2, md: 5 },
+              }}
+            >
+              <ResumeDocumentCard
+                fileName={fileName}
+                documentId={documentId}
+                loading={loading}
+                uploadError={uploadError}
+                onSelectFile={selectFile}
+                onLoadUrl={loadFromUrl}
+                onReset={resetDocument}
+              />
+              <ResumeTargetCard
+                mode={targetMode}
+                onModeChange={chooseTargetMode}
+                companyQuery={companyQuery}
+                onCompanyQueryChange={handleCompanyQueryChange}
+                companyName={companyName}
+                companyValidated={companyValidated}
+                companySearchLoading={companySearchLoading}
+                companySearchError={companySearchError}
+                selectedCompanyMeta={selectedCompanyMeta}
+                companyCandidates={companyCandidates}
+                onSearchCompanies={handleSearchCompanies}
+                onSelectCompany={selectCompany}
+                jobTitle={jobTitle}
+                onJobTitleChange={setJobTitle}
+                candidateType={candidateType}
+                onCandidateTypeChange={setCandidateType}
+              />
+            </Box>
+          </>
+        )}
 
-      <ResumeReviewForm
-        companyQuery={companyQuery}
-        onCompanyQueryChange={handleCompanyQueryChange}
-        companyName={companyName}
-        companyValidated={companyValidated}
-        companySearchLoading={companySearchLoading}
-        companySearchError={companySearchError}
-        selectedCompanyMeta={selectedCompanyMeta}
-        companyCandidates={companyCandidates}
-        onSearchCompanies={handleSearchCompanies}
-        onSelectCompany={selectCompany}
-        onClearSelectedCompany={clearSelectedCompany}
-        jobTitle={jobTitle}
-        onJobTitleChange={setJobTitle}
-        candidateType={candidateType}
-        onCandidateTypeChange={setCandidateType}
-        documentId={documentId}
-        reviewLoading={reviewLoading}
-        ragReport={ragReport}
-        reviewError={reviewError}
-        reviewCompleted={!!review}
-        onReview={handleReview}
-      />
+        {phase === 'running' && (
+          <ResumeRunningCard
+            hasReport={!!ragReport}
+            fileName={fileName}
+            targetLabel={targetLabel}
+            candidateLabel={candidateLabel}
+            onCancel={cancelReview}
+          />
+        )}
 
-      <ResumeRagReport ragReport={ragReport} reviewLoading={reviewLoading} />
+        {phase === 'result' && review && (
+          <ResumeResultView
+            key={review.review.id}
+            review={review}
+            scoresBefore={scoresBefore}
+            scoresAfter={scoresAfter}
+            annotateError={annotateError}
+            onDownload={handleDownload}
+            ragReport={ragReport}
+            documentId={documentId}
+          />
+        )}
+      </Box>
 
-      <ResumeReviewResults
-        review={review}
-        scoresBefore={scoresBefore}
-        scoresAfter={scoresAfter}
-        annotateError={annotateError}
-        onDownload={handleDownload}
-      />
+      {phase === 'input' && (
+        <ResumeStartBar
+          ready={ready}
+          summary={[fileName, targetLabel, candidateLabel].filter(Boolean).join('　・　')}
+          hint={hint}
+          onStart={handleReview}
+        />
+      )}
       {/* 固定の下部ナビに末尾が隠れないようにする（#1570） */}
       <BottomNavSpacer />
     </Box>
