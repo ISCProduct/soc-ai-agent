@@ -50,4 +50,17 @@ describe('StudentBottomNav の表示条件', () => {
       expect(getByRole('button', { name: label })).toBeInTheDocument()
     }
   })
+
+  // #2222: 現在地を色だけでなく、読み上げ（aria-current）と見た目の印（選択の状態）でも示す
+  it('現在のタブにだけ aria-current="page" を付ける', async () => {
+    window.localStorage.setItem('user', JSON.stringify(STORED_USER))
+
+    const { findByRole, getByRole } = render(<StudentBottomNav />)
+    const current = await findByRole('button', { name: '診断' })
+    expect(current).toHaveAttribute('aria-current', 'page')
+    expect(current).toHaveClass('Mui-selected')
+    for (const label of ['結果', '面接', '履歴書', 'プロフィール']) {
+      expect(getByRole('button', { name: label })).not.toHaveAttribute('aria-current')
+    }
+  })
 })

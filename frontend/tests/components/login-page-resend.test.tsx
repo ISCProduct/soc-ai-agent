@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { LoginPage } from '@/components/auth/LoginPage'
 
 jest.mock('@/components/layout/StudentThemeToggle', () => ({ StudentThemeToggle: () => null }))
@@ -59,5 +59,70 @@ describe('LoginPage の認証メール再送', () => {
 
     await screen.findByText(/正しくありません/)
     expect(screen.queryByRole('button', { name: '認証メールを再送' })).toBeNull()
+  })
+})
+
+describe('LoginPage のタブと中身の対応', () => {
+  function panelOf(tab: HTMLElement): HTMLElement {
+    const panelId = tab.getAttribute('aria-controls')
+    expect(panelId).toBeTruthy()
+    const panel = document.getElementById(panelId as string)
+    expect(panel).not.toBeNull()
+    return panel as HTMLElement
+  }
+
+  it('各タブの aria-controls が tabpanel を指し、tabpanel の aria-labelledby がそのタブを指す', () => {
+    render(<LoginPage onAuthSuccess={jest.fn()} />)
+
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs.map((t) => t.textContent)).toEqual(['ログイン', '新規登録'])
+    for (const tab of tabs) {
+      const panel = panelOf(tab)
+      expect(panel).toHaveAttribute('role', 'tabpanel')
+      expect(panel).toHaveAttribute('aria-labelledby', tab.id)
+    }
+    expect(panelOf(tabs[0]).id).not.toBe(panelOf(tabs[1]).id)
+  })
+
+  it('選ばれているタブの中身だけが表示され、タブを切り替えると対応する中身に替わる', () => {
+    render(<LoginPage onAuthSuccess={jest.fn()} />)
+    const [loginTab, registerTab] = screen.getAllByRole('tab')
+
+    expect(loginTab).toHaveAttribute('aria-selected', 'true')
+    expect(panelOf(loginTab)).toBeVisible()
+    expect(within(panelOf(loginTab)).getByRole('button', { name: 'ログイン' })).toBeInTheDocument()
+    expect(panelOf(registerTab)).not.toBeVisible()
+
+    fireEvent.click(registerTab)
+    expect(registerTab).toHaveAttribute('aria-selected', 'true')
+    expect(panelOf(registerTab)).toBeVisible()
+    expect(within(panelOf(registerTab)).getByRole('button', { name: '確認メールを送る' })).toBeInTheDocument()
+    expect(panelOf(loginTab)).not.toBeVisible()
+    expect(screen.queryByRole('button', { name: 'ログイン' })).toBeNull()
+  })
+
+  it('initialTab=1 では新規登録のタブと中身が選ばれている', () => {
+    render(<LoginPage onAuthSuccess={jest.fn()} initialTab={1} />)
+    const [loginTab, registerTab] = screen.getAllByRole('tab')
+
+    expect(registerTab).toHaveAttribute('aria-selected', 'true')
+    expect(panelOf(registerTab)).toBeVisible()
+    expect(panelOf(loginTab)).not.toBeVisible()
+  })
+
+  it('左右の矢印キーで隣のタブへ移る', async () => {
+    render(<LoginPage onAuthSuccess={jest.fn()} />)
+    const [loginTab, registerTab] = screen.getAllByRole('tab')
+
+    await act(async () => loginTab.focus())
+    await act(async () => {
+      fireEvent.keyDown(loginTab, { key: 'ArrowRight' })
+    })
+    expect(registerTab).toHaveFocus()
+
+    await act(async () => {
+      fireEvent.keyDown(registerTab, { key: 'ArrowLeft' })
+    })
+    expect(loginTab).toHaveFocus()
   })
 })

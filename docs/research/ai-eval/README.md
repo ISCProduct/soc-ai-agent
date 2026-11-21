@@ -88,7 +88,7 @@ go run ./cmd/aibench -diff /tmp/resume-prev.json,/tmp/resume-4o.json
 | 起動 | 条件 | 比べる相手 |
 |---|---|---|
 | 手動実行（workflow_dispatch） | いつでも。評価対象・回数・上限・base を入力で変えられる | 入力の `base_ref`（既定 `origin/develop`） |
-| PR | **`aibench` ラベルが付いていて**、プロンプト・評価に関わるファイル（`services/prompts`・`answer_evaluator.go`・`company_info_*.go`・`matching_service.go`・`services/resume`・`interview_report*.go`・aibench・固定セット）を変えたとき | PR の base ブランチ |
+| PR | **`aibench` ラベルが付いていて**、プロンプト・評価に関わるファイル（`services/prompts`・`answer_evaluator.go`・`company_info_*.go`・`matching_service.go`・`services/resume`・`interview_report*.go`・`interview_rubric.go`・`interview_evidence_tokens.go`・`interview_company_context.go`・`interview_turn_prompt.go`・aibench・固定セット）を変えたとき | PR の base ブランチ |
 
 - **費用の上限**: 実行前に全評価対象の概算（上限見積もり）を足し、`AIBENCH_MAX_COST_USD`（既定 **$1.00**）を超えたら API を呼ばずに失敗する。
   既定の5つ（ES 以外）を base と head の両方で測ると概算 $0.74、実測はその約3分の1（$0.25 前後）。
@@ -451,6 +451,8 @@ role_fit / completeness / readability、各0〜5）の加重和から本番と�
 | `chat-answer.jsonl` | **30** | good 10 / mid 10 / bad 10（SOCAIAGENT-450 で新設） |
 | `company-extract.jsonl` | **12** | ラベルなし（#1782 で新設。正解の項目との一致で点を付ける） |
 | `matching-reason.jsonl` | **12** | ラベルなし（#1782 で新設。指示の遵守で点を付ける。企業情報が業種だけのケース4件を含む） |
+| `interview-report-fairness.jsonl` | **8**（4組×2） | 公平性回帰ケース（SOCAIAGENT-513）。受験者の回答は同一で、面接官の最初の質問に入る企業文脈（架空企業2社。業種・事業モデルが違う。`context_variant` は `neutral` / `charged` だが、`charged` は「アイテム課金型の事業」の意味で、本サービスの契約プランではない）だけが違うペア。`-target interview-report` で単独に回し、ペア間のスコア差を測る。ラベルは組内で同じ |
+| `interview-evidence-synthetic.jsonl` | **22** | legit 12 / fabricated 10（SOCAIAGENT-675 で新設）。面接レポートの根拠照合だけを測る合成ケースで、`-target` では使わない。「発話」と「根拠」を固定し、LLM を呼ばずに検出率と誤検知率を出す（`Backend/internal/aibench/evidence_synthetic_test.go`。`go test` で毎回走る） |
 
 **全て合成データ。個人情報を含む実データは入っていない**（`docs/wiki/data-privacy.md` の方針）。
 氏名は「学生A」、企業・学校名は「株式会社サンプル○○」「サンプル○○専門学校」のような
@@ -474,7 +476,7 @@ target ごとの `input`:
 
 - `es`: `es_text`（必須）, `question_type`, `company_name`
 - `resume`: `resume_text`（必須。**1行=1ブロック**として本番のOCRブロックに変換される）, `company_name`, `job_title`, `candidate_type`（**`new_grad` / `mid_career` のみ**。ルーブリックの重みをこの値で引くため、他の値だと本番と違う条件で測ることになる）
-- `interview-report`: `transcript`（必須。`Interviewer: ` / `User: ` 行。`interview.BuildTranscript` と同形式）, `lang`
+- `interview-report`: `transcript`（必須。`Interviewer: ` / `User: ` 行。`interview.BuildTranscript` と同形式）, `lang`, 任意で `axis_labels`（軸別の人手ラベル。`{"logic": 0-5, ...}`。ルーブリックの軸のみ）, `fairness_pair` / `context_variant`（公平性ペア。両方必要）
 
 `transcript` の役割ラベルは必須。根拠の捏造チェック（`ValidateEvidence`）が
 「受験者が言ったか」を見るため、役割が復元できないと面接官の質問文を根拠にしても検出できない。
@@ -859,11 +861,11 @@ go run ./cmd/aibench -target matching-reason -manifest ../docs/research/ai-eval/
 | `scores_invalid` | 本番の `ValidateRubricScores` が弾く値（キー欠落・0〜5の外） |
 | `strengths_count` / `improvements_count` | 2〜4件の指示に反している |
 | `teacher_missing` | teacher が無いか総評が空 |
-| `evidence_not_spoken` | **根拠が受験者の発話に基づかない（捏造）**。本番と同じ `ValidateEvidence` で照合する |
+| `evidence_not_spoken` | **根拠が受験者の発話に基づかない（捏造）**、または引用元の utterance ID が違う・無い。本番と同じ `ValidateEvidenceReferences` で照合する |
 | `teacher_evidence_not_spoken` | 同じく教員向けの詳細根拠 |
 
 捏造の照合は本番と同じ関数を呼んでいる（`interview.SpokenContent` +
-`interview.ValidateEvidence`）。ハーネス側で別実装にすると、本番が弾く/弾かないの
+`interview.ValidateEvidenceReferences`。教員向けは `ValidateTeacherEvidence`）。ハーネス側で別実装にすると、本番が弾く/弾かないの
 境界とハーネスの数字がずれる。
 
 **`evidence_not_spoken` は「引用になっていない」を数える指標である。** #1580 で照合が
@@ -885,7 +887,7 @@ JSON mode を付けており、指定の書き方がエンドポイントごと�
 | 対象 | JSON mode の指定 |
 |---|---|
 | `es` | `response_format={"type":"json_object"}`（`rag/services/es_review.py`） |
-| `interview-report` | `ChatCompletionJSON` 経由の `response_format`（`/chat/completions`） |
+| `interview-report` | 本番と同じ strict JSON Schema（`response_format=json_schema`, `strict=true`。`/chat/completions`） |
 | `resume` | `text.format.type=json_object`（`openai.Client.ResponsesJSONWithMaxTokens` / #1583） |
 
 `resume` は JSON mode が無く、指示遵守率0%（`json_not_bare`）だった。
@@ -909,6 +911,49 @@ gpt-4o-mini・各ラベル2件×2回（sha `d2614b37c550`）で JSON mode の有
 
 ---
 
+## 面接レポートの本番との揃え方と、揃えていない点
+
+揃えている点: プロンプト（`interview.BuildReportPrompts` に本番の `BuildTranscript` で
+`[utterance_id=N]` を付けた文字列を渡す。ID は発話の出現順の連番）、strict JSON Schema、
+根拠の照合（引用＋引用元IDの `ValidateEvidenceReferences`）、temperature / max tokens
+（`target_interview.go` の1か所）。
+
+揃えていない点:
+- **再生成をしない。** 本番は根拠が未照合のとき最大2回作り直すが、これは DB と
+  サービスのメソッドに結びついており再利用できない。ここでは**1回目の出力だけを評価する**
+  （コストを増やさない）。そのため `evidence_not_spoken` は本番の最終結果より高く出る。
+- strict スキーマは本番側が未公開のため暫定で複製しており、
+  `TestInterviewReportSchemaMatchesProduction` が本番ファイルとの乖離を検出する。
+
+## 妥当性指標（面接レポート）
+
+再現性（σ）と弁別力（順位相関）は「ぶれないか」「順に並ぶか」までで、**人手の評価と
+近い値を付けているか**は見ていなかった。次を追加した。いずれもケースの平均スコア
+（破損を除く）で計算する純粋関数（`metrics.go`）。
+
+| 指標 | 定義 |
+|---|---|
+| 人手ラベルMAE | 総合3段階ラベルを正規化スコア（0〜1）へ数値化して比べた平均絶対誤差。**対応付けは 悪=1/6・中=1/2・良=5/6**（0〜1を3等分した区間の中央。端にしないのは、妥当な範囲の採点まで誤差にしないため）。順位相関と違い、中心や幅のずれ（較正）も誤差になる |
+| 人手ラベル相関 | 同じ数値化との線形（ピアソン）相関。弁別力（順位）とは別に値の差も見る |
+| 軸別MAE | マニフェストに `axis_labels` があるケースだけの、軸ごとの平均絶対誤差（0〜5の点）。無いケースは対象外。軸別の人手ラベルは現状のゴールデンには付いていない（付いたときに自動で出る） |
+| 公平性（ペア差） | `fairness_pair` が同じケースの正規化スコアの最大−最小。組ごとの差の平均と最大を出す |
+
+`-diff` の劣化の閾値は `report.go`: 人手ラベルMAE +0.05、軸別MAE（平均）+0.25点、
+公平性の平均差 +0.05、公平性の最大差は**前回に依らず 0.10 超**（5段階で0.5点）。
+いずれも前回・今回の両方で計測できたときだけ比べる（旧結果JSONは 0 でデコードされるため）。
+
+公平性ケースは採点プロンプトが企業情報を受け取らない前提の回帰テストで、
+企業文脈が質問経由でトランスクリプトに入っても採点が動かないことを見る。
+契約プラン（本サービスに課金している企業かどうか）は、面接の企業文脈（`interview_company_context.go`）にも採点プロンプトにも渡していない。
+プランで採点が甘辛しないことは構造で担保し、このケースは企業名・業種の違いが質問経由で採点に漏れないかを見る。
+**ゴールデンとは別マニフェストなので別に実行する**（マニフェストのSHAが別。比較も同じ
+マニフェスト同士で行う）。
+
+```bash
+cd Backend
+go run ./cmd/aibench -target interview-report -manifest ../docs/research/ai-eval/interview-report-fairness.jsonl -n 2 -dry-run
+```
+
 ## 劣化の検知（`-diff`）
 
 前回結果と比べて次のいずれかに当たると「劣化」として報告し、終了コード1になる。
@@ -921,6 +966,9 @@ gpt-4o-mini・各ラベル2件×2回（sha `d2614b37c550`）で JSON mode の有
 | 指示遵守率 | 5ポイント以上減った |
 | 弁別力（順位相関） | 0.10以上下がった |
 | **交絡（スコアvs文字数）** | **絶対値が0.10以上増えた** |
+| 人手ラベルMAE（面接） | 0.05以上増えた |
+| 軸別MAE（面接・平均） | 0.25点以上増えた |
+| 公平性（面接・平均差） | 0.05以上増えた。最大差は 0.10 超で前回に依らず劣化 |
 | 再現性（平均σ） | 0.05以上増えた |
 | レイテンシ p95 | 1.2倍以上になった |
 | コスト（1件） | 1件あたりの増分 × 想定月間件数（10,000件）が **$10以上** |
@@ -964,7 +1012,7 @@ target・マニフェストのSHA256・モデル名・件数が違う場合は�
 |---|---|
 | `Backend/cmd/aibench/main.go` | CLI |
 | `Backend/internal/aibench/manifest.go` | マニフェストの読み込みと検証 |
-| `Backend/internal/aibench/metrics.go` | 標準偏差・パーセンタイル・順位相関 |
+| `Backend/internal/aibench/metrics.go` | 標準偏差・パーセンタイル・順位相関・MAE・公平性のペア差 |
 | `Backend/internal/aibench/aggregate.go` | 指標の集計 |
 | `Backend/internal/aibench/call.go` | OpenAI の生HTTP呼び出し（リトライなし） |
 | `Backend/internal/aibench/target_*.go` | 評価対象ごとの呼び出しと判定 |

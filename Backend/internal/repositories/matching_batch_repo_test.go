@@ -2,6 +2,7 @@ package repositories_test
 
 import (
 	"Backend/internal/models"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -271,6 +272,107 @@ func TestFindTopMatchesByUserAndSession_ExcludesCompaniesWithoutProfile(t *testi
 	// 行自体は消さない方針（is_favorited / is_applied を守る）
 	if strings.Contains(sql, "DELETE") {
 		t.Errorf("読み出し経路で行を削除している: %s", sql)
+	}
+}
+
+func TestFindFavoritedByUser_PicksNewestSessionAndRequiresProfile(t *testing.T) {
+	repo, mock, captured := newMatchRepoMock(t)
+
+	mock.ExpectQuery("SELECT id FROM").
+		WithArgs(uint(7), true).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	if _, err := repo.FindFavoritedByUser(context.Background(), 7); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(*captured) == 0 {
+		t.Fatal("SQLが記録されていない")
+	}
+	sql := (*captured)[0]
+	for _, want := range []string{
+		"ROW_NUMBER()",
+		"PARTITION BY company_id",
+		"ORDER BY created_at DESC, id DESC",
+		"WHERE rn = 1",
+		"user_id = ?",
+		"is_favorited = ?",
+		"company_weight_profiles",
+		"job_position_id IS NULL",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("発行SQLに %q が無い:\n%s", want, sql)
+		}
+	}
+	if strings.Contains(sql, "updated_at") {
+		t.Errorf("代表行を updated_at で選んでいる:\n%s", sql)
+	}
+	if strings.Contains(sql, "LIMIT") {
+		t.Errorf("1社にまとめる前に件数で切っている:\n%s", sql)
+	}
+}
+
+func TestFindFavoritedByUser_LoadsPickedRowsWithCompany(t *testing.T) {
+	repo, mock, captured := newMatchRepoMock(t)
+
+	mock.ExpectQuery("SELECT id FROM").
+		WithArgs(uint(7), true).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(11).AddRow(22))
+	mock.ExpectQuery("SELECT \\* FROM `user_company_matches` WHERE id IN").
+		WithArgs(uint(11), uint(22)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "company_id", "match_score"}).
+			AddRow(11, 7, 10, 80).
+			AddRow(22, 7, 12, 70))
+	mock.ExpectQuery("SELECT \\* FROM `companies`").
+		WithArgs(uint(10), uint(12)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).
+			AddRow(10, "北見工業").
+			AddRow(12, "函館工業"))
+
+	got, err := repo.FindFavoritedByUser(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2（窓で選んだ id を1社1行で読む）", len(got))
+	}
+	byID := map[uint]string{}
+	for _, match := range got {
+		byID[match.ID] = match.Company.Name
+	}
+	if byID[11] != "北見工業" || byID[22] != "函館工業" {
+		t.Fatalf("got %#v", byID)
+	}
+	if len(*captured) < 2 || !strings.Contains((*captured)[1], "id IN") {
+		t.Fatalf("2本目が id の読み出しではない: %#v", *captured)
+	}
+}
+
+func TestUnfavoriteCompany_ScopesUserAndCompany(t *testing.T) {
+	repo, mock, captured := newMatchRepoMock(t)
+
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `user_company_matches`").
+		WithArgs(false, sqlmock.AnyArg(), uint(7), uint(3), true).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := repo.UnfavoriteCompany(context.Background(), 7, 3); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if len(*captured) == 0 {
+		t.Fatal("SQLが記録されていない")
+	}
+	sql := (*captured)[0]
+	for _, want := range []string{"user_id", "company_id", "is_favorited"} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("発行SQLに %q が無い:\n%s", want, sql)
+		}
 	}
 }
 
