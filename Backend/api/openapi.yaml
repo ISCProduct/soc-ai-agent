@@ -4723,6 +4723,15 @@ paths:
         （from/to は取得起点→相手であり、提供側→利用側ではない）。
         事業タグ専用データは未整備のため `business_tags` は空・`business_tags_status=unavailable`。
         採用情報は含めない。審査前のゲスト投稿企業はノードから除外する。
+
+        次の企業もノードから除外し、つながる辺も出さない（`meta.direct_child_*` などの件数は除外後で数える）。
+        - 国の機関・地方公共団体（国税庁の法人種別コード 101・201）
+        - 登記が閉鎖された企業（`registry_closed_on` あり）。ただし「よく知る企業」（上場している、
+          または従業員数が閾値以上。暫定で 1000 人）は残し、ノードに `registry_closed=true` と
+          `registry_closed_on`（YYYY-MM-DD。不明なら省略）を付ける。画面は「登記上は閉鎖」と注記する。
+          閉鎖されていない企業は `registry_closed=false`。
+        - 国税庁で未確認の企業（法人種別が空）は除外しない。
+        起点企業自身が除外対象のときは 404。
       security: []
       parameters:
         - in: path
@@ -4734,7 +4743,7 @@ paths:
         "200":
           description: 成功
         "404":
-          description: 企業が見つからない
+          description: 企業が見つからない（除外対象の起点を含む）
 
   /api/companies/{id}/correlation-map/compare:
     get:
@@ -4742,6 +4751,7 @@ paths:
       summary: 起点企業と選択企業の事業説明を並べて返す
       description: |
         組み合わせ専用の比較文は持たない。両社の short_business / main_business / description を返す。
+        相関図と同じ除外規則を使い、どちらかが除外対象（国の機関・地方公共団体、よく知る企業でない閉鎖企業）なら 404。
       security: []
       parameters:
         - in: path

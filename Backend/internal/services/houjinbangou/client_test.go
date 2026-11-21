@@ -5,6 +5,7 @@ package houjinbangou_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -268,5 +269,33 @@ func TestSearchByName_前方一致で問い合わせる(t *testing.T) {
 	// mode=2(部分一致)は「ひだかトヨタ自動車販売」まで拾って特定に使えない
 	if !strings.Contains((*queries)[0], "mode=1") {
 		t.Errorf("前方一致(mode=1)で問い合わせるべき: %s", (*queries)[0])
+	}
+}
+
+func TestClient_通信エラーでIDを漏らさない(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.Close() // 接続できない先にして、http.Client が url.Error を返すようにする
+	client := houjinbangou.NewClient("test-app-id", srv.URL)
+
+	_, err := client.FindByNumber(context.Background(), "7000012050002")
+	if err == nil {
+		t.Fatal("エラーが返るべき")
+	}
+	if strings.Contains(err.Error(), "test-app-id") {
+		t.Errorf("エラーにアプリケーションIDが含まれている: %v", err)
+	}
+}
+
+func TestClient_通信エラーでもcontextのエラーを判定できる(t *testing.T) {
+	client, _ := newStub(t, numResponseXML, http.StatusOK)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := client.FindByNumber(ctx, "7000012050002")
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("context.Canceled を判定できるべき: %v", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "test-app-id") {
+		t.Errorf("エラーにアプリケーションIDが含まれている: %v", err)
 	}
 }

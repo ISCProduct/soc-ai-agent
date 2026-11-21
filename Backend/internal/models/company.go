@@ -12,21 +12,26 @@ type Company struct {
 	Name        string `gorm:"type:varchar(255);not null" json:"name"`
 	NameReading string `gorm:"type:varchar(255)" json:"name_reading"` // 企業名の読み仮名（ふりがな）
 	// NameReadingSource は読み仮名の出どころ（gbizinfo / corporate_registry / website / manual。空は出どころ不明）。
-	NameReadingSource    string     `gorm:"type:varchar(24);not null;default:''" json:"name_reading_source,omitempty"`
-	NameReadingSourceURL string     `gorm:"type:varchar(500);not null;default:''" json:"name_reading_source_url,omitempty"`
-	Description          string     `gorm:"type:text" json:"description"`
-	Industry             string     `gorm:"type:varchar(100);index:idx_companies_active_status_industry,priority:3" json:"industry"`
-	EmployeeCount        int        `gorm:"default:0" json:"employee_count"`
-	EmployeeCountBasis   string     `gorm:"type:varchar(16);not null;default:''" json:"employee_count_basis,omitempty"` // consolidated|standalone
-	FoundedYear          int        `json:"founded_year"`
-	Location             string     `gorm:"type:varchar(255)" json:"location"`
-	WebsiteURL           string     `gorm:"type:varchar(500)" json:"website_url"`
-	LogoURL              string     `gorm:"type:varchar(500)" json:"logo_url"`
-	CorporateNumber      string     `gorm:"type:varchar(13);index" json:"corporate_number"`
-	SourceType           string     `gorm:"type:varchar(50)" json:"source_type"` // official, job_site, manual, scrape, web_search
-	SourceURL            string     `gorm:"type:varchar(500)" json:"source_url"`
-	SourceFetchedAt      *time.Time `json:"source_fetched_at,omitempty"`
-	IsProvisional        bool       `gorm:"default:true" json:"is_provisional"`
+	NameReadingSource    string `gorm:"type:varchar(24);not null;default:''" json:"name_reading_source,omitempty"`
+	NameReadingSourceURL string `gorm:"type:varchar(500);not null;default:''" json:"name_reading_source_url,omitempty"`
+	Description          string `gorm:"type:text" json:"description"`
+	Industry             string `gorm:"type:varchar(100);index:idx_companies_active_status_industry,priority:3" json:"industry"`
+	EmployeeCount        int    `gorm:"default:0" json:"employee_count"`
+	EmployeeCountBasis   string `gorm:"type:varchar(16);not null;default:''" json:"employee_count_basis,omitempty"` // consolidated|standalone
+	FoundedYear          int    `json:"founded_year"`
+	Location             string `gorm:"type:varchar(255)" json:"location"`
+	WebsiteURL           string `gorm:"type:varchar(500)" json:"website_url"`
+	LogoURL              string `gorm:"type:varchar(500)" json:"logo_url"`
+	CorporateNumber      string `gorm:"type:varchar(13);index" json:"corporate_number"`
+	// 国税庁の法人番号公表サイトで確認した状態（cmd/update-registry-status が保存する）。
+	// 管理画面などの既存レスポンスには出さない（相関図は専用の出力を持つ）。
+	CorporateKind     string     `gorm:"type:varchar(3);not null;default:''" json:"-"` // 法人種別コード。空は未確認
+	RegistryClosedOn  *time.Time `gorm:"type:date" json:"-"`                           // 登記記録の閉鎖等年月日。nil は閉鎖なし or 未確認
+	RegistryCheckedAt *time.Time `json:"-"`                                            // 国税庁で確認した日時。nil は未確認
+	SourceType        string     `gorm:"type:varchar(50)" json:"source_type"`          // official, job_site, manual, scrape, web_search
+	SourceURL         string     `gorm:"type:varchar(500)" json:"source_url"`
+	SourceFetchedAt   *time.Time `json:"source_fetched_at,omitempty"`
+	IsProvisional     bool       `gorm:"default:true" json:"is_provisional"`
 	// IsGuestEntry はゲスト投稿(/company-entry)由来かどうか。表示可否の判断に使う(#1409)。
 	// 以前は company_entry_submissions に行があるかで判定していたが、
 	// その行が消えると審査前の企業が公開APIへ出た(fail-open)。監査用テーブルではなく
