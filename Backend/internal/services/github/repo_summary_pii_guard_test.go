@@ -138,3 +138,9 @@ func TestSummarizeRepo_PIIGuard(t *testing.T) {
 		})
 	}
 }
+
+// passThroughGuardCtx は、伏字をかけない（素通しの）入力ガードを付けた context を返す。
+// generateRepoSummary を直接呼ぶテスト用。github_summary は学生由来の機能名で、ガードが無いと送らないため。
+func passThroughGuardCtx() context.Context {
+	return openai.WithInputGuard(context.Background(), func(s string) (string, error) { return s, nil })
+}
