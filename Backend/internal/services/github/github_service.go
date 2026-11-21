@@ -5,6 +5,8 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/repositories"
 	"Backend/internal/services/skillscore"
+	"context"
+	"strings"
 	"time"
 )
 
@@ -72,6 +74,25 @@ func (s *GitHubService) GetLanguageStats(userID uint) ([]models.GitHubLanguageSt
 }
 
 // ListRepoSummaries DBからAI要約一覧を取得する。今のプロンプトの版で作られたものだけを返す（#2185）。
-func (s *GitHubService) ListRepoSummaries(userID uint) ([]models.GitHubRepoSummary, error) {
-	return s.githubRepo.ListRepoSummaries(userID, repoSummaryPromptVersion)
+// 本人が作成者・共同編集者として同期済みでないリポジトリの要約は、消さずに一覧から隠す（SOCAIAGENT-698）。
+func (s *GitHubService) ListRepoSummaries(ctx context.Context, userID uint) ([]models.GitHubRepoSummary, error) {
+	summaries, err := s.githubRepo.ListRepoSummaries(userID, repoSummaryPromptVersion)
+	if err != nil {
+		return nil, err
+	}
+	names, err := s.githubRepo.ListOwnRepoFullNames(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	own := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		own[strings.ToLower(n)] = struct{}{}
+	}
+	visible := make([]models.GitHubRepoSummary, 0, len(summaries))
+	for _, sm := range summaries {
+		if _, ok := own[strings.ToLower(sm.FullName)]; ok {
+			visible = append(visible, sm)
+		}
+	}
+	return visible, nil
 }
