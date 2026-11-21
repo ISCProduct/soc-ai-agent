@@ -1,4 +1,5 @@
 import { authService } from '@/lib/auth'
+import type { ConsultIntent } from '@/lib/career-consult'
 import { UserFacingApiError, userFacingApiMessage } from '@/lib/user-facing-error'
 
 const API_BASE = '/api'
@@ -16,6 +17,8 @@ export interface ChatRequest {
     message: string
     industry_id: number
     job_category_id: number
+    /** ホームの「キャリア相談」で選んだ意図。セッションの最初の回答でだけ付ける */
+    consult_intent?: ConsultIntent
     chat_history?: Array<{
         role: "user" | "assistant"
         content: string
@@ -42,6 +45,10 @@ export interface ChatResponse {
     invalid_answer_count?: number
     total_questions: number
     answered_questions: number
+    /** 判定の進み具合（0〜100）。判定できた（is_complete）ときだけ 100 */
+    judgment_percent?: number
+    /** 目安の回答数を超えても判定できていないとき true（暫定の結果を見る導線を出す） */
+    suggest_provisional?: boolean
     evaluated_categories?: number
     total_categories?: number
     job_category_id?: number

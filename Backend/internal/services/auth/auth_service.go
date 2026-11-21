@@ -112,9 +112,11 @@ func (s *AuthService) issueRefreshToken(userID uint) string {
 }
 
 type RegisterRequest struct {
-	Email                    string `json:"email"    validate:"required,email"`
+	// メール形式と名前の必須は、ここへ足すと今通っている登録が 400 になる。
+	// サービスが要求しているのはメールとパスワードの有無、パスワード長だけ。
+	Email                    string `json:"email"    validate:"required"`
 	Password                 string `json:"password" validate:"required,min=8"`
-	Name                     string `json:"name"     validate:"required"`
+	Name                     string `json:"name"`
 	TargetLevel              string `json:"target_level"`
 	SchoolName               string `json:"school_name"`
 	CertificationsAcquired   string `json:"certifications_acquired"`
@@ -130,7 +132,7 @@ type RegisterRequest struct {
 
 // LoginRequest ログインリクエスト
 type LoginRequest struct {
-	Email    string `json:"email"    validate:"required,email"`
+	Email    string `json:"email"    validate:"required"`
 	Password string `json:"password" validate:"required"`
 }
 

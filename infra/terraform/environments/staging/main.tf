@@ -521,8 +521,9 @@ resource "aws_launch_template" "app" {
 #
 # ただしデプロイ中はヘルスチェックによる置換を止めること。
 # staging のデプロイは稼働中インスタンス上で
-#   docker compose down → system prune -af → pull → up -d
-# を行い、アプリが数分間停止する。インスタンスは既に InService なので
+#   docker compose pull → down → migrate → up -d
+# を行い、アプリが短時間停止する(ディスクの空きが少ないときは
+# down → system prune -af → pull → up -d で数分間)。インスタンスは既に InService なので
 # health_check_grace_period は効かず、ALB は 30秒(interval 10s × unhealthy 3回)で
 # unhealthy と判定する。そのままだと毎回のデプロイでインスタンスが置換され、
 # デプロイ自体が壊れる。

@@ -1,5 +1,6 @@
 """履歴書レビューエンドポイント。"""
 from __future__ import annotations
+from services.prompt_versions import log_prompt_call
 
 import json
 import logging
@@ -18,6 +19,8 @@ from services.resume_report import (
     generate_resume_report,
 )
 from services.settings import OPENAI_TIMEOUT_SEC
+
+REVIEW_STREAM_ERROR_MESSAGE = "レビューに失敗しました。時間をおいてもう一度お試しください。"
 
 logger = logging.getLogger("main")
 
@@ -38,12 +41,13 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             yield "data: {}\n\n".format(
-                json.dumps({"type": "error", "message": "OPENAI_API_KEY not set"}, ensure_ascii=False)
+                json.dumps({"type": "error", "message": REVIEW_STREAM_ERROR_MESSAGE}, ensure_ascii=False)
             )
             return
 
         try:
             client = OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT_SEC)
+            log_prompt_call("resume_review", resume_review_model())
             stream = client.chat.completions.create(
                 model=resume_review_model(),
                 messages=[
@@ -62,9 +66,10 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
                     )
             yield "data: {}\n\n".format(json.dumps({"type": "done"}, ensure_ascii=False))
         except Exception as exc:
+            # 例外文は内部情報を含みうるので、ログにだけ残し、利用者へは固定文言を返す
             logger.error("review_stream generate error: %s", exc)
             yield "data: {}\n\n".format(
-                json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False)
+                json.dumps({"type": "error", "message": REVIEW_STREAM_ERROR_MESSAGE}, ensure_ascii=False)
             )
 
     return StreamingResponse(generate(), media_type="text/event-stream")

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { formatDate, formatDateTime } from '@/lib/i18n/format'
 import {
   Alert,
   Box,
@@ -319,7 +320,7 @@ export default function PageContent() {
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2">
-                      {new Date(u.registered_at).toLocaleDateString('ja-JP')}
+                      {formatDate(u.registered_at)}
                     </Typography>
                   </TableCell>
                   <TableCell align="right">
@@ -330,7 +331,7 @@ export default function PageContent() {
                   <TableCell>
                     <Typography variant="body2" color="text.secondary">
                       {u.last_session_at
-                        ? new Date(u.last_session_at).toLocaleDateString('ja-JP')
+                        ? formatDate(u.last_session_at)
                         : '—'}
                     </Typography>
                   </TableCell>
@@ -379,34 +380,36 @@ export default function PageContent() {
                   <InterviewTrendChart points={toTrendPoints(detailSessions)} />
                 </Box>
               )}
-            <Table size="small">
-              <TableHead>
-                <TableRow sx={{ bgcolor: '#f5f5f5' }}>
-                  <TableCell>終了日時</TableCell>
-                  <TableCell align="center">平均スコア</TableCell>
-                  {Object.keys(SCORE_LABELS).map(k => (
-                    <TableCell key={k} align="center">{SCORE_LABELS[k]}</TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {detailSessions.map(s => (
-                  <TableRow key={s.session_id} hover>
-                    <TableCell>
-                      {s.ended_at
-                        ? new Date(s.ended_at).toLocaleString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                        : '—'}
-                    </TableCell>
-                    <TableCell align="center"><ScoreBadge score={s.avg_score} /></TableCell>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: '#f5f5f5' }}>
+                    <TableCell>終了日時</TableCell>
+                    <TableCell align="center">平均スコア</TableCell>
                     {Object.keys(SCORE_LABELS).map(k => (
-                      <TableCell key={k} align="center">
-                        <ScoreBadge score={s.scores?.[k] ?? null} />
-                      </TableCell>
+                      <TableCell key={k} align="center">{SCORE_LABELS[k]}</TableCell>
                     ))}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHead>
+                <TableBody>
+                  {detailSessions.map(s => (
+                    <TableRow key={s.session_id} hover>
+                      <TableCell>
+                        {s.ended_at
+                          ? formatDateTime(s.ended_at, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                          : '—'}
+                      </TableCell>
+                      <TableCell align="center"><ScoreBadge score={s.avg_score} /></TableCell>
+                      {Object.keys(SCORE_LABELS).map(k => (
+                        <TableCell key={k} align="center">
+                          <ScoreBadge score={s.scores?.[k] ?? null} />
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
             </>
           )}
         </DialogContent>

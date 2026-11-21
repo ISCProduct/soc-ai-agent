@@ -24,7 +24,7 @@ export const makeMessageId = () => `${Date.now()}-${Math.random().toString(36).s
  * 冒頭が長いと最初の質問まで辿り着く前に読み飛ばされる。
  */
 export const INITIAL_GREETING =
-  'このチャットはAIが自動で応答します。\n\n10〜15問に答えると、希望に近い企業を探せるようになります。答えた内容に合わせて次の質問が変わります。\n\nこのチャットでできないのは、選考の合否を決めることと、企業への応募です。進路の相談は先生にお願いします。\n\nまず、どんな仕事に興味がありますか？下のボタンから選ぶか、入力してください。'
+  'このチャットはAIが自動で応答します。\n\n答えていくと、希望に近い企業を探せるようになります。答えた内容に合わせて次の質問が変わり、傾向が判定できるまで続きます。\n\nこのチャットでできないのは、選考の合否を決めることと、企業への応募です。進路の相談は先生にお願いします。\n\nまず、どんな仕事に興味がありますか？下のボタンから選ぶか、入力してください。'
 
 /**
  * アシスタント応答から A)/1) 形式の選択肢を抽出する。
@@ -105,6 +105,20 @@ export function stripChoiceLines(content: string): string {
  * asked ベースだと途中で 100% に見える問題を避ける。
  */
 export function computeProgressTotals(args: {
+  phases: { questions_asked?: number; valid_answers?: number; min_questions?: number; max_questions?: number }[] | null
+  questionCount: number
+  totalQuestions: number
+  /** サーバーが返す「判定の進み具合」（0〜100）。あれば、質問数ではなくこれを割合にする（SOCAIAGENT-668） */
+  judgmentPercent?: number | null
+}): { valid: number; required: number; percent: number } {
+  const totals = computeQuestionTotals(args)
+  if (typeof args.judgmentPercent === 'number') {
+    return { ...totals, percent: Math.min(100, Math.max(0, Math.round(args.judgmentPercent))) }
+  }
+  return totals
+}
+
+function computeQuestionTotals(args: {
   phases: { questions_asked?: number; valid_answers?: number; min_questions?: number; max_questions?: number }[] | null
   questionCount: number
   totalQuestions: number

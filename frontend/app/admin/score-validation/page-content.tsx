@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { formatDate, formatDateTime } from '@/lib/i18n/format'
 import {
   Alert,
   Box,
@@ -320,7 +321,7 @@ function ABTestTab({ headers }: { headers: Record<string, string> }) {
                     <Chip label={v.is_active ? '有効' : '無効'} size="small" color={v.is_active ? 'success' : 'default'} />
                   </TableCell>
                   <TableCell>
-                    <Typography variant="body2">{new Date(v.created_at).toLocaleDateString('ja-JP')}</Typography>
+                    <Typography variant="body2">{formatDate(v.created_at)}</Typography>
                   </TableCell>
                   <TableCell>
                     <Button size="small" onClick={() => setSelectedExp(v.experiment_name)}>
@@ -505,7 +506,7 @@ function CalibrationTab({ headers }: { headers: Record<string, string> }) {
                   <Chip label={isActive ? '適用中' : '旧バージョン'} size="small" color={isActive ? 'primary' : 'default'} />
                   {createdAt && (
                     <Typography variant="body2" color="text.secondary">
-                      {new Date(createdAt).toLocaleString('ja-JP')}
+                      {formatDateTime(createdAt)}
                     </Typography>
                   )}
                 </Stack>

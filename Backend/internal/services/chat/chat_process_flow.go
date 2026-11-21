@@ -2,6 +2,7 @@ package chat
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/judgment"
 	"context"
 	"log"
 )
@@ -24,11 +25,14 @@ func (s *ChatService) handleInvalidAnswerFlow(ctx context.Context, req ChatReque
 	chatResponse := &ChatResponse{
 		Response:          response,
 		IsComplete:        false,
-		TotalQuestions:    15,
+		TotalQuestions:    defaultTargetQuestions,
 		AnsweredQuestions: len(history) / 2,
 		AllPhases:         allPhases,
 		CurrentPhase:      currentPhaseInfo,
 	}
+	j := s.judgmentFor(req.UserID, req.SessionID)
+	chatResponse.JudgmentPercent = j.Percent
+	chatResponse.SuggestProvisional = judgment.SuggestProvisional(countUserAnswers(history), j.Ready)
 
 	if validation != nil {
 		chatResponse.InvalidAnswerCount = validation.InvalidAnswerCount
@@ -63,10 +67,11 @@ func (s *ChatService) handleAllPhasesCompletedFromPhaseError(ctx context.Context
 	return &ChatResponse{
 		Response:            completionMsg,
 		IsComplete:          true,
-		TotalQuestions:      15,
+		TotalQuestions:      defaultTargetQuestions,
 		AnsweredQuestions:   countUserAnswers(history),
 		EvaluatedCategories: 10,
 		TotalCategories:     10,
+		JudgmentPercent:     100,
 		AllPhases:           allPhases,
 		CurrentPhase:        currentPhaseInfo,
 		Summary:             summary,
@@ -78,20 +83,10 @@ func (s *ChatService) handleAllPhasesCompletedFromCount(
 	req ChatRequest,
 	history []models.ChatMessage,
 	allPhases []models.AnalysisPhase,
-	completedProgresses []models.UserAnalysisProgress,
-	phaseByID map[uint]*models.AnalysisPhase,
 ) (*ChatResponse, bool) {
-	completedPhaseCount := 0
-	for _, p := range completedProgresses {
-		phase := p.Phase
-		if phase == nil {
-			phase = phaseByID[p.PhaseID]
-		}
-		if isPhaseComplete(p.ValidAnswers, phase) {
-			completedPhaseCount++
-		}
-	}
-	if completedPhaseCount != len(allPhases) || len(allPhases) == 0 {
+	// 完了は、フェーズを全部終えたかではなく、判定できたかで決める（SOCAIAGENT-668）。
+	// 15 問に満たなくても判定できていれば完了、全フェーズを終えても判定できなければ続ける。
+	if len(allPhases) == 0 || !s.judgmentFor(req.UserID, req.SessionID).Ready {
 		return nil, false
 	}
 
@@ -136,6 +131,7 @@ func (s *ChatService) handleAllPhasesCompletedFromCount(
 		AnsweredQuestions:   countUserAnswers(history),
 		EvaluatedCategories: evaluatedCategoriesCount,
 		TotalCategories:     10,
+		JudgmentPercent:     100,
 		AllPhases:           allPhasesInfo,
 		CurrentPhase:        currentPhaseInfo,
 		Summary:             summary,

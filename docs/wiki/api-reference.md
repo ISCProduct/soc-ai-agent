@@ -162,7 +162,8 @@ Referer に user_id が残るだけです。
 
 | メソッド | パス | パラメータ | 概要 |
 |---------|------|-----------|------|
-| POST | `/api/chat` | body: session_id, message | 発言・スコア更新・次の質問 |
+| POST | `/api/chat/match-feedback` | body: match_id, verdict（fit / unfit / none） | 推薦への「合う／合わない」を記録（SOCAIAGENT-670） |
+| POST | `/api/chat` | body: session_id, message, consult_intent（任意） | 発言・スコア更新・次の質問。応答に `judgment_percent`（判定の進み具合）・`suggest_provisional` |
 | GET | `/api/chat/history` | ?session_id | 履歴 |
 | GET | `/api/chat/scores` | ?session_id | 10カテゴリスコア取得 |
 | GET | `/api/chat/recommendations` | ?session_id | マッチング企業一覧 |
@@ -215,6 +216,7 @@ Referer に user_id が残るだけです。
 | POST | `/api/resume/{id}/review` | レビュー実行（スコア更新も実施） |
 | GET | `/api/resume/{id}/review/stream` | レビューSSEストリーミング |
 | GET | `/api/resume/{id}/annotated` | 注釈済みPDF取得 |
+| GET | `/api/resume/document?document_id=` | レビュー画面が描く、PDFに揃えた元の書類（本人のみ・`Cache-Control: private, no-store`。レビュー前は404） |
 | GET | `/api/resume/status` | 自分の履歴書の対応要否（リマインダー用、#1030） |
 
 ---
@@ -458,6 +460,41 @@ rejected         → 不合格
   }
 }
 ```
+
+---
+
+## 学習利用の同意（#2167 / #2168）
+
+面接データを採点モデルの学習に使うことへの同意。認証は `X-User-Token`（JWT）。
+希望条件（`PUT /api/user/preferences`）とは別の口です（希望条件はまるごと保存するため、同意だけを変える画面から呼ぶと希望条件を空で上書きしてしまう）。
+
+| メソッド | パス | 概要 |
+|---------|------|------|
+| GET | `/api/user/training-consent` | 同意の現在値と、最後に変更した日時 |
+| PUT | `/api/user/training-consent` | 同意を変更し、履歴（`training_consent_events`）に1行追加する |
+
+### リクエスト（PUT）
+```json
+{"allow_training_use": true, "consent_text_version": "2026-11-11"}
+```
+
+| 項目 | 必須 | 内容 |
+|------|------|------|
+| `allow_training_use` | ✓ | 同意するか |
+| `consent_text_version` | ✓ | 画面に出していた同意の文言の版。今の版（`models.TrainingConsentTextVersion`）と違えば保存しない |
+
+### レスポンス（GET / PUT）
+```json
+{"allow_training_use": true, "updated_at": "2026-11-17T10:41:08.123+09:00"}
+```
+
+`updated_at` は本人が最後に変更した日時（履歴の最後の行）。一度も変更していなければ `null`。
+
+| ステータス | 条件 |
+|-----------|------|
+| 400 | `allow_training_use` か `consent_text_version` が無い |
+| 409 | `consent_text_version` が今の版と違う（古いタブ・古いフロント）。画面を再読み込みして、今の文言を見せ直す |
+| 500 | 値の更新か履歴の追加に失敗（両方とも巻き戻る） |
 
 ---
 

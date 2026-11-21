@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { formatDateTime } from '@/lib/i18n/format'
 import {
   Alert,
   Button,
@@ -14,7 +15,6 @@ import {
   DialogTitle,
   Divider,
   Stack,
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -25,6 +25,7 @@ import {
 import { authService } from '@/lib/auth'
 import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
 type RecalcResult = {
@@ -204,7 +205,7 @@ export default function PageContent() {
             {results.length > 0 && (
               <>
                 <Divider sx={{ mb: 2 }} />
-                <Table size="small">
+                <AdminTableWrapper>
                   <TableHead>
                     <TableRow>
                       <TableCell>企業ID</TableCell>
@@ -229,7 +230,7 @@ export default function PageContent() {
                       </TableRow>
                     ))}
                   </TableBody>
-                </Table>
+                </AdminTableWrapper>
               </>
             )}
           </CardContent>
@@ -298,7 +299,7 @@ export default function PageContent() {
               </Button>
             </Stack>
             {histories.length > 0 && (
-              <Table size="small">
+              <AdminTableWrapper>
                 <TableHead>
                   <TableRow>
                     <TableCell>ID</TableCell>
@@ -315,11 +316,11 @@ export default function PageContent() {
                       <TableCell>{h.company_id}</TableCell>
                       <TableCell>{h.trigger}</TableCell>
                       <TableCell>{h.sample_count}</TableCell>
-                      <TableCell>{new Date(h.created_at).toLocaleString('ja-JP')}</TableCell>
+                      <TableCell>{formatDateTime(h.created_at)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
-              </Table>
+              </AdminTableWrapper>
             )}
             {histories.length === 0 && historyCompanyId && !historyLoading && (
               <Typography variant="body2" color="text.secondary">履歴がありません</Typography>

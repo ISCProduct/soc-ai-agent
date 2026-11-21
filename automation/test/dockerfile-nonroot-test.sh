@@ -114,6 +114,21 @@ for path in /app/node_modules /app/.next; do
 done
 
 echo
+echo "--- E. Backend 本番ステージにビルド用の道具が無い ---"
+# 最終ステージが本番イメージになる。ここへ Go SDK やコンパイラが戻ると、
+# デプロイの docker build（ターゲット未指定）が再び肥大する。
+backend_df="$ROOT/Backend/Dockerfile"
+backend_from=$(grep -n -iE '^[[:space:]]*FROM[[:space:]]' "$backend_df" | tail -1 | cut -d: -f1)
+backend_stage=$(tail -n "+$backend_from" "$backend_df")
+if grep -qiE 'golang|air-verse|build-essential|python3-dev|[[:space:]]swig' <<< "$backend_stage"; then
+  echo "FAIL Backend/Dockerfile の最終ステージに Go SDK かビルド用パッケージがあります"
+  echo "     → 本番は runtime、ローカルの air はそれより前の dev に置いてください"
+  fail=$((fail + 1))
+else
+  echo "ok   Backend/Dockerfile の最終ステージに Go SDK とビルド用パッケージが無い"
+fi
+
+echo
 echo "--- D. 判定ロジックの自己検査 ---"
 # 検査スクリプトは「壊れていても緑のまま」になりやすい。実際に Dockerfile を置いて確かめる。
 WORK=$(mktemp -d)

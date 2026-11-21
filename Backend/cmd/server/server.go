@@ -5,22 +5,30 @@ import (
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/queue"
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
 	"Backend/internal/safego"
 	"Backend/internal/services/admin"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/company"
+	"Backend/internal/services/interview"
 	"Backend/internal/services/maintenance"
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/organization"
+	"Backend/internal/services/prompts"
 	"Backend/migrations"
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	sentryecho "github.com/getsentry/sentry-go/echo"
@@ -39,6 +47,13 @@ func bootstrap() (*config.Config, *gorm.DB, *openai.Client, *config.OAuthConfig)
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// プロンプト版の環境変数が本文のある版を指しているかを確かめる（SOCAIAGENT-661）。
+	// 本文の無い版のまま動くと、使用量ログの版が実際の本文を指さなくなるので起動を止める。
+	// デプロイ前の確認は cmd/promptcheck で同じ検証だけを実行する。
+	if err := prompts.ValidateSettings(); err != nil {
+		log.Fatalf("Invalid prompt version settings: %v", err)
 	}
 
 	// データベース接続
@@ -160,7 +175,7 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 	safego.Every(24*time.Hour, true, func() {
 		// 退会時のベクトル削除はRAG障害でも退会を失敗させないためエラーを飲む。
 		// 取りこぼしをここで消し直す(#1204)。パージより先に実行して、
-		// 30日待たずに個人データを消す。
+		// パージ期限を待たずに個人データを消す。
 		if attempted, failed, err := userDeletionService.ReconcileScoutIndex(context.Background()); err != nil {
 			slog.Error("scout index reconcile failed", "error", err)
 		} else if failed > 0 {
@@ -198,22 +213,102 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 				return
 			}
 			if res != nil {
-				slog.Info("auto score calibration applied", "version", res.Version, "categories", len(res.Weights), "message", res.Message)
+				slog.Info("auto score calibration applied", "version", res.Version, "categories", len(res.Weights), "message", res.Message) // logpolicy:ok キャリブレーション結果の文言で、個人情報を含まない
 			}
 		})
 	}
 }
 
-// startServer は HTTP サーバーを起動する。戻るのは異常終了時のみ。
-func startServer(e *echo.Echo, port string) {
-	// サーバー起動
+// shutdownBudget は ECS の stopTimeout（指定が無ければ 30 秒）の内側に収める。
+// HTTP の停止、フォールバックのレポート生成、asynq の停止を、この1つの期限で並行に行う。
+const shutdownBudget = 25 * time.Second
+
+// startServer は HTTP サーバーを起動し、SIGTERM / SIGINT で処理中の要求を待ってから止める。
+// デプロイのたびに in-flight のリクエストと、キューに入った面接レポートが切れていた（SOCAIAGENT-514）。
+func startServer(e *echo.Echo, port string, interviewService *interview.InterviewService, queueServer *queue.Server) {
 	slog.Info("Starting server", "port", port)
 	// ヘッダーの読み取りと keep-alive の放置に上限を置く。WriteTimeout は履歴書レビューの
 	// SSE を途中で切るので設定しない。予算判定はロックを持たないので、書き込みの遅い
 	// クライアントが他の利用者を止めることはない。
 	e.Server.ReadHeaderTimeout = 10 * time.Second
 	e.Server.IdleTimeout = 120 * time.Second
-	if err := e.Start(":" + port); err != nil {
-		log.Fatalf("Server failed: %v", err)
+
+	errCh := make(chan error, 1)
+	// 起動の成否を errCh へ返す。safego.Go だと panic を握り潰して、
+	// こちらの select がシグナルもエラーも受け取れず止まったままになる。
+	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				errCh <- fmt.Errorf("listen panicked: %v", rec)
+			}
+		}()
+		errCh <- e.Start(":" + port)
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("Server failed: %v", err)
+		}
+	case sig := <-sigCh:
+		// ドレイン中の2回目は、チャネルに溜めずプロセスの既定動作（終了）に戻す。
+		signal.Stop(sigCh)
+		slog.Info("shutdown signal received", "signal", sig.String())
+		shutdownWithinBudget(e, interviewService, queueServer)
 	}
+}
+
+// shutdownWithinBudget は HTTP・面接レポート・asynq を同時に止め、全体を shutdownBudget で打ち切る。
+// 直列に待つと 15 秒 + レポート生成 + asynq が ECS の 30 秒を超えて SIGKILL される。
+func shutdownWithinBudget(e *echo.Echo, interviewService *interview.InterviewService, queueServer *queue.Server) {
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownBudget)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("http shutdown panic", "panic", rec)
+			}
+		}()
+		if err := e.Shutdown(ctx); err != nil {
+			slog.Error("http shutdown", "error", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("queue shutdown panic", "panic", rec)
+			}
+		}()
+		if queueServer == nil {
+			return
+		}
+		finished := make(chan struct{})
+		go func() {
+			defer close(finished)
+			defer func() {
+				if rec := recover(); rec != nil {
+					slog.Error("queue shutdown panic", "panic", rec)
+				}
+			}()
+			queueServer.Shutdown()
+		}()
+		select {
+		case <-finished:
+		case <-ctx.Done():
+			slog.Error("queue shutdown exceeded budget")
+		}
+	}()
+	if interviewService != nil {
+		interviewService.StopWorker(ctx)
+	}
+	wg.Wait()
 }

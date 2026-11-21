@@ -208,6 +208,17 @@ describe('stripChoiceLines', () => {
 })
 
 describe('computeProgressTotals', () => {
+  it('judgmentPercent があれば、質問数から出した割合ではなくそれを割合にする（0〜100に丸める）', () => {
+    const base = { phases: null, questionCount: 3, totalQuestions: 15 }
+    expect(computeProgressTotals({ ...base, judgmentPercent: 72 }).percent).toBe(72)
+    expect(computeProgressTotals({ ...base, judgmentPercent: 0 }).percent).toBe(0)
+    expect(computeProgressTotals({ ...base, judgmentPercent: 140 }).percent).toBe(100)
+    expect(computeProgressTotals({ ...base, judgmentPercent: -5 }).percent).toBe(0)
+    // 届いていない（旧いバックエンド）ときは、従来どおり質問数から
+    expect(computeProgressTotals({ ...base, judgmentPercent: null }).percent).toBe(20)
+    expect(computeProgressTotals(base).percent).toBe(20)
+  })
+
   it('フェーズの想定総数を required に使う（asked ではない）', () => {
     const totals = computeProgressTotals({
       phases: [

@@ -1,7 +1,7 @@
 # 実装に登録されている全エンドポイント。
 # 手で編集しない。次のコマンドで生成する:
 #   cd Backend && go test ./internal/routes/ -run TestRouteCatalog -update
-# 合計 309 本
+# 合計 314 本
 GET /api/ability-assessments
 POST /api/ability-assessments/:templateId/sessions
 GET /api/ability-assessments/sessions/:sessionId
@@ -178,7 +178,10 @@ POST /api/auth/verify-registration
 POST /api/chat
 GET /api/chat/analysis
 POST /api/chat/favorite
+GET /api/chat/favorites
+POST /api/chat/favorites/remove
 GET /api/chat/history
+POST /api/chat/match-feedback
 GET /api/chat/recommendations
 GET /api/chat/scores
 POST /api/chat/send-report
@@ -192,9 +195,14 @@ GET /api/companies/:id
 GET /api/companies/:id/job-positions
 GET /api/companies/:id/market-info
 GET /api/companies/:id/relations
+GET /api/companies/:id/correlation-map
+GET /api/companies/:id/correlation-map/compare
 GET /api/companies/brief
 GET /api/companies/market-info
 GET /api/companies/relations
+GET /api/companies/search
+GET /api/companies/search-options
+GET /api/companies/search/favorites
 POST /api/companies/validate
 GET /api/companies/web-search
 POST /api/company-auth/accept-invite
@@ -276,12 +284,14 @@ GET /api/notifications
 POST /api/notifications/:id/read
 POST /api/notifications/read-all
 GET /api/notifications/unread-count
+GET /api/portfolio
 POST /api/questions/create
 POST /api/questions/generate
 GET /api/questions/list
 GET /api/realtime/session-info
 POST /api/realtime/token
 GET /api/resume/annotated
+GET /api/resume/document
 POST /api/resume/review
 POST /api/resume/review/stream
 GET /api/resume/status
