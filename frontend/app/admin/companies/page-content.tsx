@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { formatNumber } from '@/lib/i18n/format'
 import Link from 'next/link'
 import {
@@ -255,6 +255,9 @@ export default function PageContent() {
     setIndustries(Array.isArray(data?.industries) ? data.industries : [])
   }, [])
 
+  // 絞り込みを変えたあと、古い企業一覧が後から届いて上書きしない。
+  const companiesRequestRef = useRef(0)
+
   const fetchCompanies = useCallback(
     async (
       p: number,
@@ -265,6 +268,7 @@ export default function PageContent() {
       groupIndustry: boolean,
       schoolFilter?: number,
     ) => {
+      const requestId = ++companiesRequestRef.current
       setError('')
       const offset = (p - 1) * PAGE_SIZE
       const params = new URLSearchParams({
@@ -284,6 +288,7 @@ export default function PageContent() {
         cache: 'no-store',
       })
       const data = await res.json()
+      if (requestId !== companiesRequestRef.current) return
       if (!res.ok) {
         setError(data?.error || '企業一覧の取得に失敗しました')
         return
