@@ -12,9 +12,10 @@ type UserWeightScore struct {
 	UserID         uint   `gorm:"not null;index:idx_user_category" json:"user_id"`
 	SessionID      string `gorm:"size:100;not null;index" json:"session_id"`
 	// Source はスコアの由来（#1678）。chat / assessment。空なら DB 既定の chat。
-	Source             string    `gorm:"size:20;not null;default:chat" json:"source"`
-	WeightCategory     string    `gorm:"size:100;not null;index:idx_user_category" json:"category"`
-	Score              int       `gorm:"default:0" json:"score"`
+	Source         string `gorm:"size:20;not null;default:chat" json:"source"`
+	WeightCategory string `gorm:"size:100;not null;index:idx_user_category" json:"category"`
+	// Score は 0.00〜100.00（DECIMAL(5,2)）。小数第2位で丸めて保存する（SOCAIAGENT-513）。
+	Score              float64   `gorm:"type:decimal(5,2);default:0" json:"score"`
 	CalculationVersion string    `gorm:"size:32;not null;default:legacy" json:"calculation_version"`
 	PromptVersion      string    `gorm:"size:64;not null;default:''" json:"prompt_version,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`

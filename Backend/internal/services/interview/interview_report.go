@@ -90,16 +90,98 @@ func (s *InterviewService) RegenerateReport(userID uint, sessionID uint) (queued
 
 func (s *InterviewService) StartWorker() {
 	// Redis キュー利用時は asynq worker が処理する。フォールバック用 channel worker は常に起動。
+	s.workerStarted.Store(true)
 	s.workerOnce.Do(func() {
-		// レポート生成ワーカー。panic で落ちるとレポートが二度と生成されない上に
-		// プロセスごと死ぬ(#1446)。
-		safego.Go(s.runWorker)
+		s.workerWG.Add(1)
+		safego.Go(func() {
+			defer s.workerWG.Done()
+			defer close(s.workerFinished)
+			s.runWorker()
+		})
 	})
 }
 
+// StopWorker は残っているレポート生成を、ctx の期限まで待ってから戻る。
+// 期限を過ぎた分は sessionID をログに残して諦める。二度呼んでも安全。
+// jobCh は閉じない。閉じると、HTTP の停止がタイムアウトしたあとに残った
+// FinishSession が closed channel へ送って panic する。
+func (s *InterviewService) StopWorker(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.stopOnce.Do(func() {
+		s.shutdownCtx = ctx
+		s.stopping.Store(true)
+		close(s.workerStop)
+	})
+	if !s.workerStarted.Load() {
+		return
+	}
+	select {
+	case <-s.workerFinished:
+	case <-ctx.Done():
+		s.logAbandonedReports()
+	}
+}
+
 func (s *InterviewService) runWorker() {
-	for sessionID := range s.jobCh {
-		s.runReportJob(sessionID)
+	for {
+		select {
+		case <-s.workerStop:
+			s.drainReportJobs()
+			return
+		case sessionID := <-s.jobCh:
+			s.runReportJob(sessionID)
+		}
+	}
+}
+
+// drainReportJobs は停止時点でチャネルに残っているジョブを、期限まで実行する。
+func (s *InterviewService) drainReportJobs() {
+	ctx := s.shutdownCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		if ctx.Err() != nil {
+			s.logAbandonedReports()
+			return
+		}
+		select {
+		case <-ctx.Done():
+			s.logAbandonedReports()
+			return
+		case sessionID := <-s.jobCh:
+			s.runReportJob(sessionID)
+		default:
+			return
+		}
+	}
+}
+
+func (s *InterviewService) logAbandonedReports() {
+	s.inFlightMu.Lock()
+	active := s.activeReport
+	s.inFlightMu.Unlock()
+	ids := make([]uint, 0, 1)
+	if active != 0 {
+		ids = append(ids, active)
+	}
+	for {
+		select {
+		case id := <-s.jobCh:
+			ids = append(ids, id)
+			s.clearReportJobInFlight(id)
+		default:
+			if len(ids) == 0 {
+				return
+			}
+			log.Printf("[Interview] shutdown budget exceeded, dropped report sessions %v", ids)
+			return
+		}
 	}
 }
 
@@ -108,6 +190,22 @@ func (s *InterviewService) runWorker() {
 // 同じセッションが二重に走らないようにするため。
 func (s *InterviewService) runReportJob(sessionID uint) {
 	defer s.clearReportJobInFlight(sessionID)
+	s.inFlightMu.Lock()
+	s.activeReport = sessionID
+	s.inFlightMu.Unlock()
+	defer func() {
+		s.inFlightMu.Lock()
+		if s.activeReport == sessionID {
+			s.activeReport = 0
+		}
+		s.inFlightMu.Unlock()
+	}()
+	if s.reportJob != nil {
+		if err := s.reportJob(context.Background(), sessionID); err != nil {
+			log.Printf("[Interview] Report generation failed for session %d: %v\n", sessionID, err)
+		}
+		return
+	}
 	if err := s.generateReport(context.Background(), sessionID); err != nil {
 		log.Printf("[Interview] Report generation failed for session %d: %v\n", sessionID, err)
 		return
@@ -268,6 +366,17 @@ func checkReportEvidence(candidate reportPayload, utterances []models.InterviewU
 	return c, ev.Checked + te.Checked
 }
 
+// 採点呼び出しのパラメータ（SOCAIAGENT-513: 同一入力でのスコアのブレを下げる）。
+const (
+	// ReportTemperature は採点の温度。0 にしないのは、go-openai が temperature を omitempty で
+	// 送るため 0 だと送信されず API 既定の 1.0 になり、逆にブレが最大になるから。
+	ReportTemperature float32 = 0.01
+	// ReportSeed は採点の seed（best effort。OpenAI は完全一致を保証しない）。
+	ReportSeed = 513
+	// ReportMaxTokens は採点応答の出力上限。
+	ReportMaxTokens = 2000
+)
+
 // generateReportPayload は LLM に講評を作らせ、保存してよい内容を返す。
 //
 // スキーマ違反と根拠の捏造は弾いて1度だけ作り直す（#795, #1527）。
@@ -282,7 +391,7 @@ func (s *InterviewService) generateReportPayload(ctx context.Context, sessionID 
 
 	var best *reportCandidate
 	// retryNote は作り直しのときだけプロンプトへ足す指示（#1527）。
-	// 温度0.4の単純な再抽選では2回目が改善する理由が無いので、
+	// 温度を下げて seed も固定しているので単純な再抽選では2回目が改善する理由が無く、
 	// どの項目が照合できなかったかを具体的に伝える。
 	var retryNote string
 	// payload/haveBody は「JSON としては読めた候補」。スコアを捨ててでも講評は残す用。
@@ -291,7 +400,7 @@ func (s *InterviewService) generateReportPayload(ctx context.Context, sessionID 
 	var lastErr error
 	for attempt := range reportGenerationAttempts {
 		llmCtx, cancel := context.WithTimeout(usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport), interviewReportLLMCallTimeout)
-		raw, err := s.openaiClient.ChatCompletionWithSchema(llmCtx, systemPrompt, userPrompt+retryNote, 0.4, 2000, interviewReportResponseSchema, model)
+		raw, err := s.openaiClient.ChatCompletionWithSchemaSeed(llmCtx, systemPrompt, userPrompt+retryNote, ReportTemperature, ReportMaxTokens, ReportSeed, interviewReportResponseSchema, model)
 		cancel()
 		if err != nil {
 			return reportPayload{}, err
