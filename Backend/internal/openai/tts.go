@@ -2,6 +2,7 @@ package openai
 
 import (
 	"Backend/internal/aimodel"
+	"Backend/internal/config"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -79,7 +80,7 @@ func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) 
 		return nil, err
 	}
 
-	model := os.Getenv("OPENAI_TTS_MODEL")
+	model := config.OpenAITTSModel()
 	if model == "" {
 		model = DefaultTTSModel
 	}

@@ -43,6 +43,10 @@ func TestStringGetters(t *testing.T) {
 		{"OpenAI Discord", "OPENAI_COST_ALERT_DISCORD_WEBHOOK_URL", OpenAICostAlertDiscordWebhookURL, " http://od ", "http://od"},
 		{"企業検索 Slack", "COMPANY_SEARCH_ALERT_SLACK_WEBHOOK_URL", CompanySearchAlertSlackWebhookURL, " http://cs ", "http://cs"},
 		{"企業検索 Discord", "COMPANY_SEARCH_ALERT_DISCORD_WEBHOOK_URL", CompanySearchAlertDiscordWebhookURL, " http://cd ", "http://cd"},
+		// モデル名は元の実装どおり空白を除かない
+		{"Whisper モデル", "OPENAI_WHISPER_MODEL", OpenAIWhisperModel, "whisper-x", "whisper-x"},
+		{"Whisper 未設定は空", "OPENAI_WHISPER_MODEL", OpenAIWhisperModel, "", ""},
+		{"TTS モデル", "OPENAI_TTS_MODEL", OpenAITTSModel, " tts-x", " tts-x"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,5 +92,32 @@ func TestBudgetEnforce(t *testing.T) {
 				t.Errorf("InterviewBudgetEnforce = %v, want %v", got, tt.interview)
 			}
 		})
+	}
+}
+
+func TestPromptEnv(t *testing.T) {
+	t.Setenv("PROMPT_VERSION_ES_REVIEW", " v2 ")
+	t.Setenv("PROMPT_VERSION", "v1")
+	t.Setenv("PROMPT_AB_ES_REVIEW", " v1:50,v2:50 ")
+	if got := PromptVersion("es_review"); got != "v2" {
+		t.Errorf("PromptVersion = %q, 工程名は大文字化され空白は除かれるべき", got)
+	}
+	if got := GlobalPromptVersion(); got != "v1" {
+		t.Errorf("GlobalPromptVersion = %q", got)
+	}
+	if got := PromptABSpec("es_review"); got != "v1:50,v2:50" {
+		t.Errorf("PromptABSpec = %q", got)
+	}
+	if got := PromptVersion("other"); got != "" {
+		t.Errorf("未設定の工程は空文字のはず: %q", got)
+	}
+}
+
+func TestMatchingReasonUseAI(t *testing.T) {
+	for val, want := range map[string]bool{"": false, "true": true, "TRUE": true, "1": true, " yes ": true, "0": false, "no": false} {
+		t.Setenv("MATCHING_REASON_USE_AI", val)
+		if got := MatchingReasonUseAI(); got != want {
+			t.Errorf("MATCHING_REASON_USE_AI=%q: got %v, want %v", val, got, want)
+		}
 	}
 }
