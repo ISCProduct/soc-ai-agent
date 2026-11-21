@@ -7,13 +7,13 @@ import (
 // UserWeightScoreRepository はユーザースコアの永続化インターフェース。
 type UserWeightScoreRepository interface {
 	// SetScore は新規レコードをスコアの絶対値で作成する
-	SetScore(userID uint, sessionID, category string, absoluteScore int) error
+	SetScore(userID uint, sessionID, category string, absoluteScore float64) error
 	// AddScore は既存レコードのスコアに差分を加算する
-	AddScore(userID uint, sessionID, category string, delta int) error
+	AddScore(userID uint, sessionID, category string, delta float64) error
 	// SetScoreWithPromptVersion は SetScore に加えて、評価に使ったプロンプト版を記録する
-	SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore int, promptVersion string) error
+	SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore float64, promptVersion string) error
 	// AddScoreWithPromptVersion は AddScore に加えて、評価に使ったプロンプト版を記録する
-	AddScoreWithPromptVersion(userID uint, sessionID, category string, delta int, promptVersion string) error
+	AddScoreWithPromptVersion(userID uint, sessionID, category string, delta float64, promptVersion string) error
 	FindByUserAndSession(userID uint, sessionID string) ([]models.UserWeightScore, error)
 	FindTopCategories(userID uint, sessionID string, limit int) ([]models.UserWeightScore, error)
 	FindByUserSessionAndCategory(userID uint, sessionID, category string) (*models.UserWeightScore, error)

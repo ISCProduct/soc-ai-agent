@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"gorm.io/gorm"
@@ -24,15 +25,18 @@ func NewUserWeightScoreRepository(db *gorm.DB) *UserWeightScoreRepository {
 	return &UserWeightScoreRepository{db: db}
 }
 
+// RoundScore は DECIMAL(5,2) に合わせて小数第2位で丸める（SOCAIAGENT-513）。
+func RoundScore(v float64) float64 { return math.Round(v*100) / 100 }
+
 // SetScore スコアを絶対値で新規作成する。
 // 呼び出し前に対象レコードが存在しないことを確認すること。
 // スコアは 0〜100 に丸める。
-func (r *UserWeightScoreRepository) SetScore(userID uint, sessionID, category string, absoluteScore int) error {
+func (r *UserWeightScoreRepository) SetScore(userID uint, sessionID, category string, absoluteScore float64) error {
 	return r.SetScoreWithPromptVersion(userID, sessionID, category, absoluteScore, "")
 }
 
 func (r *UserWeightScoreRepository) SetScoreWithPromptVersion(
-	userID uint, sessionID, category string, absoluteScore int, promptVersion string,
+	userID uint, sessionID, category string, absoluteScore float64, promptVersion string,
 ) error {
 	return r.setScoreWithSourceAndPromptVersion(
 		userID, sessionID, category, absoluteScore, models.ScoreSourceChat, promptVersion,
@@ -40,12 +44,12 @@ func (r *UserWeightScoreRepository) SetScoreWithPromptVersion(
 }
 
 // SetScoreWithSource は由来（chat / assessment）を指定して SetScore する（#1678）。
-func (r *UserWeightScoreRepository) SetScoreWithSource(userID uint, sessionID, category string, absoluteScore int, source string) error {
+func (r *UserWeightScoreRepository) SetScoreWithSource(userID uint, sessionID, category string, absoluteScore float64, source string) error {
 	return r.setScoreWithSourceAndPromptVersion(userID, sessionID, category, absoluteScore, source, "")
 }
 
 func (r *UserWeightScoreRepository) setScoreWithSourceAndPromptVersion(
-	userID uint, sessionID, category string, absoluteScore int, source, promptVersion string,
+	userID uint, sessionID, category string, absoluteScore float64, source, promptVersion string,
 ) error {
 	// 正典外のカテゴリ名を書かせない（#929）。
 	// マッチングは正典キーで scoreMap を引くため、揺れた名前で保存されると
@@ -67,7 +71,7 @@ func (r *UserWeightScoreRepository) setScoreWithSourceAndPromptVersion(
 		UserID:             userID,
 		SessionID:          sessionID,
 		WeightCategory:     category,
-		Score:              absoluteScore,
+		Score:              RoundScore(absoluteScore),
 		Source:             source,
 		CalculationVersion: models.CurrentUserScoreCalculationVersion,
 		PromptVersion:      promptVersion,
@@ -81,12 +85,12 @@ func (r *UserWeightScoreRepository) setScoreWithSourceAndPromptVersion(
 // AddScore 既存スコアに差分を加算する。
 // レコードが存在しない場合はエラーを返す。
 // 加算結果は SQL 側で 0〜100 に丸め、競合時も範囲外にならないようにする。
-func (r *UserWeightScoreRepository) AddScore(userID uint, sessionID, category string, delta int) error {
+func (r *UserWeightScoreRepository) AddScore(userID uint, sessionID, category string, delta float64) error {
 	return r.AddScoreWithPromptVersion(userID, sessionID, category, delta, "")
 }
 
 func (r *UserWeightScoreRepository) AddScoreWithPromptVersion(
-	userID uint, sessionID, category string, delta int, promptVersion string,
+	userID uint, sessionID, category string, delta float64, promptVersion string,
 ) error {
 	normalized, err := valueobject.ParseWeightCategory(category)
 	if err != nil {
@@ -102,7 +106,7 @@ func (r *UserWeightScoreRepository) AddScoreWithPromptVersion(
 	// 既存スコアを混ぜる加算では、過去版の値が残るため計算版を更新しない。
 	// プロンプト版は今回の評価に使った版を記録する（#1778）。
 	updates := map[string]any{
-		"score": gorm.Expr("GREATEST(0, LEAST(100, score + ?))", delta),
+		"score": gorm.Expr("GREATEST(0, LEAST(100, score + ?))", RoundScore(delta)),
 	}
 	if promptVersion != "" {
 		updates["prompt_version"] = promptVersion
@@ -286,7 +290,7 @@ func scoreSessionTouchedAfter(scoreAlias, appliedAt string) string {
 // ErrRecalculationTargetChanged を返す。確かめずに置換すると、反映された加点が消える。
 //
 // 置換前の行は jobID に紐づけて残し、RollbackRecalculatedSessions で元に戻せるようにする。
-func (r *UserWeightScoreRepository) ReplaceChatSessionScores(jobID, userID uint, sessionID string, scores map[string]int, version string) error {
+func (r *UserWeightScoreRepository) ReplaceChatSessionScores(jobID, userID uint, sessionID string, scores map[string]float64, version string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := lockEligibleChatSession(tx, userID, sessionID, version); err != nil {
 			return err
@@ -322,7 +326,7 @@ func (r *UserWeightScoreRepository) ReplaceChatSessionScores(jobID, userID uint,
 			}
 			row := models.UserWeightScore{
 				UserID: userID, SessionID: sessionID, Source: models.ScoreSourceChat,
-				WeightCategory: string(normalized), Score: max(0, min(100, score)),
+				WeightCategory: string(normalized), Score: RoundScore(max(0, min(100, score))),
 				CalculationVersion: version,
 			}
 			if prev, ok := byCategory[row.WeightCategory]; ok {
@@ -441,13 +445,13 @@ WHERE uws.user_id = ? AND uws.session_id = ? AND uws.calculation_version <> ?
 }
 
 // ChatSessionScoreMap はセッションのチャットスコアをカテゴリ別に返す。
-func (r *UserWeightScoreRepository) ChatSessionScoreMap(userID uint, sessionID string) (map[string]int, error) {
+func (r *UserWeightScoreRepository) ChatSessionScoreMap(userID uint, sessionID string) (map[string]float64, error) {
 	var rows []models.UserWeightScore
 	if err := r.db.Where("user_id = ? AND session_id = ? AND source = ?", userID, sessionID, models.ScoreSourceChat).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	scores := make(map[string]int, len(rows))
+	scores := make(map[string]float64, len(rows))
 	for _, row := range rows {
 		scores[row.WeightCategory] = row.Score
 	}
@@ -492,29 +496,63 @@ func (r *UserWeightScoreRepository) RollbackRecalculatedSessions(jobID uint, ver
 
 // rollbackSnapshot は1セッションを元に戻す。再計算の後にチャット回答や履歴書・ES・面接の
 // 反映があったセッションは、戻すとその更新が消えるので戻さない。戻さなかったスナップショットは
-// 消さない（唯一の控えなので）。
+// 消さない（唯一の控えなので）。行がすでに無いセッションは、控えから書き戻す。
+//
+// 控えはトランザクションの中でロックして読み直す。呼び出し側が読んだ後に退会（物理削除）が
+// 控えとスコアを消してコミットしていると、行が無いので書き戻しの対象になり、退会した学生の
+// スコアを作り直してしまう。控えが消えていたら何もしない。ユーザーが退会済み・削除済みでも何もしない
+// （user_weight_scores.user_id に外部キーが無いので、書き込みは DB では止まらない）。
 func (r *UserWeightScoreRepository) rollbackSnapshot(snapshot models.UserScoreRecalculationSnapshot, version string) (bool, error) {
-	var rows []models.UserWeightScore
-	if err := json.Unmarshal([]byte(snapshot.ScoresJSON), &rows); err != nil {
-		return false, fmt.Errorf("snapshot %d: %w", snapshot.ID, err)
-	}
 	restored := false
 	err := r.db.Transaction(func(tx *gorm.DB) error {
+		var locked models.UserScoreRecalculationSnapshot
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", snapshot.ID).Take(&locked).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var user struct {
+			ID          uint
+			WithdrawnAt *time.Time
+		}
+		err = tx.Model(&models.User{}).Select("id", "withdrawn_at").Where("id = ?", locked.UserID).Take(&user).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// ユーザー行が無い＝物理削除の後。削除が控えを取りこぼしていたので、控えも消す（点数は書き戻さない）
+			return tx.Delete(&models.UserScoreRecalculationSnapshot{}, locked.ID).Error
+		}
+		if err != nil {
+			return err
+		}
+		if user.WithdrawnAt != nil {
+			// 退会済み（物理削除の前の保管期間）。退会の取り消しに備えて控えは残し、点数は書き戻さない
+			return nil
+		}
+		var rows []models.UserWeightScore
+		if err := json.Unmarshal([]byte(locked.ScoresJSON), &rows); err != nil {
+			return fmt.Errorf("snapshot %d: %w", locked.ID, err)
+		}
+
 		scope := tx.Model(&models.UserWeightScore{}).
-			Where("user_id = ? AND session_id = ? AND source = ?", snapshot.UserID, snapshot.SessionID, models.ScoreSourceChat)
+			Where("user_id = ? AND session_id = ? AND source = ?", locked.UserID, locked.SessionID, models.ScoreSourceChat)
 		var current []models.UserWeightScore
 		if err := scope.Session(&gorm.Session{}).Clauses(clause.Locking{Strength: "UPDATE"}).Order("id").Find(&current).Error; err != nil {
 			return err
 		}
-		if len(current) == 0 || changedSinceRecalculation(current, rows, version) {
+		// 行がすでに無いセッションは、再計算の後に更新されたのではない（更新なら行がある）。
+		// 戻さずにいると、控えだけが残り続けて元の点数に戻せないので、控えから書き戻す。
+		if len(current) > 0 && changedSinceRecalculation(current, rows, version) {
 			return nil
 		}
-		lockedIDs := make([]uint, len(current))
-		for i, r := range current {
-			lockedIDs[i] = r.ID
-		}
-		if err := tx.Where("id IN ?", lockedIDs).Delete(&models.UserWeightScore{}).Error; err != nil {
-			return err
+		if len(current) > 0 {
+			lockedIDs := make([]uint, len(current))
+			for i, r := range current {
+				lockedIDs[i] = r.ID
+			}
+			if err := tx.Where("id IN ?", lockedIDs).Delete(&models.UserWeightScore{}).Error; err != nil {
+				return err
+			}
 		}
 		for i := range rows {
 			rows[i].ID = 0
@@ -522,10 +560,14 @@ func (r *UserWeightScoreRepository) rollbackSnapshot(snapshot models.UserScoreRe
 				return err
 			}
 		}
-		restored = true
-		return tx.Delete(&models.UserScoreRecalculationSnapshot{}, snapshot.ID).Error
+		// 控えも行も空なら、戻す点数が無い。控えだけ片付け、マッチングの作り直しはさせない
+		restored = len(rows) > 0 || len(current) > 0
+		return tx.Delete(&models.UserScoreRecalculationSnapshot{}, locked.ID).Error
 	})
-	return restored, err
+	if err != nil {
+		return false, err
+	}
+	return restored, nil
 }
 
 // FindLatestByUser ユーザーの最新セッションのスコアを取得する。
@@ -572,7 +614,7 @@ func (r *UserWeightScoreRepository) FindLatestScoresByUsers(userIDs []uint) (map
 	type row struct {
 		UserID         uint
 		WeightCategory string
-		Score          int
+		Score          float64
 	}
 	var rows []row
 
@@ -601,7 +643,7 @@ WHERE s.user_id IN (?)`
 		if result[x.UserID] == nil {
 			result[x.UserID] = map[string]float64{}
 		}
-		result[x.UserID][x.WeightCategory] = float64(x.Score)
+		result[x.UserID][x.WeightCategory] = x.Score
 	}
 	return result, nil
 }

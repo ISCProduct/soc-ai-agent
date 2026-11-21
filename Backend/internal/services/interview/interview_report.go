@@ -256,7 +256,7 @@ type reportCandidate struct {
 // 第2戻り値は照合対象にした項目の総数(ログ用)。
 func checkReportEvidence(candidate reportPayload, utterances []models.InterviewUtterance, spoken SpokenEvidence) (reportCandidate, int) {
 	ev := ValidateEvidenceReferences(candidate.Evidence, candidate.EvidenceUtteranceIDs, utterances)
-	te := ValidateEvidence(teacherDetailedEvidence(candidate), spoken)
+	te := ValidateTeacherEvidence(teacherDetailedEvidence(candidate), spoken)
 	c := reportCandidate{
 		payload:   candidate,
 		evidence:  ev.EvidenceCheck,
@@ -267,6 +267,17 @@ func checkReportEvidence(candidate reportPayload, utterances []models.InterviewU
 	c.payload.EvidenceUtteranceIDs = evidenceIDsAsPointers(ev.UtteranceIDs)
 	return c, ev.Checked + te.Checked
 }
+
+// 採点呼び出しのパラメータ（SOCAIAGENT-513: 同一入力でのスコアのブレを下げる）。
+const (
+	// ReportTemperature は採点の温度。0 にしないのは、go-openai が temperature を omitempty で
+	// 送るため 0 だと送信されず API 既定の 1.0 になり、逆にブレが最大になるから。
+	ReportTemperature float32 = 0.01
+	// ReportSeed は採点の seed（best effort。OpenAI は完全一致を保証しない）。
+	ReportSeed = 513
+	// ReportMaxTokens は採点応答の出力上限。
+	ReportMaxTokens = 2000
+)
 
 // generateReportPayload は LLM に講評を作らせ、保存してよい内容を返す。
 //
@@ -282,7 +293,7 @@ func (s *InterviewService) generateReportPayload(ctx context.Context, sessionID 
 
 	var best *reportCandidate
 	// retryNote は作り直しのときだけプロンプトへ足す指示（#1527）。
-	// 温度0.4の単純な再抽選では2回目が改善する理由が無いので、
+	// 温度を下げて seed も固定しているので単純な再抽選では2回目が改善する理由が無く、
 	// どの項目が照合できなかったかを具体的に伝える。
 	var retryNote string
 	// payload/haveBody は「JSON としては読めた候補」。スコアを捨ててでも講評は残す用。
@@ -291,7 +302,7 @@ func (s *InterviewService) generateReportPayload(ctx context.Context, sessionID 
 	var lastErr error
 	for attempt := range reportGenerationAttempts {
 		llmCtx, cancel := context.WithTimeout(usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport), interviewReportLLMCallTimeout)
-		raw, err := s.openaiClient.ChatCompletionWithSchema(llmCtx, systemPrompt, userPrompt+retryNote, 0.4, 2000, interviewReportResponseSchema, model)
+		raw, err := s.openaiClient.ChatCompletionWithSchemaSeed(llmCtx, systemPrompt, userPrompt+retryNote, ReportTemperature, ReportMaxTokens, ReportSeed, interviewReportResponseSchema, model)
 		cancel()
 		if err != nil {
 			return reportPayload{}, err
