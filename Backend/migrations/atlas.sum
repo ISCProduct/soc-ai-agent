@@ -1,4 +1,4 @@
-h1:PrITyN7sJchnFPNCZGoougrO7mV2cawH4uylmri78QA=
+h1:VOHQyd/bjA5TVxDMLY+ZjjEw6smIyU/ylo8BRHT9mHs=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -80,3 +80,6 @@ h1:PrITyN7sJchnFPNCZGoougrO7mV2cawH4uylmri78QA=
 20261118221819_add_job_matched_to_user_company_matches.up.sql h1:IlunoSjNSngXd2f5/D5rHtYccJof9/YP9ATRGZh8x2s=
 20261118223341_create_user_match_feedbacks.up.sql h1:0xF3Iz8do5GFZst/+IMROVcOtZCpaonZLOUBjHkJCDY=
 20261118233825_add_consult_intent_to_conversation_contexts.up.sql h1:Ends7aAQl4OetPtNPlkWp0yAsdk/Nt6dMZ3qps0IBH8=
+20261119182402_training_scorer_export_runs_sweep.up.sql h1:o5N8LfpuRFk0oa7iyzK0QFwW4AT2O16IvEYUMAA8dV0=
+20261120001650_add_name_reading_source_to_companies.up.sql h1:DdzmwUTK2CS5qN0rHlhMuOjxniit4cbOiE2oTJmlSzY=
+20261121181608_user_company_match_favorite_index.up.sql h1:leLbPzS/D14a3Y0ok7AOmd6etwh3JjhhmXHeDpOQD4c=

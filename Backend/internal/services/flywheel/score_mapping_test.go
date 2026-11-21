@@ -143,21 +143,21 @@ func TestMapInterviewScore_EvidenceChangesValue(t *testing.T) {
 		{name: "evidence十分・発話十分", evidence: strings.Repeat("あ", 200), stats: rich},
 	}
 
-	seen := map[int]string{}
-	prev := -1
+	seen := map[float64]string{}
+	prev := -1.0
 	for _, tt := range tests {
 		got := mapInterviewScore(3, tt.evidence, tt.stats)
 		if other, dup := seen[got]; dup {
-			t.Errorf("%s: %q と同じ値 %d になった。補正が効いていない", tt.name, other, got)
+			t.Errorf("%s: %q と同じ値 %v になった。補正が効いていない", tt.name, other, got)
 		}
 		seen[got] = tt.name
 		if got <= prev {
-			t.Errorf("%s: %d は前段(%d)より大きくなるべき", tt.name, got, prev)
+			t.Errorf("%s: %v は前段(%v)より大きくなるべき", tt.name, got, prev)
 		}
 		prev = got
 		// ルーブリック1段の半分（±5点）に収まり、隣のバンドへ食い込まない
-		if got < 3*rubricStep-interviewAdjustSpan/2 || got > 3*rubricStep+interviewAdjustSpan/2 {
-			t.Errorf("%s: %d が rubric=3 の帯(%d±%d)を外れた", tt.name, got, 3*rubricStep, interviewAdjustSpan/2)
+		if got < float64(3*rubricStep-interviewAdjustSpan/2) || got > float64(3*rubricStep+interviewAdjustSpan/2) {
+			t.Errorf("%s: %v が rubric=3 の帯(%d±%d)を外れた", tt.name, got, 3*rubricStep, interviewAdjustSpan/2)
 		}
 	}
 	if len(seen) != len(tests) {
@@ -175,7 +175,7 @@ func TestMapInterviewScore_RubricIsPrimary(t *testing.T) {
 		high := mapInterviewScore(rubric, best, rich)                      // 補正が最大に効いた下位
 		low := mapInterviewScore(rubric+1, "", InterviewTranscriptStats{}) // 補正が最小の上位
 		if high >= low {
-			t.Errorf("rubric=%d(%d) が rubric=%d(%d) 以上になった。ルーブリックが主軸になっていない",
+			t.Errorf("rubric=%d(%v) が rubric=%d(%v) 以上になった。ルーブリックが主軸になっていない",
 				rubric, high, rubric+1, low)
 		}
 	}
@@ -186,7 +186,7 @@ func TestMapInterviewScore_RubricIsPrimary(t *testing.T) {
 			for _, st := range []InterviewTranscriptStats{{}, rich, {UserTurns: -1, AvgAnswerRunes: -1}} {
 				got := mapInterviewScore(rubric, ev, st)
 				if got < 0 || got > 100 {
-					t.Errorf("rubric=%d: %d が 0〜100 の外", rubric, got)
+					t.Errorf("rubric=%d: %v が 0〜100 の外", rubric, got)
 				}
 			}
 		}
@@ -241,49 +241,65 @@ func TestInterviewSignal_MissingStatsIsNeutral(t *testing.T) {
 	none := mapInterviewScore(3, "", InterviewTranscriptStats{})
 	worst := mapInterviewScore(3, "", InterviewTranscriptStats{UserTurns: 1, AvgAnswerRunes: 0})
 	if none <= worst {
-		t.Errorf("統計なし(%d)は最低の発話量(%d)より下げてはいけない", none, worst)
+		t.Errorf("統計なし(%v)は最低の発話量(%v)より下げてはいけない", none, worst)
 	}
 	// 一方で、発話量が十分なケースより高くはならない
 	rich := mapInterviewScore(3, "", InterviewTranscriptStats{UserTurns: 10, AvgAnswerRunes: 200})
 	if none >= rich {
-		t.Errorf("統計なし(%d)が発話十分(%d)以上になった", none, rich)
+		t.Errorf("統計なし(%v)が発話十分(%v)以上になった", none, rich)
 	}
 }
 
-// TestMapInterviewScore_ShortEvidenceIsBelowMissing は
-// 「短い evidence は無記録より低く出る」という既知の歪みを固定する（#1554 / #1558 レビュー）。
+// TestMapInterviewScore_EvidenceIsMonotonic は evidence の長さに対して保存値が単調であることを固定する（#1558）。
 //
-// 欠損を中立(0.5)に置く以上この非単調性は消えない（判断の理由は interviewSignal のコメント）。
-// 歪みの大きさをここで固定して、意図せず広がったら気付けるようにする。
-// 上限は3点（rubric1段の 20点 に対して 15%）。これを超えたら中立値の置き方から見直す。
-func TestMapInterviewScore_ShortEvidenceIsBelowMissing(t *testing.T) {
-	rich := InterviewTranscriptStats{UserTurns: 10, AvgAnswerRunes: 120}
-
-	tests := []struct {
-		name          string
-		evidenceRunes int
-		want          int
-	}{
-		{name: "無記録（中立0.5）", evidenceRunes: 0, want: 62},
-		{name: "1文字（最も不利）", evidenceRunes: 1, want: 59},
-		{name: "中立の直前", evidenceRunes: 59, want: 62},
-		{name: "中立と同じ（full の半分）", evidenceRunes: evidenceFullRunes / 2, want: 62},
-		{name: "full で頭打ち", evidenceRunes: evidenceFullRunes, want: 65},
-		{name: "full 超も頭打ちのまま", evidenceRunes: evidenceFullRunes * 2, want: 65},
+// 旧式は evidence=空を中立(0.5)、1〜59文字を 0.5 未満にしていたため、短い本物の引用が
+// 「何も書かない」より最大3点低く、さらに捏造判定で空文字になった evidence の方が得になる逆転があった。
+// 新式は非空を 0.5+0.5*min(len/full,1) とし、非空は常に空以上、長いほど非減少になる。
+func TestMapInterviewScore_EvidenceIsMonotonic(t *testing.T) {
+	for _, stats := range []InterviewTranscriptStats{
+		{},
+		{UserTurns: 1, AvgAnswerRunes: 5},
+		{UserTurns: 10, AvgAnswerRunes: 120},
+	} {
+		missing := mapInterviewScore(3, "", stats)
+		prev := missing
+		for n := 1; n <= evidenceFullRunes*2; n++ {
+			got := mapInterviewScore(3, strings.Repeat("あ", n), stats)
+			if got < missing {
+				t.Fatalf("stats=%+v evidence=%d文字: %v が無記録(%v)より低い（捏造で空になった方が得）", stats, n, got, missing)
+			}
+			if got < prev {
+				t.Fatalf("stats=%+v evidence=%d文字: %v が直前(%v)より低い（非単調）", stats, n, got, prev)
+			}
+			prev = got
+		}
+		// full で頭打ち
+		if full, over := mapInterviewScore(3, strings.Repeat("あ", evidenceFullRunes), stats),
+			mapInterviewScore(3, strings.Repeat("あ", evidenceFullRunes*2), stats); full != over {
+			t.Errorf("stats=%+v: full(%v) と full超(%v) が違う", stats, full, over)
+		}
 	}
+}
 
+// 1文字の本物の引用は無記録以上、30文字は 1文字以上（旧式では 59 < 62 だった）。
+func TestMapInterviewScore_ShortGenuineEvidenceIsNotPenalized(t *testing.T) {
+	rich := InterviewTranscriptStats{UserTurns: 10, AvgAnswerRunes: 120}
 	missing := mapInterviewScore(3, "", rich)
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := mapInterviewScore(3, strings.Repeat("あ", tt.evidenceRunes), rich)
-			if got != tt.want {
-				t.Errorf("evidence=%d文字: %d, want %d", tt.evidenceRunes, got, tt.want)
-			}
-			if loss := missing - got; loss > 3 {
-				t.Errorf("evidence=%d文字: 無記録(%d)より %d 点低い。歪みが3点を超えた",
-					tt.evidenceRunes, missing, loss)
-			}
-		})
+	one := mapInterviewScore(3, "あ", rich)
+	thirty := mapInterviewScore(3, strings.Repeat("あ", 30), rich)
+	if !(missing <= one && one <= thirty) {
+		t.Errorf("無記録=%v 1文字=%v 30文字=%v: 単調でない", missing, one, thirty)
+	}
+}
+
+// 返す値は小数第2位まで。整数に丸めない（#1555）。
+func TestMapInterviewScore_KeepsTwoDecimals(t *testing.T) {
+	got := mapInterviewScore(3, strings.Repeat("あ", 7), InterviewTranscriptStats{UserTurns: 3, AvgAnswerRunes: 37})
+	if got != round2(got) {
+		t.Errorf("%v は小数第2位に丸まっていない", got)
+	}
+	if got == float64(int(got)) {
+		t.Errorf("%v: 小数の分解能が出ていない（整数に潰れている）", got)
 	}
 }
 
@@ -298,20 +314,20 @@ func TestMapInterviewScore_MissingEvidenceIsNeutral(t *testing.T) {
 
 	// evidence・発話統計の両方が欠損 = 補正なし。ルーブリックの ×20 がそのまま出る。
 	for rubric := range 6 {
-		want := rubric * rubricStep
+		want := float64(rubric * rubricStep)
 		if got := mapInterviewScore(rubric, "", InterviewTranscriptStats{}); got != want {
-			t.Errorf("rubric=%d: 記録が無いだけで %d 点になった（補正なしの %d 点であるべき）", rubric, got, want)
+			t.Errorf("rubric=%d: 記録が無いだけで %v 点になった（補正なしの %v 点であるべき）", rubric, got, want)
 		}
 	}
 
 	// evidence だけが欠損しても、ルーブリックの帯から下へ外れない。
-	if got := mapInterviewScore(3, "", rich); got < 3*rubricStep {
-		t.Errorf("evidence欠損・発話十分で %d 点。%d 点を下回ってはいけない", got, 3*rubricStep)
+	if got := mapInterviewScore(3, "", rich); got < float64(3*rubricStep) {
+		t.Errorf("evidence欠損・発話十分で %v 点。%d 点を下回ってはいけない", got, 3*rubricStep)
 	}
 	// 一方で、evidence が十分にある場合より高くはならない。
 	best := mapInterviewScore(3, strings.Repeat("あ", 200), rich)
 	if got := mapInterviewScore(3, "", rich); got >= best {
-		t.Errorf("evidence欠損(%d)が evidence十分(%d)以上になった", got, best)
+		t.Errorf("evidence欠損(%v)が evidence十分(%v)以上になった", got, best)
 	}
 }
 
@@ -319,14 +335,16 @@ func TestMapInterviewScore_MissingEvidenceIsNeutral(t *testing.T) {
 func TestBlendScore(t *testing.T) {
 	tests := []struct {
 		name     string
-		existing int
-		newValue int
-		want     int
+		existing float64
+		newValue float64
+		want     float64
 	}{
 		{name: "同値なら動かない", existing: 60, newValue: 60, want: 60},
-		{name: "既存70%+新30%", existing: 50, newValue: 100, want: 65}, // 35+30
-		{name: "下向きにも効く", existing: 80, newValue: 0, want: 56},      // 56+0
-		{name: "四捨五入", existing: 55, newValue: 70, want: 60},        // 38.5+21=59.5 → 60
+		{name: "既存70%+新30%", existing: 50, newValue: 100, want: 65},     // 35+30
+		{name: "下向きにも効く", existing: 80, newValue: 0, want: 56},          // 56+0
+		{name: "整数に丸めない", existing: 55, newValue: 70, want: 59.5},       // 38.5+21
+		{name: "1点差の寄与が消えない", existing: 60, newValue: 61, want: 60.3},   // 旧実装は round で 60 に戻った
+		{name: "小数第2位で丸める", existing: 33.33, newValue: 50, want: 38.33}, // 23.331+15=38.331
 		{name: "上限に張り付かない", existing: 100, newValue: 100, want: 100},
 		{name: "下限に張り付かない", existing: 0, newValue: 0, want: 0},
 		{name: "範囲外の入力も0〜100に収める", existing: 100, newValue: 1000, want: 100},
@@ -335,7 +353,7 @@ func TestBlendScore(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := blendScore(tt.existing, tt.newValue); got != tt.want {
-				t.Errorf("blendScore(%d, %d) = %d, want %d", tt.existing, tt.newValue, got, tt.want)
+				t.Errorf("blendScore(%v, %v) = %v, want %v", tt.existing, tt.newValue, got, tt.want)
 			}
 		})
 	}

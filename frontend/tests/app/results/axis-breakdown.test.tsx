@@ -131,10 +131,12 @@ describe('結果一覧への組み込み', () => {
     const onSelectCompany = jest.fn()
     render(
       <ResultsListView
-        companies={[company]} sessionId="s1" isProvisional={false} analysisScores={null} scoreComment="" analysisError={null}
+        companies={[company]} sessionId="s1"
+        favoriteCompanies={[]} favoritesLoading={false} favoritesError={null} onRetryFavorites={noop}
+        isProvisional={false} analysisScores={null} scoreComment="" analysisError={null}
         onRetryAnalysis={noop} jobSuitabilityComment="" suggestedRoles={[]} emailSending={false} favoritingId={null} applyingId={null}
         snackbar={{ open: false, message: '', severity: 'success' }} isGuestUser={false} applyEnabled onCloseSnackbar={noop}
-        onBack={noop} onReset={noop} onSendEmail={noop} onSelectCompany={onSelectCompany} onToggleFavorite={noop} onApply={noop} onNavigate={noop}
+        onBack={noop} onReset={noop} onSendEmail={noop} onSelectCompany={onSelectCompany} onToggleFavorite={noop} onUnfavoriteCompany={noop} onApply={noop} onNavigate={noop}
       />,
     )
     expect(screen.getByText('あなたの10の傾向')).toBeInTheDocument()

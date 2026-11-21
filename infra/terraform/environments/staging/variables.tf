@@ -448,3 +448,9 @@ variable "ai_failover_local_tts_speaker" {
   description = "VOICEVOX の話者 ID。空ならアプリの既定（1）"
   default     = ""
 }
+
+variable "alarm_email" {
+  type        = string
+  description = "CloudWatchアラームの通知先メールアドレス。空ならアラームは状態を持つだけで誰にも届かない。購読はメール側でConfirmするまで有効にならない"
+  default     = ""
+}

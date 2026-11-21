@@ -8,6 +8,7 @@ import { CONTENT_MAX_WIDTH } from '@/lib/design/tokens'
 import { useResultsData } from './hooks/useResultsData'
 import {
   ResultsLoadingView,
+  ResultsEmptyView,
   ResultsErrorView,
   ResultsNoMatchView,
 } from './components/ResultsStatusViews'
@@ -50,8 +51,13 @@ function ResultsContent() {
     userId,
     sessionId,
     companies,
+    favoriteCompanies,
+    favoritesLoading,
+    favoritesError,
+    retryFavorites,
     loading,
     error,
+    emptyReason,
     isProvisional,
     diagnosisSummary,
     evaluatedCategories,
@@ -83,6 +89,7 @@ function ResultsContent() {
     handleBack,
     handleReset,
     handleToggleFavorite,
+    handleUnfavoriteCompany,
     handleApply,
     lowMatchTarget,
     cancelLowMatchApply,
@@ -112,8 +119,24 @@ function ResultsContent() {
         <ResultsErrorView
           error={error}
           onBack={handleBack}
-          onReset={handleReset}
         />
+      </ResultsFallbackColumn>
+    )
+  }
+
+  // 推薦が0件（エラーではない。#2220）
+  if (emptyReason) {
+    return (
+      <ResultsFallbackColumn>
+        <AnalysisScoreCard
+          analysisScores={analysisScores}
+          scoreComment={scoreComment}
+          analysisError={analysisError}
+          onRetryAnalysis={handleRetryAnalysis}
+        />
+        {/* 推薦が0件でも、自分の10の傾向は見られるようにする（推薦とは別に取れる情報） */}
+        <MyCategoryScoresCard sessionId={sessionId} />
+        <ResultsEmptyView reason={emptyReason} onBackToChat={handleBack} />
       </ResultsFallbackColumn>
     )
   }
@@ -154,6 +177,10 @@ function ResultsContent() {
     <ResultsListView
       companies={companies}
       sessionId={sessionId}
+      favoriteCompanies={favoriteCompanies}
+      favoritesLoading={favoritesLoading}
+      favoritesError={favoritesError}
+      onRetryFavorites={retryFavorites}
       isProvisional={isProvisional}
       diagnosisSummary={diagnosisSummary}
       evaluatedCategories={evaluatedCategories}
@@ -179,6 +206,7 @@ function ResultsContent() {
       onSendEmail={handleSendEmail}
       onSelectCompany={setSelectedCompany}
       onToggleFavorite={handleToggleFavorite}
+      onUnfavoriteCompany={handleUnfavoriteCompany}
       onApply={handleApply}
       onNavigate={navigate}
     />

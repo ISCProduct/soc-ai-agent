@@ -33,7 +33,7 @@ func (r judgmentScoreRepo) FindByUserAndSession(uint, string) ([]models.UserWeig
 }
 
 func sc(cat string, v int) models.UserWeightScore {
-	return models.UserWeightScore{WeightCategory: cat, Score: v}
+	return models.UserWeightScore{WeightCategory: cat, Score: float64(v)}
 }
 
 // 合成データ。フェーズは職種4・興味4・適性4・将来3（合計15問）。

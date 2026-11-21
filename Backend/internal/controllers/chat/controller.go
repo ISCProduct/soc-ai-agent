@@ -529,6 +529,49 @@ func (c *ChatController) GetMyAxisScores(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, map[string]any{"axes": out})
 }
 
+// GetFavorites は過去の診断を含め、お気に入り企業を1社1行で返す (GET /api/chat/favorites)
+func (c *ChatController) GetFavorites(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	if c.matchingService == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "matching service not available")
+	}
+
+	limit := httpapi.LimitQuery(ctx, "limit", 50)
+	matches, err := c.matchingService.ListFavoriteCompanies(ctx.Request().Context(), userID, limit)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	displayed := matching.DisplayableMatches(matches)
+	return ctx.JSON(http.StatusOK, matching.RecommendationResponse{
+		Recommendations: matching.BuildRecommendations(displayed, nil),
+	})
+}
+
+// RemoveFavoriteCompany は企業のお気に入りを診断をまたいで外す (POST /api/chat/favorites/remove)
+func (c *ChatController) RemoveFavoriteCompany(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+
+	var req struct {
+		CompanyID uint `json:"company_id"`
+	}
+	if err := ctx.Bind(&req); err != nil || req.CompanyID == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "company_id is required")
+	}
+	if c.matchingService == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "matching service not available")
+	}
+	if err := c.matchingService.UnfavoriteCompany(ctx.Request().Context(), userID, req.CompanyID); err != nil {
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]bool{"ok": true})
+}
+
 // GetAnalysisSummary 4分析スコアと進捗を取得
 func (c *ChatController) GetAnalysisSummary(ctx echo.Context) error {
 	userID, ok := httpapi.UserID(ctx)

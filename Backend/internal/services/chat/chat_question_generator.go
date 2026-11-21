@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"Backend/internal/logsafe"
 	"Backend/internal/models"
 	"Backend/internal/services/prompts"
 	"context"
@@ -101,7 +102,7 @@ func askedCategoryCounts(history []models.ChatMessage) map[string]int {
 // pickPhaseTarget は、フェーズの質問枠を先頭の軸が使い切らないように次の軸を選ぶ。
 // 出題回数が少ない軸を優先し、同数なら未評価（スコア無しまたは0）、その次に並び順。
 // 先頭の未評価をスコアが付くまで繰り返すと、後ろの軸は診断が完了しても一度も聞かれない（SOCAIAGENT-473）。
-func pickPhaseTarget(allowed []string, scoreMap map[string]int, asked map[string]int) (string, string) {
+func pickPhaseTarget(allowed []string, scoreMap map[string]float64, asked map[string]int) (string, string) {
 	if len(allowed) == 0 {
 		return "", ""
 	}
@@ -125,7 +126,7 @@ func pickPhaseTarget(allowed []string, scoreMap map[string]int, asked map[string
 	return cat, fmt.Sprintf("「%s」を他の軸と同じ回数まで確認するため", cat)
 }
 
-func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, targetLevel string, currentPhase *models.UserAnalysisProgress, asked map[string]int) (string, uint, string, error) {
+func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]float64, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, targetLevel string, currentPhase *models.UserAnalysisProgress, asked map[string]int) (string, uint, string, error) {
 	ctx, resolvedVersion := prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration)
 
 	// 狙った軸は呼び出し元に返す。ここはフェーズで絞った allowedCategories から
@@ -162,7 +163,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	for _, cat := range allowedCategories {
 		score, exists := scoreMap[cat]
 		if exists && score != 0 {
-			scoreAnalysis += fmt.Sprintf("- %s: %d点\n", cat, score)
+			scoreAnalysis += fmt.Sprintf("- %s: %.0f点\n", cat, score)
 		} else {
 			scoreAnalysis += fmt.Sprintf("- %s: 未評価\n", cat)
 		}
@@ -171,7 +172,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	// 職種名と業界名を取得
 	jobCategoryName := "指定なし"
 	if jobCategoryID != 0 {
-		if jc, err := s.jobCategoryRepo.FindByID(jobCategoryID); err == nil && jc != nil {
+		if jc, err := s.jobCategoryRepo.FindByID(ctx, jobCategoryID); err == nil && jc != nil {
 			jobCategoryName = jc.Name
 		}
 	}
@@ -284,7 +285,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	promptVersion := resolvedVersion
 	// フォールバック: AIが空を返した場合は簡易質問を使用する
 	if questionText == "" {
-		fallbackQuestion := s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
+		fallbackQuestion := s.selectFallbackQuestion(ctx, targetCategory, jobCategoryID, targetLevel, askedTexts)
 		if fallbackQuestion != "" {
 			questionText = fallbackQuestion
 		} else {
@@ -380,7 +381,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 
 		// 最後の試行で重複してもそのまま使用（無限ループ防止）
 		if attempt == maxRetries-1 {
-			log.Printf("Max retries reached, using question anyway: %s\n", questionText)
+			log.Printf("Max retries reached, using question anyway: chars=%d\n", logsafe.Chars(questionText))
 		}
 	}
 
