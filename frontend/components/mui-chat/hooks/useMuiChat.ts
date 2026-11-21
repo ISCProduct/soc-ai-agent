@@ -407,7 +407,8 @@ export function useMuiChat() {
         }
         setMessages((prev) => [...prev, completionMessage])
       } else if (error instanceof UserFacingApiError && error.gateway) {
-        router.replace(gatewayErrorPath(error.status))
+        // 再試行でこのページへ戻れるように、いまのパスを渡す（replace なので history.back では戻れない）
+        router.replace(gatewayErrorPath(error.status, `${window.location.pathname}${window.location.search}`))
       } else {
         const errorMsg: Message = {
           id: makeMessageId(),
