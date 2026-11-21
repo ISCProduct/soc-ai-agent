@@ -4479,10 +4479,37 @@ paths:
       summary: 学習データを書き出す
       description: |
         候補者の発話と選考結果を含むため**管理者本人の認証を要求する**（#268）。サービス間シークレットでは叩けない。
+
+        1回に返すセッションは既定・上限 1000（SOCAIAGENT-694）。続きは `offset` で取る。
+        `offset` は対象セッション（発話の有無で絞る前）の位置で、発話の無いセッションは落とすため、返る件数が `limit` 未満でも続きがありうる。
+        続きがありうるときは `X-Next-Offset` ヘッダーに次の `offset` を返す（無ければ最後）。
       security: [{ adminAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 1000
+            default: 1000
+          description: 返すセッション数。0・省略・1000超は 1000
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: 飛ばす対象セッション数
       responses:
         "200":
           description: 成功
+          headers:
+            X-Next-Offset:
+              description: 続きがありうるときの次の offset
+              schema:
+                type: integer
+        "400":
+          description: limit / offset が0以上の整数でない
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
