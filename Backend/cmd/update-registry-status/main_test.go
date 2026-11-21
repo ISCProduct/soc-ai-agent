@@ -57,7 +57,7 @@ func (s *fakeStore) update(rows []backupRow, pick func(backupRow) (registryState
 		from, to := pick(r)
 		c := s.rows[r.CompanyID]
 		cur := stateOf(c)
-		if cur.Kind != from.Kind || !ptrEq(cur.ClosedOn, from.ClosedOn) || !timeEq(cur.CheckedAt, from.CheckedAt) {
+		if c.CorporateNumber != r.CorporateNumber || cur.Kind != from.Kind || !ptrEq(cur.ClosedOn, from.ClosedOn) || !timeEq(cur.CheckedAt, from.CheckedAt) {
 			continue
 		}
 		c.CorporateKind = to.Kind
@@ -188,12 +188,14 @@ func TestBackupRestore_RoundTripAndSkipsEditedRows(t *testing.T) {
 	}
 	// 書いた後に、人が企業 2 の種別を直した → 復元は触らない
 	st.rows[2].CorporateKind = "399"
+	// 書いた後に、企業 3 の法人番号が変わった → 別の法人の値なので復元は触らない
+	st.rows[3].CorporateNumber = "3999999999999"
 
 	out.Reset()
 	if err := run(context.Background(), options{Restore: backup}, st, f, &out, fixedNow); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []uint{1, 3, 5} {
+	for _, id := range []uint{1, 5} {
 		c := st.rows[id]
 		if c.CorporateKind != "" || c.RegistryClosedOn != nil || c.RegistryCheckedAt != nil {
 			t.Fatalf("書く前（未確認）に戻る: %d %+v", id, c)
@@ -201,6 +203,9 @@ func TestBackupRestore_RoundTripAndSkipsEditedRows(t *testing.T) {
 	}
 	if st.rows[2].CorporateKind != "399" {
 		t.Fatal("書いた後に変わった値は戻さない")
+	}
+	if st.rows[3].RegistryCheckedAt == nil {
+		t.Fatal("法人番号が変わった企業は戻さない")
 	}
 }
 

@@ -71,7 +71,7 @@ func (ctrl *CompanyRelationController) GetCompanyCorrelationMap(ctx echo.Context
 	}
 	view, err := ctrl.correlationMap.Build(uint(companyID))
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) || strings.Contains(err.Error(), "company not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "Company not found")
 		}
 		return httpapi.InternalError(err)
@@ -96,7 +96,7 @@ func (ctrl *CompanyRelationController) CompareCompanyBusiness(ctx echo.Context) 
 	}
 	view, err := ctrl.correlationMap.CompareBusiness(uint(focusID), uint(selectedID))
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "Company not found")
 		}
 		return httpapi.InternalError(err)

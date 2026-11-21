@@ -64,10 +64,12 @@ func ptrEq(a, b *string) bool {
 }
 
 // backupRow は、書き込んだ企業（復元に使う）。Before は書く前、After は書いた値。
+// CorporateNumber は照会に使った法人番号。書き込み・復元はこの番号のままの企業だけに行う。
 type backupRow struct {
-	CompanyID uint          `json:"company_id"`
-	Before    registryState `json:"before"`
-	After     registryState `json:"after"`
+	CompanyID       uint          `json:"company_id"`
+	CorporateNumber string        `json:"corporate_number"`
+	Before          registryState `json:"before"`
+	After           registryState `json:"after"`
 }
 
 type listed struct {
@@ -200,7 +202,7 @@ func run(ctx context.Context, o options, st store, f finder, out io.Writer, now 
 		if before.CheckedAt != nil {
 			changed++
 		}
-		rows = append(rows, backupRow{CompanyID: c.ID, Before: before, After: after})
+		rows = append(rows, backupRow{CompanyID: c.ID, CorporateNumber: c.CorporateNumber, Before: before, After: after})
 	}
 
 	pf(out, "結果: 保存する %d 社 / 変更なし %d 社 / 商号の不一致 %d 社 / 国税庁に無い %d 社 / 通信などの失敗 %d 社（対象 %d 社）\n",
@@ -332,15 +334,16 @@ func (g *gormStore) Restore(rows []backupRow) (int64, error) {
 	return g.update(rows, func(r backupRow) (registryState, registryState) { return r.After, r.Before })
 }
 
-// update は、現在の値が from のままの企業だけを to に更新する（その間に変わった企業は触らない）。全件を1トランザクションで行う。
+// update は、法人番号が照会時のままで、現在の値が from のままの企業だけを to に更新する
+// （その間に変わった企業は触らない）。全件を1トランザクションで行う。
 func (g *gormStore) update(rows []backupRow, pick func(backupRow) (from, to registryState)) (int64, error) {
 	var total int64
 	err := g.db.Transaction(func(tx *gorm.DB) error {
 		for _, r := range rows {
 			from, to := pick(r)
 			res := tx.Model(&models.Company{}).
-				Where("id = ? AND corporate_kind = ? AND registry_closed_on <=> ? AND registry_checked_at <=> ?",
-					r.CompanyID, from.Kind, from.ClosedOn, from.CheckedAt).
+				Where("id = ? AND corporate_number = ? AND corporate_kind = ? AND registry_closed_on <=> ? AND registry_checked_at <=> ?",
+					r.CompanyID, r.CorporateNumber, from.Kind, from.ClosedOn, from.CheckedAt).
 				Updates(map[string]any{
 					"corporate_kind":      to.Kind,
 					"registry_closed_on":  to.ClosedOn,
@@ -404,7 +407,8 @@ func connectDB() (*gorm.DB, error) {
 	cfg := mysqldrv.NewConfig()
 	cfg.User, cfg.Passwd = user, os.Getenv("DB_PASSWORD")
 	cfg.Net, cfg.Addr, cfg.DBName = "tcp", net.JoinHostPort(dbHost(), port), dbname
-	cfg.ParseTime, cfg.Loc = true, time.Local
+	// 確認日時の保存・読込み・復元の比較を、実行する端末の TZ に依らず一致させるため JST に固定する。
+	cfg.ParseTime, cfg.Loc = true, time.FixedZone("JST", 9*60*60)
 	cfg.Params = map[string]string{"charset": "utf8mb4"}
 	return gorm.Open(mysql.Open(cfg.FormatDSN()), &gorm.Config{})
 }

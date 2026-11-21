@@ -54,8 +54,11 @@ func isRegistryClosed(c *models.Company) bool {
 }
 
 // correlationExcluded は相関図に出さない企業か。
-// 国の機関・地方公共団体、または「よく知る企業」でない閉鎖企業。未確認は除外しない。
+// 国の機関・地方公共団体、または「よく知る企業」でない閉鎖企業。未確認（registry_checked_at が NULL）は除外しない。
 func correlationExcluded(c *models.Company, market *models.CompanyMarketInfo) bool {
+	if c.RegistryCheckedAt == nil {
+		return false
+	}
 	if isPublicBody(c) {
 		return true
 	}
@@ -188,7 +191,7 @@ func (s *CompanyCorrelationMapService) Build(focusID uint) (*CompanyCorrelationM
 
 	focusCompany := companyByID[focusID]
 	if !briefVisible(&focusCompany) || correlationExcluded(&focusCompany, marketByID[focusID]) {
-		return nil, fmt.Errorf("company not found (id=%d)", focusID)
+		return nil, fmt.Errorf("company not found (id=%d): %w", focusID, repository.ErrNotFound)
 	}
 
 	relations, err := s.relationRepo.GetRelationsByCompanyIDs(nodeIDs)
@@ -343,14 +346,17 @@ func (s *CompanyCorrelationMapService) CompareBusiness(focusID, selectedID uint)
 	selected, ok2 := byID[selectedID]
 	// 公開API。審査前のゲスト投稿企業と、相関図から除く企業は、Build と同じ条件で隠す。
 	if !ok1 || !ok2 || !briefVisible(&focus) || !briefVisible(&selected) {
-		return nil, fmt.Errorf("company not found")
+		return nil, fmt.Errorf("company not found: %w", repository.ErrNotFound)
 	}
-	excluded, err := s.anyExcluded(&focus, &selected)
-	if err != nil {
-		return nil, err
+	// 市場情報（上場）は、閉鎖企業の判定に要るときだけ引く。
+	var marketByID map[uint]*models.CompanyMarketInfo
+	if isRegistryClosed(&focus) || isRegistryClosed(&selected) {
+		if marketByID, err = s.relationRepo.GetMarketInfoByCompanyIDs(ids); err != nil {
+			return nil, fmt.Errorf("load market info: %w", err)
+		}
 	}
-	if excluded {
-		return nil, fmt.Errorf("company not found")
+	if correlationExcluded(&focus, marketByID[focusID]) || correlationExcluded(&selected, marketByID[selectedID]) {
+		return nil, fmt.Errorf("company not found: %w", repository.ErrNotFound)
 	}
 	fs, fsrc, fKnown := DeriveShortBusiness(focus.MainBusiness, focus.Description)
 	ss, ssrc, sKnown := DeriveShortBusiness(selected.MainBusiness, selected.Description)
@@ -377,27 +383,6 @@ func (s *CompanyCorrelationMapService) CompareBusiness(focusID, selectedID uint)
 		},
 		"compare_text_available": false, // 組み合わせ専用の比較文は未実装。FEは両社説明を並べる
 	}, nil
-}
-
-// anyExcluded は、渡した企業のどれかが相関図から除く対象か。
-// 市場情報（上場）は、閉鎖企業の判定に要るときだけ引く。
-func (s *CompanyCorrelationMapService) anyExcluded(cs ...*models.Company) (bool, error) {
-	for _, c := range cs {
-		if isPublicBody(c) {
-			return true, nil
-		}
-		if !isRegistryClosed(c) || c.EmployeeCount >= wellKnownEmployeeThreshold {
-			continue
-		}
-		market, err := s.relationRepo.GetMarketInfoByCompanyIDs([]uint{c.ID})
-		if err != nil {
-			return false, fmt.Errorf("load market info: %w", err)
-		}
-		if correlationExcluded(c, market[c.ID]) {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func buildCorrelationNode(c models.Company, market *models.CompanyMarketInfo, isFocus bool) CorrelationMapNode {
