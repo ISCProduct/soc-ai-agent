@@ -1433,6 +1433,36 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "413": { description: 512MB を超えた }
 
+  /api/interviews/{id}/videos:
+    get:
+      tags: [interviews]
+      summary: 本人の面接録画と、発話を録画時刻へ合わせる目安
+      description: |
+        保存先のキーと恒久URLは返さない。時刻は面接開始からの目安で、録画は面接開始の直後から始まる。
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 録画一覧と発話の目安時刻 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: セッションが無い }
+
+  /api/interviews/{id}/videos/{video_id}/url:
+    get:
+      tags: [interviews]
+      summary: 本人の面接録画の短時間再生URL
+      description: セッションとユーザーが一致する完了済み録画だけ。有効期限は15分。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: video_id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: 再生URL }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 録画が無い、または本人のものではない }
+        "422": { description: まだ再生できない }
+
   /api/hr/interviews:
     get:
       tags: [interviews]
