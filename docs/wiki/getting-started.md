@@ -234,7 +234,7 @@ go test ./...                             # 全テスト
 ```sh
 cd frontend
 npm run lint          # ESLint チェック
-npx tsc --noEmit      # 型チェック（CI の Frontend Unit Tests でも実行）
+npx next typegen && npx tsc --noEmit  # 型チェック（CI の Frontend Unit Tests でも実行）
 npm run build         # 本番ビルド（型チェック含む）
 ```
 
@@ -386,7 +386,7 @@ git commit -m "feat: #xxx 変更内容"
 
 # テスト実行
 cd Backend && go test ./...
-cd frontend && npm run lint && npx tsc --noEmit
+cd frontend && npm run lint && npx next typegen && npx tsc --noEmit
 
 # PR を作成
 gh pr create --title "Resolve #xxx: 機能説明" --base main
