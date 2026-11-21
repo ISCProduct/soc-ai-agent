@@ -71,12 +71,13 @@ def _openai_status(deep: bool) -> Dict[str, Any]:
 
 
 def _payload(deep: bool) -> Dict[str, Any]:
-    ok, detail = ping_chroma()
+    ok, _ = ping_chroma()
     openai_status = _openai_status(deep)
     openai_ok = openai_status["configured"] and openai_status.get("reachable", True)
     return {
         "status": "ok" if ok and openai_ok else "degraded",
-        "vector_store": {"ok": ok, "detail": detail},
+        # 認証なしで読めるので、接続先や例外の本文は載せない（SOCAIAGENT-701）
+        "vector_store": {"ok": ok, "detail": "ok" if ok else "unavailable"},
         "openai": openai_status,
         "chat_model": _chat_model(),
     }
@@ -108,13 +109,21 @@ def health(request: Request, deep: bool = False) -> dict:
 # /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
 # /health は後方互換のため維持
 @router.get("/healthz")
-def healthz() -> dict:
-    """ECS / ALB が見るパス。503 にするのはベクトルストアに届かないときだけ。
+async def healthz() -> dict:
+    """ECS / ALB が見るパス。503 にするのはベクトルストアに届かないときと、内部トークンが未設定のとき。
+
+    async にしてイベントループ上で返す。同期の重い処理でスレッドプールが埋まっていても、
+    ヘルスチェックが待たされてタスクが入れ替えられないようにする（SOCAIAGENT-701）。
+
+    内部トークンが空だと /health 以外は全部 503 になる（main の内部認証）ので、/healthz も 503 にして
+    設定の誤りに気づけるようにする。起動は失敗させない。
 
     OpenAI の状態は payload に載せるが、503 にはしない。OpenAI の障害でタスクを入れ替えても
     直らず、全タスクが入れ替わり続けるだけになるため。
     """
     payload = _payload(deep=False)
-    if not payload["vector_store"]["ok"]:
+    token_configured = bool(os.getenv("RAG_INTERNAL_TOKEN", "").strip())
+    payload["internal_auth"] = {"configured": token_configured}
+    if not payload["vector_store"]["ok"] or not token_configured:
         return JSONResponse(status_code=503, content=payload)
     return payload

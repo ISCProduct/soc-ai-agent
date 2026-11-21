@@ -607,9 +607,9 @@ def get_index_status(
                 info["doc_types"] = doc_types
                 info["latest_fetched_at"] = max(fetched) if fetched else None
             except Exception as exc:
-                logger.warning("chromadb status filter failed collection=%s err=%s", name, exc)
+                logger.warning("chromadb status filter failed collection=%s err=%s", name, type(exc).__name__)
                 info["company_count"] = None
-                info["error"] = str(exc)
+                info["error"] = type(exc).__name__
         collections_out.append(info)
 
     return {
@@ -629,7 +629,9 @@ def ping_chroma() -> Tuple[bool, str]:
         client.list_collections()
         return True, describe_backend()
     except Exception as exc:
-        return False, str(exc)
+        # 例外の本文は接続先などを含みうるので、種類だけを返す（SOCAIAGENT-701）
+        logger.warning("chroma ping failed err=%s", type(exc).__name__)
+        return False, type(exc).__name__
 
 
 def describe_backend() -> str:

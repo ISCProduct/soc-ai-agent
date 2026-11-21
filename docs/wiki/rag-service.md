@@ -49,7 +49,7 @@ SOC AI Agent の RAG（Retrieval-Augmented Generation）サービスは Python /
 | POST | `/company/hints` | 企業面接ヒント収集 |
 | POST | `/es/review` | エントリーシートレビュー |
 | GET | `/health` | ヘルスチェック（Chroma 接続含む） |
-| GET | `/healthz` | ヘルスチェック（Chroma 失敗時 503） |
+| GET | `/healthz` | ヘルスチェック（Chroma 失敗時・`RAG_INTERNAL_TOKEN` 未設定時 503） |
 | POST | `/company/context` | Backend からの企業コンテキスト書き込み |
 | GET | `/vector/status` | ベクトルインデックス状況 |
 | POST | `/vector/reembed` | 企業ベクトル削除・再埋め込み |
@@ -59,7 +59,7 @@ SOC AI Agent の RAG（Retrieval-Augmented Generation）サービスは Python /
 `/health` / `/healthz` を除く全エンドポイントは、Backend からの内部認証ヘッダー `X-Internal-Token` を要求します。
 
 - トークンは環境変数 `RAG_INTERNAL_TOKEN` で設定し、**Backend と RAG で同一の値**を使う（docker compose では両サービスが `Backend/.env` を読むため1箇所の設定で足りる）
-- `RAG_INTERNAL_TOKEN` 未設定時はフェイルクローズ: ヘルスチェック以外の全リクエストを 503 で拒否する
+- `RAG_INTERNAL_TOKEN` 未設定時はフェイルクローズ: ヘルスチェック以外の全リクエストを 503 で拒否する。`/healthz` も 503 を返す（起動は失敗させない）
 - トークン不一致は 401
 - 本番のトークンは `openssl rand -hex 32` などで生成する
 - Backend 側は `internal/ragclient.SetAuthHeader` がリクエストへ自動付与する（RAG 呼び出しを追加する際は必ずこれを通すこと）

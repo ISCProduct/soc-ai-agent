@@ -212,13 +212,13 @@ def test_reembed_rejects_concurrent_run_for_same_company(client, chroma, monkeyp
     from routers import vector as vector_router
 
     _patch_fetch(monkeypatch, es="新ES")
-    lock = vector_router._company_lock(vs.build_cache_key("lock", "A社", company_original="A社"))
-    assert lock.acquire(blocking=False)
+    key = vs.build_cache_key("lock", "A社", company_original="A社")
+    assert vector_router._try_start(key)
     try:
         res = client.post("/vector/reembed", json={"company_name": "A社", "doc_type": "es_review", "refresh": True})
         assert res.status_code == 409
     finally:
-        lock.release()
+        vector_router._finish(key)
 
 
 def test_reembed_without_refresh_only_deletes(client, chroma):

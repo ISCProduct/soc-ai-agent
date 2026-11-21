@@ -891,5 +891,6 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
     except HTTPException:
         raise
     except Exception as exc:
-        logger.warning("es review failed error=%s", exc)
-        raise HTTPException(status_code=500, detail=f"ES review failed: {exc}")
+        # 例外の本文は ES 本文を含みうるので、応答にもログにも出さない（SOCAIAGENT-701）
+        logger.warning("es review failed error=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="ES review failed") from exc

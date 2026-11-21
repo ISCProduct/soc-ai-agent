@@ -16,6 +16,10 @@ COMPANY_CONTEXT_MAX_LENGTH = 20000
 QUESTION_TYPE_MAX_LENGTH = 100
 # 職種名。FE の選択肢は最長でも数十字で、これを超える値は入力ミスか攻撃(#1591)
 POSITION_MAX_LENGTH = 100
+# 企業名。プロンプト・キャッシュキー・ログに入るので上限を置く（SOCAIAGENT-701）
+COMPANY_NAME_MAX_LENGTH = 200
+# 技術スタック（ESリライト経路の任意入力）の上限（SOCAIAGENT-701）
+TECH_STACK_MAX_LENGTH = 2000
 
 
 def _normalize_company_context(value: str, field_name: str) -> str:
@@ -33,8 +37,8 @@ def _normalize_company_context(value: str, field_name: str) -> str:
 
 class ReviewRequest(BaseModel):
     resume_text: str = Field(min_length=1, max_length=10000)
-    company_name: str = Field(min_length=1)
-    job_title: str = Field(default="")
+    company_name: str = Field(min_length=1, max_length=COMPANY_NAME_MAX_LENGTH)
+    job_title: str = Field(default="", max_length=POSITION_MAX_LENGTH)
     # Backend 共有キャッシュの brief（Search なし）。あればキャッシュ/Searchより優先
     company_context: str = Field(default="")
     # Backend がチャット診断スコアから組み立てた候補者プロファイル（企業キャッシュには混ぜない）
@@ -61,7 +65,7 @@ class ReviewResponse(BaseModel):
 
 
 class CompanyHintsRequest(BaseModel):
-    company_name: str = Field(min_length=1)
+    company_name: str = Field(min_length=1, max_length=COMPANY_NAME_MAX_LENGTH)
     # 職種はプロンプトとキャッシュキーの両方に入るので上限を置く(#1591)
     position: str = Field(default="", max_length=POSITION_MAX_LENGTH)
     company_context: str = Field(default="")
@@ -94,10 +98,10 @@ ES_CHAR_LIMIT_MAX = 2000
 class ESReviewRequest(BaseModel):
     es_text: str = Field(min_length=1, max_length=ES_TEXT_MAX_LENGTH)
     question_type: str = Field(default="その他", max_length=QUESTION_TYPE_MAX_LENGTH)
-    company_name: str = Field(default="")
+    company_name: str = Field(default="", max_length=COMPANY_NAME_MAX_LENGTH)
     company_context: str = Field(default="")
     # 任意: 使用技術スタック。ESリライト経路(#1533)から渡る
-    tech_stack: str = Field(default="")
+    tech_stack: str = Field(default="", max_length=TECH_STACK_MAX_LENGTH)
     # 任意: 設問の文字数上限(#1523)。未指定なら従来どおり「元の110〜130%」を目安にする
     char_limit: Optional[int] = Field(
         default=None, ge=ES_CHAR_LIMIT_MIN, le=ES_CHAR_LIMIT_MAX
@@ -177,8 +181,8 @@ class ESReviewResponse(BaseModel):
 
 
 class CompanyContextRequest(BaseModel):
-    company_name: str = Field(min_length=1)
-    context_type: str = Field(default="general")  # "jobs", "persona", "general"
+    company_name: str = Field(min_length=1, max_length=COMPANY_NAME_MAX_LENGTH)
+    context_type: Literal["jobs", "persona", "general"] = "general"
     # Backend が企業横断キャッシュへ保存する本文も他の企業コンテキストと同じ上限で拒否する。
     content: str = Field(min_length=1, max_length=COMPANY_CONTEXT_MAX_LENGTH)
 
@@ -200,7 +204,7 @@ class VectorStatusResponse(BaseModel):
 
 
 class VectorReembedRequest(BaseModel):
-    company_name: str = Field(min_length=1)
+    company_name: str = Field(min_length=1, max_length=COMPANY_NAME_MAX_LENGTH)
     doc_type: Optional[str] = None  # resume_review / company_research / interview_hints / es_review
     refresh: bool = True  # True なら削除後に WebSearch で再取得
 
