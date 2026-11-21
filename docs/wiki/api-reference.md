@@ -57,6 +57,7 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
   応答からトークンを取り除きます。本登録のゲスト引き継ぎ（`promote_guest: true`）のときだけ、今のセッションを Backend へ渡します。
 - `GET /api/auth/session`（フロントの Route Handler）はトークンの値を返さず、`user_id` と `has_admin_token` だけを返します。
 - 企業ユーザーも同じです。`company_user_token` はフロントの httpOnly Cookie にだけ置き、`X-Company-User-Token` は middleware が付けます。
+  企業のログイン・登録・招待の受け入れ・パスワード再設定の Route Handler は、成功したらその場で Cookie を張り、応答からトークンを取り除きます。
   `GET /api/company-auth/session` は `company_user_id` だけを返します。
   管理画面（`AdminShell`）は `X-Refresh-Admin-Token: 1` を付けてこれを呼び、Cookie が無い・期限が近いときは
   middleware がログインセッションの更新で取り直します（確認は10分に1回まで）。

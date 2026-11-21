@@ -15,7 +15,8 @@ export interface CompanyUser {
 }
 
 export interface CompanyAuthResponse extends CompanyUser {
-  token: string
+  // ログイン系の Route Handler は Cookie を張ってトークンを取り除くので、通常は届かない
+  token?: string
   refresh_token?: string
 }
 
@@ -36,7 +37,9 @@ function persistCompanyAuth(data: CompanyAuthResponse) {
   }))
   clearLegacyCompanyToken()
 
-  // トークンは httpOnly Cookie にだけ置き、ストレージには保存しない (#1091, SOCAIAGENT-683)。
+  // ログイン系の Route Handler がすでに httpOnly Cookie を張り、トークンを返さない（SOCAIAGENT-683）。
+  // トークンが届いたとき（古い Route Handler からの応答）だけ Cookie にする。
+  if (!data.token) return
   fetch('/api/company-auth/session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
