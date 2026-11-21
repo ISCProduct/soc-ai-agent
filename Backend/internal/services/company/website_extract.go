@@ -33,6 +33,7 @@ package company
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"sort"
@@ -84,7 +85,7 @@ func collectWebsiteText(ctx context.Context, websiteURL string) (string, error) 
 		return "", fmt.Errorf("robots.txt で取得が禁止されています: %s", top)
 	}
 
-	rawTop, err := fetchPageHTML(ctx, top)
+	rawTop, err := fetchPageHTML(ctx, robots, top)
 	if err != nil {
 		return "", fmt.Errorf("公式サイトの取得に失敗しました: %w", err)
 	}
@@ -108,7 +109,7 @@ func collectWebsiteText(ctx context.Context, websiteURL string) (string, error) 
 		case <-time.After(politeDelay):
 		}
 
-		rawSub, err := fetchPageHTML(ctx, link)
+		rawSub, err := fetchPageHTML(ctx, robots, link)
 		if err != nil {
 			continue // 1ページ落ちても残りで判断する
 		}
@@ -129,7 +130,25 @@ func collectWebsiteText(ctx context.Context, websiteURL string) (string, error) 
 
 // fetchPageHTML は1ページ取得して文字コードをUTF-8へ揃える。
 // fetchText は Content-Type の charset を見ないため、Shift-JIS のサイトが文字化けする。
-func fetchPageHTML(ctx context.Context, pageURL string) (string, error) {
+// 同じホストへのリダイレクトは、追従する前に robots の規則と照合する。
+func fetchPageHTML(ctx context.Context, robots *robotsRules, pageURL string) (string, error) {
+	origin, err := url.Parse(pageURL)
+	if err != nil {
+		return "", err
+	}
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("リダイレクトが多すぎます")
+			}
+			if req.URL.Host == origin.Host && !robots.allows(req.URL.String()) {
+				return fmt.Errorf("robots.txt で禁止されたページへのリダイレクトです: %s", req.URL)
+			}
+			return nil
+		},
+	}
+
 	type result struct {
 		html string
 		err  error
@@ -145,7 +164,7 @@ func fetchPageHTML(ctx context.Context, pageURL string) (string, error) {
 				done <- result{err: fmt.Errorf("ページ取得中に panic しました: %v", r)}
 			}
 		}()
-		body, charset, err := fetchBytes(pageURL)
+		body, charset, err := fetchBytesWith(client, pageURL)
 		if err != nil {
 			done <- result{err: err}
 			return

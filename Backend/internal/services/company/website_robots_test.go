@@ -37,6 +37,14 @@ func TestRobotsAllows(t *testing.T) {
 		{"他のボット宛は無関係", "User-agent: Googlebot\nDisallow: /", "/company/", true},
 		{"複数UA行は同じグループ", "User-agent: Googlebot\nUser-agent: SocAI\nDisallow: /company/", "/company/", false},
 		{"robots.txt自体は常に許可", "User-agent: *\nDisallow: /", "/robots.txt", true},
+		// RFC 9309 §2.2: CR 単独・CRLF も改行
+		{"CR単独の改行", "User-agent: *\rDisallow: /\r", "/company/", false},
+		{"CRLFの改行", "User-agent: *\r\nDisallow: /\r\n", "/company/", false},
+		// RFC 9309 §2.2.2: 規則とURLの符号化を揃えてから照合する
+		{"非予約文字の符号化を復号", "User-agent: *\nDisallow: /company/", "/%63ompany/", false},
+		{"日本語の規則と符号化URL", "User-agent: *\nDisallow: /会社/", "/%E4%BC%9A%E7%A4%BE/", false},
+		{"符号化の大文字小文字を無視", "User-agent: *\nDisallow: /%e4%bc%9a/", "/%E4%BC%9A/x", false},
+		{"%2Fは復号しない", "User-agent: *\nDisallow: /a/b", "/a%2Fb", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -152,5 +160,29 @@ func TestWebsite_robotsが5xxなら何も読まない(t *testing.T) {
 	}
 	if len(gotPaths) != 1 {
 		t.Errorf("robots.txt 以外を取得した: %v", gotPaths)
+	}
+}
+
+// 許可されたページから、同じホストの禁止ページへリダイレクトされても追従しない。
+func TestWebsite_禁止ページへのリダイレクトは追従しない(t *testing.T) {
+	var hitPrivate bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/robots.txt":
+			fmt.Fprint(w, "User-agent: *\nDisallow: /private/")
+		case "/":
+			http.Redirect(w, r, "/private/", http.StatusFound)
+		default:
+			hitPrivate = true
+			fmt.Fprint(w, strings.Repeat("本文", 1000))
+		}
+	}))
+	defer srv.Close()
+
+	if _, err := collectWebsiteText(context.Background(), srv.URL+"/"); err == nil {
+		t.Fatal("禁止ページへのリダイレクトはエラーにすべき")
+	}
+	if hitPrivate {
+		t.Error("禁止ページへリクエストを送ってしまった")
 	}
 }

@@ -16,12 +16,16 @@ import (
 
 // fetchBytes URLからレスポンスのバイト列とContent-TypeのCharsetを返す
 func fetchBytes(url string) ([]byte, string, error) {
+	return fetchBytesWith(&http.Client{Timeout: 30 * time.Second}, url)
+}
+
+// fetchBytesWith は fetchBytes と同じだが、リダイレクトの扱いなどを client で指定できる。
+func fetchBytesWith(client *http.Client, url string) ([]byte, string, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, "", err
 	}
 	req.Header.Set("User-Agent", companyfetch.UserAgent())
-	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, "", err
