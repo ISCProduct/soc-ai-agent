@@ -6,7 +6,7 @@ import { POST as COMPANY_POST } from '@/app/api/company-auth/session/route'
 const SAME_SITE = { 'content-type': 'application/json', origin: 'http://localhost:3000' }
 
 describe('GET /api/auth/session の管理者トークン', () => {
-  it('このリクエストで取り直した値を、古いCookieより優先する', async () => {
+  it('管理者トークンの値は返さず、有無だけを返す（SOCAIAGENT-683）', async () => {
     const request = new NextRequest('http://localhost:3000/api/auth/session', {
       headers: {
         'X-User-ID': '1',
@@ -20,7 +20,7 @@ describe('GET /api/auth/session の管理者トークン', () => {
     await expect(response.json()).resolves.toEqual({
       user_id: 1,
       user_token: 'user-jwt',
-      token: 'fresh-admin',
+      has_admin_token: true,
     })
   })
 })

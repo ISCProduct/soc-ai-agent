@@ -47,8 +47,11 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 ログインセッションの更新（`/api/auth/refresh`）のたびに再発行され、フロントの httpOnly Cookie
 `admin_token` に保持します。
 
-- `GET /api/auth/session`（フロントの Route Handler）は、管理者の場合に応答へ `token` を含めます。
-  管理画面（`AdminShell`）は、期限の1時間前から `X-Refresh-Admin-Token: 1` を付けて取り直します。
+- 管理者トークンはフロントの httpOnly Cookie `admin_token` にだけ置き、画面（JS）は値を持ちません。
+  管理APIへの `X-Admin-Token` は middleware が Cookie から付け、画面が送った値は捨てます（SOCAIAGENT-683）。
+- `GET /api/auth/session`（フロントの Route Handler）は、管理者トークンの値ではなく `has_admin_token` を返します。
+  管理画面（`AdminShell`）は `X-Refresh-Admin-Token: 1` を付けてこれを呼び、Cookie が無い・期限が近いときは
+  middleware がログインセッションの更新で取り直します（確認は10分に1回まで）。
 - `POST /api/auth/session` で `adminToken` が無いとき、`DELETE` のときは `admin_token` Cookie を削除します。
 - `POST /api/auth/session` と `POST /api/company-auth/session` は、`Content-Type: application/json` と
   自サイトの `Origin` を必須にしています（違えば 415 / 403、JSON が壊れていれば 400）。

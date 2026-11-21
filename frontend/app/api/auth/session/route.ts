@@ -26,10 +26,11 @@ export async function GET(request: NextRequest) {
     request.headers.get('X-Refreshed-Admin-Token') ||
     request.cookies.get('admin_token')?.value
 
+  // 管理者トークンの値は返さない。管理APIへは middleware が Cookie から付ける（SOCAIAGENT-683）
   return NextResponse.json({
     user_id: Number(userId),
     user_token: userToken,
-    ...(adminToken ? { token: adminToken } : {}),
+    has_admin_token: Boolean(adminToken),
   })
 }
 
