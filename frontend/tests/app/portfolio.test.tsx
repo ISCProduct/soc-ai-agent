@@ -76,3 +76,15 @@ test('読み込みに失敗したらエラーと再読み込みを出す', async
   expect(await screen.findByText(/ポートフォリオを読み込めませんでした/)).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '再読み込み' })).toBeInTheDocument()
 })
+
+test('小数スコア（DECIMAL）は整数へ丸めて表示する', async () => {
+  global.fetch = jest.fn(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ ...DATA, diagnosis: { scores: [{ category: '技術志向', score: 62.35 }] } }),
+  })) as unknown as typeof fetch
+  render(<PortfolioPage />)
+  expect(await screen.findByRole('img', { name: '技術志向 62点' })).toBeInTheDocument()
+  expect(screen.queryByText('62.35')).not.toBeInTheDocument()
+  expect(screen.getByText('62')).toBeInTheDocument()
+})

@@ -214,7 +214,10 @@ def _is_fresh(fetched_at: Optional[str], ttl_seconds: int = CACHE_TTL_SECONDS) -
     新鮮扱いにすると TTL で二度と失効せず、古い企業情報がキャッシュに残り続ける。古い扱いなら
     検索し直して上書きされるので、壊れた日付の文書が自然に入れ替わる。
 
-    fetched_at が無い（取得時刻を記録する前の文書）ときは今までどおり新鮮扱いにする。
+    fetched_at が無い（取得時刻を記録する前の文書）ときは新鮮扱いにする。ただしこの判定は
+    検索で取れた文書の後段の確認で、検索そのものは _with_ttl が fetched_at_ts で絞るので、
+    fetched_at_ts を持たない文書は検索に当たらず古い扱いになる（SOCAIAGENT-659 の U1）。
+    ここが効くのは RAG_TTL_WHERE=0 で where を切ったときだけ。
     """
     if not fetched_at or ttl_seconds <= 0:
         return True
@@ -340,12 +343,18 @@ def _with_ttl(where: Dict[str, Any], ttl_seconds: int = CACHE_TTL_SECONDS) -> Di
     """
     if ttl_seconds <= 0 or not ttl_where_enabled():
         return where
-    ttl_clause = {"fetched_at_ts": {"$gte": int(datetime.now(timezone.utc).timestamp()) - ttl_seconds}}
+    now = int(datetime.now(timezone.utc).timestamp())
+    # 後段の _is_fresh と同じく、時計のずれを超える未来の取得時刻も壊れた文書として外す。
+    # Chroma は1つの条件に演算子を1つしか持てないので、下限と上限を別の条件にする
+    ttl_clauses = [
+        {"fetched_at_ts": {"$gte": now - ttl_seconds}},
+        {"fetched_at_ts": {"$lte": now + _FETCHED_AT_FUTURE_TOLERANCE_SECONDS}},
+    ]
     if not where:
-        return ttl_clause
+        return {"$and": ttl_clauses}
     if "$and" in where:
-        return {"$and": [*where["$and"], ttl_clause]}
-    return {"$and": [where, ttl_clause]}
+        return {"$and": [*where["$and"], *ttl_clauses]}
+    return {"$and": [where, *ttl_clauses]}
 
 
 def _query_with_where(
@@ -440,8 +449,16 @@ def set_cached_documents(
         )
         # 件数が減る更新（3チャンク → 2チャンク）で、前回の3つ目が残らないようにする（SOCAIAGENT-659）。
         # 同じ cache_key でも用途（doc_type）が違う文書は共有コレクションに並ぶので、doc_type でも絞る
+        # 同じキーを別のリクエストが同時に書いたとき、相手が書いたチャンクを消さないよう、
+        # 今回より前に書かれたもの（fetched_at が今回より古い・無い）だけを消す
         stale_where = _build_where({"cache_key": meta["cache_key"], "doc_type": meta["doc_type"]})
-        stale = [i for i in (collection.get(where=stale_where, include=[]).get("ids") or []) if i not in set(ids)]
+        got = collection.get(where=stale_where, include=["metadatas"])
+        written = set(ids)
+        stale = [
+            doc_id
+            for doc_id, m in zip(got.get("ids") or [], got.get("metadatas") or [])
+            if doc_id not in written and str((m or {}).get("fetched_at") or "") < fetched_at
+        ]
         if stale:
             collection.delete(ids=stale)
         logger.info(
@@ -547,9 +564,11 @@ def replace_documents(
     ここでは新しい文書が全部読めることを確かめるまで、旧文書を消さない。失敗したら例外を投げ、
     旧文書はそのまま残る（set_cached_documents のように例外を握りつぶさない）。
 
-    消すのは、同じコレクションにある同じ企業（company と company_hash で絞る）の文書のうち、
-    今回書いた id 以外のもの。役割（role）や用途の違う旧文書もここで消すので、以前の
-    「企業の文書を全部消してから書く」と同じ結果になる。ただし消すのは書けた後だけ。
+    消すのは、同じコレクションにある同じ企業（company と company_hash で絞る）・同じ用途（doc_type）の
+    文書のうち、今回書いた id 以外のもの。役割（role）の違う旧文書もここで消すので、以前の
+    「その用途の企業の文書を全部消してから書く」と同じ結果になる。ただし消すのは書けた後だけ。
+    company_context は resume_review と company_research が共有しているので、用途の違う文書は消さない。
+    doc_type を持たない旧文書も消さない（delete_company_documents と同じ範囲。SOCAIAGENT-659）。
     戻り値: {"collection": 論理名, "replaced": 書いた件数, "deleted": 消した件数}
     """
     if not docs or not embeddings or len(docs) != len(embeddings):
@@ -585,7 +604,10 @@ def replace_documents(
         raise ReplaceDocumentsError(
             f"written documents not found collection={logical} expected={len(ids)} found={len(written)}"
         )
-    where = _build_where(_company_filter({"company": meta["company"], "company_hash": meta.get("company_hash", "")}))
+    filters = _company_filter({"company": meta["company"], "company_hash": meta.get("company_hash", "")})
+    if meta.get("doc_type"):
+        filters["doc_type"] = meta["doc_type"]
+    where = _build_where(filters)
     existing = collection.get(where=where, include=[]).get("ids") or []
     stale = [doc_id for doc_id in existing if doc_id not in set(ids)]
     if stale:

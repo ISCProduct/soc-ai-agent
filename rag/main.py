@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from typing import Any, Callable
@@ -202,6 +203,30 @@ def log_openai_version() -> None:
     has_responses = hasattr(openai_module.OpenAI, "responses")
     logger.info("openai version=%s responses_api=%s", version, has_responses)
     logger.info("vector_store backend=%s", describe_chroma_backend())
+
+
+def _run_fetched_at_ts_backfill() -> None:
+    try:
+        from scripts.backfill_fetched_at_ts import backfill
+
+        result = backfill(get_chroma_client(), apply=True)
+        logger.info("fetched_at_ts backfill done result=%s", result)
+    except Exception as exc:  # 失敗しても起動は止めない（次の起動でまた試す）
+        logger.warning("fetched_at_ts backfill failed error=%s", exc)
+
+
+@app.on_event("startup")
+def start_fetched_at_ts_backfill() -> None:
+    """既存の文書に fetched_at_ts を補う backfill を、起動時にバックグラウンドで1回流す（SOCAIAGENT-659）。
+
+    検索は TTL を fetched_at_ts の where で絞るので、補っていない文書は検索に当たらない。
+    通常の push デプロイでも既存のキャッシュが残るよう、新しい rag-review が起動するたびに流す。
+    何度流しても同じ結果になり、デプロイ中に旧版が書いた文書も次の起動で補われる。
+    RAG_BACKFILL_ON_STARTUP=0 で止められる（手動は scripts/backfill_fetched_at_ts.py）。
+    """
+    if os.getenv("RAG_BACKFILL_ON_STARTUP", "1").strip().lower() in ("0", "false", "off"):
+        return
+    threading.Thread(target=_run_fetched_at_ts_backfill, name="fetched-at-ts-backfill", daemon=True).start()
 
 
 # ルーター登録

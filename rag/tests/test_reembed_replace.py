@@ -91,7 +91,7 @@ def _docs(client, collection, company):
 
 def test_replace_documents_removes_old_chunks_and_other_roles(chroma):
     key = _seed(chroma, "company_context", "A社", "指定なし", ["旧1", "旧2", "旧3"], "company_research")
-    _seed(chroma, "company_context", "A社", "エンジニア", ["別の役割の旧文書"], "resume_review")
+    _seed(chroma, "company_context", "A社", "エンジニア", ["別の役割の旧文書"], "company_research")
     _seed(chroma, "company_context", "B社", "指定なし", ["B社の文書"], "company_research")
 
     outcome = vs.replace_documents(key, ["新"], [EMB], source="web_search", doc_type="company_research")
@@ -100,6 +100,21 @@ def test_replace_documents_removes_old_chunks_and_other_roles(chroma):
     assert _docs(chroma, "company_context", "A社") == ["新"]
     # 別の企業は消さない（company と company_hash で絞る）
     assert _docs(chroma, "company_context", "B社") == ["B社の文書"]
+
+
+def test_replace_documents_keeps_other_doc_types_and_legacy_docs(chroma):
+    # company_context は resume_review と company_research が共有している。再取得は指定した用途だけを
+    # 置き換え、別の用途と doc_type を持たない旧文書は残す（SOCAIAGENT-659。delete_company_documents と同じ範囲）
+    key = _seed(chroma, "company_context", "A社", "指定なし", ["旧1", "旧2"], "company_research")
+    _seed(chroma, "company_context", "A社", "エンジニア", ["添削用"], "resume_review")
+    col = chroma.get_or_create_collection(vs.physical_collection_name("company_context"))
+    col.upsert(ids=["legacy"], documents=["doc_type の無い旧文書"], embeddings=[EMB],
+               metadatas=[{"company": "A社", "company_hash": vs._company_hash("A社")}])
+
+    outcome = vs.replace_documents(key, ["新"], [EMB], source="web_search", doc_type="company_research")
+
+    assert outcome["deleted"] == 1
+    assert _docs(chroma, "company_context", "A社") == ["doc_type の無い旧文書", "新", "添削用"]
 
 
 def test_replace_documents_keeps_old_when_write_cannot_be_confirmed(chroma):

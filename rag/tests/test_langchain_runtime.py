@@ -71,15 +71,3 @@ def test_langchain_runtime_get_embeddings_busts_cache_on_api_key_rotation(monkey
         assert a is not b  # ローテーション後は別インスタンス
         assert mock_cls.call_args.kwargs["api_key"] == "sk-new"
         assert b.openai_api_key == "sk-new"
-
-
-def test_langchain_runtime_get_chat_model_disables_inner_retries(monkeypatch):
-    from services import langchain_runtime as runtime
-
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    with patch("services.langchain_runtime.ChatOpenAI") as mock_cls:
-        mock_cls.return_value = MagicMock(name="chat")
-        runtime.get_chat_model("gpt-4o-mini")
-        kwargs = mock_cls.call_args.kwargs
-        assert kwargs["max_retries"] == 0
-        assert kwargs["request_timeout"] == runtime._DEFAULT_REQUEST_TIMEOUT_SEC

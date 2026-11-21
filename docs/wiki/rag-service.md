@@ -377,21 +377,21 @@ HttpClient 構成では RAG コンテナ内の `/app/chroma_db` 削除では消�
 | 操作 | 作用する範囲 |
 |---|---|
 | `delete_company_documents(company, doc_type=...)` | その企業の、指定した `doc_type` の文書だけ。`company_context` を共有する `resume_review` / `company_research` の片方を消しても、もう片方は残る。`doc_type` を持たない旧文書は消さない。`doc_type` を省いたときは今までどおり企業の文書をすべて消す |
-| `set_cached_documents`（件数が減る更新） | 書いたあと、同じ `cache_key` かつ同じ `doc_type` で、今回書かなかった ID（前回の余ったチャンク）を消す |
-| 検索の TTL | where に `fetched_at_ts >= 今 - RAG_SEARCH_CACHE_TTL_SECONDS` を足して検索する。期限切れの文書が類似度の上位を占めても、有効な文書が `n_results` 件まで返る。`fetched_at_ts` を持たない文書は古い扱い |
+| `replace_documents`（`/vector/reembed` の再取得） | 書けたことを確かめたあと、同じ企業・同じ `doc_type` の、今回書かなかった文書を消す（役割が違っても消す）。用途の違う文書と `doc_type` を持たない旧文書は残す |
+| `set_cached_documents`（件数が減る更新） | 書いたあと、同じ `cache_key` かつ同じ `doc_type` で、今回書かなかった ID（前回の余ったチャンク）を消す。同時に別のリクエストが書いたチャンクを消さないよう、今回より前に書かれたもの（`fetched_at` が古い・無い）だけを消す |
+| 検索の TTL | where に `今 - RAG_SEARCH_CACHE_TTL_SECONDS <= fetched_at_ts <= 今 + 5分` を足して検索する。期限切れや、ありえない未来の日付の文書が類似度の上位を占めても、有効な文書が `n_results` 件まで返る。`fetched_at_ts` を持たない文書は古い扱い |
 | 検索の失敗 | 例外をキャッシュミスにするとき、where と例外を WARNING で出す |
 
 書き込む文書には、`fetched_at`（ISO 8601）に加えて `fetched_at_ts`（UNIX 秒の整数）を入れます。
 
-**デプロイの手順**（`fetched_at_ts` の無い既存の文書が検索に当たらなくなるため、先に補う）:
+**既存の文書への補完（backfill）**: `fetched_at_ts` の無い既存の文書は検索に当たらないので、rag-review は**起動のたびに**
+バックグラウンドで backfill を1回流します（`fetched_at` が読める文書だけに補う。読めない・無い文書は古い扱いのまま、
+次の検索で取り直される）。何度流しても同じ結果になり、通常の push デプロイで手順は要りません。デプロイ中に旧版が書いた
+文書も、次の起動で補われます。起動直後の補い終わるまでは、補っていない文書がキャッシュミスになりえます。
 
-```bash
-# 1. 件数を確かめる（既定は dry-run）
-python scripts/backfill_fetched_at_ts.py
-# 2. 書き込む。fetched_at が読める文書だけに補う（読めない・無い文書は古い扱いのまま、次の検索で取り直される）
-python scripts/backfill_fetched_at_ts.py --apply
-# 3. rag-review をデプロイする
-```
+- 結果はログの `fetched_at_ts backfill done result=...`（失敗時は `fetched_at_ts backfill failed`。起動は止めない）
+- 止めるときは `RAG_BACKFILL_ON_STARTUP=0`
+- 手で流すとき: `python scripts/backfill_fetched_at_ts.py`（件数だけ。既定は dry-run）→ `--apply` で書き込む
 
 切り戻しは `RAG_TTL_WHERE=0`（where で絞らず、取得後の `fetched_at` の判定だけにする）。
 

@@ -94,6 +94,22 @@ def test_shrinking_update_keeps_other_doc_type_with_same_cache_key(client):
     assert _docs(client, "company_context", {"doc_type": "company_research"}) == ["研究1"]
 
 
+def test_shrinking_update_keeps_chunks_written_later_by_another_request(client):
+    # A（2件）と B（3件）が同じキーを同時に書き、B の書き込みが A の掃除より後に入った場合。
+    # A は自分より後に書かれた B の3つ目を「余り」として消さない（Codex の指摘）
+    key = vs.build_cache_key("es_review", "A社", company_original="A社")
+    meta = vs.parse_cache_key(key)
+    later = datetime.now(timezone.utc) + timedelta(seconds=2)
+    _put(client, "es_review", vs._doc_ids(key, 3)[2], "B の3つ目",
+         {"company": meta["company"], "company_hash": meta["company_hash"], "role": meta["role"],
+          "doc_type": "es_review", "cache_key": key, "fetched_at": later.isoformat(),
+          "fetched_at_ts": int(later.timestamp())})
+
+    vs.set_cached_documents(key, ["A1", "A2"], [NEAR] * 2, doc_type="es_review")
+
+    assert _docs(client, "es_review") == ["A1", "A2", "B の3つ目"]
+
+
 def test_writes_record_numeric_fetched_at_ts(client):
     key = vs.build_cache_key("es_review", "A社", company_original="A社")
     before = _ts(timedelta(0))
@@ -137,6 +153,24 @@ def test_expired_docs_ranked_higher_do_not_hide_fresh_docs(client):
     assert vs.get_cached_documents(key, NEAR, n_results=2) == ["有効"]
 
 
+def test_future_fetched_at_ts_docs_do_not_hide_fresh_docs(client):
+    # 時計のずれを超える未来の取得時刻は壊れた文書。後段の _is_fresh で捨てられるので、
+    # 検索の段階で外さないと上位を占めて有効な文書が返らない（Codex の指摘）
+    key = vs.build_cache_key("es_review", "A社", company_original="A社")
+    meta = vs.parse_cache_key(key)
+    base = {"company": meta["company"], "company_hash": meta["company_hash"], "role": meta["role"],
+            "doc_type": "es_review", "cache_key": key}
+    future = datetime.now(timezone.utc) + timedelta(days=1)
+    for i in range(3):
+        _put(client, "es_review", f"future{i}", f"未来{i}",
+             {**base, "fetched_at": future.isoformat(), "fetched_at_ts": int(future.timestamp())}, emb=NEAR)
+    now = datetime.now(timezone.utc)
+    _put(client, "es_review", "fresh", "有効",
+         {**base, "fetched_at": now.isoformat(), "fetched_at_ts": int(now.timestamp())}, emb=FAR)
+
+    assert vs.get_cached_documents(key, NEAR, n_results=2) == ["有効"]
+
+
 def test_ttl_where_can_be_switched_off_for_rollback(client, monkeypatch):
     monkeypatch.setenv("RAG_TTL_WHERE", "0")
     where = vs._build_where({"company": "A社", "role": "x"})
@@ -144,12 +178,14 @@ def test_ttl_where_can_be_switched_off_for_rollback(client, monkeypatch):
 
 
 def test_with_ttl_appends_clause_to_and_and_single_filters(client):
+    # Chroma は1つの条件に演算子を1つしか持てないので、下限と上限は別の条件にする
     single = vs._with_ttl({"company": "A社"})
     assert single["$and"][0] == {"company": "A社"}
-    assert set(single["$and"][1]["fetched_at_ts"]) == {"$gte"}
+    assert [set(c["fetched_at_ts"]) for c in single["$and"][1:]] == [{"$gte"}, {"$lte"}]
     multi = vs._with_ttl({"$and": [{"company": "A社"}, {"role": "x"}]})
     assert multi["$and"][:2] == [{"company": "A社"}, {"role": "x"}]
-    assert len(multi["$and"]) == 3
+    assert len(multi["$and"]) == 4
+    assert [set(c["fetched_at_ts"]) for c in vs._with_ttl({})["$and"]] == [{"$gte"}, {"$lte"}]
 
 
 def test_docs_without_fetched_at_ts_are_stale_until_backfilled(client):
@@ -248,3 +284,56 @@ def test_backfill_main_requires_apply_to_write(client, capsys):
     assert "fetched_at_ts" not in _meta(client, "ok")
     assert backfill.main(["--apply"]) == 0
     assert "fetched_at_ts" in _meta(client, "ok")
+
+
+# --- 起動時の backfill（Codex の P1・レビューの Mid） ---------------------------
+
+
+def test_startup_backfill_fills_existing_docs(client, monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "get_chroma_client", lambda: client)
+    _seed_for_backfill(client)
+
+    main._run_fetched_at_ts_backfill()
+
+    assert "fetched_at_ts" in _meta(client, "ok")
+
+
+def test_startup_backfill_failure_does_not_raise(monkeypatch, caplog):
+    import main
+
+    def broken():
+        raise RuntimeError("chroma down")
+
+    monkeypatch.setattr(main, "get_chroma_client", broken)
+    with caplog.at_level(logging.WARNING, logger="rag-review"):
+        main._run_fetched_at_ts_backfill()
+    assert any("backfill failed" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("value, started", [("1", True), ("", True), ("0", False), ("off", False)])
+def test_startup_backfill_runs_in_background_unless_disabled(monkeypatch, value, started):
+    import main
+
+    calls = []
+
+    class FakeThread:
+        def __init__(self, target, name, daemon):
+            calls.append((target, daemon))
+
+        def start(self):
+            calls.append("start")
+
+    monkeypatch.setattr(main.threading, "Thread", FakeThread)
+    if value:
+        monkeypatch.setenv("RAG_BACKFILL_ON_STARTUP", value)
+    else:
+        monkeypatch.delenv("RAG_BACKFILL_ON_STARTUP", raising=False)
+
+    main.start_fetched_at_ts_backfill()
+
+    if started:
+        assert calls == [(main._run_fetched_at_ts_backfill, True), "start"]
+    else:
+        assert calls == []

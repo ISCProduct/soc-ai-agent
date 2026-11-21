@@ -261,8 +261,6 @@ def test_get_cached_documents_does_not_leak_across_punctuation_variants():
     key_plain = vs.build_cache_key(
         "company_research", "HIS", "指定なし", company_original="HIS"
     )
-    fetched = datetime.now(timezone.utc).isoformat()
-
     store: Dict[str, Dict[str, Any]] = {}
 
     def upsert_side_effect(**kwargs):

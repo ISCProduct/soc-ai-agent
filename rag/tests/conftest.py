@@ -14,6 +14,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # テストで必要な環境変数を設定（テスト用ダミーキー）
 os.environ.setdefault("OPENAI_API_KEY", "sk-test")
 os.environ.setdefault("RAG_INTERNAL_TOKEN", "test-internal-token")
+# 起動時の backfill（SOCAIAGENT-659）はスタブの chromadb を叩くので、テストでは流さない
+os.environ.setdefault("RAG_BACKFILL_ON_STARTUP", "0")
 
 # crewai をスタブ化（requirements.txt から除外済みのため、ローカルで未インストール）
 _crewai_mock = types.ModuleType("crewai")
