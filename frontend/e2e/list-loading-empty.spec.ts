@@ -41,7 +41,7 @@ test.describe('一覧の Loading / Empty', () => {
     await expect(page.getByText('お気に入りにした企業はまだありません')).toBeVisible()
     await page.getByRole('button', { name: 'おすすめ企業を見る' }).click()
     await expect(page).toHaveURL('/')
-    await page.getByRole('button', { name: 'お気に入り', exact: true }).click()
+    await page.getByRole('navigation', { name: 'メニュー' }).getByRole('link', { name: 'お気に入り', exact: true }).click()
     await expect(page).toHaveURL('/favorites')
     await expect(page.getByRole('heading', { name: 'お気に入り', exact: true })).toBeVisible()
   })
