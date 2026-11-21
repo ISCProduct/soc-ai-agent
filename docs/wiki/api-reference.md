@@ -139,8 +139,14 @@ Referer に user_id が残るだけです。
 | POST | `/api/auth/verify-email` | メール認証 |
 | POST | `/api/auth/resend-verification` | メール認証のメール再送（期限切れ・未着のとき）。**存在有無に関わらず常に200**、IP 単位とメールアドレス単位のレート制限あり |
 | POST | `/api/auth/forgot-password` | パスワードリセット要求 |
-| GET | `/api/auth/google` | Google OAuth開始 |
-| GET | `/api/auth/github` | GitHub OAuth開始 |
+| GET | `/api/auth/google` | Google OAuth開始。`bind`（FE が作る照合値）を受け取る |
+| GET | `/api/auth/github` | GitHub OAuth開始。`bind` は同上 |
+| POST | `/api/auth/oauth/exchange` | OAuth 完了時の短命コードを認証情報と交換する（FE の Route Handler からサーバー間で呼ぶ） |
+
+`OAUTH_CODE_EXCHANGE=true` のとき、OAuth コールバックはトークンを URL に載せず、
+`/auth/callback?code=...` へ戻します。コードは60秒・1回限りで、開始時の `bind` と対になる
+`verifier` を添えたときだけ交換できます。未設定（既定）の間は従来どおり `user=` で渡します。
+コードの保管は `REDIS_URL` があれば Redis、無ければプロセス内メモリです（複数タスク構成では Redis 必須）。
 
 ### トークン仕様（#616）
 
