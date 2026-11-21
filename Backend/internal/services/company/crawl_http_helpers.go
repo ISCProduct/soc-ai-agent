@@ -9,18 +9,23 @@ import (
 	"strings"
 	"time"
 
+	"Backend/internal/companyfetch"
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
 )
 
 // fetchBytes URLからレスポンスのバイト列とContent-TypeのCharsetを返す
 func fetchBytes(url string) ([]byte, string, error) {
+	return fetchBytesWith(&http.Client{Timeout: 30 * time.Second}, url)
+}
+
+// fetchBytesWith は fetchBytes と同じだが、リダイレクトの扱いなどを client で指定できる。
+func fetchBytesWith(client *http.Client, url string) ([]byte, string, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SocAI/1.0; +https://example.com/bot)")
-	client := &http.Client{Timeout: 30 * time.Second}
+	req.Header.Set("User-Agent", companyfetch.UserAgent())
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, "", err
@@ -69,7 +74,7 @@ func fetchText(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SocAI/1.0; +https://example.com/bot)")
+	req.Header.Set("User-Agent", companyfetch.UserAgent())
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
