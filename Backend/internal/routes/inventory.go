@@ -69,6 +69,7 @@ func Inventory() []Route {
 	SetupGitHubRoutes(api, nil, "", nil, nil, budget)
 	SetupESRoutes(api, nil, nil, "", nil, nil, budget)
 	SetupScheduleRoutes(api, nil, "", nil, nil)
+	SetupGraduateOutcomeRoutes(api, nil, "", nil, nil)
 	SetupPortfolioRoutes(api, nil, "", nil, nil)
 	SetupNotificationRoutes(api, nil, "", nil, nil)
 	SetupGoogleCalendarRoutes(api, nil, "", nil, nil)
