@@ -1413,21 +1413,25 @@ paths:
     post:
       tags: [interviews]
       summary: 1ターンを開始する
+      description: "発話数・StartedAt からの経過時間・（フラグ有効時）予算の上限に達すると、AI を呼ばずに固定の締め文と limit_reached=true（limit_reason: utterances / duration / budget）を返す。クライアントは /finish で面接を終える。"
       security: [{ userToken: [] }]
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses:
-        "200": { description: 開始した }
+        "200": { description: 開始した（上限時は締め文と limit_reached） }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: 開始前（ready）のセッション }
 
   /api/interviews/{id}/turn:
     post:
       tags: [interviews]
       summary: 1ターンの応答を処理する
+      description: "発話数・StartedAt からの経過時間・（フラグ有効時）予算の上限に達すると、AI を呼ばずに固定の締め文と limit_reached=true（limit_reason: utterances / duration / budget）を返す。クライアントは /finish で面接を終える。"
       security: [{ userToken: [] }]
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses:
-        "200": { description: 次の質問 }
+        "200": { description: 次の質問（上限時は締め文と limit_reached） }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: 開始前（ready）のセッション }
 
   /api/interviews/{id}/utterances:
     post:

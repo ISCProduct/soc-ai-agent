@@ -22,6 +22,7 @@ Object.assign(globalThis, { TextEncoder, TextDecoder })
 // ここをモックで即解決にすると、更新が半開きで固まるケースを再現できない（#1501）。
 
 import { useInterviewSession, REPORT_RETRY_FAILED_MESSAGE } from '@/app/interview/hooks/useInterviewSession'
+import { LIMIT_REACHED_MESSAGE } from '@/app/interview/finishOutcome'
 import type { InterviewMedia } from '@/app/interview/hooks/useInterviewMedia'
 import type { InterviewCompany, Position } from '@/app/interview/types'
 import type { User } from '@/lib/auth'
@@ -159,9 +160,12 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
   let hangTurnBody: boolean
   /** true の間は /api/auth/session が応答せず固まる（middleware のトークン更新が半開き） */
   let hangAuthSession: boolean
+  /** /start-turn が返すメタ情報 */
+  let startTurnMeta: Record<string, string | boolean>
 
   beforeEach(() => {
     calls = []
+    startTurnMeta = { ai_text: '自己紹介をお願いします' }
     releaseTurn = null
     holdStartTurn = false
     releaseStartTurn = null
@@ -190,7 +194,7 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
         return jsonResponse({ user_token: tokenExpiringIn(3600) })
       }
       if (url.includes('/start-turn')) {
-        if (!holdStartTurn) return turnResponse({ ai_text: '自己紹介をお願いします' })
+        if (!holdStartTurn) return turnResponse(startTurnMeta)
         return new Promise<FakeResponse>(resolve => { releaseStartTurn = resolve })
       }
       if (url.includes('/turn')) {
@@ -268,6 +272,46 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
       await new Promise(resolve => setTimeout(resolve, 0))
     })
     expect(result.current.utteranceSaveFailed).toBe(true)
+
+    unmount()
+  })
+
+  /**
+   * サーバーが上限（発話数・経過時間・予算）に達したと返したら、固定の締め文を表示し、
+   * 既存の終了経路（finishSession）で面接を終えて途中までのレポートを作る（SOCAIAGENT-696）。
+   */
+  it('ターンの応答が limit_reached なら締めの文を出して終了APIを呼ぶ', async () => {
+    const media = fakeMedia()
+    const { result, unmount } = renderSession(media)
+
+    await act(async () => { await result.current.handleJoin() })
+    act(() => { result.current.startRecording() })
+    act(() => { result.current.stopRecording() })
+    act(() => { deliverRecorderStops() })
+    await flush()
+    await act(async () => {
+      releaseTurn?.(turnResponse({ ai_text: '本日の面接はここまでです', limit_reached: true, limit_reason: 'duration' }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    await flush()
+
+    expect(calls.some(u => u.includes('/finish'))).toBe(true)
+    expect(result.current.errorMessage).toBe(LIMIT_REACHED_MESSAGE)
+    expect(result.current.utterances.at(-1)).toEqual({ role: 'ai', text: '本日の面接はここまでです' })
+
+    unmount()
+  })
+
+  it('/start-turn の応答が limit_reached でも終了APIを呼ぶ', async () => {
+    startTurnMeta = { ai_text: '本日の面接はここまでです', limit_reached: true, limit_reason: 'budget' }
+    const media = fakeMedia()
+    const { result, unmount } = renderSession(media)
+
+    await act(async () => { await result.current.handleJoin() })
+    await flush()
+
+    expect(calls.some(u => u.includes('/finish'))).toBe(true)
+    expect(result.current.errorMessage).toBe(LIMIT_REACHED_MESSAGE)
 
     unmount()
   })

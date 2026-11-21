@@ -191,7 +191,7 @@ func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role strin
 	if duplicatesServerSavedUserUtterance(existing, text) {
 		return nil
 	}
-	if len(existing) >= maxUtterancesPerSession {
+	if len(existing) >= utteranceLimit() {
 		return ErrTooManyUtterances
 	}
 	utter := &models.InterviewUtterance{
@@ -255,7 +255,7 @@ func (s *InterviewService) saveTurnUtterances(sessionID uint, turnKey string, ut
 		if text == "" {
 			continue
 		}
-		if count >= maxUtterancesPerSession {
+		if count >= utteranceLimit() {
 			return ErrTooManyUtterances
 		}
 		if runes := []rune(text); len(runes) > maxUtteranceRunes {

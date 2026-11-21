@@ -209,14 +209,15 @@ func TestAIBudgetGuardsAreAttachedToRoutes(t *testing.T) {
 		{http.MethodPost, "/api/companies/validate", deferred},
 		{http.MethodPost, "/api/github/repo/summarize", deferred},
 		{http.MethodPost, "/api/assessments/sessions/1/submit", deferred},
+		// ターンは判定を context に載せ、サービスが AI の前に読む（既定はログのみ、SOCAIAGENT-696）。
+		{http.MethodPost, "/api/interviews/1/turn", deferred},
+		{http.MethodPost, "/api/interviews/1/start-turn", deferred},
 		// 保存済みのレポートをメールで送るだけで AI を呼ばない。
 		{http.MethodPost, "/api/interviews/1/send-report", 0},
 		// 開始後の面接は予算超過で中断しない。ガードに当たらなければよい（want は 0）。
 		// ハンドラが nil なので、ガードを通り抜けた先は 400 や Recover の 500 になる。
 		{http.MethodPost, "/api/interviews/1/utterances", 0},
 		{http.MethodPost, "/api/interviews/1/finish", 0},
-		{http.MethodPost, "/api/interviews/1/turn", 0},
-		{http.MethodPost, "/api/interviews/1/start-turn", 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.method+" "+tt.path, func(t *testing.T) {

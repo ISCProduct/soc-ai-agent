@@ -378,6 +378,15 @@ export function useInterviewSession({
     await playAudioBlob(await trackTurn(receiving), gen)
   }
 
+  /**
+   * サーバーが上限（発話数・経過時間・予算）に達したと返したら、締めの文を表示したまま
+   * 既存の終了経路で面接を終え、途中までのレポートを作る（SOCAIAGENT-696）。
+   * handleStop は応答待ちのターン（＝この応答）を待つので、ここでは待たずに呼ぶ。
+   */
+  const endIfLimitReached = (meta: Record<string, string>) => {
+    if (String(meta.limit_reached) === 'true') void handleStop(false, true)
+  }
+
   const doStartTurn = async (sessionId: number, userId: number) => {
     const companyContextGeneration = companyContextGenerationRef.current
     const receive = async (): Promise<Blob> => {
@@ -428,6 +437,7 @@ export function useInterviewSession({
         historyRef.current.push({ role: 'assistant', content: aiText })
         setUtterances(p => [...p, { role: 'ai', text: aiText }])
       }
+      endIfLimitReached(meta)
       return audio
     }
     const receiving = receive()
@@ -505,7 +515,7 @@ export function useInterviewSession({
     return `interview-${userId}`
   }
 
-  const handleStop = async (forced = false) => {
+  const handleStop = async (forced = false, limitReached = false) => {
     const videoBlob = await media.stopAndCollectVideoBlob()
 
     cleanupConnection()
@@ -516,7 +526,7 @@ export function useInterviewSession({
       setFinishFailed(false)
       setStatus('finished')
       setReportStatus('pending')
-      setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: false, forced }))
+      setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: false, forced, limitReached }))
       return
     }
 
@@ -534,7 +544,7 @@ export function useInterviewSession({
     setFinishFailed(false)
     setStatus('finished')
     setReportStatus('pending')
-    setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: false, forced }))
+    setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: false, forced, limitReached }))
 
     // 動画アップロードは発話保存と独立なので先に始める
     if (videoBlob) {
@@ -566,7 +576,7 @@ export function useInterviewSession({
     } catch {
       // 終了APIの失敗を握りつぶさず、レポート画面にエラーと再試行手段を出す(#1015)
       setFinishFailed(true)
-      setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: true, forced }))
+      setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: true, forced, limitReached }))
     }
     // ポーリングは終了API（=レポート生成のキュー投入）の後に始める。
     // 先に始めるとタイムアウトの3分が生成開始前から減り始める。
@@ -844,6 +854,7 @@ export function useInterviewSession({
         historyRef.current.push({ role: 'assistant', content: aiText })
         setUtterances(p => [...p, { role: 'ai', text: aiText }])
       }
+      endIfLimitReached(meta)
       return audio
     }
     try {
