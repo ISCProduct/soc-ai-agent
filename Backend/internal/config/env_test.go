@@ -2,30 +2,49 @@ package config
 
 import "testing"
 
-func TestEnvGetters(t *testing.T) {
-	t.Setenv("APP_ENV", "production")
-	t.Setenv("RAG_REVIEW_URL", "  http://rag:9000 \n")
-	t.Setenv("USER_SECRET", " u\n")
-	t.Setenv("ADMIN_SECRET", " a\n")
-	t.Setenv("TOKEN_ENCRYPTION_KEY", " k\n")
-	t.Setenv("FRONTEND_URL", " http://fe\n")
+func TestIsProduction(t *testing.T) {
+	tests := []struct {
+		env  string
+		want bool
+	}{
+		{"production", true},
+		{"staging", false},
+		{"", false},
+		{" production", false}, // 元の実装どおり空白は除かない
+	}
+	for _, tt := range tests {
+		t.Run(tt.env, func(t *testing.T) {
+			t.Setenv("APP_ENV", tt.env)
+			if got := IsProduction(); got != tt.want {
+				t.Errorf("APP_ENV=%q: IsProduction = %v, want %v", tt.env, got, tt.want)
+			}
+		})
+	}
+}
 
-	if !IsProduction() {
-		t.Error("APP_ENV=production で IsProduction が false")
+func TestStringGetters(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		get  func() string
+		val  string
+		want string
+	}{
+		{"RAG URL は空白を除く", "RAG_REVIEW_URL", RAGReviewURL, "  http://rag:9000 \n", "http://rag:9000"},
+		{"RAG URL 未設定は空", "RAG_REVIEW_URL", RAGReviewURL, "", ""},
+		{"FRONTEND_URL は空白を除く", "FRONTEND_URL", FrontendURL, " http://fe\n", "http://fe"},
+		// 検証側 LoadConfig と同じ値で署名するため、秘密鍵は空白を除かない
+		{"USER_SECRET はそのまま", "USER_SECRET", UserSecret, " u\n", " u\n"},
+		{"ADMIN_SECRET はそのまま", "ADMIN_SECRET", AdminSecret, " a\n", " a\n"},
+		{"TOKEN_ENCRYPTION_KEY はそのまま", "TOKEN_ENCRYPTION_KEY", TokenEncryptionKey, " k\n", " k\n"},
+		{"USER_SECRET 未設定は空", "USER_SECRET", UserSecret, "", ""},
 	}
-	if got := RAGReviewURL(); got != "http://rag:9000" {
-		t.Errorf("RAGReviewURL = %q, 前後の空白が除かれるべき", got)
-	}
-	for name, got := range map[string]string{
-		"u": UserSecret(), "a": AdminSecret(), "k": TokenEncryptionKey(), "http://fe": FrontendURL(),
-	} {
-		if got != name {
-			t.Errorf("getter の値 = %q, want %q", got, name)
-		}
-	}
-
-	t.Setenv("APP_ENV", "staging")
-	if IsProduction() {
-		t.Error("APP_ENV=staging で IsProduction が true")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(tt.key, tt.val)
+			if got := tt.get(); got != tt.want {
+				t.Errorf("%s=%q: got %q, want %q", tt.key, tt.val, got, tt.want)
+			}
+		})
 	}
 }
