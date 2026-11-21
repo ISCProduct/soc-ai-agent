@@ -183,6 +183,14 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 			slog.Warn("scout index reconcile incomplete", "attempted", attempted, "failed", failed)
 		}
 
+		// 使われなくなったゲスト（リフレッシュトークンの最終発行から7日）を退会させる（SOCAIAGENT-689）。
+		// 保持期間なしで退会させるので、直後のパージで関連データごと物理削除される。
+		if expired, err := userDeletionService.ExpireStaleGuests(context.Background(), time.Now().UTC()); err != nil {
+			slog.Error("expire stale guests failed", "error", err)
+		} else if expired > 0 {
+			slog.Info("expired stale guests", "count", expired)
+		}
+
 		n, err := userDeletionService.PurgeExpiredWithdrawals(time.Now().UTC())
 		if err != nil {
 			slog.Error("purge expired withdrawals failed", "error", err)

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"Backend/internal/models"
+	"context"
 	"errors"
 	"time"
 )
@@ -41,4 +42,8 @@ type UserWithdrawalRepository interface {
 	// FindWithdrawalState は users の id と withdrawn_at だけを読む(認証のたびに呼ばれる)。
 	// 行が無ければ found=false(物理削除済み)。
 	FindWithdrawalState(userID uint) (user *models.User, found bool, err error)
+
+	// ListStaleGuestIDs は、作成が cutoff より前で、cutoff 以降にリフレッシュトークンが発行されていない
+	// 未退会のゲスト(管理者を除く)の ID を、ID 順に最大 limit 件返す(SOCAIAGENT-689)。
+	ListStaleGuestIDs(ctx context.Context, cutoff time.Time, limit int) ([]uint, error)
 }

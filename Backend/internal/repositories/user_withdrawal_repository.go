@@ -3,6 +3,7 @@ package repositories
 import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -95,6 +96,25 @@ func (r *UserWithdrawalRepository) MarkPurged(withdrawnUserID uint, at time.Time
 	return r.db.Model(&models.WithdrawnUser{}).Where("id = ?", withdrawnUserID).Updates(map[string]any{
 		"purged_at": at,
 	}).Error
+}
+
+// ListStaleGuestIDs は掃除対象のゲストの ID を返す(SOCAIAGENT-689)。
+// 「最終利用」は列を足さず、リフレッシュトークンの発行日時で測る(ゲストは使うたびにローテーションで発行される)。
+// トークンが1本も無いゲストは作成日時で測る。
+// ponytail: users.is_guest に索引は無い。日次1回・件数上限つきなので全件走査で足りる。重くなったら索引を足す。
+func (r *UserWithdrawalRepository) ListStaleGuestIDs(ctx context.Context, cutoff time.Time, limit int) ([]uint, error) {
+	// GORM は Limit(-1) を「上限なし」と解釈するので、0 以下はここで弾く。
+	if limit <= 0 {
+		return nil, fmt.Errorf("limit は 1 以上を指定してください: %d", limit)
+	}
+	var ids []uint
+	err := r.db.WithContext(ctx).Model(&models.User{}).
+		Where("is_guest = ? AND is_admin = ? AND withdrawn_at IS NULL AND created_at < ?", true, false, cutoff).
+		Where("NOT EXISTS (SELECT 1 FROM user_refresh_tokens t WHERE t.user_id = users.id AND t.created_at >= ?)", cutoff).
+		Order("id").
+		Limit(limit).
+		Pluck("id", &ids).Error
+	return ids, err
 }
 
 func (r *UserWithdrawalRepository) FindWithdrawalState(userID uint) (*models.User, bool, error) {

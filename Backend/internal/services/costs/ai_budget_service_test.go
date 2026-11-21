@@ -27,6 +27,8 @@ type fakeAIBudgetRepository struct {
 	usageCalls int
 	list       []models.AIBudgetSetting
 	batchCalls map[string][]uint
+	isGuest    bool
+	guestCalls int
 }
 
 func budgetTestKey(scope string, scopeID uint) string {
@@ -82,6 +84,11 @@ func (r *fakeAIBudgetRepository) UsageCosts(
 	r.dayStart, r.monthStart = dayStart, monthStart
 	usage := r.usage[budgetTestKey(scope, scopeID)]
 	return usage.daily, usage.monthly, nil
+}
+
+func (r *fakeAIBudgetRepository) IsGuestUser(context.Context, uint) (bool, error) {
+	r.guestCalls++
+	return r.isGuest, nil
 }
 
 func (r *fakeAIBudgetRepository) ScopeExists(context.Context, string, uint) (bool, error) {
@@ -254,5 +261,45 @@ func TestAIBudgetListSettingsWithUsage_種類ごとにまとめて読む(t *test
 	}
 	if rows[0].DailyUsedUSD != 20 || rows[1].MonthlyUsedUSD != 3 || rows[2].DailyUsedUSD != 0 {
 		t.Fatalf("rows=%+v", rows)
+	}
+}
+
+// ゲストの日次上限は環境変数で設定でき、既定（未設定）は上限なし (SOCAIAGENT-689)。
+func TestAIBudgetStatus_GuestDailyLimit(t *testing.T) {
+	userKey := budgetTestKey(models.AIBudgetScopeUser, 1)
+	tests := []struct {
+		name           string
+		env            string
+		isGuest        bool
+		settings       map[string]models.AIBudgetSetting
+		daily          float64
+		wantAllowed    bool
+		wantGuestCalls int
+	}{
+		{name: "既定は上限なしでゲスト判定もしない", env: "", isGuest: true, daily: 100, wantAllowed: true},
+		{name: "0は上限なし", env: "0", isGuest: true, daily: 100, wantAllowed: true},
+		{name: "ゲストは日次上限内なら許可", env: "1.5", isGuest: true, daily: 1, wantAllowed: true, wantGuestCalls: 1},
+		{name: "ゲストは日次上限に達したら拒否", env: "1.5", isGuest: true, daily: 1.5, wantAllowed: false, wantGuestCalls: 1},
+		{name: "通常ユーザーには効かない", env: "1.5", isGuest: false, daily: 100, wantAllowed: true, wantGuestCalls: 1},
+		{
+			name: "個別設定があればそちらを使う", env: "1.5", isGuest: true, daily: 3, wantAllowed: true,
+			settings: map[string]models.AIBudgetSetting{userKey: {DailyLimitUSD: 5}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GUEST_AI_DAILY_LIMIT_USD", tt.env)
+			repo := &fakeAIBudgetRepository{
+				settings: tt.settings, isGuest: tt.isGuest,
+				usage: map[string]fakeAIBudgetUsage{userKey: {daily: tt.daily, monthly: tt.daily}},
+			}
+			status, err := NewAIBudgetService(repo).Status(context.Background(), 1)
+			if err != nil {
+				t.Fatalf("Status returned error: %v", err)
+			}
+			if status.Allowed != tt.wantAllowed || repo.guestCalls != tt.wantGuestCalls {
+				t.Fatalf("allowed=%v guestCalls=%d, want %v %d", status.Allowed, repo.guestCalls, tt.wantAllowed, tt.wantGuestCalls)
+			}
+		})
 	}
 }

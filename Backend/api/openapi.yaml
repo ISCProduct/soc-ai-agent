@@ -784,6 +784,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AuthResponse" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/auth/verify-email:
     get:

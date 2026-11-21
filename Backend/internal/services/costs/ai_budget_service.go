@@ -50,12 +50,15 @@ type aiBudgetRepository interface {
 	UsageCosts(ctx context.Context, scope string, scopeID uint, dayStart, monthStart time.Time, realtimeRatePerMinute float64) (daily, monthly float64, err error)
 	UsageCostsByScope(ctx context.Context, scope string, scopeIDs []uint, dayStart, monthStart time.Time, realtimeRatePerMinute float64) (map[uint]repositories.AIBudgetUsage, error)
 	ScopeExists(context.Context, string, uint) (bool, error)
+	IsGuestUser(context.Context, uint) (bool, error)
 }
 
 type AIBudgetService struct {
 	repo                  aiBudgetRepository
 	now                   func() time.Time
 	realtimeRatePerMinute float64
+	// guestDailyLimitUSD は個別設定の無いゲストに掛ける日次上限（USD）。0 以下は上限なし（既定）(SOCAIAGENT-689)。
+	guestDailyLimitUSD float64
 }
 
 func NewAIBudgetService(repo aiBudgetRepository) *AIBudgetService {
@@ -63,6 +66,8 @@ func NewAIBudgetService(repo aiBudgetRepository) *AIBudgetService {
 		repo:                  repo,
 		now:                   time.Now,
 		realtimeRatePerMinute: shared.GetFloatEnv("INTERVIEW_COST_PER_MIN_USD", 0.18),
+		// 金額は未定のため既定は上限なし。運用で決まったらタスク定義の環境変数だけで入れられるようにする。
+		guestDailyLimitUSD: shared.GetFloatEnv("GUEST_AI_DAILY_LIMIT_USD", 0),
 	}
 }
 
@@ -153,6 +158,11 @@ func (s *AIBudgetService) scopeStatus(
 		return AIBudgetScopeStatus{}, err
 	}
 	status := AIBudgetScopeStatus{Scope: scope, ScopeID: scopeID}
+	if setting == nil && scope == models.AIBudgetScopeUser {
+		if setting, err = s.guestDefaultSetting(ctx, scopeID); err != nil {
+			return AIBudgetScopeStatus{}, err
+		}
+	}
 	if setting == nil {
 		return status, nil
 	}
@@ -168,6 +178,19 @@ func (s *AIBudgetService) scopeStatus(
 	status.Daily = budgetPeriodStatus(setting.DailyLimitUSD, daily)
 	status.Monthly = budgetPeriodStatus(setting.MonthlyLimitUSD, monthly)
 	return status, nil
+}
+
+// guestDefaultSetting は個別設定の無いゲストに掛ける既定の上限を返す。上限なし・ゲストでなければ nil。
+// 上限が設定されていないときはゲスト判定の読み取りもしない（既定で余分な DB 読み取りを増やさない）。
+func (s *AIBudgetService) guestDefaultSetting(ctx context.Context, userID uint) (*models.AIBudgetSetting, error) {
+	if !(s.guestDailyLimitUSD > 0) || math.IsInf(s.guestDailyLimitUSD, 0) {
+		return nil, nil
+	}
+	isGuest, err := s.repo.IsGuestUser(ctx, userID)
+	if err != nil || !isGuest {
+		return nil, err
+	}
+	return &models.AIBudgetSetting{Scope: models.AIBudgetScopeUser, ScopeID: userID, DailyLimitUSD: s.guestDailyLimitUSD}, nil
 }
 
 // budgetPeriodStatus は期間の状態を作る。上限 0 は「上限なし」で、超過にしない。

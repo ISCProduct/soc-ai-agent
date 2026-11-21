@@ -43,11 +43,21 @@ type auditRecorder interface {
 	Record(actorEmail, action, targetType string, targetID uint, metadata map[string]any)
 }
 
-// UserDeletionActor は削除実行者（本人 / 管理者）。
+// UserDeletionActor は削除実行者（本人 / 管理者 / 期限切れゲストの掃除）。
 type UserDeletionActor struct {
-	Kind  string // self | admin
+	Kind  string // self | admin | guest_expired
 	Email string
 }
+
+// actorKindGuestExpired は、使われなくなったゲストを掃除ジョブが退会させるときの実行者 (SOCAIAGENT-689)。
+const actorKindGuestExpired = "guest_expired"
+
+// StaleGuestAfter は、リフレッシュトークンの最終発行からゲストを掃除するまでの期間 (SOCAIAGENT-689)。
+const StaleGuestAfter = 7 * 24 * time.Hour
+
+// staleGuestBatchLimit は1回の掃除で退会させるゲストの上限。退会ごとに RAG への同期が走るので、1回の実行を短く保つ。
+// 残りは翌日の実行で消す。
+const staleGuestBatchLimit = 500
 
 // UserDeletionService は退会（論理）と猶予後の物理パージを担当する。
 type UserDeletionService struct {
@@ -88,12 +98,44 @@ type UserAccessGuard interface {
 
 // DeleteUser は退会処理（論理削除）。S3・関連行は残し、閲覧・ログインを不可にする。
 func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) error {
+	now := time.Now().UTC()
+	return s.withdraw(userID, actor, now, WithdrawalPurgeAfter(now))
+}
+
+// ExpireStaleGuests は、リフレッシュトークンの最終発行から StaleGuestAfter 使われていないゲストを、
+// 退会と同じ経路で退会させる (SOCAIAGENT-689)。ゲストは保持期間を置かず purge_after を now にするので、
+// 続けて PurgeExpiredWithdrawals を呼ぶと、関連データごと物理削除される。退会させた件数を返す。
+func (s *UserDeletionService) ExpireStaleGuests(ctx context.Context, now time.Time) (int, error) {
+	if s.repo == nil {
+		return 0, errors.New("database not configured")
+	}
+	now = now.UTC()
+	ids, err := s.repo.ListStaleGuestIDs(ctx, now.Add(-StaleGuestAfter), staleGuestBatchLimit)
+	if err != nil {
+		return 0, err
+	}
+	expired := 0
+	for _, id := range ids {
+		err := s.withdraw(id, UserDeletionActor{Kind: actorKindGuestExpired}, now, now)
+		if errors.Is(err, ErrAlreadyWithdrawn) {
+			continue
+		}
+		if err != nil {
+			// 1件の失敗で全体を止めない。次回の実行で再試行される。
+			log.Printf("[UserDeletion] guest expire failed user_id=%d: %v", id, err)
+			continue
+		}
+		expired++
+	}
+	return expired, nil
+}
+
+// withdraw は論理退会の本体。purgeAfter を過ぎると PurgeExpiredWithdrawals が物理削除する。
+func (s *UserDeletionService) withdraw(userID uint, actor UserDeletionActor, now, purgeAfter time.Time) error {
 	if s.repo == nil {
 		return errors.New("database not configured")
 	}
 
-	now := time.Now().UTC()
-	purgeAfter := WithdrawalPurgeAfter(now)
 	var email string
 	var keyCount int
 
@@ -105,11 +147,15 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 
 		reason := "self"
 		actorEmail := email
-		if actor.Kind == "admin" {
+		switch actor.Kind {
+		case "admin":
 			reason = "admin"
 			if actor.Email != "" {
 				actorEmail = actor.Email
 			}
+		case actorKindGuestExpired:
+			reason = actorKindGuestExpired
+			actorEmail = "system"
 		}
 
 		return models.WithdrawnUser{
@@ -129,18 +175,24 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 
 	action := "user.self_withdraw"
 	actorEmail := email
-	if actor.Kind == "admin" {
+	retentionMonths := WithdrawalRetentionMonths
+	switch actor.Kind {
+	case "admin":
 		action = "user.admin_withdraw"
 		if actor.Email != "" {
 			actorEmail = actor.Email
 		}
+	case actorKindGuestExpired:
+		action = "user.guest_expire"
+		actorEmail = "system"
+		retentionMonths = 0
 	}
 	if s.audit != nil {
 		s.audit.Record(actorEmail, action, "user", userID, map[string]any{
 			"deleted_user_email_masked": maskEmail(email),
 			"purge_after":               purgeAfter.Format(time.RFC3339),
 			"s3_object_count":           keyCount,
-			"retention_months":          WithdrawalRetentionMonths,
+			"retention_months":          retentionMonths,
 		})
 	}
 
