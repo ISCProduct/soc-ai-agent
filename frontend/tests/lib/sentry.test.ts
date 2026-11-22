@@ -49,7 +49,7 @@ describe('scrubSentryEvent', () => {
 
 // httpContextIntegration が window.location.href をそのまま request.url に入れるため、
 // query_string を空にするだけでは足りない。クエリにトークンを載せる画面が実在する:
-//   /verify-email?token= / /company-portal/setup?token= / /auth/callback?user=
+//   /verify-email?token= / /company-portal/setup?token= / /auth/callback?code=
 describe('scrubSentryEvent の URL', () => {
   it('request.url のクエリを落とす', () => {
     const event = {
@@ -63,7 +63,7 @@ describe('scrubSentryEvent の URL', () => {
 
   it('Referer も落とす（遷移元のクエリにトークンが載る）', () => {
     const event = {
-      request: { headers: { Referer: 'https://shukatsu-ai.jp/auth/callback?user=BASE64' } },
+      request: { headers: { Referer: 'https://shukatsu-ai.jp/auth/callback?code=ONETIME' } },
     } as unknown as ErrorEvent
 
     expect(scrubSentryEvent(event)?.request?.headers?.Referer).toBeUndefined()

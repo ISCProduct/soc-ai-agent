@@ -6,12 +6,10 @@ import (
 	authsvc "Backend/internal/services/auth"
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/organization"
-	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 
 	"github.com/labstack/echo/v4"
 )
@@ -26,19 +24,10 @@ func NewOAuthController(oauthService ifaces.OAuthService, organizations *organiz
 	return &OAuthController{oauthService: oauthService, organizations: organizations, codes: codes}
 }
 
-// oauthCodeExchangeEnabled は OAuth 完了時にトークンを URL へ載せず、短命コードを渡すか (SOCAIAGENT-683)。
-// FE がコード交換に対応してから true にする。false の間は従来どおり user= で渡す。
-func oauthCodeExchangeEnabled() bool {
-	return os.Getenv("OAUTH_CODE_EXCHANGE") == "true"
-}
-
 // completeLogin は OAuth 完了後に FE の /auth/callback へ戻す。
+// トークンは URL に載せず、短命コードだけを渡す (SOCAIAGENT-683 / 707)。
 func (c *OAuthController) completeLogin(ctx echo.Context, provider, redirectBase, bind string, resp *authsvc.AuthResponse) error {
 	userData, _ := json.Marshal(resp)
-	if !oauthCodeExchangeEnabled() {
-		redirectURL := redirectBase + "/auth/callback?provider=" + provider + "&user=" + base64.URLEncoding.EncodeToString(userData)
-		return ctx.Redirect(http.StatusTemporaryRedirect, redirectURL)
-	}
 	// ログインを始めたブラウザの照合値が無いと、交換時に本人のブラウザか確かめられない
 	if bind == "" {
 		log.Printf("[OAuth] %s callback: missing bind", provider)

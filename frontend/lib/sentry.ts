@@ -20,7 +20,7 @@ const SENSITIVE_HEADERS = new Set([
  * クエリにワンタイムトークンやユーザー情報を載せている画面が実在する:
  *   /verify-email?token=...            メール認証トークン
  *   /company-portal/setup?token=...    企業担当者の招待トークン
- *   /auth/callback?user=...            Base64 のユーザー情報
+ *   /auth/callback?code=...            OAuth 完了時の短命コード
  * これらのページでJSエラーが1件起きるだけで、そのまま Sentry へ送られてしまう。
  */
 function stripUrlSecrets(url: string): string {

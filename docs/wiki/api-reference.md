@@ -70,7 +70,6 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
   そのハッシュを `bind` として Backend の OAuth 開始へ渡します。
 - `/auth/callback?code=...` で戻ってきたら、フロントの `POST /api/auth/oauth/exchange` が
   Cookie の verifier とコードを Backend の `/api/auth/oauth/exchange` に送り、セッション Cookie を張ります。
-  旧方式の `/auth/callback?user=...` も移行期間中は読みます。
 - フロントは7日固定（`frontend/lib/auth/admin-token.ts`）で期限を判定するため、
   `ADMIN_TOKEN_TTL_HOURS` を短縮するときはフロント側も同時に変更してください。
 
@@ -164,9 +163,9 @@ Referer に user_id が残るだけです。
 | GET | `/api/auth/github` | GitHub OAuth開始。`bind` は同上 |
 | POST | `/api/auth/oauth/exchange` | OAuth 完了時の短命コードを認証情報と交換する（FE の Route Handler からサーバー間で呼ぶ） |
 
-`OAUTH_CODE_EXCHANGE=true` のとき、OAuth コールバックはトークンを URL に載せず、
-`/auth/callback?code=...` へ戻します。コードは60秒・1回限りで、開始時の `bind` と対になる
-`verifier` を添えたときだけ交換できます。未設定（既定）の間は従来どおり `user=` で渡します。
+OAuth コールバックはトークンを URL に載せず、`/auth/callback?code=...` へ戻します。
+コードは60秒・1回限りで、開始時の `bind` と対になる `verifier` を添えたときだけ交換できます。
+開始時の `bind` が無い・形式が違うときはログインを止めます（`?error=auth_failed`）。
 コードの保管は `REDIS_URL` があれば Redis、無ければプロセス内メモリです（複数タスク構成では Redis 必須）。
 
 ### トークン仕様（#616）

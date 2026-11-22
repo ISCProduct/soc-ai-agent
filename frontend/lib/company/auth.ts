@@ -1,5 +1,4 @@
 const COMPANY_AUTH_USER_KEY = 'company_user'
-const COMPANY_AUTH_TOKEN_KEY = 'company_token'
 
 function getSessionStorage(): Storage | null {
   if (typeof window === 'undefined') return null
@@ -20,11 +19,6 @@ export interface CompanyAuthResponse extends CompanyUser {
   refresh_token?: string
 }
 
-// トークンは httpOnly Cookie にだけ置く（SOCAIAGENT-683）。以前の版が残した値を消す。
-function clearLegacyCompanyToken() {
-  getSessionStorage()?.removeItem(COMPANY_AUTH_TOKEN_KEY)
-}
-
 function persistCompanyAuth(data: CompanyAuthResponse) {
   const session = getSessionStorage()
   if (!session) return
@@ -35,7 +29,6 @@ function persistCompanyAuth(data: CompanyAuthResponse) {
     name: data.name,
     role: data.role,
   }))
-  clearLegacyCompanyToken()
 
   // ログイン系の Route Handler がすでに httpOnly Cookie を張り、トークンを返さない（SOCAIAGENT-683）。
   // トークンが届いたとき（古い Route Handler からの応答）だけ Cookie にする。
@@ -120,13 +113,11 @@ export const companyAuthService = {
   // 企業APIリクエスト用のヘッダー。X-Company-User-Token は middleware が httpOnly Cookie から付ける
   // （SOCAIAGENT-683）ので、画面からは何も付けない。
   getAuthHeaders(): Record<string, string> {
-    clearLegacyCompanyToken()
     return {}
   },
 
   logout() {
     getSessionStorage()?.removeItem(COMPANY_AUTH_USER_KEY)
-    getSessionStorage()?.removeItem(COMPANY_AUTH_TOKEN_KEY)
     // httpOnly Cookieを削除（Backend側でリフレッシュトークンも失効させる）
     fetch('/api/company-auth/session', { method: 'DELETE' }).catch(() => {})
   },

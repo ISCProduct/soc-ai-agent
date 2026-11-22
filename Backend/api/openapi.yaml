@@ -940,8 +940,7 @@ paths:
       tags: [auth]
       summary: OAuth 完了時の短命コードを認証情報と交換する
       description: |
-        OAUTH_CODE_EXCHANGE=true のとき、OAuth コールバックはトークンを URL に載せず
-        `/auth/callback?code=...` へ戻す。FE の Route Handler がこの API をサーバー間で呼び、
+        OAuth コールバックはトークンを URL に載せず `/auth/callback?code=...` へ戻す。FE の Route Handler がこの API をサーバー間で呼び、
         結果を httpOnly Cookie にする。コードは60秒・1回限り。verifier はログインを始めた
         ブラウザだけが持つ値で、開始時の `bind`（base64url の SHA-256）と合わなければ拒否する。
       security: []
@@ -956,7 +955,7 @@ paths:
                 code: { type: string }
                 verifier: { type: string }
       responses:
-        "200": { description: 認証情報（OAuth コールバックで従来 user= に載せていた内容） }
+        "200": { description: 認証情報（AuthResponse） }
         "400": { description: リクエスト不正、またはコードが無効・使用済み・期限切れ・照合値不一致 }
 
   /api/auth/github:

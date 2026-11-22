@@ -65,19 +65,18 @@ func TestOAuthCallback_CodeExchange(t *testing.T) {
 
 	cases := []struct {
 		name     string
-		flag     string
 		bind     string
 		wantPath string
 		wantKeys []string // Location のクエリに必ずあるもの
 		noKeys   []string // Location のクエリに無いこと
 	}{
-		{"フラグオフは従来どおり user= で渡す", "", bind, "/auth/callback", []string{"user"}, []string{"code"}},
-		{"フラグオンはトークンを載せずコードだけ渡す", "true", bind, "/auth/callback", []string{"code"}, []string{"user"}},
-		{"フラグオンで照合値が無ければログインを止める", "true", "", "", []string{"error"}, []string{"user", "code"}},
+		{"トークンを載せずコードだけ渡す", bind, "/auth/callback", []string{"code"}, []string{"user"}},
+		{"照合値が無ければログインを止める", "", "", []string{"error"}, []string{"user", "code"}},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("OAUTH_CODE_EXCHANGE", tt.flag)
+			// 旧方式のフラグが残っていても、旧経路（user=）に戻らないこと (SOCAIAGENT-707)
+			t.Setenv("OAUTH_CODE_EXCHANGE", "false")
 			c := NewOAuthController(fakeOAuthService{}, nil, authsvc.NewOAuthCodeStore(nil))
 			loc := googleCallback(t, c, tt.bind)
 			if loc.Path != tt.wantPath {
@@ -93,7 +92,7 @@ func TestOAuthCallback_CodeExchange(t *testing.T) {
 					t.Fatalf("query %q があってはいけない: %s", k, loc)
 				}
 			}
-			if tt.flag == "true" && strings.Contains(loc.String(), "user-jwt") {
+			if strings.Contains(loc.String(), "user-jwt") {
 				t.Fatal("URL にトークンが載っている")
 			}
 		})
@@ -103,7 +102,6 @@ func TestOAuthCallback_CodeExchange(t *testing.T) {
 func TestOAuthExchangeCode(t *testing.T) {
 	t.Setenv("OAUTH_STATE_SECRET", "test-secret")
 	t.Setenv("APP_URL", "https://app.example")
-	t.Setenv("OAUTH_CODE_EXCHANGE", "true")
 
 	exchange := func(c *OAuthController, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/oauth/exchange", strings.NewReader(body))

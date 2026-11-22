@@ -111,7 +111,6 @@ test.describe('認証フロー', () => {
       }
       sessionStorage.setItem('user', JSON.stringify(userData))
       localStorage.setItem('user', JSON.stringify(userData))
-      localStorage.setItem('user_token', 'expired-user-token')
     })
 
     const visited: string[] = []
