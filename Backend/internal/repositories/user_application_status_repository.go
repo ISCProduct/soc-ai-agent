@@ -1,11 +1,13 @@
 package repositories
 
 import (
-	"Backend/domain/repository"
-	"Backend/internal/models"
+	"context"
 	"errors"
 	"fmt"
 	"time"
+
+	"Backend/domain/repository"
+	"Backend/internal/models"
 
 	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
@@ -380,11 +382,11 @@ func (r *UserApplicationStatusRepository) CreateActive(userID, companyID, matchI
 }
 
 // RecordStatusEvent は遷移履歴を1行足す。応募本体の成否とは別トランザクション。
-func (r *UserApplicationStatusRepository) RecordStatusEvent(ev *models.ApplicationStatusEvent) error {
+func (r *UserApplicationStatusRepository) RecordStatusEvent(ctx context.Context, ev *models.ApplicationStatusEvent) error {
 	if ev.CreatedAt.IsZero() {
 		ev.CreatedAt = time.Now()
 	}
-	return r.db.Create(ev).Error
+	return r.db.WithContext(ctx).Create(ev).Error
 }
 
 // isDuplicateEntryErr はMySQLの一意制約違反(Error 1062)かどうかを判定する。

@@ -1,16 +1,18 @@
 package application
 
 import (
-	"Backend/domain/repository"
-	"Backend/internal/models"
-	"Backend/internal/repositories"
-	"Backend/internal/services/notification"
-	"Backend/internal/services/shared"
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"slices"
 	"time"
+
+	"Backend/domain/repository"
+	"Backend/internal/models"
+	"Backend/internal/repositories"
+	"Backend/internal/services/notification"
+	"Backend/internal/services/shared"
 )
 
 // CollectiveActionRecorder は集合知ログへの書き込み面（#205）。
@@ -26,7 +28,7 @@ type ScoreSnapshotReader interface {
 
 // StatusEventRecorder は選考遷移の履歴。失敗しても応募やステータス更新は成功のままにする。
 type StatusEventRecorder interface {
-	RecordStatusEvent(ev *models.ApplicationStatusEvent) error
+	RecordStatusEvent(ctx context.Context, ev *models.ApplicationStatusEvent) error
 }
 
 // ApplicationService 応募・選考ステータス管理サービス
@@ -221,7 +223,8 @@ func (s *ApplicationService) recordStatusEvent(applicationID, userID uint, fromS
 	if s.events == nil || applicationID == 0 {
 		return
 	}
-	err := s.events.RecordStatusEvent(&models.ApplicationStatusEvent{
+	// 応募サービスはまだリクエストの context を受け取らない。履歴の書き込みだけ先に受け口を揃える。
+	err := s.events.RecordStatusEvent(context.Background(), &models.ApplicationStatusEvent{
 		ApplicationID: applicationID,
 		UserID:        userID,
 		FromStatus:    fromStatus,

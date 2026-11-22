@@ -152,7 +152,7 @@ func TestApply_SucceedsAndMarksApplied(t *testing.T) {
 
 type failEvents struct{ called int }
 
-func (f *failEvents) RecordStatusEvent(*models.ApplicationStatusEvent) error {
+func (f *failEvents) RecordStatusEvent(context.Context, *models.ApplicationStatusEvent) error {
 	f.called++
 	return errors.New("history down")
 }
