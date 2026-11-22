@@ -200,12 +200,15 @@ func fetchRobots(ctx context.Context, siteURL string) (*robotsRules, error) {
 	}
 	robotsURL := u.Scheme + "://" + u.Host + "/robots.txt"
 
+	if err := checkFetchURL(robotsURL); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, robotsURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", companyfetch.UserAgent())
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	resp, err := newFetchClient(15*time.Second, nil).Do(req)
 	if err != nil {
 		return nil, err
 	}

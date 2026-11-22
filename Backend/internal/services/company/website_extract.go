@@ -136,18 +136,12 @@ func fetchPageHTML(ctx context.Context, robots *robotsRules, pageURL string) (st
 	if err != nil {
 		return "", err
 	}
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("リダイレクトが多すぎます")
-			}
-			if req.URL.Host == origin.Host && !robots.allows(req.URL.String()) {
-				return fmt.Errorf("robots.txt で禁止されたページへのリダイレクトです: %s", req.URL)
-			}
-			return nil
-		},
-	}
+	client := newFetchClient(30*time.Second, func(req *http.Request) error {
+		if req.URL.Host == origin.Host && !robots.allows(req.URL.String()) {
+			return fmt.Errorf("robots.txt で禁止されたページへのリダイレクトです: %s", req.URL)
+		}
+		return nil
+	})
 
 	type result struct {
 		html string

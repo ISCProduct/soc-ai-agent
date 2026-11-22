@@ -293,14 +293,16 @@ func buildOpenworkSalaryText(salary int) string {
 
 // fetchOpenworkBytes URLからレスポンスのバイト列とcharsetを返す
 func fetchOpenworkBytes(url string) ([]byte, string, error) {
+	if err := checkFetchURL(url); err != nil {
+		return nil, "", err
+	}
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, "", err
 	}
 	req.Header.Set("User-Agent", companyfetch.UserAgent())
 	req.Header.Set("Accept-Language", "ja,en;q=0.9")
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := newFetchClient(30*time.Second, nil).Do(req)
 	if err != nil {
 		return nil, "", err
 	}

@@ -79,6 +79,7 @@ func TestFetchRobots(t *testing.T) {
 				fmt.Fprint(w, tt.body)
 			}))
 			defer srv.Close()
+			allowTestServer(t, srv)
 			t.Setenv("COMPANY_BOT_CONTACT", "https://bot.example.test/")
 
 			r, err := fetchRobots(context.Background(), srv.URL+"/")
@@ -109,6 +110,7 @@ func TestWebsite_robotsで禁止されたページは読まない(t *testing.T) 
 		}
 	}))
 	defer srv.Close()
+	allowTestServer(t, srv)
 
 	if _, err := collectWebsiteText(context.Background(), srv.URL+"/"); err != nil {
 		t.Fatalf("本文が取れなかった: %v", err)
@@ -134,6 +136,7 @@ func TestWebsite_トップが禁止なら何も読まない(t *testing.T) {
 		fmt.Fprintf(w, `<html><body><p>%s</p></body></html>`, filler(60))
 	}))
 	defer srv.Close()
+	allowTestServer(t, srv)
 
 	if _, err := collectWebsiteText(context.Background(), srv.URL+"/"); err == nil {
 		t.Error("全面禁止なのでエラーを返すべき")
@@ -154,6 +157,7 @@ func TestWebsite_robotsが5xxなら何も読まない(t *testing.T) {
 		fmt.Fprintf(w, `<html><body><p>%s</p></body></html>`, filler(60))
 	}))
 	defer srv.Close()
+	allowTestServer(t, srv)
 
 	if _, err := collectWebsiteText(context.Background(), srv.URL+"/"); err == nil {
 		t.Error("robots.txt を確認できないのでエラーを返すべき")
@@ -178,6 +182,7 @@ func TestWebsite_禁止ページへのリダイレクトは追従しない(t *te
 		}
 	}))
 	defer srv.Close()
+	allowTestServer(t, srv)
 
 	if _, err := collectWebsiteText(context.Background(), srv.URL+"/"); err == nil {
 		t.Fatal("禁止ページへのリダイレクトはエラーにすべき")
