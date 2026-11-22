@@ -240,6 +240,7 @@ const apiCallLogRetentionLock = "api_call_log_retention"
 
 // 日次合計へ畳む列。利用者 ID と遅延は残さない（SOCAIAGENT-528）。
 // school_id / organization_id の NULL は 0 に寄せ、UNIQUE が NULL を別物として増殖しないようにする。
+// cost_usd は元表で NULL を許す。全部 NULL の SUM は NULL になり、日次表の NOT NULL に入らない。
 const apiCallLogRollupInsert = `
 INSERT INTO api_call_log_daily (
   called_on, model, feature, provider, school_id, organization_id,
@@ -250,7 +251,7 @@ INSERT INTO api_call_log_daily (
 SELECT DATE(called_at), model, feature, provider,
        IFNULL(school_id, 0), IFNULL(organization_id, 0),
        prompt_stage, prompt_version, prompt_ab_group, price_basis, via_fallback,
-       SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens), SUM(cost_usd),
+       SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens), IFNULL(SUM(cost_usd), 0),
        SUM(audio_seconds), SUM(characters), SUM(web_search_calls), COUNT(*)
 FROM api_call_logs
 WHERE id IN (%s)

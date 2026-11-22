@@ -18,7 +18,7 @@ func TestRollupSQLKeepsRecomputeTotalsWithoutUser(t *testing.T) {
 	for _, want := range []string{
 		"audio_seconds", "characters", "web_search_calls", "price_basis",
 		"prompt_stage", "prompt_version", "prompt_ab_group", "via_fallback",
-		"call_count", "IFNULL(school_id, 0)",
+		"call_count", "IFNULL(school_id, 0)", "IFNULL(SUM(cost_usd), 0)",
 	} {
 		if !strings.Contains(apiCallLogRollupInsert, want) {
 			t.Errorf("日次合計に %s が無い", want)
