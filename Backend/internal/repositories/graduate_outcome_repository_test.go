@@ -55,15 +55,17 @@ func assertNoPII(t *testing.T, sqls []string) {
 	}
 }
 
-func TestGraduateOutcomeRepository_CountsByCompanyYear(t *testing.T) {
+func TestGraduateOutcomeRepository_OutcomeCells(t *testing.T) {
 	repo, mock, sqls := newGraduateOutcomeMock(t)
-	// 学校 5 の ID がバインドされ、年度・業界の絞り込みが後に続く。年度が NULL の行は 0 として数える
-	mock.ExpectQuery(outcomeScope+"|COALESCE(ge.graduation_year, 0) AS graduation_year|ge.graduation_year = ?|c.industry = ?").
-		WithArgs(5, 2025, "製造業").
-		WillReturnRows(sqlmock.NewRows([]string{"company_id", "company_name", "industry", "graduation_year", "count"}).
-			AddRow(1, "A社", "製造業", 2025, 3))
-	rows, err := repo.CountsByCompanyYear(context.Background(), 5, GraduateOutcomeFilter{Year: 2025, Industry: "製造業"})
-	if err != nil || len(rows) != 1 || rows[0].CompanyName != "A社" || rows[0].Count != 3 {
+	// 学校 5 の ID がバインドされ、企業・年度・業界の絞り込みが後に続く。最小の区分（企業 × 年度 × 職種）で数える。
+	// 年度が NULL の行は 0、職種はその企業のものだけ結ぶ
+	mock.ExpectQuery(outcomeScope+"|jp.company_id = ge.company_id|COALESCE(ge.graduation_year, 0) AS graduation_year|COALESCE(jp.title, '') AS title"+
+		"|ge.company_id = ?|ge.graduation_year = ?|c.industry = ?|GROUP BY ge.company_id, c.name, c.industry, COALESCE(ge.graduation_year, 0), COALESCE(jp.title, '')").
+		WithArgs(5, 1, 2025, "製造業").
+		WillReturnRows(sqlmock.NewRows([]string{"company_id", "company_name", "industry", "graduation_year", "title", "count"}).
+			AddRow(1, "A社", "製造業", 2025, "SE", 3))
+	rows, err := repo.OutcomeCells(context.Background(), 5, GraduateOutcomeFilter{Year: 2025, Industry: "製造業", CompanyID: 1})
+	if err != nil || len(rows) != 1 || rows[0].CompanyName != "A社" || rows[0].Title != "SE" || rows[0].Count != 3 {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -82,24 +84,6 @@ func TestGraduateOutcomeRepository_FilterOptions(t *testing.T) {
 	years, industries, err := repo.FilterOptions(context.Background(), 5)
 	if err != nil || len(years) != 2 || len(industries) != 1 {
 		t.Fatalf("years=%v industries=%v err=%v", years, industries, err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-	assertNoPII(t, *sqls)
-}
-
-func TestGraduateOutcomeRepository_CompanyCounts(t *testing.T) {
-	repo, mock, sqls := newGraduateOutcomeMock(t)
-	mock.ExpectQuery(outcomeScope+"|ge.company_id = ?").WithArgs(5, 1).
-		WillReturnRows(sqlmock.NewRows([]string{"company_id", "company_name", "industry", "graduation_year", "count"}).
-			AddRow(1, "A社", "", 2025, 3))
-	// 職種はその企業のものだけ結ぶ。同数は職種名順で並びを決める
-	mock.ExpectQuery(outcomeScope+"|jp.company_id = ge.company_id|ORDER BY count DESC, title").WithArgs(5, 1).
-		WillReturnRows(sqlmock.NewRows([]string{"title", "count"}).AddRow("SE", 3))
-	byYear, byPosition, err := repo.CompanyCounts(context.Background(), 5, 1)
-	if err != nil || len(byYear) != 1 || len(byPosition) != 1 || byPosition[0].Title != "SE" {
-		t.Fatalf("byYear=%+v byPosition=%+v err=%v", byYear, byPosition, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

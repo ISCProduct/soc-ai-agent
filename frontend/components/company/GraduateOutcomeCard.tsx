@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import NextLink from 'next/link'
 import { Alert, Box, Button, Card, CardContent, Chip, Link, Skeleton, Stack, Typography } from '@mui/material'
 import SchoolIcon from '@mui/icons-material/School'
-import { fetchCompanyGraduateOutcome, yearLabel, type GraduateOutcomeCompany } from '@/lib/graduate-outcomes'
+import { fetchCompanyGraduateOutcome, totalLabel, yearLabel, type GraduateOutcomeCompany } from '@/lib/graduate-outcomes'
 
 /**
  * 企業詳細の「先輩の進路実績」（#2032）。自分の学校の卒業生がこの企業に何人就職したかを、年度・職種ごとの人数で出す。
@@ -58,30 +58,31 @@ export function GraduateOutcomeCard({ companyId }: { companyId: string }) {
         </Stack>
         <Typography variant="body2" sx={{ mb: 1.5 }}>
           {few ? (
-            <>あなたの学校から <strong>少数（3人未満）</strong> の先輩がこの企業に就職しています。</>
+            <>あなたの学校から <strong>少数</strong> の先輩がこの企業に就職しています。</>
           ) : (
-            <>あなたの学校から <strong>{data.total}人</strong> の先輩がこの企業に就職しています。</>
+            <>あなたの学校から <strong>{totalLabel(data.total, data.total_few)}</strong> の先輩がこの企業に就職しています。</>
           )}
         </Typography>
-        {(data.by_year.length > 0 || data.by_year_few) && (
+        {/* 見せる区分が無い（少数だけの）企業は内訳を出さない */}
+        {data.by_year.length > 0 && (
           <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1, mb: 1 }}>
             {data.by_year.map((y) => (
               <Chip key={y.year} size="small" label={`${yearLabel(y.year)} ${y.count}人`} />
             ))}
-            {data.by_year_few && <Chip size="small" variant="outlined" label="ほかの年度 少数" />}
+            {data.by_year_few && <Chip size="small" variant="outlined" label="＋少数" />}
           </Stack>
         )}
-        {(data.by_position.length > 0 || data.by_position_few) && (
+        {data.by_position.length > 0 && (
           <Box sx={{ mb: 1 }}>
             <Typography variant="caption" color="text.secondary">職種</Typography>
             <Typography variant="body2">
-              {[...data.by_position.map((p) => `${p.title} ${p.count}人`), ...(data.by_position_few ? ['ほかの職種 少数'] : [])].join('、')}
+              {[...data.by_position.map((p) => `${p.title} ${p.count}人`), ...(data.by_position_few ? ['＋少数'] : [])].join('、')}
             </Typography>
           </Box>
         )}
         {few || data.by_year_few || data.by_position_few ? (
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-            卒業生が特定されないよう、3人未満は人数を出していません。
+            卒業生が特定されないよう、年度・職種ごとに3人未満の人数は出さず、合計にも含めていません。
           </Typography>
         ) : null}
         <Link component={NextLink} href="/graduate-outcomes" variant="body2">ほかの企業の進路実績を見る</Link>

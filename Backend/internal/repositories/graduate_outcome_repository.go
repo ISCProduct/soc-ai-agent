@@ -72,19 +72,22 @@ func (r *GraduateOutcomeRepository) CompanyVisible(ctx context.Context, companyI
 	return n > 0, err
 }
 
-// GraduateOutcomeRow は企業・年度ごとの人数。年度が未登録（0・NULL）なら GraduationYear は 0。
+// GraduateOutcomeRow は最小の区分（企業 × 年度 × 職種）ごとの人数。
+// 年度が未登録（0・NULL）なら GraduationYear は 0、職種が未登録（または別企業の職種を指している）なら Title は空。
 type GraduateOutcomeRow struct {
 	CompanyID      uint
 	CompanyName    string
 	Industry       string
 	GraduationYear int
+	Title          string
 	Count          int
 }
 
-// GraduateOutcomeFilter は一覧の絞り込み。0・空は絞らない。
+// GraduateOutcomeFilter は一覧の絞り込み。0・空は絞らない。CompanyID が 0 でなければその企業だけ。
 type GraduateOutcomeFilter struct {
-	Year     int
-	Industry string
+	Year      int
+	Industry  string
+	CompanyID uint
 }
 
 func (r *GraduateOutcomeRepository) base(ctx context.Context, schoolID uint) *gorm.DB {
@@ -94,12 +97,19 @@ func (r *GraduateOutcomeRepository) base(ctx context.Context, schoolID uint) *go
 		Where(visibleCompany)
 }
 
-const outcomeRowSelect = "ge.company_id AS company_id, c.name AS company_name, COALESCE(c.industry, '') AS industry, COALESCE(ge.graduation_year, 0) AS graduation_year, COUNT(*) AS count"
-const outcomeRowGroup = "ge.company_id, c.name, c.industry, COALESCE(ge.graduation_year, 0)"
-
-// CountsByCompanyYear は学校の卒業生の就職先を、企業・年度ごとの人数で返す。
-func (r *GraduateOutcomeRepository) CountsByCompanyYear(ctx context.Context, schoolID uint, f GraduateOutcomeFilter) ([]GraduateOutcomeRow, error) {
-	q := r.base(ctx, schoolID).Select(outcomeRowSelect)
+// OutcomeCells は学校の卒業生の就職先を、最小の区分（企業 × 年度 × 職種）ごとの人数で返す。
+//
+// 少数の秘匿（サービスの MinCount）はこの最小の区分で行い、合計や年度別・職種別は見せる区分の和だけで作る。
+// 年度別と職種別を別々に集計して秘匿すると、合計との引き算や内訳どうしの比較で隠した人数が分かるため（#2032）。
+// 職種はその企業のものだけ結ぶ（別企業の求人 ID が入った行は「職種の登録なし」に寄せる）。
+func (r *GraduateOutcomeRepository) OutcomeCells(ctx context.Context, schoolID uint, f GraduateOutcomeFilter) ([]GraduateOutcomeRow, error) {
+	q := r.base(ctx, schoolID).
+		Joins("LEFT JOIN company_job_positions jp ON jp.id = ge.job_position_id AND jp.company_id = ge.company_id").
+		Select("ge.company_id AS company_id, c.name AS company_name, COALESCE(c.industry, '') AS industry, " +
+			"COALESCE(ge.graduation_year, 0) AS graduation_year, COALESCE(jp.title, '') AS title, COUNT(*) AS count")
+	if f.CompanyID > 0 {
+		q = q.Where("ge.company_id = ?", f.CompanyID)
+	}
 	if f.Year > 0 {
 		q = q.Where("ge.graduation_year = ?", f.Year)
 	}
@@ -107,7 +117,8 @@ func (r *GraduateOutcomeRepository) CountsByCompanyYear(ctx context.Context, sch
 		q = q.Where("c.industry = ?", f.Industry)
 	}
 	var out []GraduateOutcomeRow
-	if err := q.Group(outcomeRowGroup).Scan(&out).Error; err != nil {
+	err := q.Group("ge.company_id, c.name, c.industry, COALESCE(ge.graduation_year, 0), COALESCE(jp.title, '')").Scan(&out).Error
+	if err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -124,29 +135,4 @@ func (r *GraduateOutcomeRepository) FilterOptions(ctx context.Context, schoolID 
 		return nil, nil, err
 	}
 	return years, industries, nil
-}
-
-// GraduatePositionCount は職種ごとの人数。職種が未登録（または別企業の職種を指している）なら Title は空。
-type GraduatePositionCount struct {
-	Title string
-	Count int
-}
-
-// CompanyCounts は1社について、学校の卒業生の年度別と職種別の人数を返す。
-func (r *GraduateOutcomeRepository) CompanyCounts(ctx context.Context, schoolID, companyID uint) ([]GraduateOutcomeRow, []GraduatePositionCount, error) {
-	var byYear []GraduateOutcomeRow
-	if err := r.base(ctx, schoolID).Where("ge.company_id = ?", companyID).
-		Select(outcomeRowSelect).Group(outcomeRowGroup).
-		Order("graduation_year DESC").Scan(&byYear).Error; err != nil {
-		return nil, nil, err
-	}
-	var byPosition []GraduatePositionCount
-	// 職種はその企業のものだけ結ぶ（別企業の求人 ID が入った行は「職種の登録なし」に寄せる）
-	if err := r.base(ctx, schoolID).Where("ge.company_id = ?", companyID).
-		Joins("LEFT JOIN company_job_positions jp ON jp.id = ge.job_position_id AND jp.company_id = ge.company_id").
-		Select("COALESCE(jp.title, '') AS title, COUNT(*) AS count").
-		Group("COALESCE(jp.title, '')").Order("count DESC, title").Scan(&byPosition).Error; err != nil {
-		return nil, nil, err
-	}
-	return byYear, byPosition, nil
 }

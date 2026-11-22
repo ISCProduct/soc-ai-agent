@@ -17,7 +17,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { fetchGraduateOutcomes, yearLabel, type GraduateOutcomeList } from '@/lib/graduate-outcomes'
+import { fetchGraduateOutcomes, totalLabel, yearLabel, type GraduateOutcomeList } from '@/lib/graduate-outcomes'
 
 /**
  * 卒業生の進路実績の一覧（#2032）。自分の学校の先輩が、どの企業に何人就職したかを見る。
@@ -64,7 +64,7 @@ export default function GraduateOutcomesPage() {
         <Typography variant="h5" component="h1" fontWeight="bold" gutterBottom>先輩の進路実績</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           あなたの学校の卒業生が就職した企業を、人数の多い順に表示しています。
-          卒業生が特定されないよう、3人未満は人数を出さず「少数」と表示します。
+          卒業生が特定されないよう、年度・職種ごとに3人未満の人数は出さず、合計にも含めません（「少数」「＋少数」と表示します）。
         </Typography>
 
         {data && data.school_linked && (
@@ -107,7 +107,7 @@ export default function GraduateOutcomesPage() {
 
         {data && data.school_linked && data.companies.length > 0 && (
           <>
-            <Typography variant="body2" sx={{ mb: 1 }}>合計 {data.total}人・{data.companies.length}社</Typography>
+            <Typography variant="body2" sx={{ mb: 1 }}>合計 {totalLabel(data.total, data.total_few)}・{data.companies.length}社</Typography>
             <Stack component="ul" spacing={1.5} sx={{ listStyle: 'none', p: 0, m: 0 }}>
               {data.companies.map((c) => (
                 <Box component="li" key={c.company_id}>
@@ -116,12 +116,12 @@ export default function GraduateOutcomesPage() {
                       <CardContent>
                         <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
                           <Typography fontWeight={700}>{c.company_name}</Typography>
-                          <Typography variant="body2"><strong>{c.total == null ? '少数' : `${c.total}人`}</strong></Typography>
+                          <Typography variant="body2"><strong>{totalLabel(c.total, c.total_few)}</strong></Typography>
                         </Stack>
                         {c.industry && <Typography variant="caption" color="text.secondary">{c.industry}</Typography>}
                         <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
                           {c.by_year.map((y) => <Chip key={y.year} size="small" label={`${yearLabel(y.year)} ${y.count}人`} />)}
-                          {c.by_year_few && <Chip size="small" variant="outlined" label="ほかの年度 少数" />}
+                          {c.by_year_few && c.total != null && <Chip size="small" variant="outlined" label="＋少数" />}
                         </Stack>
                       </CardContent>
                     </CardActionArea>
