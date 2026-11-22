@@ -12,7 +12,7 @@ export const maxDuration = 30
 export async function GET(request: NextRequest) {
   try {
     const days = request.nextUrl.searchParams.get('days') || '30'
-    const result = await proxyAdminBackend('GET', `/api/admin/costs/daily?days=${days}`, {
+    const result = await proxyAdminBackend('GET', `/api/admin/costs/daily?days=${encodeURIComponent(days)}`, {
       headers: adminProxyHeaders(request.headers),
       timeoutMs: 15_000,
     })

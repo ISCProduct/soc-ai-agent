@@ -2,6 +2,8 @@ package github
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/openai"
+	"Backend/internal/services/piimask"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
@@ -146,7 +148,9 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 	}
 
 	// AI要約生成
-	summary, err := s.generateRepoSummary(ctx, fullName, readme, targetRole)
+	// README は学生が書いた文章なので、chat・面接と同じく登録情報の辞書と規則で伏字にしてから送る（SOCAIAGENT-697）。
+	// 伏字を準備できないときは openai 側が送信せず ErrInputGuardFailed を返し、下の要約の失敗になる。
+	summary, err := s.generateRepoSummary(openai.WithInputGuard(ctx, piimask.GuardFor(s.subjects, userID)), fullName, readme, targetRole)
 	if err != nil {
 		return nil, fmt.Errorf("AI summary generation failed: %w", err)
 	}
