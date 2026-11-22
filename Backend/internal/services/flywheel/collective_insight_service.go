@@ -46,7 +46,7 @@ func (s *CollectiveInsightService) RecordAction(userID uint, sessionID string, c
 
 	// スコアスナップショット取得
 	scores, _ := s.weightScoreRepo.FindByUserAndSession(userID, sessionID)
-	snapshot := map[string]int{}
+	snapshot := map[string]float64{}
 	for _, sc := range scores {
 		snapshot[sc.WeightCategory] = sc.Score
 	}

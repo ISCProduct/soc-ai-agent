@@ -1,6 +1,10 @@
 // training-export は軽量採点モデルの学習データを書き出す（#2168。設計は #1834 の 2・4）。
 //
 //	TRAINING_EXPORT_HMAC_KEY=<32バイト以上の秘密鍵> TRAINING_EXPORT_S3_URI=s3://bucket/prefix go run ./cmd/training-export
+//	（同じ環境変数で）go run ./cmd/training-export -sweep-only
+//
+// 書き出しの前に、いま学習に使ってよい学生以外（同意を取り消した・退会した学生）の書き出し済みのデータを
+// すべての回から消す（Sweep）。-sweep-only は消すだけを行う。取り消し・退会を早く反映するため、毎日動かす。
 //
 // 学習に使ってよい学生（同意済み・未退会）の完了した面接を、マスキングして S3 の非公開のプレフィックスに書き、
 // 監査ログ（training_scorer_export_runs）に結果を残す。鍵か出力先が無ければ、DB にもつながずに終わる。
@@ -13,6 +17,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -29,22 +34,39 @@ import (
 )
 
 func main() {
+	sweepOnly := flag.Bool("sweep-only", false, "書き出さずに、同意を取り消した・退会した学生の書き出し済みのデータを消すだけを行う")
+	flag.Parse()
 	loadEnv()
-	res, err := export()
-	if err != nil {
-		log.Fatalf("書き出しに失敗しました: %v", err)
+	// コンテナのタスクの停止・タイムアウトでは SIGTERM が送られる。SIGTERM でも取り消して、
+	// 監査ログに「失敗」を残してから終わる（#2325 のレビュー）。取り消して失敗した回も、監査ログには「失敗」が残る。
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if *sweepOnly {
+		swept, err := scorerexport.SweepFromEnv(ctx, os.Getenv, connectStore, newS3Store)
+		if err != nil {
+			log.Fatalf("書き出し済みのデータの削除に失敗しました（消せた分: ファイル %d）: %v", swept.DeletedFiles, err)
+		}
+		printSwept(swept)
+		return
 	}
+	res, swept, err := scorerexport.RunFromEnv(ctx, os.Getenv, connectStore, newS3Store)
+	if err != nil {
+		log.Fatalf("書き出しに失敗しました（削除したファイル %d）: %v", swept.DeletedFiles, err)
+	}
+	printSwept(swept)
 	fmt.Printf("書き出しました: 学生 %d 人・面接 %d 件（書き出さなかった面接 %d 件）→ %s\n",
 		res.Students, res.Sessions, res.SkippedSessions, res.Destination)
 }
 
-// export は Ctrl+C・SIGTERM で取り消せる ctx で書き出しを1回行う。取り消して失敗した回も、監査ログには「失敗」が残る。
-func export() (scorerexport.Result, error) {
-	// コンテナのタスクの停止・タイムアウトでは SIGTERM が送られる。SIGTERM でも取り消して、
-	// 監査ログに「失敗」を残してから終わる（#2325 のレビュー）。
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return scorerexport.RunFromEnv(ctx, os.Getenv, connectStore, newS3Writer)
+// printSwept は削除の結果を表示する。照合で外したものと、件数を直せなかったマニフェストがあれば、それも出す。
+func printSwept(r scorerexport.SweepResult) {
+	fmt.Printf("書き出し済みのデータを消しました: ファイル %d・マニフェストの書き直し %d\n", r.DeletedFiles, r.UpdatedManifests)
+	if r.RepairedEntries > 0 {
+		fmt.Printf("マニフェストに載っているのに無かったファイルを外しました: %d\n", r.RepairedEntries)
+	}
+	if r.UncountedManifests > 0 {
+		fmt.Printf("file_sessions の無い古いマニフェストのため、面接の件数（session_count）を直せなかった回: %d\n", r.UncountedManifests)
+	}
 }
 
 func connectStore() (scorerexport.Store, error) {
@@ -55,7 +77,7 @@ func connectStore() (scorerexport.Store, error) {
 	return repositories.NewTrainingScorerExportRepository(db), nil
 }
 
-func newS3Writer(ctx context.Context, bucket string) (scorerexport.ObjectWriter, error) {
+func newS3Store(ctx context.Context, bucket string) (scorerexport.ObjectStore, error) {
 	return scorerexport.NewS3Writer(ctx, bucket)
 }
 

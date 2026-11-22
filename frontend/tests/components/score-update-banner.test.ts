@@ -65,4 +65,20 @@ describe('computeScoreDeltas', () => {
     const deltas = computeScoreDeltas(before, [])
     expect(deltas).toHaveLength(0)
   })
+
+  it('小数スコアは整数へ丸めてから差を取る（浮動小数点誤差を出さない）', () => {
+    const deltas = computeScoreDeltas(
+      [{ weight_category: '論理性', score: 60 }],
+      [{ weight_category: '論理性', score: 62.35 }],
+    )
+    expect(deltas).toEqual([{ category: '論理性', before: 60, after: 62, delta: 2 }])
+  })
+
+  it('丸めると同じ値になる微小変化は変化なしとする', () => {
+    const deltas = computeScoreDeltas(
+      [{ weight_category: '論理性', score: 62.1 }],
+      [{ weight_category: '論理性', score: 62.4 }],
+    )
+    expect(deltas).toHaveLength(0)
+  })
 })

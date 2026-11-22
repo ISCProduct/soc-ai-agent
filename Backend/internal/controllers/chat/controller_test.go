@@ -798,3 +798,95 @@ func TestChatController_GetRecommendations_AttachesFeedback(t *testing.T) {
 		t.Fatalf("判定が付くのは回答した推薦だけ: %+v", resp.Recommendations)
 	}
 }
+
+func TestChatController_GetFavorites_Unauthorized(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/favorites", nil)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, chatcontrollers.NewChatController(nil, nil, nil, nil, nil).GetFavorites, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
+}
+
+func TestChatController_GetFavorites_ServiceUnavailable(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/favorites", nil)
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, chatcontrollers.NewChatController(nil, nil, nil, nil, nil).GetFavorites, testsupport.NewCtx(req, rec), http.StatusServiceUnavailable)
+}
+
+func TestChatController_GetFavorites_Limit(t *testing.T) {
+	tests := []struct {
+		name      string
+		query     string
+		wantLimit int
+	}{
+		{name: "未指定は50", query: "", wantLimit: 50},
+		{name: "不正値は50", query: "?limit=abc", wantLimit: 50},
+		{name: "0以下は50", query: "?limit=0", wantLimit: 50},
+		{name: "101は100", query: "?limit=101", wantLimit: 100},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matchSvc := &mocks.MatchingServiceMock{}
+			matchSvc.On("ListFavoriteCompanies", uint(1), tt.wantLimit).Return([]*models.UserCompanyMatch{}, nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/chat/favorites"+tt.query, nil)
+			req = testsupport.WithUserID(req, 1)
+			rec := httptest.NewRecorder()
+			testsupport.AssertStatus(t, newChatController(nil, matchSvc, nil, nil, nil).GetFavorites, testsupport.NewCtx(req, rec), http.StatusOK)
+			matchSvc.AssertExpectations(t)
+		})
+	}
+}
+
+func TestChatController_GetFavorites_ServiceError(t *testing.T) {
+	matchSvc := &mocks.MatchingServiceMock{}
+	matchSvc.On("ListFavoriteCompanies", uint(1), 50).Return(nil, errors.New("db error"))
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/favorites", nil)
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, newChatController(nil, matchSvc, nil, nil, nil).GetFavorites, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
+	matchSvc.AssertExpectations(t)
+}
+
+func TestChatController_RemoveFavoriteCompany_Unauthorized(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/favorites/remove", bytes.NewBufferString(`{"company_id":3}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, chatcontrollers.NewChatController(nil, nil, nil, nil, nil).RemoveFavoriteCompany, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
+}
+
+func TestChatController_RemoveFavoriteCompany_CompanyIDRequired(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/favorites/remove", bytes.NewBufferString(`{"company_id":0}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, newChatController(nil, &mocks.MatchingServiceMock{}, nil, nil, nil).RemoveFavoriteCompany, testsupport.NewCtx(req, rec), http.StatusBadRequest)
+}
+
+func TestChatController_RemoveFavoriteCompany_ServiceUnavailable(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/favorites/remove", bytes.NewBufferString(`{"company_id":3}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, chatcontrollers.NewChatController(nil, nil, nil, nil, nil).RemoveFavoriteCompany, testsupport.NewCtx(req, rec), http.StatusServiceUnavailable)
+}
+
+func TestChatController_RemoveFavoriteCompany_ServiceError(t *testing.T) {
+	matchSvc := &mocks.MatchingServiceMock{}
+	matchSvc.On("UnfavoriteCompany", uint(1), uint(3)).Return(errors.New("db error"))
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/favorites/remove", bytes.NewBufferString(`{"company_id":3}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, newChatController(nil, matchSvc, nil, nil, nil).RemoveFavoriteCompany, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
+	matchSvc.AssertExpectations(t)
+}
+
+func TestChatController_RemoveFavoriteCompany_IdempotentOK(t *testing.T) {
+	matchSvc := &mocks.MatchingServiceMock{}
+	matchSvc.On("UnfavoriteCompany", uint(1), uint(3)).Return(nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/favorites/remove", bytes.NewBufferString(`{"company_id":3}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, newChatController(nil, matchSvc, nil, nil, nil).RemoveFavoriteCompany, testsupport.NewCtx(req, rec), http.StatusOK)
+	matchSvc.AssertExpectations(t)
+}

@@ -10,6 +10,7 @@ import logging
 import math
 import os
 import time
+from functools import lru_cache
 from typing import List
 
 import tiktoken
@@ -21,14 +22,24 @@ from services.langchain_runtime import get_embeddings
 logger = logging.getLogger("main")
 
 
+@lru_cache(maxsize=8)
+def _encoder_for(model: str) -> tiktoken.Encoding:
+    """モデルの tiktoken エンコーダ。作るのが重いので、モデルごとに1度だけ作って使い回す（SOCAIAGENT-569）。
+
+    以前はテキストごとに encoding_for_model を呼び、複数文書の埋め込みで件数ぶん作り直していた。
+    エンコーダは読み取りだけで状態を持たないので、スレッド間で共有してよい。
+    """
+    try:
+        return tiktoken.encoding_for_model(model)
+    except KeyError:
+        return tiktoken.get_encoding("cl100k_base")
+
+
 def _truncate_text(text: str, model: str) -> str:
     """テキストが埋め込みモデルのトークン上限を超えている場合に切り詰める。"""
     import main as m
 
-    try:
-        enc = tiktoken.encoding_for_model(model)
-    except KeyError:
-        enc = tiktoken.get_encoding("cl100k_base")
+    enc = _encoder_for(model)
     tokens = enc.encode(text)
     if len(tokens) > m.MAX_EMBED_TOKENS:
         logger.warning(

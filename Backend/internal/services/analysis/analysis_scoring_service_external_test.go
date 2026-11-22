@@ -109,16 +109,16 @@ func (m *mockConversationContextRepo) GetConsultIntent(sessionID string) (string
 
 type mockUserWeightScoreRepo struct{}
 
-func (m *mockUserWeightScoreRepo) SetScore(userID uint, sessionID, category string, absoluteScore int) error {
+func (m *mockUserWeightScoreRepo) SetScore(userID uint, sessionID, category string, absoluteScore float64) error {
 	return nil
 }
-func (m *mockUserWeightScoreRepo) SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore int, promptVersion string) error {
+func (m *mockUserWeightScoreRepo) SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore float64, promptVersion string) error {
 	return nil
 }
-func (m *mockUserWeightScoreRepo) AddScore(userID uint, sessionID, category string, delta int) error {
+func (m *mockUserWeightScoreRepo) AddScore(userID uint, sessionID, category string, delta float64) error {
 	return nil
 }
-func (m *mockUserWeightScoreRepo) AddScoreWithPromptVersion(userID uint, sessionID, category string, delta int, promptVersion string) error {
+func (m *mockUserWeightScoreRepo) AddScoreWithPromptVersion(userID uint, sessionID, category string, delta float64, promptVersion string) error {
 	return nil
 }
 func (m *mockUserWeightScoreRepo) FindByUserAndSession(userID uint, sessionID string) ([]models.UserWeightScore, error) {

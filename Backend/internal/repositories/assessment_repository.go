@@ -176,7 +176,7 @@ func (r *AssessmentRepository) Submit(s *models.AssessmentSession, scores map[st
 		}
 		scoreRepo := NewUserWeightScoreRepository(tx)
 		for category, score := range scores {
-			if err := scoreRepo.SetScoreWithSource(s.UserID, scoreSessionID, category, int(score+0.5), models.ScoreSourceAssessment); err != nil {
+			if err := scoreRepo.SetScoreWithSource(s.UserID, scoreSessionID, category, score, models.ScoreSourceAssessment); err != nil {
 				return err
 			}
 		}
