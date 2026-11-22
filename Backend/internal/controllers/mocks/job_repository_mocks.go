@@ -1,6 +1,8 @@
 package mocks
 
 import (
+	"context"
+
 	"Backend/internal/models"
 
 	"github.com/stretchr/testify/mock"
@@ -11,32 +13,32 @@ type JobCategoryRepositoryMock struct {
 	mock.Mock
 }
 
-func (m *JobCategoryRepositoryMock) FindAll() ([]models.JobCategory, error) {
-	args := m.Called()
+func (m *JobCategoryRepositoryMock) FindAll(ctx context.Context) ([]models.JobCategory, error) {
+	args := m.Called(ctx)
 	if v := args.Get(0); v != nil {
 		return v.([]models.JobCategory), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *JobCategoryRepositoryMock) FindByID(id uint) (*models.JobCategory, error) {
-	args := m.Called(id)
+func (m *JobCategoryRepositoryMock) FindByID(ctx context.Context, id uint) (*models.JobCategory, error) {
+	args := m.Called(ctx, id)
 	if v := args.Get(0); v != nil {
 		return v.(*models.JobCategory), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *JobCategoryRepositoryMock) FindByName(name string) ([]models.JobCategory, error) {
-	args := m.Called(name)
+func (m *JobCategoryRepositoryMock) FindByName(ctx context.Context, name string) ([]models.JobCategory, error) {
+	args := m.Called(ctx, name)
 	if v := args.Get(0); v != nil {
 		return v.([]models.JobCategory), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *JobCategoryRepositoryMock) GetTopCategories() ([]models.JobCategory, error) {
-	args := m.Called()
+func (m *JobCategoryRepositoryMock) GetTopCategories(ctx context.Context) ([]models.JobCategory, error) {
+	args := m.Called(ctx)
 	if v := args.Get(0); v != nil {
 		return v.([]models.JobCategory), args.Error(1)
 	}

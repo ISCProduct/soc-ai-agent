@@ -150,9 +150,14 @@ export function HomeRightPanel({
         {schedule.kind === 'ready' &&
           schedule.actions.slice(0, MAX_SCHEDULE_ITEMS).map((a) => (
             <Typography key={a.key} sx={bodyText}>
-              <Box component={NextLink} href={a.href} sx={{ color: HOME_COLORS.link, textDecoration: 'underline' }}>
-                {a.text}
-              </Box>
+              {/* 行き先の無い項目（改善の提案など）はリンクにしない */}
+              {a.href ? (
+                <Box component={NextLink} href={a.href} sx={{ color: HOME_COLORS.link, textDecoration: 'underline' }}>
+                  {a.text}
+                </Box>
+              ) : (
+                a.text
+              )}
             </Typography>
           ))}
         {schedule.kind === 'ready' && schedule.actions.length > MAX_SCHEDULE_ITEMS && (

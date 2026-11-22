@@ -79,6 +79,13 @@ describe('HomeRightPanel（先生から・これからの予定・お知らせ�
     expect(screen.getByText('ほか2件')).toBeInTheDocument()
   })
 
+  it('行き先の無い項目はリンクにしない', async () => {
+    loadNextActions.mockResolvedValue([{ key: 'k1', text: '行き先の無い項目', actionLabel: '' }])
+    setup()
+    expect(await screen.findByText('行き先の無い項目')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '行き先の無い項目' })).toBeNull()
+  })
+
   it('予定の取得に失敗したら、予定の欄だけにエラーと再読み込みを出し、再読み込みで取り直す', async () => {
     loadNextActions.mockRejectedValueOnce(new Error('x')).mockResolvedValueOnce([])
     setup()

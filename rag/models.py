@@ -145,6 +145,9 @@ class ESReviewUsage(BaseModel):
     # モデルごとの内訳（SOCAIAGENT-559）。Backend はこれがあればモデルごとに記録する。
     # 上の model と合計は、内訳を読まない古い Backend 向けに残す（model は評価のモデル）。
     by_model: List["ESReviewModelUsage"] = Field(default_factory=list)
+    # 使ったプロンプトの版（例: es_review_v6）。Backend が使用量の prompt_version に記録する。
+    # 既定は空（古い Backend は読まないだけなので後方互換。SOCAIAGENT-661）
+    prompt_version: str = ""
 
 
 class ESReviewFeedbackItem(BaseModel):
@@ -214,6 +217,19 @@ class VectorReembedRequest(BaseModel):
     refresh: bool = True  # True なら削除後に WebSearch で再取得
 
 
+class VectorReembedResult(BaseModel):
+    """再埋め込みの doc_type ごとの結果（SOCAIAGENT-658）。
+
+    replaced: 新しい文書に置き換えた / unchanged: 再取得が空だったので旧データを残した /
+    failed: 再取得か書き込みに失敗したので旧データを残した
+    """
+
+    doc_type: str
+    status: Literal["replaced", "unchanged", "failed"]
+    deleted: int = 0
+    error: Optional[str] = None
+
+
 class VectorReembedResponse(BaseModel):
     status: str
     company: str
@@ -221,3 +237,4 @@ class VectorReembedResponse(BaseModel):
     collections: dict
     refreshed: bool
     sources: List[str] = []
+    results: List[VectorReembedResult] = []

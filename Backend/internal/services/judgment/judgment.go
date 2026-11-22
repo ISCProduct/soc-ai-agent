@@ -33,7 +33,7 @@ type Input struct {
 	// ValidAnswers は有効に答えた質問数（スキップ・無効な回答は含めない）。
 	ValidAnswers int
 	// Scores は、カテゴリごとのスコア（0〜100）。0 は未評価として数える。
-	Scores map[string]int
+	Scores map[string]float64
 }
 
 // Result は判定の結果。
@@ -48,7 +48,7 @@ type Result struct {
 
 // Evaluate は、会話の状態から判定の進み具合を計算する。
 func Evaluate(in Input) Result {
-	evaluated, lo, hi := 0, 101, -1
+	evaluated, lo, hi := 0, 101.0, -1.0
 	for _, s := range in.Scores {
 		if s == 0 {
 			continue
@@ -61,7 +61,7 @@ func Evaluate(in Input) Result {
 			hi = s
 		}
 	}
-	spread := 0
+	spread := 0.0
 	if evaluated >= 2 {
 		spread = hi - lo
 	}
@@ -69,7 +69,7 @@ func Evaluate(in Input) Result {
 	r := Result{
 		Floor:    ratio(in.ValidAnswers, FloorValidAnswers),
 		Coverage: ratio(evaluated, MinEvaluatedCategories),
-		Spread:   ratio(spread, MinScoreSpread),
+		Spread:   ratioF(spread, float64(MinScoreSpread)),
 	}
 
 	// 職種が決まっているかは、完了の条件にしない。「まだ決めていない」人も、適性（スコア）の傾向が十分に出れば、
@@ -89,6 +89,16 @@ func Evaluate(in Input) Result {
 // SuggestProvisional は、暫定の結果を見る導線を出すか。判定できていなくて、目安の回答数を超えたとき。
 func SuggestProvisional(answered int, ready bool) bool {
 	return !ready && answered >= SoftCapAnswers
+}
+
+func ratioF(n, d float64) float64 {
+	if n <= 0 {
+		return 0
+	}
+	if n >= d {
+		return 1
+	}
+	return n / d
 }
 
 func ratio(n, d int) float64 {

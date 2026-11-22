@@ -662,6 +662,8 @@ def test_usage_totals_include_every_call(monkeypatch):
     assert result.usage.prompt_tokens == 300  # 100 * 3
     assert result.usage.completion_tokens == 600  # 200 * 3
     assert result.usage.model == "gpt-4o"
+    # Backend が使用量の prompt_version に記録する（SOCAIAGENT-661）
+    assert result.usage.prompt_version == "es_review_v6"
 
 
 def test_improved_text_uses_light_model_and_usage_is_split_by_model(monkeypatch):

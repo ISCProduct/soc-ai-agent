@@ -33,8 +33,8 @@ func validAnswersFromProgress(progresses []models.UserAnalysisProgress, phaseByI
 }
 
 // scoreMapOf は、カテゴリごとのスコア（0〜100）。
-func scoreMapOf(scores []models.UserWeightScore) map[string]int {
-	m := make(map[string]int, len(scores))
+func scoreMapOf(scores []models.UserWeightScore) map[string]float64 {
+	m := make(map[string]float64, len(scores))
 	for _, sc := range scores {
 		m[sc.WeightCategory] = sc.Score
 	}

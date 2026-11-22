@@ -82,7 +82,7 @@ func TestSaveRecalculatedScores(t *testing.T) {
 			}
 			target := repositories.UserScoreRecalculationTarget{ScoreID: 1, UserID: 7, SessionID: "session-1"}
 
-			got := service.saveRecalculatedScores(context.Background(), 1, target, map[string]int{"技術志向": 80}, "v2")
+			got := service.saveRecalculatedScores(context.Background(), 1, target, map[string]float64{"技術志向": 80}, "v2")
 			if got != tt.wantFailure {
 				t.Fatalf("failure = %q, want %q", got, tt.wantFailure)
 			}
@@ -204,7 +204,7 @@ func TestRunBatchStopsBeforeLLMWhenLeaseIsLost(t *testing.T) {
 
 var updateDryRunGolden = flag.Bool("update", false, "ドライランのゴールデンファイルを更新する")
 
-func intPtr(value int) *int { return &value }
+func intPtr(value float64) *float64 { return &value }
 
 // 表の形をゴールデンで固定する。更新: go test ./internal/services/admin/ -run DryRun -update
 func TestFormatUserScoreRecalculationDryRun(t *testing.T) {
@@ -236,7 +236,7 @@ func TestFormatUserScoreRecalculationDryRun(t *testing.T) {
 }
 
 func TestCompareRecalculatedScores(t *testing.T) {
-	got := compareRecalculatedScores(map[string]int{"a": 1, "b": 2}, map[string]int{"b": 3, "c": 4})
+	got := compareRecalculatedScores(map[string]float64{"a": 1, "b": 2}, map[string]float64{"b": 3, "c": 4})
 	if len(got) != 3 || got[0].Category != "a" || got[0].Recalculated != nil ||
 		*got[1].Current != 2 || *got[1].Recalculated != 3 || got[2].Current != nil {
 		t.Fatalf("got %+v", got)
