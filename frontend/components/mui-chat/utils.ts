@@ -69,6 +69,17 @@ export const JOB_QUICK_OPTIONS = [
  * 文字色や「白文字を載せる塗り」にすると WCAG AA(4.5:1)を満たさない。
  * 非文字UI（進捗バーの塗りなど）は 3:1 でよいのでここだけに留める。
  */
+/**
+ * チャット本文の文字数の上限（SOCAIAGENT-702）。
+ * バックエンドの chat.MaxChatMessageRunes と同じ値にすること（超えるとサーバーが 400 を返す）。
+ */
+export const CHAT_MESSAGE_MAX_CHARS = 2000
+
+/** サーバーと同じく、コードポイント（Go のルーン）単位で数える。絵文字も1字。 */
+export function countChatChars(text: string): number {
+  return Array.from(text).length
+}
+
 export const CHAT_BRAND = '#ec5b13'
 
 /**

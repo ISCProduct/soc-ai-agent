@@ -24,9 +24,15 @@ export function looksLikeHtml(raw: string): boolean {
   return t.startsWith('<!doctype') || t.startsWith('<html') || t.includes('<head>') || t.includes('<title>502')
 }
 
+/** チャット本文が上限を超えたときにサーバーが返す文言（SOCAIAGENT-702）。原因なのでそのまま見せる */
+export const CHAT_TOO_LONG_MESSAGE = '文字数が上限を超えています'
+
 export function userFacingApiMessage(status: number, raw = ''): string {
   if (isGatewayStatus(status) || looksLikeHtml(raw)) {
     return GATEWAY_USER_MESSAGE
+  }
+  if (status === 400 && raw.includes(CHAT_TOO_LONG_MESSAGE)) {
+    return CHAT_TOO_LONG_MESSAGE
   }
   if (status === 401 || status === 403) {
     return 'ログインの有効期限が切れました。再度ログインしてください。'

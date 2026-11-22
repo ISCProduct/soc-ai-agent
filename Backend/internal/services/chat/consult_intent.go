@@ -16,6 +16,21 @@ const (
 	ConsultIntentFree              = "free"               // 自分の言葉で入力した
 )
 
+// MaxChatMessageRunes はチャット本文の文字数（ルーン）の上限（SOCAIAGENT-702）。
+// 仮の値。実際の長さの分布を見て決め直す。フロントの入力欄（CHAT_MESSAGE_MAX_CHARS）と同じ値にすること。
+const MaxChatMessageRunes = 2000
+
+// ErrChatMessageTooLong はチャット本文が MaxChatMessageRunes を超えたことを表す。文言はそのまま利用者に見える。
+var ErrChatMessageTooLong = errors.New("文字数が上限を超えています")
+
+// ValidateChatMessageLength はチャット本文が上限以内かを確かめる。
+func ValidateChatMessageLength(message string) error {
+	if utf8.RuneCountInString(message) > MaxChatMessageRunes {
+		return ErrChatMessageTooLong
+	}
+	return nil
+}
+
 // maxConsultFreeTextRunes は、自由記述の上限（フロントの入力欄と同じ）。
 const maxConsultFreeTextRunes = 1000
 

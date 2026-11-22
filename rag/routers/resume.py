@@ -14,6 +14,8 @@ from openai import OpenAI
 from models import ReviewRequest, ReviewResponse
 from services.model_tiers import resume_review_model
 from services.resume_report import (
+    RESUME_REPORT_MAX_TOKENS,
+    RESUME_REPORT_TRUNCATED_NOTICE,
     RESUME_SYSTEM_PROMPT,
     build_resume_review_prompt,
     generate_resume_report,
@@ -55,15 +57,24 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
                     {"role": "user", "content": prompt},
                 ],
                 stream=True,
-                max_tokens=1500,
+                max_tokens=RESUME_REPORT_MAX_TOKENS,
                 temperature=0.3,
             )
+            finish_reason = None
             for chunk in stream:
-                delta = chunk.choices[0].delta
+                choice = chunk.choices[0]
+                finish_reason = getattr(choice, "finish_reason", None) or finish_reason
+                delta = choice.delta
                 if delta.content:
                     yield "data: {}\n\n".format(
                         json.dumps({"type": "chunk", "text": delta.content}, ensure_ascii=False)
                     )
+            if finish_reason == "length":
+                # stream は作り直さず、切れたことだけ本文の末尾で示す（SOCAIAGENT-702）
+                logger.warning("resume review stream truncated max_tokens=%d", RESUME_REPORT_MAX_TOKENS)
+                yield "data: {}\n\n".format(
+                    json.dumps({"type": "chunk", "text": RESUME_REPORT_TRUNCATED_NOTICE}, ensure_ascii=False)
+                )
             yield "data: {}\n\n".format(json.dumps({"type": "done"}, ensure_ascii=False))
         except Exception as exc:
             # 例外文は内部情報を含みうるので、ログにだけ残し、利用者へは固定文言を返す
