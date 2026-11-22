@@ -157,7 +157,7 @@ func TestRunSource_panicでもrunをfailedにし次回時刻を進める(t *test
 		t.Fatalf("run = %+v, want failed で終了時刻あり", run)
 	}
 	got, _ := repo.GetSource(1)
-	if got.NextRunAt == nil || got.NextRunAt.Sub(time.Now()) > 24*time.Hour || got.LastRunAt == nil {
+	if got.NextRunAt == nil || time.Until(*got.NextRunAt) > 24*time.Hour || got.LastRunAt == nil {
 		t.Fatalf("next_run_at = %v last_run_at = %v, want 次の定期時刻", got.NextRunAt, got.LastRunAt)
 	}
 }
