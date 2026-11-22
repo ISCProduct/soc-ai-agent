@@ -109,6 +109,12 @@ func SetupAdminRoutes(
 	admin.PATCH("/companies/:id/publish", adminCompanyController.Publish, platform)
 	admin.PATCH("/companies/:id/verify", adminCompanyController.Verify, platform)
 	admin.PATCH("/companies/:id/reject", adminCompanyController.Reject, platform)
+	// 企業情報の「取得」「確定」ボタンは職員にも開ける（オーナー決定 2026-11-22、SOCAIAGENT-692）。
+	// 企業マスタは学校に属さないため担当校スコープは掛からない。費用は Search の月次予算と
+	// singleflight（取得側の fetcher に配線済み）で全体として抑える。
+	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack)
+	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo)
+	admin.POST("/companies/:id/confirm-info", adminCompanyController.ConfirmCompanyInfo)
 	admin.GET("/companies/:id/relation-graph", adminCompanyGraphController.RelationGraph)
 	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
 	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion, platform)
@@ -213,9 +219,6 @@ func SetupAdminRoutes(
 	admin.POST("/companies/web-search-relations", adminCompanyController.WebSearchCompanyRelations, platform)
 	admin.GET("/companies/:id/gbiz-search", adminCompanyController.SearchGBiz, platform)
 	admin.POST("/companies/:id/gbiz-sync", adminCompanyController.SyncGBiz, platform)
-	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack, platform)
-	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo, platform)
-	admin.POST("/companies/:id/confirm-info", adminCompanyController.ConfirmCompanyInfo, platform)
 	admin.POST("/companies/:id/fetch-relations", adminCompanyController.FetchCompanyRelations, platform)
 	admin.POST("/companies/:id/confirm-relations", adminCompanyController.ConfirmCompanyRelations, platform)
 	admin.POST("/companies/:id/fetch-jobs", adminCompanyController.FetchJobs, platform)

@@ -2549,7 +2549,7 @@ paths:
       tags: [admin-companies]
       summary: 企業情報を取得する
       description: |
-        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+        外部APIとLLMを呼ぶため従量課金が発生する（Search の月次予算で全体を抑える）。管理者と職員（staff）が使える（オーナー決定 2026-11-22、SOCAIAGENT-692）。管理エリアの権限が無い利用者は 403。
       security: [{ adminAuth: [] }]
       parameters:
         - in: path
@@ -2561,14 +2561,14 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/admin/companies/{id}/confirm-info:
     post:
       tags: [admin-companies]
       summary: 取得した企業情報を確定する
       description: |
-        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+        プレビュー済みの結果を LLM 再実行なしで確定保存する。管理者と職員（staff）が使える（オーナー決定 2026-11-22、SOCAIAGENT-692）。管理エリアの権限が無い利用者は 403。
       security: [{ adminAuth: [] }]
       parameters:
         - in: path
@@ -2580,9 +2580,9 @@ paths:
         "200":
           description: 成功
         "400":
-          description: プロンプトの版の形式が不正（invalid prompt_version）
+          description: プロンプトの版の形式が不正（invalid prompt_version）、または website_url / source_url が http/https の URL でない
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/admin/companies/{id}/fetch-relations:
     post:
@@ -2646,7 +2646,7 @@ paths:
       tags: [admin-companies]
       summary: 技術スタックを取得する
       description: |
-        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+        外部APIとLLMを呼ぶため従量課金が発生する（Search の月次予算で全体を抑える）。管理者と職員（staff）が使える（オーナー決定 2026-11-22、SOCAIAGENT-692）。管理エリアの権限が無い利用者は 403。
       security: [{ adminAuth: [] }]
       parameters:
         - in: path
@@ -2658,7 +2658,7 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/admin/companies/{id}/fetch-persona:
     post:

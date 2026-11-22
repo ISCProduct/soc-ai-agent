@@ -1,6 +1,6 @@
 package admin_test
 
-// SOCAIAGENT-692 企業マスタの URL 検証と、面接質問 generate の AI 予算判定。
+// SOCAIAGENT-692 企業マスタ（PUT・confirm-info）の URL 検証と、面接質問 generate の AI 予算判定。
 
 import (
 	"bytes"
@@ -54,6 +54,45 @@ func TestAdminCompanyController_Update_URLScheme(t *testing.T) {
 			ctx.SetParamNames("id")
 			ctx.SetParamValues("1")
 			testsupport.AssertStatus(t, admincontrollers.NewAdminCompanyController(repo, audit, nil).Update, ctx, tt.want)
+			if tt.want != http.StatusOK {
+				repo.AssertNotCalled(t, "Update", mock.Anything)
+			}
+		})
+	}
+}
+
+// confirm-info は職員にも開けるため、PUT と同じく URL を http/https に限る。
+func TestAdminCompanyController_ConfirmCompanyInfo_URLScheme(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		value string
+		want  int
+	}{
+		{"website https は可", "website_url", "https://example.com", http.StatusOK},
+		{"source http は可", "source_url", "http://example.com/about", http.StatusOK},
+		{"website javascript は不可", "website_url", "javascript:alert(1)", http.StatusBadRequest},
+		{"source data は不可", "source_url", "data:text/html,x", http.StatusBadRequest},
+		{"website ホストなしは不可", "website_url", "https://", http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &mocks.CompanyRepositoryMock{}
+			audit := &mocks.AuditLogServiceMock{}
+			repo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "Test Corp"}, nil).Maybe()
+			repo.On("Update", mock.Anything).Return(nil).Maybe()
+			audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Maybe()
+
+			body, _ := json.Marshal(map[string]string{tt.field: tt.value})
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/companies/1/confirm-info", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			ctx := testsupport.NewCtx(req, rec)
+			ctx.SetParamNames("id")
+			ctx.SetParamValues("1")
+			// AI は呼ばれない（確定は LLM 再実行なし）。fetcher を作るためだけにクライアントを渡す。
+			c := admincontrollers.NewAdminCompanyController(repo, audit, nil, openai.NewWithBaseURL("http://127.0.0.1:1", "gpt-4o-mini"))
+			testsupport.AssertStatus(t, c.ConfirmCompanyInfo, ctx, tt.want)
 			if tt.want != http.StatusOK {
 				repo.AssertNotCalled(t, "Update", mock.Anything)
 			}
