@@ -29,7 +29,7 @@ export async function POST(
 ) {
   const { company_id } = await params
   const body = await request.text()
-  const response = await fetch(`${BACKEND_URL}/api/admin/profile-recalculation/${company_id}`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/profile-recalculation/${encodeURIComponent(company_id)}`, {
     method: 'POST',
     headers: adminHeaders(request),
     body,
@@ -42,7 +42,7 @@ export async function GET(
   { params }: { params: Promise<{ company_id: string }> }
 ) {
   const { company_id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/profile-recalculation/${company_id}/history`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/profile-recalculation/${encodeURIComponent(company_id)}/history`, {
     headers: adminHeaders(request),
   })
   return NextResponse.json(await parseResponse(response), { status: response.status })

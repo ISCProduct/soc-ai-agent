@@ -48,7 +48,7 @@ func (p *personaStub) FetchAndSavePersona(ctx context.Context, companyID uint, f
 // brief の「重視傾向」が企業の求める人材像そのもので、これが無いとレビューは
 // 業種・事業内容だけを見た一般論になる。実測では 842社中90社(10.7%)しか持っていなかった。
 func TestLookupCompanyBrief_EnsuresPersona(t *testing.T) {
-	comp := &models.Company{ID: 7, Name: "株式会社テスト", Industry: "情報通信業"}
+	comp := &models.Company{ID: 7, IsActive: true, Name: "株式会社テスト", Industry: "情報通信業"}
 	// リーダーシップを最重視するプロファイル
 	generated := &models.CompanyWeightProfile{
 		CompanyID:             7,
@@ -113,7 +113,7 @@ func TestLookupCompanyBrief_EnsuresPersona(t *testing.T) {
 // 生成器が未注入でも落ちないこと（オプション依存）
 func TestLookupCompanyBrief_WithoutPersonaEnsurer(t *testing.T) {
 	svc := &ResumeService{}
-	svc.SetCompanyRepo(&briefReaderStub{company: &models.Company{ID: 1, Name: "株式会社テスト"}})
+	svc.SetCompanyRepo(&briefReaderStub{company: &models.Company{ID: 1, IsActive: true, Name: "株式会社テスト"}})
 	if brief := svc.lookupCompanyBriefFromCache("株式会社テスト"); brief == "" {
 		t.Error("brief が空")
 	}

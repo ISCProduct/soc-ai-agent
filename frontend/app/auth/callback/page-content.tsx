@@ -46,6 +46,8 @@ function validateOAuthPayload(raw: unknown): OAuthUser {
   }
 }
 
+const LOGIN_RETRY_MESSAGE = 'ログインを確認できませんでした。もう一度ログインをやり直してください'
+
 function OAuthCallbackContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -59,21 +61,35 @@ function OAuthCallbackContent() {
         return
       }
 
+      const code = searchParams.get('code')
       const userParam = searchParams.get('user')
 
-      if (!userParam) {
+      if (!code && !userParam) {
         setError('ユーザー情報が見つかりません')
         return
       }
 
       try {
-        // Base64デコードしてユーザー情報を取得
-        // Properly handle URL-safe Base64 and UTF-8
-        const normalized = userParam.replace(/-/g, '+').replace(/_/g, '/')
-        const binary = atob(normalized)
-        const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
-        const userDataString = new TextDecoder('utf-8').decode(bytes)
-        const userDataRaw = JSON.parse(userDataString)
+        let userDataRaw: unknown
+        if (code) {
+          // 短命コードを交換する (SOCAIAGENT-683)。このブラウザで始めたログインでなければ拒否される
+          const res = await fetch('/api/auth/oauth/exchange', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code }),
+          })
+          if (!res.ok) {
+            setError(LOGIN_RETRY_MESSAGE)
+            return
+          }
+          userDataRaw = await res.json()
+        } else {
+          // 旧方式: user= の Base64(JSON)。Backend のフラグ切り替え後、移行期間を過ぎたら削除する
+          const normalized = (userParam ?? '').replace(/-/g, '+').replace(/_/g, '/')
+          const binary = atob(normalized)
+          const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
+          userDataRaw = JSON.parse(new TextDecoder('utf-8').decode(bytes))
+        }
         // スキーマ検証: 不正な構造のペイロードを拒否
         const validatedData = validateOAuthPayload(userDataRaw)
         let userData = { ...validatedData, name: fixMojibake(validatedData.name) }
@@ -86,7 +102,6 @@ function OAuthCallbackContent() {
 
         // ローカルストレージに保存
         await authService.saveAuth(userData)
-        localStorage.removeItem('oauth_state')
 
         // 名前が未設定の場合のみオンボーディングへ（初回登録ユーザー）
         if (!userData.name) {
