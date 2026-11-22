@@ -292,7 +292,7 @@ func (s *QualityService) evaluateWithLLM(
 ) (*qualityLLMResult, error) {
 	var scoreLines []string
 	for _, sc := range scores {
-		scoreLines = append(scoreLines, fmt.Sprintf("- %s: %d", sc.WeightCategory, sc.Score))
+		scoreLines = append(scoreLines, fmt.Sprintf("- %s: %.0f", sc.WeightCategory, sc.Score))
 	}
 	var matchLines []string
 	for _, m := range matches {

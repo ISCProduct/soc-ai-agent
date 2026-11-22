@@ -129,7 +129,7 @@ func TestAddScore_UpdatesExistingRecord(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE `user_weight_scores` SET `score`=GREATEST\\(0, LEAST\\(100, score \\+ \\?\\)\\),`updated_at`=\\? WHERE `id` = \\?").
-		WithArgs(5, sqlmock.AnyArg(), 10).
+		WithArgs(5.0, sqlmock.AnyArg(), 10).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -260,7 +260,7 @@ func TestReplaceChatSessionScores_RechecksEligibilityUnderLock(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectRollback()
 
-	err := repo.ReplaceChatSessionScores(1, 7, "session-1", map[string]int{"技術志向": 80}, "v2")
+	err := repo.ReplaceChatSessionScores(1, 7, "session-1", map[string]float64{"技術志向": 80}, "v2")
 	if !errors.Is(err, repositories.ErrRecalculationTargetChanged) {
 		t.Fatalf("err = %v, want ErrRecalculationTargetChanged", err)
 	}

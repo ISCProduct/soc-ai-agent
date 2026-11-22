@@ -80,3 +80,31 @@ services:
 
 - Issue #585
 - `make rag-up` / #589
+
+## 企業データの再埋め込みと全件再構築（SOCAIAGENT-658）
+
+### 企業単位の再埋め込み（`POST /vector/reembed`）
+
+以前は「削除 → 再取得」の順で、Web 検索が例外・空だと企業データが空のまま残った。いまは doc_type ごとに
+**再取得 → 新しく書く → 書けたことを確かめる → 旧文書を消す** の順（`vector_store.replace_documents`）。
+
+- 再取得が例外・空の doc_type は旧データを残す。成功した doc_type だけ置き換える。結果は `results[]`（`replaced` / `unchanged` / `failed`）
+- すべての doc_type が失敗したら 502（旧データはそのまま）。一部だけ失敗したら `status: partial`
+- 置き換えのときは、同じコレクションの同じ企業（`company` と `company_hash`）の、今回書いた以外の文書を消す（以前の「全 role を消す」と同じ結果。ただし書けた後だけ）
+- 同じ企業の再埋め込みは並行させない（2つ目は 409）
+- `refresh=false` は今までどおり削除だけ
+
+### 全件再構築（別の世代へ作って切り替える）
+
+コレクションの名前に世代の接尾辞（`RAG_COLLECTION_SUFFIX`、空なら今までの名前）を付けられる。全件の再構築は、
+新しい世代へ写してから切り替える。写している間も今の世代で検索できる。埋め込みは写すだけなので OpenAI は呼ばない。
+
+```sh
+# 1. 今の世代から g2 へ写す（距離関数を変えるなら --space cosine）
+python scripts/rebuild_collections.py --to-suffix g2 --space cosine
+# 2. 件数を確かめ、rag-review の環境変数 RAG_COLLECTION_SUFFIX=g2 にして入れ替える
+# 3. 旧世代は 7日 残し（切り戻し用）、そのあと消す（接尾辞なしの世代は ""）
+python scripts/rebuild_collections.py --drop-suffix ""
+```
+
+今使っている世代は `--drop-suffix` で消せない。学生プロフィール（`student_profiles`）は対象外。

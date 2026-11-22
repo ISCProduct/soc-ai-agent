@@ -16,10 +16,12 @@ import (
 // ここはその判断根拠を再現可能な形で残すためのテストで、
 // #1560 をもう一度開けるときは同じ数字から議論を始められるようにしてある。
 //
-// 結論（詳細は docs/wiki/scoring.md §6.3）:
+// 経緯（詳細は docs/wiki/scoring.md §6.3）:
 //   - 1点は動かす。TestMatchScoreMovesOnePointPerUserPoint / TestOnePointChangesTopMatches。
-//   - ただし int が刻む1点で既に動いているので、**小数を足す余地は無い**。
-//     上位は同点が支配しており、同点の解消は DB の取得順という恣意的な順序に委ねられている。
+//   - #1560 では小数化を一度見送ったが、SOCAIAGENT-513 で user_weight_scores.score を
+//     DECIMAL(5,2) にした。マッチ度の式は元から float64 なので式は変わらず、
+//     小数の入力が1点未満として総合マッチ度に反映されるだけ（TestFractionalUserScoreMovesMatchProportionally）。
+//   - 上位は同点が支配しており、同点の解消は DB の取得順という恣意的な順序に委ねられている。
 
 // resolutionProfile はマッチ度計算に使う10軸。
 // 軸の順序は calculateMatchScore の呼び出し順と同じ。
@@ -229,4 +231,29 @@ func adjacentGapHistogram(user resolutionProfile, companies []resolutionProfile,
 		}
 	}
 	return fmt.Sprintf("同点 %d件 / 1点差(%.3f点) %d件 / それ以上 %d件", tie, step, one, more)
+}
+
+// TestFractionalUserScoreMovesMatchProportionally は、DECIMAL 化（SOCAIAGENT-513）で
+// ユーザースコアが小数になっても、マッチ度が線形のまま 1/計測軸数 × 差分だけ動くことを固定する。
+// 整数の入力の結果は変わらない（上のテストが固定）。変わるのは小数の入力が反映される点だけ。
+func TestFractionalUserScoreMovesMatchProportionally(t *testing.T) {
+	const company = 70.0
+	for _, axes := range []int{7, 10} {
+		// 1軸だけが 60 → 60.3 になる（旧実装は整数丸めで 60 のまま 0 点しか動かなかった）。
+		base := 0.0
+		moved := 0.0
+		for i := range axes {
+			u := 60.0
+			base += CalculateCategoryMatch(u, company)
+			if i == 0 {
+				u = 60.3
+			}
+			moved += CalculateCategoryMatch(u, company)
+		}
+		got := (moved - base) / float64(axes)
+		want := 0.3 / float64(axes)
+		if math.Abs(got-want) > 1e-9 {
+			t.Errorf("%d軸: 0.3点の差が総合マッチ度を %v 動かした, want %v", axes, got, want)
+		}
+	}
 }
