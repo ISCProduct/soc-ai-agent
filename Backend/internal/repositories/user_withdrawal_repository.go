@@ -21,13 +21,43 @@ func NewUserWithdrawalRepository(db *gorm.DB) *UserWithdrawalRepository {
 }
 
 func (r *UserWithdrawalRepository) Withdraw(userID uint, now time.Time, build repository.WithdrawalRecordBuilder) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
+	return r.withdraw(context.Background(), userID, now, nil, build)
+}
+
+// WithdrawStaleGuest は、一覧を取ってから退会させるまでの間に、本登録したゲストや使われたゲストを消さないよう、
+// 退会のトランザクションの中で掃除の条件を確かめ直す(SOCAIAGENT-689)。条件は ListStaleGuestIDs と同じ。
+func (r *UserWithdrawalRepository) WithdrawStaleGuest(ctx context.Context, userID uint, cutoff, now time.Time, build repository.WithdrawalRecordBuilder) error {
+	return r.withdraw(ctx, userID, now, func(tx *gorm.DB, user *models.User) error {
+		if !user.IsGuest || user.IsAdmin || !user.CreatedAt.Before(cutoff) {
+			return repository.ErrNotStaleGuest
+		}
+		var recent int64
+		if err := tx.Model(&models.UserRefreshToken{}).
+			Where("user_id = ? AND created_at >= ?", userID, cutoff).
+			Count(&recent).Error; err != nil {
+			return err
+		}
+		if recent > 0 {
+			return repository.ErrNotStaleGuest
+		}
+		return nil
+	}, build)
+}
+
+// withdraw は論理退会の本体。check が nil でなければ、退会済みの確認のあとに呼び、エラーなら巻き戻す。
+func (r *UserWithdrawalRepository) withdraw(ctx context.Context, userID uint, now time.Time, check func(tx *gorm.DB, user *models.User) error, build repository.WithdrawalRecordBuilder) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var user models.User
 		if err := tx.First(&user, userID).Error; err != nil {
 			return err
 		}
 		if user.IsWithdrawn() {
 			return repository.ErrAlreadyWithdrawn
+		}
+		if check != nil {
+			if err := check(tx, &user); err != nil {
+				return err
+			}
 		}
 		email := user.Email
 

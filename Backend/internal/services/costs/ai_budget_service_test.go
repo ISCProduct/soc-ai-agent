@@ -264,7 +264,7 @@ func TestAIBudgetListSettingsWithUsage_種類ごとにまとめて読む(t *test
 	}
 }
 
-// ゲストの日次上限は環境変数で設定でき、既定（未設定）は上限なし (SOCAIAGENT-689)。
+// ゲストの日次上限は既定で1日100円相当（1ドル=150円）。環境変数で変えられ、0 で上限なし (SOCAIAGENT-689)。
 func TestAIBudgetStatus_GuestDailyLimit(t *testing.T) {
 	userKey := budgetTestKey(models.AIBudgetScopeUser, 1)
 	tests := []struct {
@@ -276,8 +276,10 @@ func TestAIBudgetStatus_GuestDailyLimit(t *testing.T) {
 		wantAllowed    bool
 		wantGuestCalls int
 	}{
-		{name: "既定は上限なしでゲスト判定もしない", env: "", isGuest: true, daily: 100, wantAllowed: true},
-		{name: "0は上限なし", env: "0", isGuest: true, daily: 100, wantAllowed: true},
+		{name: "既定は100円相当で、その直前は許可", env: "", isGuest: true, daily: 0.66, wantAllowed: true, wantGuestCalls: 1},
+		{name: "既定は100円相当で、達したら拒否", env: "", isGuest: true, daily: 100.0 / 150.0, wantAllowed: false, wantGuestCalls: 1},
+		{name: "既定は通常ユーザーには効かない", env: "", isGuest: false, daily: 100, wantAllowed: true, wantGuestCalls: 1},
+		{name: "0は上限なしでゲスト判定もしない", env: "0", isGuest: true, daily: 100, wantAllowed: true},
 		{name: "ゲストは日次上限内なら許可", env: "1.5", isGuest: true, daily: 1, wantAllowed: true, wantGuestCalls: 1},
 		{name: "ゲストは日次上限に達したら拒否", env: "1.5", isGuest: true, daily: 1.5, wantAllowed: false, wantGuestCalls: 1},
 		{name: "通常ユーザーには効かない", env: "1.5", isGuest: false, daily: 100, wantAllowed: true, wantGuestCalls: 1},

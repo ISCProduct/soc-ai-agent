@@ -10,6 +10,9 @@ import (
 // ErrAlreadyWithdrawn は、すでに退会済みのユーザーを退会させようとしたことを表す。
 var ErrAlreadyWithdrawn = errors.New("account already withdrawn")
 
+// ErrNotStaleGuest は、掃除の一覧を取ったあとで、ゲストでなくなった(本登録した)か、使われたことを表す(SOCAIAGENT-689)。
+var ErrNotStaleGuest = errors.New("user is no longer a stale guest")
+
 // WithdrawalRecordBuilder は退会の記録(withdrawn_users の1行)を作る。
 // Withdraw のトランザクションの中で、読んだユーザーと、そのユーザーが持つオブジェクトの
 // キー(動画・履歴書の保存先。S3 の URI のままのこともある)を受け取って呼ばれる。
@@ -26,6 +29,11 @@ type UserWithdrawalRepository interface {
 	//   - 全端末のリフレッシュトークンを失効させる
 	// どれか1つでも失敗したら、全体を巻き戻す。
 	Withdraw(userID uint, now time.Time, build WithdrawalRecordBuilder) error
+
+	// WithdrawStaleGuest は Withdraw と同じだが、同じトランザクションの中で、まだ掃除の対象か
+	// (ゲスト・管理者でない・作成が cutoff より前・cutoff 以降のリフレッシュトークンが無い)を確かめる。
+	// 外れていれば ErrNotStaleGuest を返し、何も書かない(SOCAIAGENT-689)。
+	WithdrawStaleGuest(ctx context.Context, userID uint, cutoff, now time.Time, build WithdrawalRecordBuilder) error
 
 	// HardDeleteUser はユーザーとその関連データを、1トランザクションで物理削除する。
 	// collectiveAnonymousID は、集合知ログ(匿名化済み)を消すためのハッシュ。

@@ -53,11 +53,16 @@ type aiBudgetRepository interface {
 	IsGuestUser(context.Context, uint) (bool, error)
 }
 
+// GuestAIDailyLimitDefaultUSD は、個別設定の無いゲストに掛ける日次上限の既定値（USD）。
+// 1日100円（2026-11-22 オーナー決定）。予算は USD で集計しているので、1ドル=150円で換算した値にする。
+// 為替が大きく動いたら GUEST_AI_DAILY_LIMIT_USD で上書きする (SOCAIAGENT-689)。
+const GuestAIDailyLimitDefaultUSD = 100.0 / 150.0
+
 type AIBudgetService struct {
 	repo                  aiBudgetRepository
 	now                   func() time.Time
 	realtimeRatePerMinute float64
-	// guestDailyLimitUSD は個別設定の無いゲストに掛ける日次上限（USD）。0 以下は上限なし（既定）(SOCAIAGENT-689)。
+	// guestDailyLimitUSD は個別設定の無いゲストに掛ける日次上限（USD）。0 以下は上限なし (SOCAIAGENT-689)。
 	guestDailyLimitUSD float64
 }
 
@@ -66,8 +71,8 @@ func NewAIBudgetService(repo aiBudgetRepository) *AIBudgetService {
 		repo:                  repo,
 		now:                   time.Now,
 		realtimeRatePerMinute: shared.GetFloatEnv("INTERVIEW_COST_PER_MIN_USD", 0.18),
-		// 金額は未定のため既定は上限なし。運用で決まったらタスク定義の環境変数だけで入れられるようにする。
-		guestDailyLimitUSD: shared.GetFloatEnv("GUEST_AI_DAILY_LIMIT_USD", 0),
+		// 既定は1日100円相当。0 を入れると上限なし。
+		guestDailyLimitUSD: shared.GetFloatEnv("GUEST_AI_DAILY_LIMIT_USD", GuestAIDailyLimitDefaultUSD),
 	}
 }
 

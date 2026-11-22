@@ -184,7 +184,7 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 		}
 
 		// 使われなくなったゲスト（リフレッシュトークンの最終発行から7日）を退会させる（SOCAIAGENT-689）。
-		// 保持期間なしで退会させるので、直後のパージで関連データごと物理削除される。
+		// 通常の退会と同じく12か月残し、保持期間を過ぎたらこの下のパージで物理削除される。
 		if expired, err := userDeletionService.ExpireStaleGuests(context.Background(), time.Now().UTC()); err != nil {
 			slog.Error("expire stale guests failed", "error", err)
 		} else if expired > 0 {

@@ -591,6 +591,8 @@ rejected         → 不合格
 | GET | `/api/admin/ai-budgets` | AI利用予算の一覧 |
 | PUT | `/api/admin/ai-budgets` | AI利用予算の設定 |
 | DELETE | `/api/admin/ai-budgets/:scope/:scope_id` | AI利用予算の削除 |
+
+個別の設定が無いゲストには、1日100円相当（`GUEST_AI_DAILY_LIMIT_USD`、既定 0.6667 USD = 1ドル150円で換算。0 で上限なし）の日次上限が掛かります。超えると 429（`code: ai_budget_exceeded`）を返し、AI を呼びません。
 | GET | `/api/admin/costs/summary` | APIコストサマリー |
 | GET | `/api/admin/costs/daily` | 日別コスト |
 | GET | `/api/admin/costs/monthly` | 月別コスト |
