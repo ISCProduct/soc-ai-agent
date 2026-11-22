@@ -68,6 +68,10 @@ export async function setupAuth(page: Page, user: MockUser = TEST_USER) {
       httpOnly: true,
       sameSite: 'Lax',
     },
+    // 管理者トークンはログイン時に httpOnly Cookie にだけ入る（SOCAIAGENT-683）
+    ...(user.is_admin
+      ? [{ name: 'admin_token', value: user.token, url: baseURL, httpOnly: true, sameSite: 'Lax' as const }]
+      : []),
   ])
 
   await page.addInitScript(
@@ -82,7 +86,6 @@ export async function setupAuth(page: Page, user: MockUser = TEST_USER) {
         is_admin: u.is_admin,
       }
       sessionStorage.setItem('user', JSON.stringify(userData))
-      sessionStorage.setItem('token', u.token)
       sessionStorage.setItem('user_token', u.user_token)
       localStorage.setItem('chat_session_id', 'test-session-id-001')
     },

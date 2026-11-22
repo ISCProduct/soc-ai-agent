@@ -47,7 +47,7 @@ func TestQuestionAICall_質問生成で呼び出し元の機能名は残す(t *t
 	client, usages := newUsageRecordingClient(t)
 	s := &ChatService{aiClient: client}
 
-	ctx := usagectx.WithActor(context.Background(), 7, 3)
+	ctx := usagectx.WithActor(guardedCtx(), 7, 3)
 	if _, err := s.questionAICall(ctx, "質問を作ってください"); err != nil {
 		t.Fatalf("questionAICall: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestValidateAnswerRelevance_埋め込みは機能名embedding(t *testing.T)
 	client, usages := newUsageRecordingClient(t)
 	s := &ChatService{aiClient: client}
 
-	if _, err := s.validateAnswerRelevance(context.Background(), "あなたが大切にしている価値観を教えてください", "人の役に立つことを大切にしています"); err != nil {
+	if _, err := s.validateAnswerRelevance(guardedCtx(), "あなたが大切にしている価値観を教えてください", "人の役に立つことを大切にしています"); err != nil {
 		t.Fatalf("validateAnswerRelevance: %v", err)
 	}
 	got := usages()
@@ -89,4 +89,11 @@ func TestValidateAnswerRelevance_埋め込みは機能名embedding(t *testing.T)
 			t.Fatalf("feature = %q, want embedding", u.Feature)
 		}
 	}
+}
+
+// guardedCtx は、素通しの入力ガードを付けた context を返す。本番では ProcessChat・RecalculateChatSession が
+// 入口でガードを付けるが、内部の関数を直接呼ぶテストでは付かない。チャットの機能名は学生由来で、
+// ガードが無いと送らない（SOCAIAGENT-697）ため、そのテスト用に付ける。
+func guardedCtx() context.Context {
+	return openai.WithInputGuard(context.Background(), func(s string) (string, error) { return s, nil })
 }

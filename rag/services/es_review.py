@@ -27,6 +27,7 @@ from fastapi import HTTPException
 
 from models import ESReviewFeedbackItem, ESReviewResponse, ESReviewUsage, ESStarBreakdown
 from services.sanitize import _sanitize_company_name_for_query, _wrap_untrusted_text
+from services.settings import SCORING_SEED, SCORING_TEMPERATURE
 
 logger = logging.getLogger("main")
 
@@ -171,6 +172,10 @@ class _UsageTally:
         )
 
 
+# 改善文の生成に使う温度。採点は SCORING_TEMPERATURE（SOCAIAGENT-699）
+_DEFAULT_TEMPERATURE = 0.3
+
+
 def _chat_json(
         client: Any,
         model: str,
@@ -179,6 +184,8 @@ def _chat_json(
         max_tokens: Optional[int],
         tally: Optional[_UsageTally] = None,
         schema: Optional[Tuple[str, Dict[str, Any]]] = None,
+        temperature: float = _DEFAULT_TEMPERATURE,
+        seed: Optional[int] = None,
 ) -> Tuple[str, str]:
     """JSON でチャット補完を1回呼び、(本文, finish_reason) を返す。
 
@@ -190,7 +197,9 @@ def _chat_json(
     """
     # max_tokens が None の段（改善文 / #1564）はキー自体を送らない。null を送っても
     # OpenAI 側は既定扱いだが、OpenAI 互換サーバ（vLLM / llama.cpp）での解釈差を避ける。
-    budget_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
+    budget_kwargs: Dict[str, Any] = {"max_tokens": max_tokens} if max_tokens is not None else {}
+    if seed is not None:
+        budget_kwargs["seed"] = seed
     # 評価・改善文のどちらの呼び出しでも、工程・版・モデルをログに出す（SOCAIAGENT-560）
     log_prompt_call("es_review", model)
     json_mode = {"type": "json_object"}
@@ -203,7 +212,7 @@ def _chat_json(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.3,
+            temperature=temperature,
             response_format=fmt,
             **budget_kwargs,
         )
@@ -248,6 +257,8 @@ def _call_json_with_retry(
         truncated_message: Optional[str] = None,
         keep_truncated: bool = False,
         schema: Optional[Tuple[str, Dict[str, Any]]] = None,
+        temperature: float = _DEFAULT_TEMPERATURE,
+        seed: Optional[int] = None,
 ) -> Dict[str, Any]:
     """出力上限に到達した場合のみ、上限を引き上げて1回だけ再試行する。
 
@@ -261,7 +272,7 @@ def _call_json_with_retry(
     content = ""
     for attempt in (1, 2):
         content, finish_reason = _chat_json(
-            client, model, system_prompt, user_prompt, max_tokens, tally, schema
+            client, model, system_prompt, user_prompt, max_tokens, tally, schema, temperature, seed
         )
         if finish_reason != "length":
             return _parse_json_object(content)
@@ -742,6 +753,9 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
             label="review",
             tally=tally,
             schema=("es_review", ES_REVIEW_SCHEMA),
+            # 採点の呼び出しだけ温度を下げて seed を固定する（SOCAIAGENT-699）
+            temperature=SCORING_TEMPERATURE,
+            seed=SCORING_SEED,
         )
         feedback = str(review_data.get("feedback", ""))
 
