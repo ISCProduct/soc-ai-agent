@@ -507,13 +507,9 @@ func (c *InterviewController) List(ctx echo.Context) error {
 	page := httpapi.IntQuery(ctx, "page", 1)
 	limit := httpapi.LimitQuery(ctx, "limit", 20)
 	offset := (page - 1) * limit
-	allStr := ctx.QueryParam("all")
-	all := allStr == "1" || strings.ToLower(allStr) == "true"
-	sessions, total, err := c.interviewService.ListSessions(userID, all, limit, offset)
+	// all=1（全件一覧）は廃止。指定されても本人分だけを返す（SOCAIAGENT-687）。
+	sessions, total, err := c.interviewService.ListSessions(userID, limit, offset)
 	if err != nil {
-		if errors.Is(err, shared.ErrForbidden) {
-			return echo.NewHTTPError(http.StatusForbidden, err.Error())
-		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{

@@ -18,7 +18,8 @@ let storedUser: { is_admin?: boolean } | null = { is_admin: false }
 jest.mock('@/lib/auth', () => ({
   authService: {
     getStoredUser: () => storedUser,
-    getUserFetchHeaders: () => ({ 'X-User-Token': 'jwt' }),
+    // 実装どおり、トークンは返さない（Cookie にだけある）
+    getUserFetchHeaders: () => ({}),
   },
 }))
 
