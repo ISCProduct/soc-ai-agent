@@ -561,7 +561,6 @@ export default function PageContent() {
     if (!platformReady) return
     setHeaders({
       'X-Admin-Email': user.email,
-      'X-Admin-Token': authService.getStoredToken() || '',
     })
   }, [platformReady])
 

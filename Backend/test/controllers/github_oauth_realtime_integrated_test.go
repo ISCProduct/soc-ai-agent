@@ -22,6 +22,7 @@ import (
 	usercontrollers "Backend/internal/controllers/user"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
+	authsvc "Backend/internal/services/auth"
 	"Backend/internal/services/flywheel"
 	githubservice "Backend/internal/services/github"
 	"Backend/internal/services/shared"
@@ -345,7 +346,7 @@ func TestGitHubController_SummarizeRepo_ErrorStatus(t *testing.T) {
 // ========== OAuthController ==========
 
 func newOAuthController(svc *mocks.OAuthServiceMock) *authcontrollers.OAuthController {
-	return authcontrollers.NewOAuthController(svc, nil)
+	return authcontrollers.NewOAuthController(svc, nil, authsvc.NewOAuthCodeStore(nil))
 }
 
 // ---- GoogleLogin ----

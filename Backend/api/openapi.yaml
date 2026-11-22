@@ -714,6 +714,7 @@ paths:
       responses:
         "200": { description: 送信した }
         "400": { description: メールアドレスの形式が不正 }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/auth/verify-registration:
     post:
@@ -857,11 +858,11 @@ paths:
               required: [token, password]
               properties:
                 token: { type: string }
-                password: { type: string, format: password, minLength: 8 }
+                password: { type: string, format: password, minLength: 8, description: 8文字以上・72バイト以下 }
       security: []
       responses:
         "200": { description: 再設定した }
-        "400": { description: トークンが無効か期限切れ }
+        "400": { description: トークンが無効か期限切れ、またはパスワードが8文字未満・72バイト超 }
 
   /api/auth/refresh:
     post:
@@ -911,6 +912,11 @@ paths:
     get:
       tags: [auth]
       summary: Google OAuth を開始する
+      parameters:
+        - in: query
+          name: bind
+          description: FE が作った照合値（base64url の SHA-256、43文字）。コード交換時の verifier 検証に使う
+          schema: { type: string }
       security: []
       responses:
         "302": { description: Google の認可画面へリダイレクト }
@@ -930,10 +936,39 @@ paths:
       responses:
         "302": { description: フロントエンドへリダイレクト }
 
+  /api/auth/oauth/exchange:
+    post:
+      tags: [auth]
+      summary: OAuth 完了時の短命コードを認証情報と交換する
+      description: |
+        OAUTH_CODE_EXCHANGE=true のとき、OAuth コールバックはトークンを URL に載せず
+        `/auth/callback?code=...` へ戻す。FE の Route Handler がこの API をサーバー間で呼び、
+        結果を httpOnly Cookie にする。コードは60秒・1回限り。verifier はログインを始めた
+        ブラウザだけが持つ値で、開始時の `bind`（base64url の SHA-256）と合わなければ拒否する。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, verifier]
+              properties:
+                code: { type: string }
+                verifier: { type: string }
+      responses:
+        "200": { description: 認証情報（OAuth コールバックで従来 user= に載せていた内容） }
+        "400": { description: リクエスト不正、またはコードが無効・使用済み・期限切れ・照合値不一致 }
+
   /api/auth/github:
     get:
       tags: [auth]
       summary: GitHub OAuth を開始する
+      parameters:
+        - in: query
+          name: bind
+          description: FE が作った照合値（base64url の SHA-256、43文字）。コード交換時の verifier 検証に使う
+          schema: { type: string }
       security: []
       responses:
         "302": { description: GitHub の認可画面へリダイレクト }
@@ -1318,10 +1353,6 @@ paths:
       parameters:
         - { in: query, name: page, schema: { type: integer, default: 1 } }
         - { in: query, name: limit, schema: { type: integer, default: 20 } }
-        - in: query
-          name: all
-          description: "`1` または `true` で全件（既定は自分の進行中のみ）"
-          schema: { type: string }
       responses:
         "200":
           description: 一覧
@@ -1337,7 +1368,6 @@ paths:
                   page: { type: integer }
                   limit: { type: integer }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [interviews]
       summary: 面接セッションを作る
