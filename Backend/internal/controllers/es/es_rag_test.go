@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
@@ -415,9 +416,8 @@ func TestReview_RecordsUsagePerModel(t *testing.T) {
 	if usages[1].Model != "gpt-4o-mini" || usages[1].PromptTokens != 200 || usages[1].CompletionTokens != 400 {
 		t.Errorf("改善文のモデルの行 = %+v", usages[1])
 	}
-	if usages[1].LatencyMs != 0 {
-		t.Errorf("応答時間を2行目にも付けて重複させている: %+v", usages[1])
-	}
+	// 応答時間はトークン数の割合で各行に按分する（2行目を 0 にして平均を薄めない）。
+	// スタブの応答は 1ms 未満で丸めると 0 になるので、按分の値そのものは TestSplitLatency で確かめる
 	for _, u := range usages {
 		if u.Feature != usagectx.FeatureESReview {
 			t.Errorf("機能名 = %q", u.Feature)
@@ -468,5 +468,37 @@ func TestReview_UsagePerModelEdgeCases(t *testing.T) {
 				t.Errorf("合計のトークンを記録していない: %+v", usages[0])
 			}
 		})
+	}
+}
+
+func TestSplitLatency(t *testing.T) {
+	row := func(p, c, calls int) esReviewRAGModelUsage {
+		return esReviewRAGModelUsage{PromptTokens: p, CompletionTokens: c, Calls: calls}
+	}
+	for _, tt := range []struct {
+		name string
+		rows []esReviewRAGModelUsage
+		want []time.Duration
+	}{
+		{"トークンの割合", []esReviewRAGModelUsage{row(100, 200, 1), row(200, 400, 2)}, []time.Duration{300, 600}},
+		{"端数は最後の行", []esReviewRAGModelUsage{row(1, 0, 1), row(1, 0, 1), row(1, 0, 1)}, []time.Duration{300, 300, 300}},
+		{"トークンが無ければ呼び出し回数", []esReviewRAGModelUsage{row(0, 0, 1), row(0, 0, 2)}, []time.Duration{300, 600}},
+		{"行が無い", nil, []time.Duration{}},
+	} {
+		got := splitLatency(900, tt.rows)
+		if len(got) != len(tt.want) {
+			t.Fatalf("%s: got %v", tt.name, got)
+		}
+		var sum time.Duration
+		for i := range got {
+			sum += got[i]
+			if got[i] != tt.want[i] {
+				t.Errorf("%s: got %v, want %v", tt.name, got, tt.want)
+				break
+			}
+		}
+		if len(got) > 0 && sum != 900 {
+			t.Errorf("%s: 合計 %v が 900 にならない", tt.name, sum)
+		}
 	}
 }
