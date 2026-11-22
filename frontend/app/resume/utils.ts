@@ -161,6 +161,8 @@ export type Finding = {
   withheld: boolean
   /** 書き換え案と別に伝える補足 */
   supplement: string
+  /** 書類の上の位置。無いときは強調を重ねられない（形式チェックなど） */
+  box: BBox | null
 }
 
 export const FINDING_SEVERITY_LABEL: Record<FindingSeverity, string> = {
@@ -192,6 +194,7 @@ export function buildFindings(review: Pick<ReviewResult, 'items' | 'format_findi
       withheld,
       // 書き換え案と同じ文は繰り返さない
       supplement: suggestion !== '' && suggestion !== rewrite ? suggestion : '',
+      box: parseBBox(item.bbox),
     }
   })
   const rule = (review.format_findings ?? []).map((f) => ({
@@ -203,6 +206,7 @@ export function buildFindings(review: Pick<ReviewResult, 'items' | 'format_findi
     rewrite: '',
     withheld: false,
     supplement: f.fix?.trim() ?? '',
+    box: null,
   }))
   const sourceRank = { ai: 0, rule: 1 }
   return [...ai, ...rule]
@@ -220,4 +224,40 @@ export function countBySeverity(findings: Finding[]): Record<FindingSeverity, nu
 /** 指摘があるページの最大値。指摘が無ければ1ページとみなす */
 export function pageCountOf(findings: Finding[]): number {
   return Math.max(1, ...findings.map((f) => f.page))
+}
+
+/** 書類の上の位置（画素。左上が原点）と、そのときのページの大きさ。比にすると、描く大きさによらず同じ場所を指せる。 */
+export type BBox = { x0: number; y0: number; x1: number; y1: number; pageWidth: number; pageHeight: number }
+
+/**
+ * 指摘の bbox（JSON文字列）を読む。
+ * Backend は {"bbox":[x0,y0,x1,y1],"page_width":W,"page_height":H} で保存する。
+ * ページの大きさが無い古い形式や、壊れた値は null にして、強調を重ねない（間違った場所を指さない）。
+ */
+export function parseBBox(raw: string | null | undefined): BBox | null {
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const { bbox, page_width: pageWidth, page_height: pageHeight } = parsed as { bbox?: unknown; page_width?: unknown; page_height?: unknown }
+  if (!Array.isArray(bbox) || bbox.length < 4) return null
+  const [x0, y0, x1, y1] = bbox
+  const nums = [x0, y0, x1, y1, pageWidth, pageHeight]
+  if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n))) return null
+  if ((pageWidth as number) <= 0 || (pageHeight as number) <= 0 || (x1 as number) <= (x0 as number) || (y1 as number) <= (y0 as number)) return null
+  return { x0: x0 as number, y0: y0 as number, x1: x1 as number, y1: y1 as number, pageWidth: pageWidth as number, pageHeight: pageHeight as number }
+}
+
+/** ページの大きさに対する割合（%）。ページの外にはみ出す分は切る。 */
+export function overlayRect(box: BBox): { left: number; top: number; width: number; height: number } {
+  const clamp = (v: number) => Math.min(100, Math.max(0, v))
+  const left = clamp((box.x0 / box.pageWidth) * 100)
+  const top = clamp((box.y0 / box.pageHeight) * 100)
+  const right = clamp((box.x1 / box.pageWidth) * 100)
+  const bottom = clamp((box.y1 / box.pageHeight) * 100)
+  return { left, top, width: right - left, height: bottom - top }
 }

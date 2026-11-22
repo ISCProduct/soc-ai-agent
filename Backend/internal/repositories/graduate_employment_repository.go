@@ -1,6 +1,8 @@
 package repositories
 
 import (
+	"context"
+
 	"Backend/internal/models"
 	"errors"
 
@@ -50,8 +52,8 @@ func (r *GraduateEmploymentRepository) List(companyID, schoolID *uint, limit int
 }
 
 // PlacementFacts は年度・学校名・企業の業界だけを返す。氏名は SELECT しない。
-func (r *GraduateEmploymentRepository) PlacementFacts(schoolID *uint) ([]models.GraduatePlacement, error) {
-	query := r.db.Table("graduate_employments").
+func (r *GraduateEmploymentRepository) PlacementFacts(ctx context.Context, schoolID *uint) ([]models.GraduatePlacement, error) {
+	query := r.db.WithContext(ctx).Table("graduate_employments").
 		Select("graduate_employments.graduation_year, graduate_employments.school_name, companies.industry").
 		Joins("LEFT JOIN companies ON companies.id = graduate_employments.company_id")
 	if schoolID != nil {

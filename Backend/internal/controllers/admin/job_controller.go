@@ -41,7 +41,7 @@ func NewAdminJobController(companyRepo repository.CompanyRepository, jobCategory
 
 // JobCategories GET /api/admin/job-categories
 func (c *AdminJobController) JobCategories(ctx echo.Context) error {
-	categories, err := c.jobCategory.FindAll()
+	categories, err := c.jobCategory.FindAll(ctx.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch job categories")
 	}
@@ -195,7 +195,7 @@ func (c *AdminJobController) GraduateEmploymentSummary(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
-	rows, err := c.graduateRepo.PlacementFacts(schoolID)
+	rows, err := c.graduateRepo.PlacementFacts(ctx.Request().Context(), schoolID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to summarize graduate employments")
 	}

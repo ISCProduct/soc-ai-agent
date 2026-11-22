@@ -244,7 +244,7 @@ func newAdminJobController(companyRepo *mocks.CompanyRepositoryMock, jobCatRepo 
 
 func TestAdminJobController_JobCategories_ServiceError(t *testing.T) {
 	jobCatRepo := &mocks.JobCategoryRepositoryMock{}
-	jobCatRepo.On("FindAll").Return(nil, errors.New("db error"))
+	jobCatRepo.On("FindAll", mock.Anything).Return(nil, errors.New("db error"))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/job-categories", nil)
 	rec := httptest.NewRecorder()
@@ -255,7 +255,7 @@ func TestAdminJobController_JobCategories_ServiceError(t *testing.T) {
 func TestAdminJobController_JobCategories_Success(t *testing.T) {
 	jobCatRepo := &mocks.JobCategoryRepositoryMock{}
 	categories := []models.JobCategory{{Name: "Engineer"}}
-	jobCatRepo.On("FindAll").Return(categories, nil)
+	jobCatRepo.On("FindAll", mock.Anything).Return(categories, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/job-categories", nil)
 	rec := httptest.NewRecorder()
@@ -288,7 +288,7 @@ func TestAdminJobController_GraduateEmployments_List_Success(t *testing.T) {
 
 func TestAdminJobController_GraduateEmploymentSummary_NoNames(t *testing.T) {
 	gradRepo := &mocks.GraduateEmploymentRepositoryMock{}
-	gradRepo.On("PlacementFacts", (*uint)(nil)).Return([]models.GraduatePlacement{
+	gradRepo.On("PlacementFacts", mock.Anything, (*uint)(nil)).Return([]models.GraduatePlacement{
 		{GraduationYear: 2024, SchoolName: "A校", Industry: "IT"},
 		{GraduationYear: 2024, SchoolName: "A校", Industry: "IT"},
 	}, nil)

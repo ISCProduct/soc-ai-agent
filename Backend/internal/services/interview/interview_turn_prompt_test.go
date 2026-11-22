@@ -121,7 +121,9 @@ func TestBuildInterviewSystemPromptNonceChangesPerCall(t *testing.T) {
 			nil, nil, 0, 0, 1, 5, 0, 180, nil,
 		)
 	}
-	if extractPromptMarker(t, build()) == extractPromptMarker(t, build()) {
+	marker1 := extractPromptMarker(t, build())
+	marker2 := extractPromptMarker(t, build())
+	if marker1 == marker2 {
 		t.Fatal("企業情報の区切りノンスが呼び出し間で同じ")
 	}
 }

@@ -1,10 +1,21 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 import { ResumeResultView } from '@/app/resume/components/ResumeResultView'
 import type { WeightScore } from '@/components/feedback/ScoreUpdateBanner'
 import type { ReviewResult } from '@/app/resume/types'
+
+// PDF.js は jsdom で動かない。描画そのものは Playwright の E2E で確かめ、ここでは呼び出し方を見る
+let lastPdfProps: { documentId: number; page: number; onError: () => void } | null = null
+jest.mock('@/app/resume/components/ResumePdfPage', () => ({
+  __esModule: true,
+  default: (props: { documentId: number; page: number; onError: () => void }) => {
+    lastPdfProps = props
+    return <div data-testid="pdf-page">pdf:{props.documentId}:{props.page}</div>
+  },
+}))
 
 const scores: WeightScore[] = [{ weight_category: '細部志向', score: 60 }]
 
@@ -16,7 +27,7 @@ function buildReview(overrides: Partial<ReviewResult['review']> = {}): ReviewRes
   }
 }
 
-function renderView(review: ReviewResult, extra: Partial<React.ComponentProps<typeof ResumeResultView>> = {}) {
+function renderView(review: ReviewResult, extra: Partial<ComponentProps<typeof ResumeResultView>> = {}) {
   return render(
     <ResumeResultView review={review} scoresBefore={null} scoresAfter={null} annotateError="" onDownload={() => {}} ragReport="" {...extra} />,
   )
@@ -180,5 +191,31 @@ describe('ResumeResultView', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /注釈つきPDFをダウンロード/ }))
     expect(onDownload).toHaveBeenCalledTimes(1)
+  })
+
+  it('書類IDがあれば実際の書類（PDF）を描き、無ければ原文を並べた表示にする', async () => {
+    const review = buildReview()
+    review.items = [{ id: 1, page_number: 1, severity: 'warning', message: '指摘', quote: '原文のテキスト' }]
+
+    const { unmount } = renderView(review)
+    expect(screen.queryByTestId('pdf-page')).not.toBeInTheDocument()
+    expect(screen.getByText(/実際の書類のレイアウトとは異なります/)).toBeInTheDocument()
+    unmount()
+
+    renderView(review, { documentId: 42 })
+    expect(await screen.findByTestId('pdf-page')).toHaveTextContent('pdf:42:1')
+    expect(screen.queryByText(/実際の書類のレイアウトとは異なります/)).not.toBeInTheDocument()
+  })
+
+  it('書類を読み込めなかったら、原文を並べた表示に切り替える', async () => {
+    const review = buildReview()
+    review.items = [{ id: 1, page_number: 1, severity: 'warning', message: '指摘', quote: '原文のテキスト' }]
+    renderView(review, { documentId: 42 })
+    await screen.findByTestId('pdf-page')
+
+    act(() => lastPdfProps?.onError())
+
+    expect(screen.queryByTestId('pdf-page')).not.toBeInTheDocument()
+    expect(screen.getByText(/実際の書類のレイアウトとは異なります/)).toBeInTheDocument()
   })
 })
