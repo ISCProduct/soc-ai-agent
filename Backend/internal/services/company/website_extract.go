@@ -32,6 +32,7 @@ package company
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -54,9 +55,17 @@ const (
 	// 「会社概要」は1ページに収まることが多く、増やすほど相手サーバへの負荷も増える。
 	maxAboutPages = 2
 
+	// maxAboutTries は下位ページへ送るリクエストの上限。
+	// robots.txt で禁止された先へ転送された候補は maxAboutPages に数えないが、
+	// 転送元へのリクエストは発生するので、候補が多いサイトでも送りすぎないよう別に抑える。
+	maxAboutTries = 5
+
 	// politeDelay は同一サイトへの連続アクセスの間隔。
 	politeDelay = 700 * time.Millisecond
 )
+
+// errRobotsRedirect は robots.txt で禁止されたページへの転送を追従しなかったことを表す。
+var errRobotsRedirect = errors.New("robots.txt で禁止されたページへのリダイレクトです")
 
 var anchorRe = regexp.MustCompile(`(?is)<a[^>]+href=["']([^"']+)["'][^>]*>(.*?)</a>`)
 
@@ -93,15 +102,16 @@ func collectWebsiteText(ctx context.Context, websiteURL string) (string, error) 
 	var sb strings.Builder
 	sb.WriteString(normalizeHTMLText(rawTop))
 
-	read := 0
+	read, tries := 0, 0
 	for _, link := range rankAboutLinks(rawTop, top) {
-		if read >= maxAboutPages {
+		if read >= maxAboutPages || tries >= maxAboutTries {
 			break
 		}
 		if !robots.allows(link) {
 			continue
 		}
 		read++
+		tries++
 		// 相手は自社サーバではない。連続アクセスは間隔を空ける。
 		select {
 		case <-ctx.Done():
@@ -111,6 +121,10 @@ func collectWebsiteText(ctx context.Context, websiteURL string) (string, error) 
 
 		rawSub, err := fetchPageHTML(ctx, robots, link)
 		if err != nil {
+			// 禁止先への転送は「読めないページ」なので枠を返し、次の候補を読む
+			if errors.Is(err, errRobotsRedirect) {
+				read--
+			}
 			continue // 1ページ落ちても残りで判断する
 		}
 		sb.WriteString(" ")
@@ -143,7 +157,7 @@ func fetchPageHTML(ctx context.Context, robots *robotsRules, pageURL string) (st
 				return fmt.Errorf("リダイレクトが多すぎます")
 			}
 			if req.URL.Host == origin.Host && !robots.allows(req.URL.String()) {
-				return fmt.Errorf("robots.txt で禁止されたページへのリダイレクトです: %s", req.URL)
+				return fmt.Errorf("%w: %s", errRobotsRedirect, req.URL)
 			}
 			return nil
 		},
