@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"testing"
 
 	"Backend/internal/models"
@@ -29,7 +30,7 @@ func TestNormalizeNumericAnswer_UsesPresentedOptions(t *testing.T) {
 	}}
 	v := &JobCategoryValidator{jobCategoryRepo: repo}
 
-	got, err := v.normalizeNumericAnswer("2", realClarificationQuestion)
+	got, err := v.normalizeNumericAnswer(context.Background(), "2", realClarificationQuestion)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestNormalizeNumericAnswer_PresentedOptionsForEachChoice(t *testing.T) {
 		"2": "Webエンジニア",
 		"3": "データエンジニア",
 	} {
-		got, err := v.normalizeNumericAnswer(answer, realClarificationQuestion)
+		got, err := v.normalizeNumericAnswer(context.Background(), answer, realClarificationQuestion)
 		if err != nil {
 			t.Fatalf("answer=%s: %v", answer, err)
 		}
@@ -70,7 +71,7 @@ func TestNormalizeNumericAnswer_OutOfPresentedRangeKeepsOriginal(t *testing.T) {
 	}}
 	v := &JobCategoryValidator{jobCategoryRepo: repo}
 
-	got, err := v.normalizeNumericAnswer("5", realClarificationQuestion)
+	got, err := v.normalizeNumericAnswer(context.Background(), "5", realClarificationQuestion)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,7 +83,7 @@ func TestNormalizeNumericAnswer_OutOfPresentedRangeKeepsOriginal(t *testing.T) {
 // 全角数字で答えても同じ選択肢を指すこと。
 func TestNormalizeNumericAnswer_FullWidthDigit(t *testing.T) {
 	v := &JobCategoryValidator{jobCategoryRepo: &jobCategoryRepoMock{}}
-	got, err := v.normalizeNumericAnswer("２", realClarificationQuestion)
+	got, err := v.normalizeNumericAnswer(context.Background(), "２", realClarificationQuestion)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -115,7 +116,7 @@ func TestNormalizeNumericAnswer_UnparsableQuestionDoesNotFallBackToMaster(t *tes
 	v := &JobCategoryValidator{jobCategoryRepo: repo}
 
 	// 番号付きの選択肢が無い質問文
-	got, err := v.normalizeNumericAnswer("2", "どんな仕事に興味がありますか？自由にお答えください。")
+	got, err := v.normalizeNumericAnswer(context.Background(), "2", "どんな仕事に興味がありますか？自由にお答えください。")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,7 +135,7 @@ func TestNormalizeNumericAnswer_NoQuestionUsesMaster(t *testing.T) {
 	}}
 	v := &JobCategoryValidator{jobCategoryRepo: repo}
 
-	got, err := v.normalizeNumericAnswer("2", "")
+	got, err := v.normalizeNumericAnswer(context.Background(), "2", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

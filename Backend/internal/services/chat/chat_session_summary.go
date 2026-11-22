@@ -51,7 +51,7 @@ func (s *ChatService) buildAndSaveSessionSummary(ctx context.Context, userID uin
 			if i > 0 {
 				topCats += "\n"
 			}
-			topCats += fmt.Sprintf("- %s: %d", sc.WeightCategory, sc.Score)
+			topCats += fmt.Sprintf("- %s: %.0f", sc.WeightCategory, sc.Score)
 		}
 	}
 

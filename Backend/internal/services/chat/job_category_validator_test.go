@@ -17,11 +17,11 @@ type jobCategoryRepoMock struct {
 	byIDsArgs        []uint
 }
 
-func (m *jobCategoryRepoMock) FindAll() ([]models.JobCategory, error) {
+func (m *jobCategoryRepoMock) FindAll(context.Context) ([]models.JobCategory, error) {
 	return nil, nil
 }
 
-func (m *jobCategoryRepoMock) FindByID(id uint) (*models.JobCategory, error) {
+func (m *jobCategoryRepoMock) FindByID(context.Context, uint) (*models.JobCategory, error) {
 	return nil, nil
 }
 
@@ -34,11 +34,11 @@ func (m *jobCategoryRepoMock) FindByIDs(ctx context.Context, ids []uint) ([]mode
 	return m.byIDs, nil
 }
 
-func (m *jobCategoryRepoMock) FindByName(name string) ([]models.JobCategory, error) {
+func (m *jobCategoryRepoMock) FindByName(context.Context, string) ([]models.JobCategory, error) {
 	return nil, nil
 }
 
-func (m *jobCategoryRepoMock) GetTopCategories() ([]models.JobCategory, error) {
+func (m *jobCategoryRepoMock) GetTopCategories(context.Context) ([]models.JobCategory, error) {
 	if m.topCategoriesErr != nil {
 		return nil, m.topCategoriesErr
 	}
@@ -58,7 +58,7 @@ func TestNormalizeNumericAnswer_mapsTopCategory(t *testing.T) {
 		},
 	}
 
-	got, err := v.normalizeNumericAnswer("1", "")
+	got, err := v.normalizeNumericAnswer(context.Background(), "1", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestNormalizeNumericAnswer_mapsUndecidedOption(t *testing.T) {
 		},
 	}
 
-	got, err := v.normalizeNumericAnswer("3", "")
+	got, err := v.normalizeNumericAnswer(context.Background(), "3", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestNormalizeNumericAnswer_keepsOriginalForOutOfRange(t *testing.T) {
 		},
 	}
 
-	got, err := v.normalizeNumericAnswer("9", "")
+	got, err := v.normalizeNumericAnswer(context.Background(), "9", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestNormalizeNumericAnswer_keepsOriginalForText(t *testing.T) {
 		jobCategoryRepo: &jobCategoryRepoMock{},
 	}
 
-	got, err := v.normalizeNumericAnswer("エンジニア", "")
+	got, err := v.normalizeNumericAnswer(context.Background(), "エンジニア", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestNormalizeNumericAnswer_returnsErrorOnTopCategoryFetchFailure(t *testing
 		},
 	}
 
-	if _, err := v.normalizeNumericAnswer("1", ""); err == nil {
+	if _, err := v.normalizeNumericAnswer(context.Background(), "1", ""); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }

@@ -61,7 +61,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	}
 
 	// スコア分布を分析
-	scoreMap := make(map[string]int)
+	scoreMap := make(map[string]float64)
 	evaluatedCategories := make(map[string]bool)
 	for _, score := range scores {
 		scoreMap[score.WeightCategory] = score.Score
@@ -71,7 +71,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	}
 
 	// 全カテゴリ（職種に応じて並び順を調整）
-	allCategories := s.getCategoryOrder(jobCategoryID)
+	allCategories := s.getCategoryOrder(ctx, jobCategoryID)
 
 	// フェーズの質問枠を、先頭の未評価軸が使い切らないように配る（SOCAIAGENT-473）。
 	phaseNameForPick := ""
@@ -126,7 +126,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		if err != nil {
 			// エラーは致命的にせずフォールバック質問を設定
 			log.Printf("Warning: failed to generate question via AI: %v\n", err)
-			fallbackQuestion := s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
+			fallbackQuestion := s.selectFallbackQuestion(ctx, targetCategory, jobCategoryID, targetLevel, askedTexts)
 			if fallbackQuestion != "" {
 				aiResponse = fallbackQuestion
 			} else {
@@ -178,7 +178,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		if targetLevel == "新卒" && isVerboseQuestion(aiResponse) && isTextBasedQuestion(aiResponse) {
 			simple, err := s.simplifyQuestionWithAI(ctx, aiResponse)
 			if err != nil || strings.TrimSpace(simple) == "" {
-				simple = s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
+				simple = s.selectFallbackQuestion(ctx, targetCategory, jobCategoryID, targetLevel, askedTexts)
 			}
 			if strings.TrimSpace(simple) == "" {
 				simple = simplifyNewGradQuestion(aiResponse)

@@ -17,16 +17,12 @@ const ScoreEvaluationSystemPrompt = `あなたは就職適性診断のスコア�
 
 // AnswerQualitySystemPrompt は回答品質のLLM評価に使用するシステムプロンプトです。
 // キーワードマッチングでは捉えられない「深さ」「本音度」「一貫性」を評価します。
-const AnswerQualitySystemPrompt = `あなたは就職面接の回答品質を評価する専門家です。
+// 評価観点（出力のキー）は AnswerQualityOutput から作る（SOCAIAGENT-661）。
+var AnswerQualitySystemPrompt = `あなたは就職面接の回答品質を評価する専門家です。
 以下の観点でJSON形式のみで評価してください。
 
 ## 評価観点
-- score: 総合スコア（0〜100の整数）
-- confidence: 評価の信頼度 "high" / "medium" / "low"
-- specificity: 具体性（0〜3）- 具体的な経験・数値・エピソードの有無
-- authenticity: 本音度（0〜3）- 定型文でなく個人の実感が感じられるか
-- consistency: 一貫性（0〜3）- 論理的で矛盾がないか
-- explanation: 評価理由（日本語、60文字以内）
+` + outputFieldList(AnswerQualityOutput{}) + `
 
 ## 判定基準
 - 短くても「なぜ」「どう行動したか」が含まれれば高評価にする
