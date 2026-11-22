@@ -39,6 +39,18 @@ def _company_lock(key: str) -> threading.Lock:
         return _reembed_locks.setdefault(key, threading.Lock())
 
 
+def _purge_doc_types(requested: Optional[str], target: str) -> List[str]:
+    """再取得した target で入れ替える（旧文書を消す）用途。
+
+    resume_review は company_research と同じ文書を使うので、company_research として取り直す。
+    resume_review を指定したとき・doc_type を省いたときは、resume_review の旧文書も入れ替える
+    （company_research だけを消すと、resume_review の旧文書が TTL 切れまで返り続ける。SOCAIAGENT-659）。
+    """
+    if target == "company_research" and requested in (None, "resume_review"):
+        return ["company_research", "resume_review"]
+    return [target]
+
+
 def _refresh_targets(doc_type: Optional[str]) -> List[str]:
     """再取得する doc_type（取得のしかたごと）。resume_review は company_research と同じ文書を使う。"""
     targets: List[str] = []
@@ -119,7 +131,8 @@ def vector_reembed(request: VectorReembedRequest) -> VectorReembedResponse:
                     continue
                 embeddings = m.embed_texts([text])
                 outcome = replace_documents(
-                    cache_keys[target], [text], embeddings, source="web_search", doc_type=target
+                    cache_keys[target], [text], embeddings, source="web_search", doc_type=target,
+                    purge_doc_types=_purge_doc_types(doc_type, target),
                 )
             except Exception as exc:
                 logger.exception("vector reembed failed company=%s doc_type=%s error=%s", safe_company, target, exc)

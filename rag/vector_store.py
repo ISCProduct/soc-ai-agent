@@ -11,7 +11,7 @@ import re
 import threading
 import unicodedata
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import chromadb
 
@@ -207,34 +207,98 @@ def build_cache_key(
 _FETCHED_AT_FUTURE_TOLERANCE_SECONDS = 300
 
 
+def _parse_fetched_at(value: Any) -> Optional[datetime]:
+    """fetched_at（ISO 8601）を UTC の datetime にする。読めなければ None。
+
+    タイムゾーンの無い日時は UTC とみなす（書き込みは常に UTC で、コンテナも UTC）。
+    TTL の判定（_is_fresh）と backfill の両方がこれを使い、扱いを食い違わせない。
+    """
+    if not value:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts.astimezone(timezone.utc)
+    except (ValueError, TypeError, OverflowError, OSError):
+        return None
+
+
+def _now_ts() -> int:
+    """今の UNIX 秒（整数）。テストで時刻を固定できるよう1か所にする。"""
+    return int(datetime.now(timezone.utc).timestamp())
+
+
+def _ttl_window(now_ts: int, ttl_seconds: int) -> Tuple[int, int]:
+    """TTL 内とみなす fetched_at_ts の範囲（両端を含む）。
+
+    下限は「今 - TTL」、上限は時計のずれの許容ぶんだけ未来（これを超える未来は壊れた文書）。
+    検索の where（_with_ttl）と、検索で取れた文書の後段の確認（_doc_is_fresh）の両方がこれを使う。
+    """
+    return now_ts - ttl_seconds, now_ts + _FETCHED_AT_FUTURE_TOLERANCE_SECONDS
+
+
+def _has_numeric_ts(meta: Dict[str, Any]) -> bool:
+    value = meta.get("fetched_at_ts")
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def fetched_at_to_ts(fetched_at: Any, now: Optional[datetime] = None) -> Optional[int]:
+    """fetched_at を UNIX 秒にする。読めない・ありえない未来のときは None（補わない）。"""
+    ts = _parse_fetched_at(fetched_at)
+    if ts is None:
+        return None
+    now = now or datetime.now(timezone.utc)
+    if ts.timestamp() - now.timestamp() > _FETCHED_AT_FUTURE_TOLERANCE_SECONDS:
+        return None
+    return int(ts.timestamp())
+
+
 def _is_fresh(fetched_at: Optional[str], ttl_seconds: int = CACHE_TTL_SECONDS) -> bool:
-    """キャッシュ文書が TTL 内かを返す。
+    """キャッシュ文書が TTL 内かを、fetched_at（ISO 8601）で返す。
 
     fetched_at が読めない・ありえない未来の日付のときは古い扱い（False）にする（SOCAIAGENT-567）。
-    新鮮扱いにすると TTL で二度と失効せず、古い企業情報がキャッシュに残り続ける。古い扱いなら
-    検索し直して上書きされるので、壊れた日付の文書が自然に入れ替わる。
+    新鮮扱いにすると TTL で二度と失効せず、古い企業情報がキャッシュに残り続ける。
 
-    fetched_at が無い（取得時刻を記録する前の文書）ときは新鮮扱いにする。ただしこの判定は
+    fetched_at が無い（取得時刻を記録する前の文書）ときは新鮮扱いにする。ただしこれは
     検索で取れた文書の後段の確認で、検索そのものは _with_ttl が fetched_at_ts で絞るので、
     fetched_at_ts を持たない文書は検索に当たらず古い扱いになる（SOCAIAGENT-659 の U1）。
-    ここが効くのは RAG_TTL_WHERE=0 で where を切ったときだけ。
+    fetched_at_ts を持つ文書は、後段でも fetched_at_ts を where と同じ範囲で確かめる（_doc_is_fresh）。
+    ここが効くのは、RAG_TTL_WHERE=0 で where を切ったときの、fetched_at_ts を持たない文書だけ。
     """
     if not fetched_at or ttl_seconds <= 0:
         return True
-    try:
-        ts = datetime.fromisoformat(str(fetched_at).replace("Z", "+00:00"))
-        age = (datetime.now(timezone.utc) - ts.astimezone(timezone.utc)).total_seconds()
-    except (ValueError, TypeError, OverflowError):
+    ts = _parse_fetched_at(fetched_at)
+    if ts is None:
         logger.warning("cache document has unreadable fetched_at=%r; treating as stale", fetched_at)
         return False
+    age = (datetime.now(timezone.utc) - ts).total_seconds()
     if age < -_FETCHED_AT_FUTURE_TOLERANCE_SECONDS:
         logger.warning("cache document has future fetched_at=%r; treating as stale", fetched_at)
         return False
     return age <= ttl_seconds
 
 
-def _doc_ids(cache_key: str, count: int) -> List[str]:
-    digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:16]
+def _doc_is_fresh(meta: Dict[str, Any], ttl_seconds: int = CACHE_TTL_SECONDS) -> bool:
+    """検索で取れた文書の後段の確認。fetched_at_ts があれば where と同じ整数の範囲で判定する
+    （fetched_at の小数を含む秒数で判定すると、TTL ちょうどの境界で where と1秒未満ずれる）。"""
+    if ttl_seconds <= 0:
+        return True
+    if _has_numeric_ts(meta):
+        low, high = _ttl_window(_now_ts(), ttl_seconds)
+        return low <= meta["fetched_at_ts"] <= high
+    return _is_fresh(meta.get("fetched_at"), ttl_seconds)
+
+
+def _doc_ids(cache_key: str, count: int, doc_type: str = "") -> List[str]:
+    """文書の ID。cache_key と用途（doc_type）から作る（SOCAIAGENT-659）。
+
+    resume_review と company_research は、職種が同じなら cache_key も同じで、同じコレクションに並ぶ。
+    以前は cache_key だけから ID を作っていたので、片方を書くともう片方の同じ番号のチャンクを上書きし、
+    別の用途の断片が残っていた。doc_type を含めて、用途ごとに別の文書にする。
+    doc_type を含めない旧 ID の文書は、次の書き込みの余りの掃除・再取得の削除で消える。
+    """
+    digest = hashlib.sha256(f"{doc_type}\x00{cache_key}".encode("utf-8")).hexdigest()[:16]
     return [f"{digest}_{i}" for i in range(count)]
 
 
@@ -338,17 +402,17 @@ def _with_ttl(where: Dict[str, Any], ttl_seconds: int = CACHE_TTL_SECONDS) -> Di
 
     以前は n_results 件を取ってから期限切れを捨てていたので、期限切れの文書が類似度の上位を占めると、
     有効な文書があっても返らなかった。検索の条件で絞れば、有効な文書が n_results 件まで返る。
-    fetched_at_ts（数値）が無い文書は条件に当たらず、古い扱いになる（既存の文書は
-    scripts/backfill_fetched_at_ts.py で先に補完すること）。
+    fetched_at_ts（数値）が無い文書は条件に当たらず、古い扱いになる（既存の文書は rag-review の
+    起動時の backfill（backfill_fetched_at_ts）が補う）。
     """
     if ttl_seconds <= 0 or not ttl_where_enabled():
         return where
-    now = int(datetime.now(timezone.utc).timestamp())
-    # 後段の _is_fresh と同じく、時計のずれを超える未来の取得時刻も壊れた文書として外す。
+    low, high = _ttl_window(_now_ts(), ttl_seconds)
+    # 時計のずれを超える未来の取得時刻も壊れた文書として外す。
     # Chroma は1つの条件に演算子を1つしか持てないので、下限と上限を別の条件にする
     ttl_clauses = [
-        {"fetched_at_ts": {"$gte": now - ttl_seconds}},
-        {"fetched_at_ts": {"$lte": now + _FETCHED_AT_FUTURE_TOLERANCE_SECONDS}},
+        {"fetched_at_ts": {"$gte": low}},
+        {"fetched_at_ts": {"$lte": high}},
     ]
     if not where:
         return {"$and": ttl_clauses}
@@ -381,16 +445,22 @@ def _query_with_where(
         # リスクがある)は行わずキャッシュミス扱いにする。
         # 以前は失敗を黙って握りつぶしていたので、キャッシュミスの原因が追えなかった（SOCAIAGENT-659）。
         if not fallback_where:
-            logger.warning("chromadb query failed; treated as cache miss where=%s error=%s", where, first_exc)
+            logger.warning(
+                "chromadb query failed; treated as cache miss where_keys=%s error=%s", _where_keys(where), first_exc
+            )
             return []
         try:
             results = _run(fallback_where)
         except Exception as exc:
             logger.warning(
-                "chromadb query failed twice; treated as cache miss where=%s fallback=%s error=%s",
-                where, fallback_where, exc,
+                "chromadb query failed twice; treated as cache miss where_keys=%s fallback_keys=%s error=%s",
+                _where_keys(where), _where_keys(fallback_where), exc,
             )
             return []
+        logger.info(
+            "chromadb query failed; retried with fallback where_keys=%s fallback_keys=%s error=%s",
+            _where_keys(where), _where_keys(fallback_where), first_exc,
+        )
 
     documents: List[str] = results.get("documents", [[]])[0] or []
     metadatas: List[Dict[str, Any]] = results.get("metadatas", [[]])[0] or []
@@ -398,10 +468,23 @@ def _query_with_where(
     for doc, md in zip(documents, metadatas):
         if not doc:
             continue
-        fetched_at = (md or {}).get("fetched_at")
-        if _is_fresh(fetched_at):
+        if _doc_is_fresh(md or {}):
             fresh_docs.append(doc)
     return fresh_docs
+
+
+def _where_keys(where: Optional[Dict[str, Any]]) -> List[str]:
+    """ログ用に where の項目名だけを返す（値は出さない）。"""
+    if not where:
+        return []
+    keys: List[str] = []
+    for key, value in where.items():
+        if key in ("$and", "$or") and isinstance(value, list):
+            for clause in value:
+                keys.extend(_where_keys(clause))
+        else:
+            keys.append(key)
+    return sorted(set(keys))
 
 
 def set_cached_documents(
@@ -426,7 +509,7 @@ def set_cached_documents(
     try:
         client = get_chroma_client()
         collection = client.get_or_create_collection(collection_name)
-        ids = _doc_ids(cache_key, len(docs))
+        ids = _doc_ids(cache_key, len(docs), meta["doc_type"])
         metadatas = [
             {
                 "company": meta["company"],
@@ -447,20 +530,6 @@ def set_cached_documents(
             embeddings=embeddings,
             metadatas=metadatas,
         )
-        # 件数が減る更新（3チャンク → 2チャンク）で、前回の3つ目が残らないようにする（SOCAIAGENT-659）。
-        # 同じ cache_key でも用途（doc_type）が違う文書は共有コレクションに並ぶので、doc_type でも絞る
-        # 同じキーを別のリクエストが同時に書いたとき、相手が書いたチャンクを消さないよう、
-        # 今回より前に書かれたもの（fetched_at が今回より古い・無い）だけを消す
-        stale_where = _build_where({"cache_key": meta["cache_key"], "doc_type": meta["doc_type"]})
-        got = collection.get(where=stale_where, include=["metadatas"])
-        written = set(ids)
-        stale = [
-            doc_id
-            for doc_id, m in zip(got.get("ids") or [], got.get("metadatas") or [])
-            if doc_id not in written and str((m or {}).get("fetched_at") or "") < fetched_at
-        ]
-        if stale:
-            collection.delete(ids=stale)
         logger.info(
             "chromadb upsert key=%s collection=%s docs=%d source=%s doc_type=%s",
             cache_key,
@@ -471,6 +540,33 @@ def set_cached_documents(
         )
     except Exception as exc:
         logger.exception("chromadb set failed key=%s error=%s", cache_key, exc)
+        return
+    # 書き込みは済んでいるので、余りの掃除の失敗は「書き込みの失敗」とは別に記録する
+    try:
+        _delete_stale_chunks(collection, meta, set(ids), fetched_at)
+    except Exception as exc:
+        logger.warning("chromadb stale cleanup failed key=%s collection=%s error=%s", cache_key, collection_name, exc)
+
+
+def _delete_stale_chunks(collection: Any, meta: Dict[str, str], written: set, fetched_at: str) -> None:
+    """件数が減る更新（3チャンク → 2チャンク）で、前回の余ったチャンクを消す（SOCAIAGENT-659）。
+
+    同じ cache_key・同じ用途（doc_type）で、今回書かなかった ID のうち、今回より前に書かれたもの
+    （fetched_at が今回より古い・無い）だけを消す。fetched_at は常に UTC の isoformat で書くので、
+    文字列の大小がそのまま時刻の前後になる（無い文書は空文字で、いちばん古い扱い）。
+
+    今回より後に書かれた別のリクエストのチャンクは消さない。ただし同じキーを同時に書いたときの
+    結果は「最後に書いたものが勝つ」で、両方の書き込みがきれいに残ることまでは保証しない。
+    """
+    stale_where = _build_where({"cache_key": meta["cache_key"], "doc_type": meta["doc_type"]})
+    got = collection.get(where=stale_where, include=["metadatas"])
+    stale = [
+        doc_id
+        for doc_id, m in zip(got.get("ids") or [], got.get("metadatas") or [])
+        if doc_id not in written and str((m or {}).get("fetched_at") or "") < fetched_at
+    ]
+    if stale:
+        collection.delete(ids=stale)
 
 
 def upsert_by_doc_type(
@@ -557,6 +653,7 @@ def replace_documents(
     embeddings: List[List[float]],
     source: str = "unknown",
     doc_type: Optional[str] = None,
+    purge_doc_types: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """企業の文書を「新しく書く → 書けたことを確かめる → 不要な旧文書を消す」の順で置き換える（SOCAIAGENT-658）。
 
@@ -569,6 +666,9 @@ def replace_documents(
     「その用途の企業の文書を全部消してから書く」と同じ結果になる。ただし消すのは書けた後だけ。
     company_context は resume_review と company_research が共有しているので、用途の違う文書は消さない。
     doc_type を持たない旧文書も消さない（delete_company_documents と同じ範囲。SOCAIAGENT-659）。
+
+    purge_doc_types を渡すと、消す用途をその集合にする（既定は doc_type だけ）。再埋め込みは
+    resume_review を company_research として取り直すので、両方を渡して resume_review の旧文書も入れ替える。
     戻り値: {"collection": 論理名, "replaced": 書いた件数, "deleted": 消した件数}
     """
     if not docs or not embeddings or len(docs) != len(embeddings):
@@ -578,7 +678,7 @@ def replace_documents(
     meta["doc_type"] = doc_type or meta["doc_type"]
     client = get_chroma_client()
     collection = client.get_or_create_collection(physical_collection_name(logical))
-    ids = _doc_ids(cache_key, len(docs))
+    ids = _doc_ids(cache_key, len(docs), meta["doc_type"])
     now = datetime.now(timezone.utc)
     fetched_at = now.isoformat()
     collection.upsert(
@@ -604,9 +704,14 @@ def replace_documents(
         raise ReplaceDocumentsError(
             f"written documents not found collection={logical} expected={len(ids)} found={len(written)}"
         )
-    filters = _company_filter({"company": meta["company"], "company_hash": meta.get("company_hash", "")})
-    if meta.get("doc_type"):
-        filters["doc_type"] = meta["doc_type"]
+    filters: Dict[str, Any] = _company_filter(
+        {"company": meta["company"], "company_hash": meta.get("company_hash", "")}
+    )
+    purge = sorted({t for t in (purge_doc_types or [meta.get("doc_type") or ""]) if t})
+    if len(purge) == 1:
+        filters["doc_type"] = purge[0]
+    elif purge:
+        filters["doc_type"] = {"$in": purge}
     where = _build_where(filters)
     existing = collection.get(where=where, include=[]).get("ids") or []
     stale = [doc_id for doc_id in existing if doc_id not in set(ids)]
@@ -702,3 +807,81 @@ def describe_backend() -> str:
     if CHROMA_HOST:
         return f"chromadb http://{CHROMA_HOST}:{CHROMA_PORT}"
     return f"chromadb persistent:{CHROMA_DATA_DIR}"
+
+
+# --- fetched_at_ts の backfill（SOCAIAGENT-659） -----------------------------------
+#
+# 検索は TTL を where の fetched_at_ts で絞るので、fetched_at_ts を持たない既存の文書は検索に当たらない。
+# rag-review の起動時（main.start_fetched_at_ts_backfill）と、手動のスクリプト
+# （scripts/backfill_fetched_at_ts.py）がこれを使う。
+
+BACKFILL_BATCH = 500
+
+
+def _empty_backfill_stats() -> Dict[str, Any]:
+    return {"scanned": 0, "already": 0, "filled": 0, "unreadable": 0}
+
+
+def backfill_collection(collection: Any, apply: bool = False, batch: Optional[int] = None) -> Dict[str, Any]:
+    """1つのコレクションの文書に fetched_at_ts を補い、件数（scanned / already / filled / unreadable）を返す。
+
+    - fetched_at が読めて、ありえない未来でない文書だけに足す。読めない・無い文書は古い扱いのまま（U1）
+    - 既に数値の fetched_at_ts がある文書には触らない（何度流しても同じ結果になる）
+    - 先に ID を全部集めてから、ID で分けて読む。起動時は検索・書き込みと並行して動くので、
+      offset で読み進めると、途中で文書が消えたときに読み飛ばす
+    - update には fetched_at_ts だけを渡す（Chroma の update は項目ごとにマージする）。読んでから
+      update するまでに同じ ID が書き直されても、新しい本文に古いメタデータを付けない
+    """
+    size = batch or BACKFILL_BATCH
+    stats = _empty_backfill_stats()
+    all_ids: List[str] = list(collection.get(include=[]).get("ids") or [])
+    for start in range(0, len(all_ids), size):
+        got = collection.get(ids=all_ids[start:start + size], include=["metadatas"])
+        ids: List[str] = list(got.get("ids") or [])
+        metadatas = got.get("metadatas") or [{} for _ in ids]
+        update_ids: List[str] = []
+        update_metas: List[Dict[str, Any]] = []
+        for doc_id, meta in zip(ids, metadatas):
+            meta = meta or {}
+            stats["scanned"] += 1
+            if _has_numeric_ts(meta):
+                stats["already"] += 1
+                continue
+            ts = fetched_at_to_ts(meta.get("fetched_at"))
+            if ts is None:
+                stats["unreadable"] += 1
+                continue
+            update_ids.append(doc_id)
+            update_metas.append({"fetched_at_ts": ts})
+        if update_ids:
+            stats["filled"] += len(update_ids)
+            if apply:
+                collection.update(ids=update_ids, metadatas=update_metas)
+    return stats
+
+
+def backfill_fetched_at_ts(client: Any = None, apply: bool = False) -> Dict[str, Dict[str, Any]]:
+    """今の世代（RAG_COLLECTION_SUFFIX）の企業データのコレクションをすべて補う。
+
+    1つのコレクションで失敗しても、残りのコレクションは続けて補う。失敗したコレクションは
+    結果に {"error": 例外の種類} を入れ、WARNING に残す（どこで止まったかを追えるように）。
+    """
+    client = client or get_chroma_client()
+    existing = _collection_names(client)
+    result: Dict[str, Dict[str, Any]] = {}
+    for logical in ALL_COLLECTIONS:
+        physical = physical_collection_name(logical)
+        if physical not in existing:
+            result[logical] = _empty_backfill_stats()
+            continue
+        try:
+            result[logical] = backfill_collection(client.get_collection(physical), apply=apply)
+        except Exception as exc:
+            logger.warning("fetched_at_ts backfill failed collection=%s error=%s", physical, exc)
+            result[logical] = {**_empty_backfill_stats(), "error": type(exc).__name__}
+    return result
+
+
+def backfill_failed_collections(result: Dict[str, Dict[str, Any]]) -> List[str]:
+    """backfill_fetched_at_ts の結果のうち、失敗したコレクションの論理名。"""
+    return [name for name, stats in result.items() if stats.get("error")]

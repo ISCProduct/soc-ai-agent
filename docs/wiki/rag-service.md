@@ -376,22 +376,29 @@ HttpClient 構成では RAG コンテナ内の `/app/chroma_db` 削除では消�
 
 | 操作 | 作用する範囲 |
 |---|---|
-| `delete_company_documents(company, doc_type=...)` | その企業の、指定した `doc_type` の文書だけ。`company_context` を共有する `resume_review` / `company_research` の片方を消しても、もう片方は残る。`doc_type` を持たない旧文書は消さない。`doc_type` を省いたときは今までどおり企業の文書をすべて消す |
-| `replace_documents`（`/vector/reembed` の再取得） | 書けたことを確かめたあと、同じ企業・同じ `doc_type` の、今回書かなかった文書を消す（役割が違っても消す）。用途の違う文書と `doc_type` を持たない旧文書は残す |
-| `set_cached_documents`（件数が減る更新） | 書いたあと、同じ `cache_key` かつ同じ `doc_type` で、今回書かなかった ID（前回の余ったチャンク）を消す。同時に別のリクエストが書いたチャンクを消さないよう、今回より前に書かれたもの（`fetched_at` が古い・無い）だけを消す |
-| 検索の TTL | where に `今 - RAG_SEARCH_CACHE_TTL_SECONDS <= fetched_at_ts <= 今 + 5分` を足して検索する。期限切れや、ありえない未来の日付の文書が類似度の上位を占めても、有効な文書が `n_results` 件まで返る。`fetched_at_ts` を持たない文書は古い扱い |
-| 検索の失敗 | 例外をキャッシュミスにするとき、where と例外を WARNING で出す |
+| `delete_company_documents(company, doc_type=...)` | その企業の、指定した `doc_type` の文書だけ。`company_context` を共有する `resume_review` / `company_research` の片方を消しても、もう片方は残る。`doc_type` を持たない旧文書は消さない。`doc_type` を省いたときは今までどおり企業の文書をすべて消す。**企業の文書を完全に消すときは `doc_type` を付けない**（付けると、別の用途の文書と `doc_type` の無い旧文書が残る） |
+| `replace_documents`（`/vector/reembed` の再取得） | 書けたことを確かめたあと、同じ企業・消す用途（`purge_doc_types`。既定は書いた `doc_type`）の、今回書かなかった文書を消す（役割が違っても消す）。`resume_review` は `company_research` として取り直すので、`resume_review` を指定したとき・`doc_type` を省いたときは両方の旧文書を入れ替える。`doc_type` を持たない旧文書は残す |
+| `set_cached_documents`（件数が減る更新） | 書いたあと、同じ `cache_key` かつ同じ `doc_type` で、今回書かなかった ID（前回の余ったチャンク）を消す。今回より後に書かれたもの（`fetched_at` が新しい）は消さない（同時に書いたときは最後に書いたものが勝つ）。掃除の失敗は `stale cleanup failed` の WARNING（書き込み自体は成功） |
+| 文書の ID | `cache_key` と `doc_type` から作る。`resume_review` と `company_research` は職種が同じなら `cache_key` も同じだが、ID が分かれるので、片方を書いてももう片方を上書き・削除しない。読み出しは今までどおり共有（`resume_review` の検索は `company_research` の文書も使う） |
+| 検索の TTL | where に `今 - RAG_SEARCH_CACHE_TTL_SECONDS <= fetched_at_ts <= 今 + 5分` を足して検索する。取れた文書の後段の確認も同じ整数の範囲で行う。期限切れや、ありえない未来の日付の文書が類似度の上位を占めても、有効な文書が `n_results` 件まで返る。`fetched_at_ts` を持たない文書は古い扱い |
+| 検索の失敗 | 例外をキャッシュミスにするとき、where の項目名（値は出さない）と例外を WARNING で出す。フォールバックで取れたときは INFO |
 
-書き込む文書には、`fetched_at`（ISO 8601）に加えて `fetched_at_ts`（UNIX 秒の整数）を入れます。
+書き込む文書には、`fetched_at`（ISO 8601、UTC）に加えて `fetched_at_ts`（UNIX 秒の整数）を入れます。タイムゾーンの無い `fetched_at` は UTC とみなします。
 
 **既存の文書への補完（backfill）**: `fetched_at_ts` の無い既存の文書は検索に当たらないので、rag-review は**起動のたびに**
-バックグラウンドで backfill を1回流します（`fetched_at` が読める文書だけに補う。読めない・無い文書は古い扱いのまま、
-次の検索で取り直される）。何度流しても同じ結果になり、通常の push デプロイで手順は要りません。デプロイ中に旧版が書いた
-文書も、次の起動で補われます。起動直後の補い終わるまでは、補っていない文書がキャッシュミスになりえます。
+バックグラウンドで backfill を流します（`fetched_at` が読める文書だけに補う）。何度流しても同じ結果になり、通常の push デプロイで
+手順は要りません。デプロイ中に旧版が書いた文書も、次の起動で補われます。起動直後の補い終わるまでは、補っていない文書が
+キャッシュミスになりえます。
 
-- 結果はログの `fetched_at_ts backfill done result=...`（失敗時は `fetched_at_ts backfill failed`。起動は止めない）
+- 結果はログの `fetched_at_ts backfill done result=...`
+- chroma に届かない・一部のコレクションが失敗したときは、`RAG_BACKFILL_ATTEMPTS`（既定 4）回まで、`RAG_BACKFILL_RETRY_DELAY_SEC`（既定 5 秒）から倍々に待って試し直す。1つのコレクションが失敗しても残りは補う（ログ `fetched_at_ts backfill failed collection=...`）。最後まで失敗したら `gave up`（起動は止めない。次の起動でまた試す）
 - 止めるときは `RAG_BACKFILL_ON_STARTUP=0`
 - 手で流すとき: `python scripts/backfill_fetched_at_ts.py`（件数だけ。既定は dry-run）→ `--apply` で書き込む
+
+**`fetched_at` が無い・読めない文書**は補えず、古い扱いのままです（U1）。既定（`RAG_ALLOW_WEB_SEARCH_FALLBACK=false`）では検索で
+取り直されないので、その企業は再埋め込み（`/vector/reembed`）か、Backend からの書き込み（`/company/context` など）まで
+キャッシュミスになります。マージの前に本番で dry-run（`python scripts/backfill_fetched_at_ts.py`）を流し、結果の `unreadable`
+の件数を確かめてください。
 
 切り戻しは `RAG_TTL_WHERE=0`（where で絞らず、取得後の `fetched_at` の判定だけにする）。
 

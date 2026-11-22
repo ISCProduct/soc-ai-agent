@@ -16,6 +16,8 @@ os.environ.setdefault("OPENAI_API_KEY", "sk-test")
 os.environ.setdefault("RAG_INTERNAL_TOKEN", "test-internal-token")
 # 起動時の backfill（SOCAIAGENT-659）はスタブの chromadb を叩くので、テストでは流さない
 os.environ.setdefault("RAG_BACKFILL_ON_STARTUP", "0")
+# TTL は vector_store の import 時に読むので、開発者の環境変数に左右されないよう固定する
+os.environ["RAG_SEARCH_CACHE_TTL_SECONDS"] = "86400"
 
 # crewai をスタブ化（requirements.txt から除外済みのため、ローカルで未インストール）
 _crewai_mock = types.ModuleType("crewai")

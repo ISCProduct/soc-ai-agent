@@ -74,7 +74,7 @@ def _mark_stale(client: Any, cache_key: str, docs: List, embeddings: List[List[f
     """
     meta = vector_store.parse_cache_key(cache_key)
     collection = client.get_collection(vector_store._sanitize_collection_name(meta["collection"]))
-    ids = vector_store._doc_ids(cache_key, len(docs))
+    ids = vector_store._doc_ids(cache_key, len(docs), meta["doc_type"])
     for doc_id, doc, embedding in zip(ids, docs, embeddings):
         if not doc.stale:
             continue
@@ -89,6 +89,9 @@ def _mark_stale(client: Any, cache_key: str, docs: List, embeddings: List[List[f
                 "doc_type": meta["doc_type"],
                 "source": "search_quality_eval",
                 "fetched_at": STALE_FETCHED_AT,
+                # 本番の文書と同じく数値の取得時刻も持たせ、「期限切れが返らない」理由を
+                # 「fetched_at_ts が無い」ではなく TTL の判定にする（SOCAIAGENT-659）
+                "fetched_at_ts": vector_store.fetched_at_to_ts(STALE_FETCHED_AT),
                 "cache_key": meta["cache_key"],
             }],
         )

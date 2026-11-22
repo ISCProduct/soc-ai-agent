@@ -18,7 +18,10 @@ def _matches(meta: Dict[str, Any], where: Dict[str, Any]) -> bool:
         return True
     if "$and" in where:
         return all(_matches(meta, w) for w in where["$and"])
-    return all(meta.get(k) == v for k, v in where.items())
+    return all(
+        meta.get(k) in v["$in"] if isinstance(v, dict) and "$in" in v else meta.get(k) == v
+        for k, v in where.items()
+    )
 
 
 class FakeCollection:
@@ -69,7 +72,7 @@ def chroma(monkeypatch):
 def _seed(client, collection, company, role, docs, doc_type, company_original=None):
     key = vs.build_cache_key(doc_type, company, role, company_original=company_original or company)
     col = client.get_or_create_collection(vs.physical_collection_name(collection))
-    ids = vs._doc_ids(key, len(docs))
+    ids = vs._doc_ids(key, len(docs), doc_type)
     meta = vs.parse_cache_key(key)
     col.upsert(
         ids=ids, documents=docs, embeddings=[EMB] * len(docs),
@@ -115,6 +118,24 @@ def test_replace_documents_keeps_other_doc_types_and_legacy_docs(chroma):
 
     assert outcome["deleted"] == 1
     assert _docs(chroma, "company_context", "A社") == ["doc_type の無い旧文書", "新", "添削用"]
+
+
+def test_replace_documents_purges_given_doc_types(chroma):
+    # 再埋め込みは resume_review を company_research として取り直すので、両方の旧文書を入れ替える
+    key = _seed(chroma, "company_context", "A社", "指定なし", ["旧研究"], "company_research")
+    _seed(chroma, "company_context", "A社", "エンジニア", ["旧添削1", "旧添削2"], "resume_review")
+    col = chroma.get_or_create_collection(vs.physical_collection_name("company_context"))
+    col.upsert(ids=["legacy"], documents=["doc_type の無い旧文書"], embeddings=[EMB],
+               metadatas=[{"company": "A社", "company_hash": vs._company_hash("A社")}])
+
+    outcome = vs.replace_documents(
+        key, ["新"], [EMB], source="web_search", doc_type="company_research",
+        purge_doc_types=["company_research", "resume_review"],
+    )
+
+    # company_research の旧文書は同じ ID に上書きされ、resume_review の2件が消える
+    assert outcome["deleted"] == 2
+    assert _docs(chroma, "company_context", "A社") == ["doc_type の無い旧文書", "新"]
 
 
 def test_replace_documents_keeps_old_when_write_cannot_be_confirmed(chroma):
@@ -202,6 +223,32 @@ def test_reembed_success_replaces_without_leftovers(client, chroma, monkeypatch)
 
     assert body["refreshed"] is True and body["sources"] == ["es_review"]
     assert _docs(chroma, "es_review", "A社") == ["新ES"]
+
+
+@pytest.mark.parametrize("doc_type", ["resume_review", None])
+def test_reembed_resume_review_or_all_replaces_resume_review_docs(client, chroma, monkeypatch, doc_type):
+    # resume_review は company_research として取り直す。resume_review の旧文書も入れ替えないと、
+    # 応答は replaced なのに、TTL 切れまで旧文書が返り続ける（レビューの Major 1）
+    _seed(chroma, "company_context", "A社", "指定なし", ["旧研究"], "company_research")
+    _seed(chroma, "company_context", "A社", "エンジニア", ["旧添削"], "resume_review")
+    _patch_fetch(monkeypatch, research="新研究", hints="新ヒント", es="新ES")
+
+    payload = {"company_name": "A社", "refresh": True, **({"doc_type": doc_type} if doc_type else {})}
+    body = client.post("/vector/reembed", json=payload).json()
+
+    assert {r["doc_type"]: r["status"] for r in body["results"]}["company_research"] == "replaced"
+    assert _docs(chroma, "company_context", "A社") == ["新研究"]
+
+
+def test_reembed_company_research_keeps_resume_review_docs(client, chroma, monkeypatch):
+    # company_research だけを指定したときは、resume_review の文書は入れ替えない
+    _seed(chroma, "company_context", "A社", "指定なし", ["旧研究"], "company_research")
+    _seed(chroma, "company_context", "A社", "エンジニア", ["添削"], "resume_review")
+    _patch_fetch(monkeypatch, research="新研究")
+
+    client.post("/vector/reembed", json={"company_name": "A社", "doc_type": "company_research", "refresh": True})
+
+    assert _docs(chroma, "company_context", "A社") == ["新研究", "添削"]
 
 
 def test_reembed_partial_failure_replaces_only_successful_types(client, chroma, monkeypatch):
