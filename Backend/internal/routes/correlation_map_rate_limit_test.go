@@ -37,7 +37,7 @@ func TestEchoCorrelationMapRateLimit(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, "/api/companies/1/correlation-map", nil)
 				req.RemoteAddr = "203.0.113.5:1234"
 				rec := httptest.NewRecorder()
-				got := rec.Code
+				var got int
 				if err := h(e.NewContext(req, rec)); err != nil {
 					he, ok := err.(*echo.HTTPError)
 					if !ok {
