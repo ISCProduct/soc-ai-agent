@@ -4,6 +4,7 @@ import {
   clearCompanySessionCookies,
   setCompanySessionCookies,
 } from '@/lib/auth/session-cookies'
+import { parseSessionPost } from '@/lib/auth/session-request'
 
 // middleware が Cookie をリフレッシュしたあと、有効な company_user_token をクライアントへ返す。
 // Backend 直叩き API は sessionStorage の JWT を使うため、Cookie と同期する (#1091, #616踏襲)。
@@ -26,8 +27,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { companyUserId, companyUserToken, companyRefreshToken } = await request.json()
-  if (!companyUserId || !companyUserToken) {
+  const parsed = await parseSessionPost(request, 'company-auth')
+  if (!parsed.ok) return parsed.response
+  const { companyUserId, companyUserToken, companyRefreshToken } = parsed.body
+  if (!companyUserId || typeof companyUserToken !== 'string' || companyUserToken === '') {
     return NextResponse.json(
       { error: 'companyUserId and companyUserToken are required' },
       { status: 400 }
@@ -35,7 +38,12 @@ export async function POST(request: NextRequest) {
   }
 
   const response = NextResponse.json({ ok: true })
-  setCompanySessionCookies(response, String(companyUserId), companyUserToken, companyRefreshToken)
+  setCompanySessionCookies(
+    response,
+    String(companyUserId),
+    companyUserToken,
+    typeof companyRefreshToken === 'string' ? companyRefreshToken : undefined
+  )
   return response
 }
 
