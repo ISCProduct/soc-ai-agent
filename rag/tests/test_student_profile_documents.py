@@ -60,8 +60,19 @@ _PRELUDE = textwrap.dedent(
         finally:
             db.close()
 
-    def raw_bytes_after_vacuum(path):
+    def fts_index_has(path, trigram):
+        # 全文検索（FTS5）の索引の生データ。表から消えた本文の trigram（小文字）が残っていないか
         db = sqlite3.connect(os.path.join(path, "chroma.sqlite3"))
+        try:
+            return any(trigram in (r[0] or b"") for r in db.execute("select block from embedding_fulltext_search_data"))
+        finally:
+            db.close()
+
+    def maintain(path):
+        # スクリプトの手順 5: 全文検索の索引を今の本文から作り直してから VACUUM する
+        db = sqlite3.connect(os.path.join(path, "chroma.sqlite3"))
+        db.execute("INSERT INTO embedding_fulltext_search(embedding_fulltext_search) VALUES('rebuild')")
+        db.commit()
         db.execute("VACUUM"); db.close()
         with open(os.path.join(path, "chroma.sqlite3"), "rb") as f:
             return MARK.encode() in f.read()
@@ -104,8 +115,11 @@ _CLEAR_SCRIPT = _PRELUDE + textwrap.dedent(
     assert all(n == 0 for n in text_rows(path).values()), text_rows(path)
     assert clear_documents(client, dry_run=False) == {"total": 3, "with_text": 0, "cleared": 0}
     assert set(client.list_collections()) == {"student_profiles"}
-    # 行を消しても空き領域にはバイトが残る。手順どおり VACUUM すればファイルからも消える
-    assert not raw_bytes_after_vacuum(path)
+    # 表からは消えても FTS5 の索引には古い trigram が残り、空き領域にもバイトが残る。
+    # 手順 5 どおり索引を作り直して VACUUM すれば、索引からもファイルからも消える
+    assert fts_index_has(path, b"syn")
+    assert not maintain(path)
+    assert not fts_index_has(path, b"syn")
     print("OK")
     """
 )
@@ -140,3 +154,17 @@ def test_no_text_left_in_real_chroma_sqlite(tmp_path, script):
         pytest.skip(f"chromadb を import できない環境: {out[-1]}")
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert out and out[-1] == "OK"
+
+
+def test_main_shows_recovery_when_swap_was_interrupted(monkeypatch):
+    """改名の途中で止まり元の名前が無くても、接続先の誤りではなく復旧手順を案内する。"""
+    import vector_store
+    from scripts import clear_student_profile_documents as script
+
+    client = MagicMock()
+    client.list_collections.return_value = ["student_profiles__old695", "student_profiles__swap695"]
+    monkeypatch.setattr(vector_store, "get_chroma_client", lambda: client)
+    monkeypatch.setattr(sys, "argv", ["clear_student_profile_documents.py"])
+    with pytest.raises(RuntimeError, match="空の student_profiles を削除してから"):
+        script.main()
+    client.delete_collection.assert_not_called()

@@ -22,9 +22,14 @@ update で本文を空にするだけでは足りない。chromadb 0.6.3 は書�
      バックアップ）。スナップショット自体に本文が入っているので、確認が済んだら消す。
   3. --dry-run（既定）で件数を確かめる。本文は出力しない。total=0 なら接続先を見直す（異常終了する）。
   4. --apply を実行する。
-  5. Chroma を止めて SQLite を VACUUM する（例: chroma のデータディレクトリに対して
-     `chroma utils vacuum --path <dir> --force`）。行を消しても、本文のバイトは
-     VACUUM するまで chroma.sqlite3 の空き領域に残る。
+  5. Chroma を止め、全文検索の索引を作り直してから SQLite を VACUUM する。
+     a. chroma.sqlite3 に対して次の SQL を実行する（sqlite3 コマンドか Python の sqlite3 で）。
+          INSERT INTO embedding_fulltext_search(embedding_fulltext_search) VALUES('rebuild');
+        全文検索（FTS5）の索引は、本文を空にしても古い項目（本文の断片）を次のマージまで持ち続ける。
+        rebuild は今の本文（他のコレクションの分も含む）から索引を作り直す。
+        VACUUM だけでは消えない。
+     b. VACUUM する（例: chroma のデータディレクトリに対して `chroma utils vacuum --path <dir> --force`）。
+        行を消しても、本文のバイトは VACUUM するまで chroma.sqlite3 の空き領域に残る。
   6. Chroma と rag-review を起動し、検索の疎通（make rag-smoke）を確かめる。
   staging で 1〜6 を確かめてから本番。
 
@@ -76,8 +81,13 @@ def clear_documents(client: Any, name: str = COLLECTION, dry_run: bool = True, b
     existing = set(client.list_collections())
     if old_name in existing:
         raise RuntimeError(
-            f"{old_name} が残っている（前回の差し替えが途中で止まった）。{name} の件数を確かめ、"
-            f"揃っていれば {old_name} を削除、空なら {old_name} を {name} へ戻してから再実行する"
+            f"{old_name} が残っている（前回の差し替えが途中で止まった）。書き込みを止めたまま、"
+            f"{name} の件数に応じて次のどれかを行ってから再実行する。"
+            f"{old_name} と同じ件数なら {old_name} を削除する。"
+            f"{name} が無ければ {old_name} を {name} へ改名する。"
+            f"{name} が 0 件なら、空の {name} を削除してから {old_name} を {name} へ改名する"
+            f"（同名のコレクションがあると改名できない）。"
+            f"それ以外（1 件以上で件数が合わない）はどちらも削除せずに調べる"
         )
     src = client.get_collection(name)
     ids = _all_ids(src, batch)
@@ -122,7 +132,9 @@ def main() -> int:
     from vector_store import describe_backend, get_chroma_client  # noqa: E402
 
     client = get_chroma_client()
-    if COLLECTION not in set(client.list_collections()):
+    existing = set(client.list_collections())
+    # 差し替えの途中で止まると元の名前が無いことがある。その場合は clear_documents の復旧案内に任せる。
+    if COLLECTION not in existing and COLLECTION + OLD_SUFFIX not in existing:
         logger.error("%s が %s に無い。接続先（CHROMA_HOST / RAG_CHROMA_DATA_DIR）を確かめる", COLLECTION, describe_backend())
         return 2
 
