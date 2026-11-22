@@ -314,6 +314,7 @@ func main() {
 		return piimask.Subject{Name: u.Name, Email: u.Email, SchoolName: u.SchoolName}, nil
 	})
 	resumeService.SetSubjectReader(subjectReader)
+	githubService.SetSubjectReader(subjectReader) // GitHub 要約の README も、外の LLM へ送る前に同じ辞書で伏字にする
 	escontrollers.SetSubjectReader(subjectReader) // ES 添削・リライトも、外の LLM へ送る前に同じ辞書で伏字にする
 	crawlService := company.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 	gbizInfoRepo := repositories.NewGBizInfoRepository(db)
@@ -390,6 +391,7 @@ func main() {
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
 	interviewService.SetCompanyRepo(companyPublicRepo)
+	interviewService.SetSchoolAccess(schoolService)
 	interviewService.SetCompanyOwnerChecker(func(userID, companyID uint) (bool, error) {
 		return shared.UserOwnsCompany(companyAccessRepo, userID, companyID)
 	})
@@ -401,7 +403,7 @@ func main() {
 	organizationRepo := repositories.NewOrganizationRepository(db)
 	organizationService := organization.NewOrganizationService(organizationRepo)
 	authController := authcontrollers.NewAuthController(authService, cfg.UserSecret)
-	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService)
+	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService, auth.NewOAuthCodeStore(rdb))
 	chatController := chatcontrollers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	// 推薦への「合う／合わない」（SOCAIAGENT-670）
 	chatController.SetMatchFeedback(matching.NewMatchFeedbackService(repositories.NewUserMatchFeedbackRepository(db)))
