@@ -200,7 +200,7 @@ func (s *ApplicationService) recordCollectiveAction(userID, companyID uint, sess
 // buildScoreSnapshot は応募時点の版付き JSON を作る（#203、SOCAIAGENT-673）。
 // スコアが取れなくても応募自体は通す（空文字）。マッチ行の総合点と軸別は、その時点の値をコピーする。
 func (s *ApplicationService) buildScoreSnapshot(userID uint, match *models.UserCompanyMatch) string {
-	categories := map[string]int{}
+	categories := map[string]float64{}
 	if s.scores != nil && match != nil && match.SessionID != "" {
 		rows, err := s.scores.FindByUserAndSession(userID, match.SessionID)
 		if err != nil {

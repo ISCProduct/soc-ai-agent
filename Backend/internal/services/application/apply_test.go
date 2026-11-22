@@ -6,6 +6,7 @@ package application
 
 import (
 	"Backend/internal/models"
+	"context"
 	"errors"
 	"testing"
 
@@ -32,12 +33,16 @@ func (s *stubApplyMatchRepo) CreateOrUpdateBatch([]*models.UserCompanyMatch) (in
 func (s *stubApplyMatchRepo) FindTopMatchesByUserAndSession(uint, string, int) ([]*models.UserCompanyMatch, error) {
 	return nil, nil
 }
+func (s *stubApplyMatchRepo) FindFavoritedByUser(context.Context, uint) ([]*models.UserCompanyMatch, error) {
+	return nil, nil
+}
 func (s *stubApplyMatchRepo) FindByID(uint) (*models.UserCompanyMatch, error) {
 	return s.findByIDResult, s.findByIDErr
 }
-func (s *stubApplyMatchRepo) MarkAsViewed(uint) error   { return nil }
-func (s *stubApplyMatchRepo) ToggleFavorite(uint) error { return nil }
-func (s *stubApplyMatchRepo) MarkAsApplied(uint) error  { return nil }
+func (s *stubApplyMatchRepo) MarkAsViewed(uint) error                             { return nil }
+func (s *stubApplyMatchRepo) ToggleFavorite(uint) error                           { return nil }
+func (s *stubApplyMatchRepo) UnfavoriteCompany(context.Context, uint, uint) error { return nil }
+func (s *stubApplyMatchRepo) MarkAsApplied(uint) error                            { return nil }
 func (s *stubApplyMatchRepo) GetMatchStatistics(uint, string) (map[string]any, error) {
 	return nil, nil
 }

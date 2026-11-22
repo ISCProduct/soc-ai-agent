@@ -1,4 +1,5 @@
 import { authService } from '@/lib/auth'
+import { fetchAndReadWithTimeout } from '@/lib/fetch-timeout'
 
 /** 自己分析ポートフォリオ（#2030）で選べる内容。並びが出力の順番。 */
 export const PORTFOLIO_SECTIONS = [
@@ -37,13 +38,19 @@ export type PortfolioData = {
   assessments?: { created_at: string; title: string; scores: CategoryScore[] }[] | null
 }
 
-export async function fetchPortfolio(sections: PortfolioSection[]): Promise<PortfolioData> {
-  const res = await fetch(`/api/portfolio?sections=${encodeURIComponent(sections.join(','))}`, {
-    headers: authService.getUserFetchHeaders(),
-    cache: 'no-store',
-  })
-  if (!res.ok) throw new Error(`portfolio ${res.status}`)
-  return (await res.json()) as PortfolioData
+/**
+ * timeoutMs を渡すと、本文の受信まで含めてその時間で打ち切る（ホームの帯のように、
+ * ほかの取得と一緒に待つ呼び出しで、半開きの接続に引きずられないように）。
+ */
+export async function fetchPortfolio(sections: PortfolioSection[], timeoutMs?: number): Promise<PortfolioData> {
+  const url = `/api/portfolio?sections=${encodeURIComponent(sections.join(','))}`
+  const init: RequestInit = { headers: authService.getUserFetchHeaders(), cache: 'no-store' }
+  const read = async (res: Response): Promise<PortfolioData> => {
+    if (!res.ok) throw new Error(`portfolio ${res.status}`)
+    return (await res.json()) as PortfolioData
+  }
+  if (timeoutMs !== undefined) return fetchAndReadWithTimeout(url, init, timeoutMs, read)
+  return read(await fetch(url, init))
 }
 
 export function formatDate(iso: string): string {

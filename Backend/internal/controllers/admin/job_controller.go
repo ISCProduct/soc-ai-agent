@@ -40,7 +40,7 @@ func NewAdminJobController(companyRepo repository.CompanyRepository, jobCategory
 
 // JobCategories GET /api/admin/job-categories
 func (c *AdminJobController) JobCategories(ctx echo.Context) error {
-	categories, err := c.jobCategory.FindAll()
+	categories, err := c.jobCategory.FindAll(ctx.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch job categories")
 	}

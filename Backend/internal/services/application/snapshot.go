@@ -20,13 +20,13 @@ type scoreSnapshotDocument struct {
 	LogicVersion     string             `json:"logic_version"`
 	ChatWeight       float64            `json:"chat_weight"`
 	CapturedAt       string             `json:"captured_at"`
-	Categories       map[string]int     `json:"categories"`
+	Categories       map[string]float64 `json:"categories"`
 	MatchScore       float64            `json:"match_score"`
 	MatchedAxisCount int                `json:"matched_axis_count"`
 	AxisMatch        map[string]float64 `json:"axis_match"`
 }
 
-func buildScoreSnapshotDocument(categories map[string]int, match *models.UserCompanyMatch, now time.Time) string {
+func buildScoreSnapshotDocument(categories map[string]float64, match *models.UserCompanyMatch, now time.Time) string {
 	if len(categories) == 0 && match == nil {
 		return ""
 	}
@@ -39,7 +39,7 @@ func buildScoreSnapshotDocument(categories map[string]int, match *models.UserCom
 		AxisMatch:    map[string]float64{},
 	}
 	if doc.Categories == nil {
-		doc.Categories = map[string]int{}
+		doc.Categories = map[string]float64{}
 	}
 	if match != nil {
 		doc.MatchScore = match.MatchScore

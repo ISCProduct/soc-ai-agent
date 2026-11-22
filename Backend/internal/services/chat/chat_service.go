@@ -26,6 +26,7 @@ type ChatService struct {
 	conversationContextRepo repository.ConversationContextRepository
 	answerEvaluator         *AnswerEvaluator
 	jobValidator            *JobCategoryValidator
+	questionEmb             questionEmbCache
 }
 
 func NewChatService(
