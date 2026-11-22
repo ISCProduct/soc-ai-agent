@@ -302,7 +302,6 @@ func main() {
 	oauthService := oauth.NewOAuthService(userRepo, oauthConfig, githubService)
 	oauthService.SetRefreshTokenService(refreshTokenService)
 	chatService := chat.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
-	questionService := chat.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := matching.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
 	resumeService := resume.NewResumeService(resumeRepo, "storage/resumes", aiClient)
 	// 履歴書を外部の LLM へ送る前の伏字の辞書に、その学生の氏名・メール・学校名を使う。読めないときは送らない
@@ -412,7 +411,6 @@ func main() {
 		chatController.SetJobEnqueuer(jobEnqueuer)
 	}
 	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
-	questionController := chatcontrollers.NewQuestionController(questionService)
 	relationController := companycontrollers.NewCompanyRelationController(companyQueryRepo, aiClient)
 	relationController.SetCorrelationMapService(company.NewCompanyCorrelationMapService(companyRepo, companyRelationRepo))
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
@@ -602,7 +600,7 @@ func main() {
 	// ルーティング設定
 	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret, userDeletionService, organizationService)
 	aiBudgetGuards := routes.NewAIBudgetGuards(aiBudgetService)
-	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
+	routes.SetupChatRoutes(api, chatController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupCompanyRoutes(api, relationController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 学生向けの企業検索（SOCAIAGENT-612）。業界・地域・職種で絞り込み、企業名順で返す
 	routes.SetupCompanySearchRoutes(api, companysearchcontrollers.NewController(repositories.NewCompanySearchRepository(db)), cfg.UserSecret, userDeletionService, organizationService)
