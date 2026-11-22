@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
 
 logger = logging.getLogger("rag-review")
 
@@ -24,21 +25,31 @@ DEFAULT_WEB_SEARCH_DEADLINE_SEC = 40.0
 
 
 def web_search_deadline_sec() -> float:
-    """RAG_WEB_SEARCH_DEADLINE_SEC。0 以下なら上限なし。読めなければ既定。"""
+    """RAG_WEB_SEARCH_DEADLINE_SEC。0 以下なら上限なし。読めない・有限でない（nan・inf）なら既定。
+
+    nan は float() を通るが wait_for に渡すと例外になり、Web Search がすべて黙って止まるので弾く。
+    """
     raw = os.getenv("RAG_WEB_SEARCH_DEADLINE_SEC", "").strip()
     if not raw:
         return DEFAULT_WEB_SEARCH_DEADLINE_SEC
     try:
-        return float(raw)
+        value = float(raw)
     except ValueError:
+        value = math.nan
+    if not math.isfinite(value):
         logger.warning("invalid RAG_WEB_SEARCH_DEADLINE_SEC=%r; using %.0f", raw, DEFAULT_WEB_SEARCH_DEADLINE_SEC)
         return DEFAULT_WEB_SEARCH_DEADLINE_SEC
+    return value
 
 
 async def run_with_deadline(
-        steps: Callable[[ThreadPoolExecutor], Awaitable[str]], label: str, company_name: str
+        steps: Callable[[ThreadPoolExecutor], Awaitable[str]], label: str, company_name: str,
+        fallback: Optional[Callable[[], str]] = None,
 ) -> str:
-    """steps を上限時間つきで走らせる。上限を過ぎたら空文字を返す。
+    """steps を上限時間つきで走らせる。上限を過ぎたら fallback() の値（無ければ空文字）を返す。
+
+    fallback は、上限までに途中の段（検索など）が終わっていれば、その結果を返す関数。
+    要約が遅くて上限に達しても、集め終えた検索結果を捨てずに使えるようにする。
 
     steps には専用のスレッドプールを渡す。終わったら（上限切れでも）待たずに手放すので、
     `with ThreadPoolExecutor()` の出口や asyncio.run の終了処理（既定のプールの join）で
@@ -51,8 +62,10 @@ async def run_with_deadline(
             return await steps(executor)
         return await asyncio.wait_for(steps(executor), timeout=deadline)
     except asyncio.TimeoutError:
-        logger.warning("%s pipeline exceeded deadline %.0fs company=%s; continuing without web search",
-                       label, deadline, company_name)
-        return ""
+        partial_result = fallback() if fallback else ""
+        logger.warning("%s pipeline exceeded deadline %.0fs company=%s; %s",
+                       label, deadline, company_name,
+                       "using search results without summary" if partial_result else "continuing without web search")
+        return partial_result
     finally:
         executor.shutdown(wait=False, cancel_futures=True)

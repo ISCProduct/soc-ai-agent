@@ -1,5 +1,6 @@
 """Web Search パイプライン全体の上限時間（services/deadline.py、SOCAIAGENT-558）のテスト。"""
 import asyncio
+import threading
 import time
 from unittest.mock import MagicMock
 
@@ -71,15 +72,15 @@ def test_deadline_can_be_disabled(monkeypatch, value):
 
 
 def test_hints_pipeline_returns_empty_after_deadline(monkeypatch):
-    """面接ヒントの Web Search も同じ上限で打ち切る。要約の同期呼び出しでもループを止めない。"""
+    """面接ヒントの Web Search も同じ上限で打ち切る。検索の同期呼び出しでもループを止めない。
+    検索が上限までに終わらなければ、返せる結果が無いので空文字（要約だけが遅いときは別のテスト）。"""
     import main
     from services.hints import _run_hints_web_search_pipeline
 
     monkeypatch.setenv("RAG_WEB_SEARCH_DEADLINE_SEC", "0.3")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(main, "_web_search_openai", lambda q: "検索結果")
+    monkeypatch.setattr(main, "_web_search_openai", _slow(2.0))
     client = MagicMock()
-    client.chat.completions.create.side_effect = _slow(2.0)
     monkeypatch.setattr(main, "OpenAI", lambda **_kw: client)
 
     started = time.monotonic()
@@ -88,3 +89,59 @@ def test_hints_pipeline_returns_empty_after_deadline(monkeypatch):
 
     assert result == ""
     assert elapsed < 1.5, elapsed
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf", "abc"])
+def test_deadline_sec_rejects_non_finite(monkeypatch, value):
+    # nan は float() を通るが、wait_for に渡すと例外になって Web Search がすべて止まる
+    from services import deadline
+
+    monkeypatch.setenv("RAG_WEB_SEARCH_DEADLINE_SEC", value)
+    assert deadline.web_search_deadline_sec() == deadline.DEFAULT_WEB_SEARCH_DEADLINE_SEC
+
+
+def test_hints_pipeline_falls_back_to_search_results_when_summary_is_late(monkeypatch):
+    # 検索は終わったが要約が上限に間に合わないときは、検索結果の連結を返す（要約が失敗したときと同じ）
+    import main
+    from services import hints
+
+    monkeypatch.setenv("RAG_WEB_SEARCH_DEADLINE_SEC", "0.3")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(main, "_web_search_openai", lambda q: f"結果:{q}")
+
+    class SlowCompletions:
+        def create(self, **kwargs):
+            time.sleep(2)
+
+    class SlowClient:
+        def __init__(self, **kwargs):
+            self.chat = type("Chat", (), {"completions": SlowCompletions()})()
+
+    monkeypatch.setattr(main, "OpenAI", SlowClient)
+    started = time.monotonic()
+    out = asyncio.run(hints._run_hints_web_search_pipeline("A社", "一般職", ["q1", "q2"]))
+    assert out == "結果:q1\n\n結果:q2"
+    assert time.monotonic() - started < 1.5
+
+
+def test_search_log_is_saved_outside_deadline(monkeypatch):
+    # ログの保存が遅くても、完成した要約は上限内に返る（保存は待たない）
+    import main
+    from services import research
+
+    monkeypatch.setenv("RAG_WEB_SEARCH_DEADLINE_SEC", "0.5")
+    monkeypatch.setattr(main, "_generate_search_queries", lambda c, j: ["q1"])
+    monkeypatch.setattr(main, "_web_search_openai", lambda q: "結果")
+    monkeypatch.setattr(main, "rank_results_by_domain_trust", lambda r, c: r)
+    monkeypatch.setattr(main, "_summarize_for_hiring", lambda c, j, r: "要約")
+    saved = threading.Event()
+
+    def slow_save(*args):
+        time.sleep(1)
+        saved.set()
+
+    monkeypatch.setattr(main, "_save_search_log", slow_save)
+    started = time.monotonic()
+    assert asyncio.run(research._run_web_search_pipeline("A社", "")) == "要約"
+    assert time.monotonic() - started < 0.5
+    assert saved.wait(3), "ログは後から保存される"

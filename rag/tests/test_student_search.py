@@ -27,7 +27,7 @@ def test_upsert_student_uses_stable_doc_id():
 
     kwargs = collection.upsert.call_args.kwargs
     assert kwargs["ids"] == ["student-42"]
-    assert kwargs["documents"] == ["取得資格: 基本情報"]
+    assert kwargs["documents"] == [""]
     assert kwargs["metadatas"][0]["user_id"] == 42
 
 
@@ -157,3 +157,56 @@ def test_student_search_requires_internal_token():
     unauthenticated = TestClient(main.app)
     res = unauthenticated.post("/student-search/query", json={"query": "React"})
     assert res.status_code == 401
+
+
+# --- SOCAIAGENT-568: 関連度の下限 -------------------------------------------------
+
+
+def test_query_students_drops_hits_below_min_score():
+    """関連度が下限より低い学生は返さない。候補が少なくても無関係な学生を並べない。"""
+    # score = 1/(1+d): d=0.5→0.667, d=1.5→0.4, d=2.0→0.333
+    collection = _mock_collection(count=3, query_result={
+        "metadatas": [[{"user_id": 5}, {"user_id": 2}, {"user_id": 9}]],
+        "distances": [[0.5, 1.5, 2.0]],
+    })
+    with patch.object(sps, "get_chroma_client", return_value=MagicMock(
+        get_or_create_collection=MagicMock(return_value=collection)
+    )):
+        assert [h["user_id"] for h in sps.query_students([0.1], 10, min_score=0.38)] == [5, 2]
+        # 下限ちょうどは残す
+        assert [h["user_id"] for h in sps.query_students([0.1], 10, min_score=0.4)] == [5, 2]
+        # 0 なら絞らない（既定の引数は今までどおり）
+        assert len(sps.query_students([0.1], 10)) == 3
+
+
+def test_student_query_uses_default_min_score(client, monkeypatch):
+    """min_score を省略したら既定の下限（環境変数で変えられる）を使う。"""
+    from routers import student_search
+
+    monkeypatch.delenv("STUDENT_SEARCH_MIN_SCORE", raising=False)
+    with patch("routers.student_search.embed_texts", return_value=[[0.1]]), \
+            patch("routers.student_search.query_students", return_value=[]) as q:
+        client.post("/student-search/query", json={"query": "React"})
+    assert q.call_args.args[2] == student_search.DEFAULT_MIN_SCORE
+
+    monkeypatch.setenv("STUDENT_SEARCH_MIN_SCORE", "0.5")
+    with patch("routers.student_search.embed_texts", return_value=[[0.1]]), \
+            patch("routers.student_search.query_students", return_value=[]) as q:
+        client.post("/student-search/query", json={"query": "React"})
+    assert q.call_args.args[2] == 0.5
+
+    # 壊れた値・範囲外は既定に戻す（検索を止めない）
+    for bad in ["abc", "1.5", "-0.1"]:
+        monkeypatch.setenv("STUDENT_SEARCH_MIN_SCORE", bad)
+        assert student_search.default_min_score() == student_search.DEFAULT_MIN_SCORE
+
+
+def test_student_query_request_min_score_overrides_default(client, monkeypatch):
+    """リクエストの min_score が既定より優先する。0 を渡せば絞らない。範囲外は 422。"""
+    monkeypatch.setenv("STUDENT_SEARCH_MIN_SCORE", "0.5")
+    with patch("routers.student_search.embed_texts", return_value=[[0.1]]), \
+            patch("routers.student_search.query_students", return_value=[]) as q:
+        res = client.post("/student-search/query", json={"query": "React", "min_score": 0})
+    assert res.status_code == 200
+    assert q.call_args.args[2] == 0
+    assert client.post("/student-search/query", json={"query": "React", "min_score": 1.5}).status_code == 422

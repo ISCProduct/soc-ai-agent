@@ -32,7 +32,7 @@ const topN = 10
 type scoreRow struct {
 	SessionID      string
 	WeightCategory string
-	Score          int
+	Score          float64
 }
 
 func main() {
@@ -72,7 +72,7 @@ func main() {
 			if bySession[r.SessionID] == nil {
 				bySession[r.SessionID] = map[string]float64{}
 			}
-			bySession[r.SessionID][r.WeightCategory] = float64(r.Score)
+			bySession[r.SessionID][r.WeightCategory] = r.Score
 		}
 		sessions := make([]map[string]float64, 0, len(bySession))
 		for _, s := range bySession {

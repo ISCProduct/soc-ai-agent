@@ -15,6 +15,8 @@ services:
     build:
       context: ./Backend
       dockerfile: Dockerfile
+      # 本番ターゲットは Go も air も無い。ローカルは dev でホットリロードする。
+      target: dev
     container_name: soc-ai-agent-backend
     restart: unless-stopped
     ports:
@@ -52,6 +54,7 @@ services:
     build:
       context: ./Backend
       dockerfile: Dockerfile
+      target: dev
     container_name: soc-ai-migrate
     volumes:
       - ./Backend:/app

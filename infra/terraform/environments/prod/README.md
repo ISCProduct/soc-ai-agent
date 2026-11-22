@@ -6,7 +6,7 @@
 > コンピュートは **ECS on Fargate**（EC2/ASGなし）。「展示会・説明会時のみ起動」する断続運用のため、
 > 稼働した分だけ課金されるFargateを採用（staging は常時起動用途のため ECS on EC2 のまま据え置き）。
 >
-> **重要:** 本ディレクトリは旧 EC2 直起動構成（`compute_legacy` + `network_legacy`）から刷新した。
+> **重要:** 本ディレクトリは旧 EC2 直起動構成から刷新した。旧モジュールのソースは削除済み。
 > 既存 state に対して `terraform apply` すると、旧 EC2 インスタンス／Route53 レコードが破棄され
 > 新しい Fargate 基盤に置き換わる（破壊的変更）。実際に流す前に必ず `terraform plan` の内容をチームでレビューすること。
 

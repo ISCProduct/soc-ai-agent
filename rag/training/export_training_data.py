@@ -32,7 +32,7 @@ import json
 import logging
 import re
 import sys
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("export_training_data")
