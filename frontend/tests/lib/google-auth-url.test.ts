@@ -6,6 +6,8 @@ describe('isGoogleAuthUrl', () => {
     ['http は不可', 'http://accounts.google.com/o/oauth2/v2/auth', false],
     ['別ホストは不可', 'https://example.com/o/oauth2/v2/auth', false],
     ['サブドメイン詐称は不可', 'https://accounts.google.com.example.com/', false],
+    ['google.com の別ホストは不可', 'https://www.google.com/', false],
+    ['末尾一致の別ドメインは不可', 'https://evilaccounts.google.com/', false],
     ['ユーザー情報部での詐称は不可', 'https://accounts.google.com@example.com/', false],
     ['javascript: は不可', 'javascript:alert(1)', false],
     ['相対URLは不可', '/o/oauth2/v2/auth', false],
