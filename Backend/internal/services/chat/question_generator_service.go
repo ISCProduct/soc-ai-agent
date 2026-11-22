@@ -64,7 +64,8 @@ func (s *QuestionGeneratorService) GenerateAndSaveQuestions(ctx context.Context,
   ...
 ]`, req.Count, req.Category, req.Category)
 
-	response, err := s.aiClient.Responses(usagectx.WithFeature(ctx, usagectx.FeatureChatQuestion), prompt)
+	// 送るのはカテゴリ名と件数だけで学生の文章を含まないので、学生由来の機能名でもガードを明示的に外す（SOCAIAGENT-697）。
+	response, err := s.aiClient.Responses(usagectx.WithFeature(openai.WithoutInputGuard(ctx), usagectx.FeatureChatQuestion), prompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate questions: %w", err)
 	}
