@@ -21,6 +21,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	authcontrollers "Backend/internal/controllers/auth"
+	"Backend/internal/middleware"
 	"Backend/internal/repositories"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/email"
@@ -44,6 +45,13 @@ func newIntegrationDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	return db, mock
+}
+
+func newTestEcho() *echo.Echo {
+	e := echo.New()
+	// 本番の newEchoServer と同じ検証器。無いと Login の Validate が 500 になる。
+	e.Validator = middleware.NewCustomValidator()
+	return e
 }
 
 func newAuthController(t *testing.T, db *gorm.DB) *authcontrollers.AuthController {
@@ -104,7 +112,7 @@ func TestLogin_Integration(t *testing.T) {
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 
-	e := echo.New()
+	e := newTestEcho()
 	c := e.NewContext(req, rec)
 
 	if handlerErr := authController.Login(c); handlerErr != nil {
@@ -169,7 +177,7 @@ func TestLogin_InvalidPassword_Integration(t *testing.T) {
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 
-	e := echo.New()
+	e := newTestEcho()
 	c := e.NewContext(req, rec)
 
 	if handlerErr := authController.Login(c); handlerErr != nil {
@@ -199,7 +207,7 @@ func TestCreateGuest_Integration(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/guest", nil)
 	rec := httptest.NewRecorder()
 
-	e := echo.New()
+	e := newTestEcho()
 	c := e.NewContext(req, rec)
 
 	if handlerErr := authController.CreateGuest(c); handlerErr != nil {
@@ -244,7 +252,7 @@ func TestLogin_UserNotFound_Integration(t *testing.T) {
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 
-	e := echo.New()
+	e := newTestEcho()
 	c := e.NewContext(req, rec)
 
 	if handlerErr := authController.Login(c); handlerErr != nil {

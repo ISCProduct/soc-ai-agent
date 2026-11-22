@@ -285,10 +285,15 @@ func (s *ChatService) answerSimilarity(ctx context.Context, question, answer str
 	}
 	// 埋め込みは回答チェック（chat_answer_check）と別に数える（#1993）
 	embCtx := usagectx.WithFeature(ctx, usagectx.FeatureEmbedding)
-	qEmb, err := s.aiClient.Embedding(embCtx, qText)
-	if err != nil {
-		log.Printf("[Validation] Embedding error for question: %v\n", err)
-		return 0, false
+	qEmb, hit := s.questionEmb.get(qText)
+	if !hit {
+		var err error
+		qEmb, err = s.aiClient.Embedding(embCtx, qText)
+		if err != nil {
+			log.Printf("[Validation] Embedding error for question: %v\n", err)
+			return 0, false
+		}
+		s.questionEmb.put(qText, qEmb)
 	}
 	aEmb, err := s.aiClient.Embedding(embCtx, answer)
 	if err != nil {
@@ -356,9 +361,8 @@ func parseAnswerValidity(response string) bool {
 	response = strings.TrimSuffix(response, "```")
 	response = strings.TrimSpace(response)
 
-	var result struct {
-		Valid bool `json:"valid"`
-	}
+	// プロンプトの出力形式と同じ定義で読む（SOCAIAGENT-661）
+	var result prompts.AnswerValidationOutput
 	if err := json.Unmarshal([]byte(response), &result); err != nil {
 		log.Printf("Warning: Failed to parse AI validation response: %v, response: %s\n", err, response)
 		return false

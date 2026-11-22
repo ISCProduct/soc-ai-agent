@@ -13,14 +13,19 @@ logger = logging.getLogger("main")
 
 
 def get_cached_context(
-        cache_key: str, query: str = "採用 価値観 求める人物像"
+        cache_key: str, query: str = "採用 価値観 求める人物像", allow_company_fallback: bool = True
 ) -> List[str]:
-    """ベクトルDBからキャッシュ済みドキュメントを類似度順で最大 5 件取得する。"""
+    """ベクトルDBからキャッシュ済みドキュメントを類似度順で最大 5 件取得する。
+
+    allow_company_fallback=False なら、職種（役割）が一致しないときに同じ企業の別の役割の文書で代用しない。
+    """
     import main as m
 
     try:
         query_emb = m.embed_texts([query])[0]
-        return get_cached_documents(cache_key, query_emb, n_results=5)
+        return get_cached_documents(
+            cache_key, query_emb, n_results=5, allow_company_fallback=allow_company_fallback
+        )
     except Exception as exc:
         logger.exception("chromadb get failed key=%s error=%s", cache_key, exc)
         return []

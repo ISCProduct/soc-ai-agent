@@ -592,7 +592,7 @@ def test_router_reports_context_source(
     monkeypatch.setattr(main, "set_cached_context", MagicMock())
     monkeypatch.setattr(main, "get_cached_context", MagicMock(return_value=cached))
     monkeypatch.setattr(main, "ALLOW_WEB_SEARCH_FALLBACK", web_search_enabled)
-    monkeypatch.setattr(main, "_run_async", MagicMock(return_value=[web_summary]))
+    monkeypatch.setattr(main, "_run_async", MagicMock(return_value=web_summary))  # 1本ごとに要約の文字列を返す
     fake = MagicMock(side_effect=lambda **kwargs: _fake_review_response(
         kwargs["company_context_source"]
     ))
@@ -690,21 +690,73 @@ def test_es_web_search_runs_engineer_only_with_tech_stack(monkeypatch, client, t
     assert ("エンジニアの要約" in docs[0]) == (len(expected_roles) == 2)
 
 
-def test_es_web_search_runs_pipelines_concurrently():
-    """2本のときは並列に走らせる（直列だと待ち時間が倍になる）。"""
-    import asyncio
-    import time
+def _post(client, tech_stack):
+    return client.post(
+        "/es/review",
+        json={"es_text": "学生時代に頑張ったこと", "question_type": "自己PR",
+              "company_name": "株式会社Example", "tech_stack": tech_stack},
+    )
 
-    from routers.es import _es_web_search
 
-    class FakeMain:
-        @staticmethod
-        async def _run_web_search_pipeline(company, role):
-            await asyncio.sleep(0.2)
-            return role or "一般"
+def test_es_cache_keys_are_separate_for_engineer_view(monkeypatch, client):
+    """エンジニア向けは別のキャッシュキー。スタック無しの要約が先に入っても、スタック付きの ES では
+    エンジニア向けを取り直す（キャッシュの中身が来た順で変わらない。レビューの Mid）。"""
+    import main
 
-    started = time.monotonic()
-    results = asyncio.run(_es_web_search(FakeMain, "株式会社Example", True))
-    elapsed = time.monotonic() - started
-    assert results == ["一般", "エンジニア"]
-    assert elapsed < 0.35, elapsed
+    store = {}
+    calls = []
+
+    def get_cached(key, query="", allow_company_fallback=True):
+        return store.get(key, [])
+
+    def set_cached(key, docs, source="", doc_type=None):
+        store[key] = docs
+
+    async def fake_pipeline(company, role):
+        calls.append(role)
+        return f"{role or '一般'}の要約"
+
+    monkeypatch.setattr(main, "get_cached_context", get_cached)
+    monkeypatch.setattr(main, "set_cached_context", set_cached)
+    monkeypatch.setattr(main, "ALLOW_WEB_SEARCH_FALLBACK", True)
+    monkeypatch.setattr(main, "_run_web_search_pipeline", fake_pipeline)
+    fake = MagicMock(side_effect=lambda **kwargs: _fake_review_response(kwargs["company_context_source"]))
+    monkeypatch.setattr(main, "_run_es_review", fake)
+
+    _post(client, "")  # スタック無しが先
+    assert calls == [""]
+    _post(client, "Go")  # スタック付き: 一般はキャッシュ、エンジニア向けだけ取る
+    assert calls == ["", "エンジニア"]
+    kwargs = fake.call_args.kwargs
+    assert kwargs["context_docs"] == ["一般の要約\n\nエンジニアの要約"]
+    assert kwargs["company_context_source"] == "web_search"
+    _post(client, "Go")  # 2回目は両方キャッシュ
+    assert calls == ["", "エンジニア"]
+    assert fake.call_args.kwargs["company_context_source"] == "cache"
+    assert len(store) == 2
+
+
+def test_engineer_cache_lookup_does_not_fall_back_to_general_docs(monkeypatch, client):
+    """エンジニア向けのキーを引くときは、同じ企業の一般の文書で代用しない（職種の代用を切る）。"""
+    import main
+
+    got = MagicMock(return_value=[])
+    monkeypatch.setattr(main, "get_cached_context", got)
+    monkeypatch.setattr(main, "ALLOW_WEB_SEARCH_FALLBACK", False)
+    monkeypatch.setattr(main, "_run_es_review", MagicMock(side_effect=lambda **kw: _fake_review_response(kw["company_context_source"])))
+
+    _post(client, "Go")
+
+    fallbacks = {c.args[0].endswith("::es_review::engineer"): c.kwargs["allow_company_fallback"] for c in got.call_args_list}
+    assert fallbacks == {False: True, True: False}
+
+
+def test_es_review_cache_key_with_role_is_parsed_as_es_review():
+    import vector_store as vs
+
+    general = vs.build_cache_key("es_review", "A社", company_original="A社")
+    engineer = vs.build_cache_key("es_review", "A社", "engineer", company_original="A社")
+    assert general.endswith("::es_review") and engineer.endswith("::es_review::engineer")
+    meta = vs.parse_cache_key(engineer)
+    assert (meta["collection"], meta["doc_type"], meta["role"]) == ("es_review", "es_review", "engineer")
+    assert vs.parse_cache_key(general)["role"] == "general"

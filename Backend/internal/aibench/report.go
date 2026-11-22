@@ -3,7 +3,9 @@ package aibench
 import (
 	"fmt"
 	"io"
+	"maps"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -43,6 +45,13 @@ func PrintSummary(w io.Writer, s *Summary) {
 	}
 	fmt.Fprintf(w, "%-16s 平均 %.3f / 最大 %.3f%s\n", "再現性(σ)", s.MeanScoreStdDev, s.MaxScoreStdDev,
 		formatUnstable(s.UnstableCaseIDs))
+	for _, axis := range slices.Sorted(maps.Keys(s.AxisMaxSpread)) {
+		warn := ""
+		if slices.Contains(s.UnstableAxes, axis) {
+			warn = fmt.Sprintf("  [警告: %.0f点を超える差]", AxisSpreadWarnPoints)
+		}
+		fmt.Fprintf(w, "%-16s 最大差 %.1f点（同一入力の複数回）%s\n", "ゆらぎ:"+axis, s.AxisMaxSpread[axis], warn)
+	}
 	fmt.Fprintf(w, "%-16s %+.3f（1.000が完全一致）%s\n", "弁別力(順位相関)",
 		s.LabelRankCorrelation, formatByLabel(s.MeanScoreByLabel))
 	if s.PairwiseComparable == 0 {
@@ -51,6 +60,17 @@ func PrintSummary(w io.Writer, s *Summary) {
 	} else {
 		fmt.Fprintf(w, "%-16s %.1f%%（異なるラベルの%d組のうち、点の大小がラベルと同じだった割合。50%%は当てずっぽう）\n",
 			"ペア一致率", s.PairwiseAgreement*100, s.PairwiseComparable)
+	}
+	if s.ValidityCases > 0 {
+		fmt.Fprintf(w, "%-16s MAE %.3f（0-1。小さいほど人手ラベルに近い）/ 相関 %+.3f（%d件）\n",
+			"人手ラベル妥当性", s.LabelMAE, s.LabelPearson, s.ValidityCases)
+	}
+	for _, axis := range slices.Sorted(maps.Keys(s.AxisMAE)) {
+		fmt.Fprintf(w, "%-16s MAE %.2f点（%d件）\n", "軸別MAE:"+axis, s.AxisMAE[axis], s.AxisMAECases[axis])
+	}
+	if s.FairnessPairs > 0 {
+		fmt.Fprintf(w, "%-16s 平均差 %.3f / 最大差 %.3f（%d組。企業文脈だけ違うペア。上限 %.2f）\n",
+			"公平性", s.FairnessMeanGap, s.FairnessMaxGap, s.FairnessPairs, fairnessGapAbsLimit)
 	}
 	// 交絡は弁別力の直下に必ず3行で出す。弁別力だけを見ると、長さを測っている
 	// だけの測定を「内容の質を測れている」と読んでしまう（#1593）。
@@ -171,6 +191,12 @@ const (
 	meanScoreWorseBy    = 0.05 // ラベルなしの target の平均スコアが0.05以上下がった（#1782）
 	stddevWorseBy       = 0.05 // 再現性のσが0.05以上増えた
 	latencyWorseByRatio = 1.20 // p95 が1.2倍以上になった
+
+	// 面接レポートの妥当性・公平性（SOCAIAGENT-513）。
+	labelMAEWorseBy     = 0.05 // 人手ラベルとの MAE（正規化 0-1）が0.05以上増えた（5段階で0.25点）
+	axisMAEWorseBy      = 0.25 // 軸別 MAE の平均（0-5 の点）が0.25点以上増えた
+	fairnessGapWorseBy  = 0.05 // 企業文脈だけ違うペアの平均スコア差が0.05以上増えた
+	fairnessGapAbsLimit = 0.10 // ペアの最大スコア差の絶対上限（正規化。5段階で0.5点）。前回に依らず超えたら劣化
 )
 
 // コストは比率ではなく月額換算の絶対増で判定する（#1598）。
@@ -236,6 +262,20 @@ func Diff(prev, cur *Summary) (regs []Regression, warnings []string) {
 	} else {
 		warnings = append(warnings, "交絡(vs文字数)は比較できない（#1593 より前の結果で未計測。0.000 を交絡なしと読まないこと）")
 	}
+	// MAE・公平性は両側で計測できたときだけ比べる（旧JSONは 0 でデコードされ、0 から増えたと誤検知する）。
+	if prev.ValidityCases > 0 && cur.ValidityCases > 0 {
+		add("人手ラベルMAE", prev.LabelMAE, cur.LabelMAE, labelMAEWorseBy, true)
+	}
+	if pm, cm := meanAxisMAE(prev), meanAxisMAE(cur); pm >= 0 && cm >= 0 {
+		add("軸別MAE(平均)", pm, cm, axisMAEWorseBy, true)
+	}
+	if prev.FairnessPairs > 0 && cur.FairnessPairs > 0 {
+		add("公平性(平均差)", prev.FairnessMeanGap, cur.FairnessMeanGap, fairnessGapWorseBy, true)
+	}
+	if cur.FairnessPairs > 0 && cur.FairnessMaxGap > fairnessGapAbsLimit+eps {
+		regs = append(regs, Regression{Metric: "公平性(最大差)", Prev: prev.FairnessMaxGap, Cur: cur.FairnessMaxGap,
+			Reason: fmt.Sprintf("企業文脈だけ違うペアのスコア差が上限 %.2f を超えた", fairnessGapAbsLimit)})
+	}
 	add("再現性(平均σ)", prev.MeanScoreStdDev, cur.MeanScoreStdDev, stddevWorseBy, true)
 
 	if prev.LatencyP95MS > 0 && float64(cur.LatencyP95MS) >= float64(prev.LatencyP95MS)*latencyWorseByRatio-eps {
@@ -263,6 +303,18 @@ func Diff(prev, cur *Summary) (regs []Regression, warnings []string) {
 		}
 	}
 	return regs, warnings
+}
+
+// meanAxisMAE は軸別 MAE の平均。計測していなければ -1。
+func meanAxisMAE(s *Summary) float64 {
+	if len(s.AxisMAE) == 0 {
+		return -1
+	}
+	xs := make([]float64, 0, len(s.AxisMAE))
+	for _, v := range s.AxisMAE {
+		xs = append(xs, v)
+	}
+	return Mean(xs)
 }
 
 // lengthComparable は交絡の指標を両側で比較できるかを返す。
@@ -324,6 +376,13 @@ func PrintDiff(w io.Writer, prev, cur *Summary) bool {
 	if lengthComparable(prev, cur) {
 		row("交絡(スコアvs文字数)", prev.LengthRankCorrelation, cur.LengthRankCorrelation, false)
 		row("ラベルvs文字数", prev.LabelLengthRankCorrelation, cur.LabelLengthRankCorrelation, false)
+	}
+	if prev.ValidityCases > 0 && cur.ValidityCases > 0 {
+		row("人手ラベルMAE", prev.LabelMAE, cur.LabelMAE, false)
+		row("人手ラベル相関", prev.LabelPearson, cur.LabelPearson, false)
+	}
+	if prev.FairnessPairs > 0 && cur.FairnessPairs > 0 {
+		row("公平性(平均差)", prev.FairnessMeanGap, cur.FairnessMeanGap, false)
 	}
 	row("再現性(平均σ)", prev.MeanScoreStdDev, cur.MeanScoreStdDev, false)
 	fmt.Fprintf(w, "%-18s %10d %10d %+10d\n", "p95(ms)", prev.LatencyP95MS, cur.LatencyP95MS, cur.LatencyP95MS-prev.LatencyP95MS)

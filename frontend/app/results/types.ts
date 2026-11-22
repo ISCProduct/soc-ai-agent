@@ -23,6 +23,8 @@ export interface Company {
   matchId?: number
   name: string
   industry: string
+  /** 紐づく求人が無いときは未設定。比較表でだけ使う */
+  jobTitle?: string
   location: string
   employees: string
   description: string

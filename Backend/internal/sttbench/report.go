@@ -158,9 +158,10 @@ func PrintComparison(w io.Writer, models []string, r Report) {
 		// 学生が話す時間は面接時間そのものではない。
 		const speechMinPerInterview = 10.0
 		cost := "-"
-		if s.CostBasis == "local_api_only_excludes_compute" {
+		switch s.CostBasis {
+		case "local_api_only_excludes_compute":
 			cost = "0.0000*"
-		} else if s.CostBasis == "openai_published_price" || s.CostBasis == "openai_estimated_price" {
+		case "openai_published_price", "openai_estimated_price":
 			cost = fmt.Sprintf("%.4f", s.EstCostPerMinUSD*speechMinPerInterview)
 		}
 		scored := len(s.Cases) - s.ErroredCases
