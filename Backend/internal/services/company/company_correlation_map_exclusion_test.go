@@ -19,6 +19,8 @@ func buildExclusionSvc(t *testing.T, all []models.Company, markets map[uint]*mod
 	t.Helper()
 	companyRepo := &mocks.CompanyRepositoryMock{}
 	for i := range all {
+		// 相関図の対象は有効な企業。停止中の扱いは除外規則とは別に確かめる（SOCAIAGENT-694）。
+		all[i].IsActive = true
 		c := all[i]
 		companyRepo.On("FindByID", c.ID).Return(&c, nil).Maybe()
 	}
