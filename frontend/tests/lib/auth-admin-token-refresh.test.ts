@@ -53,17 +53,6 @@ describe('authService.ensureFreshAdminToken', () => {
     expect(window.localStorage.getItem('token')).toBeNull()
   })
 
-  it('以前の版がストレージに残した管理者トークンを消す', async () => {
-    window.localStorage.setItem('token', 'legacy-admin')
-    window.sessionStorage.setItem('token', 'legacy-admin')
-    global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ has_admin_token: true }) })) as unknown as typeof fetch
-
-    await authService.ensureFreshAdminToken()
-
-    expect(window.localStorage.getItem('token')).toBeNull()
-    expect(window.sessionStorage.getItem('token')).toBeNull()
-  })
-
   it('確かめた直後は、画面遷移のたびに問い合わせない', async () => {
     const fetchMock = jest.fn(async () => ({ ok: true, json: async () => ({ has_admin_token: true }) }))
     global.fetch = fetchMock as unknown as typeof fetch

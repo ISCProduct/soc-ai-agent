@@ -86,7 +86,6 @@ export async function setupAuth(page: Page, user: MockUser = TEST_USER) {
         is_admin: u.is_admin,
       }
       sessionStorage.setItem('user', JSON.stringify(userData))
-      sessionStorage.setItem('user_token', u.user_token)
       localStorage.setItem('chat_session_id', 'test-session-id-001')
     },
     { u: user },

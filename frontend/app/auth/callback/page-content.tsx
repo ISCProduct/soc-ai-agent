@@ -10,9 +10,6 @@ type OAuthUser = {
   user_id: number | string
   email: string
   name: string
-  token?: string
-  user_token?: string
-  refresh_token?: string
   is_guest: boolean
   target_level?: string
   is_admin?: boolean
@@ -34,9 +31,6 @@ function validateOAuthPayload(raw: unknown): OAuthUser {
     user_id: d.user_id as number | string,
     email: d.email,
     name: d.name,
-    token: typeof d.token === 'string' ? d.token : undefined,
-    user_token: typeof d.user_token === 'string' ? d.user_token : undefined,
-    refresh_token: typeof d.refresh_token === 'string' ? d.refresh_token : undefined,
     is_guest: typeof d.is_guest === 'boolean' ? d.is_guest : false,
     target_level: typeof d.target_level === 'string' ? d.target_level : '',
     is_admin: typeof d.is_admin === 'boolean' ? d.is_admin : undefined,
@@ -62,34 +56,24 @@ function OAuthCallbackContent() {
       }
 
       const code = searchParams.get('code')
-      const userParam = searchParams.get('user')
-
-      if (!code && !userParam) {
+      if (!code) {
         setError('ユーザー情報が見つかりません')
         return
       }
 
       try {
-        let userDataRaw: unknown
-        if (code) {
-          // 短命コードを交換する (SOCAIAGENT-683)。このブラウザで始めたログインでなければ拒否される
-          const res = await fetch('/api/auth/oauth/exchange', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code }),
-          })
-          if (!res.ok) {
-            setError(LOGIN_RETRY_MESSAGE)
-            return
-          }
-          userDataRaw = await res.json()
-        } else {
-          // 旧方式: user= の Base64(JSON)。Backend のフラグ切り替え後、移行期間を過ぎたら削除する
-          const normalized = (userParam ?? '').replace(/-/g, '+').replace(/_/g, '/')
-          const binary = atob(normalized)
-          const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
-          userDataRaw = JSON.parse(new TextDecoder('utf-8').decode(bytes))
+        // 短命コードを交換する (SOCAIAGENT-683)。このブラウザで始めたログインでなければ拒否される。
+        // 交換の中継ルートがセッション Cookie を張り、トークンは画面へ返さない
+        const res = await fetch('/api/auth/oauth/exchange', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        })
+        if (!res.ok) {
+          setError(LOGIN_RETRY_MESSAGE)
+          return
         }
+        const userDataRaw: unknown = await res.json()
         // スキーマ検証: 不正な構造のペイロードを拒否
         const validatedData = validateOAuthPayload(userDataRaw)
         let userData = { ...validatedData, name: fixMojibake(validatedData.name) }

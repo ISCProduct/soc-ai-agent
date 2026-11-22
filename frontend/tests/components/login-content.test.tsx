@@ -26,7 +26,6 @@ function jsonResponse(status: number, body: unknown) {
 
 function storeUser(user: Record<string, unknown>) {
   window.localStorage.setItem('user', JSON.stringify(user))
-  window.localStorage.setItem('user_token', 'stored-token')
 }
 
 describe('LoginContent のセッション判定', () => {

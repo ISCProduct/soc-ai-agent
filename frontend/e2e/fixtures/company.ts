@@ -4,8 +4,8 @@ import { testJwt } from './auth'
 /**
  * 企業ポータルの E2E 用フィクスチャ（SOCAIAGENT-591）。
  *
- * 企業ユーザーのログイン状態は、学生とは別の仕組み（company_user_token の Cookie と、
- * sessionStorage の company_user / company_token）で持つ。トークンは期限付きの JWT にする
+ * 企業ユーザーのログイン状態は、学生とは別の仕組み（company_user_token の httpOnly Cookie と、
+ * sessionStorage の company_user）で持つ。トークンは期限付きの JWT にする
  * （期限が読めないと ensureFreshToken が取り直しに行き、未ログイン扱いになる）。
  */
 
@@ -37,11 +37,10 @@ export async function setupCompanyAuth(page: Page, user: MockCompanyUser = TEST_
   ])
 
   await page.addInitScript(
-    ({ u, t }: { u: MockCompanyUser; t: string }) => {
+    ({ u }: { u: MockCompanyUser }) => {
       sessionStorage.setItem('company_user', JSON.stringify(u))
-      sessionStorage.setItem('company_token', t)
     },
-    { u: user, t: token },
+    { u: user },
   )
 
   // ログイン中のユーザー（画面は role で owner 向けの操作を出し分ける）

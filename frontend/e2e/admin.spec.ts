@@ -115,7 +115,6 @@ test.describe('非管理者アクセス制御', () => {
     await page.addInitScript(() => {
       const user = { user_id: 1, email: 'normal@example.com', name: 'Normal', is_guest: false, is_admin: false }
       sessionStorage.setItem('user', JSON.stringify(user))
-      sessionStorage.setItem('token', 'normal-token')
     })
 
     await page.goto('/admin')

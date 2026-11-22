@@ -10,8 +10,6 @@ function getTenantHeaders(): Record<string, string> {
   return slug ? { 'X-Tenant-Slug': slug } : {}
 }
 const AUTH_USER_KEY = 'user'
-const AUTH_TOKEN_KEY = 'token'
-const AUTH_USER_TOKEN_KEY = 'user_token'
 
 function fixMojibake(s: string): string {
   // Detect common mojibake patterns (Ã, å followed by other Latin-1 chars)
@@ -84,16 +82,6 @@ function migrateAuthValue(key: string): string | null {
   }
 
   return null
-}
-
-// トークンは httpOnly Cookie にだけ置く（SOCAIAGENT-683）。以前の版がストレージに残した値を消す。
-// 学生の user_token は1時間で切れ、セッションの本体は以前から Cookie（refresh_token）にあるので、
-// 消してもログアウトにはならない。
-function clearLegacyTokens() {
-  for (const storage of [getSessionStorage(), getLocalStorage()]) {
-    storage?.removeItem(AUTH_TOKEN_KEY)
-    storage?.removeItem(AUTH_USER_TOKEN_KEY)
-  }
 }
 
 let adminTokenRefreshInFlight: Promise<void> | null = null
@@ -409,13 +397,12 @@ export const authService = {
     // sessionStorage（タブ内）と localStorage（タブ間・再起動後）の両方に保存する
     session?.setItem(AUTH_USER_KEY, userJson)
     local?.setItem(AUTH_USER_KEY, userJson)
-    // 管理者トークンは下の POST で httpOnly Cookie にだけ入れる
-    clearLegacyTokens()
+    // トークンはストレージに置かず、httpOnly Cookie にだけ入れる（SOCAIAGENT-683）
     adminTokenCheckedAt = 0
 
     // ログイン・本登録・ゲスト作成・OAuth のコード交換は、中継ルートがすでに httpOnly Cookie を張っていて
-    // トークンを返さない。トークンが届くのは OAuth の旧方式（user=）だけで、そのときだけ Cookie にする。
-    // 旧方式の削除は SOCAIAGENT-707。
+    // トークンを返さない。トークンが届くのはプロフィール更新（/api/auth/profile）の応答だけで、
+    // そのときだけ Cookie にする。
     if (authResponse.user_token) {
       const userId = typeof authResponse.user_id === 'string' ? Number(authResponse.user_id) : authResponse.user_id
       // 遷移で打ち切られないよう待つ。ただし無期限には待たない。
@@ -474,7 +461,6 @@ export const authService = {
    * 管理APIの X-Admin-Token は middleware が Cookie から付けるので、画面はトークンを持たない。
    */
   async ensureFreshAdminToken(): Promise<void> {
-    clearLegacyTokens()
     if (Date.now() - adminTokenCheckedAt < ADMIN_TOKEN_CHECK_INTERVAL_MS) return
     if (!adminTokenRefreshInFlight) {
       adminTokenRefreshInFlight = refreshAdminTokenCookie()
@@ -498,13 +484,9 @@ export const authService = {
 
   logout() {
     adminTokenCheckedAt = 0
-    // ユーザー情報とトークンを削除（sessionStorage運用 + legacy localStorage清掃）
+    // ユーザー情報を削除（トークンは httpOnly Cookie にしか無く、下の DELETE で消す）
     getSessionStorage()?.removeItem(AUTH_USER_KEY)
-    getSessionStorage()?.removeItem(AUTH_TOKEN_KEY)
-    getSessionStorage()?.removeItem(AUTH_USER_TOKEN_KEY)
     getLocalStorage()?.removeItem(AUTH_USER_KEY)
-    getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
-    getLocalStorage()?.removeItem(AUTH_USER_TOKEN_KEY)
 
     if (typeof window !== 'undefined') {
       const sessionId = window.localStorage.getItem('chat_session_id')

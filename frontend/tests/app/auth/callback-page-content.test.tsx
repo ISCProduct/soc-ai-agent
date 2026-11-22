@@ -1,14 +1,10 @@
 /**
  * @jest-environment jsdom
  */
-import { TextDecoder } from 'node:util'
 import { render, screen, waitFor } from '@testing-library/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import PageContent from '@/app/auth/callback/page-content'
 import { authService } from '@/lib/auth'
-
-// jsdom には TextDecoder が無い（ブラウザにはある）
-Object.assign(global, { TextDecoder })
 
 const push = jest.fn()
 
@@ -24,7 +20,8 @@ jest.mock('@/lib/auth', () => ({
   },
 }))
 
-const payload = { user_id: 7, email: 'a@example.com', name: '学生', user_token: 'user-jwt', is_guest: false }
+// 交換の中継ルートはトークンを取り除いて返す
+const payload = { user_id: 7, email: 'a@example.com', name: '学生', is_guest: false }
 
 function openWith(query: string) {
   ;(useRouter as jest.Mock).mockReturnValue({ push })
@@ -45,7 +42,7 @@ describe('/auth/callback (SOCAIAGENT-683)', () => {
     const [url, init] = (global.fetch as jest.Mock).mock.calls[0]
     expect(url).toBe('/api/auth/oauth/exchange')
     expect(JSON.parse(init.body)).toEqual({ code: 'short-code' })
-    expect(authService.saveAuth).toHaveBeenCalledWith(expect.objectContaining({ user_id: 7, user_token: 'user-jwt' }))
+    expect(authService.saveAuth).toHaveBeenCalledWith(expect.objectContaining({ user_id: 7 }))
   })
 
   it('交換が拒否されたら（別のブラウザで始まったログインなど）保存せず、やり直しを促す', async () => {
@@ -57,14 +54,14 @@ describe('/auth/callback (SOCAIAGENT-683)', () => {
     expect(push).not.toHaveBeenCalled()
   })
 
-  it('旧方式の user= も移行期間中は読める', async () => {
+  it('旧方式の user= は読まない（SOCAIAGENT-707）', async () => {
     global.fetch = jest.fn() as jest.Mock
-    // Backend の base64.URLEncoding（URL 安全な文字・パディングあり）と同じ形式
-    const user = Buffer.from(JSON.stringify(payload)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_')
+    const user = Buffer.from(JSON.stringify(payload)).toString('base64url')
     openWith(`provider=google&user=${user}`)
 
-    await waitFor(() => expect(push).toHaveBeenCalledWith('/'))
+    expect(await screen.findByText('ユーザー情報が見つかりません')).toBeInTheDocument()
     expect(global.fetch).not.toHaveBeenCalled()
-    expect(authService.saveAuth).toHaveBeenCalledWith(expect.objectContaining({ user_id: 7 }))
+    expect(authService.saveAuth).not.toHaveBeenCalled()
+    expect(push).not.toHaveBeenCalled()
   })
 })

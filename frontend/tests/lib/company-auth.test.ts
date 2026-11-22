@@ -38,12 +38,9 @@ describe('companyAuthService', () => {
       name: '担当',
       role: 'owner',
     }))
-    window.sessionStorage.setItem('company_token', 'legacy-jwt')
 
     expect(companyAuthService.getStoredUser()?.email).toBe('hr@example.com')
     expect(companyAuthService.getAuthHeaders()).toEqual({})
-    // 以前の版が残したトークンは消す
-    expect(window.sessionStorage.getItem('company_token')).toBeNull()
   })
 
   it('ログイン後もトークンを sessionStorage に保存しない', async () => {
