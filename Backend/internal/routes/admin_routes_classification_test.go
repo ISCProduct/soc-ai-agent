@@ -209,6 +209,7 @@ var schoolScopedRoutes = map[string]bool{
 	"GET /users": true,
 	"GET /teacher/students/tendency-analysis": true,
 	"GET /teacher/students/:id/es-reviews":    true,
+	"GET /students/:id/growth-history":        true,
 	"GET /interviews":                         true,
 	"GET /dashboard/users":                    true,
 	"GET /dashboard/export/csv":               true,
