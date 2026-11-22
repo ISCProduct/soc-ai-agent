@@ -65,23 +65,31 @@ func TestSafeFetch_内部宛は接続せず拒否する(t *testing.T) {
 	netsafe.LookupIP = func(string) ([]net.IP, error) { return []net.IP{net.ParseIP("127.0.0.1")}, nil }
 	t.Cleanup(func() { netsafe.LookupIP = origLookup })
 
+	// wantErr は拒否したのがどちらの検査かを表す。
+	// URL の表記で分かるものは取得前の検査で、名前解決して初めて分かるものは接続直前(netsafe)で止まる。
+	const byURLCheck, byDial = "not allowed", "blocked request to internal address"
 	targets := []struct {
-		name string
-		url  string
+		name    string
+		url     string
+		wantErr string
 	}{
-		{"ループバックのIP", internal.URL + "/robots.txt"},
-		{"localhost", "http://localhost:" + port + "/robots.txt"},
-		{"プライベートIP", "http://10.0.0.1/robots.txt"},
-		{"メタデータのリンクローカル", "http://169.254.169.254/latest/meta-data/"},
-		{"内部へ解決されるホスト名", "http://rebind.test:" + port + "/robots.txt"},
-		{"http/https 以外", "ftp://example.com/robots.txt"},
+		{"ループバックのIP", internal.URL + "/robots.txt", byURLCheck},
+		{"localhost", "http://localhost:" + port + "/robots.txt", byURLCheck},
+		{"プライベートIP", "http://10.0.0.1/robots.txt", byURLCheck},
+		{"メタデータのリンクローカル", "http://169.254.169.254/latest/meta-data/", byURLCheck},
+		{"内部へ解決されるホスト名", "http://rebind.test:" + port + "/robots.txt", byDial},
+		{"http/https 以外", "ftp://example.com/robots.txt", "only http/https"},
 	}
 	for _, e := range safeFetchEntries {
 		for _, tt := range targets {
 			t.Run(e.name+"/"+tt.name, func(t *testing.T) {
 				before := hits.Load()
-				if err := e.fetch(tt.url); err == nil {
+				err := e.fetch(tt.url)
+				if err == nil {
 					t.Fatalf("拒否されるべき: %s", tt.url)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("想定の検査で止まっていない（want %q）: %v", tt.wantErr, err)
 				}
 				if got := hits.Load() - before; got != 0 {
 					t.Errorf("内部のサーバーへ %d 回届いた", got)
