@@ -33,6 +33,8 @@ func SetupAuthRoutes(api *echo.Group, authController *authcontrollers.AuthContro
 	auth.GET("/google/callback", oauthController.GoogleCallback)
 	auth.GET("/github", oauthController.GitHubLogin)
 	auth.GET("/github/callback", oauthController.GitHubCallback)
+	// OAuth 完了時の短命コードの交換。FE の Route Handler からサーバー間で呼ぶ (SOCAIAGENT-683)
+	auth.POST("/oauth/exchange", oauthController.ExchangeCode, echomw.BodyLimit("4K"))
 
 	// 認証必須エンドポイント（X-User-Token JWTヘッダーが必要）
 	authProtected := api.Group("/auth", EchoUserAuth(userSecret, access, orgs))

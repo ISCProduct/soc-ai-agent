@@ -912,6 +912,11 @@ paths:
     get:
       tags: [auth]
       summary: Google OAuth を開始する
+      parameters:
+        - in: query
+          name: bind
+          description: FE が作った照合値（base64url の SHA-256、43文字）。コード交換時の verifier 検証に使う
+          schema: { type: string }
       security: []
       responses:
         "302": { description: Google の認可画面へリダイレクト }
@@ -931,10 +936,39 @@ paths:
       responses:
         "302": { description: フロントエンドへリダイレクト }
 
+  /api/auth/oauth/exchange:
+    post:
+      tags: [auth]
+      summary: OAuth 完了時の短命コードを認証情報と交換する
+      description: |
+        OAUTH_CODE_EXCHANGE=true のとき、OAuth コールバックはトークンを URL に載せず
+        `/auth/callback?code=...` へ戻す。FE の Route Handler がこの API をサーバー間で呼び、
+        結果を httpOnly Cookie にする。コードは60秒・1回限り。verifier はログインを始めた
+        ブラウザだけが持つ値で、開始時の `bind`（base64url の SHA-256）と合わなければ拒否する。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, verifier]
+              properties:
+                code: { type: string }
+                verifier: { type: string }
+      responses:
+        "200": { description: 認証情報（OAuth コールバックで従来 user= に載せていた内容） }
+        "400": { description: リクエスト不正、またはコードが無効・使用済み・期限切れ・照合値不一致 }
+
   /api/auth/github:
     get:
       tags: [auth]
       summary: GitHub OAuth を開始する
+      parameters:
+        - in: query
+          name: bind
+          description: FE が作った照合値（base64url の SHA-256、43文字）。コード交換時の verifier 検証に使う
+          schema: { type: string }
       security: []
       responses:
         "302": { description: GitHub の認可画面へリダイレクト }
