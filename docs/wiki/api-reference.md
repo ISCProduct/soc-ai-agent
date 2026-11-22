@@ -56,6 +56,8 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
   中継するのは許可リストに合うパスだけです。ログイン・本登録・ゲスト作成は、中継ルートがセッション Cookie を張り、
   応答からトークンを取り除きます。本登録のゲスト引き継ぎ（`promote_guest: true`）のときだけ、今のセッションを Backend へ渡します。
 - `GET /api/auth/session`（フロントの Route Handler）はトークンの値を返さず、`user_id` と `has_admin_token` だけを返します。
+- 企業ユーザーも同じです。`company_user_token` はフロントの httpOnly Cookie にだけ置き、`X-Company-User-Token` は middleware が付けます。
+  `GET /api/company-auth/session` は `company_user_id` だけを返します。
   管理画面（`AdminShell`）は `X-Refresh-Admin-Token: 1` を付けてこれを呼び、Cookie が無い・期限が近いときは
   middleware がログインセッションの更新で取り直します（確認は10分に1回まで）。
 - `POST /api/auth/session` で `adminToken` が無いとき、`DELETE` のときは `admin_token` Cookie を削除します。
