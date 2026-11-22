@@ -27,11 +27,15 @@ def _doc_id(user_id: int) -> str:
 
 
 def upsert_student(user_id: int, text: str, embedding: List[float]) -> None:
-    """学生プロフィールを登録・更新する。"""
+    """学生プロフィールを登録・更新する。
+
+    本文（text）は保存しない（SOCAIAGENT-695）。検索は埋め込みと user_id だけで足り、本文は読み戻さない。
+    documents を省くと Chroma が既定の埋め込み関数を持ち出す実装があるため、空文字を明示して渡す。
+    """
     collection = _collection()
     collection.upsert(
         ids=[_doc_id(user_id)],
-        documents=[text],
+        documents=[""],
         embeddings=[embedding],
         metadatas=[
             {
