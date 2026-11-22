@@ -49,7 +49,11 @@ describe('企業一覧の再取得', () => {
       },
     )
 
-    await Promise.resolve()
+    // Promise.all は先に落ちた時点で拒否する。マイクロタスクを何回か流しても、
+    // 遅い取得が終わる前に settled が true になってはいけない。
+    for (let i = 0; i < 20; i += 1) {
+      await Promise.resolve()
+    }
     expect(settled).toBe(false)
 
     releaseSlow()
