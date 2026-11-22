@@ -1,7 +1,9 @@
 package teacher
 
 import (
+	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,9 +22,13 @@ type memConsultation struct {
 	// afterList は ListMessages の直後に呼ぶ（取得と既読の間に発言が届く競合を再現する）
 	afterList func()
 	listErr   error
+	// hidden の ID は ListMessages に出さない（採番は済んだがコミットが遅れている発言を再現する）
+	hidden    map[uint]bool
 	inbox     []repositories.ConsultationInboxRow
 	gotLimit  int
 	gotBefore uint
+	// gotMarkIDs は最後の MarkReadBy に渡された発言の ID
+	gotMarkIDs []uint
 }
 
 func newMem() *memConsultation {
@@ -31,14 +37,14 @@ func newMem() *memConsultation {
 	}}
 }
 
-func (m *memConsultation) FindGuidance(id uint) (*models.TeacherStudentGuidance, error) {
+func (m *memConsultation) FindGuidance(_ context.Context, id uint) (*models.TeacherStudentGuidance, error) {
 	if g, ok := m.guidances[id]; ok {
 		return g, nil
 	}
 	return nil, gorm.ErrRecordNotFound
 }
-func (m *memConsultation) CreateQuestion(studentUserID uint, body string, maxOpen int64) (*models.TeacherStudentGuidance, error) {
-	if n, _ := m.CountOpenQuestions(studentUserID); n >= maxOpen {
+func (m *memConsultation) CreateQuestion(_ context.Context, studentUserID uint, body string, maxOpen int64) (*models.TeacherStudentGuidance, error) {
+	if n, _ := m.CountOpenQuestions(context.Background(), studentUserID); n >= maxOpen {
 		return nil, repositories.ErrOpenQuestionLimit
 	}
 	id := uint(len(m.guidances) + 1)
@@ -47,24 +53,24 @@ func (m *memConsultation) CreateQuestion(studentUserID uint, body string, maxOpe
 	m.messages = append(m.messages, models.GuidanceMessage{ID: uint(len(m.messages) + 1), GuidanceID: id, AuthorUserID: studentUserID, AuthorRole: models.GuidanceAuthorStudent, Body: body})
 	return g, nil
 }
-func (m *memConsultation) CreateMessage(msg *models.GuidanceMessage) error {
-	return m.CreateMessageAndMarkRead(msg, 0, time.Time{})
+func (m *memConsultation) CreateMessage(ctx context.Context, msg *models.GuidanceMessage) error {
+	return m.CreateMessageAndMarkRead(ctx, msg, 0, time.Time{})
 }
-func (m *memConsultation) CreateMessageAndMarkRead(msg *models.GuidanceMessage, seenUpToID uint, at time.Time) error {
+func (m *memConsultation) CreateMessageAndMarkRead(_ context.Context, msg *models.GuidanceMessage, seenUpToID uint, at time.Time) error {
 	msg.ID = uint(len(m.messages) + 1)
 	m.messages = append(m.messages, *msg)
 	if seenUpToID > 0 {
-		return m.MarkReadBy(msg.GuidanceID, msg.AuthorRole, seenUpToID, at)
+		m.markUpTo(msg.GuidanceID, msg.AuthorRole, seenUpToID, at)
 	}
 	return nil
 }
-func (m *memConsultation) ListMessages(guidanceID uint) ([]models.GuidanceMessage, error) {
+func (m *memConsultation) ListMessages(_ context.Context, guidanceID uint) ([]models.GuidanceMessage, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
 	var out []models.GuidanceMessage
 	for _, msg := range m.messages {
-		if msg.GuidanceID == guidanceID {
+		if msg.GuidanceID == guidanceID && !m.hidden[msg.ID] {
 			out = append(out, msg)
 		}
 	}
@@ -74,16 +80,27 @@ func (m *memConsultation) ListMessages(guidanceID uint) ([]models.GuidanceMessag
 	}
 	return out, nil
 }
-func (m *memConsultation) MarkReadBy(guidanceID uint, readerRole string, upToID uint, at time.Time) error {
+func (m *memConsultation) MarkReadBy(_ context.Context, guidanceID uint, readerRole string, messageIDs []uint, at time.Time) error {
+	m.gotMarkIDs = append([]uint(nil), messageIDs...)
+	for i := range m.messages {
+		msg := &m.messages[i]
+		if msg.GuidanceID == guidanceID && msg.AuthorRole != readerRole && msg.ReadAt == nil && slices.Contains(messageIDs, msg.ID) {
+			msg.ReadAt = &at
+		}
+	}
+	return nil
+}
+
+// markUpTo は返信と同じトランザクションでの既読（seen_message_id まで）を再現する。
+func (m *memConsultation) markUpTo(guidanceID uint, readerRole string, upToID uint, at time.Time) {
 	for i := range m.messages {
 		msg := &m.messages[i]
 		if msg.GuidanceID == guidanceID && msg.AuthorRole != readerRole && msg.ReadAt == nil && msg.ID <= upToID {
 			msg.ReadAt = &at
 		}
 	}
-	return nil
 }
-func (m *memConsultation) UnreadForStudent(studentUserID uint) (map[uint]int, error) {
+func (m *memConsultation) UnreadForStudent(_ context.Context, studentUserID uint) (map[uint]int, error) {
 	out := map[uint]int{}
 	for _, msg := range m.messages {
 		if g := m.guidances[msg.GuidanceID]; g != nil && g.StudentUserID == studentUserID && msg.AuthorRole == models.GuidanceAuthorTeacher && msg.ReadAt == nil {
@@ -92,7 +109,7 @@ func (m *memConsultation) UnreadForStudent(studentUserID uint) (map[uint]int, er
 	}
 	return out, nil
 }
-func (m *memConsultation) CountOpenQuestions(studentUserID uint) (int64, error) {
+func (m *memConsultation) CountOpenQuestions(_ context.Context, studentUserID uint) (int64, error) {
 	var n int64
 	for _, g := range m.guidances {
 		if g.StudentUserID != studentUserID || g.Kind != models.GuidanceKindQuestion {
@@ -110,7 +127,7 @@ func (m *memConsultation) CountOpenQuestions(studentUserID uint) (int64, error) 
 	}
 	return n, nil
 }
-func (m *memConsultation) ListStudentThreads(studentUserID uint, before *repositories.StudentThreadCursor, limit int) ([]repositories.StudentThreadRow, error) {
+func (m *memConsultation) ListStudentThreads(_ context.Context, studentUserID uint, before *repositories.StudentThreadCursor, limit int) ([]repositories.StudentThreadRow, error) {
 	m.gotLimit = limit
 	var out []repositories.StudentThreadRow
 	for id := uint(len(m.guidances)); id >= 1 && len(out) < limit; id-- {
@@ -121,7 +138,7 @@ func (m *memConsultation) ListStudentThreads(studentUserID uint, before *reposit
 	}
 	return out, nil
 }
-func (m *memConsultation) TeacherInbox(_ *uint, beforeID uint, limit int) ([]repositories.ConsultationInboxRow, error) {
+func (m *memConsultation) TeacherInbox(_ context.Context, _ *uint, beforeID uint, limit int) ([]repositories.ConsultationInboxRow, error) {
 	m.gotBefore, m.gotLimit = beforeID, limit
 	return m.inbox[:min(limit, len(m.inbox))], nil
 }
@@ -131,30 +148,30 @@ func TestConsultation_学生の返信と先生の既読(t *testing.T) {
 	s := NewConsultationService(store)
 
 	// 他人の案内には返信できない（見つからない扱い）
-	if _, err := s.StudentReply(99, 1, "質問です"); !errors.Is(err, ErrConsultationNotFound) {
+	if _, err := s.StudentReply(context.Background(), 99, 1, "質問です"); !errors.Is(err, ErrConsultationNotFound) {
 		t.Fatalf("他人の案内: err = %v", err)
 	}
-	view, err := s.StudentReply(10, 1, "どこを直せばよいですか？")
+	view, err := s.StudentReply(context.Background(), 10, 1, "どこを直せばよいですか？")
 	if err != nil || len(view.Messages) != 1 || view.Message != "履歴書を見直しましょう" {
 		t.Fatalf("view = %+v err = %v", view, err)
 	}
 
-	g, _ := s.FindGuidance(1)
+	g, _ := s.FindGuidance(context.Background(), 1)
 	// 先生が画面で見ていた最後の発言（ID 1）までを、返信と一緒に既読にする
-	if _, err := s.TeacherReply(20, g, "自己PRを具体的にしましょう", 1); err != nil {
+	if _, err := s.TeacherReply(context.Background(), 20, g, "自己PRを具体的にしましょう", 1); err != nil {
 		t.Fatalf("teacher reply: %v", err)
 	}
 	if store.messages[0].ReadAt == nil {
 		t.Fatal("先生が返信したのに、見ていた学生の発言が未読のまま")
 	}
 	// 学生には先生の未読が1件
-	if unread, _ := s.UnreadForStudent(10); unread[1] != 1 {
+	if unread, _ := s.UnreadForStudent(context.Background(), 10); unread[1] != 1 {
 		t.Fatalf("学生の未読 = %v", unread)
 	}
-	if _, err := s.StudentThread(10, 1); err != nil {
+	if _, err := s.StudentThread(context.Background(), 10, 1); err != nil {
 		t.Fatalf("student thread: %v", err)
 	}
-	if unread, _ := s.UnreadForStudent(10); unread[1] != 0 {
+	if unread, _ := s.UnreadForStudent(context.Background(), 10); unread[1] != 0 {
 		t.Fatalf("開いたのに未読が残る: %v", unread)
 	}
 }
@@ -172,8 +189,8 @@ func TestConsultation_本文の長さの境界(t *testing.T) {
 		{"前後の空白を除くと1000文字", "  " + strings.Repeat("あ", 1000) + "\n", nil},
 		{"絵文字1000個（UTF-16 では2000）", strings.Repeat("😀", 1000), nil},
 	} {
-		_, err := NewConsultationService(newMem()).StudentReply(10, 1, tt.body)
-		if !errors.Is(err, tt.want) && !(tt.want == nil && err == nil) {
+		_, err := NewConsultationService(newMem()).StudentReply(context.Background(), 10, 1, tt.body)
+		if !errors.Is(err, tt.want) { // errors.Is(nil, nil) は true
 			t.Errorf("%s: err = %v, want %v", tt.name, err, tt.want)
 		}
 	}
@@ -183,14 +200,14 @@ func TestConsultation_本文の長さの境界(t *testing.T) {
 func TestConsultation_表示のあとに届いた発言は既読にしない(t *testing.T) {
 	store := newMem()
 	s := NewConsultationService(store)
-	_, _ = s.StudentReply(10, 1, "1つ目の質問")
-	g, _ := s.FindGuidance(1)
+	_, _ = s.StudentReply(context.Background(), 10, 1, "1つ目の質問")
+	g, _ := s.FindGuidance(context.Background(), 1)
 
 	// 先生がスレッドを開く。取得の直後に学生が2つ目を送る
 	store.afterList = func() {
-		_ = store.CreateMessage(&models.GuidanceMessage{GuidanceID: 1, AuthorRole: models.GuidanceAuthorStudent, Body: "2つ目"})
+		_ = store.CreateMessage(context.Background(), &models.GuidanceMessage{GuidanceID: 1, AuthorRole: models.GuidanceAuthorStudent, Body: "2つ目"})
 	}
-	view, err := s.TeacherThread(g)
+	view, err := s.TeacherThread(context.Background(), g)
 	if err != nil || len(view.Messages) != 1 {
 		t.Fatalf("view = %+v err = %v", view, err)
 	}
@@ -199,7 +216,7 @@ func TestConsultation_表示のあとに届いた発言は既読にしない(t *
 	}
 
 	// 画面には1つ目までしか出ていない状態で返信する
-	if _, err := s.TeacherReply(20, g, "答えます", view.Messages[0].ID); err != nil {
+	if _, err := s.TeacherReply(context.Background(), 20, g, "答えます", view.Messages[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	if store.messages[1].ReadAt != nil {
@@ -210,9 +227,9 @@ func TestConsultation_表示のあとに届いた発言は既読にしない(t *
 // 返信は保存できたが、スレッドの読み直しに失敗したら、エラーにせず stale で返す（再送で二重にしない）。
 func TestConsultation_保存後の読み直しに失敗しても送信は成功(t *testing.T) {
 	store := newMem()
-	g, _ := NewConsultationService(store).FindGuidance(1)
+	g, _ := NewConsultationService(store).FindGuidance(context.Background(), 1)
 	store.listErr = errors.New("db")
-	view, err := NewConsultationService(store).TeacherReply(20, g, "答えます", 0)
+	view, err := NewConsultationService(store).TeacherReply(context.Background(), 20, g, "答えます", 0)
 	if err != nil || !view.Stale || len(view.Messages) != 1 || view.Messages[0].Body != "答えます" {
 		t.Fatalf("view = %+v err = %v", view, err)
 	}
@@ -224,7 +241,7 @@ func TestConsultation_保存後の読み直しに失敗しても送信は成功(
 func TestConsultation_学生からの質問(t *testing.T) {
 	store := newMem()
 	s := NewConsultationService(store)
-	view, err := s.Ask(10, " 面接の練習はどれくらいすればよいですか ")
+	view, err := s.Ask(context.Background(), 10, " 面接の練習はどれくらいすればよいですか ")
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -242,7 +259,7 @@ func TestConsultation_未回答の質問の上限(t *testing.T) {
 	s := NewConsultationService(store)
 	var first uint
 	for i := range MaxOpenQuestions {
-		v, err := s.Ask(10, "質問")
+		v, err := s.Ask(context.Background(), 10, "質問")
 		if err != nil {
 			t.Fatalf("%d件目: %v", i+1, err)
 		}
@@ -250,18 +267,18 @@ func TestConsultation_未回答の質問の上限(t *testing.T) {
 			first = v.GuidanceID
 		}
 	}
-	if _, err := s.Ask(10, "質問"); !errors.Is(err, ErrConsultationTooManyOpen) {
+	if _, err := s.Ask(context.Background(), 10, "質問"); !errors.Is(err, ErrConsultationTooManyOpen) {
 		t.Fatalf("上限を超えた: err = %v", err)
 	}
 	// ほかの学生は影響を受けない
-	if _, err := s.Ask(11, "質問"); err != nil {
+	if _, err := s.Ask(context.Background(), 11, "質問"); err != nil {
 		t.Fatalf("ほかの学生: %v", err)
 	}
-	g, _ := s.FindGuidance(first)
-	if _, err := s.TeacherReply(20, g, "答えます", 0); err != nil {
+	g, _ := s.FindGuidance(context.Background(), first)
+	if _, err := s.TeacherReply(context.Background(), 20, g, "答えます", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Ask(10, "質問"); err != nil {
+	if _, err := s.Ask(context.Background(), 10, "質問"); err != nil {
 		t.Fatalf("答えが付いたのに質問できない: %v", err)
 	}
 }
@@ -271,14 +288,14 @@ func TestConsultation_Inboxのページング(t *testing.T) {
 	store.inbox = []repositories.ConsultationInboxRow{
 		{GuidanceID: 3, LastMessageID: 30}, {GuidanceID: 2, LastMessageID: 20}, {GuidanceID: 1, LastMessageID: 10},
 	}
-	page, err := NewConsultationService(store).Inbox(nil, 40, 2)
+	page, err := NewConsultationService(store).Inbox(context.Background(), nil, 40, 2)
 	if err != nil || len(page.Items) != 2 || page.NextBeforeID != 20 {
 		t.Fatalf("page = %+v err = %v", page, err)
 	}
 	if store.gotBefore != 40 || store.gotLimit != 3 {
 		t.Fatalf("before=%d limit=%d（続きの有無を見るため1件多く取る）", store.gotBefore, store.gotLimit)
 	}
-	page, _ = NewConsultationService(store).Inbox(nil, 0, 3)
+	page, _ = NewConsultationService(store).Inbox(context.Background(), nil, 0, 3)
 	if len(page.Items) != 3 || page.NextBeforeID != 0 {
 		t.Fatalf("最後のページなのに続きがある: %+v", page)
 	}
@@ -288,14 +305,53 @@ func TestConsultation_学生の相談一覧のページング(t *testing.T) {
 	store := newMem()
 	s := NewConsultationService(store)
 	for range 2 {
-		_, _ = s.Ask(10, "質問")
+		_, _ = s.Ask(context.Background(), 10, "質問")
 	}
-	page, err := s.StudentThreads(10, nil, 2)
+	page, err := s.StudentThreads(context.Background(), 10, nil, 2)
 	if err != nil || len(page.Items) != 2 || page.Next == nil || page.Next.ID != 2 {
 		t.Fatalf("page = %+v err = %v", page, err)
 	}
-	page, _ = s.StudentThreads(10, page.Next, 2)
+	page, _ = s.StudentThreads(context.Background(), 10, page.Next, 2)
 	if len(page.Items) != 1 || page.Items[0].GuidanceID != 1 || page.Next != nil {
 		t.Fatalf("2ページ目 = %+v", page)
+	}
+}
+
+// 採番は先でもコミットが遅れて取得に含まれなかった発言は、ID が小さくても既読にしない。
+// 既読にするのは、取得して画面に返した相手側の未読の発言だけ。
+func TestConsultation_取得に含まれなかった発言は既読にしない(t *testing.T) {
+	store := newMem()
+	s := NewConsultationService(store)
+	ctx := context.Background()
+	for _, body := range []string{"1つ目", "遅れて届く2つ目", "3つ目"} {
+		if _, err := s.StudentReply(ctx, 10, 1, body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store.hidden = map[uint]bool{2: true}
+	g, _ := s.FindGuidance(ctx, 1)
+	view, err := s.TeacherThread(ctx, g)
+	if err != nil || len(view.Messages) != 2 {
+		t.Fatalf("view = %+v err = %v", view, err)
+	}
+	if !slices.Equal(store.gotMarkIDs, []uint{1, 3}) {
+		t.Fatalf("既読にした ID = %v, want [1 3]", store.gotMarkIDs)
+	}
+	for _, msg := range store.messages {
+		if got := msg.ReadAt != nil; got != (msg.ID != 2) {
+			t.Errorf("発言 %d の既読 = %v", msg.ID, got)
+		}
+	}
+
+	// 既に既読の発言と、自分（先生）の発言は渡さない
+	store.hidden = nil
+	if _, err := s.TeacherReply(ctx, 20, g, "答えます", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TeacherThread(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(store.gotMarkIDs, []uint{2}) {
+		t.Fatalf("既読にした ID = %v, want [2]", store.gotMarkIDs)
 	}
 }

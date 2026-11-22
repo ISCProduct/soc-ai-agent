@@ -60,7 +60,8 @@ export function ConsultationThread({ me, load, send, onChanged }: Props) {
 
   const submit = async () => {
     const body = draft.trim()
-    if (!body || !thread) return
+    // 読み直しの途中に送ると、あとから返った古い取得結果で新しい発言が上書きされるので送らない
+    if (!body || !thread || loading) return
     setSending(true)
     setSendError('')
     try {
@@ -120,7 +121,7 @@ export function ConsultationThread({ me, load, send, onChanged }: Props) {
       />
       {sendError && <Alert severity="error">{sendError}</Alert>}
       <Box sx={{ textAlign: 'right' }}>
-        <Button variant="contained" onClick={() => void submit()} disabled={sending || !draft.trim() || tooLong}>
+        <Button variant="contained" onClick={() => void submit()} disabled={sending || loading || !draft.trim() || tooLong}>
           {sending ? '送信中…' : '送信する'}
         </Button>
       </Box>

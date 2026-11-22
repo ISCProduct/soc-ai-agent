@@ -30,30 +30,37 @@ type store struct {
 	gotBefore uint
 }
 
-func (s *store) FindGuidance(id uint) (*models.TeacherStudentGuidance, error) {
+func (s *store) FindGuidance(_ context.Context, id uint) (*models.TeacherStudentGuidance, error) {
 	if id != 1 {
 		return nil, gorm.ErrRecordNotFound
 	}
 	return &models.TeacherStudentGuidance{ID: 1, StudentUserID: 10, Kind: models.GuidanceKindQuestion, Message: "質問"}, nil
 }
-func (s *store) CreateQuestion(studentUserID uint, body string, _ int64) (*models.TeacherStudentGuidance, error) {
+func (s *store) CreateQuestion(_ context.Context, studentUserID uint, body string, _ int64) (*models.TeacherStudentGuidance, error) {
 	s.asked++
 	return &models.TeacherStudentGuidance{ID: 2, StudentUserID: studentUserID, Kind: models.GuidanceKindQuestion, Message: body}, nil
 }
-func (s *store) CreateMessage(*models.GuidanceMessage) error { s.written++; return nil }
-func (s *store) CreateMessageAndMarkRead(_ *models.GuidanceMessage, seenUpToID uint, _ time.Time) error {
+func (s *store) CreateMessage(context.Context, *models.GuidanceMessage) error {
+	s.written++
+	return nil
+}
+func (s *store) CreateMessageAndMarkRead(_ context.Context, _ *models.GuidanceMessage, seenUpToID uint, _ time.Time) error {
 	s.written++
 	s.seenUpTo = seenUpToID
 	return nil
 }
-func (s *store) ListMessages(uint) ([]models.GuidanceMessage, error) { return nil, nil }
-func (s *store) MarkReadBy(uint, string, uint, time.Time) error      { return nil }
-func (s *store) UnreadForStudent(uint) (map[uint]int, error)         { return map[uint]int{}, nil }
-func (s *store) CountOpenQuestions(uint) (int64, error)              { return 0, nil }
-func (s *store) ListStudentThreads(uint, *repositories.StudentThreadCursor, int) ([]repositories.StudentThreadRow, error) {
+func (s *store) ListMessages(context.Context, uint) ([]models.GuidanceMessage, error) {
 	return nil, nil
 }
-func (s *store) TeacherInbox(_ *uint, beforeID uint, _ int) ([]repositories.ConsultationInboxRow, error) {
+func (s *store) MarkReadBy(context.Context, uint, string, []uint, time.Time) error { return nil }
+func (s *store) UnreadForStudent(context.Context, uint) (map[uint]int, error) {
+	return map[uint]int{}, nil
+}
+func (s *store) CountOpenQuestions(context.Context, uint) (int64, error) { return 0, nil }
+func (s *store) ListStudentThreads(context.Context, uint, *repositories.StudentThreadCursor, int) ([]repositories.StudentThreadRow, error) {
+	return nil, nil
+}
+func (s *store) TeacherInbox(_ context.Context, _ *uint, beforeID uint, _ int) ([]repositories.ConsultationInboxRow, error) {
 	s.gotBefore = beforeID
 	return nil, nil
 }

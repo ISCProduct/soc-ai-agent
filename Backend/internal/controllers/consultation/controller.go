@@ -112,7 +112,7 @@ func (c *Controller) Ask(ctx echo.Context) error {
 	if schoolID == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "学校が登録されていないため、先生に質問を送れません。プロフィールで学校を設定してください")
 	}
-	view, err := c.svc.Ask(userID, req.Body)
+	view, err := c.svc.Ask(ctx.Request().Context(), userID, req.Body)
 	if err != nil {
 		return toHTTPError(err)
 	}
@@ -156,7 +156,7 @@ func (c *Controller) StudentList(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "cursor が不正です")
 	}
-	page, err := c.svc.StudentThreads(userID, cursor, httpapi.LimitQuery(ctx, "limit", defaultListLimit))
+	page, err := c.svc.StudentThreads(ctx.Request().Context(), userID, cursor, httpapi.LimitQuery(ctx, "limit", defaultListLimit))
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -169,7 +169,7 @@ func (c *Controller) StudentUnread(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
-	counts, err := c.svc.UnreadForStudent(userID)
+	counts, err := c.svc.UnreadForStudent(ctx.Request().Context(), userID)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -192,7 +192,7 @@ func (c *Controller) StudentThread(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
-	view, err := c.svc.StudentThread(userID, id)
+	view, err := c.svc.StudentThread(ctx.Request().Context(), userID, id)
 	if err != nil {
 		return toHTTPError(err)
 	}
@@ -213,7 +213,7 @@ func (c *Controller) StudentReply(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid body")
 	}
-	view, err := c.svc.StudentReply(userID, id, req.Body)
+	view, err := c.svc.StudentReply(ctx.Request().Context(), userID, id, req.Body)
 	if err != nil {
 		return toHTTPError(err)
 	}
@@ -237,7 +237,7 @@ func (c *Controller) Inbox(ctx echo.Context) error {
 		}
 		beforeID = uint(v)
 	}
-	page, err := c.svc.Inbox(schoolID, beforeID, httpapi.LimitQuery(ctx, "limit", defaultListLimit))
+	page, err := c.svc.Inbox(ctx.Request().Context(), schoolID, beforeID, httpapi.LimitQuery(ctx, "limit", defaultListLimit))
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -251,7 +251,7 @@ func (c *Controller) teacherGuidance(ctx echo.Context) (*teacherGuidanceRef, err
 	if err != nil {
 		return nil, err
 	}
-	g, err := c.svc.FindGuidance(id)
+	g, err := c.svc.FindGuidance(ctx.Request().Context(), id)
 	if err != nil {
 		return nil, toHTTPError(err)
 	}
@@ -278,7 +278,7 @@ func (c *Controller) TeacherThread(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
-	view, err := c.svc.TeacherThread(ref.guidance)
+	view, err := c.svc.TeacherThread(ctx.Request().Context(), ref.guidance)
 	if err != nil {
 		return toHTTPError(err)
 	}
@@ -300,7 +300,7 @@ func (c *Controller) TeacherReply(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid body")
 	}
-	view, err := c.svc.TeacherReply(teacherID, ref.guidance, req.Body, req.SeenMessageID)
+	view, err := c.svc.TeacherReply(ctx.Request().Context(), teacherID, ref.guidance, req.Body, req.SeenMessageID)
 	if err != nil {
 		return toHTTPError(err)
 	}

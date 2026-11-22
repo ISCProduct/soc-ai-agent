@@ -1,6 +1,7 @@
 package teacher
 
 import (
+	"context"
 	"errors"
 	"log"
 	"strings"
@@ -32,16 +33,17 @@ const MaxOpenQuestions = 5
 
 // ConsultationStore は相談の永続化（repositories.GuidanceMessageRepository が満たす）。
 type ConsultationStore interface {
-	FindGuidance(id uint) (*models.TeacherStudentGuidance, error)
+	FindGuidance(ctx context.Context, id uint) (*models.TeacherStudentGuidance, error)
 	// CreateQuestion は未回答の質問が maxOpen 件以上なら repositories.ErrOpenQuestionLimit を返す
-	CreateQuestion(studentUserID uint, body string, maxOpen int64) (*models.TeacherStudentGuidance, error)
-	CreateMessage(m *models.GuidanceMessage) error
-	CreateMessageAndMarkRead(m *models.GuidanceMessage, seenUpToID uint, at time.Time) error
-	ListMessages(guidanceID uint) ([]models.GuidanceMessage, error)
-	MarkReadBy(guidanceID uint, readerRole string, upToID uint, at time.Time) error
-	UnreadForStudent(studentUserID uint) (map[uint]int, error)
-	ListStudentThreads(studentUserID uint, before *repositories.StudentThreadCursor, limit int) ([]repositories.StudentThreadRow, error)
-	TeacherInbox(schoolID *uint, beforeID uint, limit int) ([]repositories.ConsultationInboxRow, error)
+	CreateQuestion(ctx context.Context, studentUserID uint, body string, maxOpen int64) (*models.TeacherStudentGuidance, error)
+	CreateMessage(ctx context.Context, m *models.GuidanceMessage) error
+	CreateMessageAndMarkRead(ctx context.Context, m *models.GuidanceMessage, seenUpToID uint, at time.Time) error
+	ListMessages(ctx context.Context, guidanceID uint) ([]models.GuidanceMessage, error)
+	// MarkReadBy は messageIDs のうち、readerRole から見て相手側の未読の発言を既読にする
+	MarkReadBy(ctx context.Context, guidanceID uint, readerRole string, messageIDs []uint, at time.Time) error
+	UnreadForStudent(ctx context.Context, studentUserID uint) (map[uint]int, error)
+	ListStudentThreads(ctx context.Context, studentUserID uint, before *repositories.StudentThreadCursor, limit int) ([]repositories.StudentThreadRow, error)
+	TeacherInbox(ctx context.Context, schoolID *uint, beforeID uint, limit int) ([]repositories.ConsultationInboxRow, error)
 }
 
 type ConsultationService struct {
@@ -80,25 +82,25 @@ func validateBody(body string) (string, error) {
 
 // Ask は学生から教員への質問のスレッドを作る。学生と学校の確認は呼び出し側で済ませる。
 // 先生がまだ答えていない質問が MaxOpenQuestions 件あれば ErrConsultationTooManyOpen。
-func (s *ConsultationService) Ask(studentUserID uint, body string) (*ThreadView, error) {
+func (s *ConsultationService) Ask(ctx context.Context, studentUserID uint, body string) (*ThreadView, error) {
 	body, err := validateBody(body)
 	if err != nil {
 		return nil, err
 	}
 	// 数えてから作るまでは、同時に送られても上限を超えないよう保存側の1トランザクションで行う
-	g, err := s.store.CreateQuestion(studentUserID, body, MaxOpenQuestions)
+	g, err := s.store.CreateQuestion(ctx, studentUserID, body, MaxOpenQuestions)
 	if errors.Is(err, repositories.ErrOpenQuestionLimit) {
 		return nil, ErrConsultationTooManyOpen
 	}
 	if err != nil {
 		return nil, err
 	}
-	return s.threadAfterWrite(g, models.GuidanceMessage{GuidanceID: g.ID, AuthorRole: models.GuidanceAuthorStudent, Body: body, CreatedAt: g.CreatedAt})
+	return s.threadAfterWrite(ctx, g, models.GuidanceMessage{GuidanceID: g.ID, AuthorRole: models.GuidanceAuthorStudent, Body: body, CreatedAt: g.CreatedAt})
 }
 
 // guidanceForStudent は学生本人の案内だけを返す（他人の案内は見つからない扱い）。
-func (s *ConsultationService) guidanceForStudent(studentUserID, guidanceID uint) (*models.TeacherStudentGuidance, error) {
-	g, err := s.store.FindGuidance(guidanceID)
+func (s *ConsultationService) guidanceForStudent(ctx context.Context, studentUserID, guidanceID uint) (*models.TeacherStudentGuidance, error) {
+	g, err := s.store.FindGuidance(ctx, guidanceID)
 	if errors.Is(err, repository.ErrNotFound) || (err == nil && g.StudentUserID != studentUserID) {
 		return nil, ErrConsultationNotFound
 	}
@@ -106,16 +108,16 @@ func (s *ConsultationService) guidanceForStudent(studentUserID, guidanceID uint)
 }
 
 // FindGuidance は案内を返す（教員側の学校の確認に使う）。無ければ ErrConsultationNotFound。
-func (s *ConsultationService) FindGuidance(guidanceID uint) (*models.TeacherStudentGuidance, error) {
-	g, err := s.store.FindGuidance(guidanceID)
+func (s *ConsultationService) FindGuidance(ctx context.Context, guidanceID uint) (*models.TeacherStudentGuidance, error) {
+	g, err := s.store.FindGuidance(ctx, guidanceID)
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrConsultationNotFound
 	}
 	return g, err
 }
 
-func (s *ConsultationService) thread(g *models.TeacherStudentGuidance) (*ThreadView, error) {
-	msgs, err := s.store.ListMessages(g.ID)
+func (s *ConsultationService) thread(ctx context.Context, g *models.TeacherStudentGuidance) (*ThreadView, error) {
+	msgs, err := s.store.ListMessages(ctx, g.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -127,8 +129,8 @@ func (s *ConsultationService) thread(g *models.TeacherStudentGuidance) (*ThreadV
 
 // threadAfterWrite は書き込みのあとのスレッドを返す。取り直しに失敗しても、書き込みは済んでいるので
 // エラーにせず Stale を立てて返す（500 にすると、画面が入力を残して再送させ、発言が二重になる）。
-func (s *ConsultationService) threadAfterWrite(g *models.TeacherStudentGuidance, written models.GuidanceMessage) (*ThreadView, error) {
-	view, err := s.thread(g)
+func (s *ConsultationService) threadAfterWrite(ctx context.Context, g *models.TeacherStudentGuidance, written models.GuidanceMessage) (*ThreadView, error) {
+	view, err := s.thread(ctx, g)
 	if err == nil {
 		return view, nil
 	}
@@ -139,15 +141,22 @@ func (s *ConsultationService) threadAfterWrite(g *models.TeacherStudentGuidance,
 	}, nil
 }
 
-// readThread はスレッドを返し、readerRole の側が、返した発言（の最後の ID）までを読んだことにする。
-// 先に一覧を取り、その最大 ID までだけを既読にするので、取得のあとに届いた発言は未読のまま残る。
-func (s *ConsultationService) readThread(g *models.TeacherStudentGuidance, readerRole string) (*ThreadView, error) {
-	view, err := s.thread(g)
+// readThread はスレッドを返し、readerRole の側が、返した発言を読んだことにする。
+// 先に一覧を取り、そこに含まれた発言の ID だけを既読にするので、取得のあとに届いた発言や、
+// 採番は先でもコミットが遅れて取得に含まれなかった発言は未読のまま残る。
+func (s *ConsultationService) readThread(ctx context.Context, g *models.TeacherStudentGuidance, readerRole string) (*ThreadView, error) {
+	view, err := s.thread(ctx, g)
 	if err != nil {
 		return nil, err
 	}
-	if n := len(view.Messages); n > 0 {
-		if err := s.store.MarkReadBy(g.ID, readerRole, view.Messages[n-1].ID, s.now()); err != nil {
+	ids := make([]uint, 0, len(view.Messages))
+	for _, m := range view.Messages {
+		if m.AuthorRole != readerRole && m.ReadAt == nil {
+			ids = append(ids, m.ID)
+		}
+	}
+	if len(ids) > 0 {
+		if err := s.store.MarkReadBy(ctx, g.ID, readerRole, ids, s.now()); err != nil {
 			return nil, err
 		}
 	}
@@ -155,55 +164,55 @@ func (s *ConsultationService) readThread(g *models.TeacherStudentGuidance, reade
 }
 
 // StudentThread は学生本人のスレッドを返し、表示した教員の発言を既読にする。
-func (s *ConsultationService) StudentThread(studentUserID, guidanceID uint) (*ThreadView, error) {
-	g, err := s.guidanceForStudent(studentUserID, guidanceID)
+func (s *ConsultationService) StudentThread(ctx context.Context, studentUserID, guidanceID uint) (*ThreadView, error) {
+	g, err := s.guidanceForStudent(ctx, studentUserID, guidanceID)
 	if err != nil {
 		return nil, err
 	}
-	return s.readThread(g, models.GuidanceAuthorStudent)
+	return s.readThread(ctx, g, models.GuidanceAuthorStudent)
 }
 
 // StudentReply は学生本人のスレッドに返信する。
-func (s *ConsultationService) StudentReply(studentUserID, guidanceID uint, body string) (*ThreadView, error) {
+func (s *ConsultationService) StudentReply(ctx context.Context, studentUserID, guidanceID uint, body string) (*ThreadView, error) {
 	body, err := validateBody(body)
 	if err != nil {
 		return nil, err
 	}
-	g, err := s.guidanceForStudent(studentUserID, guidanceID)
+	g, err := s.guidanceForStudent(ctx, studentUserID, guidanceID)
 	if err != nil {
 		return nil, err
 	}
 	m := models.GuidanceMessage{GuidanceID: g.ID, AuthorUserID: studentUserID, AuthorRole: models.GuidanceAuthorStudent, Body: body}
-	if err := s.store.CreateMessage(&m); err != nil {
+	if err := s.store.CreateMessage(ctx, &m); err != nil {
 		return nil, err
 	}
-	return s.threadAfterWrite(g, m)
+	return s.threadAfterWrite(ctx, g, m)
 }
 
 // TeacherThread はスレッドを返し、表示した学生の発言を既読にする（担当校の確認は呼び出し側で済ませる）。
-func (s *ConsultationService) TeacherThread(g *models.TeacherStudentGuidance) (*ThreadView, error) {
-	return s.readThread(g, models.GuidanceAuthorTeacher)
+func (s *ConsultationService) TeacherThread(ctx context.Context, g *models.TeacherStudentGuidance) (*ThreadView, error) {
+	return s.readThread(ctx, g, models.GuidanceAuthorTeacher)
 }
 
 // TeacherReply は教員がスレッドに返信する（担当校の確認は呼び出し側で済ませる）。
 // seenUpToID は、教員が返信を書いた画面に出ていた最後の発言の ID。学生の発言はそこまでを既読にする
 // （画面を開いたあとに学生が追記した発言は、教員が見ていないので未読のまま残す）。0 なら既読にしない。
 // 返信の保存と既読は1つのトランザクションで行う。
-func (s *ConsultationService) TeacherReply(teacherUserID uint, g *models.TeacherStudentGuidance, body string, seenUpToID uint) (*ThreadView, error) {
+func (s *ConsultationService) TeacherReply(ctx context.Context, teacherUserID uint, g *models.TeacherStudentGuidance, body string, seenUpToID uint) (*ThreadView, error) {
 	body, err := validateBody(body)
 	if err != nil {
 		return nil, err
 	}
 	m := models.GuidanceMessage{GuidanceID: g.ID, AuthorUserID: teacherUserID, AuthorRole: models.GuidanceAuthorTeacher, Body: body}
-	if err := s.store.CreateMessageAndMarkRead(&m, seenUpToID, s.now()); err != nil {
+	if err := s.store.CreateMessageAndMarkRead(ctx, &m, seenUpToID, s.now()); err != nil {
 		return nil, err
 	}
-	return s.threadAfterWrite(g, m)
+	return s.threadAfterWrite(ctx, g, m)
 }
 
 // UnreadForStudent は学生の各スレッドの、教員の未読の発言の数を返す。
-func (s *ConsultationService) UnreadForStudent(studentUserID uint) (map[uint]int, error) {
-	return s.store.UnreadForStudent(studentUserID)
+func (s *ConsultationService) UnreadForStudent(ctx context.Context, studentUserID uint) (map[uint]int, error) {
+	return s.store.UnreadForStudent(ctx, studentUserID)
 }
 
 // InboxItem は教員の受信一覧の1行。
@@ -226,9 +235,9 @@ type InboxPage struct {
 
 // Inbox は学生の発言があるスレッドを、新しい順に limit 件返す。schoolID が非nilならその学校の学生だけ。
 // beforeID が 0 でなければ、最後の発言の ID がそれより小さいもの（続き）だけ。
-func (s *ConsultationService) Inbox(schoolID *uint, beforeID uint, limit int) (*InboxPage, error) {
+func (s *ConsultationService) Inbox(ctx context.Context, schoolID *uint, beforeID uint, limit int) (*InboxPage, error) {
 	// 1件多く取り、続きがあるかを判定する
-	rows, err := s.store.TeacherInbox(schoolID, beforeID, limit+1)
+	rows, err := s.store.TeacherInbox(ctx, schoolID, beforeID, limit+1)
 	if err != nil {
 		return nil, err
 	}
@@ -261,8 +270,8 @@ type StudentThreadPage struct {
 
 // StudentThreads は学生本人の案内と質問を、新しく動いた順に limit 件返す。
 // ホームの案内（10件まで・閉じたものは出ない）と違い、閉じた案内も古い相談も辿れる。
-func (s *ConsultationService) StudentThreads(studentUserID uint, before *repositories.StudentThreadCursor, limit int) (*StudentThreadPage, error) {
-	rows, err := s.store.ListStudentThreads(studentUserID, before, limit+1)
+func (s *ConsultationService) StudentThreads(ctx context.Context, studentUserID uint, before *repositories.StudentThreadCursor, limit int) (*StudentThreadPage, error) {
+	rows, err := s.store.ListStudentThreads(ctx, studentUserID, before, limit+1)
 	if err != nil {
 		return nil, err
 	}

@@ -50,6 +50,8 @@ export default function AdminConsultationsPage() {
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
+  // 返信・既読のあとの一覧の取り直しに失敗した（スレッドの操作は成功している）
+  const [refreshError, setRefreshError] = useState('')
   const [openId, setOpenId] = useState<number | null>(null)
 
   // 学校を切り替えたあとに、前の学校の遅い応答で一覧を上書きしない
@@ -59,6 +61,7 @@ export default function AdminConsultationsPage() {
     const seq = ++requestSeq.current
     setLoading(true)
     setError('')
+    setRefreshError('')
     try {
       const page = await fetchTeacherInbox(schoolId)
       if (seq !== requestSeq.current) return
@@ -110,8 +113,10 @@ export default function AdminConsultationsPage() {
         if (prev.length <= page.items.length) setNextBeforeId(page.next_before_id)
         return [...page.items, ...rest]
       })
+      if (seq === requestSeq.current) setRefreshError('')
     } catch {
-      // 一覧の更新に失敗しても、開いているスレッドの操作は終わっているので、表示はそのままにする
+      // スレッドの操作は終わっているので、スレッドはそのまま。一覧の未読表示が古いことだけを知らせ、取り直せるようにする
+      if (seq === requestSeq.current) setRefreshError('一覧を最新にできませんでした。未読の表示が古い可能性があります')
     }
   }, [schoolId])
 
@@ -150,6 +155,9 @@ export default function AdminConsultationsPage() {
         </Alert>
       )}
       {error && <Alert severity="error" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={() => void load()}>再読み込み</Button>}>{error}</Alert>}
+      {refreshError && !error && (
+        <Alert severity="warning" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={() => void refreshHead()}>再試行</Button>}>{refreshError}</Alert>
+      )}
       {(scope === 'pending' || (loading && items.length === 0)) && scope !== 'failed' && <ListSkeleton rows={3} />}
       {scope === 'ready' && loaded && !loading && !error && items.length === 0 && (
         <EmptyState title="相談はまだありません" description="学生が案内に返信したり質問したりすると、ここに表示されます。" />

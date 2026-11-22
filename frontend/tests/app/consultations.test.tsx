@@ -118,6 +118,25 @@ describe('スレッド', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
+  test('読み直しの途中は送信できない（古い取得結果で新しい発言を上書きしない）', async () => {
+    let finishReload: (t: Thread) => void = () => {}
+    const load = jest.fn()
+      .mockResolvedValueOnce(THREAD)
+      .mockImplementationOnce(() => new Promise<Thread>((r) => { finishReload = r }))
+    const send = jest.fn(async () => ({ ...THREAD, messages: [], stale: true }))
+    render(<ConsultationThread me="student" load={load} send={send} />)
+    await screen.findByText('履歴書を見直しましょう')
+    fireEvent.change(screen.getByLabelText('先生への返信'), { target: { value: '1つ目' } })
+    fireEvent.click(screen.getByRole('button', { name: '送信する' }))
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(2))
+    fireEvent.change(screen.getByLabelText('先生への返信'), { target: { value: '2つ目' } })
+    expect(screen.getByRole('button', { name: '送信する' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '送信する' }))
+    expect(send).toHaveBeenCalledTimes(1)
+    await act(async () => finishReload(THREAD))
+    expect(screen.getByRole('button', { name: '送信する' })).not.toBeDisabled()
+  })
+
   test('文字数は Backend と同じく、前後の空白を除いたコードポイントで数える', async () => {
     render(<ConsultationThread me="student" load={async () => THREAD} send={jest.fn()} />)
     await screen.findByText('履歴書を見直しましょう')
@@ -266,6 +285,32 @@ describe('先生の受信一覧', () => {
     fireEvent.click(screen.getByRole('button', { name: 'さらに読み込む' }))
     expect(await screen.findByText('佐藤')).toBeInTheDocument()
     expect(urls.at(-1)).toBe('/api/admin/teacher/consultations?before_id=50')
+  })
+
+  test('返信のあとの一覧の取り直しに失敗したら、警告と再試行を出す（スレッドの操作は成功のまま）', async () => {
+    let inboxCalls = 0
+    respondWith((url) => {
+      if (url.startsWith('/api/admin/teacher/consultations/1')) {
+        return [200, { ...THREAD, messages: [...THREAD.messages, { id: 3, guidance_id: 1, author_role: 'teacher', body: '返信です', read_at: null, created_at: '2026-11-13T03:00:00Z' }] }]
+      }
+      inboxCalls++
+      // 1回目（最初の一覧）と、スレッドを開いたあとの取り直しは成功、返信のあとの取り直しは失敗、再試行は成功
+      if (inboxCalls === 3) return [500, { message: 'down' }]
+      return [200, { items: [{ ...INBOX_ITEM, unread: inboxCalls >= 4 ? 0 : 1 }] }]
+    })
+    render(<AdminConsultationsPage />)
+    await act(async () => resolveScope?.())
+    fireEvent.click(await screen.findByRole('button', { name: /山田さんの相談を開く/ }))
+    await waitFor(() => expect(inboxCalls).toBe(2))
+    fireEvent.change(await screen.findByLabelText('学生への返信'), { target: { value: '返信です' } })
+    fireEvent.click(screen.getByRole('button', { name: '送信する' }))
+    expect(await screen.findByText(/一覧を最新にできませんでした/)).toBeInTheDocument()
+    expect(screen.getAllByText('返信です').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: '閉じる' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '再試行' }))
+    await waitFor(() => expect(screen.queryByText(/一覧を最新にできませんでした/)).not.toBeInTheDocument())
+    expect(inboxCalls).toBe(4)
   })
 
   test('スレッドで返信したあとも、「さらに読み込む」で足した続きを消さない', async () => {

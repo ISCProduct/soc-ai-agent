@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -25,11 +26,12 @@ func TestGuidanceMessageRepository_SQL(t *testing.T) {
 	_ = db.Callback().Update().After("gorm:update").Register("capture_update", cb)
 
 	repo := NewGuidanceMessageRepository(db)
+	ctx := context.Background()
 	school := uint(3)
-	_, _ = repo.TeacherInbox(&school, 42, 30)
-	_ = repo.MarkReadBy(1, "teacher", 9, time.Now())
-	_, _ = repo.CountOpenQuestions(10)
-	_, _ = repo.ListStudentThreads(10, &StudentThreadCursor{UpdatedAt: time.Now(), ID: 5}, 30)
+	_, _ = repo.TeacherInbox(ctx, &school, 42, 30)
+	_ = repo.MarkReadBy(ctx, 1, "teacher", []uint{7, 9}, time.Now())
+	_, _ = repo.CountOpenQuestions(ctx, 10)
+	_, _ = repo.ListStudentThreads(ctx, 10, &StudentThreadCursor{UpdatedAt: time.Now(), ID: 5}, 30)
 	if len(sqls) != 4 {
 		t.Fatalf("SQL = %v", sqls)
 	}
@@ -44,7 +46,7 @@ func TestGuidanceMessageRepository_SQL(t *testing.T) {
 			t.Errorf("受信一覧に %s が無い: %s", want, inbox)
 		}
 	}
-	for _, want := range []string{"author_role <> ?", "read_at IS NULL", "id <= ?"} {
+	for _, want := range []string{"author_role <> ?", "read_at IS NULL", "id IN (?,?)"} {
 		if !strings.Contains(sqls[1], want) {
 			t.Errorf("既読に %s が無い: %s", want, sqls[1])
 		}

@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -19,9 +20,9 @@ func NewGuidanceMessageRepository(db *gorm.DB) *GuidanceMessageRepository {
 }
 
 // FindGuidance は案内を1件返す。無ければ repository.ErrNotFound（= gorm.ErrRecordNotFound）。
-func (r *GuidanceMessageRepository) FindGuidance(id uint) (*models.TeacherStudentGuidance, error) {
+func (r *GuidanceMessageRepository) FindGuidance(ctx context.Context, id uint) (*models.TeacherStudentGuidance, error) {
 	var g models.TeacherStudentGuidance
-	if err := r.db.First(&g, id).Error; err != nil {
+	if err := r.db.WithContext(ctx).First(&g, id).Error; err != nil {
 		return nil, err
 	}
 	return &g, nil
@@ -34,9 +35,9 @@ var ErrOpenQuestionLimit = errors.New("open question limit reached")
 //
 // 未回答の質問が maxOpen 件以上あれば ErrOpenQuestionLimit を返して作らない。数えてから作るまでを
 // 1つのトランザクションにし、学生の users 行をロックする（同時に送られても上限を超えないように）。
-func (r *GuidanceMessageRepository) CreateQuestion(studentUserID uint, body string, maxOpen int64) (*models.TeacherStudentGuidance, error) {
+func (r *GuidanceMessageRepository) CreateQuestion(ctx context.Context, studentUserID uint, body string, maxOpen int64) (*models.TeacherStudentGuidance, error) {
 	g := &models.TeacherStudentGuidance{StudentUserID: studentUserID, Kind: models.GuidanceKindQuestion, Message: body}
-	err := r.db.Transaction(func(tx *gorm.DB) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var locked uint
 		if err := tx.Raw("SELECT id FROM users WHERE id = ? FOR UPDATE", studentUserID).Scan(&locked).Error; err != nil {
 			return err
@@ -59,15 +60,15 @@ func (r *GuidanceMessageRepository) CreateQuestion(studentUserID uint, body stri
 }
 
 // CreateMessage は発言を1件足す。学生が返したスレッドは、閉じていても開き直す（教員の返答を見落とさないように）。
-func (r *GuidanceMessageRepository) CreateMessage(m *models.GuidanceMessage) error {
-	return r.CreateMessageAndMarkRead(m, 0, time.Time{})
+func (r *GuidanceMessageRepository) CreateMessage(ctx context.Context, m *models.GuidanceMessage) error {
+	return r.CreateMessageAndMarkRead(ctx, m, 0, time.Time{})
 }
 
 // CreateMessageAndMarkRead は発言を足し、同じトランザクションで、書き手の側が相手の発言を
 // seenUpToID まで読んだことにする（0 なら既読にしない）。返信の保存と既読を分けると、
 // 既読だけ失敗して 500 になり、再送で返信が二重になるため。
-func (r *GuidanceMessageRepository) CreateMessageAndMarkRead(m *models.GuidanceMessage, seenUpToID uint, at time.Time) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
+func (r *GuidanceMessageRepository) CreateMessageAndMarkRead(ctx context.Context, m *models.GuidanceMessage, seenUpToID uint, at time.Time) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(m).Error; err != nil {
 			return err
 		}
@@ -78,32 +79,34 @@ func (r *GuidanceMessageRepository) CreateMessageAndMarkRead(m *models.GuidanceM
 		if seenUpToID == 0 {
 			return nil
 		}
-		return markRead(tx, m.GuidanceID, m.AuthorRole, seenUpToID, at)
+		return tx.Model(&models.GuidanceMessage{}).
+			Where("guidance_id = ? AND author_role <> ? AND read_at IS NULL AND id <= ?", m.GuidanceID, m.AuthorRole, seenUpToID).
+			Update("read_at", at).Error
 	})
 }
 
 // ListMessages はスレッドの発言を古い順に返す。
-func (r *GuidanceMessageRepository) ListMessages(guidanceID uint) ([]models.GuidanceMessage, error) {
+func (r *GuidanceMessageRepository) ListMessages(ctx context.Context, guidanceID uint) ([]models.GuidanceMessage, error) {
 	var out []models.GuidanceMessage
-	err := r.db.Where("guidance_id = ?", guidanceID).Order("id ASC").Find(&out).Error
+	err := r.db.WithContext(ctx).Where("guidance_id = ?", guidanceID).Order("id ASC").Find(&out).Error
 	return out, err
 }
 
-// MarkReadBy は readerRole の側が、相手側の発言を upToID まで読んだことにする（未読の発言に read_at を付ける）。
-// 画面に出した最後の発言の ID までに限るのは、表示のあとに届いた発言まで既読にしないため。
-func (r *GuidanceMessageRepository) MarkReadBy(guidanceID uint, readerRole string, upToID uint, at time.Time) error {
-	return markRead(r.db, guidanceID, readerRole, upToID, at)
-}
-
-func markRead(db *gorm.DB, guidanceID uint, readerRole string, upToID uint, at time.Time) error {
-	return db.Model(&models.GuidanceMessage{}).
-		Where("guidance_id = ? AND author_role <> ? AND read_at IS NULL AND id <= ?", guidanceID, readerRole, upToID).
+// MarkReadBy は readerRole の側が、画面に出した発言（messageIDs）のうち相手側の未読のものを読んだことにする。
+// 「ID が N 以下」で範囲を決めると、採番は先でもコミットが遅れて取得に含まれなかった発言まで既読になるため、
+// 実際に返した発言の ID だけに限る。
+func (r *GuidanceMessageRepository) MarkReadBy(ctx context.Context, guidanceID uint, readerRole string, messageIDs []uint, at time.Time) error {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&models.GuidanceMessage{}).
+		Where("guidance_id = ? AND author_role <> ? AND read_at IS NULL AND id IN ?", guidanceID, readerRole, messageIDs).
 		Update("read_at", at).Error
 }
 
 // CountOpenQuestions は学生の質問のうち、教員がまだ1度も答えていないものの数を返す。
-func (r *GuidanceMessageRepository) CountOpenQuestions(studentUserID uint) (int64, error) {
-	return countOpenQuestions(r.db, studentUserID)
+func (r *GuidanceMessageRepository) CountOpenQuestions(ctx context.Context, studentUserID uint) (int64, error) {
+	return countOpenQuestions(r.db.WithContext(ctx), studentUserID)
 }
 
 func countOpenQuestions(db *gorm.DB, studentUserID uint) (int64, error) {
@@ -133,8 +136,8 @@ type StudentThreadRow struct {
 
 // ListStudentThreads は学生本人の案内と質問を、新しく動いた順（updated_at, id の降順）に返す。
 // before が非nilなら、その位置より後ろ（古い側）だけ。
-func (r *GuidanceMessageRepository) ListStudentThreads(studentUserID uint, before *StudentThreadCursor, limit int) ([]StudentThreadRow, error) {
-	q := r.db.Table("teacher_student_guidances g").
+func (r *GuidanceMessageRepository) ListStudentThreads(ctx context.Context, studentUserID uint, before *StudentThreadCursor, limit int) ([]StudentThreadRow, error) {
+	q := r.db.WithContext(ctx).Table("teacher_student_guidances g").
 		Select(`g.id AS guidance_id, g.kind AS kind, g.message AS message, g.created_at AS created_at, g.updated_at AS updated_at,
 			(SELECT COUNT(*) FROM guidance_messages m WHERE m.guidance_id = g.id AND m.author_role = ? AND m.read_at IS NULL) AS unread`,
 			models.GuidanceAuthorTeacher).
@@ -148,12 +151,12 @@ func (r *GuidanceMessageRepository) ListStudentThreads(studentUserID uint, befor
 }
 
 // UnreadForStudent は学生の各スレッドで、教員の未読の発言の数を返す。
-func (r *GuidanceMessageRepository) UnreadForStudent(studentUserID uint) (map[uint]int, error) {
+func (r *GuidanceMessageRepository) UnreadForStudent(ctx context.Context, studentUserID uint) (map[uint]int, error) {
 	var rows []struct {
 		GuidanceID uint
 		Count      int
 	}
-	err := r.db.Table("guidance_messages m").
+	err := r.db.WithContext(ctx).Table("guidance_messages m").
 		Select("m.guidance_id AS guidance_id, COUNT(*) AS count").
 		Joins("JOIN teacher_student_guidances g ON g.id = m.guidance_id").
 		Where("g.student_user_id = ? AND m.author_role = ? AND m.read_at IS NULL", studentUserID, models.GuidanceAuthorTeacher).
@@ -180,8 +183,8 @@ type ConsultationInboxRow struct {
 // TeacherInbox は学生の発言があるスレッドを、新しい発言の順（最後の発言の ID の降順）に返す。
 // schoolID が非nilならその学校（同じ組織）の学生に限る。beforeID が 0 でなければ、最後の発言の ID がそれより小さいものだけ（続きの取得）。
 // 学生は ResolveStudentSchool と同じ条件（学生ロール・管理者でない・ゲストでない・退会していない）に限る。
-func (r *GuidanceMessageRepository) TeacherInbox(schoolID *uint, beforeID uint, limit int) ([]ConsultationInboxRow, error) {
-	q := r.db.Table("teacher_student_guidances g").
+func (r *GuidanceMessageRepository) TeacherInbox(ctx context.Context, schoolID *uint, beforeID uint, limit int) ([]ConsultationInboxRow, error) {
+	q := r.db.WithContext(ctx).Table("teacher_student_guidances g").
 		Select(`g.id AS guidance_id, g.student_user_id AS student_user_id, u.name AS student_name, g.kind AS kind, g.message AS first_message,
 			SUM(CASE WHEN m.author_role = ? AND m.read_at IS NULL THEN 1 ELSE 0 END) AS unread,
 			MAX(m.created_at) AS last_message_at, MAX(m.id) AS last_message_id`, models.GuidanceAuthorStudent).

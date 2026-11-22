@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -50,7 +51,7 @@ func TestGuidanceMessageRepository_CreateQuestion_上限なら作らない(t *te
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(5))
 	mock.ExpectRollback()
 
-	_, err := NewGuidanceMessageRepository(db).CreateQuestion(10, "質問", 5)
+	_, err := NewGuidanceMessageRepository(db).CreateQuestion(context.Background(), 10, "質問", 5)
 	if !errors.Is(err, ErrOpenQuestionLimit) {
 		t.Fatalf("err = %v, want ErrOpenQuestionLimit", err)
 	}
@@ -70,7 +71,7 @@ func TestGuidanceMessageRepository_CreateQuestion_上限未満なら同じトラ
 	mock.ExpectExec("INSERT INTO `guidance_messages`").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	g, err := NewGuidanceMessageRepository(db).CreateQuestion(10, "質問", 5)
+	g, err := NewGuidanceMessageRepository(db).CreateQuestion(context.Background(), 10, "質問", 5)
 	if err != nil || g.ID != 7 || g.StudentUserID != 10 || g.Kind != models.GuidanceKindQuestion {
 		t.Fatalf("g = %+v err = %v", g, err)
 	}

@@ -19,10 +19,25 @@ export async function proxyStudentConsultation(request: NextRequest, path: strin
       init.body = await request.text()
     }
     const res = await fetch(`${BACKEND_URL}/api/user/consultations${path}`, init)
+    if (PASS_THROUGH_STATUSES.has(res.status)) {
+      return passThroughUserError(res)
+    }
     return buildProxyJsonResponse(res)
   } catch (error) {
     return buildProxyNetworkErrorResponse(error, 'Internal server error')
   }
+}
+
+// Backend が学生向けに書いた理由（学校が未登録・未回答の質問が多い・入力の誤り・見つからない）を
+// そのまま見せる応答の status。共通のプロキシは 4xx を一般的な文言に置き換えるので、学生が
+// 何をすればよいか分からなくなる。401/403/5xx は内部の情報を含みうるので、共通の処理に任せる。
+const PASS_THROUGH_STATUSES = new Set([400, 404, 429])
+
+/** Backend の {"error": "..."} を、同じ status の {"error": "..."} として返す（読めなければ一般的な文言）。 */
+async function passThroughUserError(res: Response): Promise<NextResponse> {
+  const data = (await res.json().catch(() => ({}))) as { error?: unknown }
+  const error = typeof data.error === 'string' && data.error.trim() ? data.error : '処理に失敗しました。しばらくしてから再試行してください。'
+  return NextResponse.json({ error, status: res.status }, { status: res.status })
 }
 
 /** パスの id が正の整数か。 */

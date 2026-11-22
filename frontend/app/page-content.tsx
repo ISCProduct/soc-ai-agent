@@ -192,7 +192,7 @@ export default function PageContent() {
           onClose={!canDismiss(dismissingIds, g.id) ? undefined : () => dismissGuidanceById(g.id)}
           sx={{ borderRadius: 0 }}
         >
-          <Box component="span" sx={{ fontWeight: 700 }}>{g.kind === 'question' ? 'あなたの質問: ' : '先生から: '}</Box>
+          <Box component="span" sx={{ fontWeight: 700 }}>先生から: </Box>
           {g.message}
           {g.suggested_industries && g.suggested_industries.length > 0 && (
             <>（参考: {g.suggested_industries.join('、')}）</>
@@ -200,7 +200,7 @@ export default function PageContent() {
           {/* 案内に返信・相談できる（#2028） */}
           <Box component="span" sx={{ display: 'block', mt: 0.5 }}>
             <MuiLink component={NextLink} href={`/consultations?thread=${g.id}`} sx={{ fontWeight: 600 }}>
-              {g.kind === 'question' ? 'やり取りを見る' : '先生に返信する'}
+              先生に返信する
             </MuiLink>
           </Box>
         </Alert>
