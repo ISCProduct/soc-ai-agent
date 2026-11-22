@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import ReviewPlayer from '@/components/interview/ReviewPlayer'
 import { interviewApi, type InterviewPlayback } from '@/lib/interview'
 
@@ -83,5 +83,28 @@ describe('録画で振り返る', () => {
     )
     expect(await screen.findByText('レポートの「録画のこのあたりを再生」を押すと、その発話のあたりから再生します。')).toBeInTheDocument()
     expect(videoPlaybackURL).toHaveBeenCalledWith(8, 4)
+  })
+
+  it('署名URLの期限が切れていたら、同じ再生でも取り直す', async () => {
+    videoPlaybackURL.mockResolvedValue({ url: 'https://example.test/old', expires_at: '2000-01-01T00:00:00Z' })
+    render(
+      <ReviewPlayer
+        sessionId={8}
+        playback={playback}
+        loading={false}
+        error={null}
+        onRetry={() => undefined}
+        seekUtteranceId={null}
+        seekNonce={0}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '最初から再生' }))
+    await screen.findByRole('button', { name: '最初から再生' })
+    expect(videoPlaybackURL).toHaveBeenCalledTimes(1)
+
+    videoPlaybackURL.mockResolvedValue({ url: 'https://example.test/new', expires_at: '2099-01-01T00:00:00Z' })
+    fireEvent.click(screen.getByRole('button', { name: '最初から再生' }))
+    await screen.findByRole('button', { name: '最初から再生' })
+    expect(videoPlaybackURL).toHaveBeenCalledTimes(2)
   })
 })

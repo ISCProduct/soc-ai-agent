@@ -32,6 +32,7 @@ export default function ReviewPlayer({
 }: ReviewPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const requestGen = useRef(0)
+  const signedRef = useRef<{ url: string; expiresAtMs: number } | null>(null)
   const [playError, setPlayError] = useState<string | null>(null)
   const [preparing, setPreparing] = useState(false)
 
@@ -43,6 +44,7 @@ export default function ReviewPlayer({
 
   useEffect(() => {
     setPlayError(null)
+    signedRef.current = null
     if (videoRef.current) {
       videoRef.current.removeAttribute('src')
       videoRef.current.load()
@@ -58,10 +60,15 @@ export default function ReviewPlayer({
     try {
       const player = videoRef.current
       if (!player) return
-      if (!player.src) {
-        const signed = await interviewApi.videoPlaybackURL(sessionId, video.id)
+      // 署名URLは15分で切れる。切れたあとも同じ src のままだと、発話位置への再生が失敗したまま戻らない。
+      const signed = signedRef.current
+      const stillValid = signed != null && signed.expiresAtMs - Date.now() > 15_000
+      if (!player.src || !stillValid) {
+        const fresh = await interviewApi.videoPlaybackURL(sessionId, video.id)
         if (requestGen.current !== gen) return
-        player.src = signed.url
+        const expiresAtMs = Date.parse(fresh.expires_at)
+        signedRef.current = { url: fresh.url, expiresAtMs: Number.isNaN(expiresAtMs) ? 0 : expiresAtMs }
+        player.src = fresh.url
       }
       if (offsetSeconds != null) player.currentTime = offsetSeconds
       await player.play()
