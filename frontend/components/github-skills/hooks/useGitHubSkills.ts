@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { BACKEND_URL } from '@/lib/backend-url'
 import { authService } from '@/lib/auth'
 import { sortLanguageStats, upsertRepoSummary } from '../utils'
 import type { GitHubProfile, GitHubRepo, LanguageStat, RepoSummary, SkillScore } from '../types'
@@ -139,7 +138,8 @@ export function useGitHubSkills(userId: number, targetRole: string) {
 
   const handleConnect = () => {
     setConnecting(true)
-    window.location.href = `${BACKEND_URL}/api/auth/github`
+    // ログインと同じく自サイトの開始ルートを通す（照合値の Cookie を張るため。SOCAIAGENT-683）
+    window.location.href = '/api/auth/oauth/start?provider=github'
   }
 
   // ponytail: バックエンドの同期処理は進捗を返さない単一のブロッキングAPIのため、

@@ -117,6 +117,17 @@ run('P4 同じURLを二重に積まない(PATCHしない)', dict(ACTION='synchro
     desc=f'本文\n\n## GitHub PR\n{U}')
 # --- 昇格PR: コミットが参照するPRにキーが無くても、ブランチ名の番号から Issue を辿る ---
 PROMO = dict(PRBASE, number=100, title='Release: develop to main', base={'ref': 'main'}, head={'ref': 'release'}, merged=True)
+PROMO_CHILD = [('/pulls/100/commits', [{'commit': {'message': 'Merge pull request #50 from o/fix/x'}}]),
+               ('/issues/50', {'title': 'fix: 監査ログ [SOCAIAGENT-123]', 'body': '', 'pull_request': {}})]
+for head, base in (('develop', 'release'), ('release', 'main')):
+    promo_open = dict(PRBASE, number=100, title=f'deploy: {head} → {base}', html_url='promo-url', base={'ref': base}, head={'ref': head})
+    # 含まれる PR の課題に昇格 PR の URL を載せ、ステータスは動かさない
+    run(f'Q0 昇格PR({head}→{base})を開くと含まれるPRの課題を参照する', dict(ACTION='opened', PR_NUMBER='100'), (6, 'ステージング環境反映'),
+        pr=promo_open, routes=PROMO_CHILD, desc='', expect_desc='\n\n## GitHub PR\npromo-url')
+# 含まれる PR から課題が1件も見つからなければ赤くする
+run('Q0b 昇格PRで課題が見つからなければ警告', dict(ACTION='opened', PR_NUMBER='100'), (6, 'ステージング環境反映'),
+    pr=dict(PRBASE, number=100, title='deploy: develop → release', base={'ref': 'release'}, head={'ref': 'develop'}),
+    routes=[('/pulls/100/commits', [])], expect_warn=True, expect_rc=1)
 run('Q 昇格PR→キー無しの子PRをブランチ名の番号から解決', dict(ACTION='closed', PR_NUMBER='100'), (6, 'ステージング環境反映'), pr=PROMO,
     routes=[('/pulls/100/commits', [{'commit': {'message': 'fix: 監査ログ (#50)'}}]),
             ('/issues/50', {'title': 'fix: 監査ログ (#50)', 'body': '', 'pull_request': {}}),

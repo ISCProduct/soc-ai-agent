@@ -10,7 +10,7 @@ type InterviewService interface {
 	CreateSession(userID uint, language string, interviewerGender string) (*interview.InterviewSessionResponse, error)
 	StartSession(userID uint, sessionID uint) (*interview.InterviewSessionResponse, error)
 	FinishSession(userID uint, sessionID uint) (*interview.InterviewSessionResponse, error)
-	ListSessions(userID uint, all bool, limit int, offset int) ([]interview.InterviewSessionResponse, int64, error)
+	ListSessions(userID uint, limit int, offset int) ([]interview.InterviewSessionResponse, int64, error)
 	ListSessionsForOwner(userID, companyID uint, limit int, offset int) ([]interview.InterviewSessionResponse, int64, error)
 	GetSessionDetail(userID uint, sessionID uint) (*interview.InterviewDetailResponse, error)
 	GetReport(userID uint, sessionID uint) (*models.InterviewReport, error)

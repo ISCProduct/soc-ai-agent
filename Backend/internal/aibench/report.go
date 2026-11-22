@@ -45,6 +45,13 @@ func PrintSummary(w io.Writer, s *Summary) {
 	}
 	fmt.Fprintf(w, "%-16s 平均 %.3f / 最大 %.3f%s\n", "再現性(σ)", s.MeanScoreStdDev, s.MaxScoreStdDev,
 		formatUnstable(s.UnstableCaseIDs))
+	for _, axis := range slices.Sorted(maps.Keys(s.AxisMaxSpread)) {
+		warn := ""
+		if slices.Contains(s.UnstableAxes, axis) {
+			warn = fmt.Sprintf("  [警告: %.0f点を超える差]", AxisSpreadWarnPoints)
+		}
+		fmt.Fprintf(w, "%-16s 最大差 %.1f点（同一入力の複数回）%s\n", "ゆらぎ:"+axis, s.AxisMaxSpread[axis], warn)
+	}
 	fmt.Fprintf(w, "%-16s %+.3f（1.000が完全一致）%s\n", "弁別力(順位相関)",
 		s.LabelRankCorrelation, formatByLabel(s.MeanScoreByLabel))
 	if s.PairwiseComparable == 0 {
