@@ -9,7 +9,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/fetch-persona`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${encodeURIComponent(id)}/fetch-persona`, {
     method: 'POST',
     headers: {
       'X-Admin-Email': request.headers.get('x-admin-email') || '',
