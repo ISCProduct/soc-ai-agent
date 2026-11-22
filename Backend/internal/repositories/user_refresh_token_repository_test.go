@@ -36,7 +36,7 @@ func TestUserRefreshTokenRepository_ExplicitDelete(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db, mock := newExpiredDeleteTestDB(t)
 			mock.ExpectBegin()
-			mock.ExpectExec("^"+regexp.QuoteMeta(tt.wantSQL)+"$").WithArgs(tt.arg).WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectExec("^" + regexp.QuoteMeta(tt.wantSQL) + "$").WithArgs(tt.arg).WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectCommit()
 			if err := tt.del(db); err != nil {
 				t.Fatalf("削除に失敗: %v", err)
