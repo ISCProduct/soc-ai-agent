@@ -714,6 +714,7 @@ paths:
       responses:
         "200": { description: 送信した }
         "400": { description: メールアドレスの形式が不正 }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/auth/verify-registration:
     post:
