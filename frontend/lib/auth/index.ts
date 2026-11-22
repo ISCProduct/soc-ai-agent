@@ -1,4 +1,3 @@
-import { adminTokenNeedsRefresh } from './admin-token'
 import { BACKEND_URL } from '../backend-url'
 import { AUTH_REFRESH_TIMEOUT_MS, fetchAndReadWithTimeout, fetchWithTimeout } from '../fetch-timeout'
 import { extractTenantSlug } from '../tenant'
@@ -95,14 +94,22 @@ function persistUserToken(token: string) {
   getLocalStorage()?.setItem(AUTH_USER_TOKEN_KEY, token)
 }
 
-function persistAdminToken(token: string) {
-  getSessionStorage()?.setItem(AUTH_TOKEN_KEY, token)
-  getLocalStorage()?.setItem(AUTH_TOKEN_KEY, token)
+// 管理者トークンは httpOnly Cookie にだけ置く（SOCAIAGENT-683）。以前の版がストレージに残した値を消す。
+function clearLegacyAdminToken() {
+  getSessionStorage()?.removeItem(AUTH_TOKEN_KEY)
+  getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
 }
 
 let adminTokenRefreshInFlight: Promise<void> | null = null
+// 管理者トークンを確かめた時刻からこの間は問い合わせない（画面遷移のたびに往復させない）
+const ADMIN_TOKEN_CHECK_INTERVAL_MS = 10 * 60 * 1000
+let adminTokenCheckedAt = 0
 
-async function pullAdminToken(): Promise<void> {
+/**
+ * 管理者トークンの Cookie を、無い・期限が近ければ middleware に更新させる（SOCAIAGENT-476, 683）。
+ * トークンの値は JS に返らない。返るのは Cookie に管理者トークンがあるかどうかだけ。
+ */
+async function refreshAdminTokenCookie(): Promise<void> {
   const data = await fetchAndReadWithTimeout(
     '/api/auth/session',
     {
@@ -112,17 +119,16 @@ async function pullAdminToken(): Promise<void> {
       headers: { 'X-Refresh-Admin-Token': '1' },
     },
     AUTH_REFRESH_TIMEOUT_MS,
-    async (res): Promise<{ token?: string }> => {
+    async (res): Promise<{ has_admin_token?: boolean }> => {
       if (!res.ok) {
         throw new Error('管理者セッションを更新できませんでした。再ログインしてください。')
       }
       return res.json()
     },
   )
-  if (!data.token || adminTokenNeedsRefresh(data.token)) {
+  if (!data.has_admin_token) {
     throw new Error('管理者セッションを更新できませんでした。再ログインしてください。')
   }
-  persistAdminToken(data.token)
 }
 
 /** JWT の exp を検証なしで読み、期限切れ（または間もなく期限切れ）か判定する */
@@ -315,11 +321,8 @@ export const authService = {
     })
     if (!res.ok) throw new Error(await extractErrorMessage(res, 'ユーザー情報の取得に失敗しました。'))
     const data = await res.json()
-    // is_admin 付与後の再ログインなしでも管理者トークンを同期する (#857)
-    if (data.token) {
-      getSessionStorage()?.setItem(AUTH_TOKEN_KEY, data.token)
-      getLocalStorage()?.setItem(AUTH_TOKEN_KEY, data.token)
-    }
+    // is_admin 付与後に再ログインしていなくても、管理画面を開いたときに
+    // ensureFreshAdminToken が Cookie を取り直す (#857)。ここでは JS に保存しない。
     return {
       user_id: typeof data.user_id === 'string' ? Number(data.user_id) : data.user_id,
       email: data.email,
@@ -417,10 +420,9 @@ export const authService = {
     // sessionStorage（タブ内）と localStorage（タブ間・再起動後）の両方に保存する
     session?.setItem(AUTH_USER_KEY, userJson)
     local?.setItem(AUTH_USER_KEY, userJson)
-    if (authResponse.token) {
-      session?.setItem(AUTH_TOKEN_KEY, authResponse.token)
-      local?.setItem(AUTH_TOKEN_KEY, authResponse.token)
-    }
+    // 管理者トークンは下の POST で httpOnly Cookie にだけ入れる
+    clearLegacyAdminToken()
+    adminTokenCheckedAt = 0
     if (authResponse.user_token) {
       session?.setItem(AUTH_USER_TOKEN_KEY, authResponse.user_token)
       local?.setItem(AUTH_USER_TOKEN_KEY, authResponse.user_token)
@@ -478,10 +480,6 @@ export const authService = {
     }
   },
 
-  getStoredToken(): string | null {
-    return migrateAuthValue(AUTH_TOKEN_KEY)
-  },
-
   getStoredUserToken(): string | null {
     return migrateAuthValue(AUTH_USER_TOKEN_KEY)
   },
@@ -531,33 +529,34 @@ export const authService = {
   },
 
   /**
-   * 管理者トークンが期限間近なら、ログインセッションの更新で発行された新しい値を
-   * ストレージへ写す（SOCAIAGENT-476）。
-   *
-   * 管理APIは localStorage の token を X-Admin-Token に載せる。Cookie だけ新しくても
-   * 画面は7日前の値を送り続け、403 になる。
+   * 管理者トークンの Cookie が無い・期限が近ければ取り直す（SOCAIAGENT-476, 683）。
+   * 管理APIの X-Admin-Token は middleware が Cookie から付けるので、画面はトークンを持たない。
    */
   async ensureFreshAdminToken(): Promise<void> {
-    if (!adminTokenNeedsRefresh(this.getStoredToken())) return
+    clearLegacyAdminToken()
+    if (Date.now() - adminTokenCheckedAt < ADMIN_TOKEN_CHECK_INTERVAL_MS) return
     if (!adminTokenRefreshInFlight) {
-      adminTokenRefreshInFlight = pullAdminToken().finally(() => {
-        adminTokenRefreshInFlight = null
-      })
+      adminTokenRefreshInFlight = refreshAdminTokenCookie()
+        .then(() => {
+          adminTokenCheckedAt = Date.now()
+        })
+        .finally(() => {
+          adminTokenRefreshInFlight = null
+        })
     }
     await adminTokenRefreshInFlight
   },
 
-  // 管理者APIリクエスト用のヘッダーを返す（X-Admin-Email + X-Admin-Token）
+  // 管理者APIリクエスト用のヘッダーを返す。X-Admin-Token は middleware が httpOnly Cookie から付ける
   getAdminFetchHeaders(): Record<string, string> {
     const user = this.getStoredUser()
-    const token = this.getStoredToken()
     return {
       'X-Admin-Email': user?.email || '',
-      'X-Admin-Token': token || '',
     }
   },
 
   logout() {
+    adminTokenCheckedAt = 0
     // ユーザー情報とトークンを削除（sessionStorage運用 + legacy localStorage清掃）
     getSessionStorage()?.removeItem(AUTH_USER_KEY)
     getSessionStorage()?.removeItem(AUTH_TOKEN_KEY)
