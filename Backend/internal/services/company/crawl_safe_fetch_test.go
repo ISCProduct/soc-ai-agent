@@ -141,3 +141,19 @@ func TestSafeFetch_許可した公開先は従来どおり取得できる(t *tes
 		})
 	}
 }
+
+func TestSafeFetch_InvalidURLErrorHasNoSecret(t *testing.T) {
+	err := checkFetchURL("https://example.com:bad/path?token=SECRET")
+	if err == nil {
+		t.Fatal("不正な URL が通った")
+	}
+	if strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("エラーに元の URL が入っている: %v", err)
+	}
+}
+
+func TestSafeFetch_TransportHasIdleLimits(t *testing.T) {
+	if fetchTransport.MaxIdleConns == 0 || fetchTransport.IdleConnTimeout == 0 {
+		t.Fatalf("アイドル接続の上限・期限が無い: max=%d timeout=%v", fetchTransport.MaxIdleConns, fetchTransport.IdleConnTimeout)
+	}
+}

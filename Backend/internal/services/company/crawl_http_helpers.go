@@ -40,6 +40,10 @@ var fetchTransport = &http.Transport{
 		}
 		return netsafe.DialContext(ctx, network, addr)
 	},
+	// http.DefaultTransport と同じ上限。ゼロ値だとアイドル接続を無期限・無制限に持ち続ける
+	MaxIdleConns:        100,
+	IdleConnTimeout:     90 * time.Second,
+	TLSHandshakeTimeout: 10 * time.Second,
 }
 
 // checkFetchURL は取得してよい URL かを見る。拒否したらホスト名だけをログに出す。
