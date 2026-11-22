@@ -318,7 +318,7 @@ func TestGenerateRepoSummary_ValidatesOutput(t *testing.T) {
 			defer server.Close()
 
 			s := &GitHubService{openaiClient: openai.NewWithBaseURL(server.URL, "gpt-4o-mini")}
-			got, err := s.generateRepoSummary(context.Background(), "owner/repo", "README", "")
+			got, err := s.generateRepoSummary(passThroughGuardCtx(), "owner/repo", "README", "")
 			if tc.wantErr {
 				// JSON として読めない出力も含め、どれも「モデルの出力が不正」として返す（コントローラで 502 にするため）
 				if !errors.Is(err, ErrInvalidRepoSummaryOutput) {

@@ -428,7 +428,6 @@ UserRefreshTokenRepository.Create
 UserRefreshTokenRepository.DeleteExpired
 UserRefreshTokenRepository.FindByHash
 UserRefreshTokenRepository.Revoke
-UserRefreshTokenRepository.RevokeAllByUser
 UserRepository.CreateUser
 UserRepository.DeleteUser
 UserRepository.FindLastActivityByUsers

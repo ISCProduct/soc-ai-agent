@@ -22,7 +22,9 @@ const FORWARDING_HELPERS = [
 
 // 現時点で自前ヘッダーのまま残っている Handler 数。
 // 減らすのは歓迎。増やす場合は共通ヘルパーを使うか、この数を意図的に更新すること。
-const KNOWN_NON_FORWARDING = 64
+// 65: app/api/auth/oauth/start は Backend を fetch せず、ブラウザを Backend の OAuth 開始へ
+// リダイレクトするだけなので転送対象が無い（SOCAIAGENT-683）。
+const KNOWN_NON_FORWARDING = 65
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
