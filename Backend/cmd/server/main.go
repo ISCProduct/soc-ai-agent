@@ -401,7 +401,7 @@ func main() {
 	organizationRepo := repositories.NewOrganizationRepository(db)
 	organizationService := organization.NewOrganizationService(organizationRepo)
 	authController := authcontrollers.NewAuthController(authService, cfg.UserSecret)
-	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService)
+	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService, auth.NewOAuthCodeStore(rdb))
 	chatController := chatcontrollers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	// 推薦への「合う／合わない」（SOCAIAGENT-670）
 	chatController.SetMatchFeedback(matching.NewMatchFeedbackService(repositories.NewUserMatchFeedbackRepository(db)))

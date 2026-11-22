@@ -5,6 +5,7 @@ import {
   setAdminTokenCookie,
   setSessionCookies,
 } from '@/lib/auth/session-cookies'
+import { parseSessionPost } from '@/lib/auth/session-request'
 
 // middleware が Cookie をリフレッシュしたあと、有効な user_token をクライアントへ返す。
 // 面接など Backend 直叩き API は sessionStorage の JWT を使うため、Cookie と同期する (#616)。
@@ -25,21 +26,29 @@ export async function GET(request: NextRequest) {
     request.headers.get('X-Refreshed-Admin-Token') ||
     request.cookies.get('admin_token')?.value
 
+  // 管理者トークンの値は返さない。管理APIへは middleware が Cookie から付ける（SOCAIAGENT-683）
   return NextResponse.json({
     user_id: Number(userId),
     user_token: userToken,
-    ...(adminToken ? { token: adminToken } : {}),
+    has_admin_token: Boolean(adminToken),
   })
 }
 
 export async function POST(request: NextRequest) {
-  const { userId, userToken, refreshToken, adminToken } = await request.json()
-  if (!userId || !userToken) {
+  const parsed = await parseSessionPost(request, 'auth')
+  if (!parsed.ok) return parsed.response
+  const { userId, userToken, refreshToken, adminToken } = parsed.body
+  if (!userId || typeof userToken !== 'string' || userToken === '') {
     return NextResponse.json({ error: 'userId and userToken are required' }, { status: 400 })
   }
 
   const response = NextResponse.json({ ok: true })
-  setSessionCookies(response, String(userId), userToken, refreshToken)
+  setSessionCookies(
+    response,
+    String(userId),
+    userToken,
+    typeof refreshToken === 'string' ? refreshToken : undefined
+  )
   if (typeof adminToken === 'string' && adminToken !== '') {
     setAdminTokenCookie(response, adminToken)
   } else {
