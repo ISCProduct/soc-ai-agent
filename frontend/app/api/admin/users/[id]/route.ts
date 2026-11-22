@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const body = await request.text()
-  const response = await fetch(`${BACKEND_URL}/api/admin/users/${id}`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/users/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -30,7 +30,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/users/${id}`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/users/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: {
       'X-Admin-Email': request.headers.get('x-admin-email') || '',
