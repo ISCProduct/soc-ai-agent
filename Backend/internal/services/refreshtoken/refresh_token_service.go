@@ -1,6 +1,7 @@
 package refreshtoken
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -27,7 +28,8 @@ type RefreshTokenStore interface {
 	Create(token *models.UserRefreshToken) error
 	FindByHash(hash string) (*models.UserRefreshToken, error)
 	Revoke(id uint, at time.Time) error
-	RevokeAllByUser(userID uint, at time.Time) error
+	Delete(ctx context.Context, id uint) error
+	DeleteAllByUser(ctx context.Context, userID uint) error
 }
 
 // RefreshTokenService はリフレッシュトークンの発行・ローテーション・失効を担当する (#616)
@@ -87,22 +89,24 @@ func (s *RefreshTokenService) Rotate(plain string) (uint, string, error) {
 	return token.UserID, newPlain, nil
 }
 
-// Revoke はトークンを失効させる（見つからない場合もエラーにしない）
+// Revoke はトークンを明示的に失効させる（ログアウト。見つからない場合もエラーにしない）。
+// 行を削除し、ローテーションの猶予（validate）を効かせない。企業ユーザー側と同じ方針 (SOCAIAGENT-688)。
+// ローテーション済みで猶予中の旧トークンも、ここで削除して即時に使えなくする。
 func (s *RefreshTokenService) Revoke(plain string) error {
 	token, err := s.store.FindByHash(hashRefreshToken(plain))
 	if err != nil {
 		return err
 	}
-	if token == nil || token.RevokedAt != nil {
+	if token == nil {
 		return nil
 	}
-	return s.store.Revoke(token.ID, s.now())
+	return s.store.Delete(context.Background(), token.ID)
 }
 
-// RevokeAllForUser はユーザーの全トークンを失効させる
-// （パスワード変更・アカウント削除・全端末ログアウト時に使用）
+// RevokeAllForUser はユーザーの全トークンを削除し、猶予なしで即時に失効させる
+// （パスワード再設定・全端末ログアウト時に使用。SOCAIAGENT-688）
 func (s *RefreshTokenService) RevokeAllForUser(userID uint) error {
-	return s.store.RevokeAllByUser(userID, s.now())
+	return s.store.DeleteAllByUser(context.Background(), userID)
 }
 
 // validate はトークンの存在・期限・失効状態を検証する

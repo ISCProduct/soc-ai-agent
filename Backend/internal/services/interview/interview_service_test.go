@@ -320,6 +320,13 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 	})
 }
 
+// unrestrictedSchoolAccess は担当校なしの管理者（学校で絞らない）として常に許可する。
+type unrestrictedSchoolAccess struct{}
+
+func (unrestrictedSchoolAccess) CanAdminAccessUser(bool, uint, uint, *uint) (bool, error) {
+	return true, nil
+}
+
 // TestInterviewService_EnsureSessionOwnership は #941 の回帰テスト。
 // UploadVideo等がセッション所有者チェックに使う EnsureSessionOwnership の
 // 許可/拒否ロジックをテーブル駆動で検証する。
@@ -348,7 +355,7 @@ func TestInterviewService_EnsureSessionOwnership(t *testing.T) {
 			wantErr:   "forbidden",
 		},
 		{
-			name:      "管理者は他人のセッションでも許可",
+			name:      "担当校なしの管理者は他人のセッションでも許可",
 			actorID:   2,
 			sessionID: 100,
 			session:   &models.InterviewSession{ID: 100, UserID: 1},
@@ -362,10 +369,12 @@ func TestInterviewService_EnsureSessionOwnership(t *testing.T) {
 			sRepo := new(mockSessionRepo)
 			uRepo := new(mockUserRepo)
 			svc := interview.NewInterviewService(sRepo, nil, nil, uRepo, nil, nil, nil)
+			svc.SetSchoolAccess(unrestrictedSchoolAccess{})
 
 			sRepo.On("FindByID", tt.sessionID).Return(tt.session, nil)
 			if tt.actorID != tt.session.UserID {
 				uRepo.On("GetUserByID", tt.actorID).Return(tt.actor, nil)
+				uRepo.On("GetUserByID", tt.session.UserID).Return(&models.User{ID: tt.session.UserID}, nil).Maybe()
 			}
 
 			err := svc.EnsureSessionOwnership(tt.actorID, tt.sessionID)

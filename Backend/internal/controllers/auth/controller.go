@@ -166,8 +166,16 @@ func (c *AuthController) RequestRegistration(ctx echo.Context) error {
 	if err := ctx.Validate(&body); err != nil {
 		return err
 	}
+	key, ok := auth.NormalizeEmail(body.Email)
+	if !ok {
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "メールアドレスの形式が正しくありません")
+	}
+	// 宛先単位の上限。存在の有無に関係なく消費するので、応答からアカウントの有無は分からない。
+	if !middleware.RegistrationRequestEmailRateLimiter.Allow(key) {
+		return echo.NewHTTPError(http.StatusTooManyRequests, "Too Many Requests: リクエスト上限に達しました。しばらく待ってから再試行してください。")
+	}
 
-	if err := c.authService.RequestRegistration(body.Email); err != nil {
+	if err := c.authService.RequestRegistration(strings.TrimSpace(body.Email)); err != nil {
 		if isProduction() {
 			slog.WarnContext(ctx.Request().Context(), "request registration failed", "email", auth.MaskEmail(body.Email), "err", err)
 			return ctx.JSON(http.StatusOK, map[string]string{"message": "confirmation email sent"})
