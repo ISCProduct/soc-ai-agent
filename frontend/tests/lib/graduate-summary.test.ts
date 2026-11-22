@@ -17,4 +17,14 @@ describe('placementCsv', () => {
     expect(csv).toContain('"A,B"')
     expect(csv).not.toContain('氏名')
   })
+
+  it('数式として実行される先頭文字は文字として出す', () => {
+    const csv = placementCsv({
+      ...summary,
+      by_school: [{ label: '=1+1', count: 1, share_percent: 50 }],
+      by_industry: [{ label: '+cmd,x', count: 1, share_percent: 50 }],
+    })
+    expect(csv).toContain("学校,'=1+1,1,50%")
+    expect(csv).toContain('"\'+cmd,x"')
+  })
 })

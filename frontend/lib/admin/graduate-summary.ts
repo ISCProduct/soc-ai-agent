@@ -14,8 +14,11 @@ export interface PlacementSummary {
 }
 
 function csvCell(value: string): string {
-  if (/[",\n]/.test(value)) return `"${value.replaceAll('"', '""')}"`
-  return value
+  // Excel は = + - @ で始まるセルを数式として実行する。学校名や業界名は登録データなので、先頭に引用符を付けて文字として出す。
+  let safe = value
+  if (/^[=+\-@\t\r]/.test(safe)) safe = `'${safe}`
+  if (/[",\n]/.test(safe)) return `"${safe.replaceAll('"', '""')}"`
+  return safe
 }
 
 /** 氏名を含まない内訳の CSV。割合は登録件数に対するもの。 */
