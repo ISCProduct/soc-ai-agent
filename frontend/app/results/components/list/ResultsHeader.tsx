@@ -1,6 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
+import NextLink from 'next/link'
 import { Alert, Box, Button, Typography } from '@mui/material'
 import { ArrowBack } from '@mui/icons-material'
 import { GUEST_REGISTER_CTA_LABEL, GUEST_REGISTER_PATH } from '@/lib/guest-limits'
@@ -17,13 +18,12 @@ interface Props {
   /** PC のみ右上に出すメール送信ボタン */
   emailAction: ReactNode
   onBack: () => void
-  onNavigate: (path: string) => void
 }
 
 /** 適合度の幅がこの値以内なら「差はわずか」と一度だけ述べる */
 const NARROW_BAND_SPAN = 15
 
-export function ResultsHeader({ companyCount, favoritesOnly, isProvisional, diagnosisSummary, band, isGuestUser, emailAction, onBack, onNavigate }: Props) {
+export function ResultsHeader({ companyCount, favoritesOnly, isProvisional, diagnosisSummary, band, isGuestUser, emailAction, onBack }: Props) {
   return (
     <Box component="header" sx={{ px: { xs: 2, md: 4 }, pt: { xs: 1.5, md: 3.5 }, pb: { xs: 2.5, md: 3.25 }, backgroundColor: UI.field, borderBottom: `1px solid ${UI.rule}`, flexShrink: 0 }}>
       <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto' }}>
@@ -35,7 +35,7 @@ export function ResultsHeader({ companyCount, favoritesOnly, isProvisional, diag
         </Box>
         {isGuestUser && (
           <Alert severity="info" sx={{ mb: 2 }}
-            action={<Button color="inherit" size="small" onClick={() => onNavigate(GUEST_REGISTER_PATH)}>{GUEST_REGISTER_CTA_LABEL}</Button>}>
+            action={<Button color="inherit" size="small" component={NextLink} href={GUEST_REGISTER_PATH}>{GUEST_REGISTER_CTA_LABEL}</Button>}>
             ゲスト利用中です。メール送信や選考管理はアカウント登録後に利用できます。
             今の診断結果はそのまま引き継がれます。
           </Alert>

@@ -129,7 +129,6 @@ export default function ResultsListView({
         isGuestUser={isGuestUser}
         emailAction={isDesktop ? email : null}
         onBack={onBack}
-        onNavigate={onNavigate}
       />
       <NextStepBar analysisScores={analysisScores} isProvisional={isProvisional} onBack={onBack} />
       <Box sx={{ flexGrow: 1, overflowY: { xs: 'visible', md: 'auto' }, px: { xs: 2, md: 4 }, pt: { xs: 2, md: 4 }, pb: { xs: 2, md: 7 } }}>
@@ -160,7 +159,7 @@ export default function ResultsListView({
               <CompanyList companies={companies} ctx={ctx} />
             )}
             {!isDesktop && roles}
-            <ResultsFooterLinks isGuestUser={isGuestUser} emailAction={isDesktop ? null : email} onReset={onReset} onNavigate={onNavigate} />
+            <ResultsFooterLinks isGuestUser={isGuestUser} emailAction={isDesktop ? null : email} onReset={onReset} />
           </Box>
           {isDesktop && (
             <Box sx={{ width: 340, flexShrink: 0, display: 'grid', gap: 2 }}>

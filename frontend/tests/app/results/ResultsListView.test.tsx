@@ -4,6 +4,7 @@
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import ResultsListView from '@/app/results/components/ResultsListView'
 import type { CategoryScores, Company } from '@/app/results/types'
+import { GUEST_REGISTER_PATH } from '@/lib/guest-limits'
 
 const sampleCompany: Company = {
   id: '1',
@@ -456,8 +457,10 @@ describe('ResultsListView', () => {
       expect(describedText(email)).toBe('ゲストユーザーはメール送信できません。アカウント登録後にご利用ください。')
       const applications = screen.getByRole('button', { name: '選考管理を見る' })
       expect(describedText(applications)).toContain('応募・選考管理を利用できません')
-      // 登録への導線も近くにある
-      expect(screen.getAllByRole('button', { name: 'アカウント登録して機能を解放' }).length).toBeGreaterThan(0)
+      // 登録への導線も近くにある。別タブでも開けるようリンクにしている
+      const registerLinks = screen.getAllByRole('link', { name: 'アカウント登録して機能を解放' })
+      expect(registerLinks.length).toBeGreaterThan(0)
+      for (const link of registerLinks) expect(link).toHaveAttribute('href', GUEST_REGISTER_PATH)
     })
 
     it('ゲストの「応募する」は、行の近くの文で理由を示す', () => {
@@ -478,11 +481,15 @@ describe('ResultsListView', () => {
       renderList()
       expect(screen.queryByText(/アカウント登録後にご利用ください/)).not.toBeInTheDocument()
       expect(screen.queryByText(/準備中です/)).not.toBeInTheDocument()
-      for (const name of ['結果をメールで受け取る', '応募する', '選考管理を見る']) {
+      for (const name of ['結果をメールで受け取る', '応募する']) {
         for (const button of screen.getAllByRole('button', { name })) {
           expect(button).not.toHaveAttribute('aria-describedby')
         }
       }
+      // 選考管理は画面遷移なので、別タブでも開けるリンクにする
+      const applications = screen.getByRole('link', { name: '選考管理を見る' })
+      expect(applications).toHaveAttribute('href', '/applications')
+      expect(applications).not.toHaveAttribute('aria-describedby')
     })
 
     it('応募済みの企業には、応募が準備中でも理由の文を出さない', () => {
