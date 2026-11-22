@@ -304,7 +304,6 @@ func main() {
 	oauthService := oauth.NewOAuthService(userRepo, oauthConfig, githubService)
 	oauthService.SetRefreshTokenService(refreshTokenService)
 	chatService := chat.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
-	questionService := chat.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := matching.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
 	resumeService := resume.NewResumeService(resumeRepo, "storage/resumes", aiClient)
 	// 履歴書を外部の LLM へ送る前の伏字の辞書に、その学生の氏名・メール・学校名を使う。読めないときは送らない
@@ -316,6 +315,7 @@ func main() {
 		return piimask.Subject{Name: u.Name, Email: u.Email, SchoolName: u.SchoolName}, nil
 	})
 	resumeService.SetSubjectReader(subjectReader)
+	githubService.SetSubjectReader(subjectReader) // GitHub 要約の README も、外の LLM へ送る前に同じ辞書で伏字にする
 	escontrollers.SetSubjectReader(subjectReader) // ES 添削・リライトも、外の LLM へ送る前に同じ辞書で伏字にする
 	crawlService := company.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 	gbizInfoRepo := repositories.NewGBizInfoRepository(db)
@@ -392,6 +392,7 @@ func main() {
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
 	interviewService.SetCompanyRepo(companyPublicRepo)
+	interviewService.SetSchoolAccess(schoolService)
 	interviewService.SetCompanyOwnerChecker(func(userID, companyID uint) (bool, error) {
 		return shared.UserOwnsCompany(companyAccessRepo, userID, companyID)
 	})
@@ -403,7 +404,7 @@ func main() {
 	organizationRepo := repositories.NewOrganizationRepository(db)
 	organizationService := organization.NewOrganizationService(organizationRepo)
 	authController := authcontrollers.NewAuthController(authService, cfg.UserSecret)
-	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService)
+	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService, auth.NewOAuthCodeStore(rdb))
 	chatController := chatcontrollers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	// 推薦への「合う／合わない」（SOCAIAGENT-670）
 	chatController.SetMatchFeedback(matching.NewMatchFeedbackService(repositories.NewUserMatchFeedbackRepository(db)))
@@ -412,7 +413,6 @@ func main() {
 		chatController.SetJobEnqueuer(jobEnqueuer)
 	}
 	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
-	questionController := chatcontrollers.NewQuestionController(questionService)
 	relationController := companycontrollers.NewCompanyRelationController(companyQueryRepo, aiClient)
 	relationController.SetCorrelationMapService(company.NewCompanyCorrelationMapService(companyRepo, companyRelationRepo))
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
@@ -602,7 +602,7 @@ func main() {
 	// ルーティング設定
 	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret, userDeletionService, organizationService)
 	aiBudgetGuards := routes.NewAIBudgetGuards(aiBudgetService)
-	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
+	routes.SetupChatRoutes(api, chatController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupCompanyRoutes(api, relationController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 学生向けの企業検索（SOCAIAGENT-612）。業界・地域・職種で絞り込み、企業名順で返す
 	routes.SetupCompanySearchRoutes(api, companysearchcontrollers.NewController(repositories.NewCompanySearchRepository(db)), cfg.UserSecret, userDeletionService, organizationService)

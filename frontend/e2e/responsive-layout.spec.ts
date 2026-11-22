@@ -27,11 +27,14 @@ const PHONE_WIDTHS = [390, 375, 320]
 // CI ではバックエンドが起動していない。未モックの API を実サーバーへ流すと
 // 応答を待ち続けて画面が「読み込み中」のまま止まる。空応答で即座に返す。
 async function stubApi(page: import('@playwright/test').Page) {
-  await page.route('**/api/**', (route) =>
-    route.request().method() === 'GET'
+  await page.route('**/api/**', (route) => {
+    // セッション確認は本物の Route Handler に通す。管理画面は Cookie に管理者トークンが
+    // あるかをここで確かめるため、空配列を返すと「確認できない」になる（SOCAIAGENT-683）
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.continue()
+    return route.request().method() === 'GET'
       ? route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
-      : route.fulfill({ status: 204, body: '' }),
-  )
+      : route.fulfill({ status: 204, body: '' })
+  })
 }
 
 test.describe('レスポンシブ: 横方向の破綻', () => {

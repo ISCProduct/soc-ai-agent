@@ -3,6 +3,7 @@ package auth
 import (
 	"Backend/internal/middleware"
 	"Backend/internal/models"
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -49,7 +50,7 @@ func (r *userRepoAuthStub) RenewEmailVerification(userID uint, token string, exp
 func (r *userRepoAuthStub) GetUserByVerificationToken(token string) (*models.User, error) {
 	return nil, nil
 }
-func (r *userRepoAuthStub) GetUserByPasswordResetToken(token string) (*models.User, error) {
+func (r *userRepoAuthStub) GetUserByPasswordResetTokenHash(_ context.Context, hash string) (*models.User, error) {
 	return nil, nil
 }
 func (r *userRepoAuthStub) GetUserByOAuth(provider, oauthID string) (*models.User, error) {
