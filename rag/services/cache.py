@@ -4,6 +4,7 @@ patch("main.embed_texts") 互換のため実行時に main を参照する。
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
@@ -21,16 +22,27 @@ logger = logging.getLogger("main")
 # 「採用 価値観 求める人物像」は定数で、ES 添削のクエリも「企業名 + 定型文」なので、同じ文を
 # 何度も課金していた。埋め込みはモデルと文で決まるので、(モデル, 文) で覚えておく。
 # 企業名入りのクエリで増えすぎないよう、件数に上限を掛けて古いものから捨てる。
+# キーには文そのものではなく SHA-256 を持つ。企業名の長さには上限が無いので、長い名前を変えながら
+# 送られても、保持するのは件数 × 固定長のキーと埋め込みだけにする。
+#
+# 同じキーの初回が同時に来たときは、どれもロックの外で API を呼ぶ（ロックを持ったまま API を待たない
+# ため）。結果は同じなので壊れないが、その回だけは人数分課金される。起動直後と、上限で捨てた直後だけ。
 _QUERY_EMBEDDING_CACHE_MAX = 256
 _query_embeddings: "OrderedDict[Tuple[str, str], List[float]]" = OrderedDict()
 _query_embeddings_lock = threading.Lock()
+
+
+def _query_key(query: str) -> Tuple[str, str]:
+    """(モデル名, クエリの SHA-256)。文の長さによらずキーの大きさを一定にする。"""
+    digest = hashlib.sha256(query.encode("utf-8")).hexdigest()
+    return (os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"), digest)
 
 
 def _query_embedding(query: str) -> List[float]:
     """クエリの埋め込み。同じモデル・同じ文は2回目から API を呼ばない。失敗は覚えない。"""
     import main as m
 
-    key = (os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"), query)
+    key = _query_key(query)
     with _query_embeddings_lock:
         cached = _query_embeddings.get(key)
         if cached is not None:
