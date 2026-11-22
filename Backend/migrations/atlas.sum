@@ -1,4 +1,4 @@
-h1:IGCjzjztP6J85aRjCBGx/ZIsflk94P+A4heblivhEHI=
+h1:05nO/0vFkn/tv2qi4RZxOEb6VyUaEDyjcrT/YHTr7xk=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -83,4 +83,4 @@ h1:IGCjzjztP6J85aRjCBGx/ZIsflk94P+A4heblivhEHI=
 20261119182402_training_scorer_export_runs_sweep.up.sql h1:o5N8LfpuRFk0oa7iyzK0QFwW4AT2O16IvEYUMAA8dV0=
 20261120001650_add_name_reading_source_to_companies.up.sql h1:DdzmwUTK2CS5qN0rHlhMuOjxniit4cbOiE2oTJmlSzY=
 20261121181608_user_company_match_favorite_index.up.sql h1:leLbPzS/D14a3Y0ok7AOmd6etwh3JjhhmXHeDpOQD4c=
-20261122025144_git_hub_repos_add_is_owner_or_collaborator.up.sql h1:AwMy7Ym5HVm08eJo9lZD/NsF7MECD3RYIeDHPABs5Nc=
+20261122211106_git_hub_repos_add_is_owner_or_collaborator.up.sql h1:OGw1s9AzM50mUfh2cvdBqu+NhHfNTvwnNoSio6IZDYc=
