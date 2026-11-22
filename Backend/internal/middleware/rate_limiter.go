@@ -189,6 +189,11 @@ var VerificationResendRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, env
 // 同じ人のメールボックスに、短時間に何通も送らないための上限(サービス層が使う)。
 var VerificationResendEmailRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("VERIFICATION_RESEND_RATE_LIMIT_PER_EMAIL", 3))
 
+// RegistrationRequestRateLimiter / RegistrationRequestEmailRateLimiter は登録申請(確認メール送信)の制限器。
+// 認証メール再送と同じ値・同じ環境変数で調整する。回数は再送とは別に数える。
+var RegistrationRequestRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("VERIFICATION_RESEND_RATE_LIMIT_PER_IP", 10))
+var RegistrationRequestEmailRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("VERIFICATION_RESEND_RATE_LIMIT_PER_EMAIL", 3))
+
 // ConfigureRateLimiters は外部 KeyRateLimiter でグローバル制限器を差し替える（#617）。
 func ConfigureRateLimiters(login, passwordReset KeyRateLimiter) {
 	if login != nil {
