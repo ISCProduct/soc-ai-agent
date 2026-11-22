@@ -191,3 +191,34 @@ func TestWebsite_禁止ページへのリダイレクトは追従しない(t *te
 		t.Error("禁止ページへリクエストを送ってしまった")
 	}
 }
+
+// 禁止ページへ転送する候補は取得枠に数えず、後ろの許可された候補を読む。
+func TestWebsite_禁止先へ転送する候補は枠に数えない(t *testing.T) {
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/robots.txt":
+			fmt.Fprint(w, "User-agent: *\nDisallow: /private/")
+		case "/":
+			fmt.Fprint(w, `<html><body><a href="/company/">会社概要</a><a href="/corporate/">企業情報</a><a href="/about/">会社情報</a></body></html>`)
+		case "/company/", "/corporate/":
+			http.Redirect(w, r, "/private/", http.StatusFound)
+		case "/about/":
+			fmt.Fprintf(w, `<html><body><p>%s</p></body></html>`, filler(100))
+		default:
+			t.Errorf("想定外のリクエスト: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	allowTestServer(t, srv)
+
+	if _, err := collectWebsiteText(context.Background(), srv.URL+"/"); err != nil {
+		t.Fatalf("3番目の許可された候補から本文を取れるべき: %v (取得: %v)", err, gotPaths)
+	}
+	for _, p := range gotPaths {
+		if strings.HasPrefix(p, "/private/") {
+			t.Errorf("禁止ページへリクエストを送った: %v", gotPaths)
+		}
+	}
+}
