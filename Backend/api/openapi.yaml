@@ -858,11 +858,11 @@ paths:
               required: [token, password]
               properties:
                 token: { type: string }
-                password: { type: string, format: password, minLength: 8 }
+                password: { type: string, format: password, minLength: 8, description: 8文字以上・72バイト以下 }
       security: []
       responses:
         "200": { description: 再設定した }
-        "400": { description: トークンが無効か期限切れ }
+        "400": { description: トークンが無効か期限切れ、またはパスワードが8文字未満・72バイト超 }
 
   /api/auth/refresh:
     post:
@@ -4509,10 +4509,37 @@ paths:
       summary: 学習データを書き出す
       description: |
         候補者の発話と選考結果を含むため**管理者本人の認証を要求する**（#268）。サービス間シークレットでは叩けない。
+
+        1回に返すセッションは既定・上限 1000（SOCAIAGENT-694）。続きは `offset` で取る。
+        `offset` は対象セッション（発話の有無で絞る前）の位置で、発話の無いセッションは落とすため、返る件数が `limit` 未満でも続きがありうる。
+        続きがありうるときは `X-Next-Offset` ヘッダーに次の `offset` を返す（無ければ最後）。
       security: [{ adminAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 1000
+            default: 1000
+          description: 返すセッション数。0・省略・1000超は 1000
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: 飛ばす対象セッション数
       responses:
         "200":
           description: 成功
+          headers:
+            X-Next-Offset:
+              description: 続きがありうるときの次の offset
+              schema:
+                type: integer
+        "400":
+          description: limit / offset が0以上の整数でない
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -4752,7 +4779,9 @@ paths:
         資本の鏡像行（A→B と B→A）は1本に畳む。取引の `direction_known` は現状常に false
         （from/to は取得起点→相手であり、提供側→利用側ではない）。
         事業タグ専用データは未整備のため `business_tags` は空・`business_tags_status=unavailable`。
-        採用情報は含めない。審査前のゲスト投稿企業はノードから除外する。
+        採用情報は含めない。審査前のゲスト投稿企業と停止中（is_active=false）の企業はノードから除外する。
+
+        レート制限は IP 単位 300回/10分（`CORRELATION_MAP_RATE_LIMIT_PER_IP`、compare と共通）。
       security: []
       parameters:
         - in: path
@@ -4765,6 +4794,8 @@ paths:
           description: 成功
         "404":
           description: 企業が見つからない
+        "429":
+          description: レート制限超過
 
   /api/companies/{id}/correlation-map/compare:
     get:
@@ -4793,6 +4824,8 @@ paths:
           description: with が無い
         "404":
           description: 企業が見つからない
+        "429":
+          description: レート制限超過
 
   /api/companies/web-search:
     get:
