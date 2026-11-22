@@ -8,7 +8,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params
   if (!/^\d+$/.test(id)) return NextResponse.json({ error: 'id が不正です' }, { status: 400 })
   try {
-    const result = await proxyAdminBackend('GET', `/api/admin/teacher/consultations/${id}`, {
+    const result = await proxyAdminBackend('GET', `/api/admin/teacher/consultations/${encodeURIComponent(id)}`, {
       headers: adminProxyHeaders(request.headers),
       timeoutMs: 15_000,
     })

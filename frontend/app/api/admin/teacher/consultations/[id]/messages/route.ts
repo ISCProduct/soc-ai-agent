@@ -9,7 +9,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!/^\d+$/.test(id)) return NextResponse.json({ error: 'id が不正です' }, { status: 400 })
   const body = await request.text()
   try {
-    const result = await proxyAdminBackend('POST', `/api/admin/teacher/consultations/${id}/messages`, {
+    const result = await proxyAdminBackend('POST', `/api/admin/teacher/consultations/${encodeURIComponent(id)}/messages`, {
       headers: adminProxyHeaders(request.headers),
       body,
       timeoutMs: 15_000,
