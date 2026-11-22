@@ -58,7 +58,7 @@ func Inventory() []Route {
 
 	SetupAuthRoutes(api, nil, nil, "", nil, nil)
 	budget := NewAIBudgetGuards(nil)
-	SetupChatRoutes(api, nil, nil, "", nil, nil, budget)
+	SetupChatRoutes(api, nil, "", nil, nil, budget)
 	SetupCompanyRoutes(api, nil, "", nil, nil, budget)
 	SetupCompanySearchRoutes(api, nil, "", nil, nil)
 	SetupAdminRoutes(api,

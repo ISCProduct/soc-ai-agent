@@ -32,6 +32,7 @@ import { DeleteAccountDialog } from '@/components/profile/DeleteAccountDialog'
 import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
 import { PageLoading } from '@/components/common/PageLoading'
 import { StudentThemeToggle } from '@/components/layout/StudentThemeToggle'
+import { isGoogleAuthUrl } from '@/lib/google-auth-url'
 
 export default function PageContent() {
   return (
@@ -194,6 +195,7 @@ function ProfilePageContent() {
       })
       if (!res.ok) throw new Error('Failed to get auth URL')
       const data = await res.json()
+      if (!isGoogleAuthUrl(data.auth_url)) throw new Error('Unexpected auth URL')
       window.location.href = data.auth_url
     } catch {
       setCalendarMessage('Googleカレンダー連携の開始に失敗しました')

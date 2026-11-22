@@ -7,17 +7,78 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/services/chat"
 	"Backend/internal/services/piimask"
+	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 )
 
 const diagnosisQualityLLMTimeout = 60 * time.Second
+
+// diagnosisQualityPromptVersion は品質評価プロンプトの版。本文を変えたら上げる（使用量ログの prompt_version に残る）。
+// v2: 会話抜粋を WrapUntrustedText で囲み、フラグを列挙値に限ったスキーマを強制（SOCAIAGENT-700）。
+const diagnosisQualityPromptVersion = "v2"
+
+// qualitySummaryMaxRunes は LLM の summary として保存する上限（約200字）。超えたものは捨ててヒューリスティックの文に戻す。
+const qualitySummaryMaxRunes = 200
+
+// allowedQualityFlags は LLM が付けてよいフラグ。プロンプトに列挙した語とヒューリスティックが出す語に限る。
+// 学生の発言に書かれた指示で、教員が読むレポートへ任意の文字列を載せさせないため（SOCAIAGENT-700）。
+var allowedQualityFlags = []string{
+	"no_measured_axes", "few_measured_axes", "no_matches", "single_match_only", "thin_match_evidence", "saturated_matches",
+	"no_chat_evidence", "thin_chat_evidence", "mostly_choice_only", "choice_reason_contradiction", "score_transcript_mismatch",
+}
+
+var qualitySystemPrompt = `あなたは適性診断の品質監査者です。ユーザースコアを変更せず、会話・スコア・マッチの整合だけを評価してください。
+選択肢だけの回答が多い・理由が薄い・スコアと会話の方向が食い違う場合は confidence を下げ、対応する flags を付けてください。
+flags は次の語だけを使ってください: "` + strings.Join(allowedQualityFlags, `", "`) + `"
+JSONのみで返答:
+{"confidence":0-100の整数,"flags":[上の語の配列],"summary":"日本語で2文以内（200字以内）"}`
+
+func qualityResponseSchema() *openai.ResponseSchema {
+	enum, _ := json.Marshal(allowedQualityFlags)
+	return &openai.ResponseSchema{
+		Name: "diagnosis_quality",
+		Schema: json.RawMessage(`{
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["confidence", "flags", "summary"],
+			"properties": {
+				"confidence": {"type": "integer"},
+				"flags": {"type": "array", "items": {"type": "string", "enum": ` + string(enum) + `}},
+				"summary": {"type": "string"}
+			}
+		}`),
+	}
+}
+
+// sanitizeQualityLLMResult は許可外のフラグと上限超えの summary を捨て、捨てた件数を返す。
+// スキーマ非対応のモデルでは JSON mode へ落ちるため、スキーマがあってもここで確かめる。
+func sanitizeQualityLLMResult(r *qualityLLMResult) int {
+	dropped := 0
+	var flags []string
+	for _, f := range r.Flags {
+		f = strings.TrimSpace(f)
+		if slices.Contains(allowedQualityFlags, f) {
+			flags = append(flags, f)
+		} else {
+			dropped++
+		}
+	}
+	r.Flags = flags
+	r.Summary = strings.TrimSpace(r.Summary)
+	if utf8.RuneCountInString(r.Summary) > qualitySummaryMaxRunes {
+		r.Summary = ""
+		dropped++
+	}
+	return dropped
+}
 
 // QualityService は診断完了後に妥当性フラグを保存する（スコアは更新しない）。
 type QualityService struct {
@@ -307,26 +368,27 @@ func (s *QualityService) evaluateWithLLM(
 		chatLines = append(chatLines, fmt.Sprintf("%s: %s", msg.Role, content))
 	}
 
-	system := `あなたは適性診断の品質監査者です。ユーザースコアを変更せず、会話・スコア・マッチの整合だけを評価してください。
-選択肢だけの回答が多い・理由が薄い・スコアと会話の方向が食い違う場合は confidence を下げ、対応する flags を付けてください。
-JSONのみで返答:
-{"confidence":0-100の整数,"flags":["thin_chat_evidence"|"mostly_choice_only"|"score_transcript_mismatch"|"few_measured_axes"|"saturated_matches"等],"summary":"日本語で2文以内"}`
 	user := fmt.Sprintf("スコア:\n%s\n\n上位マッチ:\n%s\n\n会話抜粋:\n%s",
 		strings.Join(scoreLines, "\n"),
 		strings.Join(matchLines, "\n"),
-		strings.Join(chatLines, "\n"),
+		shared.WrapUntrustedText(strings.Join(chatLines, "\n"), "会話抜粋"),
 	)
 
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureDiagnosisQuality)
+	ctx = usagectx.WithPromptVersion(ctx, "diagnosis_quality", diagnosisQualityPromptVersion)
 	llmCtx, cancel := context.WithTimeout(ctx, diagnosisQualityLLMTimeout)
 	defer cancel()
-	raw, err := s.aiClient.ChatCompletionJSON(llmCtx, system, user, 0.2, 400)
+	raw, err := s.aiClient.ChatCompletionWithSchema(llmCtx, qualitySystemPrompt, user, 0.2, 400, qualityResponseSchema())
 	if err != nil {
 		return nil, err
 	}
 	var parsed qualityLLMResult
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return nil, fmt.Errorf("parse llm json: %w", err)
+	}
+	if dropped := sanitizeQualityLLMResult(&parsed); dropped > 0 {
+		// 本文は出さない（学生の発言由来の可能性がある）
+		log.Printf("[diagnosis.quality] dropped invalid llm output items=%d", dropped)
 	}
 	return &parsed, nil
 }

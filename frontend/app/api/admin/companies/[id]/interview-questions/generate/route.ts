@@ -10,7 +10,7 @@ export async function POST(
 ) {
   const { id } = await params
   const response = await fetch(
-    `${BACKEND_URL}/api/admin/companies/${id}/interview-questions/generate`,
+    `${BACKEND_URL}/api/admin/companies/${encodeURIComponent(id)}/interview-questions/generate`,
     {
       method: 'POST',
       headers: {

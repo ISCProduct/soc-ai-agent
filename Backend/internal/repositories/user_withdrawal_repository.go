@@ -54,7 +54,7 @@ func (r *UserWithdrawalRepository) Withdraw(userID uint, now time.Time, build re
 		user.OAuthProvider = ""
 		user.OAuthID = ""
 		user.EmailVerificationToken = ""
-		user.PasswordResetToken = ""
+		user.PasswordResetTokenHash = nil
 		user.IsAdmin = false
 		// 学習利用の同意は書かない（#2168）。上で読んだ値で書き戻すと、退会の処理中に本人が取り消した同意を
 		// 元に戻してしまう。同意は SetTrainingUse で履歴と一緒にだけ変える。
