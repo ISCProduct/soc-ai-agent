@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type MouseEvent, type ReactNode } from 'react'
+import { useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import type { SxProps, Theme } from '@mui/material/styles'
 import {
   Box,
@@ -32,6 +32,7 @@ import { withStableKeys } from '@/lib/list-keys'
 import AnalysisScoreCard from './AnalysisScoreCard'
 import MyCategoryScoresCard from './MyCategoryScoresCard'
 import AxisBreakdownPanel from './AxisBreakdownPanel'
+import type { AxisBreakdown } from '@/lib/axis-match'
 import FavoritesCompareList from './FavoritesCompareList'
 import {
   GUEST_REGISTER_CTA_LABEL,
@@ -144,6 +145,8 @@ export default function ResultsListView({
 }: ResultsListViewProps) {
   // 軸ごとの内訳を開いている推薦（match_id）。開いたときだけ取りに行く
   const [openAxes, setOpenAxes] = useState<ReadonlySet<number>>(new Set())
+  // 取得済みの内訳。閉じて開き直すたびに取り直さない
+  const axesCache = useRef(new Map<number, AxisBreakdown>())
   const toggleAxes = (matchId: number) => {
     setOpenAxes((prev) => {
       const next = new Set(prev)
@@ -329,7 +332,8 @@ export default function ResultsListView({
             onRetryAnalysis={onRetryAnalysis}
           />
 
-          {sessionId && <MyCategoryScoresCard sessionId={sessionId} />}
+          {/* 診断を切り替えたら作り直す（前の診断の10軸を残さない） */}
+          {sessionId && <MyCategoryScoresCard key={sessionId} sessionId={sessionId} />}
 
           {/*
             緑の枠とピルと「→」をやめた。職種名は見出しの重さで足り、
@@ -551,7 +555,11 @@ export default function ResultsListView({
                     棒はどれも満杯に見えて差を伝えない。どの軸が噛み合ったかだけを
                     1行で書くほうが速く読める。
                   */}
-                  {company.categoryScores && (
+                  {/*
+                    内訳を開いた行では隠す。一覧の値は推薦を計算した時点のもので、内訳は今のスコアから計算するので、
+                    推薦のあとに適性検査を受けるなどすると、同じ軸が別の値で並ぶ。
+                  */}
+                  {company.categoryScores && !(company.matchId !== undefined && openAxes.has(company.matchId)) && (
                     <Typography sx={{ fontSize: 13.5, color: UI.inkSoft, mb: 2 }}>
                       噛み合った軸：
                       {getTopCategoryScores(company.categoryScores, 3)
@@ -581,7 +589,7 @@ export default function ResultsListView({
                       </Button>
                       {openAxes.has(company.matchId) && (
                         <Box id={`axes-${company.matchId}`}>
-                          <AxisBreakdownPanel matchId={company.matchId} />
+                          <AxisBreakdownPanel matchId={company.matchId} cache={axesCache.current} />
                         </Box>
                       )}
                     </Box>

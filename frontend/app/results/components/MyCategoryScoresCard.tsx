@@ -37,7 +37,7 @@ export default function MyCategoryScoresCard({ sessionId }: { sessionId: string 
         あなたの10の傾向
       </Typography>
       <Typography sx={{ fontSize: 13, color: UI.inkSoft, mb: 1.5, maxWidth: '64ch' }}>
-        AI との対話から推定した参考値です（0〜100）。高い・低いに良し悪しはありません。企業ごとの内訳は、各企業の「軸ごとの内訳を見る」から確認できます。
+        AI との対話（と適性検査）から推定した参考値です（0〜100）。高い・低いに良し悪しはありません。企業ごとの内訳は、各企業の「軸ごとの内訳を見る」から確認できます。
       </Typography>
 
       {error && (
@@ -46,7 +46,7 @@ export default function MyCategoryScoresCard({ sessionId }: { sessionId: string 
         </Alert>
       )}
       {!error && scores === null && (
-        <Stack spacing={1} aria-label="傾向のスコアを読み込み中">
+        <Stack spacing={1} role="status" aria-label="傾向のスコアを読み込み中">
           {[0, 1, 2].map((i) => <Skeleton key={i} variant="rounded" height={18} />)}
         </Stack>
       )}
@@ -56,13 +56,10 @@ export default function MyCategoryScoresCard({ sessionId }: { sessionId: string 
       {!error && scores !== null && measured > 0 && (
         <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, columnGap: 4, rowGap: 0.75, maxWidth: 880 }}>
           {scores.map((s) => (
-            <Box component="li" key={s.label} sx={{ display: 'grid', gridTemplateColumns: '10.5em 1fr 3.5em', alignItems: 'center', gap: 1 }}>
+            <Box component="li" key={s.key} sx={{ display: 'grid', gridTemplateColumns: '10.5em 1fr 3.5em', alignItems: 'center', gap: 1 }}>
               <Typography sx={{ fontSize: 13.5, color: UI.ink }}>{s.label}</Typography>
-              <Box
-                role="img"
-                aria-label={s.score === null ? `${s.label} 未計測` : `${s.label} ${s.score}`}
-                sx={{ height: 6, borderRadius: 3, bgcolor: UI.ruleSoft, overflow: 'hidden' }}
-              >
+              {/* 数値は右の列で読めるので、棒は読み上げない（二重に読まれないように） */}
+              <Box aria-hidden="true" sx={{ height: 6, borderRadius: 3, bgcolor: UI.ruleSoft, overflow: 'hidden' }}>
                 {s.score !== null && <Box sx={{ height: '100%', width: `${Math.max(0, Math.min(100, s.score))}%`, bgcolor: UI.inkFaint }} />}
               </Box>
               <Typography sx={{ fontSize: 13.5, color: s.score === null ? UI.inkFaint : UI.ink, textAlign: 'right' }}>

@@ -1062,6 +1062,9 @@ paths:
     get:
       tags: [chat]
       summary: 現在のスコアを取得する
+      description: |
+        チャット由来のスコア（適性検査を合流させる前の値）。推薦の計算・軸ごとの内訳と同じ合流後の値は
+        `GET /api/chat/axis-scores` を使う（SOCAIAGENT-611）。
       security: [{ userToken: [] }]
       parameters:
         - in: query

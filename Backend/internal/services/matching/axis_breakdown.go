@@ -18,25 +18,29 @@ import (
 // 決まった規則で短く言葉にする（AI では書かない。誇張しない・毎回同じ説明にするため）。
 // 推薦順位を変えるものではなく、自己理解のための説明。
 
-// AxisDef は10軸の定義（API のキー・表示名・企業の重視度の取り出し方）。
-type AxisDef struct {
-	Key      string
-	Category string // user_weight_scores.weight_category と同じ名前
-	weight   func(p *models.CompanyWeightProfile) int
+// axisDef は10軸の定義（API のキー・スコアのカテゴリ名・画面の表示名・企業の重視度の取り出し方）。
+// matching パッケージの10軸の対応はここ1か所にまとめる（fit.go の axisNames / profileAxisValues もここから作る）。
+type axisDef struct {
+	key      string
+	category string // user_weight_scores.weight_category と同じ名前
+	// label は画面の表示名。推薦の一覧の「噛み合った軸」（frontend の CATEGORY_SCORE_LABELS）と同じにする。
+	// 同じ行に同じ軸が別の名前で並ばないように（#350 の説明の一貫性）
+	label  string
+	weight func(p *models.CompanyWeightProfile) int
 }
 
-// Axes は10軸。並びは推薦の category_scores と同じ。
-var Axes = []AxisDef{
-	{"technical", "技術志向", func(p *models.CompanyWeightProfile) int { return p.TechnicalOrientation }},
-	{"teamwork", "チームワーク志向", func(p *models.CompanyWeightProfile) int { return p.TeamworkOrientation }},
-	{"leadership", "リーダーシップ志向", func(p *models.CompanyWeightProfile) int { return p.LeadershipOrientation }},
-	{"creativity", "創造性志向", func(p *models.CompanyWeightProfile) int { return p.CreativityOrientation }},
-	{"stability", "安定志向", func(p *models.CompanyWeightProfile) int { return p.StabilityOrientation }},
-	{"growth", "成長志向", func(p *models.CompanyWeightProfile) int { return p.GrowthOrientation }},
-	{"work_life", "ワークライフバランス", func(p *models.CompanyWeightProfile) int { return p.WorkLifeBalance }},
-	{"challenge", "チャレンジ志向", func(p *models.CompanyWeightProfile) int { return p.ChallengeSeeking }},
-	{"detail", "細部志向", func(p *models.CompanyWeightProfile) int { return p.DetailOrientation }},
-	{"communication", "コミュニケーション力", func(p *models.CompanyWeightProfile) int { return p.CommunicationSkill }},
+// axes は10軸。並びは推薦の category_scores と同じ。
+var axes = []axisDef{
+	{"technical", "技術志向", "技術力", func(p *models.CompanyWeightProfile) int { return p.TechnicalOrientation }},
+	{"teamwork", "チームワーク志向", "チームワーク", func(p *models.CompanyWeightProfile) int { return p.TeamworkOrientation }},
+	{"leadership", "リーダーシップ志向", "リーダーシップ", func(p *models.CompanyWeightProfile) int { return p.LeadershipOrientation }},
+	{"creativity", "創造性志向", "創造性", func(p *models.CompanyWeightProfile) int { return p.CreativityOrientation }},
+	{"stability", "安定志向", "安定志向", func(p *models.CompanyWeightProfile) int { return p.StabilityOrientation }},
+	{"growth", "成長志向", "成長意欲", func(p *models.CompanyWeightProfile) int { return p.GrowthOrientation }},
+	{"work_life", "ワークライフバランス", "ワークライフ", func(p *models.CompanyWeightProfile) int { return p.WorkLifeBalance }},
+	{"challenge", "チャレンジ志向", "挑戦意欲", func(p *models.CompanyWeightProfile) int { return p.ChallengeSeeking }},
+	{"detail", "細部志向", "緻密さ", func(p *models.CompanyWeightProfile) int { return p.DetailOrientation }},
+	{"communication", "コミュニケーション力", "コミュニケーション", func(p *models.CompanyWeightProfile) int { return p.CommunicationSkill }},
 }
 
 // 言葉にするときの目安。
@@ -85,11 +89,15 @@ type AxisBreakdown struct {
 // 一致度も同じ式（CalculateCategoryMatch）で今のスコアから計算し直す。
 func (s *MatchingService) GetAxisBreakdown(matchID, userID uint) (*AxisBreakdown, error) {
 	match, err := s.matchRepo.FindByID(matchID)
-	if errors.Is(err, repository.ErrNotFound) || (err == nil && match.UserID != userID) {
+	if errors.Is(err, repository.ErrNotFound) {
 		return nil, shared.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	// 他人の推薦と、企業が論理削除された推薦（Preload で企業が空になる）は、存在しない推薦と同じ扱い
+	if match.UserID != userID || match.Company.ID == 0 {
+		return nil, shared.ErrNotFound
 	}
 	profiles, err := s.companyRepo.GetWeightProfilesByCompanyIDs([]uint{match.CompanyID})
 	if err != nil {
@@ -113,10 +121,15 @@ func (s *MatchingService) GetAxisBreakdown(matchID, userID uint) (*AxisBreakdown
 
 // mergedSessionScores は、その診断のスコアに適性検査を合流させた値（推薦の計算と同じ）。
 // 「あなたの10の傾向」と「軸ごとの内訳」は、どちらもこれを使う（同じ画面で数値が食い違わないように）。
+// 推薦の計算（CalculateMatching）と同じく、チャットのスコアが1件も無ければ合流しない（空を返す）。
+// 合流させると、推薦が無い（スコアが無い）画面に、適性検査だけの傾向が並んで食い違う。
 func (s *MatchingService) mergedSessionScores(userID uint, sessionID string) (map[string]float64, error) {
 	scores, err := s.userWeightScoreRepo.FindByUserAndSession(userID, sessionID)
 	if err != nil {
 		return nil, err
+	}
+	if len(scores) == 0 {
+		return map[string]float64{}, nil
 	}
 	scoreMap := make(map[string]float64, len(scores))
 	for _, sc := range scores {
@@ -142,13 +155,13 @@ func (s *MatchingService) GetMyAxisScores(userID uint, sessionID string) ([]MyAx
 	return BuildMyAxisScores(scoreMap), nil
 }
 
-// BuildMyAxisScores は10軸の並び（Axes）でスコアを返す。丸め方は BuildAxisBreakdown と同じ。
+// BuildMyAxisScores は10軸の並び（axes）でスコアを返す。丸め方は BuildAxisBreakdown と同じ。
 func BuildMyAxisScores(userScores map[string]float64) []MyAxisScore {
-	out := make([]MyAxisScore, 0, len(Axes))
-	for _, a := range Axes {
-		row := MyAxisScore{Key: a.Key, Label: a.Category}
-		if v, ok := userScores[a.Category]; ok {
-			r := math.Round(v)
+	out := make([]MyAxisScore, 0, len(axes))
+	for _, a := range axes {
+		row := MyAxisScore{Key: a.key, Label: a.label}
+		if v, ok := userScores[a.category]; ok {
+			r := math.Round(clampScore(v))
 			row.Score = &r
 		}
 		out = append(out, row)
@@ -156,40 +169,47 @@ func BuildMyAxisScores(userScores map[string]float64) []MyAxisScore {
 	return out
 }
 
+// clampScore はスコアを 0〜100 に収める（書き込み側でも収めているが、範囲外の値を文に出さないため）。
+func clampScore(v float64) float64 {
+	return math.Max(0, math.Min(100, v))
+}
+
 // BuildAxisBreakdown はスコアと企業の重視度から、軸別の内訳と言葉を組み立てる。
 func BuildAxisBreakdown(userScores map[string]float64, profile *models.CompanyWeightProfile) *AxisBreakdown {
-	out := &AxisBreakdown{Axes: make([]AxisRow, 0, len(Axes)), Strengths: []AxisNote{}, Gaps: []AxisNote{}, Unmeasured: []string{}}
+	out := &AxisBreakdown{Axes: make([]AxisRow, 0, len(axes)), Strengths: []AxisNote{}, Gaps: []AxisNote{}, Unmeasured: []string{}}
 	type scored struct {
 		note AxisNote
 		rank float64
 	}
 	var strengths, gaps []scored
-	for _, a := range Axes {
+	for _, a := range axes {
 		weight := a.weight(profile)
-		row := AxisRow{Key: a.Key, Label: a.Category, CompanyWeight: weight}
-		user, ok := userScores[a.Category]
+		row := AxisRow{Key: a.key, Label: a.label, CompanyWeight: weight}
+		raw, ok := userScores[a.category]
 		if !ok {
 			out.Axes = append(out.Axes, row)
 			if weight >= axisHigh {
-				out.Unmeasured = append(out.Unmeasured, a.Category)
+				out.Unmeasured = append(out.Unmeasured, a.label)
 			}
 			continue
 		}
-		user = math.Round(user)
-		match := CalculateCategoryMatch(user, float64(weight))
+		raw = clampScore(raw)
+		user := math.Round(raw)
+		// 一致度は丸める前のスコアで計算する（推薦の一覧と同じ。丸めてから差を取ると ±1 ずれる）
+		match := CalculateCategoryMatch(raw, float64(weight))
 		row.UserScore, row.Match = &user, &match
 		out.Axes = append(out.Axes, row)
 
 		gap := float64(weight) - user
 		switch {
 		case user >= axisHigh && weight >= axisHigh && math.Abs(gap) <= strengthMaxGap:
-			strengths = append(strengths, scored{AxisNote{a.Key, fmt.Sprintf(
+			strengths = append(strengths, scored{AxisNote{a.key, fmt.Sprintf(
 				"あなたの「%s」（%d）は、この企業が重視している度合い（%d）と近く、一致しています。",
-				a.Category, int(user), weight)}, match})
+				a.label, int(user), weight)}, match})
 		case weight >= axisHigh && gap >= gapMin:
-			gaps = append(gaps, scored{AxisNote{a.Key, fmt.Sprintf(
+			gaps = append(gaps, scored{AxisNote{a.key, fmt.Sprintf(
 				"この企業は「%s」を重視しています（%d）。あなたの今のスコアは %d です。関係する経験を具体的に話せるようにすると、伝わりやすくなります。",
-				a.Category, weight, int(user))}, gap})
+				a.label, weight, int(user))}, gap})
 		}
 	}
 	// 強みは一致度の高い順、補強ポイントは差の大きい順。同じなら軸の並び順（安定ソート）

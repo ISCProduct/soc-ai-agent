@@ -135,7 +135,7 @@ function ResultsContent() {
           onRetryAnalysis={handleRetryAnalysis}
         />
         {/* 推薦が0件でも、自分の10の傾向は見られるようにする（推薦とは別に取れる情報） */}
-        <MyCategoryScoresCard sessionId={sessionId} />
+        <MyCategoryScoresCard key={sessionId} sessionId={sessionId} />
         <ResultsEmptyView reason={emptyReason} onBackToChat={handleBack} />
       </ResultsFallbackColumn>
     )
@@ -151,7 +151,7 @@ function ResultsContent() {
           onRetryAnalysis={handleRetryAnalysis}
         />
         {/* 推薦が0件でも、自分の10の傾向は見られるようにする（推薦とは別に取れる情報） */}
-        <MyCategoryScoresCard sessionId={sessionId} />
+        <MyCategoryScoresCard key={sessionId} sessionId={sessionId} />
         <ResultsNoMatchView onReset={handleReset} />
       </ResultsFallbackColumn>
     )
