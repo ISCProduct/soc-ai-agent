@@ -76,9 +76,10 @@ Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確
 | `/unlink member:@誰か` | 解除する |
 | `/link-list` | 一覧を本人にだけ表示する |
 
-- 表は SSM Parameter `/soc-app/discord-backlog-links` に JSON で持つ。突き合わせは Backlog のユーザーID。
+- 表は DynamoDB（`${project}-discord-backlog-links`、1人1項目）に持つ。突き合わせは Backlog のユーザーID。
+- 以前の SSM Parameter `/soc-app/discord-backlog-links` は、初回の読み出しで DynamoDB へ移す。移したあとは SSM へ書き戻さない。
 - 同じ Backlog ユーザーを別の Discord ユーザーに紐づけることはできない（先に `/unlink`）。
-- 4KB の上限があり、40人強まで。超える場合は DynamoDB へ移す。
+- 人数の上限は置かない。別の人の `/link` が同時でも、相手の行は消えない。
 - 有効にするには Lambda に `BACKLOG_API_KEY`（terraform の `backlog_api_key`）が要る。未設定なら `/link` 系は「利用できません」を返す。
 - コマンドの追加後に `automation/discord/register-commands.sh` を再実行する。
 
