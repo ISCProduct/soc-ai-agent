@@ -49,6 +49,10 @@ type questionDirective struct {
 	TotalQuestions int
 	// CompanyQuestionID は元の企業別カスタム質問（評価したい観点の引き先）。標準トピックでは nil
 	CompanyQuestionID *uint
+	// DeepeningFocus は深掘りで引き出したい STAR の要素の指示。欠けている要素が無ければ空
+	DeepeningFocus string
+	// followUpState は深掘りで作った状態行。面接官の実際の発話で質問文を上書きするのに使う
+	followUpState *models.InterviewQuestionState
 }
 
 type companyQuestionHintsContextKey struct{}

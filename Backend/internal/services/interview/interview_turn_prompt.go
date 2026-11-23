@@ -231,8 +231,17 @@ func buildInterviewSystemPrompt(
 		if intent != "" {
 			question += fmt.Sprintf("\n（評価したい観点: %s）", intent)
 		}
-		base += fmt.Sprintf("\n次の質問文をそのまま面接官として投げかけてください（1問のみ）:\n%s",
-			shared.WrapUntrustedText(question, "質問文"))
+		if directive.IsDeepening {
+			// 深掘りの質問文は狙いを示す定型文。読み上げると不自然なので、直前の回答を受けて言い直させる
+			base += fmt.Sprintf("\n直前の回答を踏まえ、具体性を引き出す深掘り質問を1問だけ、面接官として自然な言葉で投げかけてください。次の質問文は狙いの参考です:\n%s",
+				shared.WrapUntrustedText(question, "質問文"))
+			if directive.DeepeningFocus != "" {
+				base += "\n" + directive.DeepeningFocus
+			}
+		} else {
+			base += fmt.Sprintf("\n次の質問文をそのまま面接官として投げかけてください（1問のみ）:\n%s",
+				shared.WrapUntrustedText(question, "質問文"))
+		}
 		if intent != "" {
 			base += "\n" + evaluationIntentNote
 		}

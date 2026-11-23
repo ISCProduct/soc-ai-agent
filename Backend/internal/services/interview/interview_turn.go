@@ -246,6 +246,13 @@ func (s *InterviewService) Turn(
 		aiText = interviewFallbackReplyText
 	}
 	aiText = piimask.StripTokens(aiText)
+	// 深掘りの質問文は定型文で保存してある。実際に投げかけた文で上書きし、レポートと次の深掘りをずらさない
+	if err == nil && directive != nil && directive.followUpState != nil && s.questionStateRepo != nil {
+		directive.followUpState.QuestionText = aiText
+		if updErr := s.questionStateRepo.Update(directive.followUpState); updErr != nil {
+			log.Printf("[Interview] update follow-up question text session=%d: %v", sessionID, updErr)
+		}
+	}
 
 	// TTS: AI返答を音声化（企業名は読み仮名に置換して誤読を防ぐ。表示用のaiTextはそのまま保持）。
 	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
