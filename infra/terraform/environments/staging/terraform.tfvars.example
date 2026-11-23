@@ -57,6 +57,10 @@ service_secret_plain = "change-me-service-secret"
 # github_dispatch_token = "<GitHub Fine-grained PAT: Actions=Read and write>"
 # github_dispatch_repo  = "ISCProduct/soc-ai-agent"
 #
+# 朝のリマインドがレビュー待ち PR を読むトークン。配信用とは別の、Pull requests 読み取り専用。
+# 未設定なら PR の節は出さず、期限リマインドだけ投稿する。
+# github_pr_read_token = "<GitHub Fine-grained PAT: Pull requests=Read-only>"
+#
 # /link で Backlog のメンバー一覧を引くAPIキー(読み取りのみ)。
 # 未設定なら /link /unlink /link-list は「利用できません」を返す。他のコマンドには影響しない。
 # backlog_api_key = "<Backlog API キー>"

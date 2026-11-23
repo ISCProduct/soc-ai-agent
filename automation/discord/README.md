@@ -72,7 +72,7 @@ Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確
 
 | コマンド | 内容 |
 |---|---|
-| `/link member:@誰か backlog:名前` | 紐づける。`backlog` は入力すると Backlog のメンバーが候補に出る。名前は完全一致 |
+| `/link member:@誰か backlog:名前 github:ログイン名` | 紐づける。`github` は任意。朝のリマインドで、その人にレビューが来ている PR をメンションする |
 | `/unlink member:@誰か` | 解除する |
 | `/link-list` | 一覧を本人にだけ表示する |
 
@@ -89,7 +89,10 @@ Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確
 - 対象ステータス: 未対応・処理中・PR確認待ち。保留・処理済み・ステージング反映以降は対象外。
 - 担当者は `/link` で紐づけた人にメンションする。未登録の人は名前だけで、「Discord未登録」と出る。
 - 「PR確認待ち」の課題があるときは、レビュアー（terraform の `backlog_reviewer_ids`、既定は大橋和幸）にもメンションして、レビューを促す。レビュアー本人が担当の課題は対象にしない。
-- 対象が無い日は何も投稿しない。
+- 開いている PR のうち、レビュー待ちのものも同じ投稿に載せる。Draft と、最新のコミットに変更要求が付いたまま更新が無い PR は除く。0件ならその節は出さない。GitHub の取得に失敗しても、Backlog の期限リマインドは投稿する。
+- メンション先は `/link` の `github`（GitHub のログイン名）で引く。未設定の人はログイン名だけで、「Discord未登録」と出る。
+- 取得用のトークンは `GITHUB_PR_READ_TOKEN`（Pull requests の読み取りだけ）。`/prod` の配信用 `GITHUB_DISPATCH_TOKEN` は使わない。同じ値を入れると節を出さない。リポジトリは `GITHUB_PR_READ_REPO`、無ければ `GITHUB_DISPATCH_REPO`。トークンが無ければ節を出さない。
+- 課題もレビュー待ち PR も無い日は何も投稿しない。
 - 投稿先は Webhook（terraform の `discord_reminder_webhook_url`）。未設定なら動かない。
 - 手動確認（投稿しない）: Lambda を `{"source":"backlog-deadline-reminder","dry_run":true}` で invoke すると、投稿予定の本文が返る。
 - 再試行はしない（成功後の失敗で二重投稿になるため）。失敗は CloudWatch Logs `/aws/lambda/<project>-discord` の `[Reminder]` に残る。

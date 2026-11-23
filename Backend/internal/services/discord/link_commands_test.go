@@ -83,6 +83,29 @@ func TestLink_登録して一覧と解除ができる(t *testing.T) {
 	}
 }
 
+func TestLink_GitHubログインを覚え再登録でも残す(t *testing.T) {
+	mem := &memSSM{}
+	h := newLinkHandler(mem, backlogStub{users: testUsers})
+	admin := []string{"role-allowed"}
+	got := contentOf(h.handleCommand(context.Background(), linkCmd(CommandNameLink, admin,
+		opt(OptionNameMember, "111"), opt(OptionNameBacklog, "大橋和幸"), opt(OptionNameGitHub, "@octocat"))))
+	if !strings.Contains(got, "octocat") {
+		t.Fatalf("登録メッセージ: %s", got)
+	}
+	if mem.value == nil || !strings.Contains(*mem.value, `"github":"octocat"`) {
+		t.Fatalf("保存されていない: %v", mem.value)
+	}
+	got = contentOf(h.handleCommand(context.Background(), linkCmd(CommandNameLink, admin,
+		opt(OptionNameMember, "111"), opt(OptionNameBacklog, "大橋和幸"))))
+	if !strings.Contains(got, "octocat") {
+		t.Fatalf("引数なしの再登録で GitHub が消えた: %s / %s", got, *mem.value)
+	}
+	list := contentOf(h.handleCommand(context.Background(), linkCmd(CommandNameLinkList, admin)))
+	if !strings.Contains(list, "GitHub: octocat") {
+		t.Fatalf("一覧に GitHub が無い: %s", list)
+	}
+}
+
 func TestLink_管理者ロールが無いと全コマンドを拒否し何も書かない(t *testing.T) {
 	mem := &memSSM{}
 	h := newLinkHandler(mem, backlogStub{users: testUsers})

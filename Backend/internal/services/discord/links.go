@@ -32,9 +32,11 @@ const (
 
 // Link は Discord ユーザーと Backlog ユーザーの対応。
 // 名前は表示用で、突き合わせには BacklogID を使う（Backlog 側の改名に強くするため）。
+// GitHub は朝のリマインドでレビュー待ち PR をメンションするためのログイン名。空なら PR では名前だけ出す。
 type Link struct {
 	BacklogID int    `json:"id"`
 	Name      string `json:"name"`
+	GitHub    string `json:"github,omitempty"`
 }
 
 // LinkService は Discord ユーザーID → Backlog ユーザーの対応表を SSM に持つ。
