@@ -23,6 +23,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/anthropics/anthropic-sdk-go v1.84.0
 	github.com/aws/aws-lambda-go v1.55.1
+	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.1
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.81.4
 	github.com/getsentry/sentry-go v0.50.0
 	github.com/getsentry/sentry-go/echo v0.35.1

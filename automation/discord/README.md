@@ -79,7 +79,7 @@ Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確
 - 表は SSM Parameter `/soc-app/discord-backlog-links` に JSON で持つ。突き合わせは Backlog のユーザーID。
 - 同じ Backlog ユーザーを別の Discord ユーザーに紐づけることはできない（先に `/unlink`）。
 - 4KB の上限があり、40人強まで。超える場合は DynamoDB へ移す。
-- 有効にするには Lambda に `BACKLOG_API_KEY`（terraform の `backlog_api_key`）が要る。未設定なら `/link` 系は「利用できません」を返す。
+- 有効にするには Secrets Manager `<project>/discord-backlog-bot` に Bot ユーザーの API キーが要る。未設定なら `/link` 系は「利用できません」を返す。個人のキーは Lambda に置かない。
 - コマンドの追加後に `automation/discord/register-commands.sh` を再実行する。
 
 ## Backlog の期限リマインド
@@ -107,6 +107,28 @@ Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確
 - 変更できるステータスは、未対応・処理中・PR確認待ち・保留。処理済み以降は変更できない。
 - 過去の日付と、今日から180日より先の日付は受け付けない。年を省いた日付が過ぎていたときも拒否する（来年は `2027-01-05` のように年から入力）。
 - 結果はチャンネルに公開で返る（理由の `@` は無効化し、メンションの通知は飛ばさない）。失敗は本人にだけ表示する。
-- Backlog への更新は、`BACKLOG_API_KEY` の持ち主の名前で記録される。変更者はコメント本文に残る。
+- Backlog への更新は、Bot ユーザーの名前で記録される。変更者はコメント本文に残る。Bot に課題の編集権限が無いときは「更新権限がありません」と返す。
 - コマンドの追加後に `register-commands.sh` を再実行する。
+
+## Bot 用 API キー（SOCAIAGENT-510）
+
+Discord から Backlog を読む・更新するキーは、個人の API キーではなく Bot ユーザーのキーにする。置き場所は Secrets Manager `<project>/discord-backlog-bot`（staging 既定は `soc-stg/discord-backlog-bot`）。中身は JSON ではなくキー文字列そのもの。Lambda にはシークレット名だけを渡し、値は起動時に読む。
+
+初回の `terraform apply` で `backlog_bot_api_key_plain` を渡すと、その値が入る。空なら `replace-via-cli` が入り、その間は `/link` と `/deadline` は動かない。2回目以降の apply は値を変えない。
+
+ローテーションは AWS CLI で行う。`terraform apply` では書き換わらない。
+
+```bash
+umask 077
+# NEW_SECRET はシェルにだけ置く。コマンドの引数には出さない。
+printf '%s' "$NEW_SECRET" > /tmp/backlog-bot-key
+aws secretsmanager put-secret-value \
+  --secret-id soc-stg/discord-backlog-bot \
+  --secret-string file:///tmp/backlog-bot-key
+rm -f /tmp/backlog-bot-key
+```
+
+Lambda は起動時に読んだキーを持ち続ける。書き換えたあとは実行環境を入れ替える（次のデプロイか、`aws lambda update-function-configuration` で設定を一度更新する）。
+
+Bot ユーザーと API キーの発行は Backlog の画面で行う。ここにはキーを書かない。
 

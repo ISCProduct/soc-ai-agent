@@ -197,6 +197,9 @@ func TestDeadline_Backlog失敗の内部情報を返さず種類で言い分け�
 	if got := run(nil, &backlogStatusError{Status: 400}); !strings.Contains(got, "受け付けませんでした") {
 		t.Errorf("400: %s", got)
 	}
+	if got := run(nil, &backlogStatusError{Status: 403}); !strings.Contains(got, "更新権限がありません") {
+		t.Errorf("403: %s", got)
+	}
 	if got := run(nil, context.DeadlineExceeded); !strings.Contains(got, "反映されたかは Backlog で確認") {
 		t.Errorf("タイムアウトは成否不明と伝える: %s", got)
 	}

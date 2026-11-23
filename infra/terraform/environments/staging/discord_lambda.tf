@@ -79,6 +79,13 @@ resource "aws_iam_role_policy" "discord_lambda" {
         Action   = ["ssm:GetParameter", "ssm:PutParameter"]
         Resource = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/discord-backlog-links"]
       },
+      {
+        # Bot 専用の Backlog API キー。個人のキーは読ませない (SOCAIAGENT-510)。
+        Sid      = "BacklogBotSecret"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = [aws_secretsmanager_secret.discord_backlog_bot.arn]
+      },
     ]
   })
 }
@@ -120,7 +127,8 @@ resource "aws_lambda_function" "discord" {
       DISCORD_ALLOWED_ROLE_ID = var.discord_allowed_role_id
       GITHUB_DISPATCH_TOKEN   = var.github_dispatch_token
       GITHUB_DISPATCH_REPO    = var.github_dispatch_repo
-      BACKLOG_API_KEY         = var.backlog_api_key
+      # キーそのものは置かない。個人の backlog_api_key は渡さない (SOCAIAGENT-510)。
+      DISCORD_BACKLOG_BOT_SECRET_ID = aws_secretsmanager_secret.discord_backlog_bot.name
 
       DISCORD_REMINDER_WEBHOOK_URL = var.discord_reminder_webhook_url
       BACKLOG_REVIEWER_IDS         = var.backlog_reviewer_ids

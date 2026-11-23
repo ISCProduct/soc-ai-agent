@@ -210,6 +210,8 @@ func deadlineFailure(err error) string {
 	case errors.Is(err, context.DeadlineExceeded):
 		// PATCH が通ったかどうか分からない。成功とも失敗とも言い切らない。
 		return "Backlog の応答が時間内に返りませんでした。反映されたかは Backlog で確認してください。"
+	case errors.As(err, &se) && (se.Status == http.StatusForbidden || se.Status == http.StatusUnauthorized):
+		return "Backlog の更新権限がありません。Bot ユーザーに課題の編集権限があるか確認してください。"
 	case errors.As(err, &se) && se.Status == http.StatusBadRequest:
 		return "Backlog が期限を受け付けませんでした（開始日より前の期限などの可能性があります）。"
 	default:
