@@ -8,6 +8,7 @@ import (
 	"Backend/internal/services/costs"
 	"Backend/internal/services/email"
 	"Backend/internal/services/flywheel"
+	"Backend/internal/services/interview/shadowscorer"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
@@ -69,6 +70,10 @@ type InterviewService struct {
 	companyReadingFlight singleflight.Group
 	// schoolAccess は本人以外の管理者に課す担当校スコープ判定（SOCAIAGENT-687）。nil なら管理者も拒否する。
 	schoolAccess SchoolAccessChecker
+	// shadowScorer と shadowStore は INTERVIEW_SHADOW_SCORER がオンのときだけ入る。
+	// ローカル採点は interview_reports や user_weight_scores には書かない。
+	shadowScorer shadowscorer.InterviewScorer
+	shadowStore  shadowScoreStore
 }
 
 // SchoolAccessChecker は admin ルートと同じ担当校スコープ判定（school.SchoolService が満たす）。

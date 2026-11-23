@@ -62,6 +62,7 @@ func SetupAdminRoutes(
 	admin.GET("/teacher/students/:id/es-reviews", teacherESReviewController.List, schoolScope)
 
 	admin.GET("/interviews", adminInterviewController.ListSessions, schoolScope)
+	admin.GET("/interviews/:id/shadow-score", adminInterviewController.ShadowScore)
 	admin.GET("/interviews/:id/videos", adminInterviewController.ListVideos)
 	admin.GET("/interviews/videos/:video_id/url", adminInterviewController.VideoURL)
 

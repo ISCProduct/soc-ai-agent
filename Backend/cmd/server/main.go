@@ -49,6 +49,7 @@ import (
 	"Backend/internal/services/houjinbangou"
 	"Backend/internal/services/hr"
 	"Backend/internal/services/interview"
+	"Backend/internal/services/interview/shadowscorer"
 	"Backend/internal/services/matching"
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/oauth"
@@ -355,6 +356,11 @@ func main() {
 	)
 	analysisService.SetSubjectReader(subjectReader) // 直近の発言を外の LLM へ送る前に、同じ辞書で伏字にする
 	interviewService := interview.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
+	if scorer, err := shadowscorer.LoadFromEnv(interview.RubricKeys(), interview.RubricScoreMin, interview.RubricScoreMax); err != nil {
+		log.Printf("シャドー採点を有効にできません: %v", err)
+	} else if scorer != nil {
+		interviewService.SetShadowScorer(scorer, repositories.NewInterviewShadowScoreRepository(db))
+	}
 	// 面接1回ごとに STT / LLM / TTS を叩くため、セッション数がそのまま費用に効く。
 	// 既定は監視のみで、止めるのは INTERVIEW_BUDGET_ENFORCE を明示したときだけ。
 	interviewService.SetBudgetGuard(costs.NewInterviewBudgetService(interviewSessionRepo, costs.NotifyInterviewBudgetToDiscord))

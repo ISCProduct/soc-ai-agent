@@ -125,6 +125,13 @@ N バイト       ヘッダ（JSON、UTF-8）
 - **推論**：x を上の手順の特徴量として、軸ごとに `z = Σ value × float64(weight[axis][index])`（添字の昇順に足す）。
   スコアは `0 + (z > θ_k となる k の数)`、確信度の目安には期待値 `Σ σ(z − θ_k)` を使えます。
 
+## Go での推論と配線確認
+
+推論は `Backend/internal/services/interview/shadowscorer` が、このファイルと同じ確認をしてから採点します。
+アプリでは `INTERVIEW_SHADOW_SCORER=true` と `INTERVIEW_SHADOW_MODEL_PATH` を置いたときだけ、面接レポートの保存後に裏で採点し、`interview_shadow_scores` へ保存します。既定はオフです。結果は `interview_reports.scores_json`、`user_weight_scores`、マッチング、学生の画面には使いません。
+
+人工データで「書き出し → 学習 → Go の推論」まで通す確認は `rag/tests/test_scorer_go_wiring.py` です。Python 3.12（Unicode 15.0.0）と Go が要ります。結果は配線が通ったことだけで、精度の主張には使いません。
+
 ## 評価レポート
 
 先頭に「LLM ラベルで学習」「LLM ラベルとの一致であり、教員の評価セットでの精度ではない」と書き、
