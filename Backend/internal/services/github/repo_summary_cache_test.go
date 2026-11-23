@@ -86,6 +86,7 @@ func TestSummarizeRepo_CacheByPromptVersion(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ts := newSummaryTestServers(t, newSummaryJSON)
 			db, mock := newSummaryTestDB(t)
+			expectOwnRepos(mock, 7, "owner/repo")
 			mock.ExpectQuery("SELECT \\* FROM `git_hub_repo_summaries` WHERE user_id = \\? AND full_name = \\?").
 				WithArgs(7, "owner/repo", 1).
 				WillReturnRows(sqlmock.NewRows(summaryColumns).
@@ -142,9 +143,10 @@ func TestListRepoSummaries_OnlyCurrentPromptVersion(t *testing.T) {
 		WithArgs(7, repoSummaryPromptVersion).
 		WillReturnRows(sqlmock.NewRows(summaryColumns).
 			AddRow(1, 7, "owner/repo", "要約", "", "", "", repoSummaryPromptVersion))
+	expectOwnRepos(mock, 7, "owner/repo")
 
 	s := &GitHubService{githubRepo: repositories.NewGitHubRepository(db)}
-	got, err := s.ListRepoSummaries(7)
+	got, err := s.ListRepoSummaries(context.Background(), 7)
 	if err != nil {
 		t.Fatalf("ListRepoSummaries error: %v", err)
 	}
@@ -346,6 +348,7 @@ func TestSummarizeRepo_InvalidOutputIsNotSaved(t *testing.T) {
 	overLimit := strings.Repeat("あ", maxRepoSummaryFieldRunes+1)
 	ts := newSummaryTestServers(t, `{"summary_text":"`+overLimit+`"}`)
 	db, mock := newSummaryTestDB(t)
+	expectOwnRepos(mock, 7, "owner/repo")
 	mock.ExpectQuery("SELECT \\* FROM `git_hub_profiles`").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "git_hub_login", "access_token"}).
 			AddRow(1, 7, "me", "plain-token"))
