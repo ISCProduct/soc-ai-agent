@@ -1,9 +1,6 @@
 const COMPANY_AUTH_USER_KEY = 'company_user'
 const COMPANY_AUTH_TOKEN_KEY = 'company_token'
 
-// middleware と同じマージン（期限2分前に同期・リフレッシュする）(#1091, #616踏襲)
-const COMPANY_TOKEN_REFRESH_MARGIN_SECONDS = 120
-
 function getSessionStorage(): Storage | null {
   if (typeof window === 'undefined') return null
   return window.sessionStorage
@@ -22,24 +19,9 @@ export interface CompanyAuthResponse extends CompanyUser {
   refresh_token?: string
 }
 
-function persistCompanyToken(token: string) {
-  getSessionStorage()?.setItem(COMPANY_AUTH_TOKEN_KEY, token)
-}
-
-/** JWT の exp を検証なしで読み、期限切れ（または間もなく期限切れ）か判定する */
-function companyTokenNeedsRefresh(token: string): boolean {
-  try {
-    const payload = token.split('.')[1]
-    if (!payload) return true
-    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
-    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
-    const decoded: unknown = JSON.parse(atob(padded))
-    const exp = (decoded as { exp?: unknown }).exp
-    if (typeof exp !== 'number') return true
-    return exp - Date.now() / 1000 < COMPANY_TOKEN_REFRESH_MARGIN_SECONDS
-  } catch {
-    return true
-  }
+// トークンは httpOnly Cookie にだけ置く（SOCAIAGENT-683）。以前の版が残した値を消す。
+function clearLegacyCompanyToken() {
+  getSessionStorage()?.removeItem(COMPANY_AUTH_TOKEN_KEY)
 }
 
 function persistCompanyAuth(data: CompanyAuthResponse) {
@@ -52,10 +34,9 @@ function persistCompanyAuth(data: CompanyAuthResponse) {
     name: data.name,
     role: data.role,
   }))
-  session.setItem(COMPANY_AUTH_TOKEN_KEY, data.token)
+  clearLegacyCompanyToken()
 
-  // httpOnly CookieにトークンをセットしてDevTools経由の露出を防ぐ。
-  // refresh_token はストレージには保存せず httpOnly Cookie のみで保持する (#1091, #616踏襲)。
+  // トークンは httpOnly Cookie にだけ置き、ストレージには保存しない (#1091, SOCAIAGENT-683)。
   fetch('/api/company-auth/session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -133,43 +114,11 @@ export const companyAuthService = {
     }
   },
 
-  getStoredToken(): string | null {
-    return getSessionStorage()?.getItem(COMPANY_AUTH_TOKEN_KEY) ?? null
-  },
-
-  // 企業APIリクエスト用のヘッダーを返す（X-Company-User-Token JWTのみ。
-  // X-Company-User-IDはBackendのEchoCompanyAuthでは参照されずJWTのみで解決されるため送らない）
+  // 企業APIリクエスト用のヘッダー。X-Company-User-Token は middleware が httpOnly Cookie から付ける
+  // （SOCAIAGENT-683）ので、画面からは何も付けない。
   getAuthHeaders(): Record<string, string> {
-    const token = this.getStoredToken()
-    if (!token) return {}
-    return {
-      'X-Company-User-Token': token,
-    }
-  },
-
-  /**
-   * httpOnly Cookie（+ middleware 自動リフレッシュ）から有効な company_user_token を取得し、
-   * sessionStorage へ同期する。Backend 直叩きの前に呼ぶ (#1091, #616踏襲)。
-   */
-  async ensureFreshToken(): Promise<void> {
-    const current = this.getStoredToken()
-    if (current && !companyTokenNeedsRefresh(current)) {
-      return
-    }
-
-    const res = await fetch('/api/company-auth/session', {
-      method: 'GET',
-      cache: 'no-store',
-      credentials: 'same-origin',
-    })
-    if (!res.ok) {
-      throw new Error('Unauthorized: セッションの有効期限が切れました。再ログインしてください。')
-    }
-    const data: { company_user_token?: string } = await res.json()
-    if (!data.company_user_token) {
-      throw new Error('Unauthorized: セッションの有効期限が切れました。再ログインしてください。')
-    }
-    persistCompanyToken(data.company_user_token)
+    clearLegacyCompanyToken()
+    return {}
   },
 
   logout() {

@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { BACKEND_URL } from '@/lib/backend-url'
 import { authService } from '@/lib/auth'
 import { sortLanguageStats, upsertRepoSummary } from '../utils'
 import type { GitHubProfile, GitHubRepo, LanguageStat, RepoSummary, SkillScore } from '../types'
@@ -52,7 +51,6 @@ export function useGitHubSkills(userId: number, targetRole: string) {
     setProfileError(false)
     setSummariesError(false)
     try {
-      await authService.ensureFreshUserToken()
       const headers = authService.getUserFetchHeaders()
       const [skillsRes, profileRes, summariesRes] = await Promise.all([
         fetch('/api/github/skills', { headers }),
@@ -118,7 +116,6 @@ export function useGitHubSkills(userId: number, targetRole: string) {
     setSummarizingRepo(fullName)
     setError(null)
     try {
-      await authService.ensureFreshUserToken()
       const res = await fetch('/api/github/repo/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
@@ -139,7 +136,8 @@ export function useGitHubSkills(userId: number, targetRole: string) {
 
   const handleConnect = () => {
     setConnecting(true)
-    window.location.href = `${BACKEND_URL}/api/auth/github`
+    // ログインと同じく自サイトの開始ルートを通す（照合値の Cookie を張るため。SOCAIAGENT-683）
+    window.location.href = '/api/auth/oauth/start?provider=github'
   }
 
   // ponytail: バックエンドの同期処理は進捗を返さない単一のブロッキングAPIのため、
@@ -157,7 +155,6 @@ export function useGitHubSkills(userId: number, targetRole: string) {
     const controller = new AbortController()
     const timeoutTimer = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS)
     try {
-      await authService.ensureFreshUserToken()
       const res = await fetch('/api/github/sync/wait', {
         method: 'POST',
         headers: authService.getUserFetchHeaders(),

@@ -4,6 +4,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/repositories"
+	"Backend/internal/services/piimask"
 	"Backend/internal/services/skillscore"
 	"context"
 	"strings"
@@ -29,7 +30,11 @@ type GitHubService struct {
 	apiBaseURL        string // テスト用オーバーライド（空なら githubAPIBase を使用）
 	graphQLURL        string // テスト用オーバーライド（空なら githubGraphQLURL を使用）
 	openaiClient      *openai.Client
+	subjects          piimask.SubjectReader // README を外部 LLM へ送る前の伏字の辞書に使う登録情報（SOCAIAGENT-697）
 }
+
+// SetSubjectReader は、伏字に使う学生の登録情報（氏名・メール・学校名）の読み取りを設定する。
+func (s *GitHubService) SetSubjectReader(r piimask.SubjectReader) { s.subjects = r }
 
 func NewGitHubService(githubRepo *repositories.GitHubRepository, skillScoreService *skillscore.SkillScoreService, openaiClient *openai.Client) *GitHubService {
 	return &GitHubService{
