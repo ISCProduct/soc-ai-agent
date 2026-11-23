@@ -14,6 +14,12 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+func TestLoadRejectsRelativePath(t *testing.T) {
+	if _, err := Load("scorer.bin", rubricKeys(), 0, 5); err == nil {
+		t.Fatal("相対パスを受け入れた")
+	}
+}
+
 func TestLoadRejectsBadChecksum(t *testing.T) {
 	path := writeModel(t, map[int]float64{0: 1}, []float64{-1, -1, -1, -1, -1})
 	data, err := os.ReadFile(path)

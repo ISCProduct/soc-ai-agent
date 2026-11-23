@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/text/unicode/norm"
@@ -91,7 +92,12 @@ func LoadFromEnv(rubricKeys []string, scoreMin, scoreMax int) (InterviewScorer, 
 // Load はモデルファイルを読む。形・Unicode の版・ルーブリック・重みの SHA-256 が
 // この実装と合わなければエラーにし、そのモデルでは採点しない。
 func Load(path string, rubricKeys []string, scoreMin, scoreMax int) (*Model, error) {
-	data, err := os.ReadFile(path)
+	cleaned := filepath.Clean(path)
+	if !filepath.IsAbs(cleaned) {
+		return nil, errors.New("採点モデルのパスは絶対パスにしてください")
+	}
+	// 起動設定で渡されたモデルファイルだけを読む。相対パスは上で拒否している。
+	data, err := os.ReadFile(cleaned) // #nosec G304,G703 -- 絶対パスのモデルファイル
 	if err != nil {
 		return nil, fmt.Errorf("採点モデルを開けません: %w", err)
 	}
