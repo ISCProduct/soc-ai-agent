@@ -54,9 +54,9 @@ export async function POST(request: NextRequest) {
     return fail('backend_body', 502)
   }
 
-  // ponytail: 画面側が今も JS からトークンを使うため、本文にはトークンを含めて返す。
-  // JS へ返すのをやめるのは PR3（lib/auth を Cookie 由来に寄せたあと）。
-  const response = NextResponse.json(auth)
+  // トークンは Cookie にだけ置き、画面へは返さない
+  const { token: _token, user_token: _userToken, refresh_token: _refreshToken, ...user } = auth
+  const response = NextResponse.json(user)
   setSessionCookies(
     response,
     String(auth.user_id),

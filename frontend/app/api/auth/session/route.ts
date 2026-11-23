@@ -7,8 +7,8 @@ import {
 } from '@/lib/auth/session-cookies'
 import { parseSessionPost } from '@/lib/auth/session-request'
 
-// middleware が Cookie をリフレッシュしたあと、有効な user_token をクライアントへ返す。
-// 面接など Backend 直叩き API は sessionStorage の JWT を使うため、Cookie と同期する (#616)。
+// ログインしているか（middleware が必要なら Cookie を更新したあと）を返す。
+// トークンの値は返さない（SOCAIAGENT-683）。
 export async function GET(request: NextRequest) {
   const userId =
     request.headers.get('X-User-ID') ||
@@ -26,10 +26,9 @@ export async function GET(request: NextRequest) {
     request.headers.get('X-Refreshed-Admin-Token') ||
     request.cookies.get('admin_token')?.value
 
-  // 管理者トークンの値は返さない。管理APIへは middleware が Cookie から付ける（SOCAIAGENT-683）
+  // トークンの値は返さない。Backend へは middleware が Cookie から付ける（SOCAIAGENT-683）
   return NextResponse.json({
     user_id: Number(userId),
-    user_token: userToken,
     has_admin_token: Boolean(adminToken),
   })
 }
