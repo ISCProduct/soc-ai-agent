@@ -198,6 +198,7 @@ func decode(data []byte, rubricKeys []string, scoreMin, scoreMax int) (*Model, e
 	if hex.EncodeToString(sum[:]) != wmeta.SHA256 {
 		return nil, errors.New("重みのチェックサム（SHA-256）が合いません")
 	}
+	fileSum := sha256.Sum256(data)
 	weights := make([]uint16, len(blob)/2)
 	for i := range weights {
 		weights[i] = binary.LittleEndian.Uint16(blob[i*2:])
@@ -216,7 +217,7 @@ func decode(data []byte, rubricKeys []string, scoreMin, scoreMax int) (*Model, e
 		scoreMin:   scoreMin,
 		thresholds: rows,
 		weights:    weights,
-		version:    wmeta.SHA256,
+		version:    hex.EncodeToString(fileSum[:]),
 	}, nil
 }
 

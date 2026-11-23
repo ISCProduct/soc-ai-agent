@@ -128,7 +128,7 @@ N バイト       ヘッダ（JSON、UTF-8）
 ## Go での推論と配線確認
 
 推論は `Backend/internal/services/interview/shadowscorer` が、このファイルと同じ確認をしてから採点します。
-アプリでは `INTERVIEW_SHADOW_SCORER=true` と `INTERVIEW_SHADOW_MODEL_PATH` を置いたときだけ、面接レポートの保存後に裏で採点し、`interview_shadow_scores` へ保存します。既定はオフです。結果は `interview_reports.scores_json`、`user_weight_scores`、マッチング、学生の画面には使いません。
+アプリでは `INTERVIEW_SHADOW_SCORER=true` と `INTERVIEW_SHADOW_MODEL_PATH` を置いたときだけ、面接レポートの保存後に裏で採点し、`interview_shadow_scores` へ保存します。発話は学習書き出しと同じ伏字を通してから特徴量にします。保存する `model_version` はモデルファイル全体の SHA-256 です。既定はオフです。採点を止めたあとも、保存済みの結果は管理者が読めます。結果は `interview_reports.scores_json`、`user_weight_scores`、マッチング、学生の画面には使いません。
 
 人工データで「書き出し → 学習 → Go の推論」まで通す確認は `rag/tests/test_scorer_go_wiring.py` です。Python 3.12（Unicode 15.0.0）と Go が要ります。結果は配線が通ったことだけで、精度の主張には使いません。
 

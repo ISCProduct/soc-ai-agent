@@ -3,6 +3,7 @@ package shadowscorer
 import (
 	"hash/fnv"
 	"math"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -113,11 +114,7 @@ func extract(turns []Turn) sparseFeatures {
 		indices = append(indices, idx)
 	}
 	// 添字の昇順。ノルムの和の順を Python と揃える。
-	for i := 1; i < len(indices); i++ {
-		for j := i; j > 0 && indices[j] < indices[j-1]; j-- {
-			indices[j], indices[j-1] = indices[j-1], indices[j]
-		}
-	}
+	slices.Sort(indices)
 	raw := make([]float64, len(indices))
 	gotCounts := make([]int, len(indices))
 	var sq float64

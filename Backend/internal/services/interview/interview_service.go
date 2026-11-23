@@ -70,10 +70,12 @@ type InterviewService struct {
 	companyReadingFlight singleflight.Group
 	// schoolAccess は本人以外の管理者に課す担当校スコープ判定（SOCAIAGENT-687）。nil なら管理者も拒否する。
 	schoolAccess SchoolAccessChecker
-	// shadowScorer と shadowStore は INTERVIEW_SHADOW_SCORER がオンのときだけ入る。
+	// shadowStore は保存済みの結果を読むために常に入る。shadowScorer はフラグがオンのときだけ。
+	// shadowMaskFor は学習書き出しと同じ伏字。未設定なら生テキストでは採点しない。
 	// ローカル採点は interview_reports や user_weight_scores には書かない。
-	shadowScorer shadowscorer.InterviewScorer
-	shadowStore  shadowScoreStore
+	shadowScorer  shadowscorer.InterviewScorer
+	shadowStore   shadowScoreStore
+	shadowMaskFor func(ctx context.Context, userID uint) (func(string) string, error)
 }
 
 // SchoolAccessChecker は admin ルートと同じ担当校スコープ判定（school.SchoolService が満たす）。

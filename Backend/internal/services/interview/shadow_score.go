@@ -3,6 +3,7 @@ package interview
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -27,6 +28,22 @@ type ShadowComparison struct {
 	LLM          map[string]int                    `json:"llm_scores"`
 }
 
+// SetShadowStore は保存先を入れる。採点を止めたあとも、保存済みの結果はここから読む。
+func (s *InterviewService) SetShadowStore(store shadowScoreStore) {
+	if s == nil {
+		return
+	}
+	s.shadowStore = store
+}
+
+// SetShadowMask は学習書き出しと同じ伏字を入れる。未設定なら採点しない。
+func (s *InterviewService) SetShadowMask(load func(ctx context.Context, userID uint) (func(string) string, error)) {
+	if s == nil {
+		return
+	}
+	s.shadowMaskFor = load
+}
+
 // SetShadowScorer はフラグがオンのときだけ呼ぶ。未設定なら採点しない。
 func (s *InterviewService) SetShadowScorer(scorer shadowscorer.InterviewScorer, store shadowScoreStore) {
 	s.shadowScorer = scorer
@@ -35,8 +52,8 @@ func (s *InterviewService) SetShadowScorer(scorer shadowscorer.InterviewScorer, 
 
 // recordShadowScore はレポート保存の後に走る。失敗してもレポート作成は成功のままにする。
 // scores_json や user_weight_scores はここでは触らない。
-func (s *InterviewService) recordShadowScore(ctx context.Context, sessionID uint, utterances []models.InterviewUtterance) {
-	if s == nil || s.shadowScorer == nil || s.shadowStore == nil {
+func (s *InterviewService) recordShadowScore(ctx context.Context, userID, sessionID uint, utterances []models.InterviewUtterance) {
+	if s == nil || s.shadowScorer == nil || s.shadowStore == nil || s.shadowMaskFor == nil {
 		return
 	}
 	defer func() {
@@ -44,7 +61,12 @@ func (s *InterviewService) recordShadowScore(ctx context.Context, sessionID uint
 			log.Printf("[Interview] shadow score panic session=%d: %v", sessionID, rec)
 		}
 	}()
-	turns := shadowTurns(utterances)
+	mask, err := s.shadowMaskFor(ctx, userID)
+	if err != nil || mask == nil {
+		log.Printf("[Interview] shadow score mask failed session=%d: %v", sessionID, err)
+		return
+	}
+	turns := shadowTurns(utterances, mask)
 	if len(turns) == 0 {
 		return
 	}
@@ -90,19 +112,25 @@ func (s *InterviewService) ShadowComparison(ctx context.Context, sessionID uint)
 		return ShadowComparison{}, err
 	}
 	if s.reportRepo != nil {
-		if report, err := s.reportRepo.FindBySessionID(sessionID); err == nil && report != nil && report.ScoresJSON != "" {
-			_ = json.Unmarshal([]byte(report.ScoresJSON), &view.LLM)
+		report, err := s.reportRepo.FindBySessionID(sessionID)
+		if err != nil && !errors.Is(err, repository.ErrNotFound) {
+			return ShadowComparison{}, err
+		}
+		if report != nil && strings.TrimSpace(report.ScoresJSON) != "" {
+			if err := json.Unmarshal([]byte(report.ScoresJSON), &view.LLM); err != nil {
+				return ShadowComparison{}, err
+			}
 		}
 	}
 	return view, nil
 }
 
-func shadowTurns(utterances []models.InterviewUtterance) []shadowscorer.Turn {
+func shadowTurns(utterances []models.InterviewUtterance, mask func(string) string) []shadowscorer.Turn {
 	var turns []shadowscorer.Turn
 	var q []string
 	answering := false
 	for _, u := range utterances {
-		text := strings.TrimSpace(u.Text)
+		text := strings.TrimSpace(mask(u.Text))
 		if text == "" {
 			continue
 		}

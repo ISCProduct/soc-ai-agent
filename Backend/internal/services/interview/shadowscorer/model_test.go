@@ -55,6 +55,23 @@ func TestScoreCountsThresholds(t *testing.T) {
 	}
 }
 
+func TestModelVersionIncludesThresholds(t *testing.T) {
+	weights := map[int]float64{0: 1}
+	low := writeModel(t, weights, []float64{-1, -1, -1, -1, -1})
+	high := writeModel(t, weights, []float64{1, 1, 1, 1, 1})
+	a, err := Load(low, rubricKeys(), 0, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := Load(high, rubricKeys(), 0, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.version == b.version {
+		t.Fatal("閾値だけが違うモデルを同じ版にした")
+	}
+}
+
 func TestScoreTrainedModelFile(t *testing.T) {
 	path := os.Getenv("SCORER_MODEL_PATH")
 	if path == "" {

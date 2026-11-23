@@ -337,7 +337,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		return err
 	}
 	// ローカル採点はレポート保存の後。失敗しても、上で書いた LLM の採点はそのまま残す。
-	s.recordShadowScore(ctx, sessionID, utterances)
+	s.recordShadowScore(ctx, session.UserID, sessionID, utterances)
 	return s.applyReportScores(session, report, utterances)
 }
 
