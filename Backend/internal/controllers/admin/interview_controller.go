@@ -379,7 +379,8 @@ JSON配列形式のみで回答（説明文不要）:
   }
 ]`, companyFacts)
 
-	ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport)
+	// 送るのは企業情報だけで学生の文章を含まないので、学生由来の機能名でもガードを明示的に外す（SOCAIAGENT-697）。
+	ctx = usagectx.WithFeature(openai.WithoutInputGuard(ctx), usagectx.FeatureInterviewReport)
 	jsonStr, err := c.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.7, 2000)
 	if err != nil {
 		return nil, err

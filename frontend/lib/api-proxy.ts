@@ -166,3 +166,26 @@ export function buildProxyNetworkErrorResponse(error: unknown, message: string):
   }
   return NextResponse.json(body, { status: 500 })
 }
+
+/** ディレクトリ移動や区切りとして解釈されうる要素か。 */
+function isUnsafePathSegment(segment: string): boolean {
+  return segment === '' || segment === '.' || segment === '..' || /[/\\]/.test(segment)
+}
+
+/**
+ * catch-all のパス要素を検証し、Backend へ渡す URL パスとしてエンコードして返す。
+ * 不正な要素（空・`.`・`..`・区切り文字を含む）が1つでもあれば null。
+ * 途中でデコードされても同じ判定になるよう、デコード後の値も確かめる。
+ */
+export function encodePathSegments(segments: string[]): string | null {
+  for (const segment of segments) {
+    let decoded = segment
+    try {
+      decoded = decodeURIComponent(segment)
+    } catch {
+      // デコードできない % は文字として扱い、下でエンコードする
+    }
+    if (isUnsafePathSegment(segment) || isUnsafePathSegment(decoded)) return null
+  }
+  return segments.map(encodeURIComponent).join('/')
+}

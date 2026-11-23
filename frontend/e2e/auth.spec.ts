@@ -10,7 +10,7 @@ test.describe('認証フロー', () => {
   })
 
   test('メールアドレスとパスワードでログインできる', async ({ page }) => {
-    await page.route('**/api/auth/login', async (route) => {
+    await page.route('**/api/bff/auth/login', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -36,7 +36,7 @@ test.describe('認証フロー', () => {
   })
 
   test('無効な認証情報でエラーメッセージが表示される', async ({ page }) => {
-    await page.route('**/api/auth/login', async (route) => {
+    await page.route('**/api/bff/auth/login', async (route) => {
       await route.fulfill({
         status: 401,
         contentType: 'application/json',

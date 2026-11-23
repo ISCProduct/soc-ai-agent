@@ -26,8 +26,8 @@ type TrainingExportRepository interface {
 	CountExportableSessions(ctx context.Context, statuses []string) (int, error)
 	// CountUserUtterances は、対象セッションのユーザー発話の総数。
 	CountUserUtterances(ctx context.Context, statuses []string) (int, error)
-	// ListOutcomeSessions は対象セッションを id 順に返す。limit が 0 以下なら全件。
-	ListOutcomeSessions(ctx context.Context, statuses []string, limit int) ([]OutcomeSession, error)
+	// ListOutcomeSessions は対象セッションを id 順に返す。limit が 0 以下なら全件、offset が正ならその件数を飛ばす。
+	ListOutcomeSessions(ctx context.Context, statuses []string, limit, offset int) ([]OutcomeSession, error)
 	// ListUserUtterances は sessionIDs のユーザー発話を、セッション・発話順に返す。
 	ListUserUtterances(ctx context.Context, sessionIDs []uint) ([]SessionUserUtterance, error)
 }
