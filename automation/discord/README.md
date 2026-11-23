@@ -107,6 +107,23 @@ Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確
 - 変更できるステータスは、未対応・処理中・PR確認待ち・保留。処理済み以降は変更できない。
 - 過去の日付と、今日から180日より先の日付は受け付けない。年を省いた日付が過ぎていたときも拒否する（来年は `2027-01-05` のように年から入力）。
 - 結果はチャンネルに公開で返る（理由の `@` は無効化し、メンションの通知は飛ばさない）。失敗は本人にだけ表示する。
-- Backlog への更新は、`BACKLOG_API_KEY` の持ち主の名前で記録される。変更者はコメント本文に残る。
+- Backlog への更新は、`BACKLOG_API_KEY` の持ち主の名前で記録される。変更者はコメント本文に残る。入れるキーは Bot ユーザーのものにする。
 - コマンドの追加後に `register-commands.sh` を再実行する。
+
+## 実機確認（SOCAIAGENT-512）
+
+受け口は staging の Lambda です。書き込みの確認は、変更してよい課題を1つ決めてから行います。終わったら期限を元に戻します。
+
+1. `/deadline` でその課題の期限を動かす。Backlog の期限が変わり、コメントが残る。
+2. 同じコマンドで元の期限に戻す。
+3. 拒否を確認する。未紐づけのメンバー、他人の課題、過去の日付、今日から180日より先。いずれも本人にだけ失敗が返る。
+4. 朝のリマインドは、先に `{"source":"backlog-deadline-reminder","dry_run":true}` で本文を見る。投稿してよいと分かってから、スケジュールを有効にする。
+
+## 止める・障害に気付く
+
+朝のリマインドを止めるときは、スケジュールを `DISABLED` にする。staging は `soc-stg-backlog-deadline-reminder`、本番は `discord_reminder_schedule_enabled = false` で apply する。再試行はしないので、止めたあとに同じ通知が追い打ちされることはない。
+
+失敗は CloudWatch Logs `/aws/lambda/<project>-discord` の `[Reminder]` と `[Discord]` に残る。本番で受け口を有効にしているときは、Lambda の Errors が1件でも SNS `<project>-alarms`（`alarm_email`）へ届く。`alarm_email` が空だと、アラームは状態を持つだけでメールは飛ばない。
+
+本番の受け口は `discord_bot_enabled = true` で作る。既定は作らない。有効にするときは、staging の朝リマインドを先に止め、Discord の Interactions Endpoint を本番の URL に切り替える。両方のスケジュールを ENABLED のままにすると、平日の朝に同じ内容が2回投稿される。
 
