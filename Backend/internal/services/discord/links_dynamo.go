@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -20,6 +21,11 @@ const (
 	condAbsent       = "attribute_not_exists(pk)"
 	condExists       = "attribute_exists(pk)"
 	condAbsentOrSelf = "attribute_not_exists(pk) OR discord_id = :discord"
+	condSameBacklog  = "backlog_id = :prev"
+
+	// 移行は /link の 2.5 秒とは別枠。Lambda の 10 秒を超えない範囲で、途中で切れても次の回が続きから書く。
+	migrationBudget  = 6 * time.Second
+	migrationWorkers = 8
 )
 
 // dynamoAPI は対応表が使う DynamoDB 操作。テストで差し替える。
@@ -52,31 +58,22 @@ func (d *dynamoLinkStore) List(ctx context.Context) (map[string]Link, error) {
 	if err := d.ensureMigrated(ctx); err != nil {
 		return nil, err
 	}
-	out := map[string]Link{}
-	var start map[string]dynamotypes.AttributeValue
-	for {
-		page, err := d.db.Scan(ctx, &dynamodb.ScanInput{
-			TableName:         aws.String(d.table),
-			ExclusiveStartKey: start,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("対応表の取得に失敗しました: %w", err)
-		}
-		for _, item := range page.Items {
-			pk := attrString(item, "pk")
-			if !strings.HasPrefix(pk, "discord#") {
-				continue
-			}
-			out[strings.TrimPrefix(pk, "discord#")] = Link{
-				BacklogID: attrInt(item, "backlog_id"),
-				Name:      attrString(item, "name"),
-			}
-		}
-		if len(page.LastEvaluatedKey) == 0 {
-			return out, nil
-		}
-		start = page.LastEvaluatedKey
+	items, err := d.scanItems(ctx)
+	if err != nil {
+		return nil, err
 	}
+	out := map[string]Link{}
+	for _, item := range items {
+		pk := attrString(item, "pk")
+		if !strings.HasPrefix(pk, "discord#") {
+			continue
+		}
+		out[strings.TrimPrefix(pk, "discord#")] = Link{
+			BacklogID: attrInt(item, "backlog_id"),
+			Name:      attrString(item, "name"),
+		}
+	}
+	return out, nil
 }
 
 func (d *dynamoLinkStore) Set(ctx context.Context, discordID string, l Link) error {
@@ -87,8 +84,15 @@ func (d *dynamoLinkStore) Set(ctx context.Context, discordID string, l Link) err
 	if err != nil {
 		return err
 	}
+	discordCond := condAbsent
+	var discordValues map[string]dynamotypes.AttributeValue
+	if current != nil {
+		// 読み取った行のままのときだけ上書きする。同じ Discord への同時 /link が、後着で占有行だけ残すのを防ぐ。
+		discordCond = condSameBacklog
+		discordValues = map[string]dynamotypes.AttributeValue{":prev": nAttr(attrInt(current, "backlog_id"))}
+	}
 	items := []dynamotypes.TransactWriteItem{
-		d.put(discordItem(discordID, l), "", nil),
+		d.put(discordItem(discordID, l), discordCond, discordValues),
 		d.put(lockItem(l.BacklogID, discordID), condAbsentOrSelf, discordValue(discordID)),
 	}
 	if current != nil && attrInt(current, "backlog_id") != l.BacklogID {
@@ -149,26 +153,102 @@ func (d *dynamoLinkStore) ensureMigrated(ctx context.Context) error {
 		d.done = true
 		return nil
 	}
+	migrateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), migrationBudget)
+	defer cancel()
+	if err := d.migrate(migrateCtx); err != nil {
+		return err
+	}
+	d.done = true
+	return nil
+}
+
+// migrate は SSM の対応表を、まだ無い行だけ DynamoDB へ書く。
+// 既にある行は読み飛ばす。条件が失敗した行は上書きしない。全件を毎回直列に書くと、
+// コマンドの制限時間でマーカーの前に切れ、次の回も最初からやり直して終わらない。
+func (d *dynamoLinkStore) migrate(ctx context.Context) error {
+	existing, err := d.scanItems(ctx)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for _, item := range existing {
+		have[attrString(item, "pk")] = true
+	}
+	var pending []map[string]dynamotypes.AttributeValue
 	if d.legacy != nil {
 		links, err := d.legacy.List(ctx)
 		if err != nil {
 			return err
 		}
 		for id, l := range links {
-			// 移行中に DynamoDB へ書かれた行は上書きしない。
-			if err := d.putIfAbsent(ctx, discordItem(id, l)); err != nil {
-				return err
+			if !have[discordPK(id)] {
+				pending = append(pending, discordItem(id, l))
 			}
-			if err := d.putIfAbsent(ctx, lockItem(l.BacklogID, id)); err != nil {
-				return err
+			if !have[backlogPK(l.BacklogID)] {
+				pending = append(pending, lockItem(l.BacklogID, id))
 			}
 		}
 	}
-	if err := d.putIfAbsent(ctx, map[string]dynamotypes.AttributeValue{"pk": sAttr(linkMetaPK)}); err != nil {
+	if err := d.putMissing(ctx, pending); err != nil {
 		return err
 	}
-	d.done = true
-	return nil
+	if have[linkMetaPK] {
+		return nil
+	}
+	return d.putIfAbsent(ctx, map[string]dynamotypes.AttributeValue{"pk": sAttr(linkMetaPK)})
+}
+
+func (d *dynamoLinkStore) scanItems(ctx context.Context) ([]map[string]dynamotypes.AttributeValue, error) {
+	var items []map[string]dynamotypes.AttributeValue
+	var start map[string]dynamotypes.AttributeValue
+	for {
+		page, err := d.db.Scan(ctx, &dynamodb.ScanInput{
+			TableName:         aws.String(d.table),
+			ExclusiveStartKey: start,
+			ConsistentRead:    aws.Bool(true),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("対応表の取得に失敗しました: %w", err)
+		}
+		items = append(items, page.Items...)
+		if len(page.LastEvaluatedKey) == 0 {
+			return items, nil
+		}
+		start = page.LastEvaluatedKey
+	}
+}
+
+func (d *dynamoLinkStore) putMissing(ctx context.Context, items []map[string]dynamotypes.AttributeValue) error {
+	if len(items) == 0 {
+		return nil
+	}
+	sem := make(chan struct{}, migrationWorkers)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var first error
+	for _, item := range items {
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(item map[string]dynamotypes.AttributeValue) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := d.putIfAbsent(ctx, item); err != nil {
+				mu.Lock()
+				if first == nil {
+					first = err
+				}
+				mu.Unlock()
+			}
+		}(item)
+	}
+	wg.Wait()
+	if first != nil {
+		return first
+	}
+	return ctx.Err()
 }
 
 func (d *dynamoLinkStore) putIfAbsent(ctx context.Context, item map[string]dynamotypes.AttributeValue) error {

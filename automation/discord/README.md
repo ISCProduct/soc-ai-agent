@@ -74,7 +74,7 @@ Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確
 |---|---|
 | `/link member:@誰か backlog:名前` | 紐づける。`backlog` は入力すると Backlog のメンバーが候補に出る。名前は完全一致 |
 | `/unlink member:@誰か` | 解除する |
-| `/link-list` | 一覧を本人にだけ表示する |
+| `/link-list` | 一覧を本人にだけ表示する。2000文字を超えるときは `page` で続きを見る |
 
 - 表は DynamoDB（`${project}-discord-backlog-links`、1人1項目）に持つ。突き合わせは Backlog のユーザーID。
 - 以前の SSM Parameter `/soc-app/discord-backlog-links` は、初回の読み出しで DynamoDB へ移す。移したあとは SSM へ書き戻さない。

@@ -14,8 +14,11 @@ import (
 
 // memDynamo は条件付きの Put / Delete / Transact を、本番と同じ式だけ評価する。
 type memDynamo struct {
-	mu    sync.Mutex
-	items map[string]map[string]dynamotypes.AttributeValue
+	mu              sync.Mutex
+	items           map[string]map[string]dynamotypes.AttributeValue
+	scans           int
+	consistentScans int
+	puts            int
 }
 
 func newMemDynamo() *memDynamo {
@@ -35,6 +38,7 @@ func (m *memDynamo) GetItem(_ context.Context, in *dynamodb.GetItemInput, _ ...f
 func (m *memDynamo) PutItem(_ context.Context, in *dynamodb.PutItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.puts++
 	pk := attrString(in.Item, "pk")
 	if !condOK(aws.ToString(in.ConditionExpression), m.items[pk], in.ExpressionAttributeValues) {
 		return nil, &dynamotypes.ConditionalCheckFailedException{}
@@ -46,11 +50,14 @@ func (m *memDynamo) PutItem(_ context.Context, in *dynamodb.PutItemInput, _ ...f
 func (m *memDynamo) Scan(_ context.Context, in *dynamodb.ScanInput, _ ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.scans++
+	if aws.ToBool(in.ConsistentRead) {
+		m.consistentScans++
+	}
 	var items []map[string]dynamotypes.AttributeValue
 	for _, item := range m.items {
 		items = append(items, cloneItem(item))
 	}
-	_ = in
 	return &dynamodb.ScanOutput{Items: items}, nil
 }
 
@@ -107,6 +114,10 @@ func condOK(expr string, item map[string]dynamotypes.AttributeValue, values map[
 			}
 		case "discord_id = :discord":
 			if item != nil && attrString(item, "discord_id") == attrString(values, ":discord") {
+				return true
+			}
+		case condSameBacklog:
+			if item != nil && attrInt(item, "backlog_id") == attrInt(values, ":prev") {
 				return true
 			}
 		}
@@ -199,7 +210,88 @@ func TestDynamoLink_既存のSSMを移行し壊れた表は空にしない(t *te
 	}
 }
 
+func TestDynamoLink_同じDiscordへの同時更新は占有を残さない(t *testing.T) {
+	svc, db := newDynamoService(nil)
+	var wg sync.WaitGroup
+	for _, backlogID := range []int{1, 2} {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			_ = svc.Set(context.Background(), "same", Link{BacklogID: id, Name: "人"})
+		}(backlogID)
+	}
+	wg.Wait()
+	got, err := svc.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("残った Discord 行 = %d", len(got))
+	}
+	owner := got["same"].BacklogID
+	other := 1
+	if owner == 1 {
+		other = 2
+	}
+	out, err := db.GetItem(context.Background(), &dynamodb.GetItemInput{Key: map[string]dynamotypes.AttributeValue{"pk": sAttr(backlogPK(other))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Item) != 0 {
+		t.Fatalf("使われていない Backlog の占有が残った: %d", other)
+	}
+	own, err := db.GetItem(context.Background(), &dynamodb.GetItemInput{Key: map[string]dynamotypes.AttributeValue{"pk": sAttr(backlogPK(owner))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attrString(own.Item, "discord_id") != "same" {
+		t.Fatalf("表示と占有が一致しない: %+v", own.Item)
+	}
+}
+
+func TestDynamoLink_一覧は強整合で読む(t *testing.T) {
+	svc, db := newDynamoService(nil)
+	if _, err := svc.List(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if db.consistentScans == 0 || db.consistentScans != db.scans {
+		t.Fatalf("強整合 %d / scan %d", db.consistentScans, db.scans)
+	}
+}
+
+func TestDynamoLink_移行は足りない行だけ書く(t *testing.T) {
+	raw := `{"111":{"id":1,"name":"大橋和幸"},"222":{"id":2,"name":"山田太郎"}}`
+	legacy := &ssmLinkStore{client: &memSSM{value: &raw}, paramName: "/p/links"}
+	svc, db := newDynamoService(legacy)
+	if err := db.putDiscord("111", Link{BacklogID: 1, Name: "新しい名前"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.putLock(1, "111"); err != nil {
+		t.Fatal(err)
+	}
+	before := db.puts
+	got, err := svc.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["111"].Name != "新しい名前" {
+		t.Fatalf("既存の行を上書きした: %+v", got["111"])
+	}
+	if got["222"].Name != "山田太郎" {
+		t.Fatalf("足りない行を移していない: %+v", got["222"])
+	}
+	// 111 の行と占有は既にある。222 の行と占有と、移行済みマーカーだけを書く。
+	if wrote := db.puts - before; wrote != 3 {
+		t.Fatalf("書き込み回数 = %d, want 3", wrote)
+	}
+}
+
 func (m *memDynamo) putDiscord(id string, l Link) error {
 	_, err := m.PutItem(context.Background(), &dynamodb.PutItemInput{Item: discordItem(id, l)})
+	return err
+}
+
+func (m *memDynamo) putLock(backlogID int, discordID string) error {
+	_, err := m.PutItem(context.Background(), &dynamodb.PutItemInput{Item: lockItem(backlogID, discordID)})
 	return err
 }

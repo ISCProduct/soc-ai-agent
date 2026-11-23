@@ -144,6 +144,7 @@ const (
 	OptionNameDate            = "date"
 	OptionNameReason          = "reason"
 	OptionNameMember          = "member"
+	OptionNamePage            = "page"
 	OptionNameBacklog         = "backlog"
 	OptionNameState           = "state"
 	// OptionNameUntil は /prod の復帰日。state と結合して on:YYYY-MM-DD の形にする。
