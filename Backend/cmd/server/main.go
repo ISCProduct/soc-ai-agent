@@ -388,6 +388,7 @@ func main() {
 	interviewService.SetAIBudget(aiBudgetService)
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
+	interviewService.SetResearchRepo(repositories.NewInterviewResearchRepository(db))
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
 	interviewService.SetCompanyRepo(companyPublicRepo)
 	interviewService.SetSchoolAccess(schoolService)

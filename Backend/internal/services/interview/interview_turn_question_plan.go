@@ -34,7 +34,11 @@ func (s *InterviewService) advanceQuestionPlan(
 	totalQuestions := int(count)
 	if count == 0 {
 		customQuestions := s.fetchCustomQuestions(companyID, position)
-		queue := BuildQuestionQueue(session.ID, customQuestions, companyQuestionHintsFromContext(ctx)...)
+		hints, err := s.confirmedResearchQuestions(ctx, companyName, position, companyQuestionHintsFromContext(ctx))
+		if err != nil {
+			return nil, err
+		}
+		queue := BuildQuestionQueue(session.ID, customQuestions, questionSourceAIResearch, hints...)
 		totalQuestions = len(queue)
 		if err := s.questionStateRepo.CreateBatch(queue); err != nil {
 			return nil, err
@@ -50,7 +54,7 @@ func (s *InterviewService) advanceQuestionPlan(
 				return nil, err
 			}
 
-			if NeedsDeepening(userAnswer, asked.Depth) {
+			if shouldDeepen(userAnswer, asked.Depth, skipScoreThresholdFromEnv()) {
 				followUpText := BuildFollowUpQuestionText(asked.QuestionText, userAnswer)
 				if generated, genErr := s.generateFollowUpQuestion(ctx, asked.QuestionText, userAnswer); genErr == nil && strings.TrimSpace(generated) != "" {
 					followUpText = generated

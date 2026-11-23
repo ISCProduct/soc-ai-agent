@@ -40,6 +40,7 @@ type InterviewService struct {
 	aiBudget             costs.AIBudgetStatusProvider
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
 	questionStateRepo    repository.InterviewQuestionStateRepository
+	researchRepo         repository.InterviewResearchRepository
 	skillScoreRepo       SkillScoreReader
 	companyRepo          shared.CompanyBriefReader
 	jobCh                chan uint
@@ -119,6 +120,11 @@ func (s *InterviewService) SetCompanyQuestionRepo(r repository.InterviewCompanyQ
 // SetQuestionStateRepo 面接質問キューリポジトリを注入する（オプション）
 func (s *InterviewService) SetQuestionStateRepo(r repository.InterviewQuestionStateRepository) {
 	s.questionStateRepo = r
+}
+
+// SetResearchRepo は Web 調査の質問候補を期限つきで読む保存先を注入する。
+func (s *InterviewService) SetResearchRepo(r repository.InterviewResearchRepository) {
+	s.researchRepo = r
 }
 
 // SetSkillScoreRepo GitHubスキルスコアリポジトリを注入する（オプション）
