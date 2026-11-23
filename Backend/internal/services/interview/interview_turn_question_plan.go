@@ -74,6 +74,7 @@ func (s *InterviewService) advanceQuestionPlan(
 					IsDeepening:       true,
 					TotalQuestions:    totalQuestions + 1,
 					DeepeningFocus:    deepeningFocus(userAnswer),
+					DeepeningOf:       asked.QuestionText,
 					followUpState:     followUp,
 				}, nil
 			}

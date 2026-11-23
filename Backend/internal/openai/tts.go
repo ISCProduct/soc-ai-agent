@@ -89,6 +89,9 @@ func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) 
 	if len(chunks) <= 1 {
 		return cli.ttsOne(ctx, text, voice)
 	}
+	// 1つでも失敗したら全体が失敗なので、残りの要求は取り消して早く返す
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	parts := make([][]byte, len(chunks))
 	errs := make([]error, len(chunks))
 	var wg sync.WaitGroup
@@ -103,9 +106,18 @@ func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) 
 				}
 			}()
 			parts[i], errs[i] = cli.ttsOne(ctx, chunk, voice)
+			if errs[i] != nil {
+				cancel()
+			}
 		}()
 	}
 	wg.Wait()
+	// 取り消しで止めた要求の context.Canceled ではなく、元の失敗を返す
+	for _, err := range errs {
+		if err != nil && !errors.Is(err, context.Canceled) {
+			return nil, err
+		}
+	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -90,5 +91,31 @@ func TestTTS_FailsWhenAnyChunkFails(t *testing.T) {
 	cli := NewWithBaseURL(server.URL, "gpt-4o-mini")
 	if got, err := cli.TTS(context.Background(), "はい。分かりました。", "alloy"); err == nil {
 		t.Fatalf("途中の失敗を無視した: %q", got)
+	}
+}
+
+// 1つが失敗したら残りの要求を取り消して早く返し、取り消しではなく元の失敗を返す。
+func TestTTS_CancelsRemainingChunksOnFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(b), "分かりました") {
+			http.Error(w, "boom", http.StatusBadRequest)
+			return
+		}
+		select { // 取り消されるまで返さない
+		case <-r.Context().Done():
+		case <-time.After(10 * time.Second):
+		}
+	}))
+	defer server.Close()
+
+	cli := NewWithBaseURL(server.URL, "gpt-4o-mini")
+	start := time.Now()
+	_, err := cli.TTS(context.Background(), "はい。分かりました。", "alloy")
+	if err == nil || errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "400") {
+		t.Fatalf("元の失敗を返していない: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("残りの要求を待った（%s）", elapsed)
 	}
 }

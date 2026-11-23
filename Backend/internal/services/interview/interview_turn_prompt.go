@@ -232,9 +232,10 @@ func buildInterviewSystemPrompt(
 			question += fmt.Sprintf("\n（評価したい観点: %s）", intent)
 		}
 		if directive.IsDeepening {
-			// 深掘りの質問文は狙いを示す定型文。読み上げると不自然なので、直前の回答を受けて言い直させる
-			base += fmt.Sprintf("\n直前の回答を踏まえ、具体性を引き出す深掘り質問を1問だけ、面接官として自然な言葉で投げかけてください。次の質問文は狙いの参考です:\n%s",
-				shared.WrapUntrustedText(question, "質問文"))
+			// 深掘りの定型文（directive.Text）は学生の回答の一部を含む。システムプロンプトは伏字の対象外なので
+			// 入れない。回答そのものは履歴（伏字を通る）にあるので、元の質問と狙いだけ渡して言い直させる。
+			base += fmt.Sprintf("\n直前の回答を踏まえ、具体性を引き出す深掘り質問を1問だけ、面接官として自然な言葉で投げかけてください。元の質問:\n%s",
+				shared.WrapUntrustedText(directive.DeepeningOf, "質問文"))
 			if directive.DeepeningFocus != "" {
 				base += "\n" + directive.DeepeningFocus
 			}

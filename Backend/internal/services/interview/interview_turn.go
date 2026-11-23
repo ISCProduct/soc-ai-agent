@@ -246,11 +246,14 @@ func (s *InterviewService) Turn(
 		aiText = interviewFallbackReplyText
 	}
 	aiText = piimask.StripTokens(aiText)
-	// 深掘りの質問文は定型文で保存してある。実際に投げかけた文で上書きし、レポートと次の深掘りをずらさない
+	// 深掘りの質問文は定型文で保存してある。実際に投げかけた文で上書きし、レポートと次の深掘りをずらさない。
+	// 失敗したら書き起こしの保存失敗と同じく呼び出し元へ知らせる
+	followUpSaveFailed := false
 	if err == nil && directive != nil && directive.followUpState != nil && s.questionStateRepo != nil {
 		directive.followUpState.QuestionText = aiText
 		if updErr := s.questionStateRepo.Update(directive.followUpState); updErr != nil {
 			log.Printf("[Interview] update follow-up question text session=%d: %v", sessionID, updErr)
+			followUpSaveFailed = true
 		}
 	}
 
@@ -295,7 +298,7 @@ func (s *InterviewService) Turn(
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
 		AIFallback:             fallbackStages(sttOutcome, llmOutcome, ttsOutcome),
-		UtteranceSaveFailed:    utteranceSaveFailed,
+		UtteranceSaveFailed:    utteranceSaveFailed || followUpSaveFailed,
 	}
 	if directive != nil {
 		result.QuestionSource = directive.Source
