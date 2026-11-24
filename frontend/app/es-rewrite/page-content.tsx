@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Box } from '@mui/material'
 import { PageLoading } from '@/components/common/PageLoading'
@@ -32,6 +32,8 @@ function ESRewriteContent() {
   const [rewriteResult, setRewriteResult] = useState<RewriteResult | null>(null)
   const [reviewResult, setReviewResult] = useState<ReviewResult | null>(null)
   const [reviewedOriginalText, setReviewedOriginalText] = useState('')
+  // リライトに使った文章。入力欄はあとから編集できるため結果と一緒に保持する
+  const [rewrittenOriginalText, setRewrittenOriginalText] = useState('')
   // 添削リクエストに使った企業名。入力欄はあとから編集できるため結果と一緒に保持する
   const [reviewedCompany, setReviewedCompany] = useState('')
   // 設問の文字数上限(#1523)。数値入力は空文字も扱うため文字列で持つ
@@ -41,6 +43,11 @@ function ESRewriteContent() {
   const [requestedCharLimit, setRequestedCharLimit] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  // 「コピーしました」を戻すタイマー。アンマウント時に解除する
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+  }, [])
 
   const parsedCharLimit = charLimit.trim() === '' ? null : Number(charLimit)
   const charLimitInvalid =
@@ -57,6 +64,7 @@ function ESRewriteContent() {
 
   const handleRewrite = async () => {
     if (!originalText.trim()) return
+    const submittedText = originalText
     setLoading(true)
     setError(null)
     setRewriteResult(null)
@@ -66,7 +74,7 @@ function ESRewriteContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          original_text: originalText,
+          original_text: submittedText,
           question_type: questionType,
           tech_stack: techStack,
           company_name: companyName,
@@ -74,6 +82,7 @@ function ESRewriteContent() {
         }),
       })
       if (!res.ok) throw new Error(await readApiErrorMessage(res, 'リライトに失敗しました。再試行してください。'))
+      setRewrittenOriginalText(submittedText)
       setRequestedCharLimit(charLimitInvalid ? null : parsedCharLimit)
       setRewriteResult(await res.json())
     } catch (e: unknown) {
@@ -115,9 +124,16 @@ function ESRewriteContent() {
   }
 
   const handleCopy = async (text: string) => {
-    await navigator.clipboard.writeText(text)
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // 権限がない・非対応のブラウザでは失敗する。黙って終わらせず既存のエラー欄で知らせる
+      setError('コピーできませんでした。文章を選択してコピーしてください。')
+      return
+    }
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+    copiedTimerRef.current = setTimeout(() => setCopied(false), 2000)
   }
 
   const result = mode === 'rewrite' ? rewriteResult : reviewResult
@@ -148,6 +164,8 @@ function ESRewriteContent() {
       {/* Mode toggle */}
       <ModeToggle
         mode={mode}
+        // 送信中に切り替えると、返ってきた結果やエラーが切り替え後の画面に混ざるため止める
+        disabled={loading}
         onSelectReview={() => { setMode('review'); setRewriteResult(null); setError(null) }}
         onSelectRewrite={() => { setMode('rewrite'); setReviewResult(null); setError(null) }}
       />
@@ -203,7 +221,7 @@ function ESRewriteContent() {
           {mode === 'rewrite' && rewriteResult && (
             <RewriteResultPanel
               rewriteResult={rewriteResult}
-              originalText={originalText}
+              originalText={rewrittenOriginalText}
               requestedCharLimit={requestedCharLimit}
               copied={copied}
               onCopy={handleCopy}
