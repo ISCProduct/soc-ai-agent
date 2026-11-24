@@ -424,6 +424,17 @@ variable "ai_model_light" {
   }
 }
 
+variable "es_improve_model" {
+  type        = string
+  description = "ES添削の改善文のモデル（OPENAI_ES_IMPROVE_MODEL、SOCAIAGENT-559）。空なら軽量の層（既定 gpt-4o-mini）。品質が落ちたら評価と同じモデルを入れて戻す"
+  default     = ""
+
+  validation {
+    condition     = var.es_improve_model == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$", var.es_improve_model))
+    error_message = "es_improve_model はモデル名（英数字・.・_・:・-）か空文字にしてください。"
+  }
+}
+
 # OpenAI 障害時の音声面接の縮退（#1833）。空なら縮退しない（今まで通り OpenAI だけ）。
 # ローカルの推論先は #1832 で用意する。詳細は docs/wiki/ai-failover.md
 variable "ai_failover_local_stt_url" {

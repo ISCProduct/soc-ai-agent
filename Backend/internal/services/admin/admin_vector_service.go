@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"Backend/internal/config"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -22,7 +22,7 @@ type AdminVectorService struct {
 }
 
 func NewAdminVectorService() *AdminVectorService {
-	base := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
+	base := config.RAGReviewURL()
 	return &AdminVectorService{
 		ragBaseURL: strings.TrimRight(base, "/"),
 		httpClient: &http.Client{Timeout: 120 * time.Second},

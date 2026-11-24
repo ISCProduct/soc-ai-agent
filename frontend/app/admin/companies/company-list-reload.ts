@@ -27,5 +27,9 @@ export async function runCompanyListReload(
   const pending: Promise<void>[] = [tasks.companies()]
   if (plan.industries) pending.push(tasks.industries())
   if (plan.coverage) pending.push(tasks.coverage())
-  await Promise.all(pending)
+  // 1本が先に失敗しても、残りを途中で放さない。
+  // 放すと画面の操作が先に戻り、遅れて届いた企業一覧が新しい絞り込みを上書きする。
+  const settled = await Promise.allSettled(pending)
+  const failed = settled.find((result) => result.status === 'rejected')
+  if (failed?.status === 'rejected') throw failed.reason
 }
