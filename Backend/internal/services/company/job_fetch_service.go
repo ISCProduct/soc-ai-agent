@@ -3,6 +3,7 @@ package company
 import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
+	"Backend/internal/config"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -17,7 +18,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -196,7 +196,7 @@ func (s *JobFetchService) FetchAndSavePersona(ctx context.Context, companyID uin
 // pushContextToRAG は取得した企業情報をRAGサービスのChromaDBに非同期でpushする。
 // requestID は呼び出し元リクエストのIDをRAGのログまで引き継ぐために受け取る(#1188)。
 func (s *JobFetchService) pushContextToRAG(requestID, companyName, contextType, content string) {
-	ragURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
+	ragURL := config.RAGReviewURL()
 	if ragURL == "" {
 		return
 	}
