@@ -165,6 +165,7 @@ GET /api/auth/google/callback
 POST /api/auth/guest
 POST /api/auth/login
 POST /api/auth/logout
+POST /api/auth/oauth/exchange
 POST /api/auth/profile
 PUT /api/auth/profile
 POST /api/auth/refresh
@@ -178,6 +179,8 @@ POST /api/auth/verify-registration
 POST /api/chat
 GET /api/chat/analysis
 POST /api/chat/favorite
+GET /api/chat/favorites
+POST /api/chat/favorites/remove
 GET /api/chat/history
 POST /api/chat/match-feedback
 GET /api/chat/recommendations
@@ -285,9 +288,6 @@ POST /api/notifications/:id/read
 POST /api/notifications/read-all
 GET /api/notifications/unread-count
 GET /api/portfolio
-POST /api/questions/create
-POST /api/questions/generate
-GET /api/questions/list
 GET /api/realtime/session-info
 POST /api/realtime/token
 GET /api/resume/annotated

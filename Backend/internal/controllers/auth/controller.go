@@ -1,15 +1,16 @@
 package auth
 
 import (
+	"Backend/internal/config"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/refreshtoken"
+	"Backend/internal/services/shared"
 	"errors"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -22,7 +23,7 @@ func tenantOrgID(ctx echo.Context) uint {
 }
 
 // isProduction は APP_ENV=production のときのみ true を返す。
-func isProduction() bool { return os.Getenv("APP_ENV") == "production" }
+func isProduction() bool { return config.IsProduction() }
 
 type AuthController struct {
 	authService interfaces.AuthService
@@ -74,6 +75,9 @@ func (c *AuthController) Register(ctx echo.Context) error {
 
 	resp, err := c.authService.Register(req, tenantOrgID(ctx), promoteGuestUserID)
 	if err != nil {
+		if apiErr := passwordValidationError(err); apiErr != nil {
+			return apiErr
+		}
 		if errors.Is(err, auth.ErrGuestNotPromotable) {
 			return httpapi.NewAPIError(http.StatusConflict, httpapi.ErrCodeValidationError, "このアカウントはゲストではないため引き継げません。ログインしてご利用ください。")
 		}
@@ -162,8 +166,16 @@ func (c *AuthController) RequestRegistration(ctx echo.Context) error {
 	if err := ctx.Validate(&body); err != nil {
 		return err
 	}
+	key, ok := auth.NormalizeEmail(body.Email)
+	if !ok {
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "メールアドレスの形式が正しくありません")
+	}
+	// 宛先単位の上限。存在の有無に関係なく消費するので、応答からアカウントの有無は分からない。
+	if !middleware.RegistrationRequestEmailRateLimiter.Allow(key) {
+		return echo.NewHTTPError(http.StatusTooManyRequests, "Too Many Requests: リクエスト上限に達しました。しばらく待ってから再試行してください。")
+	}
 
-	if err := c.authService.RequestRegistration(body.Email); err != nil {
+	if err := c.authService.RequestRegistration(strings.TrimSpace(body.Email)); err != nil {
 		if isProduction() {
 			slog.WarnContext(ctx.Request().Context(), "request registration failed", "email", auth.MaskEmail(body.Email), "err", err)
 			return ctx.JSON(http.StatusOK, map[string]string{"message": "confirmation email sent"})
@@ -238,7 +250,9 @@ func (c *AuthController) RequestPasswordReset(ctx echo.Context) error {
 	}
 
 	// エラーがあっても常に200を返す（情報漏洩防止）
-	c.authService.RequestPasswordReset(body.Email)
+	if err := c.authService.RequestPasswordReset(body.Email); err != nil {
+		slog.WarnContext(ctx.Request().Context(), "request password reset failed", "err", err)
+	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "パスワードリセットメールを送信しました"})
 }
@@ -273,7 +287,15 @@ func (c *AuthController) ResetPassword(ctx echo.Context) error {
 	}
 
 	if err := c.authService.ResetPassword(body.Token, body.Password); err != nil {
-		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, err.Error())
+		if apiErr := passwordValidationError(err); apiErr != nil {
+			slog.WarnContext(ctx.Request().Context(), "reset password validation failed") // パスワード・トークンは出さない
+			return apiErr
+		}
+		if errors.Is(err, auth.ErrPasswordResetTokenInvalid) {
+			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "パスワード再設定リンクが無効か、有効期限が切れています。もう一度再設定メールを送ってください")
+		}
+		// DB・bcrypt などの内部エラー文は利用者に返さない（SOCAIAGENT-693）
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "パスワードをリセットしました"})
@@ -354,4 +376,15 @@ func (c *AuthController) Logout(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "ログアウトしました"})
+}
+
+// passwordValidationError はパスワードの長さの検証エラーを、理由が分かる 400 にする。該当しなければ nil (SOCAIAGENT-693)。
+func passwordValidationError(err error) error {
+	switch {
+	case errors.Is(err, shared.ErrPasswordTooShort):
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "パスワードは8文字以上で入力してください")
+	case errors.Is(err, shared.ErrPasswordTooLong):
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "パスワードは72バイト以内（半角72文字、全角はおよそ24文字）で入力してください")
+	}
+	return nil
 }

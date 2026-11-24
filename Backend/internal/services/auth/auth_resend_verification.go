@@ -14,10 +14,10 @@ import (
 // 認証不要の入口なので、制限器のキーや DB の検索に、巨大な文字列を通さない。
 const maxEmailLength = 254
 
-// normalizeResendEmail は再送の入力を、制限器・DB に通せる形(前後の空白除去・小文字)にそろえる。
+// NormalizeEmail は認証不要の入口(再送・登録申請)の入力を、制限器・DB に通せる形(前後の空白除去・小文字)にそろえる。
 // 長さの上限を超える、またはメールアドレスの形式でないものは、false を返す。
 // 表示名つき(Name <a@b>)や複数指定は、ParseAddress が受け付けても、アドレス部分が入力と一致しないので弾く。
-func normalizeResendEmail(raw string) (string, bool) {
+func NormalizeEmail(raw string) (string, bool) {
 	// 長さは、加工(小文字化)の前の入力で見る。巨大な入力を加工しない。
 	if len(raw) > maxEmailLength {
 		return "", false
@@ -51,7 +51,7 @@ func (s *AuthService) SetResendLimiter(l ResendLimiter) {
 // 上限超過のどれでも、何も送らずに nil を返す(アカウントの有無を、応答から推測させない)。
 // 返すエラーは、サーバー側の失敗(DB の保存失敗など)だけで、呼び出し側は握りつぶす前提。
 func (s *AuthService) ResendVerificationEmail(email string) error {
-	email, ok := normalizeResendEmail(email)
+	email, ok := NormalizeEmail(email)
 	if !ok {
 		return nil
 	}

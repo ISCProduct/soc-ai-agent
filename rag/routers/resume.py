@@ -1,5 +1,6 @@
 """履歴書レビューエンドポイント。"""
 from __future__ import annotations
+from services.prompt_versions import log_prompt_call
 
 import json
 import logging
@@ -17,7 +18,7 @@ from services.resume_report import (
     build_resume_review_prompt,
     generate_resume_report,
 )
-from services.settings import OPENAI_TIMEOUT_SEC
+from services.settings import OPENAI_TIMEOUT_SEC, SCORING_SEED, SCORING_TEMPERATURE
 
 REVIEW_STREAM_ERROR_MESSAGE = "レビューに失敗しました。時間をおいてもう一度お試しください。"
 
@@ -46,6 +47,7 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
 
         try:
             client = OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT_SEC)
+            log_prompt_call("resume_review", resume_review_model())
             stream = client.chat.completions.create(
                 model=resume_review_model(),
                 messages=[
@@ -54,7 +56,9 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
                 ],
                 stream=True,
                 max_tokens=1500,
-                temperature=0.3,
+                # 採点にあたる呼び出しなので温度を下げて seed を固定する（SOCAIAGENT-699）
+                temperature=SCORING_TEMPERATURE,
+                seed=SCORING_SEED,
             )
             for chunk in stream:
                 delta = chunk.choices[0].delta

@@ -3,6 +3,7 @@ package company
 import (
 	"Backend/internal/controllers/httpapi"
 	companyauth "Backend/internal/services/companyauth"
+	"Backend/internal/services/shared"
 	"errors"
 	"net/http"
 
@@ -157,6 +158,10 @@ func mapCompanyAuthError(err error) error {
 		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "この企業はまだ認証されていないため招待できません")
 	case errors.Is(err, companyauth.ErrAccountDisabled):
 		return httpapi.NewAPIError(http.StatusForbidden, httpapi.ErrCodeForbidden, "このアカウントは無効化されています")
+	case errors.Is(err, shared.ErrPasswordTooShort):
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "パスワードは8文字以上で入力してください")
+	case errors.Is(err, shared.ErrPasswordTooLong):
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "パスワードは72バイト以内（半角72文字、全角はおよそ24文字）で入力してください")
 	case errors.Is(err, companyauth.ErrResetTokenInvalid):
 		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "パスワード再設定リンクが無効です")
 	case errors.Is(err, companyauth.ErrResetTokenExpired):
@@ -180,8 +185,6 @@ func mapCompanyAuthError(err error) error {
 			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "メールアドレスとパスワードを入力してください")
 		case "token and password are required":
 			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "トークンとパスワードを入力してください")
-		case "password must be at least 8 characters":
-			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "パスワードは8文字以上で入力してください")
 		case "email and name are required":
 			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "メールアドレスと担当者名を入力してください")
 		case "email is invalid":

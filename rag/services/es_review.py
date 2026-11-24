@@ -5,6 +5,13 @@ Backend の `/api/es/review`（ES添削タブ）と `/api/es/rewrite`（ESリラ
 どちらもここへ集約され、同じプロンプト・同じ出力スキーマから表示を出し分ける。
 """
 from __future__ import annotations
+from services.output_schemas import (
+    ES_IMPROVED_SCHEMA,
+    ES_REVIEW_SCHEMA,
+    is_schema_unsupported,
+    json_response_format,
+)
+from services.prompt_versions import log_prompt_call, prompt_version
 
 from services.model_tiers import es_review_model
 import json
@@ -20,6 +27,7 @@ from fastapi import HTTPException
 
 from models import ESReviewFeedbackItem, ESReviewResponse, ESReviewUsage, ESStarBreakdown
 from services.sanitize import _sanitize_company_name_for_query, _wrap_untrusted_text
+from services.settings import SCORING_SEED, SCORING_TEMPERATURE
 
 logger = logging.getLogger("main")
 
@@ -30,7 +38,7 @@ logger = logging.getLogger("main")
 #   v5 でリライト経路では表示しない指摘出力を省いた(#1532)
 #   v6 で改善文の目標字数を数値で明示する。元より短いときと目標上限を
 #   超えたときは警告し、効果の無かった作り直しは呼ばない(#1606)
-_PROMPT_VERSION = "es_review_v6"
+_PROMPT_VERSION = prompt_version("es_review")
 
 # 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測レートは素材で大きく散る
 # （英数混在 0.20 / 日本語＋英数 0.53 / 漢字かな混在 0.78〜0.81 / ひらがな主体 0.91 /
@@ -160,7 +168,12 @@ class _UsageTally:
             prompt_tokens=self.prompt_tokens,
             completion_tokens=self.completion_tokens,
             calls=self.calls,
+            prompt_version=_PROMPT_VERSION,
         )
+
+
+# 改善文の生成に使う温度。採点は SCORING_TEMPERATURE（SOCAIAGENT-699）
+_DEFAULT_TEMPERATURE = 0.3
 
 
 def _chat_json(
@@ -170,29 +183,67 @@ def _chat_json(
         user_prompt: str,
         max_tokens: Optional[int],
         tally: Optional[_UsageTally] = None,
+        schema: Optional[Tuple[str, Dict[str, Any]]] = None,
+        temperature: float = _DEFAULT_TEMPERATURE,
+        seed: Optional[int] = None,
 ) -> Tuple[str, str]:
-    """JSONモードでチャット補完を1回呼び、(本文, finish_reason) を返す。
+    """JSON でチャット補完を1回呼び、(本文, finish_reason) を返す。
+
+    schema（名前, JSON スキーマ）があれば strict の Structured Outputs で形を強制する（SOCAIAGENT-563）。
+    スキーマに対応しないモデル・互換サーバのエラーなら、JSON モードで1回だけ呼び直す。
 
     JSONパースの成否ではなく finish_reason で出力上限の到達を判定するため、
     ここではパースせず生の本文を返す（上限到達時はJSONが途中で切れている）。
     """
     # max_tokens が None の段（改善文 / #1564）はキー自体を送らない。null を送っても
     # OpenAI 側は既定扱いだが、OpenAI 互換サーバ（vLLM / llama.cpp）での解釈差を避ける。
-    budget_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.3,
-        response_format={"type": "json_object"},
-        **budget_kwargs,
-    )
+    budget_kwargs: Dict[str, Any] = {"max_tokens": max_tokens} if max_tokens is not None else {}
+    if seed is not None:
+        budget_kwargs["seed"] = seed
+    # 評価・改善文のどちらの呼び出しでも、工程・版・モデルをログに出す（SOCAIAGENT-560）
+    log_prompt_call("es_review", model)
+    json_mode = {"type": "json_object"}
+    response_format = json_response_format(*schema) if schema else json_mode
+
+    def create(fmt: Dict[str, Any]) -> Any:
+        return client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=temperature,
+            response_format=fmt,
+            **budget_kwargs,
+        )
+
+    try:
+        resp = create(response_format)
+    except Exception as exc:
+        if response_format == json_mode or not is_schema_unsupported(exc):
+            raise
+        logger.warning("structured outputs unsupported model=%s; falling back to json mode error=%s", model, exc)
+        resp = create(json_mode)
     if tally is not None:
         tally.add(getattr(resp, "usage", None))
     choice = resp.choices[0]
     return (choice.message.content or "", getattr(choice, "finish_reason", "") or "")
+
+
+def _parse_json_object(content: str) -> Dict[str, Any]:
+    """モデル出力をJSONオブジェクトとして読む。空文字は {}。
+
+    JSONでない/オブジェクト(dict)でない出力は ValueError にする。呼び出し側の
+    `.get` が AttributeError で落ちて原因不明の500になるのを避け、
+    _run_es_review の except が「何が悪かったか」付きで返せるようにする。
+    """
+    try:
+        parsed = json.loads(content or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError("model output was not valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"model output was not a JSON object (got {type(parsed).__name__})")
+    return parsed
 
 
 def _call_json_with_retry(
@@ -205,6 +256,9 @@ def _call_json_with_retry(
         tally: Optional[_UsageTally] = None,
         truncated_message: Optional[str] = None,
         keep_truncated: bool = False,
+        schema: Optional[Tuple[str, Dict[str, Any]]] = None,
+        temperature: float = _DEFAULT_TEMPERATURE,
+        seed: Optional[int] = None,
 ) -> Dict[str, Any]:
     """出力上限に到達した場合のみ、上限を引き上げて1回だけ再試行する。
 
@@ -218,10 +272,10 @@ def _call_json_with_retry(
     content = ""
     for attempt in (1, 2):
         content, finish_reason = _chat_json(
-            client, model, system_prompt, user_prompt, max_tokens, tally
+            client, model, system_prompt, user_prompt, max_tokens, tally, schema, temperature, seed
         )
         if finish_reason != "length":
-            return json.loads(content or "{}")
+            return _parse_json_object(content)
         logger.warning(
             "es review output truncated label=%s attempt=%d max_tokens=%s prompt_version=%s",
             label, attempt, max_tokens, _PROMPT_VERSION,
@@ -698,6 +752,10 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
             ),
             label="review",
             tally=tally,
+            schema=("es_review", ES_REVIEW_SCHEMA),
+            # 採点の呼び出しだけ温度を下げて seed を固定する（SOCAIAGENT-699）
+            temperature=SCORING_TEMPERATURE,
+            seed=SCORING_SEED,
         )
         feedback = str(review_data.get("feedback", ""))
 
@@ -717,6 +775,7 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
             truncated_message=improved_truncated_message,
             # 上限なしの長文はモデル自身の出力上限で切れる。422にすると警告も本文も届かない。
             keep_truncated=char_limit is None,
+            schema=("es_improved_text", ES_IMPROVED_SCHEMA),
         )
         improved_text = _text_field(improved_data, "improved_text")
         improved_length = count_es_chars(improved_text)
@@ -754,6 +813,7 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
                         label="improved_text",
                         tally=tally,
                         truncated_message=improved_truncated_message,
+                        schema=("es_improved_text", ES_IMPROVED_SCHEMA),
                     )
                 except Exception as exc:
                     logger.warning(

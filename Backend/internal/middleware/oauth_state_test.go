@@ -187,3 +187,43 @@ func TestVerifySignedState_Expired(t *testing.T) {
 		t.Error("期限切れの state は検証を失敗させるべき")
 	}
 }
+
+// TestOAuthBind は照合値Cookieの持ち回りを検証する（SOCAIAGENT-683）
+func TestOAuthBind(t *testing.T) {
+	valid := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJ_-01234"
+	cases := []struct {
+		name string
+		bind string
+		want string
+	}{
+		{"43文字のbase64urlは持ち回る", valid, valid},
+		{"空は保存しない", "", ""},
+		{"短い値は保存しない", "abc", ""},
+		{"base64url以外の文字は保存しない", valid[:42] + ";", ""},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			start := httptest.NewRecorder()
+			middleware.SetOAuthBind(start, tt.bind)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback", nil)
+			for _, c := range start.Result().Cookies() {
+				req.AddCookie(c)
+			}
+			cb := httptest.NewRecorder()
+			if got := middleware.ConsumeOAuthBind(cb, req); got != tt.want {
+				t.Fatalf("got %q want %q", got, tt.want)
+			}
+			// 使い捨て: コールバックで必ず削除する
+			deleted := false
+			for _, c := range cb.Result().Cookies() {
+				if c.Name == "oauth_bind" && c.MaxAge < 0 {
+					deleted = true
+				}
+			}
+			if !deleted {
+				t.Fatal("oauth_bind Cookie が削除されていない")
+			}
+		})
+	}
+}

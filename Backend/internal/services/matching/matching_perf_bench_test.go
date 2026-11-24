@@ -59,7 +59,7 @@ func benchUserScores() []models.UserWeightScore {
 	}
 	out := make([]models.UserWeightScore, len(cats))
 	for i, c := range cats {
-		out[i] = models.UserWeightScore{WeightCategory: c, Score: 50 + i*3}
+		out[i] = models.UserWeightScore{WeightCategory: c, Score: float64(50 + i*3)}
 	}
 	return out
 }

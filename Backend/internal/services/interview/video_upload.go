@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"time"
 )
 
@@ -68,11 +69,15 @@ func (s *VideoUploadService) Start(ctx context.Context, sessionID, userID uint, 
 		bg := context.Background()
 		fileID, url, err := s.store.UploadReader(bg, s3Key, video.MimeType, file)
 		if err != nil {
-			s.repo.UpdateStatus(bg, video.ID, "error", fmt.Sprintf("S3へのアップロードに失敗しました: %v", err), "", "", nil)
+			if uerr := s.repo.UpdateStatus(bg, video.ID, "error", fmt.Sprintf("S3へのアップロードに失敗しました: %v", err), "", "", nil); uerr != nil {
+				log.Printf("[VideoUpload] UpdateStatus(error) failed video_id=%d: %v", video.ID, uerr)
+			}
 			return
 		}
 		uploadedAt := time.Now()
-		s.repo.UpdateStatus(bg, video.ID, "done", "", fileID, url, &uploadedAt)
+		if uerr := s.repo.UpdateStatus(bg, video.ID, "done", "", fileID, url, &uploadedAt); uerr != nil {
+			log.Printf("[VideoUpload] UpdateStatus(done) failed video_id=%d: %v", video.ID, uerr)
+		}
 	})
 	return video, nil
 }

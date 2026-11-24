@@ -2,6 +2,7 @@ package resume
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/config"
 	"Backend/internal/repositories"
 	"Backend/internal/safego"
 	"Backend/internal/services/piimask"
@@ -123,8 +124,11 @@ const (
 	// requestReviewJSON が枠を倍にして1度だけやり直す。
 	ReviewMaxOutputTokens = 2400
 
-	// ReviewTemperature はレビュー生成の温度。
-	ReviewTemperature = 0.2
+	// ReviewTemperature はレビュー生成（採点を含む）の温度。同一入力での点のゆらぎを下げるため、
+	// 面接レポート（interview.ReportTemperature, SOCAIAGENT-513）と同じ 0.01 にする（SOCAIAGENT-699）。
+	// 0 にしないのは、温度を省略する経路で API 既定の 1.0 になりうるため。
+	// seed は固定しない。この呼び出しは Responses API で、seed のパラメータが無い。
+	ReviewTemperature = 0.01
 
 	// ReviewMaxItems はプロンプトが指定している items の上限。
 	// プロンプト本文と指示遵守率の判定で同じ値を使う。
@@ -231,7 +235,7 @@ func (s *ResumeService) candidateContextForRAG(userID uint) string {
 
 // ctx はリクエストIDを RAG へ伝播させるために受け取る(#1188)
 func (s *ResumeService) fetchRAGReport(ctx context.Context, resumeText, companyName, jobTitle string, userID uint) (string, error) {
-	baseURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
+	baseURL := config.RAGReviewURL()
 	if baseURL == "" {
 		return "", errors.New("RAG_REVIEW_URL is not set")
 	}
@@ -287,7 +291,7 @@ func (s *ResumeService) fetchRAGReport(ctx context.Context, resumeText, companyN
 // fetchRAGReportStream は FastAPI ストリーミングエンドポイントを呼び出し、
 // SSE レスポンスボディ (io.ReadCloser) を返す。呼び出し元がクローズする責務を持つ。
 func (s *ResumeService) fetchRAGReportStream(ctx context.Context, resumeText, companyName, jobTitle string, userID uint) (io.ReadCloser, error) {
-	baseURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
+	baseURL := config.RAGReviewURL()
 	if baseURL == "" {
 		return nil, errors.New("RAG_REVIEW_URL is not set")
 	}

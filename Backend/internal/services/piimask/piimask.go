@@ -304,7 +304,7 @@ func acceptBirthdate(text string, start, end int) bool {
 		return true
 	}
 	r, _ := utf8.DecodeRuneInString(text[end:])
-	return !(unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r))
+	return !unicode.Is(unicode.Han, r) && !unicode.Is(unicode.Hiragana, r) && !unicode.Is(unicode.Katakana, r)
 }
 
 // acceptHandle は、直前が英数字でないときだけ採る（「taro@example」の途中を拾わないため）。
@@ -313,7 +313,7 @@ func acceptHandle(text string, start, _ int) bool {
 		return true
 	}
 	r, _ := utf8.DecodeLastRuneInString(text[:start])
-	return !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '.')
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '.'
 }
 
 // notInsideDigits は一致の前後が数字でないことを見る（Go の regexp には前後読みが無いため）。
