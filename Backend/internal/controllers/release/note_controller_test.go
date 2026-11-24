@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -49,9 +50,7 @@ func newAuthenticatedReleaseNoteRequest(userID uint) (*http.Request, *httptest.R
 
 func TestReleaseNoteController_List_ReturnsNotesNewestFirst(t *testing.T) {
 	db, mock := newReleaseNoteControllerTestDB(t)
-	svc := release.NewReleaseNoteService(repositories.NewReleaseNoteRepository(db), nil)
-	userRepo := repositories.NewUserRepository(db)
-	ctrl := releasecontrollers.NewReleaseNoteController(svc, userRepo)
+	ctrl := newReleaseNoteControllerForTest(db)
 	e := echo.New()
 
 	mock.ExpectQuery("SELECT \\* FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").
@@ -86,9 +85,7 @@ func TestReleaseNoteController_List_ReturnsNotesNewestFirst(t *testing.T) {
 // #966: システム管理者(is_admin=true)にはstudent/teacherの絞り込みではなくadmin向けの絞り込みが渡ること。
 func TestReleaseNoteController_List_UsesAdminAudienceForAdminUser(t *testing.T) {
 	db, mock := newReleaseNoteControllerTestDB(t)
-	svc := release.NewReleaseNoteService(repositories.NewReleaseNoteRepository(db), nil)
-	userRepo := repositories.NewUserRepository(db)
-	ctrl := releasecontrollers.NewReleaseNoteController(svc, userRepo)
+	ctrl := newReleaseNoteControllerForTest(db)
 	e := echo.New()
 
 	mock.ExpectQuery("SELECT \\* FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").
@@ -117,9 +114,7 @@ func TestReleaseNoteController_List_UsesAdminAudienceForAdminUser(t *testing.T) 
 // #966: 未認証（userIDがコンテキストにない）場合は401を返すこと。
 func TestReleaseNoteController_List_Unauthenticated(t *testing.T) {
 	db, _ := newReleaseNoteControllerTestDB(t)
-	svc := release.NewReleaseNoteService(repositories.NewReleaseNoteRepository(db), nil)
-	userRepo := repositories.NewUserRepository(db)
-	ctrl := releasecontrollers.NewReleaseNoteController(svc, userRepo)
+	ctrl := newReleaseNoteControllerForTest(db)
 	e := echo.New()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/whats-new", nil)
@@ -135,9 +130,7 @@ func TestReleaseNoteController_List_Unauthenticated(t *testing.T) {
 
 func TestReleaseNoteController_Ingest_InvalidPayload(t *testing.T) {
 	db, _ := newReleaseNoteControllerTestDB(t)
-	svc := release.NewReleaseNoteService(repositories.NewReleaseNoteRepository(db), nil)
-	userRepo := repositories.NewUserRepository(db)
-	ctrl := releasecontrollers.NewReleaseNoteController(svc, userRepo)
+	ctrl := newReleaseNoteControllerForTest(db)
 	e := echo.New()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/whats-new/ingest", bytes.NewReader([]byte("not-json")))
@@ -157,9 +150,7 @@ func TestReleaseNoteController_Ingest_InvalidPayload(t *testing.T) {
 
 func TestReleaseNoteController_Ingest_NilLLMClientReturnsInternalError(t *testing.T) {
 	db, _ := newReleaseNoteControllerTestDB(t)
-	svc := release.NewReleaseNoteService(repositories.NewReleaseNoteRepository(db), nil)
-	userRepo := repositories.NewUserRepository(db)
-	ctrl := releasecontrollers.NewReleaseNoteController(svc, userRepo)
+	ctrl := newReleaseNoteControllerForTest(db)
 	e := echo.New()
 
 	payload := map[string]any{
@@ -177,4 +168,62 @@ func TestReleaseNoteController_Ingest_NilLLMClientReturnsInternalError(t *testin
 	if err == nil {
 		t.Fatal("expected error when llm client is nil")
 	}
+}
+
+// 閲覧者のユーザーが読めない（無い・DBエラー）ときは401を返し、更新情報は読まないこと。
+func TestReleaseNoteController_List_UserLookupFailedReturnsUnauthorized(t *testing.T) {
+	cases := map[string]func(sqlmock.Sqlmock){
+		"ユーザーが無い": func(m sqlmock.Sqlmock) {
+			m.ExpectQuery("SELECT \\* FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").
+				WithArgs(uint(3), 1).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+		},
+		"DBエラー": func(m sqlmock.Sqlmock) {
+			m.ExpectQuery("SELECT \\* FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").
+				WithArgs(uint(3), 1).WillReturnError(errors.New("db down"))
+		},
+	}
+	for name, expect := range cases {
+		t.Run(name, func(t *testing.T) {
+			db, mock := newReleaseNoteControllerTestDB(t)
+			ctrl := newReleaseNoteControllerForTest(db)
+			expect(mock)
+
+			req, rec := newAuthenticatedReleaseNoteRequest(3)
+			err := ctrl.List(echo.New().NewContext(req, rec))
+			httpErr, ok := err.(*echo.HTTPError)
+			if !ok || httpErr.Code != http.StatusUnauthorized || httpErr.Message != "Unauthorized" {
+				t.Fatalf("expected 401 Unauthorized, got %v", err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("unmet expectations: %v", err)
+			}
+		})
+	}
+}
+
+// 更新情報が読めなければ500を返すこと。
+func TestReleaseNoteController_List_ListErrorReturnsInternalError(t *testing.T) {
+	db, mock := newReleaseNoteControllerTestDB(t)
+	ctrl := newReleaseNoteControllerForTest(db)
+	mock.ExpectQuery("SELECT \\* FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").
+		WithArgs(uint(1), 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "role", "is_admin"}).AddRow(1, "staff", false))
+	mock.ExpectQuery("SELECT \\* FROM `release_notes` WHERE audience IN \\(\\?,\\?\\) ORDER BY merged_at DESC LIMIT \\?").
+		WithArgs("all", "teacher", 20).
+		WillReturnError(errors.New("db down"))
+
+	req, rec := newAuthenticatedReleaseNoteRequest(1)
+	err := ctrl.List(echo.New().NewContext(req, rec))
+	httpErr, ok := err.(*echo.HTTPError)
+	if !ok || httpErr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 HTTPError, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func newReleaseNoteControllerForTest(db *gorm.DB) *releasecontrollers.ReleaseNoteController {
+	svc := release.NewReleaseNoteService(repositories.NewReleaseNoteRepository(db), repositories.NewUserRepository(db), nil)
+	return releasecontrollers.NewReleaseNoteController(svc)
 }

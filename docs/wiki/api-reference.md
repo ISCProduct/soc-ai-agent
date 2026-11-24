@@ -47,9 +47,30 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 ログインセッションの更新（`/api/auth/refresh`）のたびに再発行され、フロントの httpOnly Cookie
 `admin_token` に保持します。
 
-- `GET /api/auth/session`（フロントの Route Handler）は、管理者の場合に応答へ `token` を含めます。
-  管理画面（`AdminShell`）は、期限の1時間前から `X-Refresh-Admin-Token: 1` を付けて取り直します。
+- 管理者トークンはフロントの httpOnly Cookie `admin_token` にだけ置き、画面（JS）は値を持ちません。
+  管理APIへの `X-Admin-Token` は middleware が Cookie から付け、画面が送った値は捨てます（SOCAIAGENT-683）。
+- 学生の `user_token` / `refresh_token` もフロントの httpOnly Cookie にだけ置き、画面（JS）は保存しません。
+  Backend へは middleware が Cookie から `X-User-Token` を付けます（SOCAIAGENT-683）。
+- 画面から Backend を直接呼んでいた API（面接・スカウト受信・スカウト設定・先生からの指導・学習データ同意・
+  `auth/user`、ログイン・本登録・ゲスト作成）は、フロントの中継ルート `/api/bff/<Backend の /api 以下のパス>` を通します。
+  中継するのは許可リストに合うパスだけです。ログイン・本登録・ゲスト作成は、中継ルートがセッション Cookie を張り、
+  応答からトークンを取り除きます。本登録のゲスト引き継ぎ（`promote_guest: true`）のときだけ、今のセッションを Backend へ渡します。
+- `GET /api/auth/session`（フロントの Route Handler）はトークンの値を返さず、`user_id` と `has_admin_token` だけを返します。
+- 企業ユーザーも同じです。`company_user_token` はフロントの httpOnly Cookie にだけ置き、`X-Company-User-Token` は middleware が付けます。
+  企業のログイン・登録・招待の受け入れ・パスワード再設定の Route Handler は、成功したらその場で Cookie を張り、応答からトークンを取り除きます。
+  `GET /api/company-auth/session` は `company_user_id` だけを返します。
+  管理画面（`AdminShell`）は `X-Refresh-Admin-Token: 1` を付けてこれを呼び、Cookie が無い・期限が近いときは
+  middleware がログインセッションの更新で取り直します（確認は10分に1回まで）。
 - `POST /api/auth/session` で `adminToken` が無いとき、`DELETE` のときは `admin_token` Cookie を削除します。
+- `POST /api/auth/session` と `POST /api/company-auth/session` は、`Content-Type: application/json` と
+  自サイトの `Origin` を必須にしています（違えば 415 / 403、JSON が壊れていれば 400）。
+  フロント外から呼ぶ場合もこの2つを付けてください。
+- OAuth ログインはフロントの `GET /api/auth/oauth/start?provider=google|github` から始めます。
+  ログインを始めたブラウザだけが持つ照合値（verifier）を httpOnly Cookie `oauth_verifier` に入れ、
+  そのハッシュを `bind` として Backend の OAuth 開始へ渡します。
+- `/auth/callback?code=...` で戻ってきたら、フロントの `POST /api/auth/oauth/exchange` が
+  Cookie の verifier とコードを Backend の `/api/auth/oauth/exchange` に送り、セッション Cookie を張ります。
+  旧方式の `/auth/callback?user=...` も移行期間中は読みます。
 - フロントは7日固定（`frontend/lib/auth/admin-token.ts`）で期限を判定するため、
   `ADMIN_TOKEN_TTL_HOURS` を短縮するときはフロント側も同時に変更してください。
 
@@ -139,8 +160,14 @@ Referer に user_id が残るだけです。
 | POST | `/api/auth/verify-email` | メール認証 |
 | POST | `/api/auth/resend-verification` | メール認証のメール再送（期限切れ・未着のとき）。**存在有無に関わらず常に200**、IP 単位とメールアドレス単位のレート制限あり |
 | POST | `/api/auth/forgot-password` | パスワードリセット要求 |
-| GET | `/api/auth/google` | Google OAuth開始 |
-| GET | `/api/auth/github` | GitHub OAuth開始 |
+| GET | `/api/auth/google` | Google OAuth開始。`bind`（FE が作る照合値）を受け取る |
+| GET | `/api/auth/github` | GitHub OAuth開始。`bind` は同上 |
+| POST | `/api/auth/oauth/exchange` | OAuth 完了時の短命コードを認証情報と交換する（FE の Route Handler からサーバー間で呼ぶ） |
+
+`OAUTH_CODE_EXCHANGE=true` のとき、OAuth コールバックはトークンを URL に載せず、
+`/auth/callback?code=...` へ戻します。コードは60秒・1回限りで、開始時の `bind` と対になる
+`verifier` を添えたときだけ交換できます。未設定（既定）の間は従来どおり `user=` で渡します。
+コードの保管は `REDIS_URL` があれば Redis、無ければプロセス内メモリです（複数タスク構成では Redis 必須）。
 
 ### トークン仕様（#616）
 

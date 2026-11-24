@@ -754,7 +754,7 @@ null を返し、`Backend/internal/observability/sentry.go` も DSN 空なら初
 
 - `Authorization` / `Cookie` / `X-*-Token` などの認証ヘッダー
 - **URL のクエリとフラグメント** — `/verify-email?token=` `/company-portal/setup?token=`
-  `/auth/callback?user=` にワンタイムトークンやユーザー情報が載るため
+  `/auth/callback?user=`（旧方式）/ `/auth/callback?code=` にワンタイムトークンやユーザー情報が載るため
 - **Referer** — 遷移元のクエリ（＝トークン）が載る
 - リクエストボディ（履歴書・チャット本文の混入防止）
 - パンくずの URL、および console のパンくずは丸ごと破棄

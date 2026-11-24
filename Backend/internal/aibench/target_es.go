@@ -198,6 +198,15 @@ func evaluateESResponse(o Observation, c Case, status int, body []byte) Observat
 	raw := float64(*resp.SpecificityScore+*resp.StarScore+*resp.LengthBalanceScore) / 3
 	o.RawScore = raw
 	o.Score = (raw - 1) / 9 // 1〜10 を 0〜1 へ
+	// 軸別の点を残し、同一入力でのゆらぎを軸ごとに見られるようにする（SOCAIAGENT-699）
+	o.AxisScores = map[string]float64{
+		"specificity_score":    float64(*resp.SpecificityScore),
+		"star_score":           float64(*resp.StarScore),
+		"length_balance_score": float64(*resp.LengthBalanceScore),
+	}
+	if resp.CompanyFitScore != nil {
+		o.AxisScores["company_fit_score"] = float64(*resp.CompanyFitScore)
+	}
 
 	if n := runeLen(resp.Feedback); n < esFeedbackMinChars || n > esFeedbackMaxChars {
 		o.Violations = append(o.Violations, "feedback_length")
