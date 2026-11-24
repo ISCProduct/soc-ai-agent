@@ -117,7 +117,7 @@ export default function EsInputForm({
         value={originalText}
         onChange={e => setOriginalText(e.target.value)}
         placeholder="例）チームで開発した経験があります。最初は上手くいきませんでしたが、話し合いを重ねて最終的には完成させることができました。この経験から協調性の大切さを学びました。"
-        // APIの上限は10,000字。超えた分を送るとRAGのバリデーションエラーになり、
+        // APIの上限は6,000字（RAG側 models.ES_TEXT_MAX_LENGTH）。超えた分を送るとRAGのバリデーションエラーになり、
         // 利用者には何が悪いのか伝わらないため入力段階で止める(#1521)
         slotProps={{ htmlInput: { maxLength: ES_TEXT_MAX_LENGTH } }}
         helperText={`${originalText.length} / ${ES_TEXT_MAX_LENGTH} 文字`}

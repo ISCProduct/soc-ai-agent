@@ -18,7 +18,7 @@ const STAR_LABELS: { key: keyof StarBreakdown; label: string; color: string; ini
 
 type Props = {
   rewriteResult: RewriteResult
-  // 比較用に表示する元の文章（現在の入力欄の値）
+  // 比較用に表示する元の文章（送信時の入力欄の値）
   originalText: string
   requestedCharLimit: number | null
   copied: boolean

@@ -6,19 +6,22 @@ import type { EsMode } from '../types'
 
 type Props = {
   mode: EsMode
+  // 送信中は切り替えさせない
+  disabled: boolean
   // 切り替え時に消す結果・エラーは呼び出し側が決める
   onSelectReview: () => void
   onSelectRewrite: () => void
 }
 
 // ES添削 / ESリライト の切り替えボタン
-export default function ModeToggle({ mode, onSelectReview, onSelectRewrite }: Props) {
+export default function ModeToggle({ mode, disabled, onSelectReview, onSelectRewrite }: Props) {
   return (
     <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', px: { xs: 2, md: 4 }, pt: 3 }}>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 3 }}>
         <Button
           startIcon={<RateReviewIcon />}
           onClick={onSelectReview}
+          disabled={disabled}
           sx={{
             px: 2.5, py: 1, borderRadius: 2, textTransform: 'none', fontWeight: 700, fontSize: 14,
             bgcolor: mode === 'review' ? UI.mark : UI.tint,
@@ -31,6 +34,7 @@ export default function ModeToggle({ mode, onSelectReview, onSelectRewrite }: Pr
         <Button
           startIcon={<AutoFixHighIcon />}
           onClick={onSelectRewrite}
+          disabled={disabled}
           sx={{
             px: 2.5, py: 1, borderRadius: 2, textTransform: 'none', fontWeight: 700, fontSize: 14,
             bgcolor: mode === 'rewrite' ? UI.mark : UI.tint,
