@@ -23,6 +23,7 @@ import (
 	"Backend/internal/services/shared"
 	"Backend/internal/services/storage"
 
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"gorm.io/gorm"
@@ -182,6 +183,47 @@ func TestInterviewController_StartTurn_OmitsCompanyInfoFromResponse(t *testing.T
 	svc.AssertExpectations(t)
 }
 
+// 上限・開始前の扱い（SOCAIAGENT-696）: 上限は 200 + limit_reached、ready は 409。
+func TestInterviewController_StartTurn_LimitAndNotStarted(t *testing.T) {
+	tests := []struct {
+		name       string
+		result     *interview.TurnResult
+		err        error
+		wantStatus int
+	}{
+		{name: "上限に達したら limit_reached を返す", result: &interview.TurnResult{AIText: "締め", LimitReached: true, LimitReason: "duration"}, wantStatus: http.StatusOK},
+		{name: "開始前のセッションは409", err: interview.ErrSessionNotStarted, wantStatus: http.StatusConflict},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/interviews/10/start-turn", bytes.NewReader([]byte(`{}`)))
+			req.Header.Set("Content-Type", "application/json")
+			req = testsupport.WithUserID(req, 1)
+			rec := httptest.NewRecorder()
+			ctx := testsupport.NewCtx(req, rec)
+			ctx.SetParamNames("id")
+			ctx.SetParamValues("10")
+			svc := &mocks.InterviewServiceMock{}
+			svc.On("StartTurn", mock.Anything, uint(1), uint(10), "", "", "", "", "", uint(0), 0, 0, 0, 0).Return(tt.result, tt.err)
+
+			err := newInterviewController(svc).StartTurn(ctx)
+			if tt.wantStatus != http.StatusOK {
+				var he *echo.HTTPError
+				if !errors.As(err, &he) || he.Code != tt.wantStatus {
+					t.Fatalf("err = %v, want status %d", err, tt.wantStatus)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			metadata := readInterviewMetadata(t, rec)
+			assert.Equal(t, true, metadata["limit_reached"])
+			assert.Equal(t, "duration", metadata["limit_reason"])
+		})
+	}
+}
+
 // ---- List ----
 
 func TestInterviewController_List_Unauthorized(t *testing.T) {
@@ -196,7 +238,7 @@ func TestInterviewController_List_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("ListSessions", uint(1), false, 10, 0).Return([]interview.InterviewSessionResponse{{ID: 1}}, int64(1), nil)
+	svc.On("ListSessions", uint(1), 10, 0).Return([]interview.InterviewSessionResponse{{ID: 1}}, int64(1), nil)
 	testsupport.AssertStatus(t, newInterviewController(svc).List, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -208,19 +250,21 @@ func TestInterviewController_List_LimitCapped(t *testing.T) {
 
 	svc := &mocks.InterviewServiceMock{}
 	// limit は100に切り捨てられる
-	svc.On("ListSessions", uint(1), false, 100, 0).Return([]interview.InterviewSessionResponse{}, int64(0), nil)
+	svc.On("ListSessions", uint(1), 100, 0).Return([]interview.InterviewSessionResponse{}, int64(0), nil)
 	testsupport.AssertStatus(t, newInterviewController(svc).List, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
-func TestInterviewController_List_Forbidden(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/interviews", nil)
+// all=1（全件一覧）は廃止した。指定されても本人分の一覧だけを返す（SOCAIAGENT-687）。
+func TestInterviewController_List_AllParamIgnored(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/interviews?all=1", nil)
 	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("ListSessions", uint(1), false, 20, 0).Return([]interview.InterviewSessionResponse{}, int64(0), shared.ErrForbidden)
-	testsupport.AssertStatus(t, newInterviewController(svc).List, testsupport.NewCtx(req, rec), http.StatusForbidden)
+	svc.On("ListSessions", uint(1), 20, 0).Return([]interview.InterviewSessionResponse{}, int64(0), nil)
+	testsupport.AssertStatus(t, newInterviewController(svc).List, testsupport.NewCtx(req, rec), http.StatusOK)
+	svc.AssertExpectations(t)
 }
 
 func TestInterviewController_HRList_Unauthorized(t *testing.T) {

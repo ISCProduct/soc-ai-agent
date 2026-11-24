@@ -84,7 +84,7 @@ func (r *TrainingExportRepository) CountUserUtterances(ctx context.Context, stat
 	return int(n), err
 }
 
-func (r *TrainingExportRepository) ListOutcomeSessions(ctx context.Context, statuses []string, limit int) ([]repository.OutcomeSession, error) {
+func (r *TrainingExportRepository) ListOutcomeSessions(ctx context.Context, statuses []string, limit, offset int) ([]repository.OutcomeSession, error) {
 	type sessionRow struct {
 		SessionID uint
 		Status    string
@@ -97,6 +97,9 @@ func (r *TrainingExportRepository) ListOutcomeSessions(ctx context.Context, stat
 		Order("s.id")
 	if limit > 0 {
 		q = q.Limit(limit)
+	}
+	if offset > 0 {
+		q = q.Offset(offset)
 	}
 	var rows []sessionRow
 	if err := q.Scan(&rows).Error; err != nil {

@@ -74,7 +74,7 @@ export function ConversionFunnelCard({ adminEmail, schoolId }: Props) {
         ...(to ? { to } : {}),
       })
       const res = await fetch(`/api/admin/dashboard/funnel?${params}`, {
-        headers: { 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' },
+        headers: { 'X-Admin-Email': adminEmail },
       })
       const body = await res.json().catch(() => ({}))
       if (!isLatest()) return

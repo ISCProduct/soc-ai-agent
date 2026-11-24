@@ -13,6 +13,7 @@ import (
 	"context"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -42,15 +43,42 @@ type InterviewService struct {
 	skillScoreRepo       SkillScoreReader
 	companyRepo          shared.CompanyBriefReader
 	jobCh                chan uint
+	// workerStop を閉じると、処理中の1件が終わったあとでワーカーが抜ける。
+	// jobCh 自体は閉じない。閉じると、停止後に残った FinishSession が
+	// closed channel へ送って panic する。
+	workerStop chan struct{}
+	stopping   atomic.Bool
+	// shutdownCtx は StopWorker の期限。nil のときは打ち切らない。
+	shutdownCtx context.Context
+	// reportJob はテストが生成処理を差し替える。nil なら generateReport。
+	reportJob func(ctx context.Context, sessionID uint) error
+	// activeReport は今生成している sessionID。0 は処理中でない。
+	activeReport uint
 	// inFlightJobs はフォールバック channel 経路の重複排除（Redis 経路の TaskID 相当、#1476）。
 	// 投入時に登録し、worker が処理し終えるまで保持する。
 	inFlightJobs         map[uint]struct{}
 	inFlightMu           sync.Mutex
 	workerOnce           sync.Once
+	stopOnce             sync.Once
+	workerWG             sync.WaitGroup
+	workerStarted        atomic.Bool
+	workerFinished       chan struct{}
 	jobs                 shared.JobEnqueuer
 	ownsCompany          func(userID, companyID uint) (bool, error)
 	companyReadingCache  companyReadingCache
 	companyReadingFlight singleflight.Group
+	// schoolAccess は本人以外の管理者に課す担当校スコープ判定（SOCAIAGENT-687）。nil なら管理者も拒否する。
+	schoolAccess SchoolAccessChecker
+}
+
+// SchoolAccessChecker は admin ルートと同じ担当校スコープ判定（school.SchoolService が満たす）。
+type SchoolAccessChecker interface {
+	CanAdminAccessUser(isAdmin bool, actorID, targetOrganizationID uint, targetSchoolID *uint) (bool, error)
+}
+
+// SetSchoolAccess は担当校スコープ判定を注入する。未注入だと本人以外は管理者でも拒否する(fail-close)。
+func (s *InterviewService) SetSchoolAccess(c SchoolAccessChecker) {
+	s.schoolAccess = c
 }
 
 // SkillScoreReader はGitHubスキルスコア取得の最小インターフェース。
@@ -77,6 +105,8 @@ func NewInterviewService(
 		speech:               newSpeechFailover(openaiClient),
 		realtimeUsageService: realtimeUsageService,
 		jobCh:                make(chan uint, jobChBufferSize),
+		workerStop:           make(chan struct{}),
+		workerFinished:       make(chan struct{}),
 		inFlightJobs:         map[uint]struct{}{},
 	}
 }
@@ -170,10 +200,19 @@ func (s *InterviewService) enqueueReportGeneration(sessionID uint) bool {
 // 超えて走っている間に再試行ボタンを押されると、レポート未保存のまま再投入できてしまう。
 // 単一 worker でも2件目が続けて走るため、LLM 費用・レポート上書き・スコアの二重反映が起きる。
 func (s *InterviewService) offerReportJob(sessionID uint) bool {
+	if s.stopping.Load() {
+		log.Printf("[Interview] shutdown 中のため session %d のレポート生成を見送りました", sessionID)
+		return false
+	}
 	if !s.markReportJobInFlight(sessionID) {
 		log.Printf("[Interview] report job already queued for session %d, skipped", sessionID)
 		// 既に控えている＝望む状態なので、投入できたものとして扱う。
 		return true
+	}
+	if s.stopping.Load() {
+		s.clearReportJobInFlight(sessionID)
+		log.Printf("[Interview] shutdown 中のため session %d のレポート生成を見送りました", sessionID)
+		return false
 	}
 	select {
 	case s.jobCh <- sessionID:
@@ -263,6 +302,10 @@ type TurnResult struct {
 	// UtteranceSaveFailed はターンの発話を書き起こしへ保存できなかったことを示す（#1969）。
 	// 面接は止めず、画面に「記録できていない」ことを出すために返す（#1476 と同じ扱い）。
 	UtteranceSaveFailed bool
+	// LimitReached は発話数・経過時間・予算の上限に達し、AI を呼ばずに締めの文を返したこと（SOCAIAGENT-696）。
+	// FE はこれを受けて既存の終了経路（/finish）で面接を終え、途中までのレポートを作る。
+	LimitReached bool
+	LimitReason  string
 }
 
 func (s *InterviewService) estimateCost(start, end *time.Time) float64 {
@@ -282,10 +325,24 @@ func (s *InterviewService) isAllowed(actorID uint, ownerID uint) bool {
 		return true
 	}
 	user, err := s.userRepo.GetUserByID(actorID)
-	if err != nil || user == nil {
+	if err != nil || user == nil || !user.IsAdmin {
 		return false
 	}
-	return user.IsAdmin
+	// 本人以外の管理者は、admin ルート（/api/admin/interviews）と同じ担当校スコープで判定する（SOCAIAGENT-687）。
+	if s.schoolAccess == nil {
+		log.Printf("[Interview] WARN: 担当校スコープ判定が未設定のため管理者の閲覧を拒否しました actor=%d", actorID)
+		return false
+	}
+	owner, err := s.userRepo.GetUserByID(ownerID)
+	if err != nil || owner == nil {
+		return false
+	}
+	ok, err := s.schoolAccess.CanAdminAccessUser(true, actorID, owner.OrganizationID, owner.SchoolID)
+	if err != nil {
+		log.Printf("[Interview] WARN: 担当校スコープ判定に失敗したため拒否しました actor=%d: %v", actorID, err)
+		return false
+	}
+	return ok
 }
 
 // redactTeacherReport は教員用レポートを見てよい実ロール（職員・管理者）以外には

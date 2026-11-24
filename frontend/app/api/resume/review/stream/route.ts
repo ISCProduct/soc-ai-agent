@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
   // 利用者が画面を離れたら上流（Backend → RAG）の接続も閉じる。上流の失敗は固定文言にして、本文はログだけに残す
   let response: Response
   try {
-    response = await fetch(`${BACKEND_URL}/api/resume/review/stream?document_id=${documentId}`, {
+    response = await fetch(`${BACKEND_URL}/api/resume/review/stream?document_id=${encodeURIComponent(documentId)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...extractUserAuthHeaders(request) },
       body: body || undefined,

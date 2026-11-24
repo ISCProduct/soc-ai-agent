@@ -1,0 +1,14 @@
+# ビルドに不要なものをコンテキストから外す（SOCAIAGENT-582）。
+# マイグレーションとソースはイメージへ埋め込むので除外しない。
+.git
+.env
+.env.*
+*.md
+coverage
+coverage.out
+storage
+tmp
+.idea
+.vscode
+.DS_Store
+**/*_test.go

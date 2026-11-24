@@ -54,6 +54,18 @@ curl http://localhost:8080/healthz
 # → {"status":"ok"}
 ```
 
+### プロセス停止（SIGTERM）
+
+ECS の `stopTimeout` は未指定で、既定の 30 秒です。SIGTERM を受けたら、その内側（25 秒）で次を同時に止めます。
+
+1. 受け付け済みの HTTP（`Shutdown`）。途中で切れた接続はエラーログに残します。
+2. フォールバックの面接レポート生成。期限内に終わらない sessionID はログに残して諦めます。Redis 上の asynq ジョブは別途、同じ期限で停止します。
+3. 2 回目の SIGINT / SIGTERM は、この待ちを中断してプロセスを終わらせます。
+
+`jobCh` は閉じません。HTTP の待ちが先にタイムアウトしたあと、残ったハンドラが閉じたチャネルへ送ると panic になるためです。
+
+ALB の `deregistration_delay`（10 秒）は SIGTERM と同時に始まります。解除直後の短いあいだ、新規リクエストがリスナーを閉じたあとのタスクへ届くことがあります。遅延は 10 秒に短縮済みです。
+
 ### マイグレーション
 
 バージョン管理型マイグレーション（`Backend/migrations/`、`cmd/migrate`）を使用（GORMの `AutoMigrate` は禁止）。CI/CD（`.github/workflows/deployment.yml`）で以下の通り自動適用される（#618）。
@@ -592,9 +604,10 @@ EventBridge Scheduler へ移すまで（#1388）は、以下を手順として�
 
 4. 朝いちばんで `/health` を確認する（上のコマンド）
 
-   **`/health` は生存確認だけ**で、DB 接続も外部 API も見ていない
-   （`cmd/server/main.go` のハンドラは無条件に 200 を返す）。
-   RDS が落ちている・タスク定義が古い状態でも 200 になるので、
+   **`/health` と `/healthz` は生存確認だけ**で、DB 接続も外部 API も見ていない
+   （`cmd/server/server.go`。ALB のヘルスチェックは `/healthz` のまま）。
+   DB まで見るのは `/ready`（ping に失敗すると 503）。認証は無く、返すのは `ok` / `unavailable` だけなので、外から分かるのは DB の生死です。ALB のヘルスチェックは `/healthz` のままにする。
+   `/ready` に向けると、DB の瞬断でタスクが落ちる。RDS が落ちている・タスク定義が古い状態でも `/health` は 200 になるので、
    これだけで「動いている」と判断しないこと。前日ステップ3を1本だけでも通すのが確実。
 5. 異常があれば Discord の運用アラートチャンネルを確認する（#1355 の通知先）
 
@@ -741,7 +754,7 @@ null を返し、`Backend/internal/observability/sentry.go` も DSN 空なら初
 
 - `Authorization` / `Cookie` / `X-*-Token` などの認証ヘッダー
 - **URL のクエリとフラグメント** — `/verify-email?token=` `/company-portal/setup?token=`
-  `/auth/callback?user=` にワンタイムトークンやユーザー情報が載るため
+  `/auth/callback?user=`（旧方式）/ `/auth/callback?code=` にワンタイムトークンやユーザー情報が載るため
 - **Referer** — 遷移元のクエリ（＝トークン）が載る
 - リクエストボディ（履歴書・チャット本文の混入防止）
 - パンくずの URL、および console のパンくずは丸ごと破棄

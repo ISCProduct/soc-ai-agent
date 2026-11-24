@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"os"
 	"sort"
 	"strings"
 )
@@ -479,6 +478,24 @@ func (s *MatchingService) ToggleFavorite(matchID uint, userID uint) error {
 	return s.matchRepo.ToggleFavorite(matchID)
 }
 
+// ListFavoriteCompanies は過去の診断を含め、お気に入り企業を1社1行で返す。
+func (s *MatchingService) ListFavoriteCompanies(ctx context.Context, userID uint, limit int) ([]*models.UserCompanyMatch, error) {
+	rows, err := s.matchRepo.FindFavoritedByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return DedupedFavorites(rows, limit), nil
+}
+
+// UnfavoriteCompany はそのユーザーの、その企業のお気に入りを診断をまたいで外す。
+// 対象が無いときも成功にする。解除は何度呼んでも同じ結果になる。
+func (s *MatchingService) UnfavoriteCompany(ctx context.Context, userID uint, companyID uint) error {
+	if companyID == 0 {
+		return nil
+	}
+	return s.matchRepo.UnfavoriteCompany(ctx, userID, companyID)
+}
+
 type MatchingDiagnostics struct {
 	UserScoreCount     int64 `json:"user_score_count"`
 	ActiveCompanyCount int64 `json:"active_company_count"`
@@ -567,8 +584,7 @@ func MatchingReasonPrompts(match *models.UserCompanyMatch, userScores []models.U
 }
 
 func matchingReasonUseAI() bool {
-	v := strings.TrimSpace(os.Getenv("MATCHING_REASON_USE_AI"))
-	return strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
+	return config.MatchingReasonUseAI()
 }
 
 func buildMatchingReasonUserPrompt(match *models.UserCompanyMatch, userScores []models.UserWeightScore) string {
