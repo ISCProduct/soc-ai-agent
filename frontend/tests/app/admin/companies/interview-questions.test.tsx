@@ -88,3 +88,28 @@ test('編集では今の観点がフォームに入り、空にして保存す�
   expect(sent[0].method).toBe('PUT')
   expect(sent[0].body.evaluation_intent).toBe('')
 })
+
+// SOCAIAGENT-692: 面接質問の書き込みはシステム管理者のみ。担当校付きの教員・職員には操作を出さない。
+test('システム管理者でなければ追加・生成・編集・削除の操作を出さない', async () => {
+  const baseFetch = global.fetch as jest.Mock
+  const base = baseFetch.getMockImplementation()!
+  baseFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('school-access')) return jsonRes({ restricted: true, schools: [] })
+    return base(input, init)
+  })
+  render(<PageContent />)
+  await screen.findAllByText('志望理由を教えてください')
+  await screen.findByText(/システム管理者のみ/)
+  expect(screen.queryByRole('button', { name: /質問を追加/ })).toBeNull()
+  expect(screen.queryByRole('button', { name: /AIで自動生成/ })).toBeNull()
+  expect(screen.queryByRole('button', { name: '質問を編集' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '質問を削除' })).toBeNull()
+})
+
+test('システム管理者には追加・生成・編集・削除の操作を出す', async () => {
+  render(<PageContent />)
+  await screen.findAllByText('志望理由を教えてください')
+  expect(await screen.findByRole('button', { name: /質問を追加/ })).toBeTruthy()
+  expect(screen.getByRole('button', { name: /AIで自動生成/ })).toBeTruthy()
+  expect(screen.getAllByRole('button', { name: '質問を編集' }).length).toBeGreaterThan(0)
+})
