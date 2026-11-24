@@ -12,9 +12,8 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
-import { BACKEND_URL } from '@/lib/config'
 
-const ENDPOINT = `${BACKEND_URL}/api/user/training-consent`
+const ENDPOINT = '/api/bff/user/training-consent'
 
 /**
  * この画面に出している同意の文言の版（#2168）。保存のたびに送り、サーバーは今の版と一致したときだけ記録する。

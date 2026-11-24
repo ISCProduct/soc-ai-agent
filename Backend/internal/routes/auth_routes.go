@@ -4,6 +4,7 @@ import (
 	authcontrollers "Backend/internal/controllers/auth"
 	"Backend/internal/middleware"
 	"Backend/internal/services/auth"
+	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -15,12 +16,12 @@ func SetupAuthRoutes(api *echo.Group, authController *authcontrollers.AuthContro
 	auth := api.Group("/auth")
 
 	// 認証不要エンドポイント
-	auth.POST("/request-registration", authController.RequestRegistration)
+	auth.POST("/request-registration", authController.RequestRegistration, echoRegistrationRequestRateLimit(), echomw.BodyLimit("4K"))
 	auth.POST("/verify-registration", authController.VerifyRegistration)
 	auth.POST("/register", authController.Register)
 	// レート制限ミドルウェアはnet/httpベースのため echo.WrapMiddleware で変換して適用
 	auth.POST("/login", authController.Login, echoLoginRateLimit())
-	auth.POST("/guest", authController.CreateGuest)
+	auth.POST("/guest", authController.CreateGuest, echoGuestCreateRateLimit())
 	auth.GET("/verify-email", authController.VerifyEmail)
 	auth.POST("/forgot-password", authController.RequestPasswordReset, echoPasswordResetRateLimit())
 	auth.POST("/resend-verification", authController.ResendVerification, echoResendVerificationRateLimit(), echomw.BodyLimit("4K"))
@@ -32,6 +33,8 @@ func SetupAuthRoutes(api *echo.Group, authController *authcontrollers.AuthContro
 	auth.GET("/google/callback", oauthController.GoogleCallback)
 	auth.GET("/github", oauthController.GitHubLogin)
 	auth.GET("/github/callback", oauthController.GitHubCallback)
+	// OAuth 完了時の短命コードの交換。FE の Route Handler からサーバー間で呼ぶ (SOCAIAGENT-683)
+	auth.POST("/oauth/exchange", oauthController.ExchangeCode, echomw.BodyLimit("4K"))
 
 	// 認証必須エンドポイント（X-User-Token JWTヘッダーが必要）
 	authProtected := api.Group("/auth", EchoUserAuth(userSecret, access, orgs))
@@ -71,12 +74,39 @@ func echoResendVerificationRateLimit() echo.MiddlewareFunc {
 	}
 }
 
+// echoRegistrationRequestRateLimit は登録申請エンドポイント用のIP単位のレート制限ミドルウェア
+func echoRegistrationRequestRateLimit() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ip := middleware.GetClientIP(c.Request())
+			if !middleware.RegistrationRequestRateLimiter.Allow(ip) {
+				return echo.NewHTTPError(http.StatusTooManyRequests, "Too Many Requests: リクエスト上限に達しました。しばらく待ってから再試行してください。")
+			}
+			return next(c)
+		}
+	}
+}
+
 // echoPasswordResetRateLimit はパスワードリセットエンドポイント用のEchoネイティブレート制限ミドルウェア
 func echoPasswordResetRateLimit() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			ip := middleware.GetClientIP(c.Request())
 			if !middleware.PasswordResetRateLimiter.Allow(ip) {
+				return echo.NewHTTPError(http.StatusTooManyRequests, "Too Many Requests: リクエスト上限に達しました。しばらく待ってから再試行してください。")
+			}
+			return next(c)
+		}
+	}
+}
+
+// echoGuestCreateRateLimit はゲスト作成エンドポイント用の IP 単位のレート制限ミドルウェア (SOCAIAGENT-689)
+func echoGuestCreateRateLimit() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ip := middleware.GetClientIP(c.Request())
+			if !middleware.GuestCreateRateLimiter.Allow(ip) {
+				slog.Warn("guest create rate limited") // IP の生値は出さない
 				return echo.NewHTTPError(http.StatusTooManyRequests, "Too Many Requests: リクエスト上限に達しました。しばらく待ってから再試行してください。")
 			}
 			return next(c)

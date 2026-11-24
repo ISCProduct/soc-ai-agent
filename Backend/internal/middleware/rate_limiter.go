@@ -189,6 +189,17 @@ var VerificationResendRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, env
 // 同じ人のメールボックスに、短時間に何通も送らないための上限(サービス層が使う)。
 var VerificationResendEmailRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("VERIFICATION_RESEND_RATE_LIMIT_PER_EMAIL", 3))
 
+// GuestCreateRateLimiter はゲスト作成（POST /api/auth/guest）の IP 単位の制限器 (SOCAIAGENT-689)。
+// 未認証でユーザー行とトークンを作れるので、連打で行を積み上げられないための上限。
+// 学校の共有 IP・BFF 経由で IP が収束するため緩めに取り、環境変数で調整できるようにする。
+// ponytail: インメモリのため、ECS のタスクごとに数える。厳密にしたい場合は Redis 版に差し替える。
+var GuestCreateRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("GUEST_CREATE_RATE_LIMIT_PER_IP", 20))
+
+// RegistrationRequestRateLimiter / RegistrationRequestEmailRateLimiter は登録申請(確認メール送信)の制限器。
+// 認証メール再送と同じ値・同じ環境変数で調整する。回数は再送とは別に数える。
+var RegistrationRequestRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("VERIFICATION_RESEND_RATE_LIMIT_PER_IP", 10))
+var RegistrationRequestEmailRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("VERIFICATION_RESEND_RATE_LIMIT_PER_EMAIL", 3))
+
 // ConfigureRateLimiters は外部 KeyRateLimiter でグローバル制限器を差し替える（#617）。
 func ConfigureRateLimiters(login, passwordReset KeyRateLimiter) {
 	if login != nil {
@@ -209,6 +220,11 @@ var GuestAIRateLimiter KeyRateLimiter = NewRateLimiter(10*time.Minute, envPositi
 // GuestAIGlobalRateLimiter は同エンドポイント群の全体上限（#1154）。
 // IPを変えれば per-IP 制限は回避できるため、実質的なコスト上限はこちらが担う。
 var GuestAIGlobalRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("GUEST_AI_RATE_LIMIT_GLOBAL", 1000))
+
+// CorrelationMapRateLimiter は企業相関図（未認証で叩ける）のIP単位制限（SOCAIAGENT-694）。
+// GuestAIRateLimiter と同じく、BFF 経由で送信元IPが収束しうるため緩めに取り、環境変数で調整できるようにする。
+// ponytail: インメモリのため ECS のタスクごとに数える。厳密にしたい場合は Redis 版に差し替える。
+var CorrelationMapRateLimiter KeyRateLimiter = NewRateLimiter(10*time.Minute, envPositiveInt("CORRELATION_MAP_RATE_LIMIT_PER_IP", 300))
 
 // envPositiveInt は環境変数を正の整数として読む。未設定・不正値は既定値。
 // 展示会中に上限へ当たった場合、再ビルドせずタスク定義の環境変数だけで緩められるようにするための調整つまみ。

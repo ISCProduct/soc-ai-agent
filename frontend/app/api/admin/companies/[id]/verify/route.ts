@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const body = await request.text()
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/verify`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${encodeURIComponent(id)}/verify`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
