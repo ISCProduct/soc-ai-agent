@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -64,7 +63,7 @@ func TestLLMEvaluate_ABの本文と記録が揃う(t *testing.T) {
 			client.OnUsage = func(u internalOpenAI.Usage) { usage = u }
 			e := &AnswerEvaluator{llmClient: client}
 
-			ctx := usagectx.WithActor(context.Background(), users[tt.version], 0)
+			ctx := usagectx.WithActor(guardedCtx(), users[tt.version], 0)
 			result, version := e.llmEvaluateWithPromptVersion(ctx, "質問", "回答")
 			if result == nil {
 				t.Fatal("評価が返らない")

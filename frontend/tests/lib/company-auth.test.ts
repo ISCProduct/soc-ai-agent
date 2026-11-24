@@ -28,7 +28,9 @@ describe('companyAuthService', () => {
     })
   })
 
-  it('stores auth headers from sessionStorage', () => {
+  // トークンは httpOnly Cookie にだけ置き、画面は持たない（SOCAIAGENT-683）。
+  // X-Company-User-Token は middleware が Cookie から付ける。
+  it('ユーザー情報は sessionStorage から読み、トークンはヘッダーに付けない', () => {
     window.sessionStorage.setItem('company_user', JSON.stringify({
       company_user_id: 1,
       company_id: 10,
@@ -36,18 +38,21 @@ describe('companyAuthService', () => {
       name: '担当',
       role: 'owner',
     }))
-    window.sessionStorage.setItem('company_token', 'jwt-token')
+    window.sessionStorage.setItem('company_token', 'legacy-jwt')
 
     expect(companyAuthService.getStoredUser()?.email).toBe('hr@example.com')
-    expect(companyAuthService.getStoredToken()).toBe('jwt-token')
-    // X-Company-User-ID は Backend の EchoCompanyAuth では参照されず、
-    // なりすまし防止のため httpOnly Cookie 経由でのみ注入する(クライアントJSからは送らない)
-    expect(companyAuthService.getAuthHeaders()).toEqual({
-      'X-Company-User-Token': 'jwt-token',
-    })
+    expect(companyAuthService.getAuthHeaders()).toEqual({})
+    // 以前の版が残したトークンは消す
+    expect(window.sessionStorage.getItem('company_token')).toBeNull()
   })
 
-  it('returns empty headers when no token is stored', () => {
-    expect(companyAuthService.getAuthHeaders()).toEqual({})
+  it('ログイン後もトークンを sessionStorage に保存しない', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ company_user_id: 1, company_id: 10, email: 'hr@example.com', name: '担当', role: 'owner', token: 'jwt', refresh_token: 'r' }),
+    }) as unknown as typeof fetch
+    await companyAuthService.login('hr@example.com', 'pw')
+    expect(window.sessionStorage.getItem('company_token')).toBeNull()
+    expect(companyAuthService.getStoredUser()?.company_user_id).toBe(1)
   })
 })
