@@ -81,12 +81,17 @@ func BuildCompanyBrief(company *models.Company, profile *models.CompanyWeightPro
 // 既定状態でもあり、published だけに絞ると面接の企業選択・履歴書レビューの
 // 企業ブリーフがほぼ空になる（guestEntryVisibilityGuard のコメント参照）。
 // ゲスト投稿由来かどうかで分けるのが #1203 / #1409 で決めた線。
+//
+// 停止中（is_active=false）の企業は、ゲスト投稿かどうかに関わらず出さない（SOCAIAGENT-694）。
 func briefVisible(c *models.Company) bool {
+	if !c.IsActive {
+		return false
+	}
 	if !c.IsGuestEntry {
 		return true
 	}
-	// 管理者が公開したものは出す。公開後に却下されると is_active=false になる。
-	return c.DataStatus == "published" && c.IsActive
+	// 管理者が公開したものは出す。
+	return c.DataStatus == "published"
 }
 
 func trimRunes(s string, max int) string {

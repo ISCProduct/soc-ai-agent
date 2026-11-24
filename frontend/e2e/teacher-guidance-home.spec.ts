@@ -27,7 +27,7 @@ test.describe('ホームの教員案内（狭い画面）', () => {
 
   test('取得に失敗したらエラーと再読み込みを出し、再読み込みで案内が出る', async ({ page }) => {
     let fail = true
-    await page.route('**/api/user/guidances', (route) =>
+    await page.route('**/api/bff/user/guidances', (route) =>
       fail
         ? route.fulfill({ status: 500, contentType: 'application/json', body: '{}' })
         : route.fulfill({
@@ -50,7 +50,7 @@ test.describe('ホームの教員案内（狭い画面）', () => {
   })
 
   test('案内が0件ならエラーは出ない', async ({ page }) => {
-    await page.route('**/api/user/guidances', (route) =>
+    await page.route('**/api/bff/user/guidances', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ guidances: [] }) }),
     )
 
