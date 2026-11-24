@@ -388,7 +388,7 @@ jobs:
 
       # 本アクションは浮動タグ(v5等)を公開していないため、完全バージョンで指定する
       - name: Dependency Review (high severity)
-        uses: actions/dependency-review-action@v5.0.0
+        uses: actions/dependency-review-action@v5.0.1
         with:
           fail-on-severity: high
 
