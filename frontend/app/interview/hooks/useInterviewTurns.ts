@@ -48,6 +48,8 @@ type UseInterviewTurnsArgs = {
   setUtterances: Dispatch<SetStateAction<Utterance[]>>
   setErrorMessage: Dispatch<SetStateAction<string | null>>
   setUtteranceSaveFailed: Dispatch<SetStateAction<boolean>>
+  /** サーバーが上限（発話数・経過時間・予算）に達したと返したときに呼ぶ（SOCAIAGENT-696） */
+  onLimitReached: () => void
 }
 
 /**
@@ -78,7 +80,16 @@ export function useInterviewTurns({
   setUtterances,
   setErrorMessage,
   setUtteranceSaveFailed,
+  onLimitReached,
 }: UseInterviewTurnsArgs) {
+  /**
+   * サーバーが上限（発話数・経過時間・予算）に達したと返したら、締めの文を表示したまま
+   * 既存の終了経路で面接を終え、途中までのレポートを作る（SOCAIAGENT-696）。
+   * 終了処理は応答待ちのターン（＝この応答）を待つので、ここでは待たずに呼ぶ。
+   */
+  const endIfLimitReached = (meta: Record<string, string>) => {
+    if (String(meta.limit_reached) === 'true') onLimitReached()
+  }
   /**
    * 応答待ちのターン(#1476)。
    * 「完了する」は turnPending 中でも押せるし、時間切れの強制終了も割り込む。
@@ -181,6 +192,7 @@ export function useInterviewTurns({
         historyRef.current.push({ role: 'assistant', content: aiText })
         setUtterances(p => [...p, { role: 'ai', text: aiText }])
       }
+      endIfLimitReached(meta)
       return audio
     }
     const receiving = receive()
@@ -266,6 +278,7 @@ export function useInterviewTurns({
         historyRef.current.push({ role: 'assistant', content: aiText })
         setUtterances(p => [...p, { role: 'ai', text: aiText }])
       }
+      endIfLimitReached(meta)
       return audio
     }
     try {
