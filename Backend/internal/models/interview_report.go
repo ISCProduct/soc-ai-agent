@@ -12,6 +12,8 @@ type InterviewReport struct {
 	StrengthsJSON            string  `gorm:"type:json"                     json:"strengths_json"`
 	ImprovementsJSON         string  `gorm:"type:json"                     json:"improvements_json"`
 	TeacherReportJSON        string  `gorm:"type:json"                     json:"teacher_report_json"` // 教員用詳細レポート
+	// CategoryBreakdownJSON は質問カテゴリ別の評価（SOCAIAGENT-610）。NULL は内訳なし（旧データを含む）
+	CategoryBreakdownJSON *string `gorm:"type:json" json:"category_breakdown_json"`
 	// ScoresAppliedAt は面接スコアを user_weight_scores へ反映した時刻（#1512）。
 	// NULL なら未反映。反映する側が NULL から条件付き UPDATE で奪い合い、
 	// 勝った1つだけがスコアを書く。Redis 障害中に複数タスクで同じセッションの
