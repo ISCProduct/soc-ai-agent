@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/graduate-employments/${id}`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/graduate-employments/${encodeURIComponent(id)}`, {
     headers: {
       'X-Admin-Email': req.headers.get('x-admin-email') || '',
       'X-Admin-Token': req.headers.get('x-admin-token') || '',
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const body = await request.text()
-  const response = await fetch(`${BACKEND_URL}/api/admin/graduate-employments/${id}`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/graduate-employments/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',

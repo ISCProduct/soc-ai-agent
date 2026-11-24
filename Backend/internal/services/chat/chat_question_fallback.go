@@ -180,7 +180,7 @@ func (s *ChatService) selectFallbackQuestion(ctx context.Context, category strin
 			return q
 		}
 	}
-	generic := []string{}
+	var generic []string
 	if targetLevel == "中途" {
 		generic = []string{
 			"最近取り組んだ仕事やタスクはありますか？簡単に教えてください。",

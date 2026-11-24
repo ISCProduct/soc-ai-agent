@@ -136,8 +136,8 @@ func runFitEval(t *testing.T, companies []*models.CompanyWeightProfile, topN int
 }
 
 func logEval(t *testing.T, name string, r evalResult) {
-	t.Log(fmt.Sprintf("%s 上位10件: ずれ1軸以上 %.1f%% → %.1f%%、参考 %.1f%% → %.1f%%、入れ替わり %.1f%%、全企業のうち参考 %.1f%%",
-		name, r.off1*100, r.on1*100, r.offRef*100, r.onRef*100, r.topShift*100, r.allRef*100))
+	t.Logf("%s 上位10件: ずれ1軸以上 %.1f%% → %.1f%%、参考 %.1f%% → %.1f%%、入れ替わり %.1f%%、全企業のうち参考 %.1f%%",
+		name, r.off1*100, r.on1*100, r.offRef*100, r.onRef*100, r.topShift*100, r.allRef*100)
 }
 
 // ばらけた企業: 上位10件のずれた提案が減る。上位は変えすぎない。

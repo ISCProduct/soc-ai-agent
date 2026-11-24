@@ -69,7 +69,7 @@ export async function mockEmptyChatAuxRoutes(page: Page) {
   await page.route('**/api/applications', async (route) => {
     await route.fulfill(jsonOk({ applications: [] }))
   })
-  await page.route('**/api/user/guidances', async (route) => {
+  await page.route('**/api/bff/user/guidances', async (route) => {
     await route.fulfill(jsonOk({ guidances: [] }))
   })
   // アプリ内通知（#2033）。一覧・未読数とも空にする（ホームのお知らせとヘッダのベル）

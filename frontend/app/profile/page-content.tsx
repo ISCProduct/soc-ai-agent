@@ -29,8 +29,10 @@ import GitHubSkills from '@/components/github-skills'
 import { ScoutPreferencesCard } from '@/components/profile/ScoutPreferencesCard'
 import { TrainingConsentCard } from '@/components/profile/TrainingConsentCard'
 import { DeleteAccountDialog } from '@/components/profile/DeleteAccountDialog'
+import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
 import { PageLoading } from '@/components/common/PageLoading'
 import { StudentThemeToggle } from '@/components/layout/StudentThemeToggle'
+import { isGoogleAuthUrl } from '@/lib/google-auth-url'
 
 export default function PageContent() {
   return (
@@ -193,6 +195,7 @@ function ProfilePageContent() {
       })
       if (!res.ok) throw new Error('Failed to get auth URL')
       const data = await res.json()
+      if (!isGoogleAuthUrl(data.auth_url)) throw new Error('Unexpected auth URL')
       window.location.href = data.auth_url
     } catch {
       setCalendarMessage('Googleカレンダー連携の開始に失敗しました')
@@ -583,10 +586,12 @@ function ProfilePageContent() {
       {/* 保存成功トースト */}
       <Snackbar
         open={saved}
-        autoHideDuration={3000}
+        autoHideDuration={SNACKBAR_AUTO_HIDE_MS}
         onClose={() => setSaved(false)}
         message="プロフィールを保存しました"
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        // 下部ナビの上へ逃がす（#2222）
+        sx={ABOVE_BOTTOM_NAV_SX}
       />
     </Box>
   )

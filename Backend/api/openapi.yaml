@@ -54,8 +54,6 @@ tags:
     description: 学生・教員の認証とプロフィール
   - name: chat
     description: 診断チャットとスコア
-  - name: questions
-    description: 質問の生成・管理
 
   - name: interviews
     description: AI面接のセッション・発話・レポート
@@ -331,7 +329,7 @@ components:
             - challenge_seeking
             - detail_orientation
             - communication_skill
-        Score: { type: integer, minimum: 0, maximum: 100 }
+        Score: { type: number, minimum: 0, maximum: 100, description: 小数第2位まで（DECIMAL(5,2)）。表示側で丸める }
 
     PhaseProgress:
       type: object
@@ -714,6 +712,7 @@ paths:
       responses:
         "200": { description: 送信した }
         "400": { description: メールアドレスの形式が不正 }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/auth/verify-registration:
     post:
@@ -857,11 +856,11 @@ paths:
               required: [token, password]
               properties:
                 token: { type: string }
-                password: { type: string, format: password, minLength: 8 }
+                password: { type: string, format: password, minLength: 8, description: 8文字以上・72バイト以下 }
       security: []
       responses:
         "200": { description: 再設定した }
-        "400": { description: トークンが無効か期限切れ }
+        "400": { description: トークンが無効か期限切れ、またはパスワードが8文字未満・72バイト超 }
 
   /api/auth/refresh:
     post:
@@ -911,6 +910,11 @@ paths:
     get:
       tags: [auth]
       summary: Google OAuth を開始する
+      parameters:
+        - in: query
+          name: bind
+          description: FE が作った照合値（base64url の SHA-256、43文字）。コード交換時の verifier 検証に使う
+          schema: { type: string }
       security: []
       responses:
         "302": { description: Google の認可画面へリダイレクト }
@@ -930,10 +934,39 @@ paths:
       responses:
         "302": { description: フロントエンドへリダイレクト }
 
+  /api/auth/oauth/exchange:
+    post:
+      tags: [auth]
+      summary: OAuth 完了時の短命コードを認証情報と交換する
+      description: |
+        OAUTH_CODE_EXCHANGE=true のとき、OAuth コールバックはトークンを URL に載せず
+        `/auth/callback?code=...` へ戻す。FE の Route Handler がこの API をサーバー間で呼び、
+        結果を httpOnly Cookie にする。コードは60秒・1回限り。verifier はログインを始めた
+        ブラウザだけが持つ値で、開始時の `bind`（base64url の SHA-256）と合わなければ拒否する。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, verifier]
+              properties:
+                code: { type: string }
+                verifier: { type: string }
+      responses:
+        "200": { description: 認証情報（OAuth コールバックで従来 user= に載せていた内容） }
+        "400": { description: リクエスト不正、またはコードが無効・使用済み・期限切れ・照合値不一致 }
+
   /api/auth/github:
     get:
       tags: [auth]
       summary: GitHub OAuth を開始する
+      parameters:
+        - in: query
+          name: bind
+          description: FE が作った照合値（base64url の SHA-256、43文字）。コード交換時の verifier 検証に使う
+          schema: { type: string }
       security: []
       responses:
         "302": { description: GitHub の認可画面へリダイレクト }
@@ -1136,7 +1169,9 @@ paths:
     post:
       tags: [chat]
       summary: 企業マッチのお気に入りを切り替える
-      description: 対象は `match_id`（`UserCompanyMatch` のID）。`session_id` では切り替わらない。
+      description: >
+        対象は `match_id`（その診断の `UserCompanyMatch` 1行）。`session_id` では切り替わらない。
+        診断をまたいで外すときは `/api/chat/favorites/remove` を使う。
       security: [{ userToken: [] }]
       requestBody:
         required: true
@@ -1151,6 +1186,74 @@ paths:
         "200": { description: 切り替えた }
         "400": { description: match_id が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/chat/favorites:
+    get:
+      tags: [chat]
+      summary: お気に入り企業を診断をまたいで1社1行で返す
+      description: >
+        同じ企業は、その診断のマッチが作られた時刻がいちばん新しい行を残す。
+        閲覧や再計算で進む更新時刻では選ばない。並びは適合度の高い順。
+        重みプロファイルの無い企業は件数を数える前に外す。
+        `limit` は 1 以上 100 以下。未指定・0以下・数値でないときは 50。100 を超える指定は 100。
+      security: [{ userToken: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: お気に入り企業
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recommendations]
+                properties:
+                  recommendations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer, description: 企業ID }
+                        match_id: { type: integer, description: 代表にした診断のマッチID }
+                        category_name: { type: string }
+                        score: { type: integer }
+                        industry: { type: string }
+                        job_title: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { description: マッチングサービスが無い }
+
+  /api/chat/favorites/remove:
+    post:
+      tags: [chat]
+      summary: 企業のお気に入りを診断をまたいで外す
+      description: >
+        `company_id` の企業について、そのユーザーの全診断の `is_favorited` を外す。
+        `/api/chat/favorite` は1診断の1行だけを切り替える。こちらは全診断が対象。
+        もともと付いていなくても 200 を返す。
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [company_id]
+              properties:
+                company_id: { type: integer }
+      responses:
+        "200":
+          description: 外した（対象が無くても成功）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "400": { description: company_id が無い }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { description: マッチングサービスが無い }
 
   /api/chat/match-feedback:
     post:
@@ -1179,64 +1282,6 @@ paths:
         "403": { description: 他人の推薦 }
         "404": { description: 推薦が無い }
 
-  # ── questions ──────────────────────────────────────
-  /api/questions/generate:
-    post:
-      tags: [questions]
-      summary: 質問を生成する
-      security: [{ userToken: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [category]
-              properties:
-                category:
-                  type: string
-                  description: 正典10カテゴリのいずれか
-      responses:
-        "200": { description: 生成した質問 }
-        "400": { description: category が無い }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-
-  /api/questions/create:
-    post:
-      tags: [questions]
-      summary: 質問を登録する
-      security: [{ userToken: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [question, weight_category]
-              properties:
-                question: { type: string }
-                weight_category:
-                  type: string
-                  description: 正典10カテゴリのいずれか
-      responses:
-        "200": { description: 登録した }
-        "400": { description: question か weight_category が無い }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-
-  /api/questions/list:
-    get:
-      tags: [questions]
-      summary: カテゴリ別に質問を取得する
-      security: [{ userToken: [] }]
-      parameters:
-        - in: query
-          name: category
-          required: true
-          schema: { type: string }
-      responses:
-        "200": { description: 質問一覧 }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-
   # ── interviews ─────────────────────────────────────
   /api/interviews:
     get:
@@ -1246,10 +1291,6 @@ paths:
       parameters:
         - { in: query, name: page, schema: { type: integer, default: 1 } }
         - { in: query, name: limit, schema: { type: integer, default: 20 } }
-        - in: query
-          name: all
-          description: "`1` または `true` で全件（既定は自分の進行中のみ）"
-          schema: { type: string }
       responses:
         "200":
           description: 一覧
@@ -1265,7 +1306,6 @@ paths:
                   page: { type: integer }
                   limit: { type: integer }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [interviews]
       summary: 面接セッションを作る
@@ -2276,10 +2316,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Company"
+        "400":
+          description: 入力が不正（website_url / logo_url が http/https 以外など）
         "404":
           description: 存在しない
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 
   /api/admin/companies/{id}/publish:
     patch:
@@ -2403,7 +2445,7 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 
   /api/admin/companies/{id}/interview-questions/generate:
     post:
@@ -2420,7 +2462,8 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/admin/companies/{id}/interview-questions/{qid}:
     put:
@@ -2447,7 +2490,7 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
     delete:
       tags: [admin-companies]
       summary: 企業の面接質問を削除
@@ -2467,14 +2510,14 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 
   /api/admin/companies/{id}/fetch-info:
     post:
       tags: [admin-companies]
       summary: 企業情報を取得する
       description: |
-        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+        外部APIとLLMを呼ぶため従量課金が発生する（Search の月次予算で全体を抑える）。管理者と職員（staff）が使える（オーナー決定 2026-11-22、SOCAIAGENT-692）。管理エリアの権限が無い利用者は 403。
       security: [{ adminAuth: [] }]
       parameters:
         - in: path
@@ -2486,14 +2529,14 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/admin/companies/{id}/confirm-info:
     post:
       tags: [admin-companies]
       summary: 取得した企業情報を確定する
       description: |
-        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+        プレビュー済みの結果を LLM 再実行なしで確定保存する。管理者と職員（staff）が使える（オーナー決定 2026-11-22、SOCAIAGENT-692）。管理エリアの権限が無い利用者は 403。
       security: [{ adminAuth: [] }]
       parameters:
         - in: path
@@ -2505,9 +2548,9 @@ paths:
         "200":
           description: 成功
         "400":
-          description: プロンプトの版の形式が不正（invalid prompt_version）
+          description: プロンプトの版の形式が不正（invalid prompt_version）、または website_url / source_url が http/https の URL でない
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/admin/companies/{id}/fetch-relations:
     post:
@@ -2571,7 +2614,7 @@ paths:
       tags: [admin-companies]
       summary: 技術スタックを取得する
       description: |
-        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+        外部APIとLLMを呼ぶため従量課金が発生する（Search の月次予算で全体を抑える）。管理者と職員（staff）が使える（オーナー決定 2026-11-22、SOCAIAGENT-692）。管理エリアの権限が無い利用者は 403。
       security: [{ adminAuth: [] }]
       parameters:
         - in: path
@@ -2583,7 +2626,7 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/admin/companies/{id}/fetch-persona:
     post:
@@ -4407,10 +4450,37 @@ paths:
       summary: 学習データを書き出す
       description: |
         候補者の発話と選考結果を含むため**管理者本人の認証を要求する**（#268）。サービス間シークレットでは叩けない。
+
+        1回に返すセッションは既定・上限 1000（SOCAIAGENT-694）。続きは `offset` で取る。
+        `offset` は対象セッション（発話の有無で絞る前）の位置で、発話の無いセッションは落とすため、返る件数が `limit` 未満でも続きがありうる。
+        続きがありうるときは `X-Next-Offset` ヘッダーに次の `offset` を返す（無ければ最後）。
       security: [{ adminAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 1000
+            default: 1000
+          description: 返すセッション数。0・省略・1000超は 1000
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: 飛ばす対象セッション数
       responses:
         "200":
           description: 成功
+          headers:
+            X-Next-Offset:
+              description: 続きがありうるときの次の offset
+              schema:
+                type: integer
+        "400":
+          description: limit / offset が0以上の整数でない
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -4650,7 +4720,9 @@ paths:
         資本の鏡像行（A→B と B→A）は1本に畳む。取引の `direction_known` は現状常に false
         （from/to は取得起点→相手であり、提供側→利用側ではない）。
         事業タグ専用データは未整備のため `business_tags` は空・`business_tags_status=unavailable`。
-        採用情報は含めない。審査前のゲスト投稿企業はノードから除外する。
+        採用情報は含めない。審査前のゲスト投稿企業と停止中（is_active=false）の企業はノードから除外する。
+
+        レート制限は IP 単位 300回/10分（`CORRELATION_MAP_RATE_LIMIT_PER_IP`、compare と共通）。
       security: []
       parameters:
         - in: path
@@ -4663,6 +4735,8 @@ paths:
           description: 成功
         "404":
           description: 企業が見つからない
+        "429":
+          description: レート制限超過
 
   /api/companies/{id}/correlation-map/compare:
     get:
@@ -4691,6 +4765,8 @@ paths:
           description: with が無い
         "404":
           description: 企業が見つからない
+        "429":
+          description: レート制限超過
 
   /api/companies/web-search:
     get:

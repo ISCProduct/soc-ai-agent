@@ -1,10 +1,10 @@
 package chat
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"Backend/domain/valueobject"
@@ -53,11 +53,11 @@ func TestGenerateStrategicQuestion_FallbackDoesNotRecordPromptVersion(t *testing
 	}
 
 	question, _, _, err := service.generateStrategicQuestion(
-		context.Background(),
+		guardedCtx(),
 		nil,
 		42,
 		"session-1",
-		map[string]int{},
+		map[string]float64{},
 		[]string{"創造性志向"},
 		map[string]bool{},
 		0,
@@ -120,7 +120,7 @@ func TestQuestionGenerationPaths_RecordPromptVersion(t *testing.T) {
 		var usages []internalOpenAI.Usage
 		service, questionRepo := newService(&usages)
 
-		if _, _, err := service.generateQuestionWithAI(context.Background(), nil, 42, "session-1", 0, 0); err != nil {
+		if _, _, err := service.generateQuestionWithAI(guardedCtx(), nil, 42, "session-1", 0, 0); err != nil {
 			t.Fatalf("generateQuestionWithAI returned error: %v", err)
 		}
 		if questionRepo.question == nil || questionRepo.question.PromptVersion != "question-t1" {
@@ -133,7 +133,7 @@ func TestQuestionGenerationPaths_RecordPromptVersion(t *testing.T) {
 		var usages []internalOpenAI.Usage
 		service, _ := newService(&usages)
 
-		if _, err := service.simplifyQuestionWithAI(context.Background(), "難しい質問"); err != nil {
+		if _, err := service.simplifyQuestionWithAI(guardedCtx(), "難しい質問"); err != nil {
 			t.Fatalf("simplifyQuestionWithAI returned error: %v", err)
 		}
 		assertUsage(t, usages)
@@ -251,7 +251,7 @@ func TestGetCategoryOrder_ReturnsCanonicalCategories(t *testing.T) {
 	}
 
 	// 職種未決定
-	check("undecided", (&ChatService{}).getCategoryOrder(context.Background(), 0))
+	check("undecided", (&ChatService{}).getCategoryOrder(guardedCtx(), 0))
 
 	// 職種ごとの優先順位（先頭に何を聞くか）は仕様なので固定する。
 	// 網羅性チェックだけだと順序を入れ替えても検出できない。
@@ -281,10 +281,10 @@ func TestFallbackQuestions_CoverAllCanonicalCategories(t *testing.T) {
 	s := &ChatService{}
 	for _, c := range valueobject.AllWeightCategories() {
 		for _, level := range []string{"新卒", "中途"} {
-			if got := s.fallbackQuestionForCategory(context.Background(), string(c), 0, level); got == "" {
+			if got := s.fallbackQuestionForCategory(guardedCtx(), string(c), 0, level); got == "" {
 				t.Errorf("%s(%s): 単数フォールバックが空", c, level)
 			}
-			if got := s.fallbackQuestionsForCategory(context.Background(), string(c), 0, level); len(got) == 0 {
+			if got := s.fallbackQuestionsForCategory(guardedCtx(), string(c), 0, level); len(got) == 0 {
 				t.Errorf("%s(%s): 複数フォールバックが空", c, level)
 			}
 		}
@@ -296,7 +296,7 @@ func TestSelectFallbackQuestion_SkipsAsked(t *testing.T) {
 	asked := map[string]bool{
 		"最近頑張ったことはありますか？": true,
 	}
-	got := s.selectFallbackQuestion(context.Background(), "不明カテゴリ", 0, "新卒", asked)
+	got := s.selectFallbackQuestion(guardedCtx(), "不明カテゴリ", 0, "新卒", asked)
 	if got == "" {
 		t.Fatal("expected non-empty fallback")
 	}
@@ -307,11 +307,11 @@ func TestSelectFallbackQuestion_SkipsAsked(t *testing.T) {
 
 func TestSelectFallbackQuestion_CategoryOptions(t *testing.T) {
 	s := &ChatService{}
-	got := s.selectFallbackQuestion(context.Background(), "創造性志向", 0, "新卒", map[string]bool{})
+	got := s.selectFallbackQuestion(guardedCtx(), "創造性志向", 0, "新卒", map[string]bool{})
 	if got == "" {
 		t.Fatal("expected creativity fallback")
 	}
-	options := s.fallbackQuestionsForCategory(context.Background(), "創造性志向", 0, "新卒")
+	options := s.fallbackQuestionsForCategory(guardedCtx(), "創造性志向", 0, "新卒")
 	found := false
 	for _, q := range options {
 		if q == got {
@@ -326,7 +326,150 @@ func TestSelectFallbackQuestion_CategoryOptions(t *testing.T) {
 
 func TestFallbackQuestionForCategory_DefaultEmpty(t *testing.T) {
 	s := &ChatService{}
-	if got := s.fallbackQuestionForCategory(context.Background(), "存在しないカテゴリ", 0, "新卒"); got != "" {
+	if got := s.fallbackQuestionForCategory(guardedCtx(), "存在しないカテゴリ", 0, "新卒"); got != "" {
 		t.Fatalf("want empty, got %q", got)
+	}
+}
+
+// AI が空を返して代わりの質問にしても、そのあと AI が作り直した文を保存するときは版を残す（#2573）。
+func TestGenerateStrategicQuestion_RecordsPromptVersionWhenAIRewritesFallback(t *testing.T) {
+	t.Setenv("PROMPT_VERSION", "")
+	t.Setenv("PROMPT_VERSION_QUESTION_GENERATION", "char-v1")
+
+	cases := []struct {
+		name          string
+		outputs       []string
+		history       []models.ChatMessage
+		allCategories []string
+		askedTexts    map[string]bool
+		phase         *models.UserAnalysisProgress
+		wantQuestion  string
+		wantVersion   string
+	}{
+		{
+			// 代わりの質問が自由記述で、選択肢の作り直しを AI がした
+			name:    "choice_regenerated",
+			outputs: []string{`"`, "合成の質問はどれですか？\nA) 合成1\nB) 合成2\nC) その他（自由記述）"},
+			history: []models.ChatMessage{
+				{Role: "assistant", Content: "合成の過去質問を具体的に教えてください。"},
+				{Role: "user", Content: "合成の回答です"},
+			},
+			allCategories: []string{"技術志向"},
+			askedTexts:    map[string]bool{},
+			phase:         &models.UserAnalysisProgress{QuestionsAsked: 1, Phase: charPhase(1, "job_analysis", 3, 5)},
+			wantQuestion:  "合成の質問はどれですか？\nA) 合成1\nB) 合成2\nC) その他（自由記述）",
+			wantVersion:   "char-v1",
+		},
+		{
+			// 代わりの質問が既に聞いた質問と似ていて、AI が作り直した
+			name:          "duplicate_regenerated",
+			outputs:       []string{`"`, "合成のまったく別の質問はありますか？"},
+			allCategories: []string{"ワークライフバランス"},
+			askedTexts:    map[string]bool{"仕事とプライベートのバランスについて、どんな働き方が理想ですか？（合成）": true},
+			wantQuestion:  "合成のまったく別の質問はありますか？",
+			wantVersion:   "char-v1",
+		},
+		{
+			// 作り直しが無ければ、代わりの質問は AI の文ではないので版は空のまま
+			name:          "fallback_only",
+			outputs:       []string{`"`},
+			allCategories: []string{"ワークライフバランス"},
+			askedTexts:    map[string]bool{},
+			wantQuestion:  "仕事とプライベートのバランスについて、どんな働き方が理想ですか？",
+			wantVersion:   "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ai, client := newScriptedAIServer(t, tc.outputs...)
+			questionRepo := &charAIQuestionRepo{}
+			s := &ChatService{
+				aiClient:                client,
+				aiGeneratedQuestionRepo: questionRepo,
+				conversationContextRepo: &charConversationRepo{},
+			}
+			q, _, _, err := s.generateStrategicQuestion(guardedCtx(), tc.history, 42, "char-session",
+				map[string]float64{}, tc.allCategories, tc.askedTexts, 0, 0, "新卒", tc.phase, nil)
+			if err != nil {
+				t.Fatalf("err=%v", err)
+			}
+			if q != tc.wantQuestion {
+				t.Fatalf("question=%q, want %q", q, tc.wantQuestion)
+			}
+			if len(ai.prompts) != len(tc.outputs) {
+				t.Fatalf("AI呼び出し回数=%d, want %d", len(ai.prompts), len(tc.outputs))
+			}
+			if len(questionRepo.created) != 1 {
+				t.Fatalf("保存件数=%d", len(questionRepo.created))
+			}
+			if got := questionRepo.created[0].PromptVersion; got != tc.wantVersion {
+				t.Fatalf("PromptVersion=%q, want %q", got, tc.wantVersion)
+			}
+		})
+	}
+}
+
+// 既に聞いた質問の一覧は、呼ぶたびに同じ順で並ぶ（#2573）。
+func TestAskedQuestionLists_AreSorted(t *testing.T) {
+	asked := map[string]bool{}
+	for _, q := range []string{"合成質問E", "合成質問B", "合成質問D", "合成質問A", "合成質問C", "合成質問G", "合成質問F"} {
+		asked[q] = true
+	}
+	wantList := "1. 合成質問A\n2. 合成質問B\n3. 合成質問C\n4. 合成質問D\n5. 合成質問E\n6. 合成質問F\n7. 合成質問G\n"
+
+	t.Run("buildAskedQuestionsText", func(t *testing.T) {
+		for range 20 {
+			if got := buildAskedQuestionsText(asked); !strings.Contains(got, wantList) {
+				t.Fatalf("並びが決まっていない:\n%s", got)
+			}
+		}
+	})
+
+	t.Run("regenerateIfDuplicate", func(t *testing.T) {
+		for range 20 {
+			ai, client := newScriptedAIServer(t, "合成のまったく別の新しい問い")
+			s := &ChatService{aiClient: client}
+			if _, _, err := s.regenerateIfDuplicate(guardedCtx(), "合成質問A", asked, "技術志向"); err != nil {
+				t.Fatalf("err=%v", err)
+			}
+			if len(ai.prompts) != 1 {
+				t.Fatalf("AI呼び出し回数=%d", len(ai.prompts))
+			}
+			// プロンプトは JSON に入っているので改行は \n で現れる
+			if want := strings.ReplaceAll(wantList, "\n", `\n`); !strings.Contains(ai.prompts[0], want) {
+				t.Fatalf("並びが決まっていない:\n%s", ai.prompts[0])
+			}
+		}
+	})
+}
+
+// ContextData は値に引用符などが入っても正しい JSON になる（#2573）。
+func TestGenerateStrategicQuestion_ContextDataIsValidJSON(t *testing.T) {
+	_, client := newScriptedAIServer(t, "合成の新しい質問を教えてください。")
+	questionRepo := &charAIQuestionRepo{}
+	s := &ChatService{
+		aiClient:                client,
+		aiGeneratedQuestionRepo: questionRepo,
+		conversationContextRepo: &charConversationRepo{},
+	}
+	category := `合成"軸\`
+	if _, _, _, err := s.generateStrategicQuestion(guardedCtx(), nil, 42, "char-session",
+		map[string]float64{}, []string{category}, map[string]bool{}, 0, 0, "新卒", nil, nil); err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if len(questionRepo.created) != 1 {
+		t.Fatalf("保存件数=%d", len(questionRepo.created))
+	}
+	raw := questionRepo.created[0].ContextData
+	var got map[string]string
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("ContextData が JSON として読めない: %v\n%s", err, raw)
+	}
+	want := map[string]string{
+		"target_category": category,
+		"purpose":         "まだ評価できていない「" + category + "」を評価するため",
+	}
+	if len(got) != len(want) || got["target_category"] != want["target_category"] || got["purpose"] != want["purpose"] {
+		t.Fatalf("ContextData=%v, want %v", got, want)
 	}
 }

@@ -97,23 +97,30 @@ func SetupAdminRoutes(
 	admin.POST("/schools/:id/job-suppressions", adminSchoolJobSuppressionController.Create)
 	admin.DELETE("/schools/:id/job-suppressions/:jobId", adminSchoolJobSuppressionController.Delete)
 
-	// 企業・求人カタログの閲覧と基本編集（掲載承認のため全件閲覧は担当校管理者にも必要）
+	// 企業・求人カタログの閲覧（掲載承認のため全件閲覧は担当校管理者にも必要）。
+	// 企業マスタと面接質問は全校共有のため、書き込みはシステム管理者専用（SOCAIAGENT-692）。
 	admin.GET("/companies", adminCompanyController.List)
 	admin.GET("/companies/industries", adminCompanyController.Industries)
 	admin.GET("/companies/names", adminCompanyController.Names)
 	admin.GET("/companies/:id", adminCompanyController.Get)
-	admin.PUT("/companies/:id", adminCompanyController.Update)
+	admin.PUT("/companies/:id", adminCompanyController.Update, platform)
 	// 掲載公開・非公開は全テナント共通の DataStatus / IsActive を書き換えるのでシステム管理者専用。
 	// 担当校ごとの掲載可否は /schools/:id/company-approvals で扱う。
 	admin.PATCH("/companies/:id/publish", adminCompanyController.Publish, platform)
 	admin.PATCH("/companies/:id/verify", adminCompanyController.Verify, platform)
 	admin.PATCH("/companies/:id/reject", adminCompanyController.Reject, platform)
+	// 企業情報の「取得」「確定」ボタンは職員にも開ける（オーナー決定 2026-11-22、SOCAIAGENT-692）。
+	// 企業マスタは学校に属さないため担当校スコープは掛からない。費用は Search の月次予算と
+	// singleflight（取得側の fetcher に配線済み）で全体として抑える。
+	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack)
+	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo)
+	admin.POST("/companies/:id/confirm-info", adminCompanyController.ConfirmCompanyInfo)
 	admin.GET("/companies/:id/relation-graph", adminCompanyGraphController.RelationGraph)
 	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
-	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion)
-	admin.POST("/companies/:id/interview-questions/generate", adminInterviewController.GenerateCompanyQuestions)
-	admin.PUT("/companies/:id/interview-questions/:qid", adminInterviewController.UpdateCompanyQuestion)
-	admin.DELETE("/companies/:id/interview-questions/:qid", adminInterviewController.DeleteCompanyQuestion)
+	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion, platform)
+	admin.POST("/companies/:id/interview-questions/generate", adminInterviewController.GenerateCompanyQuestions, platform)
+	admin.PUT("/companies/:id/interview-questions/:qid", adminInterviewController.UpdateCompanyQuestion, platform)
+	admin.DELETE("/companies/:id/interview-questions/:qid", adminInterviewController.DeleteCompanyQuestion, platform)
 	admin.GET("/job-categories", adminJobController.JobCategories)
 	admin.GET("/job-positions", adminJobController.JobPositions)
 	admin.POST("/job-positions", adminJobController.CreateJobPosition)
@@ -212,9 +219,6 @@ func SetupAdminRoutes(
 	admin.POST("/companies/web-search-relations", adminCompanyController.WebSearchCompanyRelations, platform)
 	admin.GET("/companies/:id/gbiz-search", adminCompanyController.SearchGBiz, platform)
 	admin.POST("/companies/:id/gbiz-sync", adminCompanyController.SyncGBiz, platform)
-	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack, platform)
-	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo, platform)
-	admin.POST("/companies/:id/confirm-info", adminCompanyController.ConfirmCompanyInfo, platform)
 	admin.POST("/companies/:id/fetch-relations", adminCompanyController.FetchCompanyRelations, platform)
 	admin.POST("/companies/:id/confirm-relations", adminCompanyController.ConfirmCompanyRelations, platform)
 	admin.POST("/companies/:id/fetch-jobs", adminCompanyController.FetchJobs, platform)

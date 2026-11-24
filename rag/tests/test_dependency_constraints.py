@@ -126,11 +126,9 @@ class TestConstraintsCommentConsistency:
         """langchain コメントに除外済みの crewai を前提とした記述が残っていない。"""
         content = self._read_constraints()
         # langchain の制約行より前のコメントを確認
-        found_langchain_constraint = False
         for line in content.splitlines():
             stripped = line.strip()
-            if stripped.startswith("langchain>=") or stripped.startswith("langchain>="):
-                found_langchain_constraint = True
+            if stripped.startswith("langchain>="):
                 break
             if stripped.startswith("#") and "crewai 0.64.0 は langchain 0.2.x を要求する" in stripped:
                 pytest.fail(

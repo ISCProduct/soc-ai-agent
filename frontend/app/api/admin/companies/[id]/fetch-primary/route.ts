@@ -21,7 +21,7 @@ export async function POST(
   const force = request.nextUrl.searchParams.get('force')
   const qs = force === 'true' ? '?force=true' : ''
   try {
-    const result = await proxyAdminBackend('POST', `/api/admin/companies/${id}/fetch-primary${qs}`, {
+    const result = await proxyAdminBackend('POST', `/api/admin/companies/${encodeURIComponent(id)}/fetch-primary${qs}`, {
       headers: adminProxyHeaders(request.headers),
       // maxDuration より短くし、タイムアウト時に整形エラーを返せるようにする
       timeoutMs: 270_000,

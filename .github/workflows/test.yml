@@ -126,6 +126,10 @@ jobs:
       - name: govulncheck の例外判定
         run: ./automation/test/govulncheck-filter-test.sh
 
+      # pip-audit（RAG）の例外判定。考え方は govulncheck と同じ（SOCAIAGENT-578）。
+      - name: pip-audit の例外判定
+        run: ./automation/test/pip-audit-filter-test.sh
+
       # 版番号の比較対象。checkout の既定は fetch-depth=1 で origin/develop を
       # 持たないため、ここで取得する。
       - name: develop を取得（版番号の比較用）
@@ -417,6 +421,14 @@ jobs:
       # 既存ジョブへステップとして足す（別ジョブにすると npm ci がもう一度走る）。
       - name: Run lint
         run: npm run lint
+
+      # 型エラーはこれまで E2E ジョブの `next build` で初めて分かり、検知まで3分以上かかっていた。
+      # E2E は必須チェックでもないため、型エラーが必須の3チェックを素通りする余地もあった。
+      # 必須の本ジョブで先に落とす（next build の型検査と同じ tsconfig を使う）。
+      # tsc だけでは next build が生成する next-env.d.ts と .next/types（ルートの型検証）が無く、
+      # route handler の引数の型違いなどを見逃す。next typegen で先に生成する（1秒未満）。
+      - name: Run type check
+        run: npx next typegen && npx tsc --noEmit
 
       - name: Run unit tests
         run: npm test -- --no-coverage

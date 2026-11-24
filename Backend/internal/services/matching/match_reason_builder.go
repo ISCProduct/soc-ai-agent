@@ -182,7 +182,7 @@ func topUserStrengths(scores []models.UserWeightScore) string {
 		if scores[i].Score <= 0 {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s(%d点)", scores[i].WeightCategory, scores[i].Score))
+		parts = append(parts, fmt.Sprintf("%s(%.0f点)", scores[i].WeightCategory, scores[i].Score))
 	}
 	if len(parts) == 0 {
 		return "幅広い観点"

@@ -1,5 +1,6 @@
 """履歴書レビューレポート生成（stream / 非stream 共通）。"""
 from __future__ import annotations
+from services.prompt_versions import log_prompt_call
 
 import logging
 import os
@@ -10,7 +11,7 @@ from openai import OpenAI
 from models import ReviewRequest
 from services.model_tiers import resume_review_model
 from services.sanitize import _sanitize_company_name_for_query, _sanitize_job_title, _wrap_untrusted_text
-from services.settings import OPENAI_TIMEOUT_SEC
+from services.settings import OPENAI_TIMEOUT_SEC, SCORING_SEED, SCORING_TEMPERATURE
 
 logger = logging.getLogger("main")
 
@@ -99,6 +100,7 @@ def generate_resume_report(
         request, retrieved, context_source, resume_char_limit
     )
     client = OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT_SEC)
+    log_prompt_call("resume_review", resume_review_model())
     resp = client.chat.completions.create(
         model=resume_review_model(),
         messages=[
@@ -107,7 +109,9 @@ def generate_resume_report(
         ],
         stream=False,
         max_tokens=1500,
-        temperature=0.3,
+        # 採点にあたる呼び出しなので温度を下げて seed を固定する（SOCAIAGENT-699）
+        temperature=SCORING_TEMPERATURE,
+        seed=SCORING_SEED,
     )
     text = (resp.choices[0].message.content or "").strip()
     if not text:
