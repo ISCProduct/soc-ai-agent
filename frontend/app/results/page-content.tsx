@@ -8,6 +8,7 @@ import { CONTENT_MAX_WIDTH } from '@/lib/design/tokens'
 import { useResultsData } from './hooks/useResultsData'
 import {
   ResultsLoadingView,
+  ResultsEmptyView,
   ResultsErrorView,
   ResultsNoMatchView,
 } from './components/ResultsStatusViews'
@@ -58,6 +59,7 @@ function ResultsContent() {
     retryFavorites,
     loading,
     error,
+    emptyReason,
     isProvisional,
     diagnosisSummary,
     evaluatedCategories,
@@ -79,6 +81,8 @@ function ResultsContent() {
     diagramError,
     emailSending,
     favoritingId,
+    feedbackingId,
+    handleFeedback,
     applyingId,
     snackbar,
     isGuestUser,
@@ -117,8 +121,22 @@ function ResultsContent() {
         <ResultsErrorView
           error={error}
           onBack={handleBack}
-          onReset={handleReset}
         />
+      </ResultsFallbackColumn>
+    )
+  }
+
+  // 推薦が0件（エラーではない。#2220）
+  if (emptyReason) {
+    return (
+      <ResultsFallbackColumn>
+        <AnalysisScoreCard
+          analysisScores={analysisScores}
+          scoreComment={scoreComment}
+          analysisError={analysisError}
+          onRetryAnalysis={handleRetryAnalysis}
+        />
+        <ResultsEmptyView reason={emptyReason} onBackToChat={handleBack} />
       </ResultsFallbackColumn>
     )
   }
@@ -176,6 +194,8 @@ function ResultsContent() {
       suggestedRoles={suggestedRoles}
       emailSending={emailSending}
       favoritingId={favoritingId}
+      feedbackingId={feedbackingId}
+      onFeedback={handleFeedback}
       applyingId={applyingId}
       snackbar={snackbar}
       isGuestUser={isGuestUser}

@@ -8,7 +8,7 @@ function json(body: unknown) {
 async function mockHome(page: Page, opts: { schedule: unknown[]; applications: unknown[]; guidances: unknown[] }) {
   await page.route('**/api/schedule', (route) => route.fulfill(json(opts.schedule)))
   await page.route('**/api/applications', (route) => route.fulfill(json({ applications: opts.applications })))
-  await page.route('**/api/user/guidances', (route) => route.fulfill(json({ guidances: opts.guidances })))
+  await page.route('**/api/bff/user/guidances', (route) => route.fulfill(json({ guidances: opts.guidances })))
   await page.route('**/api/whats-new', (route) => route.fulfill(json([])))
   await page.route('**/api/resume/status', (route) =>
     route.fulfill(json({ has_document: false, latest_score: null, needs_attention: true })),
@@ -16,8 +16,11 @@ async function mockHome(page: Page, opts: { schedule: unknown[]; applications: u
 }
 
 // #1576: ホームで「次にやること」が分かり、お知らせが積み重なってチャットを押し下げない。
-test.describe('ホームの次にやること', () => {
+// 右パネルが無い狭い画面（lg 未満）では、従来どおり上に「次にやること」とお知らせを積む。
+// 広い画面（3カラム）は home-consult.spec.ts で検査する。
+test.describe('ホームの次にやること（狭い画面）', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 800 })
     await setupAuth(page, TEST_USER)
   })
 

@@ -91,6 +91,21 @@ def _sanitize_collection_name(name: str) -> str:
     return cleaned[:63]
 
 
+def collection_suffix() -> str:
+    """コレクションの世代の接尾辞（RAG_COLLECTION_SUFFIX、SOCAIAGENT-658）。空なら接尾辞なし（今までの名前）。
+
+    全件再構築は、新しい世代のコレクションへ作ってから、この値を切り替えて使う
+    （scripts/rebuild_collections.py）。再構築の間も旧世代で検索できる。
+    """
+    return re.sub(r"[^a-zA-Z0-9_-]", "", os.getenv("RAG_COLLECTION_SUFFIX", "").strip())
+
+
+def physical_collection_name(name: str, suffix: Optional[str] = None) -> str:
+    """論理名（company_context など）に世代の接尾辞を付けた、Chroma 上の実際の名前。"""
+    suffix = collection_suffix() if suffix is None else suffix
+    return _sanitize_collection_name(f"{name}_{suffix}" if suffix else name)
+
+
 def _company_hash(company_original: Optional[str]) -> str:
     """サニタイズ前の企業名をNFKC正規化してSHA-256ハッシュを返す (#938)。
 
@@ -188,15 +203,31 @@ def build_cache_key(
     return f"{company_segment}::{role}"
 
 
+# 取得時刻が未来にずれていてよい幅（ホスト間の時計のずれ）。これを超える未来の日付は壊れているとみなす。
+_FETCHED_AT_FUTURE_TOLERANCE_SECONDS = 300
+
+
 def _is_fresh(fetched_at: Optional[str], ttl_seconds: int = CACHE_TTL_SECONDS) -> bool:
+    """キャッシュ文書が TTL 内かを返す。
+
+    fetched_at が読めない・ありえない未来の日付のときは古い扱い（False）にする（SOCAIAGENT-567）。
+    新鮮扱いにすると TTL で二度と失効せず、古い企業情報がキャッシュに残り続ける。古い扱いなら
+    検索し直して上書きされるので、壊れた日付の文書が自然に入れ替わる。
+
+    fetched_at が無い（取得時刻を記録する前の文書）ときは今までどおり新鮮扱いにする。
+    """
     if not fetched_at or ttl_seconds <= 0:
         return True
     try:
-        ts = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+        ts = datetime.fromisoformat(str(fetched_at).replace("Z", "+00:00"))
         age = (datetime.now(timezone.utc) - ts.astimezone(timezone.utc)).total_seconds()
-        return age <= ttl_seconds
-    except ValueError:
-        return True
+    except (ValueError, TypeError, OverflowError):
+        logger.warning("cache document has unreadable fetched_at=%r; treating as stale", fetched_at)
+        return False
+    if age < -_FETCHED_AT_FUTURE_TOLERANCE_SECONDS:
+        logger.warning("cache document has future fetched_at=%r; treating as stale", fetched_at)
+        return False
+    return age <= ttl_seconds
 
 
 def _doc_ids(cache_key: str, count: int) -> List[str]:
@@ -226,7 +257,7 @@ def get_cached_documents(
 ) -> List[str]:
     """企業単位コレクションから類似ドキュメントを取得する。"""
     meta = parse_cache_key(cache_key)
-    collection_name = _sanitize_collection_name(meta["collection"])
+    collection_name = physical_collection_name(meta["collection"])
     try:
         client = get_chroma_client()
         existing = _collection_names(client)
@@ -351,7 +382,7 @@ def set_cached_documents(
         mapped = DOC_TYPE_TO_COLLECTION.get(doc_type)
         if mapped:
             meta["collection"] = mapped
-    collection_name = _sanitize_collection_name(meta["collection"])
+    collection_name = physical_collection_name(meta["collection"])
     fetched_at = datetime.now(timezone.utc).isoformat()
     try:
         client = get_chroma_client()
@@ -432,10 +463,11 @@ def delete_company_documents(
     )
 
     for name in collections:
-        if name not in existing:
+        physical = physical_collection_name(name)
+        if physical not in existing:
             per_collection[name] = 0
             continue
-        collection = client.get_collection(name)
+        collection = client.get_collection(physical)
         try:
             before = collection.count()
             try:
@@ -456,6 +488,71 @@ def delete_company_documents(
     return {"deleted": deleted_total, "collections": per_collection}
 
 
+class ReplaceDocumentsError(RuntimeError):
+    """書いた文書を確かめられなかった（旧データは消していない）。"""
+
+
+def replace_documents(
+    cache_key: str,
+    docs: List[str],
+    embeddings: List[List[float]],
+    source: str = "unknown",
+    doc_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    """企業の文書を「新しく書く → 書けたことを確かめる → 不要な旧文書を消す」の順で置き換える（SOCAIAGENT-658）。
+
+    以前の再埋め込みは「削除 → 再取得」の順で、再取得が例外・空だと企業データが空のまま残った。
+    ここでは新しい文書が全部読めることを確かめるまで、旧文書を消さない。失敗したら例外を投げ、
+    旧文書はそのまま残る（set_cached_documents のように例外を握りつぶさない）。
+
+    消すのは、同じコレクションにある同じ企業（company と company_hash で絞る）の文書のうち、
+    今回書いた id 以外のもの。役割（role）や用途の違う旧文書もここで消すので、以前の
+    「企業の文書を全部消してから書く」と同じ結果になる。ただし消すのは書けた後だけ。
+    戻り値: {"collection": 論理名, "replaced": 書いた件数, "deleted": 消した件数}
+    """
+    if not docs or not embeddings or len(docs) != len(embeddings):
+        raise ValueError("docs と embeddings は同じ件数で、空でないこと")
+    meta = parse_cache_key(cache_key)
+    logical = DOC_TYPE_TO_COLLECTION.get(doc_type or "", meta["collection"])
+    meta["doc_type"] = doc_type or meta["doc_type"]
+    client = get_chroma_client()
+    collection = client.get_or_create_collection(physical_collection_name(logical))
+    ids = _doc_ids(cache_key, len(docs))
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    collection.upsert(
+        ids=ids,
+        documents=docs,
+        embeddings=embeddings,
+        metadatas=[
+            {
+                "company": meta["company"],
+                "company_hash": meta.get("company_hash", ""),
+                "role": meta["role"],
+                "doc_type": meta["doc_type"],
+                "source": source,
+                "fetched_at": fetched_at,
+                "cache_key": meta["cache_key"],
+            }
+            for _ in docs
+        ],
+    )
+    written = collection.get(ids=ids, include=[]).get("ids") or []
+    if len(set(written)) != len(ids):
+        raise ReplaceDocumentsError(
+            f"written documents not found collection={logical} expected={len(ids)} found={len(written)}"
+        )
+    where = _build_where(_company_filter({"company": meta["company"], "company_hash": meta.get("company_hash", "")}))
+    existing = collection.get(where=where, include=[]).get("ids") or []
+    stale = [doc_id for doc_id in existing if doc_id not in set(ids)]
+    if stale:
+        collection.delete(ids=stale)
+    logger.info(
+        "chromadb replace key=%s collection=%s replaced=%d deleted=%d",
+        cache_key, logical, len(ids), len(stale),
+    )
+    return {"collection": logical, "replaced": len(ids), "deleted": len(stale)}
+
+
 def get_index_status(
     company: Optional[str] = None,
     company_original: Optional[str] = None,
@@ -466,11 +563,12 @@ def get_index_status(
     collections_out: List[Dict[str, Any]] = []
 
     for name in ALL_COLLECTIONS:
-        info: Dict[str, Any] = {"name": name, "exists": name in existing, "count": 0}
-        if name not in existing:
+        physical = physical_collection_name(name)
+        info: Dict[str, Any] = {"name": name, "exists": physical in existing, "count": 0}
+        if physical not in existing:
             collections_out.append(info)
             continue
-        collection = client.get_collection(name)
+        collection = client.get_collection(physical)
         info["count"] = collection.count()
         if company:
             where = _build_where(

@@ -12,9 +12,8 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
-import { BACKEND_URL } from '@/lib/config'
 
-const ENDPOINT = `${BACKEND_URL}/api/user/training-consent`
+const ENDPOINT = '/api/bff/user/training-consent'
 
 /**
  * この画面に出している同意の文言の版（#2168）。保存のたびに送り、サーバーは今の版と一致したときだけ記録する。
@@ -22,7 +21,7 @@ const ENDPOINT = `${BACKEND_URL}/api/user/training-consent`
  * （Backend/internal/models/training_consent_event.go）と一緒に上げること（両者が同じことはバックエンドのテストで確かめる）。
  * 古いタブ・古いフロントは古い版を送るので、サーバーが 409 で拒否し、新しい文言への同意として記録されない。
  */
-export const TRAINING_CONSENT_TEXT_VERSION = '2026-11-11'
+export const TRAINING_CONSENT_TEXT_VERSION = '2026-11-18'
 
 async function fetchConsent(): Promise<boolean> {
   const r = await fetch(ENDPOINT, { headers: authService.getUserFetchHeaders() })
@@ -108,10 +107,10 @@ export function TrainingConsentCard() {
           AI 面接の改善への協力
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          あなたの AI 面接の記録（発話とスコア）を、面接の採点モデルを改善するための学習に使ってよいかの設定です。
+          あなたの AI 面接の記録（発話・スコア・録画した動画）を、面接の採点モデルを改善するための学習に使ってよいかの設定です。
         </Typography>
         <Box component="ul" sx={{ m: 0, mb: 2, pl: 2.5, color: 'text.secondary', typography: 'body2' }}>
-          <li>氏名・メールアドレス・学校名・企業名などは、学習に使う前に別の記号に置き換えます。</li>
+          <li>氏名・メールアドレス・学校名・企業名などは、学習に使う前に別の記号に置き換えます。ただし、録画した動画の顔や声は置き換えられません。</li>
           <li>学習以外の目的には使いません。企業や先生に公開されることもありません。</li>
           <li>いつでもオフにできます。オフにすると、すでに学習用に書き出したあなたのデータも削除します。</li>
         </Box>
@@ -147,7 +146,7 @@ export function TrainingConsentCard() {
                   onChange={(e) => void change(e.target.checked)}
                 />
               }
-              label="面接の記録を、採点モデルの学習に使うことに同意する"
+              label="面接の記録（動画を含む）を、採点モデルの学習に使うことに同意する"
             />
           </>
         )}

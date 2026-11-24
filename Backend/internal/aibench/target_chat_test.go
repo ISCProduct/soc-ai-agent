@@ -164,3 +164,13 @@ func TestChatAnswerTarget_Run呼び出し内容(t *testing.T) {
 		t.Errorf("ユーザープロンプトが BuildAnswerQualityUserPrompt の構造と違う: %q", usrText)
 	}
 }
+
+// TestChatAnswerResponse_キーは本番の出力スキーマと一致する は、ベンチの読み方が本番の
+// 出力スキーマ（prompts.AnswerQualityOutput）からずれていないことを確かめる（SOCAIAGENT-661）。
+// Score だけは欠落を数えるためにポインタで受けるので、型ではなくキーで比べる。
+func TestChatAnswerResponse_キーは本番の出力スキーマと一致する(t *testing.T) {
+	got := prompts.OutputKeys(chatAnswerResponse{})
+	if want := prompts.OutputKeys(prompts.AnswerQualityOutput{}); !slices.Equal(got, want) {
+		t.Errorf("chatAnswerResponse のキー %v が prompts.AnswerQualityOutput のキー %v と違う", got, want)
+	}
+}

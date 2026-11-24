@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/models"
 	"context"
 
 	"gorm.io/gorm"
@@ -16,10 +17,23 @@ func NewTrainingExportRepository(db *gorm.DB) *TrainingExportRepository {
 	return &TrainingExportRepository{db: db}
 }
 
+// trainingConsentedUserIDs は「学習に使ってよい学生」のIDの副問い合わせ。
+// 学習利用に同意済み・未退会・学生ロール・非ゲスト。退会の猶予期間中は論理削除で allow_training_use が
+// 1 のまま残るため、フラグだけでは判定しない。同意の画面は学生にしか出さないので、学生以外は対象にしない。
+// 学習データへ書き出すすべての問い合わせは、この条件を通す。同意していない人の面接を、学習に使わないため。
+func (r *TrainingExportRepository) trainingConsentedUserIDs(ctx context.Context) *gorm.DB {
+	return r.db.WithContext(ctx).Table("users AS tu").Select("tu.id").
+		Where("tu.allow_training_use = ?", true).
+		Where("tu.withdrawn_at IS NULL").
+		Where("tu.role = ?", models.UserRoleStudent).
+		Where("tu.is_guest = ?", false)
+}
+
 func (r *TrainingExportRepository) CountOutcomeApplications(ctx context.Context, statuses []string) (int, error) {
 	var n int64
 	err := r.db.WithContext(ctx).Table("user_application_statuses").
 		Where("status IN ?", statuses).
+		Where("user_id IN (?)", r.trainingConsentedUserIDs(ctx)).
 		Count(&n).Error
 	return int(n), err
 }
@@ -34,6 +48,7 @@ func (r *TrainingExportRepository) CountSessionsByStatus(ctx context.Context, st
 		Select("a.status AS status, COUNT(DISTINCT s.id) AS n").
 		Joins("JOIN interview_sessions AS s ON s.user_id = a.user_id AND s.company_id = a.company_id").
 		Where("a.status IN ?", statuses).
+		Where("a.user_id IN (?)", r.trainingConsentedUserIDs(ctx)).
 		Group("a.status").
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -52,6 +67,7 @@ func (r *TrainingExportRepository) CountExportableSessions(ctx context.Context, 
 		Joins("JOIN user_application_statuses AS a ON s.user_id = a.user_id AND s.company_id = a.company_id").
 		Joins("JOIN interview_utterances AS u ON u.session_id = s.id AND u.role = ?", "user").
 		Where("a.status IN ?", statuses).
+		Where("a.user_id IN (?)", r.trainingConsentedUserIDs(ctx)).
 		Distinct("s.id").
 		Count(&n).Error
 	return int(n), err
@@ -63,11 +79,12 @@ func (r *TrainingExportRepository) CountUserUtterances(ctx context.Context, stat
 		Joins("JOIN interview_sessions AS s ON s.id = u.session_id").
 		Joins("JOIN user_application_statuses AS a ON s.user_id = a.user_id AND s.company_id = a.company_id").
 		Where("a.status IN ? AND u.role = ?", statuses, "user").
+		Where("a.user_id IN (?)", r.trainingConsentedUserIDs(ctx)).
 		Count(&n).Error
 	return int(n), err
 }
 
-func (r *TrainingExportRepository) ListOutcomeSessions(ctx context.Context, statuses []string, limit int) ([]repository.OutcomeSession, error) {
+func (r *TrainingExportRepository) ListOutcomeSessions(ctx context.Context, statuses []string, limit, offset int) ([]repository.OutcomeSession, error) {
 	type sessionRow struct {
 		SessionID uint
 		Status    string
@@ -76,9 +93,13 @@ func (r *TrainingExportRepository) ListOutcomeSessions(ctx context.Context, stat
 		Select("s.id AS session_id, a.status AS status").
 		Joins("JOIN user_application_statuses AS a ON s.user_id = a.user_id AND s.company_id = a.company_id").
 		Where("a.status IN ?", statuses).
+		Where("a.user_id IN (?)", r.trainingConsentedUserIDs(ctx)).
 		Order("s.id")
 	if limit > 0 {
 		q = q.Limit(limit)
+	}
+	if offset > 0 {
+		q = q.Offset(offset)
 	}
 	var rows []sessionRow
 	if err := q.Scan(&rows).Error; err != nil {
@@ -103,6 +124,9 @@ func (r *TrainingExportRepository) ListUserUtterances(ctx context.Context, sessi
 	if err := r.db.WithContext(ctx).Table("interview_utterances").
 		Select("session_id, text").
 		Where("session_id IN ? AND role = ?", sessionIDs, "user").
+		// 一覧を取ったあとに同意を取り消した人の発話を、ここで取り出さない（セッション単位で条件を付け直す）
+		Where("session_id IN (?)", r.db.WithContext(ctx).Table("interview_sessions AS s").Select("s.id").
+			Where("s.user_id IN (?)", r.trainingConsentedUserIDs(ctx))).
 		Order("session_id, created_at, id").
 		Scan(&rows).Error; err != nil {
 		return nil, err

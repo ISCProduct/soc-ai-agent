@@ -2,8 +2,10 @@ package resume
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/config"
 	"Backend/internal/repositories"
 	"Backend/internal/safego"
+	"Backend/internal/services/piimask"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"bufio"
@@ -81,7 +83,12 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 	}
 
 	findings := formatFindingsFor(blocks)
-	review, items, err := s.buildResumeReviewWithAI(ctx, blocks, companyName, jobTitle, candidateType, doc.UserID)
+	// 外へ送るのは伏字済みの写しだけ。保存した本文と注釈PDFの位置は元のまま。失敗したら送らない
+	masked, err := s.maskBlocksForLLM(doc.UserID, blocks)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	review, items, err := s.buildResumeReviewWithAI(ctx, masked, companyName, jobTitle, candidateType, doc.UserID)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -117,8 +124,11 @@ const (
 	// requestReviewJSON が枠を倍にして1度だけやり直す。
 	ReviewMaxOutputTokens = 2400
 
-	// ReviewTemperature はレビュー生成の温度。
-	ReviewTemperature = 0.2
+	// ReviewTemperature はレビュー生成（採点を含む）の温度。同一入力での点のゆらぎを下げるため、
+	// 面接レポート（interview.ReportTemperature, SOCAIAGENT-513）と同じ 0.01 にする（SOCAIAGENT-699）。
+	// 0 にしないのは、温度を省略する経路で API 既定の 1.0 になりうるため。
+	// seed は固定しない。この呼び出しは Responses API で、seed のパラメータが無い。
+	ReviewTemperature = 0.01
 
 	// ReviewMaxItems はプロンプトが指定している items の上限。
 	// プロンプト本文と指示遵守率の判定で同じ値を使う。
@@ -225,7 +235,7 @@ func (s *ResumeService) candidateContextForRAG(userID uint) string {
 
 // ctx はリクエストIDを RAG へ伝播させるために受け取る(#1188)
 func (s *ResumeService) fetchRAGReport(ctx context.Context, resumeText, companyName, jobTitle string, userID uint) (string, error) {
-	baseURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
+	baseURL := config.RAGReviewURL()
 	if baseURL == "" {
 		return "", errors.New("RAG_REVIEW_URL is not set")
 	}
@@ -281,7 +291,7 @@ func (s *ResumeService) fetchRAGReport(ctx context.Context, resumeText, companyN
 // fetchRAGReportStream は FastAPI ストリーミングエンドポイントを呼び出し、
 // SSE レスポンスボディ (io.ReadCloser) を返す。呼び出し元がクローズする責務を持つ。
 func (s *ResumeService) fetchRAGReportStream(ctx context.Context, resumeText, companyName, jobTitle string, userID uint) (io.ReadCloser, error) {
-	baseURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
+	baseURL := config.RAGReviewURL()
 	if baseURL == "" {
 		return nil, errors.New("RAG_REVIEW_URL is not set")
 	}
@@ -483,13 +493,20 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	_ = s.repo.ReplaceTextBlocks(doc.ID, blocks)
 	findings := formatFindingsFor(blocks)
 
-	text := buildResumeText(blocks, reviewTextLimit)
+	// 外へ送るのは伏字済みの写しだけ。失敗したら送らない
+	masked, err := s.maskBlocksForLLM(doc.UserID, blocks)
+	if err != nil {
+		log.Printf("resume_review_stream: mask failed document_id=%d err=%v", documentID, err)
+		sendEvent(map[string]any{"type": "error", "message": errMaskUnavailable.Error()})
+		return err
+	}
+	text := buildResumeText(masked, reviewTextLimit)
 
 	// RAGレポートをストリーミングしつつ全文を収集する
 	ragReport := s.streamRAGReport(ctx, w, text, companyName, jobTitle, doc.UserID)
 
 	// スコア・指摘事項を生成
-	review, items, err := s.buildReviewScoreItems(ctx, blocks, companyName, jobTitle, candidateType, ragReport)
+	review, items, err := s.buildReviewScoreItems(ctx, masked, companyName, jobTitle, candidateType, ragReport)
 	if err != nil {
 		log.Printf("resume_review_stream: build score failed: %v", err)
 		sendEvent(map[string]any{"type": "error", "message": reviewScoreErrorMessage(err)})
@@ -627,7 +644,7 @@ func relaySSEChunks(body io.Reader, w http.ResponseWriter) (string, error) {
 	return accum.String(), scanner.Err()
 }
 
-func (s *ResumeService) buildResumeReviewWithAI(ctx context.Context, blocks []models.ResumeTextBlock, companyName string, jobTitle string, candidateType string, userID uint) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (s *ResumeService) buildResumeReviewWithAI(ctx context.Context, blocks llmBlocks, companyName string, jobTitle string, candidateType string, userID uint) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	text := buildResumeText(blocks, reviewTextLimit)
 	if strings.TrimSpace(text) == "" {
 		return nil, nil, &shared.ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
@@ -649,7 +666,7 @@ func (s *ResumeService) buildResumeReviewWithAI(ctx context.Context, blocks []mo
 
 // buildReviewScoreItems はcompanyInfoを受け取りOpenAIでスコア・指摘事項を生成する。
 // fetchRAGReportStream など外部から取得したRAGレポートを直接渡す場合に使用する。
-func (s *ResumeService) buildReviewScoreItems(ctx context.Context, blocks []models.ResumeTextBlock, companyName, jobTitle, candidateType, companyInfo string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (s *ResumeService) buildReviewScoreItems(ctx context.Context, blocks llmBlocks, companyName, jobTitle, candidateType, companyInfo string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	if s.aiClient == nil {
 		return nil, nil, fmt.Errorf("AIクライアントが初期化されていません")
 	}
@@ -693,7 +710,7 @@ func (s *ResumeService) buildReviewScoreItems(ctx context.Context, blocks []mode
 		log.Printf("resume_review: ルーブリック違反のためスコアを捨てる: %v", scoreErr)
 	}
 
-	items := mapReviewItems(blocks, response.Items)
+	items := mapReviewItems(blocks.list(), response.Items)
 	log.Printf("resume_review: items mapped=%d raw=%d", len(items), len(response.Items))
 	if len(items) < 3 || scoreErr != nil {
 		items, overall, scoreErr = s.retryReviewGeneration(ctx, blocks, companyName, jobTitle, candidateType, companyInfo, modelOverride, items, overall, scoreErr)
@@ -722,14 +739,14 @@ func prependCompanyBrief(brief, companyInfo string) string {
 // 1度だけ作り直し、採用する指摘とスコアを返す。やり直しに失敗したら初回の結果をそのまま返す。
 func (s *ResumeService) retryReviewGeneration(
 	ctx context.Context,
-	blocks []models.ResumeTextBlock,
+	blocks llmBlocks,
 	companyName, jobTitle, candidateType, companyInfo, modelOverride string,
 	items []models.ResumeReviewItem,
 	overall int,
 	scoreErr error,
 ) ([]models.ResumeReviewItem, int, error) {
 	// スコアだけが不正なときもやり直す。面接（#795）と同じく作り直しは1度だけ。
-	blocksForRetry := selectReviewBlocks(blocks, 40)
+	blocksForRetry := selectReviewBlocks(blocks.list(), 40)
 	blockList := buildBlockList(blocksForRetry)
 	retryPrompt := buildReviewRetryPrompt(blockList, companyName, jobTitle, companyInfo, candidateType)
 	rawRetry, retryReqErr := s.requestReviewJSON(ctx, reviewRetrySystemPrompt, retryPrompt, modelOverride)
@@ -739,7 +756,7 @@ func (s *ResumeService) retryReviewGeneration(
 	if retryReqErr == nil {
 		responseRetry := aiReviewResponse{}
 		if decodeJSON(rawRetry, &responseRetry) == nil {
-			retryItems := mapReviewItems(blocks, responseRetry.Items)
+			retryItems := mapReviewItems(blocks.list(), responseRetry.Items)
 			log.Printf("resume_review: retry items mapped=%d raw=%d", len(retryItems), len(responseRetry.Items))
 			// 指摘の差し替えは「初回が3件未満」のときだけ。スコアだけが不正で
 			// 初回の指摘が足りているなら、本文に紐づいた初回の指摘を守る。
@@ -929,5 +946,11 @@ func BuildReviewPromptFromTextWithConfidence(resumeText string, confidence []flo
 		lineNo++
 		blocks = append(blocks, block)
 	}
-	return buildReviewPrompt(buildResumeText(blocks, reviewTextLimit), companyName, jobTitle, companyInfo, candidateType)
+	// 評価ハーネスは合成データで測るが、本番と同じく伏字済みのブロックだけをプロンプトへ載せる。
+	// 辞書は空（登録情報が無い）で、規則だけで伏字にする。作れなければ空のプロンプトを返して送らせない。
+	m, err := piimask.ForLLM(piimask.Subject{})
+	if err != nil {
+		return ""
+	}
+	return buildReviewPrompt(buildResumeText(maskBlocksWith(m, blocks), reviewTextLimit), companyName, jobTitle, companyInfo, candidateType)
 }

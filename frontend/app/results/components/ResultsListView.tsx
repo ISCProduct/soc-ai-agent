@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, type MouseEvent } from 'react'
+import { useState, type MouseEvent, type ReactNode } from 'react'
+import type { SxProps, Theme } from '@mui/material/styles'
 import {
   Box,
   Typography,
@@ -25,8 +26,9 @@ import {
   Favorite,
   FavoriteBorder,
 } from '@mui/icons-material'
-import type { AnalysisScores, Company, SnackbarState, SuggestedRole } from '../types'
+import type { AnalysisScores, Company, MatchFeedbackVerdict, SnackbarState, SuggestedRole } from '../types'
 import { buildEsRewriteQuery, buildInterviewQuery, getTopCategoryScores } from '../utils'
+import { withStableKeys } from '@/lib/list-keys'
 import AnalysisScoreCard from './AnalysisScoreCard'
 import FavoritesCompareList from './FavoritesCompareList'
 import {
@@ -39,7 +41,7 @@ import { APPLY_CLOSED_LABEL, getApplyClosedButtonProps } from '@/lib/apply-avail
 import { CONTENT_MAX_WIDTH, UI, leadSentences, scaleBand } from '@/lib/design/tokens'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import { FavoritesPageNav } from '@/components/favorites/FavoritesPageNav'
-import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
+import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
 
 export interface ResultsListViewProps {
   companies: Company[]
@@ -66,6 +68,8 @@ export interface ResultsListViewProps {
   suggestedRoles: SuggestedRole[]
   emailSending: boolean
   favoritingId: number | null
+  /** 「合う／合わない」を送信中の推薦。送信中は押せない */
+  feedbackingId?: number | null
   applyingId: number | null
   snackbar: SnackbarState
   isGuestUser: boolean
@@ -78,8 +82,27 @@ export interface ResultsListViewProps {
   onSelectCompany: (company: Company) => void
   onToggleFavorite: (e: MouseEvent, company: Company) => void
   onUnfavoriteCompany: (e: MouseEvent, company: Company) => void
+  /** 推薦への「合う／合わない」。省略すると、ボタンを出さない */
+  onFeedback?: (e: MouseEvent, company: Company, verdict: MatchFeedbackVerdict) => void
   onApply: (e: MouseEvent, company: Company) => void
   onNavigate: (path: string) => void
+}
+
+// 押せない理由の文の id（ボタンの aria-describedby から指す）。同じ画面に2つあるメール送信ボタンは別の id にする
+const EMAIL_REASON_TOP_ID = 'results-email-disabled-reason-top'
+const EMAIL_REASON_BOTTOM_ID = 'results-email-disabled-reason-bottom'
+const APPLICATIONS_REASON_ID = 'results-applications-disabled-reason'
+
+/**
+ * 押せないボタンの理由を、常に見える文として出す（#2221）。
+ * 吹き出し（Tooltip）はマウスを乗せないと出ず、タッチ端末では読めないので、吹き出しは補助にとどめる。
+ */
+function DisabledReason({ id, children, sx }: { id: string; children: ReactNode; sx?: SxProps<Theme> }) {
+  return (
+    <Typography id={id} variant="caption" component="p" sx={[{ color: UI.inkSoft, mt: 0.5 }, ...(Array.isArray(sx) ? sx : [sx])]}>
+      {children}
+    </Typography>
+  )
 }
 
 /**
@@ -118,6 +141,8 @@ export default function ResultsListView({
   onSelectCompany,
   onToggleFavorite,
   onUnfavoriteCompany,
+  onFeedback,
+  feedbackingId = null,
   onApply,
   onNavigate,
 }: ResultsListViewProps) {
@@ -129,6 +154,14 @@ export default function ResultsListView({
   const favoritesTotal = favoritesTotalProp ?? favoriteCompanies.length
   const favoriteCount = favoritesTotal
   const listedCompanies = favoritesOnly ? favoriteCompanies : companies
+  // 「応募する」を押せない理由（応募済みは理由ではないので出さない）。ゲストの理由を先に出す
+  const applyReason = (company: Company): string => {
+    if (company.isApplied) return ''
+    if (guestApplicationsProps.disabled) return guestApplicationsProps.title
+    if (applyClosedProps.disabled) return applyClosedProps.title
+    return ''
+  }
+  const applyReasonId = (company: Company) => `results-apply-disabled-reason-${String(company.id).replace(/[^A-Za-z0-9_-]/g, '_')}`
   // 一覧全体の幅。各社の位置はこの中で示す。並び順は渡されたまま（適合度順）。
   const band = scaleBand(listedCompanies.map((c) => c.matchScore))
   // 一覧の中で最も多い根拠軸数。これを下回る行だけ印を出す
@@ -161,19 +194,25 @@ export default function ResultsListView({
           <Button variant="outlined" startIcon={<ArrowBack />} onClick={onBack}>
             チャットに戻る
           </Button>
-          <Tooltip title={guestEmailProps.title} disableHoverListener={!guestEmailProps.disabled}>
-            <span>
-              <Button
-                variant="contained"
-                startIcon={<Email />}
-                onClick={onSendEmail}
-                disabled={emailSending || guestEmailProps.disabled}
-                sx={{ width: { xs: '100%', sm: 'auto' } }}
-              >
-                {emailSending ? '送信中...' : '結果をメールで受け取る'}
-              </Button>
-            </span>
-          </Tooltip>
+          <Box sx={{ width: { xs: '100%', sm: 'auto' } }}>
+            <Tooltip title={guestEmailProps.title} disableHoverListener={!guestEmailProps.disabled}>
+              <span>
+                <Button
+                  variant="contained"
+                  startIcon={<Email />}
+                  onClick={onSendEmail}
+                  disabled={emailSending || guestEmailProps.disabled}
+                  aria-describedby={guestEmailProps.disabled ? EMAIL_REASON_TOP_ID : undefined}
+                  sx={{ width: { xs: '100%', sm: 'auto' } }}
+                >
+                  {emailSending ? '送信中...' : '結果をメールで受け取る'}
+                </Button>
+              </span>
+            </Tooltip>
+            {guestEmailProps.disabled && (
+              <DisabledReason id={EMAIL_REASON_TOP_ID}>{guestEmailProps.title}</DisabledReason>
+            )}
+          </Box>
         </Box>
         {isGuestUser && (
           <Alert
@@ -304,10 +343,10 @@ export default function ResultsListView({
                 </Typography>
               )}
               <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, maxWidth: '72ch' }}>
-                {suggestedRoles.map((role, i) => (
+                {withStableKeys(suggestedRoles, (r) => r.title).map(({ key, item: role, index: i }) => (
                   <Box
                     component="li"
-                    key={i}
+                    key={key}
                     sx={{
                       py: 1.25,
                       borderTop: i === 0 ? `1px solid ${UI.ruleSoft}` : 'none',
@@ -455,9 +494,35 @@ export default function ResultsListView({
                       </Typography>
                     )}
 
+                  {company.jobMatched && (
+                    <Typography sx={{ fontSize: 13, color: UI.inkSoft, mt: 0.5 }}>選んだ職種の募集があります。</Typography>
+                  )}
+                  {/* 参考の印は文字で出す（色だけで伝えない）。理由は文頭の「参考:」から続けて読める */}
+                  {company.isReference && company.fitNote && (
+                    <Typography sx={{ fontSize: 13, color: UI.flag, mt: 0.5 }}>{company.fitNote}</Typography>
+                  )}
+
                   <Typography sx={{ fontSize: 15, lineHeight: 1.9, color: UI.ink, maxWidth: '68ch', mb: 2 }}>
                     {leadSentences(company.description)}
                   </Typography>
+
+                  {onFeedback && company.matchId && (
+                    <Box role="group" aria-label={`${company.name}の提案への回答`} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                      <Typography sx={{ fontSize: 13, color: UI.inkSoft }}>この提案は？</Typography>
+                      {(['fit', 'unfit'] as const).map((verdict) => (
+                        <Button
+                          key={verdict}
+                          size="small"
+                          variant={company.feedback === verdict ? 'contained' : 'outlined'}
+                          aria-pressed={company.feedback === verdict}
+                          disabled={feedbackingId === company.matchId}
+                          onClick={(e) => onFeedback(e, company, verdict)}
+                        >
+                          {verdict === 'fit' ? '合う' : '合わない'}
+                        </Button>
+                      ))}
+                    </Box>
+                  )}
 
 
                   {/*
@@ -466,9 +531,9 @@ export default function ResultsListView({
                   */}
                   {company.techStack && company.techStack.length > 0 && (
                     <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
-                      {company.techStack.map((tech, i) => (
+                      {withStableKeys(company.techStack).map(({ key, item: tech }) => (
                         <Box
-                          key={i}
+                          key={key}
                           sx={{
                             fontSize: 12.5,
                             color: UI.inkSoft,
@@ -486,8 +551,8 @@ export default function ResultsListView({
 
                   {company.tags && company.tags.length > 0 && (
                     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                      {company.tags.map((tag, i) => (
-                        <Chip key={i} label={tag} size="small" />
+                      {withStableKeys(company.tags).map(({ key, item: tag }) => (
+                        <Chip key={key} label={tag} size="small" />
                       ))}
                     </Stack>
                   )}
@@ -554,6 +619,7 @@ export default function ResultsListView({
                           variant={company.isApplied ? 'contained' : 'outlined'}
                           size="small"
                           color="primary"
+                          aria-describedby={applyReason(company) ? applyReasonId(company) : undefined}
                           disabled={
                             company.isApplied ||
                             applyingId === company.matchId ||
@@ -573,6 +639,9 @@ export default function ResultsListView({
                       </span>
                     </Tooltip>
                   </Stack>
+                  {applyReason(company) && (
+                    <DisabledReason id={applyReasonId(company)}>{applyReason(company)}</DisabledReason>
+                  )}
               </Box>
             ))}
           </Box>
@@ -587,6 +656,7 @@ export default function ResultsListView({
                     startIcon={<Email />}
                     onClick={onSendEmail}
                     disabled={emailSending || guestEmailProps.disabled}
+                    aria-describedby={guestEmailProps.disabled ? EMAIL_REASON_BOTTOM_ID : undefined}
                   >
                     {emailSending ? '送信中...' : '結果をメールで受け取る'}
                   </Button>
@@ -603,6 +673,7 @@ export default function ResultsListView({
                     variant="outlined"
                     size="large"
                     disabled={guestApplicationsProps.disabled}
+                    aria-describedby={guestApplicationsProps.disabled ? APPLICATIONS_REASON_ID : undefined}
                     onClick={() => onNavigate('/applications')}
                   >
                     選考管理を見る
@@ -613,6 +684,13 @@ export default function ResultsListView({
                 最初からやり直す
               </Button>
             </Stack>
+            {/* 押せない理由は吹き出しだけでなく、常に見える文で出す（タッチ端末では吹き出しが出ない。#2221） */}
+            {guestEmailProps.disabled && (
+              <DisabledReason id={EMAIL_REASON_BOTTOM_ID} sx={{ mt: 1.5 }}>{guestEmailProps.title}</DisabledReason>
+            )}
+            {guestApplicationsProps.disabled && (
+              <DisabledReason id={APPLICATIONS_REASON_ID}>{guestApplicationsProps.title}</DisabledReason>
+            )}
           </Box>
         </Box>
       </Box>
@@ -621,7 +699,7 @@ export default function ResultsListView({
       <BottomNavSpacer />
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={5000}
+        autoHideDuration={SNACKBAR_AUTO_HIDE_MS}
         onClose={onCloseSnackbar}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         sx={ABOVE_BOTTOM_NAV_SX}

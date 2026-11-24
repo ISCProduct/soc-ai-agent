@@ -2,6 +2,7 @@ package matching
 
 import (
 	"Backend/internal/models"
+	"context"
 	"errors"
 	"testing"
 
@@ -28,7 +29,7 @@ func (s *stubToggleFavoriteMatchRepo) CreateOrUpdateBatch([]*models.UserCompanyM
 func (s *stubToggleFavoriteMatchRepo) FindTopMatchesByUserAndSession(uint, string, int) ([]*models.UserCompanyMatch, error) {
 	return nil, nil
 }
-func (s *stubToggleFavoriteMatchRepo) FindFavoritedByUser(uint) ([]*models.UserCompanyMatch, error) {
+func (s *stubToggleFavoriteMatchRepo) FindFavoritedByUser(context.Context, uint) ([]*models.UserCompanyMatch, error) {
 	return s.favorited, nil
 }
 func (s *stubToggleFavoriteMatchRepo) FindByID(uint) (*models.UserCompanyMatch, error) {
@@ -39,7 +40,7 @@ func (s *stubToggleFavoriteMatchRepo) ToggleFavorite(uint) error {
 	s.toggleCalled = true
 	return nil
 }
-func (s *stubToggleFavoriteMatchRepo) UnfavoriteCompany(userID uint, companyID uint) error {
+func (s *stubToggleFavoriteMatchRepo) UnfavoriteCompany(_ context.Context, userID uint, companyID uint) error {
 	s.unfavUser = userID
 	s.unfavCompany = companyID
 	return nil
@@ -90,7 +91,7 @@ func TestUnfavoriteCompany_ClearsAcrossSessions(t *testing.T) {
 	repo := &stubToggleFavoriteMatchRepo{}
 	s := &MatchingService{matchRepo: repo}
 
-	if err := s.UnfavoriteCompany(7, 3); err != nil {
+	if err := s.UnfavoriteCompany(context.Background(), 7, 3); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if repo.unfavUser != 7 || repo.unfavCompany != 3 {
@@ -106,7 +107,7 @@ func TestListFavoriteCompanies_DedupesRepoRows(t *testing.T) {
 	}}
 	s := &MatchingService{matchRepo: repo}
 
-	got, total, ids, err := s.ListFavoriteCompanies(1, 0, 50)
+	got, total, ids, err := s.ListFavoriteCompanies(context.Background(), 1, 0, 50)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,7 +135,7 @@ func TestListFavoriteCompanies_OffsetReturnsLaterCompanies(t *testing.T) {
 	repo := &stubToggleFavoriteMatchRepo{favorited: rows}
 	s := &MatchingService{matchRepo: repo}
 
-	got, total, ids, err := s.ListFavoriteCompanies(1, 1, 1)
+	got, total, ids, err := s.ListFavoriteCompanies(context.Background(), 1, 1, 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -145,7 +146,7 @@ func TestListFavoriteCompanies_OffsetReturnsLaterCompanies(t *testing.T) {
 		t.Fatalf("got %+v, want company 10 only", got)
 	}
 
-	past, pastTotal, _, err := s.ListFavoriteCompanies(1, 100, 100)
+	past, pastTotal, _, err := s.ListFavoriteCompanies(context.Background(), 1, 100, 100)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -75,7 +76,7 @@ func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint
 		shared.WrapUntrustedText(transcript, "応募者発言"))
 
 	model := aimodel.For(aimodel.StageInterviewReport)
-	ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewRealtime)
+	ctx = usagectx.WithFeature(s.withPIIGuard(ctx, session.UserID), usagectx.FeatureInterviewRealtime)
 	llmCtx, cancel := context.WithTimeout(ctx, interviewPhraseSuggestionsLLMTimeout)
 	defer cancel()
 	raw, err := s.openaiClient.ChatCompletionJSON(llmCtx, systemPrompt, userPrompt, 0.5, 1000, model)
@@ -115,10 +116,24 @@ func (s *InterviewService) GetTrend(userID uint, limit int) ([]InterviewTrendPoi
 		sessions[i], sessions[j] = sessions[j], sessions[i]
 	}
 
+	// レポートは1回でまとめて取得する。取得失敗時はレポート無し扱い(従来動作)
+	ids := make([]uint, len(sessions))
+	for i, session := range sessions {
+		ids[i] = session.ID
+	}
+	reportBySession := map[uint]*models.InterviewReport{}
+	reports, err := s.reportRepo.FindBySessionIDs(ids)
+	if err != nil {
+		log.Printf("[Interview] GetTrend: report batch fetch failed (user=%d, sessions=%d): %v", userID, len(ids), err)
+	}
+	for i := range reports {
+		reportBySession[reports[i].SessionID] = &reports[i]
+	}
+
 	points := make([]InterviewTrendPoint, 0, len(sessions))
 	for _, session := range sessions {
-		report, err := s.reportRepo.FindBySessionID(session.ID)
-		if err != nil {
+		report, ok := reportBySession[session.ID]
+		if !ok {
 			// レポート未生成のセッションはスキップ
 			continue
 		}

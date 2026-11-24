@@ -4,6 +4,8 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/piimask"
+	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
@@ -37,8 +39,8 @@ type AxisScore struct {
 }
 
 type CategoryRecommendation struct {
-	Category string `json:"category"`
-	Score    int    `json:"score"`
+	Category string  `json:"category"`
+	Score    float64 `json:"score"`
 }
 
 type CompanyRecommendation struct {
@@ -62,6 +64,10 @@ type LLMStructuredSummary struct {
 	Concerns                []string `json:"concerns"`
 	RecommendedWorkingStyle string   `json:"recommended_working_style"`
 }
+
+// analysisSummaryPromptVersion は分析サマリーのプロンプトの版。本文を変えたら上げる（使用量ログの prompt_version に残る）。
+// v2: 学生の発言を WrapUntrustedText で囲む（SOCAIAGENT-700）。
+const analysisSummaryPromptVersion = "v2"
 
 func analysisSummaryResponseSchema() *openai.ResponseSchema {
 	return &openai.ResponseSchema{
@@ -154,7 +160,13 @@ type AnalysisScoringService struct {
 	matchRepo               repository.UserCompanyMatchRepository
 	futureAnalyzer          FutureAnalyzer
 	aiClient                *openai.Client
+	// subjects は、LLM へ送る直前の伏字に使う、学生の登録情報（氏名・学校名・メール）の読み取り。
+	// 未設定なら、登録情報なしの規則だけで伏字にする。
+	subjects piimask.SubjectReader
 }
+
+// SetSubjectReader は、伏字に使う登録情報の読み取りを設定する。
+func (s *AnalysisScoringService) SetSubjectReader(r piimask.SubjectReader) { s.subjects = r }
 
 func NewAnalysisScoringService(
 	userWeightScoreRepo repository.UserWeightScoreRepository,
@@ -237,7 +249,8 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 					lastUserTexts = append(lastUserTexts, m.Content)
 				}
 			}
-			userContext := strings.Join(lastUserTexts, "\n---\n")
+			// 学生の発言は区切りで囲み、中の指示文に従わせない（SOCAIAGENT-700）
+			userContext := shared.WrapUntrustedText(strings.Join(lastUserTexts, "\n---\n"), "学生の発言")
 
 			systemPrompt := `あなたは採用支援の専門家です。以下の情報を元に、JSON形式で要約を出力してください。
 出力フォーマット: {"strengths": ["..."], "concerns": ["..."], "recommended_working_style": "..."}
@@ -247,7 +260,10 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 			// リクエストの ctx を引き継ぐ。誰も受け取らない要約に課金しないよう、クライアントが
 			// 切断したら LLM 呼び出しも止める。その場合 LLM 要約なしで返り、保存もしないので、
 			// 次回のリクエストで生成し直される。
-			aiCtx, cancel := context.WithTimeout(usagectx.WithFeature(ctx, usagectx.FeatureAnalysisScoring), analysisSummaryLLMTimeout)
+			// 直近のユーザー発言を外部 AI へ送る前に、個人を特定できる語を伏字にする（作れなければ送らない）
+			guarded := openai.WithInputGuard(ctx, piimask.GuardFor(s.subjects, userID))
+			guarded = usagectx.WithPromptVersion(guarded, "analysis_summary", analysisSummaryPromptVersion)
+			aiCtx, cancel := context.WithTimeout(usagectx.WithFeature(guarded, usagectx.FeatureAnalysisScoring), analysisSummaryLLMTimeout)
 			raw, err := s.aiClient.ChatCompletionWithSchema(aiCtx, systemPrompt, userPrompt, 0.2, 400, analysisSummaryResponseSchema())
 			cancel()
 			if err == nil && strings.TrimSpace(raw) != "" {
@@ -261,11 +277,8 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 						log.Printf("failed to persist llm summary: %v", err)
 					}
 				} else {
-					// JSONでない場合は生テキストとして保存
-					summary.LLMRawSummary = raw
-					if err := s.conversationContextRepo.SetSessionSummary(userID, sessionID, raw); err != nil {
-						log.Printf("failed to persist llm summary: %v", err)
-					}
+					// JSON として読めない応答は保存も表示もしない。本文は出さない（学生の発言由来の可能性がある）
+					log.Printf("[analysis.summary] discarded unparsable llm output len=%d", len(raw))
 				}
 			} else if err != nil {
 				log.Printf("LLM summary generation failed: %v", err)

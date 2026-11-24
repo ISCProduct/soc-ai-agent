@@ -4,7 +4,6 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"Backend/internal/services/chat"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
@@ -29,11 +28,13 @@ import (
 type ChatController struct {
 	chatService     ifaces.ChatService
 	matchingService ifaces.MatchingService
+	// 推薦へのフィードバック（SOCAIAGENT-670）。任意の依存（未注入なら記録しない）。
+	feedback        MatchFeedback
 	analysisService ifaces.AnalysisScoringService
 	userRepo        repository.UserRepository
 	emailService    ifaces.EmailService
 	jobs            shared.JobEnqueuer
-	qualityRepo     *repositories.DiagnosisQualityRepository
+	quality         *diagnosis.QualityService
 	matchingTimers  sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
 	matchingRunning sync.Map // key: sessionID, value: struct{}（実行中の多重起動防止, #1167）
 	aiBudget        costs.AIBudgetStatusProvider
@@ -74,16 +75,16 @@ func (c *ChatController) SetJobEnqueuer(j shared.JobEnqueuer) {
 	c.jobs = j
 }
 
-// SetDiagnosisQualityRepo は recommendations に診断信頼度を載せるための参照先。
-func (c *ChatController) SetDiagnosisQualityRepo(r *repositories.DiagnosisQualityRepository) {
-	c.qualityRepo = r
+// SetDiagnosisQualityService は recommendations に診断信頼度を載せるための参照先。
+func (c *ChatController) SetDiagnosisQualityService(s *diagnosis.QualityService) {
+	c.quality = s
 }
 
 func (c *ChatController) loadDiagnosisQuality(userID uint, sessionID string) (confidence int, flags []string, summary string) {
-	if c.qualityRepo == nil {
+	if c.quality == nil {
 		return 0, nil, ""
 	}
-	report, err := c.qualityRepo.FindByUserAndSession(userID, sessionID)
+	report, err := c.quality.FindReport(userID, sessionID)
 	if err != nil || report == nil {
 		return 0, nil, ""
 	}
@@ -259,6 +260,10 @@ func (c *ChatController) Chat(ctx echo.Context) error {
 	if req.SessionID == "" || req.Message == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Missing required fields")
 	}
+	// 相談の意図（任意）。知らない値と、長すぎる自由記述は受け付けない
+	if err := chat.ValidateConsultIntent(req.ConsultIntent, req.Message); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 
 	// 既存セッションへの書き込みの場合、他ユーザーのセッションでないことを検証する（#946 IDOR対策）。
 	// さらに NEW セッションの同時開始時には session_id の所有権を原子的に確定させ、
@@ -388,8 +393,10 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 
 	displayed := matching.DisplayableMatches(matches)
 	minAxes := matching.MinMatchedAxisCount(displayed)
+	recs := matching.BuildRecommendations(displayed, reasonScores)
+	c.attachFeedback(userID, recs)
 	return ctx.JSON(http.StatusOK, matching.RecommendationResponse{
-		Recommendations:     matching.BuildRecommendations(displayed, reasonScores),
+		Recommendations:     recs,
 		EvaluatedCategories: evaluatedCategories,
 		IsProvisional:       matching.IsRecommendationProvisional(evaluatedCategories, diagConf, diagFlags, minAxes),
 		DiagnosisConfidence: diagConf,
@@ -397,6 +404,61 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		DiagnosisSummary:    diagSummary,
 		MinMatchedAxisCount: minAxes,
 	})
+}
+
+// attachFeedback は、本人の「合う／合わない」を推薦に付ける。読めなくても推薦は返す。
+func (c *ChatController) attachFeedback(userID uint, recs []matching.Recommendation) {
+	if c.feedback == nil || len(recs) == 0 {
+		return
+	}
+	ids := make([]uint, 0, len(recs))
+	for _, r := range recs {
+		ids = append(ids, r.MatchID)
+	}
+	verdicts := c.feedback.Verdicts(userID, ids)
+	for i := range recs {
+		recs[i].Feedback = verdicts[recs[i].MatchID]
+	}
+}
+
+// MatchFeedback は、推薦への「合う／合わない」の記録（matching.MatchFeedbackService）。
+type MatchFeedback interface {
+	Submit(userID, matchID uint, verdict string) error
+	Verdicts(userID uint, matchIDs []uint) map[uint]string
+}
+
+// SetMatchFeedback は、推薦へのフィードバックの記録を有効にする。
+func (c *ChatController) SetMatchFeedback(f MatchFeedback) { c.feedback = f }
+
+// SubmitMatchFeedback は、推薦への「合う／合わない」を記録する (POST /api/chat/match-feedback)。
+// verdict は fit / unfit / none（取り消し）。自由記述は受け付けない。
+func (c *ChatController) SubmitMatchFeedback(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	if c.feedback == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "feedback is unavailable")
+	}
+	var req struct {
+		MatchID uint   `json:"match_id"`
+		Verdict string `json:"verdict"`
+	}
+	if err := ctx.Bind(&req); err != nil || req.MatchID == 0 || req.Verdict == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "match_id and verdict are required")
+	}
+	if err := c.feedback.Submit(userID, req.MatchID, req.Verdict); err != nil {
+		switch {
+		case errors.Is(err, matching.ErrInvalidFeedbackVerdict):
+			return echo.NewHTTPError(http.StatusBadRequest, "verdict must be fit, unfit or none")
+		case errors.Is(err, shared.ErrForbidden):
+			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
+		case errors.Is(err, shared.ErrNotFound):
+			return echo.NewHTTPError(http.StatusNotFound, "match not found")
+		}
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]bool{"ok": true})
 }
 
 // ToggleFavorite お気に入りをトグル (POST /api/chat/favorite)
@@ -439,7 +501,7 @@ func (c *ChatController) GetFavorites(ctx echo.Context) error {
 	// ユーザーIDは認証だけを見る。クエリの user_id では他人のお気に入りを読めない。
 	limit := httpapi.LimitQuery(ctx, "limit", 50)
 	offset := httpapi.IntQuery(ctx, "offset", 0)
-	matches, total, companyIDs, err := c.matchingService.ListFavoriteCompanies(userID, offset, limit)
+	matches, total, companyIDs, err := c.matchingService.ListFavoriteCompanies(ctx.Request().Context(), userID, offset, limit)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -475,7 +537,7 @@ func (c *ChatController) RemoveFavoriteCompany(ctx echo.Context) error {
 	if c.matchingService == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "matching service not available")
 	}
-	if err := c.matchingService.UnfavoriteCompany(userID, req.CompanyID); err != nil {
+	if err := c.matchingService.UnfavoriteCompany(ctx.Request().Context(), userID, req.CompanyID); err != nil {
 		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]bool{"ok": true})

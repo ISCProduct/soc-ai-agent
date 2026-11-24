@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"Backend/internal/logsafe"
 	"Backend/internal/models"
 	"context"
 	"fmt"
@@ -37,8 +38,19 @@ func (s *ChatService) resolveJobCategoryForChat(ctx context.Context, req ChatReq
 		storedJobCategoryID = jobCategoryID
 	}
 
+	// 最初の回答が相談の意図なら、職種の判定（AI 呼び出し）を飛ばす。意図を保存し、次の質問で職種を聞く。
+	// 意図の回答は質問数に数えない（診断の1問目は、職種の回答）。
+	if jobCategoryID == 0 && req.ConsultIntent != "" && IsValidConsultIntent(req.ConsultIntent) && s.shouldValidateJobCategory(history) {
+		if resp, handled, err := s.handleConsultIntent(ctx, req); err != nil {
+			return nil, err
+		} else if handled {
+			result.earlyResponse = resp
+			return result, nil
+		}
+	}
+
 	if jobCategoryID == 0 && s.shouldValidateJobCategory(history) {
-		log.Printf("[JobValidation] Validating job category answer: %s\n", req.Message)
+		log.Printf("[JobValidation] Validating job category answer: chars=%d\n", logsafe.Chars(req.Message))
 		// 直前に提示した質問文を渡す。番号だけの回答は、そのとき並んでいた
 		// 選択肢に対して解釈しないと別の職種になる（#1330）。
 		presentedQuestion := findLastAssistantQuestion(history)
@@ -72,7 +84,7 @@ func (s *ChatService) resolveJobCategoryForChat(ctx context.Context, req ChatReq
 				result.earlyResponse = &ChatResponse{
 					Response:          jobValidation.SuggestedQuestion,
 					IsComplete:        false,
-					TotalQuestions:    15,
+					TotalQuestions:    defaultTargetQuestions,
 					AnsweredQuestions: 0,
 					JobCategoryID:     0,
 				}
@@ -89,4 +101,47 @@ func (s *ChatService) resolveJobCategoryForChat(ctx context.Context, req ChatReq
 
 	result.jobCategoryID = jobCategoryID
 	return result, nil
+}
+
+// handleConsultIntent は、セッションの最初の回答が相談の意図のときの応答を作る。
+// 意図を保存し、職種を聞く質問を返す。既に意図が保存されているセッションでは何もしない（最初の選択を正とする）。
+func (s *ChatService) handleConsultIntent(ctx context.Context, req ChatRequest) (*ChatResponse, bool, error) {
+	if s.conversationContextRepo != nil {
+		stored, err := s.conversationContextRepo.GetConsultIntent(req.SessionID)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to load consult intent: %w", err)
+		}
+		if stored != "" {
+			return nil, false, nil
+		}
+		if err := s.conversationContextRepo.SetConsultIntent(req.UserID, req.SessionID, req.ConsultIntent); err != nil {
+			return nil, false, fmt.Errorf("failed to store consult intent: %w", err)
+		}
+	}
+	// 本文はログに出さない（文字数だけ）
+	log.Printf("[ConsultIntent] saved intent=%s chars=%d\n", req.ConsultIntent, logsafe.Chars(req.Message))
+
+	jobQuestion, err := s.jobValidator.GenerateJobSelectionQuestion(ctx)
+	if err != nil {
+		log.Printf("[ConsultIntent] job selection question failed: %v\n", err)
+		jobQuestion = "どの職種に興味がありますか？職種名で答えても構いません。まだ決めていない場合は、そう答えてください。"
+	}
+	response := "相談内容を教えてくれてありがとうございます。まず、どの職種に興味があるかを聞かせてください。\n\n" + jobQuestion
+
+	assistantMsg := &models.ChatMessage{
+		SessionID: req.SessionID,
+		UserID:    req.UserID,
+		Role:      "assistant",
+		Content:   response,
+	}
+	if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+		return nil, false, fmt.Errorf("failed to save job question: %w", err)
+	}
+	return &ChatResponse{
+		Response:          response,
+		IsComplete:        false,
+		TotalQuestions:    defaultTargetQuestions,
+		AnsweredQuestions: 0,
+		JudgmentPercent:   0,
+	}, true, nil
 }

@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"context"
 	"time"
 
 	"gorm.io/gorm"
@@ -135,11 +136,7 @@ func (r *InterviewSessionRepository) GetUserStatsBatch(userIDs []uint) (map[uint
 	}
 	result := make(map[uint]UserSessionStat, len(rows))
 	for _, r := range rows {
-		result[r.UserID] = UserSessionStat{
-			UserID:        r.UserID,
-			SessionCount:  r.SessionCount,
-			LastSessionAt: r.LastSessionAt,
-		}
+		result[r.UserID] = UserSessionStat(r)
 	}
 	return result, nil
 }
@@ -155,4 +152,25 @@ func (r *InterviewSessionRepository) ListFinishedSessionIDsByUser(userID uint) (
 		ids[i] = s.ID
 	}
 	return ids, nil
+}
+
+// ListFinishedSessionIDsByUsers は複数ユーザーの終了済みセッションIDをユーザーIDごとに一括取得する
+func (r *InterviewSessionRepository) ListFinishedSessionIDsByUsers(ctx context.Context, userIDs []uint) (map[uint][]uint, error) {
+	result := make(map[uint][]uint, len(userIDs))
+	if len(userIDs) == 0 {
+		return result, nil
+	}
+	var rows []struct {
+		ID     uint
+		UserID uint
+	}
+	if err := r.db.WithContext(ctx).Model(&models.InterviewSession{}).Select("id, user_id").
+		Where("user_id IN ? AND status = ? AND deleted_at IS NULL", userIDs, "finished").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.UserID] = append(result[row.UserID], row.ID)
+	}
+	return result, nil
 }

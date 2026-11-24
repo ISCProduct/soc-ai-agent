@@ -3,6 +3,7 @@ package repositories
 import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -20,13 +21,43 @@ func NewUserWithdrawalRepository(db *gorm.DB) *UserWithdrawalRepository {
 }
 
 func (r *UserWithdrawalRepository) Withdraw(userID uint, now time.Time, build repository.WithdrawalRecordBuilder) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
+	return r.withdraw(context.Background(), userID, now, nil, build)
+}
+
+// WithdrawStaleGuest は、一覧を取ってから退会させるまでの間に、本登録したゲストや使われたゲストを消さないよう、
+// 退会のトランザクションの中で掃除の条件を確かめ直す(SOCAIAGENT-689)。条件は ListStaleGuestIDs と同じ。
+func (r *UserWithdrawalRepository) WithdrawStaleGuest(ctx context.Context, userID uint, cutoff, now time.Time, build repository.WithdrawalRecordBuilder) error {
+	return r.withdraw(ctx, userID, now, func(tx *gorm.DB, user *models.User) error {
+		if !user.IsGuest || user.IsAdmin || !user.CreatedAt.Before(cutoff) {
+			return repository.ErrNotStaleGuest
+		}
+		var recent int64
+		if err := tx.Model(&models.UserRefreshToken{}).
+			Where("user_id = ? AND created_at >= ?", userID, cutoff).
+			Count(&recent).Error; err != nil {
+			return err
+		}
+		if recent > 0 {
+			return repository.ErrNotStaleGuest
+		}
+		return nil
+	}, build)
+}
+
+// withdraw は論理退会の本体。check が nil でなければ、退会済みの確認のあとに呼び、エラーなら巻き戻す。
+func (r *UserWithdrawalRepository) withdraw(ctx context.Context, userID uint, now time.Time, check func(tx *gorm.DB, user *models.User) error, build repository.WithdrawalRecordBuilder) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var user models.User
 		if err := tx.First(&user, userID).Error; err != nil {
 			return err
 		}
 		if user.IsWithdrawn() {
 			return repository.ErrAlreadyWithdrawn
+		}
+		if check != nil {
+			if err := check(tx, &user); err != nil {
+				return err
+			}
 		}
 		email := user.Email
 
@@ -54,7 +85,7 @@ func (r *UserWithdrawalRepository) Withdraw(userID uint, now time.Time, build re
 		user.OAuthProvider = ""
 		user.OAuthID = ""
 		user.EmailVerificationToken = ""
-		user.PasswordResetToken = ""
+		user.PasswordResetTokenHash = nil
 		user.IsAdmin = false
 		// 学習利用の同意は書かない（#2168）。上で読んだ値で書き戻すと、退会の処理中に本人が取り消した同意を
 		// 元に戻してしまう。同意は SetTrainingUse で履歴と一緒にだけ変える。
@@ -95,6 +126,25 @@ func (r *UserWithdrawalRepository) MarkPurged(withdrawnUserID uint, at time.Time
 	return r.db.Model(&models.WithdrawnUser{}).Where("id = ?", withdrawnUserID).Updates(map[string]any{
 		"purged_at": at,
 	}).Error
+}
+
+// ListStaleGuestIDs は掃除対象のゲストの ID を返す(SOCAIAGENT-689)。
+// 「最終利用」は列を足さず、リフレッシュトークンの発行日時で測る(ゲストは使うたびにローテーションで発行される)。
+// トークンが1本も無いゲストは作成日時で測る。
+// ponytail: users.is_guest に索引は無い。日次1回・件数上限つきなので全件走査で足りる。重くなったら索引を足す。
+func (r *UserWithdrawalRepository) ListStaleGuestIDs(ctx context.Context, cutoff time.Time, limit int) ([]uint, error) {
+	// GORM は Limit(-1) を「上限なし」と解釈するので、0 以下はここで弾く。
+	if limit <= 0 {
+		return nil, fmt.Errorf("limit は 1 以上を指定してください: %d", limit)
+	}
+	var ids []uint
+	err := r.db.WithContext(ctx).Model(&models.User{}).
+		Where("is_guest = ? AND is_admin = ? AND withdrawn_at IS NULL AND created_at < ?", true, false, cutoff).
+		Where("NOT EXISTS (SELECT 1 FROM user_refresh_tokens t WHERE t.user_id = users.id AND t.created_at >= ?)", cutoff).
+		Order("id").
+		Limit(limit).
+		Pluck("id", &ids).Error
+	return ids, err
 }
 
 func (r *UserWithdrawalRepository) FindWithdrawalState(userID uint) (*models.User, bool, error) {
@@ -188,6 +238,8 @@ func hardDeleteUserData(tx *gorm.DB, userID uint, collectiveAnonymousID string) 
 		&models.UserAnalysisProgress{},
 		&models.UserEmbedding{},
 		&models.VariantAssignment{},
+		// 推薦へのフィードバック（SOCAIAGENT-670）。推薦（user_company_matches）への FK があるので、推薦より先に消す
+		&models.UserMatchFeedback{},
 		&models.UserCompanyMatch{},
 		&models.UserApplicationStatus{},
 		&models.CompanyReview{},

@@ -23,9 +23,9 @@ import type {
   Company,
   SnackbarState,
   SuggestedRole,
+  MatchFeedbackVerdict,
 } from '../types'
 import {
-  buildEmptyRecommendationsMessage,
   mapAnalysisScores,
   mapRecommendationToCompany,
 } from '../utils'
@@ -52,6 +52,8 @@ export function useResultsData() {
   const favoriteCompanyIds = useRef(new Set<string>())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // 推薦が0件のときの理由（API の reason）。0件はエラーではないので error とは分ける（#2220）
+  const [emptyReason, setEmptyReason] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
   const [isProvisional, setIsProvisional] = useState(false)
   const [diagnosisSummary, setDiagnosisSummary] = useState<string | null>(null)
@@ -71,6 +73,7 @@ export function useResultsData() {
   const [diagramError, setDiagramError] = useState<string | null>(null)
   const [emailSending, setEmailSending] = useState(false)
   const [favoritingId, setFavoritingId] = useState<number | null>(null)
+  const [feedbackingId, setFeedbackingId] = useState<number | null>(null)
   const [applyingId, setApplyingId] = useState<number | null>(null)
   // 応募を受け付けているか。取得できるまでは閉じている扱い（SOCAIAGENT-403）
   const [applyEnabled, setApplyEnabled] = useState(false)
@@ -160,6 +163,7 @@ export function useResultsData() {
         setLoading(true)
         // 再フェッチ時に前回の error が残ると一覧が描画されない（Bugbot）
         setError(null)
+        setEmptyReason(null)
         void fetchAnalysis()
 
         const response = await fetchWithTimeout(`/api/chat/recommendations?session_id=${sessionId}&limit=10`, {
@@ -199,10 +203,13 @@ export function useResultsData() {
         )
 
         if (!data || !data.recommendations || !Array.isArray(data.recommendations) || data.recommendations.length === 0) {
-          const reason = data?.reason || 'matching_results_empty'
-          const diagnostics = data?.diagnostics
+          const reason = typeof data?.reason === 'string' && data.reason ? data.reason : 'matching_results_empty'
+          if (data?.diagnostics) {
+            // 内部指標は画面に出さず、調査用に console へ出すだけにする
+            console.debug('[results] empty recommendations diagnostics', data.diagnostics)
+          }
           setCompanies([])
-          setError(buildEmptyRecommendationsMessage(reason, diagnostics))
+          setEmptyReason(reason)
           setLoading(false)
           return
         }
@@ -374,6 +381,35 @@ export function useResultsData() {
     }
   }
 
+  // 推薦への「合う／合わない」。同じ判定をもう一度押したら取り消す（SOCAIAGENT-670）
+  const handleFeedback = async (e: MouseEvent, company: Company, verdict: MatchFeedbackVerdict) => {
+    e.stopPropagation()
+    if (!company.matchId || feedbackingId !== null) return
+    const next = company.feedback === verdict ? undefined : verdict
+    setFeedbackingId(company.matchId)
+    try {
+      const res = await fetch('/api/chat/match-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
+        body: JSON.stringify({ match_id: company.matchId, verdict: next ?? 'none' }),
+      })
+      if (res.ok) {
+        setCompanies((prev) => prev.map((c) => (c.matchId === company.matchId ? { ...c, feedback: next } : c)))
+        setSnackbar({
+          open: true,
+          message: next ? '回答を記録しました。今後の改善に使います' : '回答を取り消しました',
+          severity: 'success',
+        })
+      } else {
+        setSnackbar({ open: true, message: '回答の記録に失敗しました', severity: 'error' })
+      }
+    } catch {
+      setSnackbar({ open: true, message: '回答の記録に失敗しました', severity: 'error' })
+    } finally {
+      setFeedbackingId(null)
+    }
+  }
+
   const handleToggleFavorite = async (e: MouseEvent, company: Company) => {
     e.stopPropagation()
     if (favoritingId !== null) return
@@ -506,6 +542,7 @@ export function useResultsData() {
     retryFavorites: loadFavorites,
     loading,
     error,
+    emptyReason,
     isProvisional,
     diagnosisSummary,
     evaluatedCategories,
@@ -527,6 +564,8 @@ export function useResultsData() {
     diagramError,
     emailSending,
     favoritingId,
+    feedbackingId,
+    handleFeedback,
     applyingId,
     applyEnabled,
     snackbar,

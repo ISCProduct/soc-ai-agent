@@ -17,15 +17,17 @@ async function silenceOtherBanners(page: Page) {
 const loadFailedText = '先生からの案内を読み込めませんでした'
 
 // #1691: 取得失敗（Error）と案内なし（Empty）を同じ見た目にしない。
-test.describe('ホームの教員案内', () => {
+// 右パネルが無い狭い画面（lg 未満）の積み方。広い画面（右パネルの「先生から」）は home-consult.spec.ts で検査する。
+test.describe('ホームの教員案内（狭い画面）', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 800 })
     await setupAuth(page, TEST_USER)
     await silenceOtherBanners(page)
   })
 
   test('取得に失敗したらエラーと再読み込みを出し、再読み込みで案内が出る', async ({ page }) => {
     let fail = true
-    await page.route('**/api/user/guidances', (route) =>
+    await page.route('**/api/bff/user/guidances', (route) =>
       fail
         ? route.fulfill({ status: 500, contentType: 'application/json', body: '{}' })
         : route.fulfill({
@@ -48,7 +50,7 @@ test.describe('ホームの教員案内', () => {
   })
 
   test('案内が0件ならエラーは出ない', async ({ page }) => {
-    await page.route('**/api/user/guidances', (route) =>
+    await page.route('**/api/bff/user/guidances', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ guidances: [] }) }),
     )
 

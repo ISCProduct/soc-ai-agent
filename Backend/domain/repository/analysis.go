@@ -2,18 +2,19 @@ package repository
 
 import (
 	"Backend/internal/models"
+	"context"
 )
 
 // UserWeightScoreRepository はユーザースコアの永続化インターフェース。
 type UserWeightScoreRepository interface {
 	// SetScore は新規レコードをスコアの絶対値で作成する
-	SetScore(userID uint, sessionID, category string, absoluteScore int) error
+	SetScore(userID uint, sessionID, category string, absoluteScore float64) error
 	// AddScore は既存レコードのスコアに差分を加算する
-	AddScore(userID uint, sessionID, category string, delta int) error
+	AddScore(userID uint, sessionID, category string, delta float64) error
 	// SetScoreWithPromptVersion は SetScore に加えて、評価に使ったプロンプト版を記録する
-	SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore int, promptVersion string) error
+	SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore float64, promptVersion string) error
 	// AddScoreWithPromptVersion は AddScore に加えて、評価に使ったプロンプト版を記録する
-	AddScoreWithPromptVersion(userID uint, sessionID, category string, delta int, promptVersion string) error
+	AddScoreWithPromptVersion(userID uint, sessionID, category string, delta float64, promptVersion string) error
 	FindByUserAndSession(userID uint, sessionID string) ([]models.UserWeightScore, error)
 	FindTopCategories(userID uint, sessionID string, limit int) ([]models.UserWeightScore, error)
 	FindByUserSessionAndCategory(userID uint, sessionID, category string) (*models.UserWeightScore, error)
@@ -42,12 +43,12 @@ type UserCompanyMatchRepository interface {
 	FindTopMatchesByUserAndSession(userID uint, sessionID string, limit int) ([]*models.UserCompanyMatch, error)
 	// FindFavoritedByUser はユーザーがお気に入りにしたマッチを、更新が新しい順で返す。
 	// 同じ企業の行が診断ごとに複数ある。呼び出し側で1社にまとめる。
-	FindFavoritedByUser(userID uint) ([]*models.UserCompanyMatch, error)
+	FindFavoritedByUser(ctx context.Context, userID uint) ([]*models.UserCompanyMatch, error)
 	FindByID(id uint) (*models.UserCompanyMatch, error)
 	MarkAsViewed(matchID uint) error
 	ToggleFavorite(matchID uint) error
 	// UnfavoriteCompany はそのユーザーの、その企業のお気に入りを診断をまたいで外す。
-	UnfavoriteCompany(userID uint, companyID uint) error
+	UnfavoriteCompany(ctx context.Context, userID uint, companyID uint) error
 	MarkAsApplied(matchID uint) error
 	GetMatchStatistics(userID uint, sessionID string) (map[string]any, error)
 }

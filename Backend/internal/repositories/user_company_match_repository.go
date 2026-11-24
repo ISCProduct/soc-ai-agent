@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"context"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -31,6 +32,8 @@ var upsertAssignments = clause.AssignmentColumns([]string{
 	"detail_match",
 	"communication_match",
 	"matched_axis_count",
+	"fit_mismatch_axes",
+	"job_matched",
 	"match_reason",
 	// 理由と一緒に更新する。AI理由を作らない再計算では空になり、
 	// 存在しないAI理由を古い版が生成したことにならない。
@@ -129,11 +132,11 @@ func (r *UserCompanyMatchRepository) FindTopMatchesByUserAndSession(
 // 切ると、適合度が上位の企業が窓の外に落ちる。
 // プロファイルの無い企業はここで外す。後段で落とすと件数を食ったまま画面に出ず、
 // 学生から外せなくなる。
-func (r *UserCompanyMatchRepository) FindFavoritedByUser(userID uint) ([]*models.UserCompanyMatch, error) {
+func (r *UserCompanyMatchRepository) FindFavoritedByUser(ctx context.Context, userID uint) ([]*models.UserCompanyMatch, error) {
 	var picked []struct {
 		ID uint
 	}
-	err := r.db.Raw(`
+	err := r.db.WithContext(ctx).Raw(`
 SELECT id FROM (
   SELECT id,
          ROW_NUMBER() OVER (
@@ -156,7 +159,7 @@ WHERE rn = 1`, userID, true).Scan(&picked).Error
 	}
 
 	var ms []*models.UserCompanyMatch
-	err = r.db.Where("id IN ?", ids).
+	err = r.db.WithContext(ctx).Where("id IN ?", ids).
 		Preload("Company").
 		Preload("JobPosition").
 		Find(&ms).Error
@@ -167,8 +170,8 @@ WHERE rn = 1`, userID, true).Scan(&picked).Error
 }
 
 // UnfavoriteCompany はそのユーザーの、その企業のお気に入りをすべて外す。
-func (r *UserCompanyMatchRepository) UnfavoriteCompany(userID uint, companyID uint) error {
-	return r.db.Model(&models.UserCompanyMatch{}).
+func (r *UserCompanyMatchRepository) UnfavoriteCompany(ctx context.Context, userID uint, companyID uint) error {
+	return r.db.WithContext(ctx).Model(&models.UserCompanyMatch{}).
 		Where("user_id = ? AND company_id = ? AND is_favorited = ?", userID, companyID, true).
 		Update("is_favorited", false).Error
 }
@@ -208,7 +211,8 @@ func (r *UserCompanyMatchRepository) MarkAsApplied(matchID uint) error {
 		Update("is_applied", true).Error
 }
 
-// GetMatchStatistics マッチング統計情報を取得
+// GetMatchStatistics マッチング統計情報を取得する。
+// 件数と平均は1回の SELECT にまとめ、失敗した集計を 0 として返さない（SOCAIAGENT-517）。
 func (r *UserCompanyMatchRepository) GetMatchStatistics(userID uint, sessionID string) (map[string]any, error) {
 	var result struct {
 		TotalMatches   int64
@@ -219,36 +223,22 @@ func (r *UserCompanyMatchRepository) GetMatchStatistics(userID uint, sessionID s
 	}
 
 	err := r.db.Model(&models.UserCompanyMatch{}).
+		Select(`COUNT(*) AS total_matches,
+			COALESCE(SUM(CASE WHEN is_viewed = 1 THEN 1 ELSE 0 END), 0) AS viewed_count,
+			COALESCE(SUM(CASE WHEN is_favorited = 1 THEN 1 ELSE 0 END), 0) AS favorited_count,
+			COALESCE(SUM(CASE WHEN is_applied = 1 THEN 1 ELSE 0 END), 0) AS applied_count,
+			COALESCE(AVG(match_score), 0) AS avg_match_score`).
 		Where("user_id = ? AND session_id = ?", userID, sessionID).
-		Count(&result.TotalMatches).Error
+		Scan(&result).Error
 	if err != nil {
 		return nil, err
 	}
 
-	r.db.Model(&models.UserCompanyMatch{}).
-		Where("user_id = ? AND session_id = ? AND is_viewed = ?", userID, sessionID, true).
-		Count(&result.ViewedCount)
-
-	r.db.Model(&models.UserCompanyMatch{}).
-		Where("user_id = ? AND session_id = ? AND is_favorited = ?", userID, sessionID, true).
-		Count(&result.FavoritedCount)
-
-	r.db.Model(&models.UserCompanyMatch{}).
-		Where("user_id = ? AND session_id = ? AND is_applied = ?", userID, sessionID, true).
-		Count(&result.AppliedCount)
-
-	r.db.Model(&models.UserCompanyMatch{}).
-		Select("AVG(match_score)").
-		Where("user_id = ? AND session_id = ?", userID, sessionID).
-		Scan(&result.AvgMatchScore)
-
-	stats := map[string]any{
+	return map[string]any{
 		"total_matches":   result.TotalMatches,
 		"viewed_count":    result.ViewedCount,
 		"favorited_count": result.FavoritedCount,
 		"applied_count":   result.AppliedCount,
 		"avg_match_score": result.AvgMatchScore,
-	}
-
-	return stats, nil
+	}, nil
 }

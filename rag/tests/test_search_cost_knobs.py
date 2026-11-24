@@ -4,7 +4,6 @@ OpenAI の web_search は検索結果が固定トークンとして課金され�
 1コールの重さ（search_context_size）とコール回数（クエリ数）が
 そのままコストに効く。既定値と env での上書きを固定する。
 """
-import os
 
 import pytest
 

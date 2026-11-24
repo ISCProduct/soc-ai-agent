@@ -159,7 +159,7 @@ func TestAdminDashboardController_ListUsers_Success(t *testing.T) {
 	sessRepo.On("GetUserStatsBatch", []uint{1}).Return(map[uint]repositories.UserSessionStat{
 		1: {UserID: 1, SessionCount: 3},
 	}, nil)
-	sessRepo.On("ListFinishedSessionIDsByUser", uint(1)).Return([]uint{}, nil)
+	sessRepo.On("ListFinishedSessionIDsByUsers", []uint{1}).Return(map[uint][]uint{}, nil)
 	repRepo.On("FindBySessionIDs", []uint(nil)).Return([]models.InterviewReport{}, nil)
 
 	testsupport.AssertStatus(t, newAdminDashboardController(userRepo, sessRepo, repRepo).ListUsers, testsupport.NewCtx(req, rec), http.StatusOK)
@@ -284,7 +284,7 @@ func TestAdminDashboardController_ExportCSV_Success(t *testing.T) {
 
 	userRepo.On("ListUsersPaged", 10000, 0, "", mock.Anything).Return(users, int64(1), nil)
 	sessRepo.On("GetUserStatsBatch", []uint{1}).Return(map[uint]repositories.UserSessionStat{}, nil)
-	sessRepo.On("ListFinishedSessionIDsByUser", uint(1)).Return([]uint{}, nil)
+	sessRepo.On("ListFinishedSessionIDsByUsers", []uint{1}).Return(map[uint][]uint{}, nil)
 	repRepo.On("FindBySessionIDs", []uint(nil)).Return([]models.InterviewReport{}, nil)
 
 	testsupport.AssertStatus(t, newAdminDashboardController(userRepo, sessRepo, repRepo).ExportCSV, testsupport.NewCtx(req, rec), http.StatusOK)

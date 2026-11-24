@@ -107,12 +107,12 @@ type matchingScoreRepo struct {
 	scores []models.UserWeightScore
 }
 
-func (s *matchingScoreRepo) SetScore(uint, string, string, int) error { return nil }
-func (s *matchingScoreRepo) AddScore(uint, string, string, int) error { return nil }
-func (s *matchingScoreRepo) SetScoreWithPromptVersion(uint, string, string, int, string) error {
+func (s *matchingScoreRepo) SetScore(uint, string, string, float64) error { return nil }
+func (s *matchingScoreRepo) AddScore(uint, string, string, float64) error { return nil }
+func (s *matchingScoreRepo) SetScoreWithPromptVersion(uint, string, string, float64, string) error {
 	return nil
 }
-func (s *matchingScoreRepo) AddScoreWithPromptVersion(uint, string, string, int, string) error {
+func (s *matchingScoreRepo) AddScoreWithPromptVersion(uint, string, string, float64, string) error {
 	return nil
 }
 func (s *matchingScoreRepo) FindByUserAndSession(uint, string) ([]models.UserWeightScore, error) {
@@ -145,14 +145,14 @@ func (s *matchingMatchRepo) CreateOrUpdateBatch(matches []*models.UserCompanyMat
 func (s *matchingMatchRepo) FindTopMatchesByUserAndSession(uint, string, int) ([]*models.UserCompanyMatch, error) {
 	return nil, nil
 }
-func (s *matchingMatchRepo) FindFavoritedByUser(uint) ([]*models.UserCompanyMatch, error) {
+func (s *matchingMatchRepo) FindFavoritedByUser(context.Context, uint) ([]*models.UserCompanyMatch, error) {
 	return nil, nil
 }
-func (s *matchingMatchRepo) FindByID(uint) (*models.UserCompanyMatch, error) { return nil, nil }
-func (s *matchingMatchRepo) MarkAsViewed(uint) error                         { return nil }
-func (s *matchingMatchRepo) ToggleFavorite(uint) error                       { return nil }
-func (s *matchingMatchRepo) UnfavoriteCompany(uint, uint) error              { return nil }
-func (s *matchingMatchRepo) MarkAsApplied(uint) error                        { return nil }
+func (s *matchingMatchRepo) FindByID(uint) (*models.UserCompanyMatch, error)     { return nil, nil }
+func (s *matchingMatchRepo) MarkAsViewed(uint) error                             { return nil }
+func (s *matchingMatchRepo) ToggleFavorite(uint) error                           { return nil }
+func (s *matchingMatchRepo) UnfavoriteCompany(context.Context, uint, uint) error { return nil }
+func (s *matchingMatchRepo) MarkAsApplied(uint) error                            { return nil }
 func (s *matchingMatchRepo) GetMatchStatistics(uint, string) (map[string]any, error) {
 	return nil, nil
 }
