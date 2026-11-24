@@ -1,6 +1,7 @@
 package user
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +19,7 @@ type fakeGrowthStore struct {
 	rows   []models.UserGrowthSnapshot
 }
 
-func (f *fakeGrowthStore) ListRecent(userID uint, limit int) ([]models.UserGrowthSnapshot, error) {
+func (f *fakeGrowthStore) ListRecent(_ context.Context, userID uint, limit int) ([]models.UserGrowthSnapshot, error) {
 	f.userID = userID
 	if limit < len(f.rows) {
 		return f.rows[:limit], nil

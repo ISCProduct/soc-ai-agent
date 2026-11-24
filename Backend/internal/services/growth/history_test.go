@@ -99,3 +99,22 @@ func TestScoresFromRows_DoesNotFillMissingCategories(t *testing.T) {
 		t.Fatal("無いカテゴリを埋めてはいけない")
 	}
 }
+
+func TestBuildHistory_DecimalScoreDeltaHasNoFloatNoise(t *testing.T) {
+	base := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	rows := []models.UserGrowthSnapshot{
+		snapshot(2, base.Add(time.Hour), `{"技術志向":72.3}`, `[]`),
+		snapshot(1, base, `{"技術志向":70.1}`, `[]`),
+	}
+
+	history := BuildHistory(rows)
+	var got *float64
+	for _, change := range history.Categories {
+		if change.Category == "技術志向" {
+			got = change.Delta
+		}
+	}
+	if got == nil || *got != 2.2 {
+		t.Fatalf("delta should be 2.2 without float noise: %v", got)
+	}
+}

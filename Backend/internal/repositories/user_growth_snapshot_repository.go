@@ -1,6 +1,8 @@
 package repositories
 
 import (
+	"context"
+
 	"Backend/internal/models"
 
 	"gorm.io/gorm"
@@ -18,39 +20,39 @@ func NewUserGrowthSnapshotRepository(db *gorm.DB) *UserGrowthSnapshotRepository 
 	return &UserGrowthSnapshotRepository{db: db}
 }
 
-func (r *UserGrowthSnapshotRepository) Scores(userID uint, sessionID string) ([]models.UserWeightScore, error) {
+func (r *UserGrowthSnapshotRepository) Scores(ctx context.Context, userID uint, sessionID string) ([]models.UserWeightScore, error) {
 	var rows []models.UserWeightScore
-	err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).Find(&rows).Error
+	err := r.db.WithContext(ctx).Where("user_id = ? AND session_id = ?", userID, sessionID).Find(&rows).Error
 	return rows, err
 }
 
-func (r *UserGrowthSnapshotRepository) Progress(userID uint, sessionID string) ([]models.UserAnalysisProgress, error) {
+func (r *UserGrowthSnapshotRepository) Progress(ctx context.Context, userID uint, sessionID string) ([]models.UserAnalysisProgress, error) {
 	var rows []models.UserAnalysisProgress
-	err := r.db.Preload("Phase").Where("user_id = ? AND session_id = ?", userID, sessionID).Find(&rows).Error
+	err := r.db.WithContext(ctx).Preload("Phase").Where("user_id = ? AND session_id = ?", userID, sessionID).Find(&rows).Error
 	return rows, err
 }
 
 // LatestProgressSession は、そのユーザーの診断フェーズが最後に進んだセッションを返す。
 // 進捗が無ければ空文字。
-func (r *UserGrowthSnapshotRepository) LatestProgressSession(userID uint) (string, error) {
+func (r *UserGrowthSnapshotRepository) LatestProgressSession(ctx context.Context, userID uint) (string, error) {
 	var row models.UserAnalysisProgress
-	err := r.db.Where("user_id = ?", userID).Order("updated_at DESC, id DESC").Limit(1).Find(&row).Error
+	err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("updated_at DESC, id DESC").Limit(1).Find(&row).Error
 	if err != nil {
 		return "", err
 	}
 	return row.SessionID, nil
 }
 
-func (r *UserGrowthSnapshotRepository) Insert(row *models.UserGrowthSnapshot) error {
-	return r.db.Create(row).Error
+func (r *UserGrowthSnapshotRepository) Insert(ctx context.Context, row *models.UserGrowthSnapshot) error {
+	return r.db.WithContext(ctx).Create(row).Error
 }
 
 // ListRecent は新しい順に最大30件返す。
-func (r *UserGrowthSnapshotRepository) ListRecent(userID uint, limit int) ([]models.UserGrowthSnapshot, error) {
+func (r *UserGrowthSnapshotRepository) ListRecent(ctx context.Context, userID uint, limit int) ([]models.UserGrowthSnapshot, error) {
 	if limit <= 0 || limit > growthHistoryLimit {
 		limit = growthHistoryLimit
 	}
 	var rows []models.UserGrowthSnapshot
-	err := r.db.Where("user_id = ?", userID).Order("created_at DESC, id DESC").Limit(limit).Find(&rows).Error
+	err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC, id DESC").Limit(limit).Find(&rows).Error
 	return rows, err
 }

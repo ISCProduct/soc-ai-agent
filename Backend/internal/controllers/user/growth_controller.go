@@ -1,6 +1,7 @@
 package user
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -17,7 +18,7 @@ import (
 
 // SnapshotLister は本人の成長の記録を新しい順に読む。
 type SnapshotLister interface {
-	ListRecent(userID uint, limit int) ([]models.UserGrowthSnapshot, error)
+	ListRecent(ctx context.Context, userID uint, limit int) ([]models.UserGrowthSnapshot, error)
 }
 
 type userLookup interface {
@@ -70,7 +71,7 @@ func (c *GrowthController) ForStaff(ctx echo.Context) error {
 }
 
 func (c *GrowthController) write(ctx echo.Context, userID uint) error {
-	rows, err := c.snapshots.ListRecent(userID, 30)
+	rows, err := c.snapshots.ListRecent(ctx.Request().Context(), userID, 30)
 	if err != nil {
 		httpapi.LogError(err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load growth history")

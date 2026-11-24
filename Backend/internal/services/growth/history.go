@@ -3,6 +3,7 @@ package growth
 import (
 	"cmp"
 	"encoding/json"
+	"math"
 	"slices"
 	"time"
 
@@ -101,12 +102,12 @@ func SourceLabel(source string) string {
 
 // Point は履歴の1時点。
 type Point struct {
-	ID          uint            `json:"id"`
-	Source      string          `json:"source"`
-	SourceLabel string          `json:"source_label"`
-	CreatedAt   time.Time       `json:"created_at"`
+	ID          uint               `json:"id"`
+	Source      string             `json:"source"`
+	SourceLabel string             `json:"source_label"`
+	CreatedAt   time.Time          `json:"created_at"`
 	Scores      map[string]float64 `json:"scores"`
-	Phases      []PhaseSnapshot `json:"phases"`
+	Phases      []PhaseSnapshot    `json:"phases"`
 }
 
 // CategoryChange は直近の記録と、その1つ前との差。
@@ -183,6 +184,12 @@ func BuildHistory(rows []models.UserGrowthSnapshot) History {
 	return history
 }
 
+// scoreDelta は小数2桁（user_weight_scores.score は decimal(5,2)）で差を返す。
+// 浮動小数の引き算のまま返すと 2.1999999999999886 のような値が画面に出る。
+func scoreDelta(current, previous float64) float64 {
+	return math.Round((current-previous)*100) / 100
+}
+
 func compareCategories(prev, cur map[string]float64) []CategoryChange {
 	seen := map[string]bool{}
 	names := make([]string, 0, len(valueobject.AllWeightCategories()))
@@ -225,11 +232,11 @@ func compareCategories(prev, cur map[string]float64) []CategoryChange {
 		switch {
 		case hasPrev && hasCur && current > previous:
 			change.ChangeLabel = ChangeImproved
-			delta := current - previous
+			delta := scoreDelta(current, previous)
 			change.Delta = &delta
 		case hasPrev && hasCur && current < previous:
 			change.ChangeLabel = ChangeDeclined
-			delta := current - previous
+			delta := scoreDelta(current, previous)
 			change.Delta = &delta
 		case hasPrev && hasCur:
 			change.ChangeLabel = ChangeUnchanged

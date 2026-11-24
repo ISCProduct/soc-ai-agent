@@ -1,6 +1,7 @@
 package growth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -16,19 +17,19 @@ type fakeStore struct {
 	scoreErr error
 }
 
-func (f *fakeStore) Scores(uint, string) ([]models.UserWeightScore, error) {
+func (f *fakeStore) Scores(context.Context, uint, string) ([]models.UserWeightScore, error) {
 	return f.scores, f.scoreErr
 }
 
-func (f *fakeStore) Progress(_ uint, sessionID string) ([]models.UserAnalysisProgress, error) {
+func (f *fakeStore) Progress(_ context.Context, _ uint, sessionID string) ([]models.UserAnalysisProgress, error) {
 	return f.progress[sessionID], nil
 }
 
-func (f *fakeStore) LatestProgressSession(uint) (string, error) {
+func (f *fakeStore) LatestProgressSession(context.Context, uint) (string, error) {
 	return f.latest, nil
 }
 
-func (f *fakeStore) Insert(row *models.UserGrowthSnapshot) error {
+func (f *fakeStore) Insert(_ context.Context, row *models.UserGrowthSnapshot) error {
 	f.inserted = row
 	return nil
 }
