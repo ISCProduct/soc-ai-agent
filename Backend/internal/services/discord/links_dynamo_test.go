@@ -19,6 +19,7 @@ type memDynamo struct {
 	scans           int
 	consistentScans int
 	puts            int
+	panicPK         string
 }
 
 func newMemDynamo() *memDynamo {
@@ -40,6 +41,9 @@ func (m *memDynamo) PutItem(_ context.Context, in *dynamodb.PutItemInput, _ ...f
 	defer m.mu.Unlock()
 	m.puts++
 	pk := attrString(in.Item, "pk")
+	if m.panicPK != "" && pk == m.panicPK {
+		panic("put boom")
+	}
 	if !condOK(aws.ToString(in.ConditionExpression), m.items[pk], in.ExpressionAttributeValues) {
 		return nil, &dynamotypes.ConditionalCheckFailedException{}
 	}
@@ -283,6 +287,19 @@ func TestDynamoLink_移行は足りない行だけ書く(t *testing.T) {
 	// 111 の行と占有は既にある。222 の行と占有と、移行済みマーカーだけを書く。
 	if wrote := db.puts - before; wrote != 3 {
 		t.Fatalf("書き込み回数 = %d, want 3", wrote)
+	}
+}
+
+func TestPutMissing_panicは失敗にして待つ(t *testing.T) {
+	db := newMemDynamo()
+	db.panicPK = "discord#1"
+	store := newDynamoLinkStoreWith(db, "links", nil)
+	err := store.putMissing(context.Background(), []map[string]dynamotypes.AttributeValue{
+		{"pk": sAttr("discord#1")},
+		{"pk": sAttr("discord#2")},
+	})
+	if err == nil || !strings.Contains(err.Error(), "異常終了") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

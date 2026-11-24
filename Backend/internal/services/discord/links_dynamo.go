@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -232,9 +233,21 @@ func (d *dynamoLinkStore) putMissing(ctx context.Context, items []map[string]dyn
 		}
 		wg.Add(1)
 		sem <- struct{}{}
+		// 成否を first に返すので safego.Go は使わない。
+		// panic を握り潰すと移行成功扱いになり、移行済みマーカーを書いてしまう。
 		go func(item map[string]dynamotypes.AttributeValue) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[Discord] 対応表の移行で panic: %v", r)
+					mu.Lock()
+					if first == nil {
+						first = fmt.Errorf("対応表の移行中に異常終了しました: %v", r)
+					}
+					mu.Unlock()
+				}
+			}()
 			if err := d.putIfAbsent(ctx, item); err != nil {
 				mu.Lock()
 				if first == nil {
