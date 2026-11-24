@@ -27,11 +27,14 @@ const PHONE_WIDTHS = [390, 375, 320]
 // CI ではバックエンドが起動していない。未モックの API を実サーバーへ流すと
 // 応答を待ち続けて画面が「読み込み中」のまま止まる。空応答で即座に返す。
 async function stubApi(page: import('@playwright/test').Page) {
-  await page.route('**/api/**', (route) =>
-    route.request().method() === 'GET'
+  await page.route('**/api/**', (route) => {
+    // セッション確認は本物の Route Handler に通す。管理画面は Cookie に管理者トークンが
+    // あるかをここで確かめるため、空配列を返すと「確認できない」になる（SOCAIAGENT-683）
+    if (new URL(route.request().url()).pathname === '/api/auth/session') return route.continue()
+    return route.request().method() === 'GET'
       ? route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
-      : route.fulfill({ status: 204, body: '' }),
-  )
+      : route.fulfill({ status: 204, body: '' })
+  })
 }
 
 test.describe('レスポンシブ: 横方向の破綻', () => {
@@ -248,16 +251,16 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
     total: number,
   ) {
     // stubApi より後の route が優先される。
-    await page.route('**/api/interviews**', (route) => {
+    await page.route('**/api/bff/interviews**', (route) => {
       const { pathname } = new URL(route.request().url())
-      if (pathname === '/api/interviews') {
+      if (pathname === '/api/bff/interviews') {
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({ ...SESSION_RESPONSE, sessions, total }),
         })
       }
-      if (pathname === '/api/interviews/trend') {
+      if (pathname === '/api/bff/interviews/trend') {
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -350,13 +353,13 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
     // 教員用レポートはサーバーが実ロールで返すか決める(#1814)。教員として見る。
     await setupAuth(page, { ...TEST_USER, is_staff: true })
     await stubApi(page)
-    await page.route('**/api/interviews**', (route) => {
+    await page.route('**/api/bff/interviews**', (route) => {
       const { pathname } = new URL(route.request().url())
       const json = (body: unknown) =>
         route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
-      if (pathname === '/api/interviews') return json({ ...SESSION_RESPONSE })
-      if (pathname === '/api/interviews/trend') return json({ points: TREND_POINTS })
-      if (pathname === '/api/interviews/axis-comparison') {
+      if (pathname === '/api/bff/interviews') return json({ ...SESSION_RESPONSE })
+      if (pathname === '/api/bff/interviews/trend') return json({ points: TREND_POINTS })
+      if (pathname === '/api/bff/interviews/axis-comparison') {
         return json({
           base_session_id: 2,
           target_session_id: 3,
@@ -369,7 +372,7 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
           ],
         })
       }
-      if (pathname === '/api/interviews/1') {
+      if (pathname === '/api/bff/interviews/1') {
         return json({ session: SESSION_RESPONSE.sessions[0], utterances: [], report: REPORT })
       }
       return route.fallback()

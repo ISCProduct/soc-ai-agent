@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/go-sql-driver/mysql"
@@ -201,6 +202,31 @@ func (s *SchoolService) CanAdminAccessSchool(isAdmin bool, adminUserID uint, tar
 		}
 	}
 	return false, nil
+}
+
+// CanAdminAccessUser は「対象ユーザー」に対する担当校スコープ判定（#1675）。
+//
+// users.school_id は自己申告の学校名から解決されるため、担当校に含まれていても
+// その学校が対象ユーザーの学園のものでなければ通さない（fail-close）。
+// 無制限の管理者は学校で絞らないため、学校の引き直しもしない。
+// httpapi.EnsureAdminSchoolAccessForUser と面接サービスの所有者判定（SOCAIAGENT-687）が共有する。
+func (s *SchoolService) CanAdminAccessUser(isAdmin bool, actorID, targetOrganizationID uint, targetSchoolID *uint) (bool, error) {
+	restricted, allowedSchoolIDs, err := s.ResolveAccess(isAdmin, actorID)
+	if err != nil {
+		return false, err
+	}
+	if !restricted {
+		return true, nil
+	}
+	// 拒否が確定している場合は学校を引かない。
+	if targetSchoolID == nil || !slices.Contains(allowedSchoolIDs, *targetSchoolID) {
+		return false, nil
+	}
+	effective, err := s.EffectiveSchoolID(targetOrganizationID, targetSchoolID)
+	if err != nil {
+		return false, err
+	}
+	return effective != nil, nil
 }
 
 // ListAccessibleSchools は主体がフィルタUIで選べる学校一覧を返す。

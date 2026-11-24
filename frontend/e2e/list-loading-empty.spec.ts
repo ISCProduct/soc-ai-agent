@@ -31,6 +31,49 @@ test.describe('一覧の Loading / Empty', () => {
     await expect(page.getByRole('status', { name: '応募を読み込み中' })).toHaveCount(0)
   })
 
+  test('お気に入り: 読み込み中は Skeleton、空なら理由とおすすめ企業への導線', async ({ page }) => {
+    const release = holdThenFulfill(page, '**/api/chat/favorites**', { recommendations: [] })
+    await page.goto('/favorites')
+    await expect(page.getByRole('status', { name: 'お気に入りを読み込み中' })).toBeVisible({ timeout: 15000 })
+    await expect(page.getByRole('heading', { name: 'お気に入り', exact: true })).toBeVisible()
+
+    release()
+    await expect(page.getByText('お気に入りにした企業はまだありません')).toBeVisible()
+    await page.getByRole('button', { name: 'おすすめ企業を見る' }).click()
+    await expect(page).toHaveURL('/')
+    // サイドバーの項目は link で描画される（home-consult.spec.ts と同じ探し方）
+    await page.getByRole('navigation', { name: 'メニュー' }).last().getByRole('link', { name: 'お気に入り', exact: true }).click()
+    await expect(page).toHaveURL('/favorites')
+    await expect(page.getByRole('heading', { name: 'お気に入り', exact: true })).toBeVisible()
+  })
+
+  test('お気に入り: 企業名は企業詳細へ進み、狭い画面でも社名が見える', async ({ page }) => {
+    await page.route('**/api/chat/favorites**', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          recommendations: [{
+            id: 7,
+            match_id: 20,
+            category_name: '北見工業',
+            industry: '製造',
+            job_title: '生産技術',
+            score: 81,
+            category_scores: { technical: 81.2 },
+            is_favorited: true,
+          }],
+        }),
+      })
+    })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/favorites')
+    const companyName = page.getByRole('button', { name: '北見工業', exact: true })
+    await expect(companyName).toBeVisible()
+    await companyName.click()
+    await expect(page).toHaveURL(/\/company\/7/)
+  })
+
   test('チャット履歴: 空ならAI相談への導線を出す', async ({ page }) => {
     const release = holdThenFulfill(page, '**/api/chat/sessions', [])
     await page.goto('/chat-history')
@@ -52,10 +95,10 @@ test.describe('一覧の Loading / Empty', () => {
   })
 
   test('面接履歴: 空ならAI面接を始める導線を出す', async ({ page }) => {
-    await page.route('**/api/interviews/trend*', (route) =>
+    await page.route('**/api/bff/interviews/trend*', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ points: [] }) }),
     )
-    const release = holdThenFulfill(page, '**/api/interviews?*', { sessions: [], total: 0 })
+    const release = holdThenFulfill(page, '**/api/bff/interviews?*', { sessions: [], total: 0 })
     await page.goto('/interview/history')
     await expect(page.getByRole('status', { name: '面接履歴を読み込み中' })).toBeVisible({ timeout: 15000 })
     release()

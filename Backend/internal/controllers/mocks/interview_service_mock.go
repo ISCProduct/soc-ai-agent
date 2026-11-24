@@ -36,8 +36,8 @@ func (m *InterviewServiceMock) FinishSession(userID uint, sessionID uint) (*inte
 	return args.Get(0).(*interview.InterviewSessionResponse), args.Error(1)
 }
 
-func (m *InterviewServiceMock) ListSessions(userID uint, all bool, limit int, offset int) ([]interview.InterviewSessionResponse, int64, error) {
-	args := m.Called(userID, all, limit, offset)
+func (m *InterviewServiceMock) ListSessions(userID uint, limit int, offset int) ([]interview.InterviewSessionResponse, int64, error) {
+	args := m.Called(userID, limit, offset)
 	return args.Get(0).([]interview.InterviewSessionResponse), args.Get(1).(int64), args.Error(2)
 }
 

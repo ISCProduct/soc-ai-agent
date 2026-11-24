@@ -10,7 +10,7 @@ export default function PrivacyPage() {
         プライバシーポリシー
       </Typography>
       <Typography variant="body2" color="text.secondary" gutterBottom>
-        最終更新日: 2026年11月18日
+        最終更新日: 2026年11月19日
       </Typography>
       <Divider sx={{ my: 3 }} />
 
@@ -62,8 +62,8 @@ export default function PrivacyPage() {
           4. データの保持期間
         </Typography>
         <Typography variant="body1">
-          アカウントが有効な期間中、データを保持します。退会後は即座にログイン・閲覧ができなくなり、約30日後にすべてのデータを完全削除します。
-          面接動画は、アカウントが有効な間保管し、退会後約30日で削除します。
+          アカウントが有効な期間中、データを保持します。退会後は即座にログイン・閲覧ができなくなり、12ヶ月後にすべてのデータを完全削除します。
+          面接動画は、アカウントが有効な間保管し、退会後12ヶ月で削除します。
         </Typography>
 
         <Typography variant="h6" component="h2" fontWeight="bold">
