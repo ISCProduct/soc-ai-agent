@@ -25,10 +25,14 @@ export function useInterviewClock({ selectedPosition, handleStop }: UseInterview
   const [questionElapsedSeconds, setQuestionElapsedSeconds] = useState(0)
   const [isDeepeningQuestion, setIsDeepeningQuestion] = useState(false)
   const [questionCategory, setQuestionCategory] = useState<string | null>(null)
-  const [sessionWarningShown, setSessionWarningShown] = useState(false)
+  const [sessionWarningShown, _setSessionWarningShown] = useState(false)
+  // タイマーの閉包は開始時の state を読み続けるため、警告済みかは ref で見る(#2573)
+  const sessionWarningShownRef = useRef(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const sessionStartRef = useRef<number | null>(null)
   const questionStartedAtRef = useRef<number | null>(null)
+
+  const setSessionWarningShown = (v: boolean) => { sessionWarningShownRef.current = v; _setSessionWarningShown(v) }
 
   const startTimer = () => {
     sessionStartRef.current = Date.now()
@@ -46,7 +50,7 @@ export function useInterviewClock({ selectedPosition, handleStop }: UseInterview
       setElapsedSeconds(elapsed)
       setRemainingSeconds(remaining)
       setQuestionElapsedSeconds(questionElapsed)
-      if (remaining <= 120 && !sessionWarningShown) setSessionWarningShown(true)
+      if (remaining <= 120 && !sessionWarningShownRef.current) setSessionWarningShown(true)
       if (remaining <= 0) handleStop(true)
     }, 1000)
   }
