@@ -438,4 +438,88 @@ describe('管理画面 企業一覧', () => {
       expect(screen.getByRole('button', { name: 'マッチング情報を更新' })).not.toBeDisabled()
     })
   })
+
+  describe('操作後の取り直しでエラー表示を消さない・まとめて取得の事前確認 (SOCAIAGENT-716)', () => {
+    const bodyOf = (c: Call) => JSON.parse(c.body ?? '{}') as { dry_run?: boolean }
+
+    it('一括公開: 失敗があったら、一覧を取り直したあともエラーを残す。絞り込みを変えたら消す', async () => {
+      const READY_2 = { ...READY_DRAFT, id: 4, name: 'そろい二号株式会社' }
+      mockFetch((c) => {
+        if (c.url.startsWith('/api/admin/companies?')) return jsonRes({ companies: [READY_DRAFT, READY_2], total: 2 })
+        if (c.url === '/api/admin/companies/4/publish') return jsonRes({}, false, 500)
+        return undefined
+      })
+      jest.spyOn(window, 'confirm').mockReturnValue(true)
+      await renderPage()
+      fireEvent.click(screen.getByLabelText('このページで公開できる企業（2 社）を選択'))
+      const before = listCalls().length
+      fireEvent.click(screen.getByRole('button', { name: '選択した 2 社を学生に公開' }))
+      await screen.findByText('1 社を公開しました。1 社は公開できませんでした。')
+      expect(listCalls().length).toBeGreaterThan(before)
+      expect(screen.getByText('1 社の公開に失敗しました。')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: '公開前' }))
+      await waitFor(() => expect(screen.queryByText('1 社の公開に失敗しました。')).not.toBeInTheDocument())
+    })
+
+    it('情報を取得: 一部失敗のエラーを、一覧を取り直したあとも残す', async () => {
+      mockFetch((c) =>
+        c.url.includes('/api/admin/companies/2/fetch-primary')
+          ? jsonRes({
+              info_step: { status: 'error' },
+              tech_step: { status: 'fetched' },
+              relations_step: { status: 'fetched' },
+              errors: ['合成の失敗'],
+            })
+          : undefined,
+      )
+      await renderPage()
+      fireEvent.click(screen.getByRole('button', { name: '情報を取得' }))
+      await screen.findByText(/情報の取得が一部失敗しました/)
+      await waitFor(() => expect(calls.at(-1)?.url).toBe('/api/admin/companies/l1-coverage'))
+      expect(screen.getByText('一部うまくいきませんでした: 合成の失敗')).toBeInTheDocument()
+    })
+
+    it('情報を取得: 予算超過のエラーを、一覧を取り直したあとも残す', async () => {
+      mockFetch((c) =>
+        c.url.includes('/api/admin/companies/2/fetch-primary')
+          ? jsonRes({
+              info_step: { status: 'skipped', detail: 'budget' },
+              tech_step: { status: 'skipped', detail: 'budget' },
+              relations_step: { status: 'skipped', detail: 'budget' },
+            })
+          : undefined,
+      )
+      await renderPage()
+      fireEvent.click(screen.getByRole('button', { name: '情報を取得' }))
+      await waitFor(() => expect(calls.at(-1)?.url).toBe('/api/admin/companies/l1-coverage'))
+      expect(await screen.findByText(/月次の情報取得上限に達しているため/)).toBeInTheDocument()
+    })
+
+    it('まとめて取得: 失敗があったら、一覧を取り直したあともエラーを残す', async () => {
+      mockFetch((c) => {
+        if (c.url !== '/api/admin/companies/fetch-missing-batch') return undefined
+        if (bodyOf(c).dry_run) return jsonRes({ candidate_n: 1 })
+        return jsonRes({ processed: 1, errors: 1, items: [{ name: 'たりない株式会社', error: '合成の失敗' }] })
+      })
+      await renderPage()
+      fireEvent.click(screen.getByRole('button', { name: 'まとめて取得' }))
+      await screen.findByText(/取得完了: 1 社/)
+      await waitFor(() => expect(calls.at(-1)?.url).toBe('/api/admin/companies/l1-coverage'))
+      expect(screen.getByText('1 社とも 合成の失敗。時間をおいて再度お試しください。')).toBeInTheDocument()
+    })
+
+    it('まとめて取得: 事前確認が失敗したらエラーを出し、取得を始めない', async () => {
+      mockFetch((c) =>
+        c.url === '/api/admin/companies/fetch-missing-batch' ? jsonRes({ error: '事前確認エラー（合成）' }, false, 500) : undefined,
+      )
+      await renderPage()
+      fireEvent.click(screen.getByRole('button', { name: 'まとめて取得' }))
+      expect(await screen.findByText('事前確認エラー（合成）')).toBeInTheDocument()
+      const batch = calls.filter((c) => c.url === '/api/admin/companies/fetch-missing-batch')
+      expect(batch).toHaveLength(1)
+      expect(bodyOf(batch[0]).dry_run).toBe(true)
+      expect(screen.getByRole('button', { name: 'まとめて取得' })).not.toBeDisabled()
+    })
+  })
 })

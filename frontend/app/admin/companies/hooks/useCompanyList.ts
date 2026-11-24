@@ -83,8 +83,10 @@ export function useCompanyList() {
       industry: string,
       readiness: FilterReadiness,
       groupIndustry: boolean,
+      // 操作後の取り直しでは false にし、操作で出たエラー表示を残す（SOCAIAGENT-716）
+      clearError = true,
     ) => {
-      setError('')
+      if (clearError) setError('')
       const offset = (p - 1) * PAGE_SIZE
       const params = new URLSearchParams({
         limit: String(PAGE_SIZE),
@@ -160,7 +162,7 @@ export function useCompanyList() {
   const reloadCurrentList = (kind: CompanyListReloadKind) =>
     runCompanyListReload(kind, {
       companies: () =>
-        fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry),
+        fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry, false),
       industries: () => fetchIndustries(),
       coverage: () => fetchCoverage(),
     })
