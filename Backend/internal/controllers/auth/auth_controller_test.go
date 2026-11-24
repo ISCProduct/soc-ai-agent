@@ -255,7 +255,7 @@ func TestAuthController_RequestPasswordReset_AlwaysOK(t *testing.T) {
 
 func TestAuthController_ResetPassword_InvalidToken(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	svc.On("ResetPassword", "bad-tok", "newpass").Return(errors.New("invalid token"))
+	svc.On("ResetPassword", "bad-tok", "newpass").Return(auth.ErrPasswordResetTokenInvalid)
 
 	body, _ := json.Marshal(map[string]string{"token": "bad-tok", "password": "newpass"})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password", bytes.NewBuffer(body))

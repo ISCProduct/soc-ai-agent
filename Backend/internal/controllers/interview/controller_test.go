@@ -238,7 +238,7 @@ func TestInterviewController_List_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("ListSessions", uint(1), false, 10, 0).Return([]interview.InterviewSessionResponse{{ID: 1}}, int64(1), nil)
+	svc.On("ListSessions", uint(1), 10, 0).Return([]interview.InterviewSessionResponse{{ID: 1}}, int64(1), nil)
 	testsupport.AssertStatus(t, newInterviewController(svc).List, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -250,19 +250,21 @@ func TestInterviewController_List_LimitCapped(t *testing.T) {
 
 	svc := &mocks.InterviewServiceMock{}
 	// limit は100に切り捨てられる
-	svc.On("ListSessions", uint(1), false, 100, 0).Return([]interview.InterviewSessionResponse{}, int64(0), nil)
+	svc.On("ListSessions", uint(1), 100, 0).Return([]interview.InterviewSessionResponse{}, int64(0), nil)
 	testsupport.AssertStatus(t, newInterviewController(svc).List, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
-func TestInterviewController_List_Forbidden(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/interviews", nil)
+// all=1（全件一覧）は廃止した。指定されても本人分の一覧だけを返す（SOCAIAGENT-687）。
+func TestInterviewController_List_AllParamIgnored(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/interviews?all=1", nil)
 	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("ListSessions", uint(1), false, 20, 0).Return([]interview.InterviewSessionResponse{}, int64(0), shared.ErrForbidden)
-	testsupport.AssertStatus(t, newInterviewController(svc).List, testsupport.NewCtx(req, rec), http.StatusForbidden)
+	svc.On("ListSessions", uint(1), 20, 0).Return([]interview.InterviewSessionResponse{}, int64(0), nil)
+	testsupport.AssertStatus(t, newInterviewController(svc).List, testsupport.NewCtx(req, rec), http.StatusOK)
+	svc.AssertExpectations(t)
 }
 
 func TestInterviewController_HRList_Unauthorized(t *testing.T) {

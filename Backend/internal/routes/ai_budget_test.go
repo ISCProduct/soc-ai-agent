@@ -176,7 +176,7 @@ func TestAIBudgetGuardsAreAttachedToRoutes(t *testing.T) {
 	e := echo.New()
 	e.Use(echomw.Recover())
 	api := e.Group("/api")
-	SetupChatRoutes(api, nil, nil, secret, nil, nil, budget)
+	SetupChatRoutes(api, nil, secret, nil, nil, budget)
 	SetupCompanyRoutes(api, nil, secret, nil, nil, budget)
 	SetupResumeRoutes(api, nil, secret, nil, nil, budget)
 	SetupInterviewRoutes(api, nil, nil, secret, nil, nil, budget)
@@ -196,7 +196,6 @@ func TestAIBudgetGuardsAreAttachedToRoutes(t *testing.T) {
 		{http.MethodPost, "/api/chat", immediate},
 		{http.MethodGet, "/api/chat/analysis", immediate},
 		{http.MethodPost, "/api/chat/send-report", immediate},
-		{http.MethodPost, "/api/questions/generate", immediate},
 		{http.MethodPost, "/api/resume/review", immediate},
 		{http.MethodPost, "/api/resume/review/stream", immediate},
 		{http.MethodPost, "/api/es/review", immediate},
