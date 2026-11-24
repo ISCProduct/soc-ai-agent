@@ -3,6 +3,7 @@ package companyportal
 import (
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
+	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -91,6 +92,18 @@ func (f *fakeScoutStore) CreateScoutWithinCooldown(s *models.Scout, cooldown tim
 	s.CreatedAt = now
 	f.scouts = append(f.scouts, *s)
 	return 0, nil
+}
+
+func (f *fakeScoutStore) CountByCompanySince(_ context.Context, companyID uint, since time.Time) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var n int64
+	for _, s := range f.scouts {
+		if s.CompanyID == companyID && !s.CreatedAt.Before(since) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (f *fakeScoutStore) ListByCompany(companyID uint, _, _ int) ([]models.Scout, int64, error) {
@@ -250,7 +263,7 @@ func TestScoutService_Send_クールダウンとブロック(t *testing.T) {
 	now := time.UnixMilli(1_700_000_000_000)
 	svc.now = func() time.Time { return now }
 
-	first, err := svc.Send(1, 9, SendScoutInput{UserID: 101, TemplateID: 1})
+	first, err := svc.Send(context.Background(), 1, 9, SendScoutInput{UserID: 101, TemplateID: 1})
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
@@ -264,14 +277,14 @@ func TestScoutService_Send_クールダウンとブロック(t *testing.T) {
 		t.Fatalf("mail sent=%d", mailer.sent)
 	}
 
-	_, err = svc.Send(1, 9, SendScoutInput{UserID: 101, TemplateID: 1})
+	_, err = svc.Send(context.Background(), 1, 9, SendScoutInput{UserID: 101, TemplateID: 1})
 	if !errors.Is(err, ErrScoutCooldown) {
 		t.Fatalf("cooldown want %v got %v", ErrScoutCooldown, err)
 	}
 
 	_ = store.BlockCompany(101, 1)
 	svc.now = func() time.Time { return now.Add(ScoutCooldown + time.Minute) }
-	_, err = svc.Send(1, 9, SendScoutInput{UserID: 101, TemplateID: 1})
+	_, err = svc.Send(context.Background(), 1, 9, SendScoutInput{UserID: 101, TemplateID: 1})
 	if !errors.Is(err, ErrScoutBlocked) {
 		t.Fatalf("blocked want %v got %v", ErrScoutBlocked, err)
 	}
@@ -302,7 +315,7 @@ func TestScoutService_Send_並行送信は1件だけ保存してメールも1通
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := svc.Send(1, 9, SendScoutInput{UserID: 101, TemplateID: 1})
+			_, err := svc.Send(context.Background(), 1, 9, SendScoutInput{UserID: 101, TemplateID: 1})
 			mu.Lock()
 			defer mu.Unlock()
 			switch {
@@ -406,7 +419,7 @@ func TestScoutService_Send_展開済み本文からも実名を除いて保存�
 		mailer,
 		"http://localhost:3000",
 	)
-	got, err := svc.Send(1, 9, SendScoutInput{UserID: 101, TemplateID: 1, Message: "山田さん、デモ株式会社です"})
+	got, err := svc.Send(context.Background(), 1, 9, SendScoutInput{UserID: 101, TemplateID: 1, Message: "山田さん、デモ株式会社です"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,5 +464,111 @@ func TestInterpolateScoutBody(t *testing.T) {
 	got := InterpolateScoutBody("{{学生名}}@{{企業名}}", "A", "B")
 	if got != "A@B" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// SOCAIAGENT-694: 企業ごとのスカウト送信に日次・月次の上限を設け、超過時はメールを送らずに拒否する。
+func TestScoutService_Send_企業ごとの送信上限(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	// 2026-11-10 10:00 JST
+	base := time.Date(2026, 11, 10, 10, 0, 0, 0, jst)
+
+	type step struct {
+		companyID uint
+		userID    uint
+		at        time.Time
+		wantErr   error
+	}
+	tests := []struct {
+		name    string
+		daily   int
+		monthly int
+		steps   []step
+	}{
+		{
+			name:  "日次上限を超えると拒否し、翌日(JST)は送れる",
+			daily: 2, monthly: 100,
+			steps: []step{
+				{1, 101, base, nil},
+				{1, 102, base, nil},
+				{1, 103, base, ErrScoutQuotaExceeded},
+				// 同じ日の 23:59 JST も同じ日
+				{1, 103, time.Date(2026, 11, 10, 23, 59, 0, 0, jst), ErrScoutQuotaExceeded},
+				// 翌日 0:00 JST（UTC ではまだ 11/10）
+				{1, 103, time.Date(2026, 11, 11, 0, 0, 0, 0, jst), nil},
+			},
+		},
+		{
+			name:  "月次上限を超えると拒否し、翌月は送れる",
+			daily: 100, monthly: 2,
+			steps: []step{
+				{1, 101, base, nil},
+				{1, 102, base.AddDate(0, 0, 5), nil},
+				{1, 103, base.AddDate(0, 0, 10), ErrScoutQuotaExceeded},
+				{1, 103, time.Date(2026, 12, 1, 0, 0, 0, 0, jst), nil},
+			},
+		},
+		{
+			name:  "上限は企業ごとに数える",
+			daily: 1, monthly: 100,
+			steps: []step{
+				{1, 101, base, nil},
+				{2, 101, base, nil},
+				{1, 102, base, ErrScoutQuotaExceeded},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newFakeScoutStore()
+			mailer := &fakeMailer{}
+			svc := NewScoutService(
+				store,
+				fakeVisible{ok: true},
+				fakeUserReader{user: &models.User{ID: 101, Name: "山田", Email: "a@example.com"}},
+				fakeCompanyReader{company: &models.Company{ID: 1, Name: "デモ株式会社"}},
+				mailer,
+				"http://localhost:3000",
+			)
+			svc.dailyLimit, svc.monthlyLimit = tt.daily, tt.monthly
+			wantMails := 0
+			for i, st := range tt.steps {
+				at := st.at
+				svc.now = func() time.Time { return at }
+				_, err := svc.Send(context.Background(), st.companyID, 9, SendScoutInput{UserID: st.userID, Message: "ご案内です"})
+				if !errors.Is(err, st.wantErr) {
+					t.Fatalf("step %d: want %v got %v", i, st.wantErr, err)
+				}
+				if st.wantErr == nil {
+					wantMails++
+				}
+				if mailer.sent != wantMails {
+					t.Fatalf("step %d: 上限超過でメールを送っている sent=%d want=%d", i, mailer.sent, wantMails)
+				}
+			}
+		})
+	}
+}
+
+func TestScoutQuotaLimitsFromEnv(t *testing.T) {
+	tests := []struct {
+		name               string
+		daily, monthly     string
+		wantDay, wantMonth int
+	}{
+		{"未設定は既定", "", "", 50, 500},
+		{"正の整数は採用", "10", "200", 10, 200},
+		{"0・負数・不正値は既定", "0", "abc", 50, 500},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SCOUT_DAILY_LIMIT_PER_COMPANY", tt.daily)
+			t.Setenv("SCOUT_MONTHLY_LIMIT_PER_COMPANY", tt.monthly)
+			svc := NewScoutService(newFakeScoutStore(), nil, nil, nil, nil, "")
+			if svc.dailyLimit != tt.wantDay || svc.monthlyLimit != tt.wantMonth {
+				t.Fatalf("got %d/%d want %d/%d", svc.dailyLimit, svc.monthlyLimit, tt.wantDay, tt.wantMonth)
+			}
+		})
 	}
 }

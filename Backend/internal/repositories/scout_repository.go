@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -113,6 +114,15 @@ func (r *ScoutRepository) CreateScoutWithinCooldown(s *models.Scout, cooldown ti
 		return 0, err
 	}
 	return remaining, nil
+}
+
+// CountByCompanySince は企業が since 以降に送ったスカウトの件数を返す（送信上限の判定用。SOCAIAGENT-694）。
+func (r *ScoutRepository) CountByCompanySince(ctx context.Context, companyID uint, since time.Time) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&models.Scout{}).
+		Where("company_id = ? AND created_at >= ?", companyID, since).
+		Count(&n).Error
+	return n, err
 }
 
 func (r *ScoutRepository) ListByCompany(companyID uint, limit, offset int) ([]models.Scout, int64, error) {

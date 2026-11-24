@@ -5,9 +5,12 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services/notification"
 	"Backend/internal/services/shared"
+	"context"
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -21,7 +24,25 @@ var (
 	ErrScoutBlocked    = errors.New("scout blocked by student")
 	ErrScoutNotVisible = errors.New("student not visible for scout")
 	ErrScoutNotFound   = shared.ErrNotFound
+	// ErrScoutQuotaExceeded は企業ごとの日次・月次の送信上限に達したとき（SOCAIAGENT-694）。
+	ErrScoutQuotaExceeded = errors.New("scout quota exceeded")
 )
+
+// 企業ごとのスカウト送信上限の既定値（SOCAIAGENT-694）。環境変数で上書きできる。
+const (
+	defaultScoutDailyLimitPerCompany   = 50
+	defaultScoutMonthlyLimitPerCompany = 500
+)
+
+// scoutQuotaZone は日次・月次の区切りに使うタイムゾーン（日本時間）。
+var scoutQuotaZone = time.FixedZone("JST", 9*60*60)
+
+func envPositiveInt(key string, def int) int {
+	if v, err := strconv.Atoi(os.Getenv(key)); err == nil && v > 0 {
+		return v
+	}
+	return def
+}
 
 type scoutStore interface {
 	CreateTemplate(t *models.ScoutTemplate) error
@@ -33,6 +54,8 @@ type scoutStore interface {
 	// 判定と作成はストア側で直列化する。
 	CreateScoutWithinCooldown(s *models.Scout, cooldown time.Duration, now time.Time) (time.Duration, error)
 	ListByCompany(companyID uint, limit, offset int) ([]models.Scout, int64, error)
+	// CountByCompanySince は企業が since 以降に送ったスカウトの件数を返す。
+	CountByCompanySince(ctx context.Context, companyID uint, since time.Time) (int64, error)
 	ListByUser(userID uint, limit, offset int) ([]models.Scout, int64, error)
 	FindByIDForUser(userID, id uint) (*models.Scout, error)
 	UpdateStatusForUser(userID, id uint, fromStatuses []string, toStatus string) error
@@ -70,6 +93,9 @@ type ScoutService struct {
 	now       func() time.Time
 	appURL    string
 	notifier  notification.Notifier
+	// 企業ごとの送信上限（JST の暦日・暦月で数える）
+	dailyLimit   int
+	monthlyLimit int
 }
 
 // SetNotifier はスカウトの受信を学生へ知らせる通知を設定する（#2033）。
@@ -86,14 +112,41 @@ func NewScoutService(
 	appURL string,
 ) *ScoutService {
 	return &ScoutService{
-		store:     store,
-		visible:   visible,
-		users:     users,
-		companies: companies,
-		mailer:    mailer,
-		now:       time.Now,
-		appURL:    strings.TrimRight(strings.TrimSpace(appURL), "/"),
+		store:        store,
+		visible:      visible,
+		users:        users,
+		companies:    companies,
+		mailer:       mailer,
+		now:          time.Now,
+		appURL:       strings.TrimRight(strings.TrimSpace(appURL), "/"),
+		dailyLimit:   envPositiveInt("SCOUT_DAILY_LIMIT_PER_COMPANY", defaultScoutDailyLimitPerCompany),
+		monthlyLimit: envPositiveInt("SCOUT_MONTHLY_LIMIT_PER_COMPANY", defaultScoutMonthlyLimitPerCompany),
 	}
+}
+
+// checkQuota は企業の当日・当月の送信数が上限に達していれば ErrScoutQuotaExceeded を返す。
+// ponytail: 判定と保存は別の処理のため、同じ企業から別々の学生へ同時に送ると上限を数件超えうる。
+// 厳密にしたい場合は企業単位のロック行を CreateScoutWithinCooldown のトランザクションで取る。
+func (s *ScoutService) checkQuota(ctx context.Context, companyID uint) error {
+	now := s.now().In(scoutQuotaZone)
+	y, m, d := now.Date()
+	limits := []struct {
+		since time.Time
+		limit int
+	}{
+		{time.Date(y, m, d, 0, 0, 0, 0, scoutQuotaZone), s.dailyLimit},
+		{time.Date(y, m, 1, 0, 0, 0, 0, scoutQuotaZone), s.monthlyLimit},
+	}
+	for _, l := range limits {
+		n, err := s.store.CountByCompanySince(ctx, companyID, l.since)
+		if err != nil {
+			return err
+		}
+		if n >= int64(l.limit) {
+			return ErrScoutQuotaExceeded
+		}
+	}
+	return nil
 }
 
 type ScoutTemplateInput struct {
@@ -221,7 +274,7 @@ func (s *ScoutService) CooldownRemaining(companyID, userID uint) (time.Duration,
 	return ScoutCooldown - elapsed, nil
 }
 
-func (s *ScoutService) Send(companyID, companyUserID uint, in SendScoutInput) (*SendScoutResult, error) {
+func (s *ScoutService) Send(ctx context.Context, companyID, companyUserID uint, in SendScoutInput) (*SendScoutResult, error) {
 	if companyID == 0 || companyUserID == 0 {
 		return nil, shared.ErrForbidden
 	}
@@ -285,6 +338,11 @@ func (s *ScoutService) Send(companyID, companyUserID uint, in SendScoutInput) (*
 	}
 	if utf8.RuneCountInString(message) > models.MaxScoutMessageLength {
 		return nil, &shared.ValidationError{Message: "文面が長すぎます"}
+	}
+
+	// 上限超過は保存・通知・メールより前に止める（SOCAIAGENT-694）。
+	if err := s.checkQuota(ctx, companyID); err != nil {
+		return nil, err
 	}
 
 	scout := &models.Scout{

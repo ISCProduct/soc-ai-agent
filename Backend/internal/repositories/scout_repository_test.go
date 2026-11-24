@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -107,5 +108,22 @@ func TestCreateScoutWithinCooldown_クールダウン中は保存しない(t *te
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("クールダウン中に INSERT した: %v", err)
+	}
+}
+
+// TestCountByCompanySince_企業と期間で数える は、送信上限の判定（SOCAIAGENT-694）が
+// 企業IDと開始時刻の両方で絞った件数を使うことを固定する。
+func TestCountByCompanySince_企業と期間で数える(t *testing.T) {
+	repo, mock := newScoutRepoTestDB(t)
+	since := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `scouts` WHERE company_id = \\? AND created_at >= \\?").
+		WithArgs(1, since).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(7))
+	n, err := repo.CountByCompanySince(context.Background(), 1, since)
+	if err != nil || n != 7 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
