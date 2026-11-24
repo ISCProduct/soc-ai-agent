@@ -10,7 +10,7 @@ import {
   formatFetchPrimarySummary,
   hasActionableSoftEmpty,
 } from '@/lib/admin/company-fetch'
-import { canSelectForPublish, type Company } from '../company-list-model'
+import { canSelectForPublish, networkErrorMessage, type Company } from '../company-list-model'
 
 type Params = {
   companies: Company[]
@@ -48,15 +48,19 @@ export function useCompanyRowActions({
   const handlePublish = async (companyId: number) => {
     setError('')
     setMenuAnchor(null)
-    const ok = await publishCompany(companyId)
-    if (!ok) {
-      setError('公開に失敗しました')
-      return
+    try {
+      const ok = await publishCompany(companyId)
+      if (!ok) {
+        setError('公開に失敗しました')
+        return
+      }
+      setFetchSeverity('success')
+      setFetchMessage('企業を学生に公開しました。')
+      setSelectedIds((prev) => prev.filter((id) => id !== companyId))
+      await reloadCurrentList('status')
+    } catch {
+      setError(networkErrorMessage('公開'))
     }
-    setFetchSeverity('success')
-    setFetchMessage('企業を学生に公開しました。')
-    setSelectedIds((prev) => prev.filter((id) => id !== companyId))
-    await reloadCurrentList('status')
   }
 
   const handleBulkPublish = async () => {
@@ -74,13 +78,17 @@ export function useCompanyRowActions({
     setError('')
     setFetchMessage('')
     try {
-      let success = 0
+      // 1社の通信断で止めず、全件を試して成否を数える（#2573）
+      const published: number[] = []
       let failed = 0
       for (const company of targets) {
-        if (await publishCompany(company.id)) success += 1
+        const ok = await publishCompany(company.id).catch(() => false)
+        if (ok) published.push(company.id)
         else failed += 1
       }
-      setSelectedIds([])
+      const success = published.length
+      // 公開できた分だけ選択から外し、失敗した分は選択に残して再試行できるようにする
+      setSelectedIds((prev) => prev.filter((id) => !published.includes(id)))
       if (failed > 0) {
         setFetchSeverity('warning')
         setFetchMessage(`${success} 社を公開しました。${failed} 社は公開できませんでした。`)
@@ -98,43 +106,51 @@ export function useCompanyRowActions({
   const handleSetVerified = async (companyId: number, verified: boolean) => {
     setError('')
     setMenuAnchor(null)
-    const res = await fetch(`/api/admin/companies/${companyId}/verify`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        ...authService.getAdminFetchHeaders(),
-      },
-      body: JSON.stringify({ verified }),
-    })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      setError(data?.error || `学生検索の審査を更新できませんでした (${res.status})`)
-      return
+    try {
+      const res = await fetch(`/api/admin/companies/${companyId}/verify`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authService.getAdminFetchHeaders(),
+        },
+        body: JSON.stringify({ verified }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setError(data?.error || `学生検索の審査を更新できませんでした (${res.status})`)
+        return
+      }
+      setFetchSeverity('success')
+      setFetchMessage(
+        verified
+          ? '学生検索の審査を完了しました。この企業は学生の検索とスカウト送信ができます。'
+          : '学生検索の審査を取り消しました。学生の検索とスカウト送信はできません。',
+      )
+      await reloadCurrentList('status')
+    } catch {
+      setError(networkErrorMessage('学生検索の審査の更新'))
     }
-    setFetchSeverity('success')
-    setFetchMessage(
-      verified
-        ? '学生検索の審査を完了しました。この企業は学生の検索とスカウト送信ができます。'
-        : '学生検索の審査を取り消しました。学生の検索とスカウト送信はできません。',
-    )
-    await reloadCurrentList('status')
   }
 
   const handleReject = async (companyId: number) => {
     setError('')
     setMenuAnchor(null)
-    const res = await fetch(`/api/admin/companies/${companyId}/reject`, {
-      method: 'PATCH',
-      headers: authService.getAdminFetchHeaders(),
-    })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      setError(data?.error || `非公開への変更に失敗しました (${res.status})`)
-      return
+    try {
+      const res = await fetch(`/api/admin/companies/${companyId}/reject`, {
+        method: 'PATCH',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setError(data?.error || `非公開への変更に失敗しました (${res.status})`)
+        return
+      }
+      setFetchSeverity('success')
+      setFetchMessage('企業を非公開にしました。学生には表示されません。')
+      await reloadCurrentList('reject')
+    } catch {
+      setError(networkErrorMessage('非公開への変更'))
     }
-    setFetchSeverity('success')
-    setFetchMessage('企業を非公開にしました。学生には表示されません。')
-    await reloadCurrentList('reject')
   }
 
   const handleFetchPrimary = async (companyId: number, force = false) => {
