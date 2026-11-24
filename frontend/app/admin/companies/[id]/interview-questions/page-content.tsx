@@ -33,6 +33,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import { authService } from '@/lib/auth'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 
@@ -85,6 +86,14 @@ export default function PageContent() {
   useEffect(() => {
     const user = authService.getStoredUser()
     if (!user?.is_admin && !user?.is_staff) window.location.href = '/'
+  }, [])
+
+  // 企業マスタ・面接質問は全校共有のため、書き込みはシステム管理者のみ（API も 403 を返す）
+  const [isPlatform, setIsPlatform] = useState(false)
+  useEffect(() => {
+    getAdminSchoolAccess()
+      .then((access) => setIsPlatform(!access.restricted))
+      .catch(() => setIsPlatform(false))
   }, [])
 
   const [companyName, setCompanyName] = useState('')
@@ -263,20 +272,27 @@ export default function PageContent() {
         <Typography variant="body2" color="text.secondary">
           登録した質問はAI面接のシステムプロンプトに自動的に注入されます。
         </Typography>
-        <Stack direction="row" spacing={1}>
-          <Button
-            variant="outlined"
-            startIcon={generating ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
-            onClick={handleGenerate}
-            disabled={generating}
-          >
-            {generating ? 'AI生成中...' : 'AIで自動生成'}
-          </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
-            質問を追加
-          </Button>
-        </Stack>
+        {isPlatform && (
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="outlined"
+              startIcon={generating ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
+              onClick={handleGenerate}
+              disabled={generating}
+            >
+              {generating ? 'AI生成中...' : 'AIで自動生成'}
+            </Button>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+              質問を追加
+            </Button>
+          </Stack>
+        )}
       </Box>
+      {!isPlatform && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          面接質問は全校で共有するため、追加・編集・削除はシステム管理者のみ行えます。修正が必要なときはシステム管理者に依頼してください。
+        </Alert>
+      )}
 
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
@@ -284,7 +300,7 @@ export default function PageContent() {
         </Box>
       ) : questions.length === 0 ? (
         <Paper elevation={0} sx={{ p: 4, textAlign: 'center', border: '1px dashed #e2e8f0' }}>
-          <Typography color="text.secondary">質問が登録されていません。「質問を追加」から登録してください。</Typography>
+          <Typography color="text.secondary">{isPlatform ? '質問が登録されていません。「質問を追加」から登録してください。' : '質問が登録されていません。'}</Typography>
         </Paper>
       ) : (
         <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0' }}>
@@ -296,7 +312,7 @@ export default function PageContent() {
                 <TableCell sx={{ fontWeight: 700, width: 140 }}>職種（空=全共通）</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>質問文</TableCell>
                 <TableCell sx={{ fontWeight: 700, width: 80 }}>必須</TableCell>
-                <TableCell sx={{ fontWeight: 700, width: 100 }}>操作</TableCell>
+                {isPlatform && <TableCell sx={{ fontWeight: 700, width: 100 }}>操作</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -324,20 +340,22 @@ export default function PageContent() {
                       <Chip label="必須" size="small" color="error" sx={{ fontWeight: 700 }} />
                     )}
                   </TableCell>
-                  <TableCell>
-                    <Stack direction="row" spacing={0.5}>
-                      <Tooltip title="編集">
-                        <IconButton size="small" onClick={() => openEdit(q)} aria-label="質問を編集">
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="削除">
-                        <IconButton size="small" color="error" onClick={() => setDeleteConfirmId(q.id)} aria-label="質問を削除">
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
-                  </TableCell>
+                  {isPlatform && (
+                    <TableCell>
+                      <Stack direction="row" spacing={0.5}>
+                        <Tooltip title="編集">
+                          <IconButton size="small" onClick={() => openEdit(q)} aria-label="質問を編集">
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="削除">
+                          <IconButton size="small" color="error" onClick={() => setDeleteConfirmId(q.id)} aria-label="質問を削除">
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
