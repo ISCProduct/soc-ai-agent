@@ -517,6 +517,8 @@ jobs:
     name: Deploy Discord Lambda
     runs-on: ubuntu-latest
     environment: staging
+    permissions:
+      contents: read
     concurrency:
       group: deploy-discord-lambda
       cancel-in-progress: true
@@ -564,13 +566,15 @@ jobs:
     name: Deploy Discord Lambda (production)
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      contents: read
     concurrency:
       group: deploy-discord-lambda-prod
       cancel-in-progress: true
 
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
-      FUNCTION_NAME: soc-app-discord
+      FUNCTION_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}-discord
 
     steps:
       - uses: actions/checkout@v7
@@ -591,9 +595,16 @@ jobs:
         working-directory: ./Backend
         run: |
           set -e
-          if ! aws lambda get-function --function-name "$FUNCTION_NAME" >/dev/null 2>&1; then
-            echo "本番の Discord Lambda は未作成です。discord_bot_enabled を有効にするまでスキップします"
-            exit 0
+          # 関数が無い（ResourceNotFoundException）ときだけスキップする。
+          # 権限不足・スロットリング・ネットワーク断などは握りつぶさず失敗させる。
+          if ! GET_OUT=$(aws lambda get-function --function-name "$FUNCTION_NAME" 2>&1); then
+            if echo "$GET_OUT" | grep -q "ResourceNotFoundException"; then
+              echo "本番の Discord Lambda は未作成です。discord_bot_enabled を有効にするまでスキップします"
+              exit 0
+            fi
+            echo "::error::aws lambda get-function が ResourceNotFoundException 以外で失敗しました"
+            echo "$GET_OUT" >&2
+            exit 1
           fi
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o bootstrap ./cmd/discord-lambda
           zip -j discord-lambda.zip bootstrap

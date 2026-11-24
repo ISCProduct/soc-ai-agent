@@ -57,6 +57,10 @@ cp backend.hcl.example backend.hcl
 terraform init -backend-config=backend.hcl
 ```
 
+> **既存の作業ディレクトリは `-upgrade` が必要:** Discord の受け口（`discord_lambda.tf`）で `archive` provider を追加した。
+> すでに `terraform init` 済みの環境では、lock file にこの provider が無いため `terraform init -upgrade -backend-config=backend.hcl` を実行する。
+> 本番で `discord_bot_enabled = true` にする手順（apply → 実コード配置 → Interactions Endpoint 切り替え、`BACKLOG_API_KEY` を #2563 の `DISCORD_BACKLOG_BOT_SECRET_ID` 方式に揃える）は `automation/discord/README.md` の「本番への切り替え手順」を参照。
+
 ### 4. plan / apply
 
 既定（`*_desired_count=0`）で apply すると ALB/ECS/RDS/S3/Route53 は作られるが Fargate タスクは0台 = アプリは起動しない。ALB自体は常時課金される点に注意。
