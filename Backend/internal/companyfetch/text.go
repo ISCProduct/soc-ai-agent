@@ -166,7 +166,8 @@ func ValidatePublicHTTPURL(rawURL string) error {
 	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("invalid url: %w", err)
+		// url.Parse のエラーは元の URL（クエリのトークン等）を含むので、ログに出る値へ混ぜない
+		return fmt.Errorf("invalid url")
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return fmt.Errorf("only http/https urls are allowed")
