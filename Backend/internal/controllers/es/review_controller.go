@@ -1,6 +1,7 @@
 package es
 
 import (
+	"Backend/internal/config"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
@@ -17,7 +18,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -315,7 +315,7 @@ func postESReview(ctx echo.Context, payload esReviewRAGRequest, cli *openai.Clie
 	}
 	payload.ESText = masked
 
-	ragURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
+	ragURL := config.RAGReviewURL()
 	if ragURL == "" {
 		return 0, nil, echo.NewHTTPError(http.StatusServiceUnavailable, "RAG_REVIEW_URL is not configured")
 	}
