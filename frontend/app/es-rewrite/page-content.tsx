@@ -1,360 +1,26 @@
 'use client'
 
-import { memo, Suspense, useMemo, useState } from 'react'
-import { formatDate } from '@/lib/i18n/format'
-import FormatFindingsSection, { type FormatFinding } from '@/components/feedback/FormatFindingsSection'
+import { Suspense, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import {
-  Alert,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  Divider,
-  IconButton,
-  LinearProgress,
-  Paper,
-  Stack,
-  TextField,
-  Tooltip,
-  Typography,
-} from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
-import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import CheckIcon from '@mui/icons-material/Check'
-import EditNoteIcon from '@mui/icons-material/EditNote'
-import RateReviewIcon from '@mui/icons-material/RateReview'
+import { Box } from '@mui/material'
 import { PageLoading } from '@/components/common/PageLoading'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import { CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
-import { createTextDiff, findUniqueTextRange, type DiffSegment } from './text-diff'
-import EsTemplatePanel from '@/components/es/EsTemplatePanel'
-import { PLACEHOLDER_PATTERN } from '@/lib/es-templates'
+import { createTextDiff, findUniqueTextRange } from './text-diff'
+import { readApiErrorMessage } from './api-error'
+import { CHAR_LIMIT_MAX, CHAR_LIMIT_MIN, type CharLimitMode, type EsMode, type ReviewResult, type RewriteResult } from './types'
+import EsRewriteHeader from './components/EsRewriteHeader'
+import ModeToggle from './components/ModeToggle'
+import EsInputForm from './components/EsInputForm'
+import ReviewResultPanel from './components/ReviewResultPanel'
+import RewriteResultPanel from './components/RewriteResultPanel'
 
-const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
-
-// RAG側 models.ES_TEXT_MAX_LENGTH と合わせる。
-// 10,000字だった頃は7,300字を超えた入力が必ず 422 になっていた（#1564）
-const ES_TEXT_MAX_LENGTH = 6000
-
-// RAG側 models.ES_CHAR_LIMIT_MIN / MAX と合わせる（設問の文字数上限 / #1523）
-const CHAR_LIMIT_MIN = 100
-const CHAR_LIMIT_MAX = 2000
-
-/**
- * APIプロキシのエラーレスポンス（{ error, status, detail }想定）から
- * 日本語の短いメッセージを取り出す。生JSON/HTMLをそのまま表示しないため(#1015)。
- *
- * 422 のみ detail を優先する。RAGが利用者向けの具体的な案内（例: 「文章が長すぎて
- * 添削できませんでした。文字数を減らしてお試しください。」#1521）を detail に入れる一方、
- * api-proxy が error へ一般文「処理に失敗しました。しばらくしてから再試行してください。」を
- * 入れるため、error だけを読むと何をすれば直るのか分からなくなる。
- *
- * ただし detail は文字列とは限らない。api-proxy の getDetailText は本文に文字列 detail が
- * 無いとレスポンス本文そのものを入れるため（FastAPIのバリデーションエラーは detail が配列で、
- * しかも input にES全文が入る）、案内文の形をしているものだけを採用する。#1015 の
- * 「生JSONを画面に出さない」を壊さないための検査。
- */
-const USER_FACING_DETAIL_MAX = 200
-
-function userFacingDetail(detail: unknown): string | undefined {
-  if (typeof detail !== 'string') return undefined
-  const text = detail.trim()
-  if (!text || text.length > USER_FACING_DETAIL_MAX) return undefined
-  if (text.startsWith('{') || text.startsWith('[')) return undefined
-  return text
-}
-
-async function readApiErrorMessage(res: Response, fallback: string): Promise<string> {
-  try {
-    const data: unknown = await res.json()
-    const { error, detail } = (data ?? {}) as { error?: unknown; detail?: unknown }
-    const safeDetail = userFacingDetail(detail)
-    if (res.status === 422 && safeDetail) return safeDetail
-    if (typeof error === 'string' && error) return error
-    if (safeDetail) return safeDetail
-  } catch { /* ignore */ }
-  return fallback
-}
-
-type StarBreakdown = {
-  situation: string
-  task: string
-  action: string
-  result: string
-}
-
-// 字数の結果(#1523 / #1606)。ES添削・ESリライトで同じ形を返す（生成経路が同じ / #1533）
-type CharLimitResult = {
-  improved_text_length?: number
-  // 指定字数に収まったか。上限未指定なら null
-  char_limit_satisfied?: boolean | null
-  // 改善文が目標レンジ（元の100〜130%）に入ったか。指定字数があるときは null
-  improved_length_satisfied?: boolean | null
-  // short は元の100%未満、long は130%超え。範囲内と指定字数があるときは null
-  improved_length_issue?: 'short' | 'long' | null
-}
-
-type RewriteResult = CharLimitResult & {
-  rewritten_text: string
-  star: StarBreakdown
-}
-
-type ReviewResult = CharLimitResult & {
-  specificity_score: number
-  star_score: number
-  company_fit_score: number | null
-  length_balance_score: number
-  feedback: string
-  improved_text: string
-  company_strategy?: string | null
-  feedback_items?: ReviewFeedbackItem[]
-  // 企業情報の取得元。"none" なら企業適合性を評価していない(#1524)
-  company_context_source?: 'company_brief' | 'cache' | 'web_search' | 'none'
-  // 同一設問の前回の添削(#1531)。初回・未ログイン・設問未入力のときは付かない。
-  previous?: PreviousReview | null
-  // ルールによる形式チェックの指摘(#1530)。「必ず直す」として AI の指摘とは分けて表示する
-  format_findings?: FormatFinding[]
-}
-
-type PreviousReview = {
-  id: number
-  created_at: string
-  question: string
-  question_type: string
-  specificity_score: number
-  star_score: number
-  length_balance_score: number
-  company_fit_score?: number | null
-}
-
-type ReviewFeedbackItem = {
-  score_key: 'specificity_score' | 'star_score' | 'company_fit_score' | 'length_balance_score'
-  source_excerpt: string
-  issue: string
-  suggestion: string
-}
-
-type AnchoredFeedbackItem = ReviewFeedbackItem & {
-  index: number
-  anchorId: string
-  start: number
-  end: number
-}
-
-const FEEDBACK_SCORE_LABELS: Record<ReviewFeedbackItem['score_key'], string> = {
-  specificity_score: '具体性',
-  star_score: 'STAR法準拠',
-  company_fit_score: '企業適合性',
-  length_balance_score: '文字数バランス',
-}
-
-const NO_ANCHORED_FEEDBACK: AnchoredFeedbackItem[] = []
-
-const HighlightedDiffText = memo(function HighlightedDiffText({
-  segments,
-  anchors = NO_ANCHORED_FEEDBACK,
-  ariaLabel,
-}: {
-  segments: DiffSegment[]
-  anchors?: AnchoredFeedbackItem[]
-  ariaLabel: string
-}) {
-  const renderedAnchors = new Set<string>()
-
-  return (
-    <Box
-      role="group"
-      aria-label={ariaLabel}
-      sx={{ fontSize: 14, lineHeight: 1.9, color: UI.ink, whiteSpace: 'pre-wrap' }}
-    >
-      {segments.flatMap((segment, segmentIndex) => {
-        const intersectingAnchors = anchors.filter(
-          anchor => anchor.start < segment.end && anchor.end > segment.start,
-        )
-        const boundaries = new Set([segment.start, segment.end])
-        for (const anchor of intersectingAnchors) {
-          boundaries.add(Math.max(segment.start, anchor.start))
-          boundaries.add(Math.min(segment.end, anchor.end))
-        }
-        const sortedBoundaries = [...boundaries].sort((a, b) => a - b)
-
-        return sortedBoundaries.slice(0, -1).map((start, partIndex) => {
-          const end = sortedBoundaries[partIndex + 1]
-          const text = segment.text.slice(start - segment.start, end - segment.start)
-          const activeAnchors = intersectingAnchors.filter(
-            anchor => anchor.start < end && anchor.end > start,
-          )
-          const newAnchorIds = activeAnchors
-            .filter(anchor => !renderedAnchors.has(anchor.anchorId))
-            .map(anchor => anchor.anchorId)
-          for (const anchor of activeAnchors) renderedAnchors.add(anchor.anchorId)
-          const anchorId = newAnchorIds[0]
-          const anchorProps = anchorId
-            ? { id: anchorId, 'data-es-feedback-anchor': 'true', tabIndex: -1 }
-            : {}
-          const anchorMarkers = newAnchorIds.slice(1).map(anchorId => (
-            <Box
-              key={anchorId}
-              component="span"
-              id={anchorId}
-              data-es-feedback-anchor="true"
-              tabIndex={-1}
-              sx={{ display: 'inline-block', width: 0, height: '1em', overflow: 'hidden', scrollMarginTop: '96px' }}
-            />
-          ))
-          const anchorStyle = activeAnchors.length > 0
-            ? { boxShadow: `inset 0 -2px ${UI.mark}`, scrollMarginTop: '96px' }
-            : {}
-
-          if (segment.kind === 'removed') {
-            return (
-              <Box
-                key={`${segmentIndex}-${partIndex}`}
-                component="del"
-                {...anchorProps}
-                sx={{
-                  bgcolor: '#fee2e2',
-                  color: '#991b1b',
-                  textDecoration: 'line-through',
-                  borderRadius: 0.5,
-                  ...anchorStyle,
-                }}
-              >
-                {anchorMarkers}
-                {text}
-              </Box>
-            )
-          }
-          if (segment.kind === 'added') {
-            return (
-              <Box
-                key={`${segmentIndex}-${partIndex}`}
-                component="ins"
-                {...anchorProps}
-                sx={{
-                  bgcolor: '#dcfce7',
-                  color: '#166534',
-                  textDecoration: 'underline',
-                  textUnderlineOffset: '2px',
-                  borderRadius: 0.5,
-                  ...anchorStyle,
-                }}
-              >
-                {anchorMarkers}
-                {text}
-              </Box>
-            )
-          }
-          return (
-            <Box
-              key={`${segmentIndex}-${partIndex}`}
-              component="span"
-              {...anchorProps}
-              sx={anchorStyle}
-            >
-              {anchorMarkers}
-              {text}
-            </Box>
-          )
-        })
-      })}
-    </Box>
-  )
-})
-
-// マーカーは S / T / A / R の頭文字を使う。
-// 📍🎯⚡📊 を当てていたが、絵文字と項目の対応に意味が無く、
-// STAR という枠組みそのものを隠していた。頭文字なら対応が自明。
-const STAR_LABELS: { key: keyof StarBreakdown; label: string; color: string; initial: string }[] = [
-  { key: 'situation', label: 'Situation（状況）', color: '#3b82f6', initial: 'S' },
-  { key: 'task',      label: 'Task（課題）',      color: '#8b5cf6', initial: 'T' },
-  { key: 'action',    label: 'Action（施策）',    color: UI.mark,   initial: 'A' },
-  { key: 'result',    label: 'Result（成果）',    color: '#10b981', initial: 'R' },
-]
-
-/**
- * 生成結果の字数表示(#1523)。
- *
- * 字数はサーバが数えた値をそのまま出す（改行と前後の空白を数えない数え方は
- * RAG 側の count_es_chars が唯一の定義。画面で数え直すと定義が二重になる）。
- */
-// ScoreDelta は同一設問の前回スコアとの差（#1531）。
-// 前回が無い項目は何も出さない。0 を出すと「評価された結果の±0」と
-// 「比べる相手がいない」が区別できなくなる。
-function ScoreDelta({ current, previous }: { current: number; previous: number | null | undefined }) {
-  if (previous == null) return null
-  const diff = current - previous
-  if (diff === 0) {
-    return <Typography sx={{ fontSize: 12, fontWeight: 600, color: UI.inkFaint }}>±0</Typography>
-  }
-  const up = diff > 0
-  return (
-    <Typography sx={{ fontSize: 12, fontWeight: 700, color: up ? '#15803d' : '#b91c1c' }}>
-      {up ? '▲' : '▼'}{Math.abs(diff)}
-    </Typography>
-  )
-}
-
-function formatPreviousDate(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '前回'
-  return formatDate(d, { year: 'numeric', month: 'numeric', day: 'numeric' })
-}
-
-function CharCountNote({ result, charLimit }: { result: CharLimitResult; charLimit: number | null }) {
-  const length = result.improved_text_length
-  const overLimit = result.char_limit_satisfied === false
-  const tooLong = result.improved_length_issue === 'long'
-  // 理由が無い応答は false を短さとみなす。長い文章に「短くなりました」とは出さない。
-  const tooShort = result.improved_length_issue === 'short'
-    || (result.improved_length_issue == null && result.improved_length_satisfied === false)
-  const lengthKnown = typeof length === 'number' && length > 0
-  // 字数が0でも「短い」と分かっているときは警告を出す。ここで return すると、
-  // 空の改善文が説明なしで画面に残る（#1606）。
-  if (!lengthKnown && !tooShort && !tooLong) return null
-  return (
-    <Box sx={{ mt: 1.5 }}>
-      {lengthKnown && (
-        <Typography sx={{ fontSize: 13, fontWeight: 600, color: overLimit || tooShort || tooLong ? '#b45309' : UI.inkFaint }}>
-          {charLimit === null ? `${length} 文字` : `${length} / ${charLimit} 文字`}
-          （改行と前後の空白は数えません）
-        </Typography>
-      )}
-      {overLimit && (
-        <Alert severity="warning" role="status" sx={{ mt: 1, borderRadius: 2, fontSize: 13 }}>
-          指定字数に収まりませんでした。勝手に切り詰めずそのまま出しているので、削る箇所を選んでから提出してください。もう一度実行すると収まることもあります。
-        </Alert>
-      )}
-      {tooShort && (
-        <Alert severity="warning" role="status" sx={{ mt: 1, borderRadius: 2, fontSize: 13 }}>
-          生成された文章が元の文章より短くなりました。要約になっていて、元の内容が落ちていることがあります。このまま提出せず、元の文章と見比べてください。
-        </Alert>
-      )}
-      {tooLong && (
-        <Alert severity="warning" role="status" sx={{ mt: 1, borderRadius: 2, fontSize: 13 }}>
-          生成された文章が元の文章の130%を超えています。このまま提出せず、残す内容を選んで短くしてください。
-        </Alert>
-      )}
-    </Box>
-  )
-}
-
-type ScoreKey = 'specificity_score' | 'star_score' | 'company_fit_score' | 'length_balance_score'
-
-const SCORE_ITEMS: { key: ScoreKey; label: string; color: string }[] = [
-  { key: 'specificity_score',    label: '具体性',       color: '#3b82f6' },
-  { key: 'star_score',           label: 'STAR法準拠',   color: '#8b5cf6' },
-  { key: 'company_fit_score',    label: '企業適合性',   color: UI.mark },
-  { key: 'length_balance_score', label: '文字数バランス', color: '#10b981' },
-]
-
+// ES添削・リライト画面。state と送信処理をここで持ち、表示は components/ の部品へ渡す（#2569）
 function ESRewriteContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  const [mode, setMode] = useState<'rewrite' | 'review'>('rewrite')
+  const [mode, setMode] = useState<EsMode>('rewrite')
   const [originalText, setOriginalText] = useState('')
   const [questionType, setQuestionType] = useState('学チカ')
   // 設問文。同一設問の前回結果と突き合わせるキーになる(#1531)。
@@ -370,7 +36,7 @@ function ESRewriteContent() {
   const [reviewedCompany, setReviewedCompany] = useState('')
   // 設問の文字数上限(#1523)。数値入力は空文字も扱うため文字列で持つ
   const [charLimit, setCharLimit] = useState('')
-  const [charLimitMode, setCharLimitMode] = useState<'within' | 'around'>('within')
+  const [charLimitMode, setCharLimitMode] = useState<CharLimitMode>('within')
   // 実行時に使った上限。入力欄はあとから編集できるため結果と一緒に保持する
   const [requestedCharLimit, setRequestedCharLimit] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -477,60 +143,14 @@ function ESRewriteContent() {
     <Box sx={{ minHeight: '100vh', bgcolor: UI.paper }}>
       {/* 帯と区切り線は全幅のまま、中身だけ本文と同じ列に入れる（#1783）。
           padding は列ラッパーに置き、行のボックスは入力欄と同じ幅にする。 */}
-      <Box
-        component="header"
-        data-testid="es-rewrite-header"
-        sx={{ bgcolor: UI.field, borderBottom: `1px solid ${UI.ruleSoft}` }}
-      >
-        <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', width: '100%', px: { xs: 2, md: 4 }, py: 2 }}>
-          <Box data-testid="es-rewrite-header-row" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <Box sx={{ color: UI.mark }}><EditNoteIcon sx={{ fontSize: 32 }} /></Box>
-              <Box>
-                <Typography sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: UI.ink }}>ES添削・リライト</Typography>
-                {/*
-                  「AIがあなたのES文章を添削・リライトします」をやめた。
-                  誰が添削するかより、何が返ってくるかを書く。
-                */}
-                <Typography sx={{ fontSize: 12, color: UI.inkFaint }}>書いた文章を読み、直したほうがよい点と書き直し例を返します</Typography>
-              </Box>
-            </Box>
-            <IconButton onClick={() => router.push('/')} sx={{ bgcolor: UI.tint, color: UI.inkSoft }} aria-label="ホームへ戻る">
-              <ArrowBackIcon />
-            </IconButton>
-          </Box>
-        </Box>
-      </Box>
+      <EsRewriteHeader onBack={() => router.push('/')} />
 
       {/* Mode toggle */}
-      <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', px: { xs: 2, md: 4 }, pt: 3 }}>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 3 }}>
-          <Button
-            startIcon={<RateReviewIcon />}
-            onClick={() => { setMode('review'); setRewriteResult(null); setError(null) }}
-            sx={{
-              px: 2.5, py: 1, borderRadius: 2, textTransform: 'none', fontWeight: 700, fontSize: 14,
-              bgcolor: mode === 'review' ? UI.mark : UI.tint,
-              color: mode === 'review' ? '#fff' : UI.inkSoft,
-              '&:hover': { bgcolor: mode === 'review' ? `color-mix(in srgb, ${UI.mark} 88%, transparent)` : UI.ruleSoft },
-            }}
-          >
-            ES添削
-          </Button>
-          <Button
-            startIcon={<AutoFixHighIcon />}
-            onClick={() => { setMode('rewrite'); setReviewResult(null); setError(null) }}
-            sx={{
-              px: 2.5, py: 1, borderRadius: 2, textTransform: 'none', fontWeight: 700, fontSize: 14,
-              bgcolor: mode === 'rewrite' ? UI.mark : UI.tint,
-              color: mode === 'rewrite' ? '#fff' : UI.inkSoft,
-              '&:hover': { bgcolor: mode === 'rewrite' ? `color-mix(in srgb, ${UI.mark} 88%, transparent)` : UI.ruleSoft },
-            }}
-          >
-            ESリライト（STAR法）
-          </Button>
-        </Box>
-      </Box>
+      <ModeToggle
+        mode={mode}
+        onSelectReview={() => { setMode('review'); setRewriteResult(null); setError(null) }}
+        onSelectRewrite={() => { setMode('rewrite'); setReviewResult(null); setError(null) }}
+      />
 
       {/* Main */}
       <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', px: { xs: 2, md: 4 }, pb: 4 }}>
@@ -543,489 +163,51 @@ function ESRewriteContent() {
           }}
         >
           {/* ── Left: Input ── */}
-          <Paper data-testid="es-rewrite-form" elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
-            <Typography sx={{ fontWeight: 700, fontSize: 17, mb: 2.5 }}>
-              {mode === 'review' ? 'ES添削' : 'ESリライト'} — 元の文章を入力
-            </Typography>
-
-            {/* 質問種別 */}
-            <Box sx={{ mb: 2.5 }}>
-              <Typography sx={{ fontSize: 13, fontWeight: 600, color: UI.inkSoft, mb: 1 }}>質問種別</Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {QUESTION_TYPES.map(type => (
-                  <Chip
-                    key={type}
-                    label={type}
-                    onClick={() => setQuestionType(type)}
-                    sx={{
-                      cursor: 'pointer', fontWeight: 600,
-                      bgcolor: questionType === type ? UI.mark : UI.tint,
-                      color: questionType === type ? '#fff' : UI.inkSoft,
-                      '&:hover': { bgcolor: questionType === type ? `color-mix(in srgb, ${UI.mark} 88%, transparent)` : UI.ruleSoft },
-                    }}
-                  />
-                ))}
-              </Box>
-            </Box>
-
-            {/* 書き出しガイドと例文（SOCAIAGENT-613）。種別を変えたら例文の絞り込みも戻す */}
-            <EsTemplatePanel
-              key={questionType}
-              questionType={questionType}
-              draft={originalText}
-              maxLength={ES_TEXT_MAX_LENGTH}
-              onInsert={setOriginalText}
-            />
-
-            {/* 設問（#1531） */}
-            <Box sx={{ mb: 2.5 }}>
-              <TextField
-                fullWidth
-                size="small"
-                label="設問（任意）"
-                placeholder="例: 学生時代に力を入れたことを教えてください"
-                value={question}
-                onChange={e => setQuestion(e.target.value)}
-                inputProps={{ maxLength: 500 }}
-                helperText="同じ設問で添削し直すと、前回のスコアと比べられます"
-              />
-            </Box>
-
-            {/* ES本文 */}
-            <TextField
-              multiline
-              rows={10}
-              fullWidth
-              value={originalText}
-              onChange={e => setOriginalText(e.target.value)}
-              placeholder="例）チームで開発した経験があります。最初は上手くいきませんでしたが、話し合いを重ねて最終的には完成させることができました。この経験から協調性の大切さを学びました。"
-              // APIの上限は10,000字。超えた分を送るとRAGのバリデーションエラーになり、
-              // 利用者には何が悪いのか伝わらないため入力段階で止める(#1521)
-              slotProps={{ htmlInput: { maxLength: ES_TEXT_MAX_LENGTH } }}
-              helperText={`${originalText.length} / ${ES_TEXT_MAX_LENGTH} 文字`}
-              sx={{
-                mb: 2.5,
-                '& .MuiOutlinedInput-root': {
-                  fontSize: 14, lineHeight: 1.8,
-                  '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: UI.mark },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: UI.mark },
-                },
-              }}
-            />
-
-            {/* 設問の文字数上限(#1523)。「400字以内」が前提のESに合わせる */}
-            <Box sx={{ mb: 3 }}>
-              <TextField
-                fullWidth
-                size="small"
-                type="number"
-                value={charLimit}
-                onChange={e => setCharLimit(e.target.value)}
-                label="設問の文字数上限（任意）"
-                placeholder="例: 400"
-                error={charLimitInvalid}
-                helperText={
-                  charLimitInvalid
-                    ? `${CHAR_LIMIT_MIN}〜${CHAR_LIMIT_MAX} の整数で入力してください`
-                    : '指定すると、書き直し後の文章をこの字数に収めます（未指定なら元の文章の長さを基準にします）'
-                }
-                slotProps={{
-                  htmlInput: { min: CHAR_LIMIT_MIN, max: CHAR_LIMIT_MAX, step: 50, inputMode: 'numeric' },
-                }}
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: charLimitInvalid ? undefined : UI.mark },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: charLimitInvalid ? undefined : UI.mark },
-                  },
-                  '& .MuiInputLabel-root.Mui-focused': { color: charLimitInvalid ? undefined : UI.mark },
-                }}
-              />
-              {parsedCharLimit !== null && !charLimitInvalid && (
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
-                  {([
-                    { value: 'within', label: `${parsedCharLimit}字以内` },
-                    { value: 'around', label: `${parsedCharLimit}字程度` },
-                  ] as const).map(({ value, label }) => (
-                    <Chip
-                      key={value}
-                      label={label}
-                      onClick={() => setCharLimitMode(value)}
-                      sx={{
-                        cursor: 'pointer', fontWeight: 600,
-                        bgcolor: charLimitMode === value ? UI.mark : UI.tint,
-                        color: charLimitMode === value ? '#fff' : UI.inkSoft,
-                        '&:hover': { bgcolor: charLimitMode === value ? `color-mix(in srgb, ${UI.mark} 88%, transparent)` : UI.ruleSoft },
-                      }}
-                    />
-                  ))}
-                </Box>
-              )}
-            </Box>
-
-            {/* 添削モード: 志望企業 / リライトモード: 技術スタック */}
-            {mode === 'review' ? (
-              <>
-                <TextField
-                  fullWidth
-                  size="small"
-                  value={companyName}
-                  onChange={e => setCompanyName(e.target.value)}
-                  label="志望企業名（任意・入力で企業適合性を評価）"
-                  placeholder="例: 株式会社サイバーエージェント"
-                  sx={{
-                    mb: 3,
-                    '& .MuiOutlinedInput-root': {
-                      '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: UI.mark },
-                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: UI.mark },
-                    },
-                    '& .MuiInputLabel-root.Mui-focused': { color: UI.mark },
-                  }}
-                />
-                {companyName.trim() !== '' && loading && (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
-                    <CircularProgress size={16} />
-                    <Typography variant="body2" sx={{ color: UI.inkFaint }}>企業情報を分析中...</Typography>
-                  </Box>
-                )}
-              </>
-            ) : (
-              <>
-                <TextField
-                  fullWidth
-                  size="small"
-                  value={techStack}
-                  onChange={e => setTechStack(e.target.value)}
-                  label="使用技術スタック（任意）"
-                  placeholder="例: React, Node.js, PostgreSQL, Docker"
-                  sx={{
-                    mb: 3,
-                    '& .MuiOutlinedInput-root': {
-                      '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: UI.mark },
-                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: UI.mark },
-                    },
-                    '& .MuiInputLabel-root.Mui-focused': { color: UI.mark },
-                  }}
-                />
-                <TextField
-                  fullWidth
-                  size="small"
-                  value={companyName}
-                  onChange={e => setCompanyName(e.target.value)}
-                  label="志望企業名（任意・入力で企業情報を参照）"
-                  placeholder="例: 株式会社サイバーエージェント"
-                  sx={{
-                    mb: 3,
-                    '& .MuiOutlinedInput-root': {
-                      '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: UI.mark },
-                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: UI.mark },
-                    },
-                    '& .MuiInputLabel-root.Mui-focused': { color: UI.mark },
-                  }}
-                />
-                {companyName.trim() !== '' && loading && (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
-                    <CircularProgress size={16} />
-                    <Typography variant="body2" sx={{ color: UI.inkFaint }}>企業情報を分析中...</Typography>
-                  </Box>
-                )}
-              </>
-            )}
-
-            {/* ひな形・例文の【 】が残ったまま送ると、AI がそのまま書き直してしまう */}
-            {PLACEHOLDER_PATTERN.test(originalText) && (
-              <Alert severity="warning" role="status" sx={{ mb: 2, borderRadius: 2, fontSize: 13 }}>
-                【 】の部分が残っています。自分の経験に置き換えてから送ってください。
-              </Alert>
-            )}
-
-            <Button
-              variant="contained"
-              fullWidth
-              size="large"
-              disabled={!originalText.trim() || loading || charLimitInvalid}
-              onClick={mode === 'review' ? handleReview : handleRewrite}
-              startIcon={loading ? <CircularProgress size={18} sx={{ color: '#fff' }} /> : (mode === 'review' ? <RateReviewIcon /> : <AutoFixHighIcon />)}
-              sx={{
-                bgcolor: UI.mark, '&:hover': { bgcolor: `color-mix(in srgb, ${UI.mark} 88%, transparent)` },
-                borderRadius: 2, py: 1.5, fontWeight: 700, fontSize: 16,
-                textTransform: 'none',
-                '&:disabled': { bgcolor: UI.ruleSoft, color: UI.inkFaint },
-              }}
-            >
-              {loading
-                ? (mode === 'review' ? '添削中...' : 'リライト中...')
-                : (mode === 'review' ? '添削する' : '書き直す')
-              }
-            </Button>
-
-            {error && (
-              <Alert severity="error" sx={{ mt: 2, borderRadius: 2 }}>{error}</Alert>
-            )}
-          </Paper>
+          <EsInputForm
+            mode={mode}
+            questionType={questionType}
+            setQuestionType={setQuestionType}
+            question={question}
+            setQuestion={setQuestion}
+            originalText={originalText}
+            setOriginalText={setOriginalText}
+            charLimit={charLimit}
+            setCharLimit={setCharLimit}
+            parsedCharLimit={parsedCharLimit}
+            charLimitInvalid={charLimitInvalid}
+            charLimitMode={charLimitMode}
+            setCharLimitMode={setCharLimitMode}
+            techStack={techStack}
+            setTechStack={setTechStack}
+            companyName={companyName}
+            setCompanyName={setCompanyName}
+            loading={loading}
+            error={error}
+            onSubmit={mode === 'review' ? handleReview : handleRewrite}
+          />
 
           {/* ── Right: Result ── */}
           {mode === 'review' && reviewResult && (
-            <Stack spacing={2}>
-              {/* Score gauges */}
-              <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `2px solid ${UI.mark}`, bgcolor: `color-mix(in srgb, ${UI.mark} 2%, transparent)` }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 17, color: UI.mark, mb: reviewResult.previous ? 1 : 2.5 }}>添削スコア</Typography>
-                {reviewResult.previous && (
-                  <Typography sx={{ fontSize: 12, color: UI.inkFaint, mb: 2 }}>
-                    同じ設問の前回（{formatPreviousDate(reviewResult.previous.created_at)}）と比べています
-                  </Typography>
-                )}
-                <Stack spacing={2}>
-                  {SCORE_ITEMS.map(({ key, label, color }) => {
-                    const score = reviewResult[key]
-                    // 未評価（企業情報なし）の項目は行ごと出さない。空のバーは 0/10 に見え、
-                    // 「低く評価された」と誤解させるため(#1524)。理由はスコアの下でまとめて案内する。
-                    // null だけでなく undefined も弾く（値が欠けたレスポンスで NaN のバーを出さない）
-                    if (score == null) return null
-                    const pct = (score / 10) * 100
-                    return (
-                      <Box key={key}>
-                        <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
-                          <Typography sx={{ fontSize: 13, fontWeight: 600, color: UI.inkSoft }}>{label}</Typography>
-                          <Stack direction="row" spacing={1} alignItems="baseline">
-                            <ScoreDelta current={score} previous={reviewResult.previous?.[key] ?? null} />
-                            <Typography sx={{ fontSize: 13, fontWeight: 700, color }}>{score} / 10</Typography>
-                          </Stack>
-                        </Stack>
-                        <LinearProgress
-                          variant="determinate"
-                          value={pct}
-                          sx={{ height: 8, borderRadius: 4, bgcolor: UI.ruleSoft, '& .MuiLinearProgress-bar': { bgcolor: color, borderRadius: 4 } }}
-                        />
-                      </Box>
-                    )
-                  })}
-                </Stack>
-                {reviewResult.company_fit_score == null && (
-                  !reviewedCompany ? (
-                    <Typography sx={{ mt: 2, fontSize: 13, color: UI.inkFaint, lineHeight: 1.8 }}>
-                      企業名を入力して添削すると、企業適合性も評価します。
-                    </Typography>
-                  ) : (
-                    // 「企業情報を取得できたか」は company_fit_score ではなく company_context_source で判断する。
-                    // 取得できていてもスコアだけ算出できないことがあり（企業情報を根拠にした対策アドバイスは
-                    // 出ている）、そこで「公開情報が見つかりませんでした」と出すと画面が矛盾する(#1524)。
-                    <Alert
-                      severity="info"
-                      role="status"
-                      sx={{ mt: 2, borderRadius: 2, fontSize: 13 }}
-                    >
-                      <Typography component="h3" sx={{ fontSize: 13, fontWeight: 700, mb: 0.5 }}>
-                        {(reviewResult.company_context_source ?? 'none') === 'none'
-                          ? '企業情報を取得できなかったため、企業適合性は評価していません'
-                          : '今回は企業適合性の点数を算出できませんでした'}
-                      </Typography>
-                      <Typography sx={{ fontSize: 13, lineHeight: 1.8 }}>
-                        {(reviewResult.company_context_source ?? 'none') === 'none'
-                          ? `「${reviewedCompany}」の公開情報が見つかりませんでした。根拠のない点数は出さないようにしています。上の項目とフィードバックは通常どおり評価済みです。企業名を正式名称（例: 株式会社◯◯）で入力し直すと、企業適合性も評価できる場合があります。`
-                          : `「${reviewedCompany}」の情報は参照できましたが、点数としてまとめられませんでした。上の項目とフィードバック、企業ごとの対策アドバイスは通常どおり利用できます。点数も知りたい場合は、もう一度「添削する」を押してください。`}
-                      </Typography>
-                    </Alert>
-                  )
-                )}
-              </Paper>
-
-              {/* Feedback */}
-              {reviewResult.format_findings && (
-                <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
-                  <FormatFindingsSection findings={reviewResult.format_findings} text={reviewedOriginalText} />
-                </Paper>
-              )}
-
-              <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 1.5 }}>フィードバック</Typography>
-                <Typography variant="body2" sx={{ color: UI.inkSoft, lineHeight: 1.8 }}>
-                  {reviewResult.feedback}
-                </Typography>
-                {anchoredFeedback.length > 0 && (
-                  <Box sx={{ mt: 2 }}>
-                    <Typography sx={{ fontWeight: 700, fontSize: 14, mb: 1 }}>
-                      指摘と改善のヒント
-                    </Typography>
-                    <Stack spacing={1.5}>
-                      {anchoredFeedback.map(item => (
-                        <Box
-                          key={item.index}
-                          sx={{ borderLeft: `3px solid ${UI.mark}`, pl: 1.5, py: 0.25 }}
-                        >
-                          <Typography sx={{ fontSize: 12, fontWeight: 700, color: UI.mark, mb: 0.5 }}>
-                            {FEEDBACK_SCORE_LABELS[item.score_key]}
-                          </Typography>
-                          <Typography variant="body2" sx={{ color: UI.ink, lineHeight: 1.7 }}>
-                            {item.issue}
-                          </Typography>
-                          <Typography
-                            component="blockquote"
-                            sx={{
-                              m: 0,
-                              mt: 0.75,
-                              pl: 1,
-                              borderLeft: `2px solid ${UI.ruleSoft}`,
-                              color: UI.inkFaint,
-                              fontSize: 13,
-                            }}
-                          >
-                            「{item.source_excerpt}」
-                          </Typography>
-                          <Typography variant="body2" sx={{ color: UI.inkSoft, lineHeight: 1.7, mt: 0.5 }}>
-                            改善のヒント：{item.suggestion}
-                          </Typography>
-                          <Button
-                            component="a"
-                            href={`#${item.anchorId}`}
-                            size="small"
-                            onClick={() => document.getElementById(item.anchorId)?.focus({ preventScroll: true })}
-                            sx={{ mt: 0.5, px: 0, minWidth: 0, textTransform: 'none' }}
-                          >
-                            原文の該当箇所を見る
-                          </Button>
-                        </Box>
-                      ))}
-                    </Stack>
-                  </Box>
-                )}
-              </Paper>
-
-              {reviewResult.company_strategy && (
-                <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.tint}`, bgcolor: UI.field }}>
-                  <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 1.5 }}>🏢 {reviewedCompany || '志望企業'}への対策アドバイス</Typography>
-                  <Typography variant="body2" sx={{ color: UI.inkSoft, lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{reviewResult.company_strategy}</Typography>
-                </Paper>
-              )}
-
-              {/* Before / After comparison */}
-              {(reviewResult.improved_text || reviewResult.improved_length_satisfied === false) && (
-                <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                    <Typography sx={{ fontWeight: 700, fontSize: 16 }}>改善後テキスト</Typography>
-                    {reviewResult.improved_text && (
-                      <Tooltip title={copied ? 'コピーしました' : 'クリップボードにコピー'}>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleCopy(reviewResult.improved_text)}
-                          aria-label="改善文をコピー"
-                          sx={{ bgcolor: copied ? '#10b981' : UI.tint, '&:hover': { bgcolor: copied ? '#059669' : UI.ruleSoft } }}
-                        >
-                          {copied
-                            ? <CheckIcon sx={{ color: '#fff', fontSize: 18 }} />
-                            : <ContentCopyIcon sx={{ color: UI.inkSoft, fontSize: 18 }} />
-                          }
-                        </IconButton>
-                      </Tooltip>
-                    )}
-                  </Box>
-                  <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: 'wrap' }}>
-                    <Chip size="small" label="追加" sx={{ bgcolor: '#dcfce7', color: '#166534' }} />
-                    <Chip size="small" label="削除" sx={{ bgcolor: '#fee2e2', color: '#991b1b' }} />
-                  </Stack>
-                  {reviewDiff?.usedFallback && (
-                    <Alert severity="warning" role="status" sx={{ mb: 1.5 }}>
-                      文章が長いため差分を簡易表示しています。変更箇所を正確に示していない場合があります。
-                    </Alert>
-                  )}
-                  {reviewDiff &&
-                    !reviewDiff.original.some(segment => segment.kind === 'removed') &&
-                    !reviewDiff.improved.some(segment => segment.kind === 'added') && (
-                      <Alert severity="info" role="status" sx={{ mb: 1.5 }}>
-                        改善前後に差分はありませんでした。
-                      </Alert>
-                    )}
-                  <Typography sx={{ fontSize: 12, fontWeight: 700, color: UI.inkFaint, mb: 0.5 }}>
-                    改善後（追加をハイライト）
-                  </Typography>
-                  {reviewDiff && (
-                    <HighlightedDiffText
-                      segments={reviewDiff.improved}
-                      ariaLabel="追加箇所を示した改善後テキスト"
-                    />
-                  )}
-                  <CharCountNote result={reviewResult} charLimit={requestedCharLimit} />
-                  <Divider sx={{ my: 2 }} />
-                  <Typography sx={{ fontWeight: 700, fontSize: 13, mb: 1, color: UI.inkFaint }}>
-                    元の文章（削除をハイライト）
-                  </Typography>
-                  {reviewDiff && (
-                    <HighlightedDiffText
-                      segments={reviewDiff.original}
-                      anchors={anchoredFeedback}
-                      ariaLabel="削除箇所と指摘箇所を示した元の文章"
-                    />
-                  )}
-                </Paper>
-              )}
-            </Stack>
+            <ReviewResultPanel
+              reviewResult={reviewResult}
+              reviewedOriginalText={reviewedOriginalText}
+              reviewedCompany={reviewedCompany}
+              requestedCharLimit={requestedCharLimit}
+              reviewDiff={reviewDiff}
+              anchoredFeedback={anchoredFeedback}
+              copied={copied}
+              onCopy={handleCopy}
+            />
           )}
 
           {mode === 'rewrite' && rewriteResult && (
-            <Stack spacing={2}>
-              {/* Rewritten text */}
-              <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `2px solid ${UI.mark}`, bgcolor: `color-mix(in srgb, ${UI.mark} 2%, transparent)` }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <AutoFixHighIcon sx={{ color: UI.mark, fontSize: 20 }} />
-                    <Typography sx={{ fontWeight: 700, fontSize: 17, color: UI.mark }}>リライト後</Typography>
-                  </Box>
-                  <Tooltip title={copied ? 'コピーしました' : 'クリップボードにコピー'}>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleCopy(rewriteResult.rewritten_text)}
-                      aria-label="リライト結果をコピー"
-                      sx={{ bgcolor: copied ? '#10b981' : UI.tint, '&:hover': { bgcolor: copied ? '#059669' : UI.ruleSoft } }}
-                    >
-                      {copied
-                        ? <CheckIcon sx={{ color: '#fff', fontSize: 18 }} />
-                        : <ContentCopyIcon sx={{ color: UI.inkSoft, fontSize: 18 }} />
-                      }
-                    </IconButton>
-                  </Tooltip>
-                </Box>
-                <Typography sx={{ fontSize: 14, lineHeight: 1.9, color: UI.ink, whiteSpace: 'pre-wrap' }}>
-                  {rewriteResult.rewritten_text}
-                </Typography>
-                <CharCountNote result={rewriteResult} charLimit={requestedCharLimit} />
-              </Paper>
-
-              {/* STAR breakdown */}
-              <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 0.5 }}>STAR法 分解</Typography>
-                {/* 学生には初見の用語なので、見出しの下で一度だけ説明する。 */}
-                <Typography sx={{ fontSize: 13, color: UI.inkFaint, mb: 2 }}>
-                  「どんな状況で、何が課題で、何をして、どうなったか」の4つが書けているかを見ます。
-                </Typography>
-                <Stack spacing={2}>
-                  {STAR_LABELS.map(({ key, label, color, initial }, idx) => (
-                    <Box key={key}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.8 }}>
-                        <Box sx={{
-                          width: 28, height: 28, borderRadius: 1.5, bgcolor: `${color}15`,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 14, fontWeight: 700, color,
-                        }}>
-                          {initial}
-                        </Box>
-                        <Typography sx={{ fontWeight: 700, fontSize: 13, color }}>{label}</Typography>
-                      </Box>
-                      <Typography variant="body2" sx={{ color: UI.inkSoft, lineHeight: 1.75, borderLeft: `3px solid ${color}40`, pl: 1.5 }}>
-                        {rewriteResult.star[key] || '—'}
-                      </Typography>
-                      {idx < STAR_LABELS.length - 1 && <Divider sx={{ mt: 1.5, borderColor: UI.tint }} />}
-                    </Box>
-                  ))}
-                </Stack>
-              </Paper>
-
-              {/* Compare hint */}
-              <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 13, mb: 1, color: UI.inkFaint }}>元の文章</Typography>
-                <Typography variant="body2" sx={{ color: UI.inkFaint, lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>
-                  {originalText}
-                </Typography>
-              </Paper>
-            </Stack>
+            <RewriteResultPanel
+              rewriteResult={rewriteResult}
+              originalText={originalText}
+              requestedCharLimit={requestedCharLimit}
+              copied={copied}
+              onCopy={handleCopy}
+            />
           )}
         </Box>
       </Box>
