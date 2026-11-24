@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -53,7 +52,7 @@ func TestGenerateStrategicQuestion_FallbackDoesNotRecordPromptVersion(t *testing
 	}
 
 	question, _, _, err := service.generateStrategicQuestion(
-		context.Background(),
+		guardedCtx(),
 		nil,
 		42,
 		"session-1",
@@ -120,7 +119,7 @@ func TestQuestionGenerationPaths_RecordPromptVersion(t *testing.T) {
 		var usages []internalOpenAI.Usage
 		service, questionRepo := newService(&usages)
 
-		if _, _, err := service.generateQuestionWithAI(context.Background(), nil, 42, "session-1", 0, 0); err != nil {
+		if _, _, err := service.generateQuestionWithAI(guardedCtx(), nil, 42, "session-1", 0, 0); err != nil {
 			t.Fatalf("generateQuestionWithAI returned error: %v", err)
 		}
 		if questionRepo.question == nil || questionRepo.question.PromptVersion != "question-t1" {
@@ -133,7 +132,7 @@ func TestQuestionGenerationPaths_RecordPromptVersion(t *testing.T) {
 		var usages []internalOpenAI.Usage
 		service, _ := newService(&usages)
 
-		if _, err := service.simplifyQuestionWithAI(context.Background(), "難しい質問"); err != nil {
+		if _, err := service.simplifyQuestionWithAI(guardedCtx(), "難しい質問"); err != nil {
 			t.Fatalf("simplifyQuestionWithAI returned error: %v", err)
 		}
 		assertUsage(t, usages)
@@ -251,7 +250,7 @@ func TestGetCategoryOrder_ReturnsCanonicalCategories(t *testing.T) {
 	}
 
 	// 職種未決定
-	check("undecided", (&ChatService{}).getCategoryOrder(context.Background(), 0))
+	check("undecided", (&ChatService{}).getCategoryOrder(guardedCtx(), 0))
 
 	// 職種ごとの優先順位（先頭に何を聞くか）は仕様なので固定する。
 	// 網羅性チェックだけだと順序を入れ替えても検出できない。
@@ -281,10 +280,10 @@ func TestFallbackQuestions_CoverAllCanonicalCategories(t *testing.T) {
 	s := &ChatService{}
 	for _, c := range valueobject.AllWeightCategories() {
 		for _, level := range []string{"新卒", "中途"} {
-			if got := s.fallbackQuestionForCategory(context.Background(), string(c), 0, level); got == "" {
+			if got := s.fallbackQuestionForCategory(guardedCtx(), string(c), 0, level); got == "" {
 				t.Errorf("%s(%s): 単数フォールバックが空", c, level)
 			}
-			if got := s.fallbackQuestionsForCategory(context.Background(), string(c), 0, level); len(got) == 0 {
+			if got := s.fallbackQuestionsForCategory(guardedCtx(), string(c), 0, level); len(got) == 0 {
 				t.Errorf("%s(%s): 複数フォールバックが空", c, level)
 			}
 		}
@@ -296,7 +295,7 @@ func TestSelectFallbackQuestion_SkipsAsked(t *testing.T) {
 	asked := map[string]bool{
 		"最近頑張ったことはありますか？": true,
 	}
-	got := s.selectFallbackQuestion(context.Background(), "不明カテゴリ", 0, "新卒", asked)
+	got := s.selectFallbackQuestion(guardedCtx(), "不明カテゴリ", 0, "新卒", asked)
 	if got == "" {
 		t.Fatal("expected non-empty fallback")
 	}
@@ -307,11 +306,11 @@ func TestSelectFallbackQuestion_SkipsAsked(t *testing.T) {
 
 func TestSelectFallbackQuestion_CategoryOptions(t *testing.T) {
 	s := &ChatService{}
-	got := s.selectFallbackQuestion(context.Background(), "創造性志向", 0, "新卒", map[string]bool{})
+	got := s.selectFallbackQuestion(guardedCtx(), "創造性志向", 0, "新卒", map[string]bool{})
 	if got == "" {
 		t.Fatal("expected creativity fallback")
 	}
-	options := s.fallbackQuestionsForCategory(context.Background(), "創造性志向", 0, "新卒")
+	options := s.fallbackQuestionsForCategory(guardedCtx(), "創造性志向", 0, "新卒")
 	found := false
 	for _, q := range options {
 		if q == got {
@@ -326,7 +325,7 @@ func TestSelectFallbackQuestion_CategoryOptions(t *testing.T) {
 
 func TestFallbackQuestionForCategory_DefaultEmpty(t *testing.T) {
 	s := &ChatService{}
-	if got := s.fallbackQuestionForCategory(context.Background(), "存在しないカテゴリ", 0, "新卒"); got != "" {
+	if got := s.fallbackQuestionForCategory(guardedCtx(), "存在しないカテゴリ", 0, "新卒"); got != "" {
 		t.Fatalf("want empty, got %q", got)
 	}
 }

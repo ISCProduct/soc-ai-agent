@@ -87,7 +87,7 @@ type UserWeightScore struct {
 （`matching_service.go` の `scoredMatch`、#1124）。名前が揺れるとユーザーの実スコアが
 捨てられて軸数が減るため、保存経路では正典化が必須。
 
-保存経路（`UserWeightScoreRepository.SetScore/AddScore`、`POST /api/questions/*`）は
+保存経路（`UserWeightScoreRepository.SetScore/AddScore`）は
 `valueobject.ParseWeightCategory` を必ず通し、正典外を弾く。
 
 ### 別名表の2種類

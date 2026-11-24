@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { BACKEND_URL } from '@/lib/backend-url'
 import { authService, User } from '@/lib/auth'
 import { interviewApi, interviewLimits, InterviewReport, InterviewSession } from '@/lib/interview'
 import { extractApiErrorMessage, parseMediaError, parseMultipartResponse } from '@/lib/interview/utils'
@@ -43,9 +42,8 @@ export const REPORT_RETRY_FAILED_MESSAGE =
  * ヘッダー受信後に本文（multipart の音声）で止まる場合も同じなので、
  * fetchWithTimeout ではなく本文の読み込みまで見る fetchAndReadWithTimeout を使う。
  *
- * ターンはこの通信の前に authService.ensureFreshUserToken() を待つ。そちらにも
- * AUTH_REFRESH_TIMEOUT_MS（15秒）が掛かっているので、ターン1回の上限は
- * 15 + 90 = 105秒。どこで固まっても有限時間で戻る（#1501）。
+ * トークンの更新は middleware が同じリクエストの中で行う（SOCAIAGENT-683）。
+ * どこで固まっても、ターン1回は90秒で戻る（#1501）。
  */
 const TURN_FETCH_TIMEOUT_MS = 90_000
 
@@ -381,8 +379,7 @@ export function useInterviewSession({
   const doStartTurn = async (sessionId: number, userId: number) => {
     const companyContextGeneration = companyContextGenerationRef.current
     const receive = async (): Promise<Blob> => {
-      await authService.ensureFreshUserToken()
-      const { meta, audio } = await fetchAndReadWithTimeout(`${BACKEND_URL}/api/interviews/${sessionId}/start-turn`, {
+      const { meta, audio } = await fetchAndReadWithTimeout(`/api/bff/interviews/${sessionId}/start-turn`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
         body: JSON.stringify({
@@ -804,8 +801,7 @@ export function useInterviewSession({
       // 保存し終えてから応答する。冒頭の質問より先に回答が保存されないよう、/start-turn の
       // 応答を待ってから送る(#1969)。
       await startTurnSettledRef.current
-      await authService.ensureFreshUserToken()
-      const { meta, audio } = await fetchAndReadWithTimeout(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
+      const { meta, audio } = await fetchAndReadWithTimeout(`/api/bff/interviews/${session.id}/turn`, {
         method: 'POST',
         headers: { ...authService.getUserFetchHeaders() },
         body: formData,
