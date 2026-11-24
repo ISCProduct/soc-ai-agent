@@ -16,9 +16,12 @@ import {
   Stack,
   Tooltip,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material'
 import { visuallyHidden } from '@mui/utils'
 import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone'
+import CloseIcon from '@mui/icons-material/Close'
 import { authService } from '@/lib/auth'
 import { formatDateTime } from '@/lib/i18n/format'
 import { shouldShowStudentBottomNav } from '@/lib/sidebar-nav'
@@ -50,8 +53,12 @@ function formatTime(iso: string): string {
  * ヘッダのベルと未読バッジ（#2033）。締切・選考結果・スカウト・先生の案内を見落とさないようにする。
  * 学生の画面（下のナビと同じ範囲）で、ログイン中だけ右上に出す。AI 面接の本番中は操作の邪魔になるので隠す。
  */
-export function NotificationBell() {
+export function NotificationBell({ placement = 'global' }: { placement?: 'global' | 'inline' }) {
   const pathname = usePathname()
+  const theme = useTheme()
+  const mobile = useMediaQuery(theme.breakpoints.down('md'))
+  const inline = placement === 'inline'
+  const mobileCorrelation = mobile && pathname === '/correlation-diagram'
   const router = useRouter()
   const interviewSessionActive = useInterviewSessionActive()
   const [loggedIn, setLoggedIn] = useState(false)
@@ -64,6 +71,7 @@ export function NotificationBell() {
   const [loadingMore, setLoadingMore] = useState(false)
 
   const visible = loggedIn && !interviewSessionActive && (pathname === '/' || shouldShowStudentBottomNav(pathname))
+    && (inline ? mobileCorrelation : !mobileCorrelation)
 
   useEffect(() => {
     const user = authService.getStoredUser()
@@ -177,15 +185,17 @@ export function NotificationBell() {
           onClick={open}
           aria-label={unread > 0 ? `通知（未読 ${unread} 件）` : '通知'}
           aria-haspopup="dialog"
+          aria-expanded={Boolean(anchor)}
           sx={{
-            position: 'fixed',
+            position: inline ? 'relative' : 'fixed',
             // 印刷（ポートフォリオの PDF など）に載せない
             '@media print': { display: 'none' },
-            top: 8,
-            right: 8,
-            zIndex: (theme) => theme.zIndex.appBar + 1,
+            top: inline ? undefined : 8,
+            right: inline ? undefined : 8,
+            zIndex: inline ? undefined : (theme) => theme.zIndex.appBar + 1,
             bgcolor: 'background.paper',
-            boxShadow: 1,
+            boxShadow: inline ? 0 : 1,
+            ...(inline ? { width: 44, height: 44, borderRadius: '12px', border: '1px solid', borderColor: 'divider', color: 'text.secondary', flexShrink: 0 } : {}),
             '&:hover': { bgcolor: 'background.paper' },
           }}
         >
@@ -200,11 +210,12 @@ export function NotificationBell() {
         onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-        slotProps={{ paper: { sx: { width: { xs: 'calc(100vw - 32px)', sm: 360 }, maxHeight: 480 } } }}
+        slotProps={{ paper: { ...(inline ? { role: 'dialog', 'aria-label': '通知一覧' } : {}), sx: { width: { xs: 'calc(100vw - 32px)', sm: 360 }, maxHeight: inline ? 'calc(100dvh - 160px)' : 480, ...(inline ? { mt: 1, borderRadius: '12px' } : {}) } } }}
       >
         <Stack direction="row" sx={{ px: 2, py: 1.5, alignItems: 'center', justifyContent: 'space-between' }}>
           <Typography variant="subtitle1" component="h2" fontWeight={600}>通知</Typography>
-          <Button size="small" onClick={() => void readAll()} disabled={unread === 0}>すべて既読にする</Button>
+          <Button size="small" onClick={() => void readAll()} disabled={unread === 0} sx={inline ? { minHeight: 44, ml: 'auto' } : undefined}>すべて既読にする</Button>
+          {inline && <IconButton aria-label="通知を閉じる" onClick={() => setAnchor(null)} sx={{ width: 44, height: 44 }}><CloseIcon /></IconButton>}
         </Stack>
         {error && (
           <Alert
