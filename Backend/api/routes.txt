@@ -320,3 +320,4 @@ GET /api/whats-new
 GET /health
 GET /healthz
 GET /metrics
+GET /ready

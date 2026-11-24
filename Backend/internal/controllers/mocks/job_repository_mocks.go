@@ -29,6 +29,14 @@ func (m *JobCategoryRepositoryMock) FindByID(ctx context.Context, id uint) (*mod
 	return nil, args.Error(1)
 }
 
+func (m *JobCategoryRepositoryMock) FindByIDs(ctx context.Context, ids []uint) ([]models.JobCategory, error) {
+	args := m.Called(ctx, ids)
+	if v := args.Get(0); v != nil {
+		return v.([]models.JobCategory), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 func (m *JobCategoryRepositoryMock) FindByName(ctx context.Context, name string) ([]models.JobCategory, error) {
 	args := m.Called(ctx, name)
 	if v := args.Get(0); v != nil {

@@ -148,7 +148,7 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
 │   └── finetune/            # ファインチューニング関連
 ├── infra/terraform/         # AWS インフラ設定（staging / prod / modules）
 ├── automation/              # Discord通知・ワークフロー検査スクリプト
-├── tools/company-graph/     # 企業スクレイピング（別Goモジュール）
+├── tools/company-graph/     # 企業スクレイピング（別Goモジュール。ローカルの compose のみ。staging / 本番には載せていない）
 ├── compose.yml              # Docker Compose（ローカル開発用）
 └── docker-compose.yml       # Docker Compose（staging EC2 用）
 ```

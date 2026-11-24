@@ -11,6 +11,7 @@ import (
 type JobCategoryRepository interface {
 	FindAll(ctx context.Context) ([]models.JobCategory, error)
 	FindByID(ctx context.Context, id uint) (*models.JobCategory, error)
+	FindByIDs(ctx context.Context, ids []uint) ([]models.JobCategory, error)
 	FindByName(ctx context.Context, name string) ([]models.JobCategory, error)
 	GetTopCategories(ctx context.Context) ([]models.JobCategory, error)
 }
