@@ -8,7 +8,7 @@ fastapi==0.165.0
 # LangChain（埋め込み・検索・今後のチェーン化）。1.x 系に固定（constraints.txt 参照）。
 langchain>=1.5.0,<2.0
 langchain-core>=1.8.4,<2.0
-langchain-openai>=1.7.4,<2.0
+langchain-openai>=1.8.5,<2.0
 langchain-text-splitters>=1.0,<2.0
 # 軽量採点モデルの学習（training/scorer、#2170）で直接使う。chromadb の推移的依存として既に入っている。
 # 上限は constraints.txt と同じ。下限は chromadb 0.6 系が要求する版。
