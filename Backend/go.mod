@@ -12,7 +12,7 @@ require (
 	github.com/labstack/echo/v4 v4.16.5
 	github.com/sashabaranov/go-openai v1.43.0
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.59.0
 	golang.org/x/oauth2 v0.38.0
 	golang.org/x/time v0.15.0
 	gorm.io/driver/mysql v1.6.0
@@ -106,7 +106,7 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	golang.org/x/net v0.62.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
 )
