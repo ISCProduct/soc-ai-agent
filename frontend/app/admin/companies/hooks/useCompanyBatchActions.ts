@@ -213,6 +213,11 @@ export function useCompanyBatchActions({
         primary_only: true,
         concurrency: GLOBAL_BATCH_CONCURRENCY,
       })
+      // 事前確認が失敗したら取得を始めない（マッチング用データの更新と同じ扱い。SOCAIAGENT-716）
+      if (!preview.ok) {
+        setError(String(preview.data.error || preview.data.message || `まとめて取得に失敗しました (${preview.status})`))
+        return
+      }
       let progress = emptyBatchProgress(candidateCountFromResponse(preview.data))
       setBatchProgress(progress)
       setFetchMessage(formatBatchProgressLabel(progress, true))
