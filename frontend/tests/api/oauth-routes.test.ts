@@ -71,6 +71,11 @@ describe('POST /api/auth/oauth/exchange (SOCAIAGENT-683)', () => {
 
     expect(response.status).toBe(200)
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ code: 'short-code', verifier: 'my-verifier' })
+    // トークンは Cookie にだけ置き、画面へは返さない（SOCAIAGENT-683 PR3b）
+    const body = await response.json()
+    expect(body).not.toHaveProperty('user_token')
+    expect(body).not.toHaveProperty('refresh_token')
+    expect(body.user_id).toBe(7)
     const setCookie = response.headers.get('set-cookie') ?? ''
     expect(setCookie).toContain('user_token=user-jwt')
     expect(setCookie).toContain('refresh_token=refresh')
