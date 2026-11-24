@@ -1,6 +1,7 @@
 package company_test
 
 import (
+	"context"
 	"testing"
 
 	"Backend/internal/controllers/mocks"
@@ -53,7 +54,7 @@ func TestCompanyCorrelationMapService_Build_DistinguishesSubsidiaryAndAffiliate(
 	}, nil)
 
 	svc := company.NewCompanyCorrelationMapService(companyRepo, relRepo)
-	got, err := svc.Build(1)
+	got, err := svc.Build(context.Background(), 1)
 	require.NoError(t, err)
 
 	assert.Equal(t, uint(1), got.FocusCompanyID)
@@ -110,7 +111,7 @@ func TestCompanyCorrelationMapService_Build_InitialChildLimit(t *testing.T) {
 	relRepo.On("GetRelationsByCompanyIDs", mock.Anything).Return(rels, nil)
 
 	svc := company.NewCompanyCorrelationMapService(companyRepo, relRepo)
-	got, err := svc.Build(1)
+	got, err := svc.Build(context.Background(), 1)
 	require.NoError(t, err)
 
 	assert.Equal(t, 6, got.Meta.DirectChildTotal)
@@ -155,7 +156,7 @@ func TestCompanyCorrelationMapService_Build_CollapsesMirroredCapitalEdges(t *tes
 	}, nil)
 
 	svc := company.NewCompanyCorrelationMapService(companyRepo, relRepo)
-	got, err := svc.Build(18)
+	got, err := svc.Build(context.Background(), 18)
 	require.NoError(t, err)
 
 	require.Len(t, got.CapitalEdges, 1)
@@ -181,7 +182,7 @@ func TestCompanyCorrelationMapService_Build_BusinessDirectionNotTrusted(t *testi
 	}, nil)
 
 	svc := company.NewCompanyCorrelationMapService(companyRepo, relRepo)
-	got, err := svc.Build(1)
+	got, err := svc.Build(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, got.BusinessEdges, 1)
 	// from/to は取得起点→相手であり提供側→利用側ではない
@@ -210,7 +211,7 @@ func TestCompanyCorrelationMapService_Build_HidesUnpublishedGuestEntry(t *testin
 	}, nil)
 
 	svc := company.NewCompanyCorrelationMapService(companyRepo, relRepo)
-	got, err := svc.Build(1)
+	got, err := svc.Build(context.Background(), 1)
 	require.NoError(t, err)
 	for _, n := range got.Nodes {
 		assert.NotEqual(t, uint(99), n.ID)
@@ -231,4 +232,53 @@ func TestCompanyCorrelationMapService_CompareBusiness_HidesUnpublishedGuestEntry
 	_, err := svc.CompareBusiness(1, 99)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
+}
+
+// tagRepoStub は事業タグの読み出しを固定値で返す。
+type tagRepoStub struct {
+	byID     map[uint][]string
+	askedIDs []uint
+}
+
+func (s *tagRepoStub) ListAll(context.Context) ([]models.BusinessTag, error) { return nil, nil }
+func (s *tagRepoStub) NamesByCompanyIDs(_ context.Context, ids []uint) (map[uint][]string, error) {
+	s.askedIDs = ids
+	return s.byID, nil
+}
+func (s *tagRepoStub) ReplaceForCompany(context.Context, uint, []string) error { return nil }
+
+func TestCompanyCorrelationMapService_Build_BusinessTags(t *testing.T) {
+	companyRepo := &mocks.CompanyRepositoryMock{}
+	companyRepo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "親"}, nil)
+	all := []models.Company{{ID: 1, Name: "親", Industry: "情報通信業"}}
+	rels := []models.CompanyRelation{}
+	for i := 2; i <= 7; i++ {
+		all = append(all, models.Company{ID: uint(i), Name: string(rune('A' + i - 2)), NameReading: string(rune('a' + i - 2))})
+		rels = append(rels, capitalRel(1, uint(i), "capital_subsidiary"))
+	}
+	companyRepo.On("FindByIDs", mock.Anything).Return(all, nil)
+	relRepo := &relationRepoMock{}
+	relRepo.On("GetMarketInfoByCompanyIDs", mock.Anything).Return(map[uint]*models.CompanyMarketInfo{}, nil)
+	relRepo.On("GetRelationsByCompanyIDs", mock.Anything).Return(rels, nil)
+
+	// 7 は初期表示の4社に入らない（読み仮名順で最後）
+	tags := &tagRepoStub{byID: map[uint][]string{7: {"クラウド", "業務システム"}}}
+	svc := company.NewCompanyCorrelationMapService(companyRepo, relRepo)
+	svc.SetBusinessTagRepository(tags)
+	got, err := svc.Build(context.Background(), 1)
+	require.NoError(t, err)
+	require.NotContains(t, got.Meta.InitialChildIDs, uint(7))
+	assert.Len(t, tags.askedIDs, 7, "返すノード全件をまとめて引く")
+
+	for _, n := range got.Nodes {
+		switch n.ID {
+		case 7:
+			assert.Equal(t, []string{"クラウド", "業務システム"}, n.BusinessTags)
+			assert.Equal(t, "available", n.BusinessTagsStatus)
+		default:
+			// 業種があってもタグとして補わない
+			assert.Equal(t, []string{}, n.BusinessTags)
+			assert.Equal(t, "unavailable", n.BusinessTagsStatus)
+		}
+	}
 }

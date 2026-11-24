@@ -109,6 +109,10 @@ func SetupAdminRoutes(
 	admin.PATCH("/companies/:id/verify", adminCompanyController.Verify, platform)
 	admin.PATCH("/companies/:id/reject", adminCompanyController.Reject, platform)
 	admin.GET("/companies/:id/relation-graph", adminCompanyGraphController.RelationGraph)
+	// 事業タグ（SOCAIAGENT-717）。タグ一覧は全校共有のため、書き込みはシステム管理者専用。
+	admin.GET("/business-tags", adminCompanyController.ListBusinessTags)
+	admin.GET("/companies/:id/business-tags", adminCompanyController.GetCompanyBusinessTags)
+	admin.PUT("/companies/:id/business-tags", adminCompanyController.UpdateCompanyBusinessTags, platform)
 	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
 	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion)
 	admin.POST("/companies/:id/interview-questions/generate", adminInterviewController.GenerateCompanyQuestions)
