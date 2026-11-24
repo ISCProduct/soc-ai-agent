@@ -121,7 +121,7 @@ func TestObserveTranscribe_RecordsLatency(t *testing.T) {
 // 実際に合成音声(約3,800バイト/秒)を根拠に4,000としていた時期があり、
 // ブラウザの実データ(16,000バイト/秒)と4倍ずれていた。
 func TestEstimateAudioSeconds_MatchesRecorderBitrate(t *testing.T) {
-	const hookPath = "../../../../frontend/app/interview/hooks/useInterviewSession.ts"
+	const hookPath = "../../../../frontend/app/interview/hooks/useInterviewRecorder.ts"
 	src, err := os.ReadFile(hookPath)
 	if err != nil {
 		t.Skipf("フロントのソースを読めないためスキップ: %v", err)
