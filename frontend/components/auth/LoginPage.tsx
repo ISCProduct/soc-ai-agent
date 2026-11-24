@@ -19,7 +19,7 @@ import Link from 'next/link'
 import { authService, AuthResponse } from '@/lib/auth'
 import { GUEST_LIMITATIONS } from '@/lib/guest-limits'
 import { StudentThemeToggle } from '@/components/layout/StudentThemeToggle'
-import { extractTenantSlug } from '@/lib/tenant'
+import { oauthStartUrl } from '@/lib/tenant'
 import { TabPanel, tabA11yProps } from '@/components/common/TabPanel'
 
 const AUTH_TABS_ID = 'auth'
@@ -122,9 +122,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
   const handleOAuthLogin = (provider: 'google' | 'github') => {
     // 自サイトの開始ルートで照合値を httpOnly Cookie に入れてから、Backend の OAuth へ進む (SOCAIAGENT-683)。
     // fetch ではなくナビゲートする（Backend の state Cookie を Backend のオリジンで設定させるため）
-    const slug = extractTenantSlug(window.location.hostname)
-    const tenantParam = slug ? `&tenant=${encodeURIComponent(slug)}` : ''
-    window.location.href = `/api/auth/oauth/start?provider=${provider}${tenantParam}`
+    window.location.href = oauthStartUrl(provider, window.location.hostname)
   }
 
   return (

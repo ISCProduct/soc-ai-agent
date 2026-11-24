@@ -97,7 +97,7 @@ describe('POST /api/company-auth/reset-password', () => {
     jest.restoreAllMocks()
   })
 
-  it('認証ヘッダー無しでバックエンドへ素通しする', async () => {
+  it('認証ヘッダー無しでバックエンドへ送り、成功したら Cookie を張ってトークンを返さない', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(JSON.stringify(authResponse), {
         status: 200,
@@ -123,11 +123,13 @@ describe('POST /api/company-auth/reset-password', () => {
     expect(forwardedHeaders).toEqual({ 'Content-Type': 'application/json' })
 
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual(authResponse)
-
-    // Cookie はこのルートでは張らない。accept-invite と同じく素通しにして、
-    // クライアントの persistCompanyAuth -> POST /api/company-auth/session に一本化する。
-    expect(response.headers.getSetCookie()).toEqual([])
+    // ログイン・登録・招待の受け入れと同じく、このルートで httpOnly Cookie を張り、
+    // トークンは画面へ返さない（SOCAIAGENT-683）
+    const { token: _token, refresh_token: _refresh, ...withoutTokens } = authResponse as Record<string, unknown>
+    await expect(response.json()).resolves.toEqual(withoutTokens)
+    const setCookie = response.headers.getSetCookie().join('\n')
+    expect(setCookie).toContain('company_user_token=')
+    expect(setCookie).toMatch(/HttpOnly/i)
   })
 
   it('トークン無効(400)は同じステータスでそのまま返す', async () => {
