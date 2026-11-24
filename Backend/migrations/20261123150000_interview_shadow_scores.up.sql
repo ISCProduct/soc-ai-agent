@@ -3,7 +3,7 @@
 CREATE TABLE `interview_shadow_scores` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `session_id` bigint unsigned NOT NULL,
-  `model_version` varchar(64) NOT NULL COMMENT '重みの SHA-256',
+  `model_version` varchar(64) NOT NULL COMMENT 'モデルファイル全体の SHA-256（重みだけのハッシュではない）',
   `scores_json` json NOT NULL COMMENT '軸ごとのスコアと確信度',
   `latency_ms` int NOT NULL,
   `created_at` datetime(3) DEFAULT NULL,

@@ -53,7 +53,7 @@ type Model struct {
 	scoreMin   int
 	thresholds [][]float64
 	weights    []uint16 // axis-major float16 bits
-	version    string   // 重みの SHA-256
+	version    string   // モデルファイル全体の SHA-256（重みだけのハッシュではない）
 }
 
 type fileScorer struct {

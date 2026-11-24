@@ -1,4 +1,4 @@
-h1:X867sPEU6VmrN3LVFAOVjMcyVfcO7TuUJPCwTsqFW2s=
+h1:llfWwBoYdgxQNgFOmxsAhE7AVBCidPUVad3z8edXaXM=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -86,4 +86,4 @@ h1:X867sPEU6VmrN3LVFAOVjMcyVfcO7TuUJPCwTsqFW2s=
 20261122030155_add_password_reset_token_hash_to_users.up.sql h1:0AORfLjn56TGkPN48NEXgi+eQrHqSAgEZoMfQajbzCA=
 20261122030156_invalidate_plain_password_reset_tokens.up.sql h1:ZdQQ+B7+xGRaF1rFZTvxUCyHboChYS1ijwRgrNTPlhM=
 20261122211106_git_hub_repos_add_is_owner_or_collaborator.up.sql h1:2bCMGa5zSnveZ3UxIAxfNp0YKFxTrdWfSRapGjOW/no=
-20261123150000_interview_shadow_scores.up.sql h1:50RSPrZiAs0ce4Y7xHbpcH299vDihfQHy0pxIpm6DbU=
+20261123150000_interview_shadow_scores.up.sql h1:pRsrm/QjOv2+3Lq1hFd84VUFKTR3b59NkcloSrYIxGA=
