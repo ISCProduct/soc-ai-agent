@@ -63,6 +63,14 @@ func TestBuildCompanyBrief_GuestEntryVisibility(t *testing.T) {
 			},
 			wantPayload: true,
 		},
+		{
+			name: "ゲスト投稿でなくても停止中(is_active=false)の企業は出さない",
+			company: models.Company{
+				Name: "停止中株式会社", MainBusiness: payload,
+				DataStatus: "published", IsGuestEntry: false, IsActive: false,
+			},
+			wantPayload: false,
+		},
 		// 残差を明示する。SQL ガードは「is_guest_entry=0 だが company_entry_submissions に
 		// 行がある未公開企業」も弾くが、models.Company から submissions は見えないので
 		// ここでは弾けない（上のケースと見分けがつかない）。

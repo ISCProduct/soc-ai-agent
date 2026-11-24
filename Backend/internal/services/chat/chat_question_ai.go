@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 )
 
@@ -46,13 +47,13 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 	}
 
 	// スコア分布を分析
-	scoreMap := make(map[string]int)
+	scoreMap := make(map[string]float64)
 	for _, score := range scores {
 		scoreMap[score.WeightCategory] = score.Score
 	}
 
 	// まだ評価されていないカテゴリを特定（職種に応じて並び順を調整）
-	allCategories := s.getCategoryOrder(jobCategoryID)
+	allCategories := s.getCategoryOrder(ctx, jobCategoryID)
 
 	unevaluatedCategories := []string{}
 	for _, cat := range allCategories {
@@ -86,14 +87,14 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 	} else {
 		// 全カテゴリ評価済みの場合は、深掘り質問
 		var highestCategory string
-		highestScore := -100
+		highestScore := -100.0
 		for cat, score := range scoreMap {
 			if score > highestScore {
 				highestScore = score
 				highestCategory = cat
 			}
 		}
-		prompt = prompts.BuildDeepeningQuestionPrompt(historyText, highestCategory, highestScore, industryID, jobCategoryID)
+		prompt = prompts.BuildDeepeningQuestionPrompt(historyText, highestCategory, int(math.Round(highestScore)), industryID, jobCategoryID)
 	}
 
 	questionText, err := s.questionAICall(ctx, prompt)

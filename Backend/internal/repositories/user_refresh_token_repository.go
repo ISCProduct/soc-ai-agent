@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -44,12 +45,16 @@ func (r *UserRefreshTokenRepository) Revoke(id uint, at time.Time) error {
 		Update("revoked_at", at).Error
 }
 
-// RevokeAllByUser はユーザーの有効なトークンをすべて失効させる
-// （ログアウト全端末・パスワード変更・アカウント停止時に使用）
-func (r *UserRefreshTokenRepository) RevokeAllByUser(userID uint, at time.Time) error {
-	return r.db.Model(&models.UserRefreshToken{}).
-		Where("user_id = ? AND revoked_at IS NULL", userID).
-		Update("revoked_at", at).Error
+// Delete はトークンを物理削除する。明示的なログアウトで使用し、
+// Revoke のローテーション猶予（並行リフレッシュ対策）を適用させない (SOCAIAGENT-688)。
+func (r *UserRefreshTokenRepository) Delete(ctx context.Context, id uint) error {
+	return r.db.WithContext(ctx).Delete(&models.UserRefreshToken{}, id).Error
+}
+
+// DeleteAllByUser はユーザーのトークンをすべて物理削除する（ローテーション済みで猶予中のものも含む）。
+// パスワード再設定などの全端末失効で使用する (SOCAIAGENT-688)。
+func (r *UserRefreshTokenRepository) DeleteAllByUser(ctx context.Context, userID uint) error {
+	return r.db.WithContext(ctx).Where("user_id = ?", userID).Delete(&models.UserRefreshToken{}).Error
 }
 
 // DeleteExpired は expires_at が before より前のトークンを、期限の古い順に最大 limit 件だけ物理削除し、

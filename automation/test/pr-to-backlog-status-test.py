@@ -15,7 +15,7 @@ script = textwrap.dedent(body)
 FAILED = []
 
 def run(name, env, issue_status, pr=None, expect_patch=None, hits=(), expect_warn=False,
-        desc='本文', expect_desc=None, routes=()):
+        desc='本文', expect_desc=None, routes=(), expect_rc=0):
     d = tempfile.mkdtemp()
     os.makedirs(f'{d}/.github/scripts')
     src = open(f'{REPO}/.github/scripts/backlog_client.py', encoding='utf-8').read()
@@ -57,7 +57,7 @@ urllib.request.urlopen = _fake
     m = re.search(r'PATCHES=(.*)', out.stdout)
     patches = json.loads(m.group(1)) if m else None
     status_patches = [p for p in (patches or []) if 'statusId' in (p[1] or {})]
-    ok = out.returncode == 0 and (expect_patch is None and not status_patches) or (expect_patch is not None and [p[1]['statusId'] for p in status_patches] == [expect_patch])
+    ok = out.returncode == expect_rc and (expect_patch is None and not status_patches) or (expect_patch is not None and [p[1]['statusId'] for p in status_patches] == [expect_patch])
     ok = ok and (('::warning' in out.stdout) == expect_warn)
     # 説明欄の PR URL 節。1本上書きだと追いPRでURLが消え、改行を消すと後続本文が連結する。
     desc_patches = [p[1]['description'] for p in (patches or []) if 'description' in (p[1] or {})]
@@ -82,18 +82,22 @@ run('E PR opened ドラフト(未対応→処理中)', dict(ACTION='opened', PR_
 run('E2 ドラフト解除(処理中→PR確認待ち)', dict(ACTION='ready_for_review', PR_NUMBER='9'), (2, '処理中'), pr=PRBASE, expect_patch=5)
 run('F PR opened(先へ進んだ課題は戻さない)', dict(ACTION='opened', PR_NUMBER='9'), (6, 'ステージング環境反映'), pr=PRBASE)
 run('G PR reopened(未対応→PR確認待ち)', dict(ACTION='reopened', PR_NUMBER='9'), (1, '未対応'), pr=PRBASE, expect_patch=5)
+# 本文にキーを書き足した(edited)ら次の push を待たずに進める。閉じた PR の編集では動かさない
+run('G2 PR edited(処理中→PR確認待ち)', dict(ACTION='edited', PR_NUMBER='9'), (2, '処理中'), pr=dict(PRBASE, state='open'), expect_patch=5)
+run('G3 閉じたPRの edited は動かさない', dict(ACTION='edited', PR_NUMBER='9'), (1, '未対応'), pr=dict(PRBASE, state='closed'))
 run('H PRクローズ(非マージ)は従来どおり未対応', dict(ACTION='closed', PR_NUMBER='9'), (2, '処理中'), pr=PRBASE, expect_patch=1)
 run('I ブランチ名の番号→GitHub Issue→Backlogキー', dict(ACTION='branch_created', BRANCH='fix/1374-guest', PR_NUMBER=''), (1, '未対応'),
     pr={'title': '', 'body': '<!-- backlog-key:SOCAIAGENT-77 -->'}, expect_patch=2)
 NOKEY = dict(PRBASE, title='feat(company): 企業情報の実データを検証する (#9)')
 HIT = [{'issueKey': 'SOCAIAGENT-326', 'summary': 'fix(company): 企業情報の実データを検証する'}]
 run('J キー無しPR→課題名の完全一致でPR確認待ち', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=NOKEY, hits=HIT, expect_patch=5)
-run('K キー無しPR→一致なしは警告', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=NOKEY, hits=[{'issueKey': 'SOCAIAGENT-1', 'summary': '別の課題'}], expect_warn=True)
-run('L キー無しPR→複数一致は更新せず警告', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=NOKEY, hits=HIT + [dict(HIT[0], issueKey='SOCAIAGENT-327')], expect_warn=True)
+# レビュー待ちのPRでキーが決まらないときは失敗(rc=1)にして PR 上に出す
+run('K キー無しPR→一致なしは警告', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=NOKEY, hits=[{'issueKey': 'SOCAIAGENT-1', 'summary': '別の課題'}], expect_warn=True, expect_rc=1)
+run('L キー無しPR→複数一致は更新せず警告', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=NOKEY, hits=HIT + [dict(HIT[0], issueKey='SOCAIAGENT-327')], expect_warn=True, expect_rc=1)
 run('M キー無しPR→マージで警告(develop)', dict(ACTION='closed', PR_NUMBER='9'), (2, '処理中'), pr=dict(NOKEY, merged=True), hits=[], expect_warn=True)
 JA = dict(PRBASE, title='ログイン: エラーを表示する (#9)')
 run('N 日本語の分類名は落とさない(別課題に誤爆しない)', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=JA,
-    hits=[{'issueKey': 'SOCAIAGENT-8', 'summary': '検索: エラーを表示する'}], expect_warn=True)
+    hits=[{'issueKey': 'SOCAIAGENT-8', 'summary': '検索: エラーを表示する'}], expect_warn=True, expect_rc=1)
 run('O 日本語の分類名が同じ課題には一致する', dict(ACTION='opened', PR_NUMBER='9'), (2, '処理中'), pr=JA,
     hits=[{'issueKey': 'SOCAIAGENT-8', 'summary': 'ログイン: エラーを表示する'}], expect_patch=5)
 # --- 説明欄の PR URL 節 ---
@@ -113,6 +117,17 @@ run('P4 同じURLを二重に積まない(PATCHしない)', dict(ACTION='synchro
     desc=f'本文\n\n## GitHub PR\n{U}')
 # --- 昇格PR: コミットが参照するPRにキーが無くても、ブランチ名の番号から Issue を辿る ---
 PROMO = dict(PRBASE, number=100, title='Release: develop to main', base={'ref': 'main'}, head={'ref': 'release'}, merged=True)
+PROMO_CHILD = [('/pulls/100/commits', [{'commit': {'message': 'Merge pull request #50 from o/fix/x'}}]),
+               ('/issues/50', {'title': 'fix: 監査ログ [SOCAIAGENT-123]', 'body': '', 'pull_request': {}})]
+for head, base in (('develop', 'release'), ('release', 'main')):
+    promo_open = dict(PRBASE, number=100, title=f'deploy: {head} → {base}', html_url='promo-url', base={'ref': base}, head={'ref': head})
+    # 含まれる PR の課題に昇格 PR の URL を載せ、ステータスは動かさない
+    run(f'Q0 昇格PR({head}→{base})を開くと含まれるPRの課題を参照する', dict(ACTION='opened', PR_NUMBER='100'), (6, 'ステージング環境反映'),
+        pr=promo_open, routes=PROMO_CHILD, desc='', expect_desc='\n\n## GitHub PR\npromo-url')
+# 含まれる PR から課題が1件も見つからなければ赤くする
+run('Q0b 昇格PRで課題が見つからなければ警告', dict(ACTION='opened', PR_NUMBER='100'), (6, 'ステージング環境反映'),
+    pr=dict(PRBASE, number=100, title='deploy: develop → release', base={'ref': 'release'}, head={'ref': 'develop'}),
+    routes=[('/pulls/100/commits', [])], expect_warn=True, expect_rc=1)
 run('Q 昇格PR→キー無しの子PRをブランチ名の番号から解決', dict(ACTION='closed', PR_NUMBER='100'), (6, 'ステージング環境反映'), pr=PROMO,
     routes=[('/pulls/100/commits', [{'commit': {'message': 'fix: 監査ログ (#50)'}}]),
             ('/issues/50', {'title': 'fix: 監査ログ (#50)', 'body': '', 'pull_request': {}}),

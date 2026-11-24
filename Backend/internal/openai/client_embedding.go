@@ -39,9 +39,7 @@ func (cli *Client) Embedding(ctx context.Context, input string, modelOverride ..
 	if err != nil {
 		return nil, err
 	}
-	if len(resp.Data) == 0 {
-		return nil, errors.New("empty embedding response")
-	}
+	// 結果が空でも課金されたトークンは記録する（SOCAIAGENT-655）。記録してから空を判定する
 	if resp.Usage.PromptTokens > 0 {
 		cli.reportUsage(ctx, usageReport{
 			provider:     cli.embeddingProvider,
@@ -49,6 +47,9 @@ func (cli *Client) Embedding(ctx context.Context, input string, modelOverride ..
 			promptTokens: resp.Usage.PromptTokens,
 			latency:      time.Since(start),
 		})
+	}
+	if len(resp.Data) == 0 {
+		return nil, errors.New("empty embedding response")
 	}
 	return resp.Data[0].Embedding, nil
 }
