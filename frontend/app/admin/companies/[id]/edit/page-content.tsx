@@ -16,6 +16,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import {
   resolveIndustryFieldProfile,
   type TechFieldKey,
@@ -96,6 +97,14 @@ export default function PageContent() {
   useEffect(() => {
     const user = authService.getStoredUser()
     if (!user?.is_admin && !user?.is_staff) window.location.href = '/'
+  }, [])
+
+  // 企業マスタ・面接質問は全校共有のため、書き込みはシステム管理者のみ（API も 403 を返す）
+  const [isPlatform, setIsPlatform] = useState(false)
+  useEffect(() => {
+    getAdminSchoolAccess()
+      .then((access) => setIsPlatform(!access.restricted))
+      .catch(() => setIsPlatform(false))
   }, [])
 
   const [error, setError] = useState('')
@@ -229,7 +238,7 @@ export default function PageContent() {
         backHref="/admin/companies"
         backAriaLabel="企業一覧に戻る"
         actions={
-          profile.techAspectEnabled ? (
+          profile.techAspectEnabled && isPlatform ? (
             <Button variant="contained" onClick={handleSave} disabled={busy} disableElevation>
               {saving ? '保存中…' : '保存'}
             </Button>
@@ -239,6 +248,11 @@ export default function PageContent() {
 
       <CompanyAspectTabs companyId={id} active="tech" industry={industry} />
       <ErrorAlert error={error} />
+      {!isPlatform && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          企業情報は全校で共有するため、手入力での保存はシステム管理者のみ行えます。修正が必要なときはシステム管理者に依頼してください。
+        </Alert>
+      )}
       {success && (
         <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
           {success}
@@ -293,9 +307,11 @@ export default function PageContent() {
                 <Button variant="outlined" onClick={() => handleAiFetch(true)} disabled={busy}>
                   最新の情報に更新
                 </Button>
-                <Button variant="contained" onClick={handleSave} disabled={busy} disableElevation>
-                  {saving ? '保存中…' : '保存'}
-                </Button>
+                {isPlatform && (
+                  <Button variant="contained" onClick={handleSave} disabled={busy} disableElevation>
+                    {saving ? '保存中…' : '保存'}
+                  </Button>
+                )}
               </Stack>
             </Stack>
           </Box>

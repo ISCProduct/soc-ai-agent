@@ -10,6 +10,7 @@ import (
 
 func TestBuildCompanyBrief_FromDBFields(t *testing.T) {
 	company := &models.Company{
+		IsActive:     true,
 		Name:         "株式会社サンプルテック",
 		Description:  "長い説明は事業欄のフォールバック候補",
 		MainBusiness: "BtoB SaaSの開発・提供",

@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   try {
-    const result = await proxyAdminBackend('GET', `/api/admin/organizations/${id}`, {
+    const result = await proxyAdminBackend('GET', `/api/admin/organizations/${encodeURIComponent(id)}`, {
       headers: adminProxyHeaders(request.headers),
       timeoutMs: 15_000,
     })
@@ -25,7 +25,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params
   const body = await request.text()
   try {
-    const result = await proxyAdminBackend('PUT', `/api/admin/organizations/${id}`, {
+    const result = await proxyAdminBackend('PUT', `/api/admin/organizations/${encodeURIComponent(id)}`, {
       headers: adminProxyHeaders(request.headers),
       body,
       timeoutMs: 30_000,

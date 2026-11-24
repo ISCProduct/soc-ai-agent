@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -21,7 +22,10 @@ const (
 	oauthStateCookieName  = "oauth_state"
 	oauthStateTTL         = 10 * time.Minute // OAuth フローは10分以内に完了すべき
 	oauthTenantCookieName = "oauth_tenant_slug"
+	oauthBindCookieName   = "oauth_bind"
 )
+
+var oauthBindPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 // GenerateOAuthState はランダムな state 値を生成し、HMAC 署名付き Cookie にセットして state 文字列を返す。
 // state はコールバック時に VerifyOAuthState で検証する。
@@ -75,12 +79,41 @@ func VerifyOAuthState(w http.ResponseWriter, r *http.Request) bool {
 // SetOAuthTenantSlug はOAuthフロー開始時に学園サブドメインslugを使い捨てCookieへ保存する。
 // state Cookieと同様、ブラウザのOAuthプロバイダ往復をまたいでテナント情報を引き継ぐために使う。
 func SetOAuthTenantSlug(w http.ResponseWriter, slug string) {
-	if slug == "" {
+	setOneShotCookie(w, oauthTenantCookieName, slug)
+}
+
+// ConsumeOAuthTenantSlug はOAuthコールバック時にテナントslug Cookieを読み取り、削除する（使い捨て）。
+// Cookieが無ければ空文字を返す（テナント制約なしのOAuthフロー）。
+func ConsumeOAuthTenantSlug(w http.ResponseWriter, r *http.Request) string {
+	return consumeOneShotCookie(w, r, oauthTenantCookieName)
+}
+
+// SetOAuthBind はOAuthフロー開始時に、FE がログインを始めたブラウザで作った照合値
+// （base64url の SHA-256、43文字）を使い捨てCookieへ保存する (SOCAIAGENT-683)。
+// 形式が違う値は保存しない。
+func SetOAuthBind(w http.ResponseWriter, bind string) {
+	if !oauthBindPattern.MatchString(bind) {
+		return
+	}
+	setOneShotCookie(w, oauthBindCookieName, bind)
+}
+
+// ConsumeOAuthBind はOAuthコールバック時に照合値Cookieを読み取り、削除する（使い捨て）。
+func ConsumeOAuthBind(w http.ResponseWriter, r *http.Request) string {
+	bind := consumeOneShotCookie(w, r, oauthBindCookieName)
+	if !oauthBindPattern.MatchString(bind) {
+		return ""
+	}
+	return bind
+}
+
+func setOneShotCookie(w http.ResponseWriter, name, value string) {
+	if value == "" {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     oauthTenantCookieName,
-		Value:    slug,
+		Name:     name,
+		Value:    value,
 		Path:     "/",
 		MaxAge:   int(oauthStateTTL.Seconds()),
 		HttpOnly: true,
@@ -89,12 +122,10 @@ func SetOAuthTenantSlug(w http.ResponseWriter, slug string) {
 	})
 }
 
-// ConsumeOAuthTenantSlug はOAuthコールバック時にテナントslug Cookieを読み取り、削除する（使い捨て）。
-// Cookieが無ければ空文字を返す（テナント制約なしのOAuthフロー）。
-func ConsumeOAuthTenantSlug(w http.ResponseWriter, r *http.Request) string {
-	cookie, err := r.Cookie(oauthTenantCookieName)
+func consumeOneShotCookie(w http.ResponseWriter, r *http.Request, name string) string {
+	cookie, err := r.Cookie(name)
 	http.SetCookie(w, &http.Cookie{
-		Name:     oauthTenantCookieName,
+		Name:     name,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
