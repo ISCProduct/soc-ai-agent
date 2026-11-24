@@ -3,13 +3,14 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Avatar, Box, Button, Drawer, Tooltip, Typography, type SvgIconProps } from '@mui/material'
+import { Avatar, Box, Button, Drawer, IconButton, Tooltip, Typography, type SvgIconProps } from '@mui/material'
 import AdminPanelSettings from '@mui/icons-material/AdminPanelSettings'
 import Assessment from '@mui/icons-material/Assessment'
 import Assignment from '@mui/icons-material/Assignment'
 import BorderAll from '@mui/icons-material/BorderAll'
 import Business from '@mui/icons-material/Business'
 import CalendarMonth from '@mui/icons-material/CalendarMonth'
+import Close from '@mui/icons-material/Close'
 import Description from '@mui/icons-material/Description'
 import EditNote from '@mui/icons-material/EditNote'
 import Favorite from '@mui/icons-material/Favorite'
@@ -82,7 +83,11 @@ const NAV_ICONS: Record<string, React.ComponentType<SvgIconProps>> = {
   '/admin': AdminPanelSettings,
 }
 
-const sectionHeadingSx = { fontWeight: 600, fontSize: 13, lineHeight: 1.5, color: UI.inkSoft } as const
+const sectionHeadingSx = { fontWeight: 600, fontSize: { xs: 14, md: 13 }, lineHeight: 1.5, color: UI.inkSoft } as const
+const hiddenScrollbarSx = {
+  scrollbarWidth: 'none',
+  '&::-webkit-scrollbar': { display: 'none' },
+} as const
 
 /**
  * ホーム（相談中心）の左サイドバー（Figma「改善G／相談中心」ノード 37:340）。
@@ -164,14 +169,15 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           display: 'flex',
           alignItems: 'center',
           gap: 1.5,
-          minHeight: 44,
+          minHeight: { xs: 48, md: 44 },
+          flexShrink: 0,
           px: 1.5,
           borderRadius: '8px',
           textDecoration: 'none',
           bgcolor: current ? UI.markTint : 'transparent',
-          color: current ? UI.mark : UI.inkSoft,
+          color: current ? UI.mark : { xs: UI.ink, md: UI.inkSoft },
           fontWeight: current ? 700 : 400,
-          fontSize: 15,
+          fontSize: { xs: 16, md: 15 },
           lineHeight: 1.5,
           '&:hover': { bgcolor: current ? UI.markTint : UI.tint },
           '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
@@ -192,12 +198,19 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
     )
   }
 
-  const content = (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100%', p: 2, bgcolor: UI.field }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, gap: 1 }}>
+  const content = (mobile: boolean) => (
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: { xs: '100%', md: 'auto' }, minHeight: '100%', p: { xs: 0, md: 2 }, bgcolor: UI.field }}>
+      {/* モバイルでは上部をスクロール領域の外に置き、いつでも閉じられるようにする。 */}
+      <Box sx={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
+        px: { xs: 2, md: 1.5 }, gap: 1,
+        pt: { xs: 'calc(8px + env(safe-area-inset-top))', md: 0 },
+        pb: { xs: 1, md: 0 },
+        borderBottom: { xs: `1px solid ${UI.ruleSoft}`, md: 'none' },
+      }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
           <Avatar sx={{ width: 32, height: 32, bgcolor: UI.markTint, color: UI.mark, fontSize: 16 }}>{user.name.charAt(0).toUpperCase()}</Avatar>
-          <Typography noWrap sx={{ fontWeight: 600, fontSize: 14, lineHeight: 1.5, color: UI.ink }}>
+          <Typography noWrap sx={{ fontWeight: 600, fontSize: { xs: 15, md: 14 }, lineHeight: 1.5, color: UI.ink }}>
             {user.name}
           </Typography>
           {user.is_guest && (
@@ -206,20 +219,43 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
             </Typography>
           )}
         </Box>
-        <Button
-          onClick={onLogout}
-          sx={{
-            minWidth: 0, p: 0.5, fontSize: 12, fontWeight: 400, color: UI.inkSoft, textTransform: 'none', flexShrink: 0,
-            '&:hover': { bgcolor: UI.tint },
-            '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
-          }}
-        >
-          ログアウト
-        </Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <Button
+            onClick={onLogout}
+            sx={{
+              minWidth: 0, p: 0.5, fontSize: { xs: 13, md: 12 }, fontWeight: 400, color: UI.inkSoft, textTransform: 'none', flexShrink: 0,
+              '&:hover': { bgcolor: UI.tint },
+              '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
+            }}
+          >
+            ログアウト
+          </Button>
+          {mobile && (
+            <IconButton
+              aria-label={t('menu.close')}
+              onClick={onMobileClose}
+              sx={{
+                width: 44, height: 44, flexShrink: 0, color: UI.inkSoft,
+                '&:hover': { bgcolor: UI.tint },
+                '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
+              }}
+            >
+              <Close />
+            </IconButton>
+          )}
+        </Box>
       </Box>
-      <Box sx={{ height: 8 }} />
+      <Box sx={{ height: 8, flexShrink: 0 }} />
 
-      <Box component="nav" aria-label="メニュー" sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+      <Box component="nav" aria-label="メニュー" sx={{
+        display: 'flex', flexDirection: 'column', flex: 1,
+        minHeight: { xs: 0, md: 'auto' },
+        overflowY: { xs: 'auto', md: 'visible' },
+        overscrollBehaviorY: { xs: 'contain', md: 'auto' },
+        px: { xs: 2, md: 0 },
+        pb: { xs: 'max(16px, env(safe-area-inset-bottom))', md: 0 },
+        ...hiddenScrollbarSx,
+      }}>
         {navItem(HOME_SIDEBAR_TOP[0].href, HOME_SIDEBAR_TOP[0].label)}
         {navItem(HOME_SIDEBAR_TOP[1].href, HOME_SIDEBAR_TOP[1].label, {
           // 結果画面へは、いまのチャットの session を付けて遷移する（付けられないときはチャットへ）
@@ -229,19 +265,19 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           },
         })}
 
-        <Box sx={{ height: 24 }} />
-        <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1, minHeight: 24, px: 1.5 }}>
+        <Box sx={{ height: { xs: 20, md: 24 }, flexShrink: 0 }} />
+        <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1, minHeight: 24, flexShrink: 0, px: 1.5 }}>
           <Typography component="span" sx={sectionHeadingSx}>
             {t('groups.analysis')}
           </Typography>
           <Typography
             component="span"
-            sx={{ fontSize: 12, lineHeight: 1.5, fontWeight: 400, color: UI.inkSoft, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
+            sx={{ fontSize: { xs: 13, md: 12 }, lineHeight: 1.5, fontWeight: 400, color: UI.inkSoft, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
           >
             {`判定の進み具合 ${progress.percent}%`}
           </Typography>
         </Box>
-        <Box sx={{ px: 1.5, py: 0.5 }}>
+        <Box sx={{ px: 1.5, py: 0.5, flexShrink: 0 }}>
           <Box
             role="progressbar"
             aria-label="自己分析の進み具合"
@@ -256,8 +292,8 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
         {HOME_SIDEBAR_ANALYSIS.map((i) => navItem(i.href, i.label))}
 
         {HOME_SIDEBAR_GROUPS.map((group) => (
-          <Box key={group.heading} sx={{ display: 'flex', flexDirection: 'column' }}>
-            <Box sx={{ height: 24 }} />
+          <Box key={group.heading} sx={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+            <Box sx={{ height: { xs: 20, md: 24 }, flexShrink: 0 }} />
             <Typography component="p" sx={{ ...sectionHeadingSx, px: 1.5 }}>
               {group.heading}
             </Typography>
@@ -287,17 +323,17 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
   )
 
   const drawerSx = {
-    width: HOME_LAYOUT.sidebarWidth,
+    width: { xs: 'min(360px, calc(100vw - 24px))', md: HOME_LAYOUT.sidebarWidth },
     flexShrink: 0,
     '& .MuiDrawer-paper': {
-      width: HOME_LAYOUT.sidebarWidth,
+      width: { xs: 'min(360px, calc(100vw - 24px))', md: HOME_LAYOUT.sidebarWidth },
+      height: { xs: '100dvh', md: '100%' },
       boxSizing: 'border-box',
       bgcolor: UI.field,
       borderRight: `1px solid ${UI.ruleSoft}`,
-      overflowY: 'auto',
-      // バーだけ隠し、ホイール・タッチ・キーボードでのスクロールは維持する。
-      scrollbarWidth: 'none',
-      '&::-webkit-scrollbar': { display: 'none' },
+      // モバイルは nav だけをスクロールさせ、上部の閉じる操作を残す。
+      overflowY: { xs: 'hidden', md: 'auto' },
+      ...hiddenScrollbarSx,
     },
   }
 
@@ -305,11 +341,11 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
     <>
       {/* モバイル用: Temporary Drawer */}
       <Drawer variant="temporary" open={mobileOpen} onClose={onMobileClose} ModalProps={{ keepMounted: true }} className={styles.drawerMobile} sx={drawerSx}>
-        {content}
+        {content(true)}
       </Drawer>
       {/* デスクトップ用: Permanent Drawer */}
       <Drawer variant="permanent" className={styles.drawerDesktop} sx={drawerSx} open>
-        {content}
+        {content(false)}
       </Drawer>
     </>
   )

@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { HomeSidebar } from '@/components/home/HomeSidebar'
 import {
   HOME_SIDEBAR_ANALYSIS,
@@ -131,5 +131,27 @@ describe('HomeSidebar（ホームの左サイドバー）', () => {
     render(<HomeSidebar user={user} onLogout={jest.fn()} />)
     fireEvent.click(within(nav()).getByRole('link', { name: 'マッチング結果' }))
     expect(push).toHaveBeenCalledTimes(1)
+  })
+
+  it('モバイルの閉じるボタンからメニューを閉じられる', async () => {
+    const onMobileClose = jest.fn()
+    const { rerender } = render(<HomeSidebar user={user} onLogout={jest.fn()} mobileOpen onMobileClose={onMobileClose} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'メニューを閉じる' }))
+    expect(onMobileClose).toHaveBeenCalledTimes(1)
+
+    rerender(<HomeSidebar user={user} onLogout={jest.fn()} mobileOpen={false} onMobileClose={onMobileClose} />)
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'メニューを閉じる' })).not.toBeInTheDocument())
+  })
+
+  it('モバイルの項目を選ぶと、行き先を保ったままメニューを閉じる', () => {
+    const onMobileClose = jest.fn()
+    render(<HomeSidebar user={user} onLogout={jest.fn()} mobileOpen onMobileClose={onMobileClose} />)
+
+    const menu = screen.getByRole('navigation', { name: 'メニュー' })
+    const profile = within(menu).getByRole('link', { name: 'プロフィール設定' })
+    expect(profile).toHaveAttribute('href', '/profile')
+    fireEvent.click(profile)
+    expect(onMobileClose).toHaveBeenCalledTimes(1)
   })
 })

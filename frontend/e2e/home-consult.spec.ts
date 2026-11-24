@@ -160,6 +160,59 @@ test.describe('ホーム（相談中心・広い画面）', () => {
 })
 
 test.describe('ホーム（相談中心・狭い画面）', () => {
+  test('モバイルは幅を広げて文字とタップ領域を確保し、末尾までスクロールしても閉じられる', async ({ page }) => {
+    await setupAuth(page, TEST_USER)
+    await mockHome(page)
+
+    for (const width of [320, 375, 768]) {
+      await page.setViewportSize({ width, height: 640 })
+      await page.goto('/')
+      await expect(heading(page)).toBeVisible({ timeout: 20000 })
+      await page.getByRole('button', { name: 'メニューを開く' }).click()
+
+      const drawer = page.locator('.MuiDrawer-paper:visible')
+      const close = drawer.getByRole('button', { name: 'メニューを閉じる' })
+      const menu = drawer.getByRole('navigation', { name: 'メニュー' })
+      const home = menu.getByRole('link', { name: 'ホーム', exact: true })
+      await expect(drawer).toHaveCSS('width', `${Math.min(360, width - 24)}px`)
+      await expect(home).toHaveCSS('font-size', '16px')
+      await expect(home).toHaveCSS('min-height', '48px')
+      await expect(menu).toHaveCSS('overflow-y', 'auto')
+      await expect(menu).toHaveCSS('scrollbar-width', 'none')
+      await expect(close).toHaveCSS('width', '44px')
+      await expect(close).toHaveCSS('height', '44px')
+
+      const before = await close.boundingBox()
+      expect(before).not.toBeNull()
+      await menu.evaluate((el) => { el.scrollTop = el.scrollHeight })
+      await expect(menu.getByRole('link', { name: 'プロフィール設定' })).toBeInViewport()
+      expect(await menu.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+      const after = await close.boundingBox()
+      expect(after).not.toBeNull()
+      expect(Math.abs(after!.y - before!.y)).toBeLessThan(1)
+
+      await close.click()
+      await expect(close).not.toBeVisible()
+    }
+  })
+
+  test('PCは280px幅・15pxの文字・44pxの行を維持する', async ({ page }) => {
+    await setupAuth(page, TEST_USER)
+    await mockHome(page)
+
+    for (const width of [1024, 1440]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/')
+      await expect(heading(page)).toBeVisible({ timeout: 20000 })
+      const drawer = page.locator('.MuiDrawer-paper:visible')
+      const home = drawer.getByRole('link', { name: 'ホーム', exact: true })
+      await expect(drawer).toHaveCSS('width', '280px')
+      await expect(home).toHaveCSS('font-size', '15px')
+      await expect(home).toHaveCSS('min-height', '44px')
+      await expect(drawer.getByRole('button', { name: 'メニューを閉じる' })).toHaveCount(0)
+    }
+  })
+
   test('右パネルは出さず、従来どおり上に「次にやること」を積む。メインの相談は同じ', async ({ page }) => {
     await page.setViewportSize({ width: 1100, height: 800 })
     await setupAuth(page, TEST_USER)
