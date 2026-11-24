@@ -71,7 +71,7 @@ func TestBuildInterviewSystemPromptGolden(t *testing.T) {
 		{"directive_deepening_company_category", args{
 			companyName: "テスト工業", position: "企画", companyInfo: "  ",
 			customQuestions: customWithIntent,
-			turnCount: 3, remainingSeconds: 100, questionIndex: 9, totalQuestions: 4,
+			turnCount:       3, remainingSeconds: 100, questionIndex: 9, totalQuestions: 4,
 			questionElapsedSeconds: 500, questionDurationSeconds: 120,
 			directive: &questionDirective{
 				Text: "定型の深掘り文", Category: "企業独自カテゴリ", IsDeepening: true,
@@ -80,7 +80,7 @@ func TestBuildInterviewSystemPromptGolden(t *testing.T) {
 			},
 		}},
 		{"directive_deepening_no_focus_no_intent", args{
-			position: "開発",
+			position:  "開発",
 			turnCount: 1, questionIndex: 1, totalQuestions: 3, questionElapsedSeconds: -5,
 			directive: &questionDirective{
 				Text: "定型", Category: "強み・弱み", IsDeepening: true, DeepeningOf: "強みを教えてください。",
@@ -98,12 +98,12 @@ func TestBuildInterviewSystemPromptGolden(t *testing.T) {
 		{"directive_empty_text_category_only", args{
 			companyReading: "よみのみ", companyType: "sier",
 			customQuestions: customPlain,
-			turnCount: 7, remainingSeconds: 30,
+			turnCount:       7, remainingSeconds: 30,
 			directive: &questionDirective{Text: "  ", Category: "逆質問"},
 		}},
 		{"directive_blank_category", args{
 			companyName: "テスト物流",
-			turnCount: 3, remainingSeconds: 200,
+			turnCount:   3, remainingSeconds: 200,
 			directive: &questionDirective{Text: "次の質問です。", Category: "  "},
 		}},
 	}
