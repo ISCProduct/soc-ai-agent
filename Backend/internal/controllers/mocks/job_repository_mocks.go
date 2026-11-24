@@ -76,6 +76,14 @@ func (m *GraduateEmploymentRepositoryMock) Update(entry *models.GraduateEmployme
 	return args.Error(0)
 }
 
+func (m *GraduateEmploymentRepositoryMock) PlacementFacts(ctx context.Context, schoolID *uint) ([]models.GraduatePlacement, error) {
+	args := m.Called(ctx, schoolID)
+	if v := args.Get(0); v != nil {
+		return v.([]models.GraduatePlacement), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 func (m *GraduateEmploymentRepositoryMock) List(companyID, schoolID *uint, limit int) ([]models.GraduateEmployment, error) {
 	args := m.Called(companyID, schoolID, limit)
 	if v := args.Get(0); v != nil {

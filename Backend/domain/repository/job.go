@@ -23,4 +23,6 @@ type GraduateEmploymentRepository interface {
 	Update(entry *models.GraduateEmployment) error
 	// schoolID が非nilの場合は個別校で絞り込む。
 	List(companyID, schoolID *uint, limit int) ([]models.GraduateEmployment, error)
+	// PlacementFacts は集計用。氏名は返さない。schoolID が非nilのときはその校だけ。
+	PlacementFacts(ctx context.Context, schoolID *uint) ([]models.GraduatePlacement, error)
 }

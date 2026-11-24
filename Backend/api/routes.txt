@@ -75,6 +75,7 @@ GET /api/admin/graduate-employments
 POST /api/admin/graduate-employments
 GET /api/admin/graduate-employments/:id
 PUT /api/admin/graduate-employments/:id
+GET /api/admin/graduate-employments/summary
 GET /api/admin/interviews
 GET /api/admin/interviews/:id/videos
 GET /api/admin/interviews/videos/:video_id/url

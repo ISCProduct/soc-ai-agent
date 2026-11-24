@@ -169,7 +169,7 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
 | Frontend | Next.js / React / TypeScript | 16 / 19 / — |
 | UI ライブラリ | MUI | v7 |
 | 面接官アバター | SVGイラスト(自前実装、音声振幅駆動の口パク) | — |
-| RAG | Python / FastAPI / LangChain / ChromaDB | 3.10+ |
+| RAG | Python / FastAPI / LangChain / ChromaDB | 3.12 |
 | ベクトル DB | ChromaDB | — |
 | AI | OpenAI API（GPT-4o / Realtime） | — |
 | 動画・PDF | AWS S3 | — |
