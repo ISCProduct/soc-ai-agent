@@ -3,6 +3,7 @@
  */
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import PageContent from '@/app/admin/companies/page-content'
+import { GATEWAY_USER_MESSAGE } from '@/lib/user-facing-error'
 
 // 企業一覧画面の主な表示・操作と API 呼び出しを固定する（#2569 の分割前後で挙動が変わらないことの確認用）。
 // データはすべて合成。
@@ -21,7 +22,12 @@ jest.mock('@/lib/admin/school-access', () => ({
 }))
 
 jest.mock('@/components/admin/SchoolFilterSelect', () => ({
-  SchoolFilterSelect: () => <span>学校フィルタ</span>,
+  // 押すと学校 7 を選んだことにする
+  SchoolFilterSelect: ({ onChange }: { onChange: (id: number | undefined) => void }) => (
+    <button type="button" onClick={() => onChange(7)}>
+      学校フィルタ
+    </button>
+  ),
 }))
 
 const FETCHED = '2099-01-01T00:00:00Z'
@@ -60,6 +66,24 @@ function jsonRes(body: unknown, ok = true, status = 200) {
   const raw = JSON.stringify(body)
   return { ok, status, text: async () => raw, json: async () => JSON.parse(raw) }
 }
+
+/** HTML のエラーページ（ALB 等）。json() は例外になる */
+function htmlRes(status = 500) {
+  const raw = '<!doctype html><html><body>error</body></html>'
+  return {
+    ok: false,
+    status,
+    text: async () => raw,
+    json: async () => {
+      throw new SyntaxError('Unexpected token <')
+    },
+  }
+}
+
+/** 通信断 */
+const networkError = () => Promise.reject(new TypeError('Failed to fetch'))
+
+const NETWORK_MESSAGE = '通信エラーが発生しました。時間をおいて再度お試しください。'
 
 let calls: Call[] = []
 
@@ -111,8 +135,10 @@ describe('管理画面 企業一覧', () => {
       'GET /api/admin/companies?limit=50&offset=0',
       'GET /api/admin/companies/industries',
       'GET /api/admin/companies/l1-coverage',
-      'GET /api/admin/companies/industries',
     ])
+    // 権限の解決後に業界一覧を取り直さない（#2573）
+    await new Promise((r) => setTimeout(r, 50))
+    expect(calls.filter((c) => c.url === '/api/admin/companies/industries')).toHaveLength(1)
   })
 
   it('行ごとに状態・足りない情報・操作ボタンを出し分ける', async () => {
@@ -281,5 +307,135 @@ describe('管理画面 企業一覧', () => {
     render(<PageContent />)
     expect(await screen.findByText('まだ企業が登録されていません')).toBeInTheDocument()
     expect(await screen.findByRole('link', { name: '最初の企業を追加' })).toBeInTheDocument()
+  })
+
+  describe('通信失敗・不具合の修正 (#2573)', () => {
+    const openAdvanced = () => fireEvent.click(screen.getByText('高度な設定（通常は使いません）'))
+
+    it('一覧取得が HTML のエラーページを返したら、エラーを表示する', async () => {
+      mockFetch((c) => (c.url.startsWith('/api/admin/companies?') ? htmlRes(500) : undefined))
+      render(<PageContent />)
+      expect(await screen.findByText(GATEWAY_USER_MESSAGE)).toBeInTheDocument()
+    })
+
+    it('業界一覧の取得に失敗したら、エラーを表示する', async () => {
+      mockFetch((c) =>
+        c.url === '/api/admin/companies/industries' ? jsonRes({ error: '業界一覧の取得エラー（合成）' }, false, 500) : undefined,
+      )
+      render(<PageContent />)
+      expect(await screen.findByText('業界一覧の取得エラー（合成）')).toBeInTheDocument()
+    })
+
+    it('マッチング用データの状況が通信断で取れなかったら、エラーを表示する', async () => {
+      mockFetch((c) => (c.url === '/api/admin/companies/l1-coverage' ? networkError() : undefined))
+      render(<PageContent />)
+      expect(await screen.findByText('通信エラーが発生しました。しばらくしてから再試行してください。')).toBeInTheDocument()
+    })
+
+    it('学生に公開: 通信断ならエラーを表示する', async () => {
+      mockFetch((c) => (c.url.endsWith('/publish') ? networkError() : undefined))
+      await renderPage()
+      fireEvent.click(screen.getByRole('button', { name: '学生に公開' }))
+      expect(await screen.findByText(`公開中に${NETWORK_MESSAGE}`)).toBeInTheDocument()
+    })
+
+    it('非公開にする: 通信断ならエラーを表示する', async () => {
+      mockFetch((c) => (c.url.endsWith('/reject') ? networkError() : undefined))
+      await renderPage()
+      fireEvent.click(screen.getByRole('button', { name: 'こうかい株式会社のその他の操作' }))
+      fireEvent.click(within(await screen.findByRole('menu')).getByText('非公開にする'))
+      expect(await screen.findByText(`非公開への変更中に${NETWORK_MESSAGE}`)).toBeInTheDocument()
+    })
+
+    it('学生検索の審査: 通信断ならエラーを表示する', async () => {
+      mockFetch((c) => (c.url.endsWith('/verify') ? networkError() : undefined))
+      await renderPage()
+      fireEvent.click(screen.getByRole('button', { name: 'そろい株式会社のその他の操作' }))
+      fireEvent.click(within(await screen.findByRole('menu')).getByText('学生検索の審査を完了'))
+      expect(await screen.findByText(`学生検索の審査の更新中に${NETWORK_MESSAGE}`)).toBeInTheDocument()
+    })
+
+    it('初期データを用意: 通信断ならエラーを表示し、ボタンを戻す', async () => {
+      mockFetch((c) => (c.url === '/api/admin/companies/seed-l1' ? networkError() : undefined))
+      await renderPage()
+      openAdvanced()
+      fireEvent.click(screen.getByRole('button', { name: '初期データを用意' }))
+      expect(await screen.findByText(`マッチング用データの準備中に${NETWORK_MESSAGE}`)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '初期データを用意' })).not.toBeDisabled()
+    })
+
+    it('一括公開: 途中で通信断になっても成否件数を出し、成功した分だけ選択から外す', async () => {
+      const READY_2 = { ...READY_DRAFT, id: 4, name: 'そろい二号株式会社' }
+      mockFetch((c) => {
+        if (c.url.startsWith('/api/admin/companies?')) return jsonRes({ companies: [READY_DRAFT, READY_2], total: 2 })
+        if (c.url === '/api/admin/companies/4/publish') return networkError()
+        return undefined
+      })
+      jest.spyOn(window, 'confirm').mockReturnValue(true)
+      await renderPage()
+      fireEvent.click(screen.getByLabelText('このページで公開できる企業（2 社）を選択'))
+      fireEvent.click(screen.getByRole('button', { name: '選択した 2 社を学生に公開' }))
+      expect(await screen.findByText('1 社を公開しました。1 社は公開できませんでした。')).toBeInTheDocument()
+      expect(screen.getByText('公開できる企業 1 社を選択中')).toBeInTheDocument()
+      expect(screen.getByRole('checkbox', { name: 'そろい二号株式会社を選択' })).toBeChecked()
+    })
+
+    it('学校を切り替えても一覧を取り直さない', async () => {
+      mockFetch()
+      await renderPage()
+      const before = listCalls().length
+      fireEvent.click(screen.getByRole('button', { name: '学校フィルタ' }))
+      await waitFor(() => expect(calls.some((c) => c.url === '/api/admin/schools/7/company-approvals')).toBe(true))
+      expect(listCalls()).toHaveLength(before)
+    })
+
+    it('学校の承認状態: 読み込み中と取得失敗で表示を分ける', async () => {
+      let failApprovals: () => void = () => {}
+      mockFetch((c) =>
+        c.url === '/api/admin/schools/7/company-approvals'
+          ? new Promise((resolve) => {
+              failApprovals = () => resolve(jsonRes({ error: '承認状態エラー（合成）' }, false, 500))
+            })
+          : undefined,
+      )
+      await renderPage()
+      fireEvent.click(screen.getByRole('button', { name: '学校フィルタ' }))
+      expect((await screen.findAllByText('承認状態 読み込み中')).length).toBeGreaterThan(0)
+      expect(screen.queryByText('承認状態 不明')).not.toBeInTheDocument()
+      failApprovals()
+      expect(await screen.findByText('承認状態エラー（合成）')).toBeInTheDocument()
+      expect(screen.getAllByText('承認状態 不明').length).toBeGreaterThan(0)
+      expect(screen.queryByText('承認状態 読み込み中')).not.toBeInTheDocument()
+    })
+
+    it('マッチング情報を更新: 事前確認も concurrency を送る', async () => {
+      mockFetch()
+      await renderPage()
+      openAdvanced()
+      fireEvent.click(screen.getByRole('button', { name: 'マッチング情報を更新' }))
+      await waitFor(() => expect(calls.filter((c) => c.url === '/api/admin/companies/warm-l1').length).toBeGreaterThan(1))
+      const first = calls.find((c) => c.url === '/api/admin/companies/warm-l1')
+      expect(JSON.parse(first?.body ?? '{}')).toEqual({
+        limit: 100,
+        dry_run: true,
+        include_info: true,
+        include_persona: true,
+        concurrency: 8,
+      })
+    })
+
+    it('マッチング情報を更新: 事前確認が失敗したらエラーを出し、更新を始めない', async () => {
+      mockFetch((c) =>
+        c.url === '/api/admin/companies/warm-l1' ? jsonRes({ error: '事前確認エラー（合成）' }, false, 500) : undefined,
+      )
+      await renderPage()
+      openAdvanced()
+      fireEvent.click(screen.getByRole('button', { name: 'マッチング情報を更新' }))
+      expect(await screen.findByText('事前確認エラー（合成）')).toBeInTheDocument()
+      const warm = calls.filter((c) => c.url === '/api/admin/companies/warm-l1')
+      expect(warm).toHaveLength(1)
+      expect(JSON.parse(warm[0].body ?? '{}').dry_run).toBe(true)
+      expect(screen.getByRole('button', { name: 'マッチング情報を更新' })).not.toBeDisabled()
+    })
   })
 })
