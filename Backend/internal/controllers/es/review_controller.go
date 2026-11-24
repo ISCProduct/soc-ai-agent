@@ -1,6 +1,7 @@
 package es
 
 import (
+	"Backend/internal/config"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
@@ -8,6 +9,7 @@ import (
 	"Backend/internal/ragclient"
 	"Backend/internal/services/esreview"
 	"Backend/internal/services/piimask"
+	"Backend/internal/services/prompts"
 	"Backend/internal/usagectx"
 	"bytes"
 	"context"
@@ -16,7 +18,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -68,6 +69,18 @@ type esReviewRAGRequest struct {
 
 // esReviewRAGUsage は RAG が返すトークン使用量（公開APIへは出さない / #1533）。
 type esReviewRAGUsage struct {
+	Model            string `json:"model"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	Calls            int    `json:"calls"`
+	// PromptVersion は RAG が使ったプロンプトの版（例: es_review_v6）。古い RAG は返さないので空がありうる（SOCAIAGENT-661）
+	PromptVersion string `json:"prompt_version"`
+	// ByModel はモデルごとの内訳（SOCAIAGENT-559）。評価と改善文でモデルが違い、単価も違うので、
+	// あればモデルごとに記録する。無ければ（古い RAG）上の合計を Model で記録する。
+	ByModel []esReviewRAGModelUsage `json:"by_model"`
+}
+
+type esReviewRAGModelUsage struct {
 	Model            string `json:"model"`
 	PromptTokens     int    `json:"prompt_tokens"`
 	CompletionTokens int    `json:"completion_tokens"`
@@ -302,7 +315,7 @@ func postESReview(ctx echo.Context, payload esReviewRAGRequest, cli *openai.Clie
 	}
 	payload.ESText = masked
 
-	ragURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
+	ragURL := config.RAGReviewURL()
 	if ragURL == "" {
 		return 0, nil, echo.NewHTTPError(http.StatusServiceUnavailable, "RAG_REVIEW_URL is not configured")
 	}
@@ -383,12 +396,73 @@ func consumeRAGUsage(ctx echo.Context, cli *openai.Client, feature string, body 
 	if err := json.Unmarshal(usageRaw, &usage); err == nil && usage.Calls > 0 {
 		// 機能名は呼び出し元が定数で渡す（#1294 の方針）。実行主体はリクエストの
 		// コンテキストから取る（未ログイン利用も仕様の経路なので無ければ NULL）。
-		cli.ReportProxyUsage(usagectx.WithFeature(ctx.Request().Context(), feature), openai.ProxyUsage{
-			Model:            usage.Model,
-			PromptTokens:     usage.PromptTokens,
-			CompletionTokens: usage.CompletionTokens,
-			Latency:          latency,
-		})
+		reportCtx := usagectx.WithFeature(ctx.Request().Context(), feature)
+		// プロンプトの版は es_review / es_rewrite のどちらでも記録する（同じ添削プロンプト。SOCAIAGENT-661）。
+		// 形式に合わない値は api_call_logs.prompt_version（varchar(64)）に入れない
+		if v := strings.TrimSpace(usage.PromptVersion); prompts.ValidPromptVersion(v) {
+			reportCtx = usagectx.WithPromptAssignment(reportCtx, string(prompts.StageESReview), v, "")
+		}
+		// モデルごとに記録する。応答時間は1リクエスト分なので、合計が重ならないよう、記録する行に
+		// トークン数の割合で按分する（以前は2行目を 0 にしていて、AVG(latency_ms) が薄まり、
+		// 改善文のモデルが平均 0ms に見えた）
+		rows := make([]esReviewRAGModelUsage, 0, len(usage.ByModel))
+		for _, m := range usage.ByModel {
+			if m.Calls > 0 {
+				rows = append(rows, m)
+			}
+		}
+		reported := 0
+		for i, share := range splitLatency(latency, rows) {
+			m := rows[i]
+			cli.ReportProxyUsage(reportCtx, openai.ProxyUsage{
+				Model:            m.Model,
+				PromptTokens:     m.PromptTokens,
+				CompletionTokens: m.CompletionTokens,
+				Latency:          share,
+			})
+			reported++
+		}
+		// 内訳が無い（古い RAG）か、内訳から1行も記録できなかったときは、合計を記録する（使用量を捨てない）
+		if reported == 0 {
+			cli.ReportProxyUsage(reportCtx, openai.ProxyUsage{
+				Model:            usage.Model,
+				PromptTokens:     usage.PromptTokens,
+				CompletionTokens: usage.CompletionTokens,
+				Latency:          latency,
+			})
+		}
 	}
 	return cleaned
+}
+
+// splitLatency は1リクエストの応答時間を、行ごとのトークン数（入力＋出力）の割合で按分する。
+// 合計は latency と一致させる（端数は最後の行に寄せる）。トークンが全部 0 なら呼び出し回数で、
+// それも 0 なら均等に分ける。
+func splitLatency(latency time.Duration, rows []esReviewRAGModelUsage) []time.Duration {
+	out := make([]time.Duration, len(rows))
+	if len(rows) == 0 {
+		return out
+	}
+	weights := make([]int64, len(rows))
+	var total int64
+	for i, r := range rows {
+		weights[i] = int64(r.PromptTokens + r.CompletionTokens)
+		total += weights[i]
+	}
+	if total == 0 {
+		for i, r := range rows {
+			weights[i] = int64(max(r.Calls, 1))
+			total += weights[i]
+		}
+	}
+	var used time.Duration
+	for i := range rows {
+		if i == len(rows)-1 {
+			out[i] = latency - used
+			break
+		}
+		out[i] = time.Duration(int64(latency) * weights[i] / total)
+		used += out[i]
+	}
+	return out
 }

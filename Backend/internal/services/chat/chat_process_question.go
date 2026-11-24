@@ -61,103 +61,20 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	}
 
 	// スコア分布を分析
-	scoreMap := make(map[string]int)
-	evaluatedCategories := make(map[string]bool)
-	for _, score := range scores {
-		scoreMap[score.WeightCategory] = score.Score
-		if score.Score != 0 {
-			evaluatedCategories[score.WeightCategory] = true
-		}
-	}
+	scoreMap, evaluatedCategories := summarizeScores(scores)
 
 	// 全カテゴリ（職種に応じて並び順を調整）
-	allCategories := s.getCategoryOrder(jobCategoryID)
-
-	// フェーズの質問枠を、先頭の未評価軸が使い切らないように配る（SOCAIAGENT-473）。
-	phaseNameForPick := ""
-	if currentPhase != nil && currentPhase.Phase != nil && !input.extraRound {
-		phaseNameForPick = currentPhase.Phase.PhaseName
-	}
-	// 延長ラウンドは、フェーズで絞らず全軸から選ぶ（判定に足りない軸を埋めるため）。
-	targetCategory, _ := pickPhaseTarget(
-		allowedCategoriesForPhase(phaseNameForPick, allCategories),
-		scoreMap,
-		askedCategoryCounts(history),
-	)
-	log.Printf("Targeting category: %s\n", targetCategory)
+	allCategories := s.getCategoryOrder(ctx, jobCategoryID)
 
 	// 常にまずルールベース質問を試し、なければAIで生成
-	var questionWeightID uint
-	var aiResponse string
-
-	// 質問生成には最新10件の履歴のみ使用（文脈を保ちつつ、プロンプトを短く）
-	recentHistory := history
-	if len(history) > 10 {
-		recentHistory = history[len(history)-10:]
-	}
-
-	// まず、ルールベース質問から選択を試みる
-	log.Printf("[RuleBased] Attempting to get predefined question for category: %s\n", targetCategory)
-	currentPhaseName := ""
-	if currentPhase != nil && currentPhase.Phase != nil {
-		currentPhaseName = currentPhase.Phase.PhaseName
-	}
-	predefinedQ, err := s.tryGetPredefinedQuestion(req.UserID, req.SessionID, targetCategory, req.IndustryID, jobCategoryID, targetLevel, askedTexts, currentPhaseName)
-
-	if err == nil && predefinedQ != nil {
-		log.Printf("[RuleBased] Using predefined question (ID: %d) for category: %s\n", predefinedQ.ID, predefinedQ.Category)
-		aiResponse = predefinedQ.QuestionText
-		questionWeightID = predefinedQ.ID
-		// 事前定義質問はカテゴリを自分で持っている。そちらを正とする(#1333)。
-		if predefinedQ.Category != "" {
-			targetCategory = predefinedQ.Category
-		}
-	} else {
-		// ルールベース質問がない場合、AIで生成
-		log.Printf("[AI] No predefined question available, generating with AI for category: %s (asked: %d questions)\n", targetCategory, len(askedTexts))
-		// AI生成はフェーズで絞った候補から軸を選び直すので、ここで決めた
-		// targetCategory とは一致しないことがある。実際に狙った軸を受け取って
-		// 質問メッセージに残す(#1333)。
-		var usedCategory string
-		aiResponse, _, usedCategory, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, jobCategoryID, targetLevel, currentPhase, askedCategoryCounts(history))
-		if usedCategory != "" {
-			targetCategory = usedCategory
-		}
-		if err != nil {
-			// エラーは致命的にせずフォールバック質問を設定
-			log.Printf("Warning: failed to generate question via AI: %v\n", err)
-			fallbackQuestion := s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
-			if fallbackQuestion != "" {
-				aiResponse = fallbackQuestion
-			} else {
-				aiResponse = "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
-			}
-		}
-	}
-	if currentPhaseName != "" && isTextBasedQuestion(aiResponse) && !shouldForceTextQuestion(recentHistory, currentPhase) {
-		if currentPhaseName == "job_analysis" || currentPhaseName == "interest_analysis" || currentPhaseName == "aptitude_analysis" || currentPhaseName == "future_analysis" {
-			// 選択肢はフェーズではなく評価軸で決める。フェーズは3〜4問続くので、
-			// フェーズ単位にすると質問が変わっても同じ選択肢が並び続ける。
-			aiResponse = buildChoiceFallback(aiResponse, targetCategory)
-		}
-	}
+	aiResponse, questionWeightID, targetCategory := s.selectNextQuestion(ctx, input, targetLevel, scoreMap, allCategories, askedTexts)
 
 	// 5. フェーズベースの完了判定
 	// 全フェーズが完了しているかチェック
-	completedPhaseCount := 0
-	for _, p := range completedProgresses {
-		phase := p.Phase
-		if phase == nil {
-			phase = phaseByID[p.PhaseID]
-		}
-		if isPhaseComplete(p.ValidAnswers, phase) {
-			completedPhaseCount++
-		}
-	}
+	completedPhaseCount := countCompletedPhases(completedProgresses, phaseByID)
 
 	// 質問数を計算（進捗表示用）
 	answeredCount := countUserAnswers(history)
-	_ = allPhasesReachedMax(completedProgresses, allPhases)
 
 	// 完了判定: 質問数やフェーズの消化ではなく、判定できたかで決める（SOCAIAGENT-668）。
 	// 15 問に満たなくても、判定できていれば完了。15 問を超えても、判定できなければ続ける。
@@ -170,44 +87,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	// 診断完了時のメッセージは追加しない（次の回答時に完了判定する）
 
 	// 6. AIの応答を保存
-	// Guard: do not save empty assistant messages
-	if strings.TrimSpace(aiResponse) != "" {
-		if jobJustResolved {
-			aiResponse = "ありがとうございます！それでは、適性診断を始めますね。\n\n" + aiResponse
-		}
-		if targetLevel == "新卒" && isVerboseQuestion(aiResponse) && isTextBasedQuestion(aiResponse) {
-			simple, err := s.simplifyQuestionWithAI(ctx, aiResponse)
-			if err != nil || strings.TrimSpace(simple) == "" {
-				simple = s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
-			}
-			if strings.TrimSpace(simple) == "" {
-				simple = simplifyNewGradQuestion(aiResponse)
-			}
-			aiResponse = simple
-		}
-		// 新卒向けに表現を調整（全フェーズ共通）
-		if targetLevel == "新卒" {
-			aiResponse = sanitizeForNewGrad(aiResponse)
-		}
-
-		assistantMsg := &models.ChatMessage{
-			SessionID:        req.SessionID,
-			UserID:           req.UserID,
-			Role:             "assistant",
-			Content:          aiResponse,
-			QuestionWeightID: questionWeightID,
-			// 採点側が質問文から推測し直さずに済むよう、狙った軸を残す(#1333)。
-			WeightCategory: targetCategory,
-		}
-		if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-			log.Printf("Warning: failed to save assistant message: %v\n", err)
-			// 続行は可能にする
-		}
-	} else {
-		// フォールバック: 空のAI応答の場合は簡易質問を返す
-		log.Printf("Warning: skipped saving empty assistant message for session %s user %d\n", req.SessionID, req.UserID)
-		aiResponse = "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
-	}
+	aiResponse = s.saveNextQuestion(ctx, req, aiResponse, questionWeightID, targetCategory, jobCategoryID, jobJustResolved, targetLevel, askedTexts)
 
 	if isComplete {
 		if err := s.ensureEmbeddings(ctx, req.UserID, req.SessionID, jobCategoryID); err != nil {
@@ -225,14 +105,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	allPhasesInfo, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
 
 	// フェーズの質問数合計を計算（最大が無い場合は最小を採用）
-	totalMaxQuestions := 0
-	for _, phase := range allPhases {
-		if phase.MaxQuestions > 0 {
-			totalMaxQuestions += phase.MaxQuestions
-		} else {
-			totalMaxQuestions += phase.MinQuestions
-		}
-	}
+	totalMaxQuestions := totalPhaseQuestions(allPhases)
 
 	// 完了している場合は要約を生成して応答に含める
 	var sessionSummary *SessionSummary
@@ -256,6 +129,173 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		JudgmentPercent:     judged.Percent,
 		SuggestProvisional:  judgment.SuggestProvisional(answeredCount, judged.Ready),
 	}, nil
+}
+
+// summarizeScores はスコアを軸ごとの点数と、0 以外が付いた（評価済みの）軸に分ける。
+func summarizeScores(scores []models.UserWeightScore) (map[string]float64, map[string]bool) {
+	scoreMap := make(map[string]float64)
+	evaluatedCategories := make(map[string]bool)
+	for _, score := range scores {
+		scoreMap[score.WeightCategory] = score.Score
+		if score.Score != 0 {
+			evaluatedCategories[score.WeightCategory] = true
+		}
+	}
+	return scoreMap, evaluatedCategories
+}
+
+// selectNextQuestion は次の質問文・事前定義質問の ID・狙った軸を決める。
+// 事前定義質問を先に試し、無ければ AI で生成する（失敗時はフォールバック質問）。
+// 選択肢フェーズで自由記述になった質問は、評価軸ごとの選択肢で補う。
+func (s *ChatService) selectNextQuestion(ctx context.Context, input processQuestionInput, targetLevel string, scoreMap map[string]float64, allCategories []string, askedTexts map[string]bool) (string, uint, string) {
+	req := input.req
+	history := input.history
+	jobCategoryID := input.jobCategoryID
+	currentPhase := input.currentPhase
+
+	// フェーズの質問枠を、先頭の未評価軸が使い切らないように配る（SOCAIAGENT-473）。
+	phaseNameForPick := ""
+	if currentPhase != nil && currentPhase.Phase != nil && !input.extraRound {
+		phaseNameForPick = currentPhase.Phase.PhaseName
+	}
+	// 延長ラウンドは、フェーズで絞らず全軸から選ぶ（判定に足りない軸を埋めるため）。
+	targetCategory, _ := pickPhaseTarget(
+		allowedCategoriesForPhase(phaseNameForPick, allCategories),
+		scoreMap,
+		askedCategoryCounts(history),
+	)
+	log.Printf("Targeting category: %s\n", targetCategory)
+
+	var questionWeightID uint
+	var aiResponse string
+
+	// 質問生成には最新10件の履歴のみ使用（文脈を保ちつつ、プロンプトを短く）
+	recentHistory := history
+	if len(history) > 10 {
+		recentHistory = history[len(history)-10:]
+	}
+
+	// まず、ルールベース質問から選択を試みる
+	log.Printf("[RuleBased] Attempting to get predefined question for category: %s\n", targetCategory)
+	currentPhaseName := ""
+	if currentPhase != nil && currentPhase.Phase != nil {
+		currentPhaseName = currentPhase.Phase.PhaseName
+	}
+	predefinedQ, err := s.tryGetPredefinedQuestion(req.UserID, req.SessionID, targetCategory, req.IndustryID, jobCategoryID, targetLevel, askedTexts, currentPhaseName)
+	if err != nil {
+		// 取得に失敗しても AI 生成へ進む（流れは変えない）。原因を追えるように残す(#2573)。
+		log.Printf("Warning: failed to get predefined question: %v\n", err)
+	}
+
+	if err == nil && predefinedQ != nil {
+		log.Printf("[RuleBased] Using predefined question (ID: %d) for category: %s\n", predefinedQ.ID, predefinedQ.Category)
+		aiResponse = predefinedQ.QuestionText
+		questionWeightID = predefinedQ.ID
+		// 事前定義質問はカテゴリを自分で持っている。そちらを正とする(#1333)。
+		if predefinedQ.Category != "" {
+			targetCategory = predefinedQ.Category
+		}
+	} else {
+		// ルールベース質問がない場合、AIで生成
+		log.Printf("[AI] No predefined question available, generating with AI for category: %s (asked: %d questions)\n", targetCategory, len(askedTexts))
+		// AI生成はフェーズで絞った候補から軸を選び直すので、ここで決めた
+		// targetCategory とは一致しないことがある。実際に狙った軸を受け取って
+		// 質問メッセージに残す(#1333)。
+		var usedCategory string
+		aiResponse, _, usedCategory, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, jobCategoryID, targetLevel, currentPhase, askedCategoryCounts(history))
+		if usedCategory != "" {
+			targetCategory = usedCategory
+		}
+		if err != nil {
+			// エラーは致命的にせずフォールバック質問を設定
+			log.Printf("Warning: failed to generate question via AI: %v\n", err)
+			fallbackQuestion := s.selectFallbackQuestion(ctx, targetCategory, jobCategoryID, targetLevel, askedTexts)
+			if fallbackQuestion != "" {
+				aiResponse = fallbackQuestion
+			} else {
+				aiResponse = "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
+			}
+		}
+	}
+	if currentPhaseName != "" && isTextBasedQuestion(aiResponse) && !shouldForceTextQuestion(recentHistory, currentPhase) {
+		if currentPhaseName == "job_analysis" || currentPhaseName == "interest_analysis" || currentPhaseName == "aptitude_analysis" || currentPhaseName == "future_analysis" {
+			// 選択肢はフェーズではなく評価軸で決める。フェーズは3〜4問続くので、
+			// フェーズ単位にすると質問が変わっても同じ選択肢が並び続ける。
+			aiResponse = buildChoiceFallback(aiResponse, targetCategory)
+		}
+	}
+	return aiResponse, questionWeightID, targetCategory
+}
+
+// countCompletedPhases は完了条件を満たしたフェーズの数（進捗ログ用）。
+func countCompletedPhases(completedProgresses []models.UserAnalysisProgress, phaseByID map[uint]*models.AnalysisPhase) int {
+	completedPhaseCount := 0
+	for _, p := range completedProgresses {
+		phase := p.Phase
+		if phase == nil {
+			phase = phaseByID[p.PhaseID]
+		}
+		if isPhaseComplete(p.ValidAnswers, phase) {
+			completedPhaseCount++
+		}
+	}
+	return completedPhaseCount
+}
+
+// saveNextQuestion は次の質問文を整えてアシスタントのメッセージとして保存し、返す文面を返す。
+// 空の質問は保存せず、お詫びの文面を返す。保存に失敗しても続行する。
+func (s *ChatService) saveNextQuestion(ctx context.Context, req ChatRequest, aiResponse string, questionWeightID uint, targetCategory string, jobCategoryID uint, jobJustResolved bool, targetLevel string, askedTexts map[string]bool) string {
+	// Guard: do not save empty assistant messages
+	if strings.TrimSpace(aiResponse) == "" {
+		// フォールバック: 空のAI応答の場合は簡易質問を返す
+		log.Printf("Warning: skipped saving empty assistant message for session %s user %d\n", req.SessionID, req.UserID)
+		return "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
+	}
+	if jobJustResolved {
+		aiResponse = "ありがとうございます！それでは、適性診断を始めますね。\n\n" + aiResponse
+	}
+	if targetLevel == "新卒" && isVerboseQuestion(aiResponse) && isTextBasedQuestion(aiResponse) {
+		simple, err := s.simplifyQuestionWithAI(ctx, aiResponse)
+		if err != nil || strings.TrimSpace(simple) == "" {
+			simple = s.selectFallbackQuestion(ctx, targetCategory, jobCategoryID, targetLevel, askedTexts)
+		}
+		if strings.TrimSpace(simple) == "" {
+			simple = simplifyNewGradQuestion(aiResponse)
+		}
+		aiResponse = simple
+	}
+	// 新卒向けに表現を調整（全フェーズ共通）
+	if targetLevel == "新卒" {
+		aiResponse = sanitizeForNewGrad(aiResponse)
+	}
+
+	assistantMsg := &models.ChatMessage{
+		SessionID:        req.SessionID,
+		UserID:           req.UserID,
+		Role:             "assistant",
+		Content:          aiResponse,
+		QuestionWeightID: questionWeightID,
+		// 採点側が質問文から推測し直さずに済むよう、狙った軸を残す(#1333)。
+		WeightCategory: targetCategory,
+	}
+	if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+		log.Printf("Warning: failed to save assistant message: %v\n", err)
+		// 続行は可能にする
+	}
+	return aiResponse
+}
+
+// totalPhaseQuestions は全フェーズの質問数の合計（最大が無いフェーズは最小を数える）。
+func totalPhaseQuestions(allPhases []models.AnalysisPhase) int {
+	totalMaxQuestions := 0
+	for _, phase := range allPhases {
+		if phase.MaxQuestions > 0 {
+			totalMaxQuestions += phase.MaxQuestions
+		} else {
+			totalMaxQuestions += phase.MinQuestions
+		}
+	}
+	return totalMaxQuestions
 }
 
 func (s *ChatService) collectAskedTexts(userID uint, sessionID string, history []models.ChatMessage) map[string]bool {

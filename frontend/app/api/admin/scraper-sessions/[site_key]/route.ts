@@ -18,7 +18,7 @@ export async function DELETE(
   { params }: { params: Promise<{ site_key: string }> }
 ) {
   const { site_key } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/scraper-sessions/${site_key}`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/scraper-sessions/${encodeURIComponent(site_key)}`, {
     method: 'DELETE',
     headers: adminHeaders(request),
   })

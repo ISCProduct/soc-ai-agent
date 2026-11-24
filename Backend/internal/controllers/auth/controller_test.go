@@ -82,6 +82,7 @@ func (m *mockAuthService) ResendVerificationEmail(email string) error {
 func newAuthTestServer(svc interfaces.AuthService) (*echo.Echo, *AuthController) {
 	e := echo.New()
 	e.HTTPErrorHandler = middleware.CustomHTTPErrorHandler
+	e.Validator = middleware.NewCustomValidator()
 	ctrl := NewAuthController(svc, authTestUserSecret)
 	return e, ctrl
 }
@@ -129,7 +130,7 @@ func TestRegister_DuplicateEmail_ReturnsDuplicateEmailCode(t *testing.T) {
 		},
 	}
 	e, ctrl := newAuthTestServer(svc)
-	rec := servePost(e, "/register", `{"email":"a@example.com","password":"pass"}`, ctrl.Register)
+	rec := servePost(e, "/register", `{"email":"a@example.com","password":"password"}`, ctrl.Register)
 
 	if rec.Code != http.StatusConflict {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusConflict)
@@ -161,7 +162,7 @@ func TestRegister_OtherError_ReturnsValidationError(t *testing.T) {
 		},
 	}
 	e, ctrl := newAuthTestServer(svc)
-	rec := servePost(e, "/register", `{"email":"a@example.com","password":"pw"}`, ctrl.Register)
+	rec := servePost(e, "/register", `{"email":"a@example.com","password":"password"}`, ctrl.Register)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
@@ -179,7 +180,7 @@ func TestRegister_Success(t *testing.T) {
 		},
 	}
 	e, ctrl := newAuthTestServer(svc)
-	rec := servePost(e, "/register", `{"email":"a@example.com","password":"pass"}`, ctrl.Register)
+	rec := servePost(e, "/register", `{"email":"a@example.com","password":"password"}`, ctrl.Register)
 
 	if rec.Code != http.StatusCreated {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusCreated)
@@ -337,7 +338,7 @@ func TestVerifyRegistration_JSONBody(t *testing.T) {
 func TestResetPassword_InvalidToken_ReturnsValidationError(t *testing.T) {
 	svc := &mockAuthService{
 		resetPasswordFn: func(_, _ string) error {
-			return errors.New("invalid or expired token")
+			return auth.ErrPasswordResetTokenInvalid
 		},
 	}
 	e, ctrl := newAuthTestServer(svc)

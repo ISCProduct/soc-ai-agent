@@ -27,11 +27,15 @@ def _doc_id(user_id: int) -> str:
 
 
 def upsert_student(user_id: int, text: str, embedding: List[float]) -> None:
-    """学生プロフィールを登録・更新する。"""
+    """学生プロフィールを登録・更新する。
+
+    本文（text）は保存しない（SOCAIAGENT-695）。検索は埋め込みと user_id だけで足り、本文は読み戻さない。
+    documents を省くと Chroma が既定の埋め込み関数を持ち出す実装があるため、空文字を明示して渡す。
+    """
     collection = _collection()
     collection.upsert(
         ids=[_doc_id(user_id)],
-        documents=[text],
+        documents=[""],
         embeddings=[embedding],
         metadatas=[
             {
@@ -51,8 +55,12 @@ def delete_student(user_id: int) -> int:
     return 1
 
 
-def query_students(embedding: List[float], top_k: int) -> List[Dict[str, Any]]:
-    """クエリベクトルに近い学生を関連度順で返す。"""
+def query_students(embedding: List[float], top_k: int, min_score: float = 0.0) -> List[Dict[str, Any]]:
+    """クエリベクトルに近い学生を関連度順で返す。
+
+    min_score より関連度の低い学生は返さない（SOCAIAGENT-568）。候補の少ないクエリでも
+    top_k 件を無条件に返すと、無関係な学生が上位に並ぶ。
+    """
     collection = _collection()
     if collection.count() == 0:
         return []
@@ -72,5 +80,10 @@ def query_students(embedding: List[float], top_k: int) -> List[Dict[str, Any]]:
         if user_id is None:
             continue
         # Chroma の距離は小さいほど近い。1/(1+d) で 0<score<=1 の関連度へ写す。
-        hits.append({"user_id": int(user_id), "score": 1.0 / (1.0 + float(distance))})
+        score = 1.0 / (1.0 + float(distance))
+        if score < min_score:
+            continue
+        hits.append({"user_id": int(user_id), "score": score})
+    if len(hits) < len(metadatas):
+        logger.info("student query kept %d/%d hits (min_score=%.3f)", len(hits), len(metadatas), min_score)
     return hits

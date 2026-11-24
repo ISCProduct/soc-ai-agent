@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -169,9 +170,18 @@ type BacklogClient struct {
 	http       *http.Client
 }
 
-// NewBacklogClientFromEnv は BACKLOG_API_KEY が無ければ nil を返す（機能を無効にする）。
+// NewBacklogClientFromEnv は Bot キーも BACKLOG_API_KEY も無ければ nil を返す（機能を無効にする）。
+// シークレットの読み取りに失敗したときも nil を返し、他のコマンドの起動は止めない。
 func NewBacklogClientFromEnv() *BacklogClient {
-	key := os.Getenv("BACKLOG_API_KEY")
+	key, err := ResolveBacklogAPIKey(context.Background())
+	if err != nil {
+		log.Printf("[Discord] Backlog の Bot キーを読めませんでした: %v", err)
+		return nil
+	}
+	return newBacklogClient(key)
+}
+
+func newBacklogClient(key string) *BacklogClient {
 	if key == "" {
 		return nil
 	}
@@ -229,7 +239,7 @@ func (c *BacklogClient) do(ctx context.Context, method, path string, q, form url
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/api/v2"+path+"?"+q.Encode(), body)
 	if err != nil {
-		return errors.New("Backlog API のリクエスト作成に失敗しました")
+		return errors.New("backlog API のリクエスト作成に失敗しました")
 	}
 	if form != nil {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -240,7 +250,7 @@ func (c *BacklogClient) do(ctx context.Context, method, path string, q, form url
 		if errors.As(err, &ue) {
 			err = ue.Err
 		}
-		return fmt.Errorf("Backlog API の呼び出しに失敗しました: %w", err)
+		return fmt.Errorf("backlog API の呼び出しに失敗しました: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -250,7 +260,7 @@ func (c *BacklogClient) do(ctx context.Context, method, path string, q, form url
 		return nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("Backlog API の応答を読めませんでした: %w", err)
+		return fmt.Errorf("backlog API の応答を読めませんでした: %w", err)
 	}
 	return nil
 }
@@ -269,9 +279,9 @@ func ResolveBacklogUser(users []BacklogUser, name string) (BacklogUser, error) {
 	case 1:
 		return found[0], nil
 	case 0:
-		return BacklogUser{}, fmt.Errorf("Backlog に「%s」という名前のメンバーがいません。候補から選んでください", name)
+		return BacklogUser{}, fmt.Errorf("backlog に「%s」という名前のメンバーがいません。候補から選んでください", name)
 	default:
-		return BacklogUser{}, fmt.Errorf("Backlog に「%s」が複数います。管理者に確認してください", name)
+		return BacklogUser{}, fmt.Errorf("backlog に「%s」が複数います。管理者に確認してください", name)
 	}
 }
 

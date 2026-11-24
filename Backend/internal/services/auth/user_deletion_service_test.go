@@ -82,6 +82,21 @@ func TestUserDeletionService_SoftWithdrawDoesNotDeleteS3(t *testing.T) {
 	}
 }
 
+func TestWithdrawalPurgeAfterIsTwelveMonths(t *testing.T) {
+	withdrawnAt := time.Date(2026, 3, 15, 1, 2, 3, 0, time.UTC)
+	got := WithdrawalPurgeAfter(withdrawnAt)
+	want := time.Date(2027, 3, 15, 1, 2, 3, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("purgeAfter=%s want %s", got, want)
+	}
+	if !got.After(withdrawnAt) {
+		t.Fatal("退会した瞬間の期限になっている")
+	}
+	if got.Equal(withdrawnAt.AddDate(0, 0, 30)) {
+		t.Fatal("保持が30日のまま")
+	}
+}
+
 func TestUserDeletionService_EnsureActiveUser(t *testing.T) {
 	sqlDB, mock, err := sqlmock.New()
 	if err != nil {

@@ -1,6 +1,7 @@
 package aibench
 
 import (
+	"maps"
 	"slices"
 	"sort"
 
@@ -28,6 +29,12 @@ const (
 	BrokenNetwork = "network_error"
 )
 
+// ModelTokens は1モデル分のトークン。
+type ModelTokens struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+}
+
 // Observation は1ケース1回の実行結果。
 type Observation struct {
 	CaseID string `json:"case_id"`
@@ -40,6 +47,9 @@ type Observation struct {
 	// TokensEstimated はトークン数が実測ではなく概算であることを示す。
 	// ES添削は RAG 経由で usage が返らないため概算になる。
 	TokensEstimated bool `json:"tokens_estimated"`
+	// TokensByModel はモデルごとのトークン（SOCAIAGENT-559）。ES 添削は評価と改善文でモデルが違い、
+	// 単価も違うので、あればモデルごとの単価でコストを見積もる。無ければ合計を対象のモデルの単価で見積もる。
+	TokensByModel map[string]ModelTokens `json:"tokens_by_model,omitempty"`
 
 	Broken       bool   `json:"broken"`
 	BrokenReason string `json:"broken_reason,omitempty"`
@@ -54,6 +64,13 @@ type Observation struct {
 	Score float64 `json:"score"`
 	// RawScore は正規化前の値（ES: 1-10、履歴書: 0-100、面接: 0-5）。
 	RawScore float64 `json:"raw_score"`
+
+	// AxisScores は軸別の採点（面接レポート、0-5）。AxisLabels は軸別の人手ラベル（任意）。
+	AxisScores map[string]float64 `json:"axis_scores,omitempty"`
+	AxisLabels map[string]float64 `json:"axis_labels,omitempty"`
+	// FairnessPair / ContextVariant は公平性回帰ケースの組と企業文脈の種類。
+	FairnessPair   string `json:"fairness_pair,omitempty"`
+	ContextVariant string `json:"context_variant,omitempty"`
 
 	// Violations は指示違反の内容。空なら指示を守れている。
 	Violations []string `json:"violations,omitempty"`
@@ -149,6 +166,12 @@ type Summary struct {
 	MaxScoreStdDev  float64 `json:"max_score_stddev"`
 	// UnstableCaseIDs は標準偏差が UnstableStdDevThreshold を超えたケース。
 	UnstableCaseIDs []string `json:"unstable_case_ids,omitempty"`
+	// AxisMaxSpread は採点軸ごとの「同一入力を複数回採点したときの最大−最小」の、全ケースでの最大（元の点）。
+	// 平均のスコアでは軸どうしのゆらぎが打ち消し合って見えなくなるため、軸別に出す（SOCAIAGENT-699）。
+	// 破損した実行と、1回しか採点できなかったケースは数えない。
+	AxisMaxSpread map[string]float64 `json:"axis_max_spread,omitempty"`
+	// UnstableAxes は AxisMaxSpread が AxisSpreadWarnPoints を超えた軸。警告のみで失敗にはしない。
+	UnstableAxes []string `json:"unstable_axes,omitempty"`
 
 	// 弁別力: ゴールドラベル（良/中/悪）とスコアの順位相関（1.0が完全一致）。
 	LabelRankCorrelation float64 `json:"label_rank_correlation"`
@@ -157,6 +180,21 @@ type Summary struct {
 	PairwiseAgreement  float64            `json:"pairwise_agreement"`
 	PairwiseComparable int                `json:"pairwise_comparable"`
 	MeanScoreByLabel   map[string]float64 `json:"mean_score_by_label"`
+	// 妥当性（面接レポート）: 人手ラベル（3段階を数値化、LabelTargetScore）と採点の一致。
+	// ValidityCases はその計算に使ったケース数。0 は未計測（旧JSON・ラベルなし）で、
+	// MAE 0.000 を「完全一致」と読まないこと。
+	ValidityCases int `json:"validity_cases"`
+	// LabelMAE は正規化スコア(0-1)の平均絶対誤差。LabelPearson は線形相関。
+	LabelMAE     float64 `json:"label_mae"`
+	LabelPearson float64 `json:"label_pearson"`
+	// AxisMAE は軸別の人手ラベルがあるケースだけの軸別 MAE（0-5 の点）。AxisMAECases は軸ごとの件数。
+	AxisMAE      map[string]float64 `json:"axis_mae,omitempty"`
+	AxisMAECases map[string]int     `json:"axis_mae_cases,omitempty"`
+	// 公平性: 回答が同一で企業文脈だけ違うペアの、正規化スコア差（組内の最大-最小）。
+	FairnessPairs   int     `json:"fairness_pairs"`
+	FairnessMeanGap float64 `json:"fairness_mean_gap"`
+	FairnessMaxGap  float64 `json:"fairness_max_gap"`
+
 	// MeanScore は全ケースの平均スコア（ケースごとの平均の平均）。ラベルなしの target（#1782）では
 	// 正解との一致・指示の遵守の割合そのもので、劣化判定に使う。
 	MeanScore float64 `json:"mean_score"`
@@ -196,6 +234,9 @@ type Summary struct {
 	CostPerCallUSD  float64 `json:"cost_per_call_usd"`
 	TotalCostUSD    float64 `json:"total_cost_usd"`
 	CostIsEstimated bool    `json:"cost_is_estimated"`
+	// ModelsUsed は実際にトークンを使ったモデル（モデルごとの内訳があるときはその全部）。
+	// 改善文のモデルだけを変えた実行どうしを、Model（評価のモデル）だけで取り違えないように
+	ModelsUsed []string `json:"models_used,omitempty"`
 
 	CaseDetails  []CaseSummary `json:"cases_detail"`
 	Observations []Observation `json:"observations"`
@@ -204,6 +245,10 @@ type Summary struct {
 // UnstableStdDevThreshold は「再現性が低い」とみなす標準偏差の閾値（正規化スコア）。
 // 0.1 は 10点満点で1点、100点満点で10点のばらつきに相当する。
 const UnstableStdDevThreshold = 0.1
+
+// AxisSpreadWarnPoints は軸別の最大差を警告する閾値（元の点。差がこれを超えたら警告）。
+// 整数で採点する軸では 2点以上の差で警告になる。実測前の仮の値なので、失敗にはせず警告だけにする（SOCAIAGENT-699）。
+const AxisSpreadWarnPoints = 1.0
 
 // Aggregate は実行結果を集計する。
 //
@@ -232,6 +277,8 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	broken := 0
 	compliant, compliantDenom := 0, 0
 	var promptTokens, completionTokens int
+	var totalCost float64
+	modelsUsed := map[string]bool{}
 	estimated := false
 
 	measured := 0
@@ -252,6 +299,18 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 		measured++
 		promptTokens += o.PromptTokens
 		completionTokens += o.CompletionTokens
+		// モデルごとの内訳があれば、モデルごとの単価で見積もる（全量を対象のモデルの単価にしない）
+		if len(o.TokensByModel) > 0 {
+			for m, t := range o.TokensByModel {
+				totalCost += costs.EstimateCostUSD(m, t.PromptTokens, t.CompletionTokens)
+				modelsUsed[m] = true
+			}
+		} else {
+			totalCost += costs.EstimateCostUSD(model, o.PromptTokens, o.CompletionTokens)
+			if o.PromptTokens > 0 || o.CompletionTokens > 0 {
+				modelsUsed[model] = true
+			}
+		}
 		if o.TokensEstimated {
 			estimated = true
 		}
@@ -292,6 +351,8 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	stddevs := make([]float64, 0, len(byCase))
 	scoresByLabel := map[string][]float64{}
 	caseMeans := make([]float64, 0, len(byCase))
+	axisPred, axisTrue := map[string][]float64{}, map[string][]float64{}
+	pairMeans := map[string][]float64{}
 	for _, id := range caseOrder {
 		runs := byCase[id]
 		scores := make([]float64, 0, len(runs))
@@ -310,6 +371,27 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 		if len(scores) > 0 {
 			cs.MeanScore = Mean(scores)
 			caseMeans = append(caseMeans, cs.MeanScore)
+			if pair := runs[0].FairnessPair; pair != "" {
+				pairMeans[pair] = append(pairMeans[pair], cs.MeanScore)
+			}
+			for axis, want := range runs[0].AxisLabels {
+				var got []float64
+				for _, o := range runs {
+					if v, ok := o.AxisScores[axis]; ok && !o.Broken {
+						got = append(got, v)
+					}
+				}
+				if len(got) > 0 {
+					axisPred[axis] = append(axisPred[axis], Mean(got))
+					axisTrue[axis] = append(axisTrue[axis], want)
+				}
+			}
+			for axis, spread := range axisSpreads(runs) {
+				if s.AxisMaxSpread == nil {
+					s.AxisMaxSpread = map[string]float64{}
+				}
+				s.AxisMaxSpread[axis] = max(s.AxisMaxSpread[axis], spread)
+			}
 			cs.ScoreStdDev = StdDev(scores)
 			stddevs = append(stddevs, cs.ScoreStdDev)
 			if cs.ScoreStdDev > UnstableStdDevThreshold {
@@ -333,6 +415,11 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 		}
 	}
 	sort.Strings(s.UnstableCaseIDs)
+	for _, axis := range slices.Sorted(maps.Keys(s.AxisMaxSpread)) {
+		if s.AxisMaxSpread[axis] > AxisSpreadWarnPoints {
+			s.UnstableAxes = append(s.UnstableAxes, axis)
+		}
+	}
 	s.LabelRankCorrelation = SpearmanCorrelation(labelSeries, scoreSeries)
 	s.PairwiseAgreement, s.PairwiseComparable = PairwiseAgreement(labelSeries, scoreSeries)
 	s.LengthRankCorrelation = SpearmanCorrelation(charSeries, scoreSeries)
@@ -342,8 +429,31 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	for label, xs := range scoresByLabel {
 		s.MeanScoreByLabel[label] = Mean(xs)
 	}
+	if target == TargetInterviewReport {
+		var want, got []float64
+		for _, c := range scored {
+			if v, ok := LabelTargetScore(c.Label); ok {
+				want, got = append(want, v), append(got, c.MeanScore)
+			}
+		}
+		s.ValidityCases = len(want)
+		s.LabelMAE = MeanAbsError(want, got)
+		s.LabelPearson = PearsonCorrelation(want, got)
+	}
+	for axis, want := range axisTrue {
+		if s.AxisMAE == nil {
+			s.AxisMAE, s.AxisMAECases = map[string]float64{}, map[string]int{}
+		}
+		s.AxisMAE[axis] = MeanAbsError(want, axisPred[axis])
+		s.AxisMAECases[axis] = len(want)
+	}
+	s.FairnessPairs, s.FairnessMeanGap, s.FairnessMaxGap = FairnessGaps(pairMeans)
 
-	s.TotalCostUSD = costs.EstimateCostUSD(model, promptTokens, completionTokens)
+	s.TotalCostUSD = totalCost
+	for m := range modelsUsed {
+		s.ModelsUsed = append(s.ModelsUsed, m)
+	}
+	sort.Strings(s.ModelsUsed)
 	// 1件あたりは計測できた回数で割る。課金は破損した呼び出しにも発生するが、
 	// 通信エラーで応答が返らなかった回にはトークン課金が無い。
 	if measured > 0 {
@@ -441,4 +551,24 @@ func newLengthStratum(group []CaseSummary) LengthStratum {
 		st.MeanScoreByLabel[label] = Mean(xs)
 	}
 	return st
+}
+
+// axisSpreads は1ケースの実行から、軸ごとの最大−最小を返す。破損した実行は除き、2回以上採点できた軸だけを返す。
+func axisSpreads(runs []Observation) map[string]float64 {
+	vals := map[string][]float64{}
+	for _, o := range runs {
+		if o.Broken {
+			continue
+		}
+		for axis, v := range o.AxisScores {
+			vals[axis] = append(vals[axis], v)
+		}
+	}
+	out := map[string]float64{}
+	for axis, vs := range vals {
+		if len(vs) >= 2 {
+			out[axis] = slices.Max(vs) - slices.Min(vs)
+		}
+	}
+	return out
 }

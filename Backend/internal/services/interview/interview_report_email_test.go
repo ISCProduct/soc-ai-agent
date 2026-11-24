@@ -24,6 +24,9 @@ func (m *mockInterviewReportRepo) ReleaseScoresApplication(uint) error { return 
 func (m *mockInterviewReportRepo) FindBySessionID(sessionID uint) (*models.InterviewReport, error) {
 	return m.report, m.err
 }
+func (m *mockInterviewReportRepo) FindBySessionIDs([]uint) ([]models.InterviewReport, error) {
+	return nil, nil
+}
 func (m *mockInterviewReportRepo) Upsert(report *models.InterviewReport) error { return nil }
 
 // #939: SendReportEmail はセッション所有者以外からの呼び出しを forbidden で拒否しなければならない。

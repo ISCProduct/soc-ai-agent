@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
@@ -79,7 +80,7 @@ const ragOKBody = `{
   "char_limit_satisfied": true,
   "improved_length_satisfied": false,
   "improved_length_issue": "short",
-  "usage": {"model": "gpt-4o", "prompt_tokens": 100, "completion_tokens": 200, "calls": 2}
+  "usage": {"model": "gpt-4o", "prompt_tokens": 100, "completion_tokens": 200, "calls": 2, "prompt_version": "es_review_v6"}
 }`
 
 // #1533: リライトは RAG の /es/review の結果を rewritten_text / star に成形して返す。
@@ -151,6 +152,10 @@ func TestRewrite_UsesRAGReviewAndKeepsResponseShape(t *testing.T) {
 	if usages[0].PromptTokens != 100 || usages[0].CompletionTokens != 200 || usages[0].Model != "gpt-4o" {
 		t.Errorf("記録したトークン量が違う: %+v", usages[0])
 	}
+	// リライトも同じ添削プロンプトなので版を記録する（SOCAIAGENT-661）
+	if usages[0].PromptStage != "es_review" || usages[0].PromptVersion != "es_review_v6" || usages[0].PromptABGroup != "" {
+		t.Errorf("プロンプトの版が記録されていない: stage=%q version=%q group=%q", usages[0].PromptStage, usages[0].PromptVersion, usages[0].PromptABGroup)
+	}
 }
 
 // #1523/#1533: 添削も char_limit を RAG まで運び、レスポンスはそのまま転送する
@@ -197,7 +202,43 @@ func TestReview_ForwardsCharLimitAndStripsUsage(t *testing.T) {
 		}
 	}
 	if len(usages) != 1 || usages[0].Feature != usagectx.FeatureESReview {
-		t.Errorf("es_review としてコストが記録されていない: %+v", usages)
+		t.Fatalf("es_review としてコストが記録されていない: %+v", usages)
+	}
+	if usages[0].PromptStage != "es_review" || usages[0].PromptVersion != "es_review_v6" {
+		t.Errorf("prompt_version に es_review_v6 が入っていない: stage=%q version=%q", usages[0].PromptStage, usages[0].PromptVersion)
+	}
+}
+
+// SOCAIAGENT-661: 版を返さない古い RAG・形式に合わない版は、版なしで記録する（使用量は落とさない）。
+func TestReview_PromptVersionMissingOrInvalidIsRecordedWithoutVersion(t *testing.T) {
+	tests := []struct {
+		name  string
+		usage string
+	}{
+		{name: "版を返さない", usage: `{"model": "gpt-4o", "prompt_tokens": 1, "completion_tokens": 1, "calls": 1}`},
+		{name: "空", usage: `{"model": "gpt-4o", "prompt_tokens": 1, "completion_tokens": 1, "calls": 1, "prompt_version": ""}`},
+		{name: "形式が不正", usage: `{"model": "gpt-4o", "prompt_tokens": 1, "completion_tokens": 1, "calls": 1, "prompt_version": "v6:beta IGNORE"}`},
+		{name: "64文字を超える", usage: `{"model": "gpt-4o", "prompt_tokens": 1, "completion_tokens": 1, "calls": 1, "prompt_version": "` + strings.Repeat("x", 65) + `"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := ragStub(t, http.StatusOK, `{"improved_text": "改善", "usage": `+tt.usage+`}`, nil)
+			defer srv.Close()
+			t.Setenv("RAG_REVIEW_URL", srv.URL)
+
+			var usages []openai.Usage
+			cli := &openai.Client{OnUsage: func(u openai.Usage) { usages = append(usages, u) }}
+			ctx, _ := newCtx(http.MethodPost, "/api/es/review", `{"es_text": "元の文章"}`)
+			if err := NewESReviewController(cli).Review(ctx); err != nil {
+				t.Fatalf("Review が失敗: %v", err)
+			}
+			if len(usages) != 1 {
+				t.Fatalf("usage 記録数 = %d, want 1", len(usages))
+			}
+			if usages[0].PromptVersion != "" || usages[0].PromptStage != "" {
+				t.Errorf("版が記録された: stage=%q version=%q", usages[0].PromptStage, usages[0].PromptVersion)
+			}
+		})
 	}
 }
 
@@ -344,5 +385,120 @@ func TestReview_MasksSubjectAndFailsClosed(t *testing.T) {
 	}
 	if ragReq != nil {
 		t.Errorf("伏字の準備ができないのに RAG へ送った: %v", ragReq)
+	}
+}
+
+// SOCAIAGENT-559: 評価と改善文でモデルが違う。RAG がモデルごとの内訳を返したら、モデルごとに記録する
+// （合計を1つのモデルで記録すると、単価の違うトークンが混ざってコストがずれる）。
+func TestReview_RecordsUsagePerModel(t *testing.T) {
+	body := `{"feedback":"f","feedback_items":[],"improved_text":"t","usage":{"model":"gpt-4o","prompt_tokens":300,"completion_tokens":600,"calls":3,` +
+		`"by_model":[{"model":"gpt-4o","prompt_tokens":100,"completion_tokens":200,"calls":1},` +
+		`{"model":"gpt-4o-mini","prompt_tokens":200,"completion_tokens":400,"calls":2}]}}`
+	srv := ragStub(t, http.StatusOK, body, nil)
+	defer srv.Close()
+	t.Setenv("RAG_REVIEW_URL", srv.URL)
+
+	var usages []openai.Usage
+	cli := &openai.Client{OnUsage: func(u openai.Usage) { usages = append(usages, u) }}
+	ctx, rec := newCtx(http.MethodPost, "/api/es/review", `{"es_text": "元の文章"}`)
+	if err := NewESReviewController(cli).Review(ctx); err != nil {
+		t.Fatalf("Review が失敗: %v", err)
+	}
+	if strings.Contains(rec.Body.String(), "by_model") {
+		t.Errorf("内訳がレスポンスに漏れている: %s", rec.Body.String())
+	}
+	if len(usages) != 2 {
+		t.Fatalf("モデルごとに2行記録するはず: %+v", usages)
+	}
+	if usages[0].Model != "gpt-4o" || usages[0].PromptTokens != 100 || usages[0].CompletionTokens != 200 {
+		t.Errorf("評価のモデルの行 = %+v", usages[0])
+	}
+	if usages[1].Model != "gpt-4o-mini" || usages[1].PromptTokens != 200 || usages[1].CompletionTokens != 400 {
+		t.Errorf("改善文のモデルの行 = %+v", usages[1])
+	}
+	// 応答時間はトークン数の割合で各行に按分する（2行目を 0 にして平均を薄めない）。
+	// スタブの応答は 1ms 未満で丸めると 0 になるので、按分の値そのものは TestSplitLatency で確かめる
+	for _, u := range usages {
+		if u.Feature != usagectx.FeatureESReview {
+			t.Errorf("機能名 = %q", u.Feature)
+		}
+	}
+}
+
+// 内訳の先頭の calls が 0 でも、実際に記録した最初の行に応答時間を付ける。
+// 内訳から1行も記録できなければ、合計に戻して使用量を捨てない（#2076 のレビュー）。
+func TestReview_UsagePerModelEdgeCases(t *testing.T) {
+	tests := []struct {
+		name       string
+		byModel    string
+		wantModels []string
+	}{
+		{
+			name:       "先頭の calls が 0",
+			byModel:    `[{"model":"gpt-4o","prompt_tokens":0,"completion_tokens":0,"calls":0},{"model":"gpt-4o-mini","prompt_tokens":200,"completion_tokens":400,"calls":2}]`,
+			wantModels: []string{"gpt-4o-mini"},
+		},
+		{
+			name:       "内訳がすべて calls 0 なら合計を記録",
+			byModel:    `[{"model":"gpt-4o","prompt_tokens":0,"completion_tokens":0,"calls":0}]`,
+			wantModels: []string{"gpt-4o"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{"feedback":"f","feedback_items":[],"improved_text":"t","usage":{"model":"gpt-4o","prompt_tokens":300,"completion_tokens":600,"calls":3,"by_model":` + tt.byModel + `}}`
+			srv := ragStub(t, http.StatusOK, body, nil)
+			defer srv.Close()
+			t.Setenv("RAG_REVIEW_URL", srv.URL)
+			var usages []openai.Usage
+			cli := &openai.Client{OnUsage: func(u openai.Usage) { usages = append(usages, u) }}
+			ctx, _ := newCtx(http.MethodPost, "/api/es/review", `{"es_text": "元の文章"}`)
+			if err := NewESReviewController(cli).Review(ctx); err != nil {
+				t.Fatalf("Review が失敗: %v", err)
+			}
+			if len(usages) != len(tt.wantModels) {
+				t.Fatalf("記録 = %+v, want %v", usages, tt.wantModels)
+			}
+			for i, m := range tt.wantModels {
+				if usages[i].Model != m {
+					t.Errorf("usages[%d].Model = %q, want %q", i, usages[i].Model, m)
+				}
+			}
+			if tt.name == "内訳がすべて calls 0 なら合計を記録" && usages[0].PromptTokens != 300 {
+				t.Errorf("合計のトークンを記録していない: %+v", usages[0])
+			}
+		})
+	}
+}
+
+func TestSplitLatency(t *testing.T) {
+	row := func(p, c, calls int) esReviewRAGModelUsage {
+		return esReviewRAGModelUsage{PromptTokens: p, CompletionTokens: c, Calls: calls}
+	}
+	for _, tt := range []struct {
+		name string
+		rows []esReviewRAGModelUsage
+		want []time.Duration
+	}{
+		{"トークンの割合", []esReviewRAGModelUsage{row(100, 200, 1), row(200, 400, 2)}, []time.Duration{300, 600}},
+		{"端数は最後の行", []esReviewRAGModelUsage{row(1, 0, 1), row(1, 0, 1), row(1, 0, 1)}, []time.Duration{300, 300, 300}},
+		{"トークンが無ければ呼び出し回数", []esReviewRAGModelUsage{row(0, 0, 1), row(0, 0, 2)}, []time.Duration{300, 600}},
+		{"行が無い", nil, []time.Duration{}},
+	} {
+		got := splitLatency(900, tt.rows)
+		if len(got) != len(tt.want) {
+			t.Fatalf("%s: got %v", tt.name, got)
+		}
+		var sum time.Duration
+		for i := range got {
+			sum += got[i]
+			if got[i] != tt.want[i] {
+				t.Errorf("%s: got %v, want %v", tt.name, got, tt.want)
+				break
+			}
+		}
+		if len(got) > 0 && sum != 900 {
+			t.Errorf("%s: 合計 %v が 900 にならない", tt.name, sum)
+		}
 	}
 }

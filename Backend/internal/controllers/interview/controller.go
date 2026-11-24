@@ -298,10 +298,15 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrSessionFinished) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		if errors.Is(err, interviewsvc.ErrSessionNotStarted) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		return httpapi.InternalError(err)
 	}
 
 	return writeTurnMultipart(ctx, map[string]any{
+		"limit_reached":            result.LimitReached,
+		"limit_reason":             result.LimitReason,
 		"user_text":                result.UserText,
 		"ai_text":                  result.AIText,
 		"utterance_save_failed":    result.UtteranceSaveFailed,
@@ -370,10 +375,15 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrSessionFinished) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		if errors.Is(err, interviewsvc.ErrSessionNotStarted) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		return httpapi.InternalError(err)
 	}
 
 	return writeTurnMultipart(ctx, map[string]any{
+		"limit_reached":            result.LimitReached,
+		"limit_reason":             result.LimitReason,
 		"ai_text":                  result.AIText,
 		"utterance_save_failed":    result.UtteranceSaveFailed,
 		"question_source":          result.QuestionSource,
@@ -394,13 +404,22 @@ func writeTurnMultipart(ctx echo.Context, meta map[string]any, audio []byte) err
 	mw := multipart.NewWriter(ctx.Response().Writer)
 	ctx.Response().Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
 
-	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
-	json.NewEncoder(metaPart).Encode(meta)
+	metaPart, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(metaPart).Encode(meta); err != nil {
+		return err
+	}
 
-	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {audioContentType(audio)}})
-	audioPart.Write(audio)
-	mw.Close()
-	return nil
+	audioPart, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {audioContentType(audio)}})
+	if err != nil {
+		return err
+	}
+	if _, err := audioPart.Write(audio); err != nil {
+		return err
+	}
+	return mw.Close()
 }
 
 func parseCompanyQuestionHints(raw string) ([]string, error) {
@@ -498,13 +517,9 @@ func (c *InterviewController) List(ctx echo.Context) error {
 	page := httpapi.IntQuery(ctx, "page", 1)
 	limit := httpapi.LimitQuery(ctx, "limit", 20)
 	offset := (page - 1) * limit
-	allStr := ctx.QueryParam("all")
-	all := allStr == "1" || strings.ToLower(allStr) == "true"
-	sessions, total, err := c.interviewService.ListSessions(userID, all, limit, offset)
+	// all=1（全件一覧）は廃止。指定されても本人分だけを返す（SOCAIAGENT-687）。
+	sessions, total, err := c.interviewService.ListSessions(userID, limit, offset)
 	if err != nil {
-		if errors.Is(err, shared.ErrForbidden) {
-			return echo.NewHTTPError(http.StatusForbidden, err.Error())
-		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
