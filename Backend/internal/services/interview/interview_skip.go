@@ -11,14 +11,19 @@ import (
 // LightweightAnswerScore は、深掘りを飛ばすかどうかだけを決める点数（0〜100）。
 // 面接の採点（ルーブリック、user_weight_scores、シャドー採点）には使わない。
 // モデルは呼ばない。追加の API 費用は 0 で、遅延は文字列の走査だけ。
+//
+// 長さだけで稼げる点は最大 40（lengthScoreMax）に抑える。典型的な閾値（60 前後）には、
+// 数値・取り組みの内容などの具体性シグナルが無いと届かない。抽象的な長文で深掘りを飛ばさないため。
+const lengthScoreMax = 40
+
 func LightweightAnswerScore(answer string) int {
 	trimmed := strings.TrimSpace(answer)
 	if trimmed == "" || trimmed == "（聞き取れませんでした）" {
 		return 0
 	}
-	score := utf8.RuneCountInString(trimmed) * 60 / 80
-	if score > 60 {
-		score = 60
+	score := utf8.RuneCountInString(trimmed) * lengthScoreMax / 80
+	if score > lengthScoreMax {
+		score = lengthScoreMax
 	}
 	if strongSignalPattern.MatchString(trimmed) {
 		score += 25

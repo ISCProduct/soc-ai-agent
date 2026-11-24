@@ -10,8 +10,14 @@ import (
 
 func TestLightweightAnswerScore_採点ではなく深掘り判定だけ(t *testing.T) {
 	longAbstract := strings.Repeat("あ", 80)
-	if got := LightweightAnswerScore(longAbstract); got != 60 {
-		t.Fatalf("抽象的な長文 = %d, want 60", got)
+	if got := LightweightAnswerScore(longAbstract); got != lengthScoreMax {
+		t.Fatalf("抽象的な長文 = %d, want %d", got, lengthScoreMax)
+	}
+	if got := LightweightAnswerScore(strings.Repeat("あ", 500)); got >= 60 {
+		t.Fatalf("長さだけで典型的な閾値(60)に届いた: %d", got)
+	}
+	if got := LightweightAnswerScore(longAbstract + "3件"); got < 60 {
+		t.Fatalf("長さ+具体性シグナルは閾値に届くべき: %d", got)
 	}
 	if got := LightweightAnswerScore("3名でAPIをリリースした"); got < 25 {
 		t.Fatalf("具体性のある短文 = %d", got)
@@ -26,13 +32,13 @@ func TestShouldDeepen_閾値以上は深掘りしない(t *testing.T) {
 	if !NeedsDeepening(answer, 0) {
 		t.Fatal("この回答は長さと具体性では深掘り対象")
 	}
-	threshold := 60
+	threshold := lengthScoreMax
 	if shouldDeepen(answer, 0, &threshold) {
 		t.Fatal("閾値以上なのに深掘りする")
 	}
-	higher := 90
-	if !shouldDeepen(answer, 0, &higher) {
-		t.Fatal("閾値未満なのに深掘りを飛ばした")
+	typical := 60
+	if !shouldDeepen(answer, 0, &typical) {
+		t.Fatal("抽象的な長文が、長さだけで典型的な閾値(60)を超えて深掘りを飛ばした")
 	}
 	if !shouldDeepen(answer, 0, nil) {
 		t.Fatal("閾値が無いときは現行の判定")
@@ -87,7 +93,7 @@ func TestAdvanceQuestionPlan_高評価なら深掘りしない(t *testing.T) {
 	session := &models.InterviewSession{ID: 1}
 
 	t.Run("閾値以上は次の質問へ進む", func(t *testing.T) {
-		t.Setenv("INTERVIEW_SKIP_SCORE_THRESHOLD", "60")
+		t.Setenv("INTERVIEW_SKIP_SCORE_THRESHOLD", "40")
 		repo := newRepo()
 		service := NewInterviewService(nil, nil, nil, nil, nil, nil, nil)
 		service.SetQuestionStateRepo(repo)
@@ -100,6 +106,20 @@ func TestAdvanceQuestionPlan_高評価なら深掘りしない(t *testing.T) {
 		}
 		if directive == nil || directive.Text != "次の質問" || directive.IsDeepening {
 			t.Fatalf("directive = %+v", directive)
+		}
+	})
+
+	t.Run("抽象的な長文は典型的な閾値60では深掘りする", func(t *testing.T) {
+		t.Setenv("INTERVIEW_SKIP_SCORE_THRESHOLD", "60")
+		repo := newRepo()
+		service := NewInterviewService(nil, nil, nil, nil, nil, nil, nil)
+		service.SetQuestionStateRepo(repo)
+		directive, err := service.advanceQuestionPlan(context.Background(), session, 0, "", "", answer, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if repo.created != 1 || directive == nil || !directive.IsDeepening {
+			t.Fatalf("created=%d directive=%+v", repo.created, directive)
 		}
 	})
 

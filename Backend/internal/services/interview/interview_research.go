@@ -2,7 +2,6 @@ package interview
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -12,42 +11,55 @@ import (
 
 const defaultResearchTTL = 168 * time.Hour
 
-// confirmedResearchQuestions は、面接で使ってよい調査済みの質問を返す。
-// 保存先が期限内の結果を持っていればそれを使い、渡された候補では上書きしない。
-// 期限切れか未保存のときだけ、今回渡された候補を保存する。ここから Web 検索はしない。
-func (s *InterviewService) confirmedResearchQuestions(ctx context.Context, companyName, position string, hints []string) ([]string, error) {
+// confirmedResearchQuestions は、面接で使う企業別の質問候補を返す。
+//   - 保存先に期限内のサーバー側の調査結果があれば、それを使う（クライアントの候補では上書きしない）。
+//   - なければ、リクエストで渡された候補をこのセッション限りで使う。クライアント由来の候補は
+//     企業×職種で共有される保存先には書かない（他の利用者の面接に混ざるのを防ぐ）。
+//   - 保存先を読めなくても質問キューの作成は止めない。ログに残し、渡された候補（なければ空）で続ける。
+//
+// ここから Web 検索はしない。
+func (s *InterviewService) confirmedResearchQuestions(ctx context.Context, companyName, position string, hints []string) []string {
+	sessionOnly := normalizeCompanyQuestionHints(hints)
 	if s.researchRepo == nil {
-		return hints, nil
+		return sessionOnly
 	}
 	key := researchCompanyKey(companyName)
 	if key == "" {
-		return hints, nil
+		return sessionOnly
 	}
-	pos := strings.TrimSpace(position)
-	now := time.Now()
-	stored, ok, err := s.researchRepo.FindFresh(ctx, key, pos, now)
+	stored, ok, err := s.researchRepo.FindFresh(ctx, key, strings.TrimSpace(position), time.Now())
 	if err != nil {
-		return nil, fmt.Errorf("調査結果を読めません: %w", err)
+		log.Printf("[Interview] 調査結果を読めないため、セッション限りの候補で続けます: %v", err)
+		return sessionOnly
 	}
 	if ok {
-		return stored, nil
+		return stored
 	}
-	normalized := normalizeCompanyQuestionHints(hints)
-	if len(normalized) == 0 {
-		return nil, nil
+	return sessionOnly
+}
+
+// SaveServerResearch は、サーバー側で調査した質問候補を共有の保存先に書く。
+// リクエスト本文（クライアント）から来た候補を渡してはいけない。保存に失敗しても面接は止めず、エラーを返すだけ。
+// 企業名・職種が列の幅を超えるときは、リポジトリが列の幅まで切り詰める。
+func (s *InterviewService) SaveServerResearch(ctx context.Context, companyName, position string, questions []string) error {
+	if s.researchRepo == nil {
+		return nil
 	}
-	expires := now.Add(researchTTL())
-	if err := s.researchRepo.Save(ctx, key, pos, normalized, now, expires); err != nil {
-		return nil, fmt.Errorf("調査結果を保存できません: %w", err)
+	key := researchCompanyKey(companyName)
+	normalized := normalizeCompanyQuestionHints(questions)
+	if key == "" || len(normalized) == 0 {
+		return nil
 	}
-	return normalized, nil
+	now := time.Now()
+	return s.researchRepo.Save(ctx, key, strings.TrimSpace(position), normalized, now, now.Add(s.researchTTL))
 }
 
 func researchCompanyKey(companyName string) string {
 	return strings.ToLower(strings.TrimSpace(companyName))
 }
 
-func researchTTL() time.Duration {
+// researchTTLFromEnv は INTERVIEW_RESEARCH_TTL_HOURS を読む。サービス生成時に1回だけ呼ぶ。
+func researchTTLFromEnv() time.Duration {
 	raw := strings.TrimSpace(os.Getenv("INTERVIEW_RESEARCH_TTL_HOURS"))
 	if raw == "" {
 		return defaultResearchTTL

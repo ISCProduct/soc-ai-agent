@@ -31,10 +31,8 @@ func (s *InterviewService) advanceQuestionPlan(
 	totalQuestions := int(count)
 	if count == 0 {
 		customQuestions := s.fetchCustomQuestions(companyID, position)
-		hints, err := s.confirmedResearchQuestions(ctx, companyName, position, companyQuestionHintsFromContext(ctx))
-		if err != nil {
-			return nil, err
-		}
+		// 調査結果の読み取りに失敗しても質問キューは作る（候補なしか、今回のセッション限りの候補で続ける）。
+		hints := s.confirmedResearchQuestions(ctx, companyName, position, companyQuestionHintsFromContext(ctx))
 		queue := BuildQuestionQueue(session.ID, customQuestions, questionSourceAIResearch, hints...)
 		totalQuestions = len(queue)
 		if err := s.questionStateRepo.CreateBatch(queue); err != nil {
@@ -51,7 +49,7 @@ func (s *InterviewService) advanceQuestionPlan(
 				return nil, err
 			}
 
-			if shouldDeepen(userAnswer, asked.Depth, skipScoreThresholdFromEnv()) {
+			if shouldDeepen(userAnswer, asked.Depth, s.skipScoreThreshold) {
 				// 追質問の文は面接官の応答を作る1回の呼び出しで作る（ここで別に LLM を呼ぶと、
 				// ターンの応答が1往復ぶん遅れる）。ここでは狙いの定型文だけ置き、実際の発話で上書きする。
 				followUpText := BuildFollowUpQuestionText(asked.QuestionText, userAnswer)

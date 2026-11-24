@@ -41,6 +41,8 @@ type InterviewService struct {
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
 	questionStateRepo    repository.InterviewQuestionStateRepository
 	researchRepo         repository.InterviewResearchRepository
+	researchTTL          time.Duration // 生成時に環境変数から1回だけ読む
+	skipScoreThreshold   *int          // 生成時に環境変数から1回だけ読む
 	skillScoreRepo       SkillScoreReader
 	companyRepo          shared.CompanyBriefReader
 	jobCh                chan uint
@@ -109,6 +111,8 @@ func NewInterviewService(
 		workerStop:           make(chan struct{}),
 		workerFinished:       make(chan struct{}),
 		inFlightJobs:         map[uint]struct{}{},
+		researchTTL:          researchTTLFromEnv(),
+		skipScoreThreshold:   skipScoreThresholdFromEnv(),
 	}
 }
 
