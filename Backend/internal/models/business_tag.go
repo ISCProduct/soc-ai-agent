@@ -32,19 +32,26 @@ func (CompanyBusinessTag) TableName() string { return "company_business_tags" }
 // MaxBusinessTagsPerCompany は1社に付けられる事業タグの上限。
 const MaxBusinessTagsPerCompany = 20
 
+// MaxBusinessTagNameLength はタグ名の最大文字数（business_tags.name の varchar(64) に合わせる）。
+const MaxBusinessTagNameLength = 64
+
+// invisibleChars は見た目が同じ別タグを作れてしまう幅の無い文字。strings.Fields では消えない。
+var invisibleChars = strings.NewReplacer("\u200b", "", "\u200c", "", "\u200d", "", "\u2060", "", "\ufeff", "")
+
 // NormalizeBusinessTagNames は登録用にタグ名をそろえる。
-// NFKC で全角・半角を統一し、前後の空白を除き、連続する空白を1つにする。
+// NFKC で全角・半角を統一し、幅の無い文字を除き、前後の空白を除き、連続する空白を1つにする。
+// 長さは正規化後に数える（「㍿」は NFKC で「株式会社」の4文字になる）。
 // 空は捨て、同じ名前は1つにまとめる（順序は最初の出現順）。
 func NormalizeBusinessTagNames(names []string) ([]string, error) {
 	out := make([]string, 0, len(names))
 	seen := map[string]struct{}{}
 	for _, raw := range names {
-		name := strings.Join(strings.Fields(norm.NFKC.String(raw)), " ")
+		name := strings.Join(strings.Fields(invisibleChars.Replace(norm.NFKC.String(raw))), " ")
 		if name == "" {
 			continue
 		}
-		if utf8.RuneCountInString(name) > MaxTagNameLength {
-			return nil, fmt.Errorf("事業タグは%d文字以内にしてください: %q", MaxTagNameLength, name)
+		if utf8.RuneCountInString(name) > MaxBusinessTagNameLength {
+			return nil, fmt.Errorf("事業タグは%d文字以内にしてください: %q", MaxBusinessTagNameLength, name)
 		}
 		if _, ok := seen[name]; ok {
 			continue
