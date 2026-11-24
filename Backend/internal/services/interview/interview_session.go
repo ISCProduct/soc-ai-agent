@@ -371,22 +371,9 @@ func (s *InterviewService) ListSessionsForOwner(userID, companyID uint, limit in
 	return s.ListAllSessionsAdmin(limit, offset, nil, &cid)
 }
 
-func (s *InterviewService) ListSessions(userID uint, all bool, limit int, offset int) ([]InterviewSessionResponse, int64, error) {
-	if all {
-		user, err := s.userRepo.GetUserByID(userID)
-		if err != nil || user == nil || !user.IsAdmin {
-			return nil, 0, shared.ErrForbidden
-		}
-		total, err := s.sessionRepo.CountAll(nil, nil)
-		if err != nil {
-			return nil, 0, err
-		}
-		sessions, err := s.sessionRepo.ListAll(limit, offset, nil, nil)
-		if err != nil {
-			return nil, 0, err
-		}
-		return toSessionResponses(sessions), total, nil
-	}
+// ListSessions は学生用の一覧で、本人のセッションだけを返す。
+// 全件一覧（all=1）は担当校スコープを持たないため廃止した。管理者は /api/admin/interviews を使う（SOCAIAGENT-687）。
+func (s *InterviewService) ListSessions(userID uint, limit int, offset int) ([]InterviewSessionResponse, int64, error) {
 	total, err := s.sessionRepo.CountByUser(userID)
 	if err != nil {
 		return nil, 0, err
