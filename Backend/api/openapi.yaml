@@ -1340,6 +1340,24 @@ paths:
         "200": { description: 推移 }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/interviews/axis-comparison:
+    get:
+      tags: [interviews]
+      summary: 2回の面接の軸別差分
+      description: |
+        比較先のスコアから比較元を引く。本人のセッションだけ比較できる。
+        `/:id` より先に登録している。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: base, required: true, schema: { type: integer }, description: 比較元のセッションID }
+        - { in: query, name: target, required: true, schema: { type: integer }, description: 比較先のセッションID }
+      responses:
+        "200": { description: 軸ごとの差分 }
+        "400": { description: セッション指定が不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: セッションまたはレポートが無い }
+
   /api/interviews/{id}:
     get:
       tags: [interviews]

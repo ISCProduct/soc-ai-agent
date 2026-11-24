@@ -15,8 +15,9 @@ func SetupInterviewRoutes(api *echo.Group, interviewController *interviewcontrol
 	// ターンでは既定でログのみ（monitor）。超過で止めるのは INTERVIEW_TURN_BUDGET_ENFORCE=true のときだけで、
 	// そのときも締めの文で正常終了させる（SOCAIAGENT-696）。
 	interviews := api.Group("/interviews", EchoUserAuth(userSecret, access, orgs))
-	// /trend は /:id より先にEchoのルーターが解決するため先に登録する
+	// /trend と /axis-comparison は /:id より先にEchoのルーターが解決するため先に登録する
 	interviews.GET("/trend", interviewController.GetTrend)
+	interviews.GET("/axis-comparison", interviewController.CompareAxes)
 	interviews.GET("", interviewController.List)
 	interviews.POST("", interviewController.Create)
 	interviews.GET("/:id", interviewController.Get)
