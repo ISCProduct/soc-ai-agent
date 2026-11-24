@@ -17,7 +17,7 @@ err=<nil>
     "AnswerScore": 0,
     "IsAnswered": false,
     "prompt_version": "char-v1",
-    "ContextData": "{\"target_category\": \"創造性志向\", \"purpose\": \"まだ評価できていない「創造性志向」を評価するため\"}",
+    "ContextData": "{\"target_category\":\"創造性志向\",\"purpose\":\"まだ評価できていない「創造性志向」を評価するため\"}",
     "CreatedAt": "0001-01-01T00:00:00Z",
     "UpdatedAt": "0001-01-01T00:00:00Z"
   }
