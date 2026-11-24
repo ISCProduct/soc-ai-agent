@@ -181,7 +181,7 @@ export interface AuthResponse {
 
 export const authService = {
   async login(email: string, password: string): Promise<AuthResponse> {
-    const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
+    const res = await fetch('/api/bff/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getTenantHeaders() },
       body: JSON.stringify({ email, password }),
@@ -299,7 +299,7 @@ export const authService = {
   },
 
   async createGuest(): Promise<AuthResponse> {
-    const res = await fetch(`${BACKEND_URL}/api/auth/guest`, {
+    const res = await fetch('/api/bff/auth/guest', {
       method: 'POST',
       headers: getTenantHeaders(),
     })
@@ -416,8 +416,9 @@ export const authService = {
     clearLegacyTokens()
     adminTokenCheckedAt = 0
 
-    // ログイン・本登録・ゲスト作成と OAuth の旧方式（user=）は応答にトークンが載るので、ここで httpOnly Cookie にする。
-    // ストレージには保存しない。OAuth のコード交換は中継ルートが Cookie を張り、トークンを返さない。
+    // ログイン・本登録・ゲスト作成・OAuth のコード交換は、中継ルートがすでに httpOnly Cookie を張っていて
+    // トークンを返さない。トークンが届くのは OAuth の旧方式（user=）だけで、そのときだけ Cookie にする。
+    // 旧方式の削除は SOCAIAGENT-707。
     if (authResponse.user_token) {
       const userId = typeof authResponse.user_id === 'string' ? Number(authResponse.user_id) : authResponse.user_id
       // 遷移で打ち切られないよう待つ。ただし無期限には待たない。
