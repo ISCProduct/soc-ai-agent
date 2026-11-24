@@ -94,6 +94,22 @@ export type InterviewTrendPoint = {
   enthusiasm: number | null
 }
 
+export type AxisScoreDelta = {
+  axis: string
+  label: string
+  base: number | null
+  target: number | null
+  delta: number | null
+  direction: 'improved' | 'declined' | 'unchanged' | 'unavailable'
+  change_label: string
+}
+
+export type AxisComparisonResult = {
+  base_session_id: number
+  target_session_id: number
+  axes: AxisScoreDelta[]
+}
+
 export type PhraseSuggestion = {
   original: string
   suggestions: string[]
@@ -234,6 +250,16 @@ export const interviewApi = {
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const data = await res.json()
     return data.points as InterviewTrendPoint[]
+  },
+
+  async compareAxes(baseSessionId: number, targetSessionId: number): Promise<AxisComparisonResult> {
+    const params = new URLSearchParams({
+      base: String(baseSessionId),
+      target: String(targetSessionId),
+    })
+    const res = await interviewFetch(`/api/bff/interviews/axis-comparison?${params}`, undefined, LIST_FETCH_TIMEOUT_MS)
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+    return (await res.json()) as AxisComparisonResult
   },
 
   async sendReportEmail(sessionId: number, userId: number): Promise<{ message: string }> {
