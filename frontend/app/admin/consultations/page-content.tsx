@@ -32,6 +32,9 @@ function formatTime(iso: string): string {
 
 type ScopeState = 'pending' | 'ready' | 'failed'
 
+/** 返信・既読のあとの取り直しで辿るページの上限（届かなければ、取り直した分から読み直す） */
+const MAX_REFRESH_PAGES = 5
+
 /**
  * 学生からの相談の受信一覧（#2028）。担当校の学生の、案内への返信と質問を新しい順に出す。
  * 未読（まだ読んでいない学生の発言）がある相談に印を付ける。
@@ -56,12 +59,23 @@ export default function AdminConsultationsPage() {
 
   // 学校を切り替えたあとに、前の学校の遅い応答で一覧を上書きしない
   const requestSeq = useRef(0)
+  // 先頭の取り直しどうしの世代。重なったときは最後に始めたものだけを使う
+  const refreshSeq = useRef(0)
+  // 取り直しの最中に、今の一覧（2ページ目以降も含む）を読むため
+  const itemsRef = useRef<ConsultationInboxItem[]>([])
+  const nextBeforeIdRef = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    itemsRef.current = items
+    nextBeforeIdRef.current = nextBeforeId
+  }, [items, nextBeforeId])
 
   const load = useCallback(async () => {
     const seq = ++requestSeq.current
     setLoading(true)
     setError('')
     setRefreshError('')
+    // 前の学校の「続き」の位置を、新しい学校の一覧に送らない
+    setNextBeforeId(undefined)
     try {
       const page = await fetchTeacherInbox(schoolId)
       if (seq !== requestSeq.current) return
@@ -85,7 +99,7 @@ export default function AdminConsultationsPage() {
   }, [scope, load])
 
   const loadMore = async () => {
-    if (!nextBeforeId) return
+    if (!nextBeforeId || loading) return
     const seq = requestSeq.current
     setLoadingMore(true)
     try {
@@ -100,23 +114,50 @@ export default function AdminConsultationsPage() {
     }
   }
 
-  // スレッドで返信・既読にしたあとは、先頭のページだけ取り直して差し替える。
-  // 一覧ごと読み直すと、「さらに読み込む」で足した2ページ目以降が消えるため。
-  const refreshHead = useCallback(async () => {
+  // スレッドで返信・既読にしたあとは、先頭から取り直して差し替える。一覧ごと読み直すと、
+  // 「さらに読み込む」で足した2ページ目以降が消えるため。新しい発言は ID が大きいので先頭に来る。
+  // 取り直した範囲と、読み込み済みの残りの間に隙間が出ないよう、読み込み済みの先頭に届くまでページを辿る
+  // （届かなければ残りを捨て、取り直した分から続きを読む）。
+  const refreshHead = useCallback(async (openedId?: number) => {
     const seq = requestSeq.current
+    const rseq = ++refreshSeq.current
+    // load の開始・別の取り直しの開始のどちらかがあれば、この応答は使わない
+    const stale = () => seq !== requestSeq.current || rseq !== refreshSeq.current
     try {
-      const page = await fetchTeacherInbox(schoolId)
-      if (seq !== requestSeq.current) return
-      setItems((prev) => {
-        const rest = prev.filter((p) => !page.items.some((it) => it.guidance_id === p.guidance_id))
-        // 先頭のページより後ろを読んでいなければ、続きの位置は取り直した結果に合わせる
-        if (prev.length <= page.items.length) setNextBeforeId(page.next_before_id)
-        return [...page.items, ...rest]
-      })
-      if (seq === requestSeq.current) setRefreshError('')
+      const fetched: ConsultationInboxItem[] = []
+      let cursor: number | undefined
+      let reached = false
+      for (let i = 0; i < MAX_REFRESH_PAGES; i++) {
+        const page = await fetchTeacherInbox(schoolId, cursor)
+        if (stale()) return
+        fetched.push(...page.items.filter((it) => !fetched.some((f) => f.guidance_id === it.guidance_id)))
+        cursor = page.next_before_id
+        // 読み込み済みの一覧は、その先頭から続きの位置まで隙間なく取ってある。取り直した範囲がその先頭
+        // （前に取ったときの ID）まで届けば、そこから下は読み込み済みの分でつながる
+        const loadedTop = itemsRef.current.reduce((max, p) => Math.max(max, p.last_message_id), 0)
+        const tail = fetched.at(-1)?.last_message_id ?? 0
+        if (!cursor || loadedTop === 0 || tail <= loadedTop) {
+          reached = true
+          break
+        }
+      }
+      const tail = fetched.at(-1)?.last_message_id ?? 0
+      // 残りのうち、取り直した範囲より古い（ID の小さい）ものだけを後ろに残す
+      const rest = reached && cursor
+        ? itemsRef.current.filter((p) => !fetched.some((f) => f.guidance_id === p.guidance_id) && p.last_message_id < tail)
+        : []
+      const next = rest.length > 0 ? nextBeforeIdRef.current : cursor
+      // 開いていた相談が取り直した範囲に無ければ（2ページ目以降）、画面に出した発言は既読にしたので未読を消す。
+      // あとから届いた発言は ID が大きいので、次の取り直しで先頭に来る
+      const merged = [...fetched, ...rest].map((p) =>
+        openedId !== undefined && p.guidance_id === openedId && !fetched.some((f) => f.guidance_id === openedId) ? { ...p, unread: 0 } : p,
+      )
+      setItems(merged)
+      setNextBeforeId(next)
+      setRefreshError('')
     } catch {
       // スレッドの操作は終わっているので、スレッドはそのまま。一覧の未読表示が古いことだけを知らせ、取り直せるようにする
-      if (seq === requestSeq.current) setRefreshError('一覧を最新にできませんでした。未読の表示が古い可能性があります')
+      if (!stale()) setRefreshError('一覧を最新にできませんでした。未読の表示が古い可能性があります')
     }
   }, [schoolId])
 
@@ -137,7 +178,8 @@ export default function AdminConsultationsPage() {
   }
 
   const loadOpen = useCallback(() => fetchTeacherThread(openId ?? 0), [openId])
-  const sendOpen = useCallback((body: string, lastSeenId: number | undefined) => replyAsTeacher(openId ?? 0, body, lastSeenId), [openId])
+  const sendOpen = useCallback((body: string, seenIds: number[]) => replyAsTeacher(openId ?? 0, body, seenIds), [openId])
+  const onThreadChanged = useCallback(() => void refreshHead(openId ?? undefined), [refreshHead, openId])
 
   return (
     <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
@@ -156,7 +198,7 @@ export default function AdminConsultationsPage() {
       )}
       {error && <Alert severity="error" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={() => void load()}>再読み込み</Button>}>{error}</Alert>}
       {refreshError && !error && (
-        <Alert severity="warning" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={() => void refreshHead()}>再試行</Button>}>{refreshError}</Alert>
+        <Alert severity="warning" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={() => void refreshHead(openId ?? undefined)}>再試行</Button>}>{refreshError}</Alert>
       )}
       {(scope === 'pending' || (loading && items.length === 0)) && scope !== 'failed' && <ListSkeleton rows={3} />}
       {scope === 'ready' && loaded && !loading && !error && items.length === 0 && (
@@ -185,7 +227,7 @@ export default function AdminConsultationsPage() {
       </Stack>
       {nextBeforeId && (
         <Box sx={{ textAlign: 'center', mt: 2 }}>
-          <Button onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? '読み込み中…' : 'さらに読み込む'}</Button>
+          <Button onClick={() => void loadMore()} disabled={loadingMore || loading}>{loadingMore ? '読み込み中…' : 'さらに読み込む'}</Button>
         </Box>
       )}
 
@@ -197,7 +239,7 @@ export default function AdminConsultationsPage() {
           </IconButton>
         </DialogTitle>
         <DialogContent dividers>
-          {openId !== null && <ConsultationThread me="teacher" load={loadOpen} send={sendOpen} onChanged={() => void refreshHead()} />}
+          {openId !== null && <ConsultationThread key={openId} me="teacher" load={loadOpen} send={sendOpen} onChanged={onThreadChanged} />}
         </DialogContent>
       </Dialog>
     </PageContainer>

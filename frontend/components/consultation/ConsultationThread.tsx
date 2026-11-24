@@ -8,8 +8,8 @@ type Props = {
   /** 自分の側。自分の発言を右に寄せる */
   me: 'student' | 'teacher'
   load: () => Promise<Thread>
-  /** lastSeenId は、送信時に画面に出ていた最後の発言の ID（先生の既読の範囲に使う） */
-  send: (body: string, lastSeenId: number | undefined) => Promise<Thread>
+  /** seenIds は、送信時に画面に出ていた相手の未読の発言の ID（先生の返信で、そのうちのものだけを既読にする） */
+  send: (body: string, seenIds: number[]) => Promise<Thread>
   /** 送信・読み込みのあとに呼ぶ（未読数の取り直しなど） */
   onChanged?: () => void
 }
@@ -19,9 +19,18 @@ function formatTime(iso: string): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+/** 保存できた発言を、表示中のスレッドに ID で足す（重複は足さない・ID の順に並べる）。 */
+export function mergeSavedMessages(thread: Thread, saved: Thread['messages']): Thread {
+  const known = new Set(thread.messages.map((m) => m.id))
+  const added = saved.filter((m) => m.id > 0 && !known.has(m.id))
+  if (added.length === 0) return thread
+  return { ...thread, messages: [...thread.messages, ...added].sort((a, b) => a.id - b.id) }
+}
+
 /**
  * 相談のスレッド（#2028）。最初の案内（または質問）と、その後のやり取りを古い順に出し、下で返信する。
- * 学生と先生の両方の画面で使う。
+ * 学生と先生の両方の画面で使う。別のスレッドを開くときは、呼び出し側で key を変えてインスタンスを分ける
+ * （前のスレッドへの返信の完了で、開き直したスレッドの表示を上書きしないように）。
  */
 export function ConsultationThread({ me, load, send, onChanged }: Props) {
   const [thread, setThread] = useState<Thread | null>(null)
@@ -65,11 +74,15 @@ export function ConsultationThread({ me, load, send, onChanged }: Props) {
     setSending(true)
     setSendError('')
     try {
-      const result = await send(body, thread.messages.at(-1)?.id)
+      const seenIds = thread.messages.filter((m) => m.author_role !== me && !m.read_at).map((m) => m.id)
+      const result = await send(body, seenIds)
       // 送信中は入力欄を止めているので、ここで消すのは送った文章だけ
       setDraft('')
       if (result.stale) {
-        // 保存はできたが、スレッドの読み直しに失敗した。送信は成功なので読み直す（再送させない）
+        // 保存はできたが、スレッドの読み直しに失敗した。送信は成功なので、保存した発言を表示中のスレッドに
+        // 足してから読み直す（再送させない。読み直しにも失敗したら、スレッドは残して警告を出す）
+        setThread((cur) => (cur ? mergeSavedMessages(cur, result.messages) : cur))
+        onChangedRef.current?.()
         void reload()
       } else {
         setThread(result)
@@ -84,9 +97,9 @@ export function ConsultationThread({ me, load, send, onChanged }: Props) {
   }
 
   if (loading && !thread) return <Box sx={{ textAlign: 'center', py: 3 }}><CircularProgress size={24} aria-label="相談を読み込み中" /></Box>
-  if (error) {
-    return <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => void reload()}>再読み込み</Button>}>{error}</Alert>
-  }
+  const retry = <Button color="inherit" size="small" onClick={() => void reload()}>再読み込み</Button>
+  // 一度も読めていなければエラーだけを出す。表示中のスレッドがあれば残し、最新でないことを知らせる
+  if (error && !thread) return <Alert severity="error" action={retry}>{error}</Alert>
   if (!thread) return null
 
   const opener = thread.kind === 'question' ? 'student' : 'teacher'
@@ -97,6 +110,11 @@ export function ConsultationThread({ me, load, send, onChanged }: Props) {
 
   return (
     <Stack spacing={1.5}>
+      {error && (
+        <Alert severity="warning" action={retry}>
+          やり取りを最新にできませんでした。表示が古い可能性があります（{error}）
+        </Alert>
+      )}
       <Stack spacing={1} component="ol" sx={{ listStyle: 'none', p: 0, m: 0 }} aria-label="やり取り">
         {showOpener && <Bubble mine={opener === me} who={opener === 'teacher' ? '先生' : 'あなた'} body={thread.message} at={thread.created_at} />}
         {thread.messages.map((m) => (

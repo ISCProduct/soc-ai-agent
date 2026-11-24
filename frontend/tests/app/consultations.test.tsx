@@ -12,7 +12,6 @@ import type { ConsultationThread as Thread } from '@/lib/consultation'
 jest.mock('next/navigation', () => ({ useRouter: () => ({ push: jest.fn() }), usePathname: () => '/' }))
 jest.mock('@/lib/auth', () => ({
   authService: {
-    ensureFreshUserToken: async () => undefined,
     getUserFetchHeaders: () => ({ 'X-User-Token': 'jwt' }),
     getAdminFetchHeaders: () => ({ Authorization: 'Bearer admin' }),
   },
@@ -65,7 +64,7 @@ function respondWith(routes: (url: string) => [number, unknown]) {
 }
 
 describe('スレッド', () => {
-  test('案内と、その後のやり取りを古い順に出し、返信を送ると表示を更新する。見ていた最後の発言の ID も渡す', async () => {
+  test('案内と、その後のやり取りを古い順に出し、返信を送ると表示を更新する。画面に出ていた相手の未読の発言の ID を渡す', async () => {
     const send = jest.fn(async (body: string) => ({
       ...THREAD,
       messages: [...THREAD.messages, { id: 2, guidance_id: 1, author_role: 'teacher' as const, body, read_at: null, created_at: '2026-11-13T03:00:00Z' }],
@@ -79,7 +78,7 @@ describe('スレッド', () => {
     fireEvent.change(screen.getByLabelText('学生への返信'), { target: { value: '自己PRを具体的にしましょう' } })
     fireEvent.click(screen.getByRole('button', { name: '送信する' }))
     expect(await screen.findByText('自己PRを具体的にしましょう')).toBeInTheDocument()
-    expect(send).toHaveBeenCalledWith('自己PRを具体的にしましょう', 1)
+    expect(send).toHaveBeenCalledWith('自己PRを具体的にしましょう', [1])
     expect(onChanged).toHaveBeenCalled()
   })
 
@@ -116,6 +115,39 @@ describe('スレッド', () => {
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2))
     expect(screen.getByLabelText('先生への返信')).toHaveValue('')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  test('画面に出ていた発言の ID だけを渡す（自分の発言と既読の発言は渡さない）', async () => {
+    const load = async (): Promise<Thread> => ({
+      ...THREAD,
+      messages: [
+        { id: 1, guidance_id: 1, author_role: 'student', body: '既読', read_at: '2026-11-13T02:30:00Z', created_at: '2026-11-13T02:00:00Z' },
+        { id: 3, guidance_id: 1, author_role: 'student', body: '未読A', read_at: null, created_at: '2026-11-13T02:10:00Z' },
+        { id: 4, guidance_id: 1, author_role: 'teacher', body: '自分', read_at: null, created_at: '2026-11-13T02:20:00Z' },
+        { id: 6, guidance_id: 1, author_role: 'student', body: '未読B', read_at: null, created_at: '2026-11-13T02:30:00Z' },
+      ],
+    })
+    const send = jest.fn(async () => ({ ...THREAD }))
+    render(<ConsultationThread me="teacher" load={load} send={send} />)
+    await screen.findByText('未読B')
+    fireEvent.change(screen.getByLabelText('学生への返信'), { target: { value: '答えます' } })
+    fireEvent.click(screen.getByRole('button', { name: '送信する' }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith('答えます', [3, 6]))
+  })
+
+  test('stale の応答なら保存した発言を表示に足し、読み直しにも失敗したらスレッドを残して警告を出す', async () => {
+    const load = jest.fn().mockResolvedValueOnce(THREAD).mockRejectedValueOnce(new Error('相談を読み込めませんでした'))
+    const saved = { id: 9, guidance_id: 1, author_role: 'student' as const, body: '確認します', read_at: null, created_at: '2026-11-13T04:00:00Z' }
+    const send = jest.fn(async () => ({ ...THREAD, messages: [saved], stale: true }))
+    render(<ConsultationThread me="student" load={load} send={send} />)
+    await screen.findByText('履歴書を見直しましょう')
+    fireEvent.change(screen.getByLabelText('先生への返信'), { target: { value: '確認します' } })
+    fireEvent.click(screen.getByRole('button', { name: '送信する' }))
+    expect(await screen.findByText(/やり取りを最新にできませんでした/)).toBeInTheDocument()
+    // スレッド（元の発言と、保存した発言）は残る
+    expect(screen.getByText('どこを直せばよいですか？')).toBeInTheDocument()
+    expect(screen.getByText('確認します')).toBeInTheDocument()
+    expect(screen.getByLabelText('先生への返信')).toHaveValue('')
   })
 
   test('読み直しの途中は送信できない（古い取得結果で新しい発言を上書きしない）', async () => {
@@ -311,6 +343,67 @@ describe('先生の受信一覧', () => {
     fireEvent.click(screen.getByRole('button', { name: '再試行' }))
     await waitFor(() => expect(screen.queryByText(/一覧を最新にできませんでした/)).not.toBeInTheDocument())
     expect(inboxCalls).toBe(4)
+  })
+
+  test('学校を切り替えたら、前の学校の「続き」を出さない（読み込み中に押しても前のカーソルを送らない）', async () => {
+    const pending = deferredFetch()
+    render(<AdminConsultationsPage />)
+    await act(async () => {
+      changeSchool?.(5)
+      resolveScope?.()
+    })
+    await waitFor(() => expect(pending).toHaveLength(1))
+    await act(async () => pending[0].resolve(200, { items: [INBOX_ITEM], next_before_id: 50 }))
+    expect(await screen.findByRole('button', { name: 'さらに読み込む' })).toBeInTheDocument()
+    await act(async () => changeSchool?.(6))
+    await waitFor(() => expect(pending).toHaveLength(2))
+    expect(screen.queryByRole('button', { name: 'さらに読み込む' })).not.toBeInTheDocument()
+  })
+
+  test('返信のあとの取り直しは、読み込み済みの続きとの間に隙間を残さない', async () => {
+    // 読み込み済み: 先頭 100（山田）、続き 61（佐藤）。そのあいだに、ほかの学生の相談 125・110・105 が増えた
+    let phase = 'before'
+    const row = (guidance_id: number, student_name: string, last_message_id: number) => ({ ...INBOX_ITEM, guidance_id, student_name, last_message_id, unread: 0 })
+    const urls = respondWith((url) => {
+      if (url.startsWith('/api/admin/teacher/consultations/1')) {
+        phase = 'after'
+        return [200, THREAD]
+      }
+      if (phase === 'before') {
+        return url.includes('before_id=100') ? [200, { items: [row(2, '佐藤', 61)] }] : [200, { items: [row(1, '山田', 100)], next_before_id: 100 }]
+      }
+      if (url.includes('before_id=100')) return [200, { items: [row(2, '佐藤', 61)] }]
+      if (url.includes('before_id=110')) return [200, { items: [row(5, '高橋', 105), row(1, '山田', 100)], next_before_id: 100 }]
+      return [200, { items: [row(3, '鈴木', 125), row(4, '田中', 110)], next_before_id: 110 }]
+    })
+    render(<AdminConsultationsPage />)
+    await act(async () => resolveScope?.())
+    expect(await screen.findByText('山田')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'さらに読み込む' }))
+    expect(await screen.findByText('佐藤')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /山田さんの相談を開く/ }))
+    // 先頭のページ（125・110）だけでは読み込み済みの 61 に届かないので、続きを辿って 105 も取る
+    expect(await screen.findByText('高橋')).toBeInTheDocument()
+    expect(urls).toContain('/api/admin/teacher/consultations?before_id=110')
+    const names = screen.getAllByRole('button', { name: /さんの相談を開く/, hidden: true }).map((b) => (b.getAttribute('aria-label') ?? '').replace(/さんの相談を開く.*/, ''))
+    expect(names).toEqual(['鈴木', '田中', '高橋', '山田', '佐藤'])
+    // 読み込み済みの先頭（100）に届いたら、それより下は読み込み済みの分を使う（取り直さない）
+    expect(urls.filter((u) => u.includes('before_id=100'))).toHaveLength(1)
+  })
+
+  test('2ページ目の相談を開いたら、その行の未読を消す', async () => {
+    respondWith((url) => {
+      if (url.includes('before_id=50')) return [200, { items: [{ ...INBOX_ITEM, guidance_id: 2, student_name: '佐藤', last_message_id: 40, unread: 2 }] }]
+      if (url.startsWith('/api/admin/teacher/consultations/2')) return [200, { ...THREAD, guidance_id: 2 }]
+      return [200, { items: [{ ...INBOX_ITEM, unread: 0 }], next_before_id: 50 }]
+    })
+    render(<AdminConsultationsPage />)
+    await act(async () => resolveScope?.())
+    fireEvent.click(await screen.findByRole('button', { name: 'さらに読み込む' }))
+    expect(await screen.findByRole('button', { name: '佐藤さんの相談を開く（未読 2 件）' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /佐藤さんの相談を開く/ }))
+    expect(await screen.findByRole('button', { name: '佐藤さんの相談を開く', hidden: true })).toBeInTheDocument()
   })
 
   test('スレッドで返信したあとも、「さらに読み込む」で足した続きを消さない', async () => {

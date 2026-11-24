@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,9 +25,11 @@ import (
 // #2028: 先生のスレッドは、学生の学校が担当校でなければ 404（存在しない ID と同じ）。学生は本人のスレッドだけ。
 
 type store struct {
-	written   int
-	asked     int
-	seenUpTo  uint
+	written int
+	asked   int
+	seenIDs []uint
+	// gone なら質問の保存の時点で退会済み
+	gone      bool
 	gotBefore uint
 }
 
@@ -36,17 +39,21 @@ func (s *store) FindGuidance(_ context.Context, id uint) (*models.TeacherStudent
 	}
 	return &models.TeacherStudentGuidance{ID: 1, StudentUserID: 10, Kind: models.GuidanceKindQuestion, Message: "質問"}, nil
 }
-func (s *store) CreateQuestion(_ context.Context, studentUserID uint, body string, _ int64) (*models.TeacherStudentGuidance, error) {
+func (s *store) CreateQuestion(_ context.Context, studentUserID uint, body string, _ int64) (*models.TeacherStudentGuidance, *models.GuidanceMessage, error) {
 	s.asked++
-	return &models.TeacherStudentGuidance{ID: 2, StudentUserID: studentUserID, Kind: models.GuidanceKindQuestion, Message: body}, nil
+	if s.gone {
+		return nil, nil, repositories.ErrQuestionStudentGone
+	}
+	return &models.TeacherStudentGuidance{ID: 2, StudentUserID: studentUserID, Kind: models.GuidanceKindQuestion, Message: body},
+		&models.GuidanceMessage{ID: 42, GuidanceID: 2, AuthorUserID: studentUserID, AuthorRole: models.GuidanceAuthorStudent, Body: body}, nil
 }
 func (s *store) CreateMessage(context.Context, *models.GuidanceMessage) error {
 	s.written++
 	return nil
 }
-func (s *store) CreateMessageAndMarkRead(_ context.Context, _ *models.GuidanceMessage, seenUpToID uint, _ time.Time) error {
+func (s *store) CreateMessageAndMarkRead(_ context.Context, _ *models.GuidanceMessage, seenIDs []uint, _ time.Time) error {
 	s.written++
-	s.seenUpTo = seenUpToID
+	s.seenIDs = seenIDs
 	return nil
 }
 func (s *store) ListMessages(context.Context, uint) ([]models.GuidanceMessage, error) {
@@ -137,12 +144,22 @@ func TestTeacherReply_担当校以外は404(t *testing.T) {
 	}
 }
 
-func TestTeacherReply_担当校なら返信でき_見ていた発言までを既読にする(t *testing.T) {
+func TestTeacherReply_担当校なら返信でき_見ていた発言を既読にする(t *testing.T) {
 	st := &store{}
 	c := NewController(teacher.NewConsultationService(st), resolver{}, schools())
-	ctx, rec := teacherCtx(http.MethodPost, "/api/admin/teacher/consultations/1/messages", 20, `{"body":"返信です","seen_message_id":7}`)
-	if err := c.TeacherReply(ctx); err != nil || rec.Code != http.StatusCreated || st.written != 1 || st.seenUpTo != 7 {
-		t.Fatalf("err = %v code = %d written = %d seen = %d", err, rec.Code, st.written, st.seenUpTo)
+	ctx, rec := teacherCtx(http.MethodPost, "/api/admin/teacher/consultations/1/messages", 20, `{"body":"返信です","seen_message_ids":[3,7]}`)
+	if err := c.TeacherReply(ctx); err != nil || rec.Code != http.StatusCreated || st.written != 1 || !slices.Equal(st.seenIDs, []uint{3, 7}) {
+		t.Fatalf("err = %v code = %d written = %d seen = %v", err, rec.Code, st.written, st.seenIDs)
+	}
+}
+
+func TestTeacherReply_既読のIDが多すぎれば400(t *testing.T) {
+	st := &store{}
+	c := NewController(teacher.NewConsultationService(st), resolver{}, schools())
+	ids := strings.TrimSuffix(strings.Repeat("1,", maxSeenMessageIDs+1), ",")
+	ctx, _ := teacherCtx(http.MethodPost, "/api/admin/teacher/consultations/1/messages", 20, `{"body":"返信です","seen_message_ids":[`+ids+`]}`)
+	if err := c.TeacherReply(ctx); code(err) != http.StatusBadRequest || st.written != 0 {
+		t.Fatalf("err = %v written = %d", err, st.written)
 	}
 }
 
@@ -163,14 +180,17 @@ func TestAsk(t *testing.T) {
 		resolver resolver
 		body     string
 		want     int
+		gone     bool
 	}{
-		{"学校の学生", resolver{}, `{"body":"質問です"}`, http.StatusCreated},
-		{"学校の学園が本人と違う", resolver{school: ptr(6)}, `{"body":"質問です"}`, http.StatusBadRequest},
-		{"学生でない（ゲスト・管理者・職員）", resolver{err: teacher.ErrGuidanceStudentNotFound}, `{"body":"質問です"}`, http.StatusForbidden},
-		{"空", resolver{}, `{"body":"  "}`, http.StatusBadRequest},
-		{"1001文字", resolver{}, `{"body":"` + strings.Repeat("あ", 1001) + `"}`, http.StatusBadRequest},
+		{"学校の学生", resolver{}, `{"body":"質問です"}`, http.StatusCreated, false},
+		{"学校の学園が本人と違う", resolver{school: ptr(6)}, `{"body":"質問です"}`, http.StatusBadRequest, false},
+		{"学生でない（ゲスト・管理者・職員）", resolver{err: teacher.ErrGuidanceStudentNotFound}, `{"body":"質問です"}`, http.StatusForbidden, false},
+		{"空", resolver{}, `{"body":"  "}`, http.StatusBadRequest, false},
+		{"1001文字", resolver{}, `{"body":"` + strings.Repeat("あ", 1001) + `"}`, http.StatusBadRequest, false},
+		// 学校の確認のあと、保存の直前に退会が確定した: 学生でないときと同じ 403
+		{"保存の直前に退会", resolver{}, `{"body":"質問です"}`, http.StatusForbidden, true},
 	} {
-		st := &store{}
+		st := &store{gone: tt.gone}
 		c := NewController(teacher.NewConsultationService(st), tt.resolver, schools())
 		ctx, rec := studentCtx(http.MethodPost, "/api/user/consultations", 10, tt.body)
 		err := c.Ask(ctx)
@@ -181,7 +201,7 @@ func TestAsk(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("%s: %d, want %d (err=%v)", tt.name, got, tt.want, err)
 		}
-		if tt.want != http.StatusCreated && st.asked != 0 {
+		if tt.want != http.StatusCreated && !tt.gone && st.asked != 0 {
 			t.Errorf("%s: 受け付けない質問を保存した", tt.name)
 		}
 	}

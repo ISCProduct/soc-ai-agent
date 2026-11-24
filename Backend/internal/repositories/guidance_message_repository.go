@@ -31,16 +31,29 @@ func (r *GuidanceMessageRepository) FindGuidance(ctx context.Context, id uint) (
 // ErrOpenQuestionLimit は、未回答の質問が上限に達していて新しい質問を作らなかったこと。
 var ErrOpenQuestionLimit = errors.New("open question limit reached")
 
-// CreateQuestion は学生からの質問のスレッド（種類 question の案内）と最初の発言を、1つのトランザクションで作る。
+// ErrQuestionStudentGone は、質問を作る時点で学生が退会済み（または行が無い）だったこと。
+var ErrQuestionStudentGone = errors.New("student withdrawn or missing")
+
+// CreateQuestion は学生からの質問のスレッド（種類 question の案内）と最初の発言を、1つのトランザクションで作り、
+// 両方を返す（発言は ID と作成日時が入った保存済みのもの）。
 //
 // 未回答の質問が maxOpen 件以上あれば ErrOpenQuestionLimit を返して作らない。数えてから作るまでを
 // 1つのトランザクションにし、学生の users 行をロックする（同時に送られても上限を超えないように）。
-func (r *GuidanceMessageRepository) CreateQuestion(ctx context.Context, studentUserID uint, body string, maxOpen int64) (*models.TeacherStudentGuidance, error) {
+// ロックのあとに退会を確かめ、退会済みなら ErrQuestionStudentGone で作らない（学校の確認のあとに
+// 退会が確定しても、退会者の質問を残さないように）。
+func (r *GuidanceMessageRepository) CreateQuestion(ctx context.Context, studentUserID uint, body string, maxOpen int64) (*models.TeacherStudentGuidance, *models.GuidanceMessage, error) {
 	g := &models.TeacherStudentGuidance{StudentUserID: studentUserID, Kind: models.GuidanceKindQuestion, Message: body}
+	msg := &models.GuidanceMessage{AuthorUserID: studentUserID, AuthorRole: models.GuidanceAuthorStudent, Body: body}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var locked uint
-		if err := tx.Raw("SELECT id FROM users WHERE id = ? FOR UPDATE", studentUserID).Scan(&locked).Error; err != nil {
+		var locked struct {
+			ID          uint
+			WithdrawnAt *time.Time
+		}
+		if err := tx.Raw("SELECT id, withdrawn_at FROM users WHERE id = ? FOR UPDATE", studentUserID).Scan(&locked).Error; err != nil {
 			return err
+		}
+		if locked.ID == 0 || locked.WithdrawnAt != nil {
+			return ErrQuestionStudentGone
 		}
 		open, err := countOpenQuestions(tx, studentUserID)
 		if err != nil {
@@ -52,23 +65,37 @@ func (r *GuidanceMessageRepository) CreateQuestion(ctx context.Context, studentU
 		if err := tx.Create(g).Error; err != nil {
 			return err
 		}
-		return tx.Create(&models.GuidanceMessage{
-			GuidanceID: g.ID, AuthorUserID: studentUserID, AuthorRole: models.GuidanceAuthorStudent, Body: body,
-		}).Error
+		msg.GuidanceID = g.ID
+		return tx.Create(msg).Error
 	})
-	return g, err
+	if err != nil {
+		return nil, nil, err
+	}
+	return g, msg, nil
 }
 
 // CreateMessage は発言を1件足す。学生が返したスレッドは、閉じていても開き直す（教員の返答を見落とさないように）。
 func (r *GuidanceMessageRepository) CreateMessage(ctx context.Context, m *models.GuidanceMessage) error {
-	return r.CreateMessageAndMarkRead(ctx, m, 0, time.Time{})
+	return r.CreateMessageAndMarkRead(ctx, m, nil, time.Time{})
 }
 
-// CreateMessageAndMarkRead は発言を足し、同じトランザクションで、書き手の側が相手の発言を
-// seenUpToID まで読んだことにする（0 なら既読にしない）。返信の保存と既読を分けると、
-// 既読だけ失敗して 500 になり、再送で返信が二重になるため。
-func (r *GuidanceMessageRepository) CreateMessageAndMarkRead(ctx context.Context, m *models.GuidanceMessage, seenUpToID uint, at time.Time) error {
+// CreateMessageAndMarkRead は発言を足し、同じトランザクションで、書き手の側が相手の発言のうち
+// seenIDs（画面に出ていた発言の ID）を読んだことにする（空なら既読にしない）。返信の保存と既読を分けると、
+// 既読だけ失敗して 500 になり、再送で返信が二重になるため。「ID が N 以下」で範囲を決めると、採番は先でも
+// コミットが遅れて画面に出ていなかった発言まで既読になるので、ID の一覧に限る（MarkReadBy と同じ）。
+//
+// 先に親の案内の行をロックし、無ければ repository.ErrNotFound（= gorm.ErrRecordNotFound）で何も書かない。
+// guidance_messages には親への外部キーが無いので、退会者の削除（親を消す）と重なったときに、
+// 親の無い発言だけが残らないようにする。
+func (r *GuidanceMessageRepository) CreateMessageAndMarkRead(ctx context.Context, m *models.GuidanceMessage, seenIDs []uint, at time.Time) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var parent uint
+		if err := tx.Raw("SELECT id FROM teacher_student_guidances WHERE id = ? FOR UPDATE", m.GuidanceID).Scan(&parent).Error; err != nil {
+			return err
+		}
+		if parent == 0 {
+			return gorm.ErrRecordNotFound
+		}
 		if err := tx.Create(m).Error; err != nil {
 			return err
 		}
@@ -76,11 +103,11 @@ func (r *GuidanceMessageRepository) CreateMessageAndMarkRead(ctx context.Context
 			Updates(map[string]any{"dismissed_at": nil, "updated_at": time.Now()}).Error; err != nil {
 			return err
 		}
-		if seenUpToID == 0 {
+		if len(seenIDs) == 0 {
 			return nil
 		}
 		return tx.Model(&models.GuidanceMessage{}).
-			Where("guidance_id = ? AND author_role <> ? AND read_at IS NULL AND id <= ?", m.GuidanceID, m.AuthorRole, seenUpToID).
+			Where("guidance_id = ? AND author_role <> ? AND read_at IS NULL AND id IN ?", m.GuidanceID, m.AuthorRole, seenIDs).
 			Update("read_at", at).Error
 	})
 }

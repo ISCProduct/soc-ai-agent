@@ -34,10 +34,12 @@ const MaxOpenQuestions = 5
 // ConsultationStore は相談の永続化（repositories.GuidanceMessageRepository が満たす）。
 type ConsultationStore interface {
 	FindGuidance(ctx context.Context, id uint) (*models.TeacherStudentGuidance, error)
-	// CreateQuestion は未回答の質問が maxOpen 件以上なら repositories.ErrOpenQuestionLimit を返す
-	CreateQuestion(ctx context.Context, studentUserID uint, body string, maxOpen int64) (*models.TeacherStudentGuidance, error)
+	// CreateQuestion は未回答の質問が maxOpen 件以上なら repositories.ErrOpenQuestionLimit、
+	// 学生が退会済みなら repositories.ErrQuestionStudentGone を返す。成功なら案内と保存済みの最初の発言を返す
+	CreateQuestion(ctx context.Context, studentUserID uint, body string, maxOpen int64) (*models.TeacherStudentGuidance, *models.GuidanceMessage, error)
+	// CreateMessage / CreateMessageAndMarkRead は、親の案内が無ければ repository.ErrNotFound を返す
 	CreateMessage(ctx context.Context, m *models.GuidanceMessage) error
-	CreateMessageAndMarkRead(ctx context.Context, m *models.GuidanceMessage, seenUpToID uint, at time.Time) error
+	CreateMessageAndMarkRead(ctx context.Context, m *models.GuidanceMessage, seenIDs []uint, at time.Time) error
 	ListMessages(ctx context.Context, guidanceID uint) ([]models.GuidanceMessage, error)
 	// MarkReadBy は messageIDs のうち、readerRole から見て相手側の未読の発言を既読にする
 	MarkReadBy(ctx context.Context, guidanceID uint, readerRole string, messageIDs []uint, at time.Time) error
@@ -88,14 +90,27 @@ func (s *ConsultationService) Ask(ctx context.Context, studentUserID uint, body 
 		return nil, err
 	}
 	// 数えてから作るまでは、同時に送られても上限を超えないよう保存側の1トランザクションで行う
-	g, err := s.store.CreateQuestion(ctx, studentUserID, body, MaxOpenQuestions)
+	g, msg, err := s.store.CreateQuestion(ctx, studentUserID, body, MaxOpenQuestions)
 	if errors.Is(err, repositories.ErrOpenQuestionLimit) {
 		return nil, ErrConsultationTooManyOpen
+	}
+	if errors.Is(err, repositories.ErrQuestionStudentGone) {
+		// 学校の確認のあとに退会が確定した。学校の確認で退会済みと分かったときと同じ扱いにする
+		return nil, ErrGuidanceStudentNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return s.threadAfterWrite(ctx, g, models.GuidanceMessage{GuidanceID: g.ID, AuthorRole: models.GuidanceAuthorStudent, Body: body, CreatedAt: g.CreatedAt})
+	// 読み直しに失敗したときも、保存済みの発言（実際の ID と作成日時）を返す
+	return s.threadAfterWrite(ctx, g, *msg)
+}
+
+// writeErr は発言の保存のエラーを、親の案内が消えていたら「見つからない」にする。
+func writeErr(err error) error {
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrConsultationNotFound
+	}
+	return err
 }
 
 // guidanceForStudent は学生本人の案内だけを返す（他人の案内は見つからない扱い）。
@@ -184,7 +199,7 @@ func (s *ConsultationService) StudentReply(ctx context.Context, studentUserID, g
 	}
 	m := models.GuidanceMessage{GuidanceID: g.ID, AuthorUserID: studentUserID, AuthorRole: models.GuidanceAuthorStudent, Body: body}
 	if err := s.store.CreateMessage(ctx, &m); err != nil {
-		return nil, err
+		return nil, writeErr(err)
 	}
 	return s.threadAfterWrite(ctx, g, m)
 }
@@ -195,17 +210,17 @@ func (s *ConsultationService) TeacherThread(ctx context.Context, g *models.Teach
 }
 
 // TeacherReply は教員がスレッドに返信する（担当校の確認は呼び出し側で済ませる）。
-// seenUpToID は、教員が返信を書いた画面に出ていた最後の発言の ID。学生の発言はそこまでを既読にする
-// （画面を開いたあとに学生が追記した発言は、教員が見ていないので未読のまま残す）。0 なら既読にしない。
-// 返信の保存と既読は1つのトランザクションで行う。
-func (s *ConsultationService) TeacherReply(ctx context.Context, teacherUserID uint, g *models.TeacherStudentGuidance, body string, seenUpToID uint) (*ThreadView, error) {
+// seenIDs は、教員が返信を書いた画面に出ていた発言の ID。学生の発言はそのうちのものだけを既読にする
+// （画面を開いたあとに学生が追記した発言や、コミットが遅れて画面に出なかった発言は未読のまま残す）。
+// 空なら既読にしない。返信の保存と既読は1つのトランザクションで行う。
+func (s *ConsultationService) TeacherReply(ctx context.Context, teacherUserID uint, g *models.TeacherStudentGuidance, body string, seenIDs []uint) (*ThreadView, error) {
 	body, err := validateBody(body)
 	if err != nil {
 		return nil, err
 	}
 	m := models.GuidanceMessage{GuidanceID: g.ID, AuthorUserID: teacherUserID, AuthorRole: models.GuidanceAuthorTeacher, Body: body}
-	if err := s.store.CreateMessageAndMarkRead(ctx, &m, seenUpToID, s.now()); err != nil {
-		return nil, err
+	if err := s.store.CreateMessageAndMarkRead(ctx, &m, seenIDs, s.now()); err != nil {
+		return nil, writeErr(err)
 	}
 	return s.threadAfterWrite(ctx, g, m)
 }

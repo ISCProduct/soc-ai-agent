@@ -214,7 +214,7 @@ export default function ConsultationsPage() {
           </IconButton>
         </DialogTitle>
         <DialogContent dividers>
-          {openId !== null && <ConsultationThread me="student" load={loadOpen} send={sendOpen} onChanged={() => void refreshUnread()} />}
+          {openId !== null && <ConsultationThread key={openId} me="student" load={loadOpen} send={sendOpen} onChanged={() => void refreshUnread()} />}
         </DialogContent>
       </Dialog>
     </Box>

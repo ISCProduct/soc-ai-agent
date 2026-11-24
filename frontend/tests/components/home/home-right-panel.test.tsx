@@ -49,6 +49,11 @@ describe('HomeRightPanel（先生から・これからの予定・お知らせ�
     expect(props.onDismissGuidance).toHaveBeenCalledWith(7)
   })
 
+  it('広い画面の案内からも、狭い画面と同じリンクで先生に返信できる（#2028）', () => {
+    setup({ guidances: [guidance(7, 'まずは自己分析の質問に答えてみましょう。')] })
+    expect(screen.getByRole('link', { name: '先生に返信する' })).toHaveAttribute('href', '/consultations?thread=7')
+  })
+
   it('既読にしている最中の案内は、「読みました」を押せない（連打を防ぐ）', () => {
     setup({ guidances: [guidance(7, '案内')], dismissingIds: new Set([7]) })
     expect(screen.getByRole('button', { name: '読みました' })).toBeDisabled()

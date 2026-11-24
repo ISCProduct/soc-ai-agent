@@ -44,9 +44,12 @@ type bodyRequest struct {
 
 type teacherReplyRequest struct {
 	Body string `json:"body"`
-	// SeenMessageID は、返信を書いた画面に出ていた最後の発言の ID。学生の発言はそこまでを既読にする。
-	SeenMessageID uint `json:"seen_message_id"`
+	// SeenMessageIDs は、返信を書いた画面に出ていた学生の発言の ID。そのうちの未読だけを既読にする。
+	SeenMessageIDs []uint `json:"seen_message_ids"`
 }
+
+// maxSeenMessageIDs は返信で一度に既読にできる発言の数の上限（IN 句を際限なく長くしない）。
+const maxSeenMessageIDs = 1000
 
 const defaultListLimit = 30
 
@@ -70,8 +73,15 @@ func toHTTPError(err error) error {
 		return echo.NewHTTPError(http.StatusBadRequest, teacher.FormatConsultationError(err))
 	case errors.Is(err, teacher.ErrConsultationTooManyOpen):
 		return echo.NewHTTPError(http.StatusTooManyRequests, teacher.FormatConsultationError(err))
+	case errors.Is(err, teacher.ErrGuidanceStudentNotFound):
+		// 質問の保存の直前に退会が確定した。学校の確認で退会済みと分かったとき（Ask）と同じ応答にする
+		return studentOnly()
 	}
 	return httpapi.InternalError(err)
+}
+
+func studentOnly() error {
+	return echo.NewHTTPError(http.StatusForbidden, "学生のアカウントだけが先生に質問できます")
 }
 
 func student(ctx echo.Context) (uint, error) {
@@ -99,7 +109,7 @@ func (c *Controller) Ask(ctx echo.Context) error {
 	}
 	orgID, schoolID, err := c.students.ResolveStudentSchool(userID)
 	if errors.Is(err, teacher.ErrGuidanceStudentNotFound) {
-		return echo.NewHTTPError(http.StatusForbidden, "学生のアカウントだけが先生に質問できます")
+		return studentOnly()
 	}
 	if err != nil {
 		return httpapi.InternalError(err)
@@ -286,7 +296,7 @@ func (c *Controller) TeacherThread(ctx echo.Context) error {
 }
 
 // TeacherReply は POST /api/admin/teacher/consultations/:id/messages。
-// body の seen_message_id までの学生の発言を、返信と同じトランザクションで既読にする。
+// body の seen_message_ids（画面に出ていた発言の ID）のうち学生の未読の発言を、返信と同じトランザクションで既読にする。
 func (c *Controller) TeacherReply(ctx echo.Context) error {
 	teacherID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
 	if !ok {
@@ -300,7 +310,10 @@ func (c *Controller) TeacherReply(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid body")
 	}
-	view, err := c.svc.TeacherReply(ctx.Request().Context(), teacherID, ref.guidance, req.Body, req.SeenMessageID)
+	if len(req.SeenMessageIDs) > maxSeenMessageIDs {
+		return echo.NewHTTPError(http.StatusBadRequest, "seen_message_ids が多すぎます")
+	}
+	view, err := c.svc.TeacherReply(ctx.Request().Context(), teacherID, ref.guidance, req.Body, req.SeenMessageIDs)
 	if err != nil {
 		return toHTTPError(err)
 	}

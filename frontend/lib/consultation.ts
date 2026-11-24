@@ -17,7 +17,7 @@ export type ConsultationThread = {
   message: string
   created_at: string
   messages: ConsultationMessage[]
-  /** 発言は保存できたが、スレッドの読み直しに失敗した（読み直す） */
+  /** 発言は保存できたが、スレッドの読み直しに失敗した。messages は保存した発言だけ（表示中のスレッドに足して読み直す） */
   stale?: boolean
 }
 
@@ -59,7 +59,6 @@ async function readError(res: Response, fallback: string): Promise<never> {
 // ---- 学生（同一オリジンの /api/user/consultations を通す） ----
 
 async function studentFetch(path: string, init?: RequestInit): Promise<Response> {
-  await authService.ensureFreshUserToken()
   return fetch(`/api/user/consultations${path}`, {
     cache: 'no-store',
     ...init,
@@ -123,11 +122,15 @@ export async function fetchTeacherThread(id: number): Promise<ConsultationThread
 }
 
 /** 先生の返信。seenMessageId は、返信を書いた画面に出ていた最後の発言の ID（そこまでの学生の発言を既読にする）。 */
-export async function replyAsTeacher(id: number, body: string, seenMessageId?: number): Promise<ConsultationThread> {
+/**
+ * 先生の返信。seenMessageIds は返信を書いた画面に出ていた学生の未読の発言の ID で、
+ * Backend はそのうちのものだけを既読にする（画面に出ていなかった発言は ID が小さくても未読のまま）。
+ */
+export async function replyAsTeacher(id: number, body: string, seenMessageIds: number[] = []): Promise<ConsultationThread> {
   const res = await fetch(`/api/admin/teacher/consultations/${id}/messages`, {
     method: 'POST',
     headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body, seen_message_id: seenMessageId ?? 0 }),
+    body: JSON.stringify({ body, seen_message_ids: seenMessageIds }),
   })
   if (!res.ok) return readError(res, '返信を送れませんでした')
   return (await res.json()) as ConsultationThread

@@ -1941,7 +1941,7 @@ paths:
       summary: 学生から先生への質問のスレッドを作る
       description: |
         #2028。学生は `X-User-Token` から決まる。本文は前後の空白を除いて1000文字（Unicode のコードポイント）まで。
-        学生でない（ゲスト・管理者・職員）なら 403。学校が未登録・学校の学園が本人と違うなら 400（どの先生にも届かないため）。
+        学生でない（ゲスト・管理者・職員）、または保存の直前に退会が確定していたなら 403。学校が未登録・学校の学園が本人と違うなら 400（どの先生にも届かないため）。
         先生がまだ答えていない質問が5件あれば 429。
         保存のあとのスレッドの読み直しに失敗しても 201 で `stale: true` を返す（再送で二重にしない）。
       security: [{ userToken: [] }]
@@ -2036,8 +2036,9 @@ paths:
       tags: [admin-analytics]
       summary: スレッドに先生が返信する
       description: |
-        スレッドの学生の学校が担当校でなければ 404。`seen_message_id`（返信を書いた画面に出ていた最後の発言の ID）までの
-        学生の発言を、返信と同じトランザクションで既読にする（省略・0 なら既読にしない）。
+        スレッドの学生の学校が担当校でなければ 404。`seen_message_ids`（返信を書いた画面に出ていた発言の ID）のうち
+        学生の未読の発言を、返信と同じトランザクションで既読にする（省略・空なら既読にしない。1000 件を超えたら 400）。
+        画面に出ていなかった発言は、ID が小さくても既読にしない。
         保存のあとのスレッドの読み直しに失敗しても 201 で `stale: true` を返す（再送で二重にしない）。
       security: [{ adminAuth: [] }]
       parameters:
@@ -2051,7 +2052,10 @@ paths:
               required: [body]
               properties:
                 body: { type: string, maxLength: 1000 }
-                seen_message_id: { type: integer }
+                seen_message_ids:
+                  type: array
+                  maxItems: 1000
+                  items: { type: integer }
       responses:
         "201": { description: 返信後のスレッド }
         "400": { $ref: "#/components/responses/ValidationError" }

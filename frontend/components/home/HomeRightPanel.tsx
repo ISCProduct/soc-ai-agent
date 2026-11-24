@@ -104,6 +104,14 @@ export function HomeRightPanel({
               {g.message}
               {g.suggested_industries && g.suggested_industries.length > 0 && `（参考: ${g.suggested_industries.join('、')}）`}
             </Typography>
+            {/* 案内に返信・相談できる（#2028）。狭い画面の案内（page-content.tsx）と同じリンク */}
+            <Typography
+              component={NextLink}
+              href={`/consultations?thread=${g.id}`}
+              sx={{ alignSelf: 'flex-start', fontSize: 16, fontWeight: 700, color: HOME_COLORS.link, textDecoration: 'underline' }}
+            >
+              先生に返信する
+            </Typography>
             <ButtonBase
               // 閉じる処理中は無効にする。連打すると同じ案内へ何度も POST が飛ぶ。
               disabled={!canDismiss(dismissingIds, g.id)}
