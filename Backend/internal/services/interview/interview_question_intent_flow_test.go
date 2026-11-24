@@ -12,6 +12,8 @@ type fakeQuestionStateRepo struct {
 	states  []models.InterviewQuestionState
 	latest  *models.InterviewQuestionState
 	created []*models.InterviewQuestionState
+	// failUpdate が返すエラーで Update を失敗させる（nil なら成功）
+	failUpdate func(*models.InterviewQuestionState) error
 }
 
 func (r *fakeQuestionStateRepo) CountBySessionID(uint) (int64, error) {
@@ -25,7 +27,12 @@ func (r *fakeQuestionStateRepo) Create(s *models.InterviewQuestionState) error {
 	r.created = append(r.created, s)
 	return nil
 }
-func (r *fakeQuestionStateRepo) Update(*models.InterviewQuestionState) error { return nil }
+func (r *fakeQuestionStateRepo) Update(s *models.InterviewQuestionState) error {
+	if r.failUpdate != nil {
+		return r.failUpdate(s)
+	}
+	return nil
+}
 func (r *fakeQuestionStateRepo) FindBySessionID(uint) ([]models.InterviewQuestionState, error) {
 	return r.states, nil
 }
