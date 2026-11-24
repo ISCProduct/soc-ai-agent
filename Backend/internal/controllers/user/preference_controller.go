@@ -9,6 +9,7 @@ import (
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
+	"Backend/internal/services/userpreference"
 
 	"github.com/labstack/echo/v4"
 )
@@ -27,17 +28,17 @@ type industryLister interface {
 }
 
 type UserPreferenceController struct {
-	repo       *repositories.UserPreferenceRepository
+	service    *userpreference.Service
 	syncer     scoutIndexSyncer
 	industries industryLister
 }
 
 func NewUserPreferenceController(
-	repo *repositories.UserPreferenceRepository,
+	service *userpreference.Service,
 	syncer scoutIndexSyncer,
 	industries industryLister,
 ) *UserPreferenceController {
-	return &UserPreferenceController{repo: repo, syncer: syncer, industries: industries}
+	return &UserPreferenceController{service: service, syncer: syncer, industries: industries}
 }
 
 // Industries GET /api/user/industries
@@ -73,15 +74,8 @@ func (c *UserPreferenceController) Get(ctx echo.Context) error {
 	if !ok {
 		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
-	pref, err := c.repo.FindByUserID(userID)
-	if err != nil {
-		return httpapi.InternalError(err)
-	}
-	if pref == nil {
-		// 未設定でも 200 で空の希望条件を返し、フロントの分岐を減らす。
-		pref = &models.UserPreference{UserID: userID}
-	}
-	allow, err := c.repo.GetScoutVisibility(userID)
+	// 未設定でも 200 で空の希望条件を返す（service が空の希望条件を返す）。
+	pref, allow, err := c.service.Get(userID)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -110,16 +104,7 @@ func (c *UserPreferenceController) Put(ctx echo.Context) error {
 		DesiredLocation:   location,
 		Note:              strings.TrimSpace(body.Note),
 	}
-	if err := c.repo.Upsert(pref); err != nil {
-		return httpapi.InternalError(err)
-	}
-
-	if body.AllowScoutVisibility != nil {
-		if err := c.repo.SetScoutVisibility(userID, *body.AllowScoutVisibility); err != nil {
-			return httpapi.InternalError(err)
-		}
-	}
-	allow, err := c.repo.GetScoutVisibility(userID)
+	allow, err := c.service.Save(pref, body.AllowScoutVisibility)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -151,7 +136,7 @@ type trainingConsentResponse struct {
 
 // trainingConsentResponseFor は、同意の現在値と最後に変更した日時を（1つのクエリで）読み、応答を組み立てる。
 func (c *UserPreferenceController) trainingConsentResponseFor(userID uint) (trainingConsentResponse, error) {
-	state, err := c.repo.GetTrainingConsent(userID)
+	state, err := c.service.TrainingConsent(userID)
 	if err != nil {
 		return trainingConsentResponse{}, err
 	}
@@ -195,7 +180,7 @@ func (c *UserPreferenceController) PutTrainingConsent(ctx echo.Context) error {
 	}
 	// 値の更新と同意の履歴（どの文言の版に対する操作か）を同じトランザクションで保存する（#2168）。
 	// どちらかが失敗すれば両方とも巻き戻るので、500 を返して保存できたように見せない。
-	if err := c.repo.SetTrainingUse(userID, *body.AllowTrainingUse, body.ConsentTextVersion); err != nil {
+	if err := c.service.SetTrainingUse(userID, *body.AllowTrainingUse, body.ConsentTextVersion); err != nil {
 		return httpapi.InternalError(err)
 	}
 	resp, err := c.trainingConsentResponseFor(userID)

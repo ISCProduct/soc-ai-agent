@@ -3,10 +3,12 @@ package admin
 import (
 	"Backend/domain/repository"
 	"Backend/internal/controllers/httpapi"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/companyportal"
+	"Backend/internal/services/costs"
 	"Backend/internal/services/interview"
 	"Backend/internal/services/school"
 	"Backend/internal/services/shared"
@@ -36,6 +38,7 @@ type AdminInterviewController struct {
 	userRepo            repository.UserRepository
 	sessionRepo         repository.InterviewSessionRepository
 	schools             *school.SchoolService
+	aiBudget            costs.AIBudgetStatusProvider
 }
 
 func NewAdminInterviewController(
@@ -83,6 +86,11 @@ func (c *AdminInterviewController) ensureSchoolAccessForUser(ctx echo.Context, o
 // SetOpenAIClient OpenAIクライアントを注入する
 func (c *AdminInterviewController) SetOpenAIClient(client *openai.Client) {
 	c.openaiClient = client
+}
+
+// SetAIBudget は面接質問の AI 生成に使う予算判定を注入する。
+func (c *AdminInterviewController) SetAIBudget(p costs.AIBudgetStatusProvider) {
+	c.aiBudget = p
 }
 
 // SetUserAccessGuard 退会済みユーザーの動画閲覧を遮断するために注入する
@@ -295,6 +303,17 @@ func (c *AdminInterviewController) GenerateCompanyQuestions(ctx echo.Context) er
 
 	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 60*time.Second)
 	defer cancel()
+
+	// 静的シークレットでの呼び出し（利用者なし）は予算の対象外。ほかの AI ルートの予算判定と同じ扱い。
+	if userID, ok := middleware.AdminUserIDFromContext(reqCtx); ok {
+		if err := costs.CheckUserAIBudget(reqCtx, c.aiBudget, userID); err != nil {
+			if errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+				return httpapi.AIBudgetExceeded(ctx)
+			}
+			httpapi.LogError(err)
+			return httpapi.AIBudgetUnavailable()
+		}
+	}
 
 	questions, err := c.generateQuestionsWithAI(reqCtx, company, positions)
 	if err != nil {
