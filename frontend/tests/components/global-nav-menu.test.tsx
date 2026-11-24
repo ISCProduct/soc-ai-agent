@@ -71,6 +71,18 @@ describe('GlobalNavMenu', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
+  it('相関図では画面のサイドバー・メニューと重複させない', () => {
+    mockPathname = '/correlation-diagram'
+    const { container } = render(<GlobalNavMenu />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('従来の企業選択画面では共通メニューを表示する', () => {
+    mockPathname = '/correlation-diagram'
+    render(<GlobalNavMenu correlationSelection />)
+    expect(screen.getByRole('button', { name: 'メニューを開く' })).toBeInTheDocument()
+  })
+
   it('ログイン画面では表示しない', () => {
     mockPathname = '/login'
     const { container } = render(<GlobalNavMenu />)
