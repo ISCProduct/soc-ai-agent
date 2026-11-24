@@ -1,12 +1,12 @@
 import { authService } from '@/lib/auth'
-import { BACKEND_URL } from '@/lib/config'
 
 export type VideoRetention = {
   days: number | null
   unlimited: boolean
 }
 
-const ENDPOINT = `${BACKEND_URL}/api/user/interview-video-retention`
+// httpOnly Cookie のトークンは BFF が付ける（SOCAIAGENT-683）。Backend 直叩きは 401 になる。
+const ENDPOINT = '/api/bff/user/interview-video-retention'
 
 /** 同意文と面接結果に出す、学校の保持期間の一文。 */
 export function videoRetentionSentence(retention: VideoRetention | null, status: 'loading' | 'error' | 'ready'): string {

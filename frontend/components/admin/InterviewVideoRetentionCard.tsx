@@ -34,6 +34,7 @@ export function InterviewVideoRetentionCard() {
   const [schoolID, setSchoolID] = useState<number | null>(null)
   const [choice, setChoice] = useState('90')
   const [loading, setLoading] = useState(true)
+  const [retentionLoading, setRetentionLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
@@ -60,21 +61,30 @@ export function InterviewVideoRetentionCard() {
   }, [])
 
   useEffect(() => {
-    if (schoolID == null) return
+    if (schoolID == null) {
+      setRetentionLoading(false)
+      return
+    }
     let cancelled = false
-    const requested = schoolID
+    // 切り替え中に前の学校の値が残ったまま保存できないよう、未読込に戻す
+    setRetentionLoading(true)
+    setChoice('90')
+    setSaved('')
+    setError('')
     void (async () => {
       try {
-        const response = await fetch(`/api/admin/schools/${requested}`, {
+        const response = await fetch(`/api/admin/schools/${schoolID}`, {
           headers: authService.getAdminFetchHeaders(),
         })
         if (!response.ok) throw new Error('failed')
         const data = (await response.json()) as { interview_video_retention_days?: number | null }
-        if (cancelled || requested !== schoolID) return
+        if (cancelled) return
         setChoice(toChoice(data.interview_video_retention_days ?? null))
         setError('')
       } catch {
         if (!cancelled) setError('今の保持期間を読み込めませんでした')
+      } finally {
+        if (!cancelled) setRetentionLoading(false)
       }
     })()
     return () => {
@@ -83,7 +93,7 @@ export function InterviewVideoRetentionCard() {
   }, [schoolID])
 
   const save = async () => {
-    if (schoolID == null || !canEdit) return
+    if (schoolID == null || !canEdit || retentionLoading) return
     setSaving(true)
     setSaved('')
     setError('')
@@ -138,7 +148,7 @@ export function InterviewVideoRetentionCard() {
               select
               label="残す期間"
               value={choice}
-              disabled={!canEdit}
+              disabled={!canEdit || retentionLoading}
               onChange={(event) => setChoice(event.target.value)}
               sx={{ mb: 2, minWidth: 220 }}
             >
@@ -150,8 +160,12 @@ export function InterviewVideoRetentionCard() {
               <Typography variant="body2">変更できるのは学校管理者です。</Typography>
             )}
             {canEdit && (
-              <Button variant="contained" onClick={() => void save()} disabled={saving}>
-                {saving ? '保存しています' : 'この期間で保存する'}
+              <Button
+                variant="contained"
+                onClick={() => void save()}
+                disabled={saving || retentionLoading}
+              >
+                {saving ? '保存しています' : retentionLoading ? '読み込み中' : 'この期間で保存する'}
               </Button>
             )}
             {saved && <Alert severity="success" sx={{ mt: 2 }}>{saved}</Alert>}
