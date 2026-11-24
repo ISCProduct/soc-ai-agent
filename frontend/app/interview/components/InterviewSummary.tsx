@@ -19,6 +19,7 @@ import CheckIcon from '@mui/icons-material/Check'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { InterviewReport, InterviewUtterance, PhraseSuggestion, interviewApi } from '@/lib/interview'
 import { parseJsonSafe } from '@/lib/interview/utils'
+import QuestionCategoryBreakdown from './QuestionCategoryBreakdown'
 
 import { UI } from '@/lib/design/tokens'
 
@@ -323,6 +324,16 @@ export default function InterviewSummary({ report, utterances, userId, theme = '
           )}
         </Box>
       ) : null}
+
+      {/* 質問の種類ごとの評価（SOCAIAGENT-610）。改善点の次に読ませる */}
+      <QuestionCategoryBreakdown
+        json={report.category_breakdown_json}
+        paperBg={paperBg}
+        paperBorder={paperBorder}
+        textPrimary={textPrimary}
+        textSecondary={textSecondary}
+        textMuted={textMuted}
+      />
 
       {/* Phrase Suggestions */}
       {userId && (
