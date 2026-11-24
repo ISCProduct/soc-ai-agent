@@ -207,13 +207,13 @@ export const interviewApi = {
   },
 
   async listPlayback(sessionId: number): Promise<InterviewPlayback> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/videos`, undefined, LIST_FETCH_TIMEOUT_MS)
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}/videos`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return (await res.json()) as InterviewPlayback
   },
 
   async videoPlaybackURL(sessionId: number, videoId: number): Promise<{ url: string; expires_at: string }> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/videos/${videoId}/url`, undefined, LIST_FETCH_TIMEOUT_MS)
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}/videos/${videoId}/url`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return (await res.json()) as { url: string; expires_at: string }
   },
