@@ -8,7 +8,7 @@ function json(body: unknown) {
 async function mockHome(page: Page, opts: { schedule: unknown[]; applications: unknown[]; guidances: unknown[] }) {
   await page.route('**/api/schedule', (route) => route.fulfill(json(opts.schedule)))
   await page.route('**/api/applications', (route) => route.fulfill(json({ applications: opts.applications })))
-  await page.route('**/api/user/guidances', (route) => route.fulfill(json({ guidances: opts.guidances })))
+  await page.route('**/api/bff/user/guidances', (route) => route.fulfill(json({ guidances: opts.guidances })))
   await page.route('**/api/whats-new', (route) => route.fulfill(json([])))
   await page.route('**/api/resume/status', (route) =>
     route.fulfill(json({ has_document: false, latest_score: null, needs_attention: true })),

@@ -1,4 +1,4 @@
-h1:VFsdpD6Dc4xb4xz+QAxg99fyGTCglU+8u1RGhCWjcu8=
+h1:1uxqtd/XbHH5I6y70AzqFcCmKpzUAGmv2Mr27wriKaU=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -85,4 +85,5 @@ h1:VFsdpD6Dc4xb4xz+QAxg99fyGTCglU+8u1RGhCWjcu8=
 20261121181608_user_company_match_favorite_index.up.sql h1:leLbPzS/D14a3Y0ok7AOmd6etwh3JjhhmXHeDpOQD4c=
 20261122030155_add_password_reset_token_hash_to_users.up.sql h1:0AORfLjn56TGkPN48NEXgi+eQrHqSAgEZoMfQajbzCA=
 20261122030156_invalidate_plain_password_reset_tokens.up.sql h1:ZdQQ+B7+xGRaF1rFZTvxUCyHboChYS1ijwRgrNTPlhM=
-20261123065700_guidance_messages.up.sql h1:HnygKblsaVkYkvyMGMBJskcM2ZAItHePWptEc3X4maQ=
+20261122211106_git_hub_repos_add_is_owner_or_collaborator.up.sql h1:2bCMGa5zSnveZ3UxIAxfNp0YKFxTrdWfSRapGjOW/no=
+20261123065700_guidance_messages.up.sql h1:OPijiUWlaDg94pHnodF5Oowpo9/8Z77DTjSmuvbFiNk=
