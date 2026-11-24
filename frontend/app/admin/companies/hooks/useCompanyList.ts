@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { authService } from '@/lib/auth'
 import { getAdminSchoolAccess } from '@/lib/admin/school-access'
+import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin/fetch'
 import { runCompanyListReload, type CompanyListReloadKind } from '../company-list-reload'
 import {
   INDUSTRY_UNSET,
@@ -46,24 +47,32 @@ export function useCompanyList() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
 
+  // 取得系は adminFetchJson で成否を先に見る。HTML のエラーページや通信断も例外にそろえ、
+  // 画面のエラー表示に出す（#2573。以前は res.json() が例外になり、何も表示されなかった）。
   const fetchCoverage = useCallback(async () => {
-    const res = await fetch('/api/admin/companies/l1-coverage', {
-      headers: authService.getAdminFetchHeaders(),
-      cache: 'no-store',
-    })
-    if (!res.ok) return
-    const data = await res.json()
-    setCoverage(data)
+    try {
+      const data = await adminFetchJson<L1Coverage>(
+        '/api/admin/companies/l1-coverage',
+        { headers: authService.getAdminFetchHeaders(), cache: 'no-store' },
+        'マッチング用データの状況の取得に失敗しました',
+      )
+      setCoverage(data)
+    } catch (e) {
+      setError(toAdminErrorMessage(e))
+    }
   }, [])
 
   const fetchIndustries = useCallback(async () => {
-    const res = await fetch('/api/admin/companies/industries', {
-      headers: authService.getAdminFetchHeaders(),
-      cache: 'no-store',
-    })
-    if (!res.ok) return
-    const data = await res.json()
-    setIndustries(Array.isArray(data?.industries) ? data.industries : [])
+    try {
+      const data = await adminFetchJson<{ industries?: string[] }>(
+        '/api/admin/companies/industries',
+        { headers: authService.getAdminFetchHeaders(), cache: 'no-store' },
+        '業界一覧の取得に失敗しました',
+      )
+      setIndustries(Array.isArray(data?.industries) ? data.industries : [])
+    } catch (e) {
+      setError(toAdminErrorMessage(e))
+    }
   }, [])
 
   const fetchCompanies = useCallback(
@@ -74,9 +83,10 @@ export function useCompanyList() {
       industry: string,
       readiness: FilterReadiness,
       groupIndustry: boolean,
-      schoolFilter?: number,
+      // 操作後の取り直しでは false にし、操作で出たエラー表示を残す（SOCAIAGENT-716）
+      clearError = true,
     ) => {
-      setError('')
+      if (clearError) setError('')
       const offset = (p - 1) * PAGE_SIZE
       const params = new URLSearchParams({
         limit: String(PAGE_SIZE),
@@ -88,19 +98,19 @@ export function useCompanyList() {
       if (industry) params.set('industry', industry)
       if (readiness !== 'all') params.set('readiness', readiness)
       if (groupIndustry) params.set('order', 'industry')
-      // 企業カタログは共有のため一覧自体は絞り込まない。schoolFilterは承認トグルの対象校選択にのみ使う。
-      void schoolFilter
-      const res = await fetch(`/api/admin/companies?${params}`, {
-        headers: authService.getAdminFetchHeaders(),
-        cache: 'no-store',
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data?.error || '企業一覧の取得に失敗しました')
-        return
+      // 企業カタログは共有のため、学校の選択では一覧を絞り込まない（承認トグルの対象校選択にのみ使う）。
+      // そのため学校を切り替えても取り直さない（#2573）。
+      try {
+        const data = await adminFetchJson<{ companies?: Company[]; total?: number }>(
+          `/api/admin/companies?${params}`,
+          { headers: authService.getAdminFetchHeaders(), cache: 'no-store' },
+          '企業一覧の取得に失敗しました',
+        )
+        setCompanies(data?.companies || [])
+        setTotal(data?.total ?? 0)
+      } catch (e) {
+        setError(toAdminErrorMessage(e))
       }
-      setCompanies(data?.companies || [])
-      setTotal(data?.total ?? 0)
     },
     [],
   )
@@ -117,8 +127,8 @@ export function useCompanyList() {
   }, [searchInput])
 
   useEffect(() => {
-    void fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry, schoolId)
-  }, [fetchCompanies, page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry, schoolId])
+    void fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry)
+  }, [fetchCompanies, page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry])
 
   useEffect(() => {
     setSelectedIds([])
@@ -136,10 +146,14 @@ export function useCompanyList() {
     })
   }, [companies])
 
+  // 業界一覧は権限に関係なく初回に1回だけ取る。coverage はシステム管理者と分かってから取る（#2573）。
+  useEffect(() => {
+    void fetchIndustries()
+  }, [fetchIndustries])
+
   useEffect(() => {
     if (isPlatform) void fetchCoverage()
-    void fetchIndustries()
-  }, [isPlatform, fetchCoverage, fetchIndustries])
+  }, [isPlatform, fetchCoverage])
 
   const handlePageChange = (_: React.ChangeEvent<unknown>, value: number) => {
     setPage(value)
@@ -148,7 +162,7 @@ export function useCompanyList() {
   const reloadCurrentList = (kind: CompanyListReloadKind) =>
     runCompanyListReload(kind, {
       companies: () =>
-        fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry, schoolId),
+        fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry, false),
       industries: () => fetchIndustries(),
       coverage: () => fetchCoverage(),
     })

@@ -69,6 +69,12 @@ export function useInterviewSession({
   // session/userを読んでしまう(#926)のを防ぐため、常に最新値を反映するrefを使う
   const sessionRef = useRef<InterviewSession | null>(null)
   const userRef = useRef<User | null>(null)
+  /**
+   * 終了処理の実行中・実行済みか(#2573)。時間切れの判定はタイマーで毎秒成り立ち、タイマーを止める
+   * cleanupConnection は録画の取得を待った後なので、その間に handleStop が重ねて呼ばれる。
+   * 「完了する」と時間切れが重なった場合も含め、1回の面接で終了処理を1回だけにする。次の参加で戻す。
+   */
+  const stoppingRef = useRef(false)
 
   // 小さなフックへ渡す後段の関数（sendTurn / handleStop）は、このレンダーで後から定義するものを
   // 呼び出し時に参照する。分割前と同じく「録音・タイマーを始めたレンダー」の関数が呼ばれる。
@@ -91,7 +97,7 @@ export function useInterviewSession({
   const {
     report, setReport, reportStatus, setReportStatus, reportProgress, setReportProgress,
     reportFailedByServer, setReportFailedByServer, reportStartedAt, reportRetryError, setReportRetryError,
-    emailSending, emailSent, emailError, scoresAfter, pollRef,
+    emailSending, emailSent, emailError, scoresAfter, stopReportPolling,
     startReportPolling, retryReportPolling, sendReportEmail,
   } = useInterviewReport({ session, user })
   const {
@@ -150,7 +156,8 @@ export function useInterviewSession({
   const cleanupConnection = (invalidateCompanyContext = false) => {
     audioGenerationRef.current++
     if (invalidateCompanyContext) companyContextGenerationRef.current++
-    ;[timerRef, pollRef].forEach(r => { if (r.current) { clearInterval(r.current); r.current = null } })
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
+    stopReportPolling()
     questionStartedAtRef.current = null
     if (mediaRecorderRef.current) {
       // 録音中に終了した場合、stop() の onstop で新しいターンを送ると
@@ -184,6 +191,7 @@ export function useInterviewSession({
 
   const handleJoin = async () => {
     if (!user) return
+    stoppingRef.current = false
     companyContextGenerationRef.current++
     setErrorMessage(null)
     setUtterances([])
@@ -235,6 +243,8 @@ export function useInterviewSession({
   }
 
   const handleStop = async (forced = false, limitReached = false) => {
+    if (stoppingRef.current) return
+    stoppingRef.current = true
     const videoBlob = await media.stopAndCollectVideoBlob()
 
     cleanupConnection()

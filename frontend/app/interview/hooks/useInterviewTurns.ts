@@ -109,6 +109,12 @@ export function useInterviewTurns({
   const historyRef = useRef<{ role: string; content: string }[]>([])
   const companyContextRef = useRef({ reading: '', readingResolved: false })
   const companyContextGenerationRef = useRef(0)
+  /**
+   * /turn に送る進行状況の最新値(#2573)。sendTurn は録音を始めたレンダーの閉包で呼ばれるため、
+   * 引数の値をそのまま読むと録音開始時点の残り時間・経過・質問番号が送られる。毎レンダー更新して送信時に読む。
+   */
+  const progressRef = useRef({ remainingSeconds, currentQuestionIndex, totalQuestionCount, questionElapsedSeconds })
+  progressRef.current = { remainingSeconds, currentQuestionIndex, totalQuestionCount, questionElapsedSeconds }
 
   /**
    * ターンの応答処理（発話を保存チェーンへ積み終えるまで）を「実行中のターン」として記録する(#1476)。
@@ -208,10 +214,11 @@ export function useInterviewTurns({
     formData.append('audio', audioBlob, `audio.${ext}`)
     formData.append('user_id', String(user.user_id))
     formData.append('turn_count', String(Math.floor(historyRef.current.length / 2) + 1))
-    formData.append('remaining_seconds', String(remainingSeconds))
-    formData.append('question_index', String(currentQuestionIndex))
-    formData.append('total_questions', String(totalQuestionCount))
-    formData.append('question_elapsed_seconds', String(questionElapsedSeconds))
+    const progress = progressRef.current
+    formData.append('remaining_seconds', String(progress.remainingSeconds))
+    formData.append('question_index', String(progress.currentQuestionIndex))
+    formData.append('total_questions', String(progress.totalQuestionCount))
+    formData.append('question_elapsed_seconds', String(progress.questionElapsedSeconds))
     formData.append('question_duration_seconds', String(Math.max(60, interviewLimits.questionDurationSeconds || 180)))
     formData.append('company_name', interviewCompany?.name || '')
     formData.append('company_reading', companyContextRef.current.reading || interviewCompany?.name_reading || '')

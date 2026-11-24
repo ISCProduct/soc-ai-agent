@@ -22,6 +22,7 @@ import {
   GLOBAL_BATCH_PREVIEW_LIMIT,
   GLOBAL_BATCH_WAVE_LIMIT,
   WARM_L1_WAVE_LIMIT,
+  networkErrorMessage,
   type L1Coverage,
 } from '../company-list-model'
 
@@ -67,6 +68,9 @@ export function useCompanyBatchActions({
         `準備完了: 新規 ${data.created ?? 0} 社 / 更新 ${data.updated ?? 0} 社 / 変更なし ${data.skipped ?? 0} 社`,
       )
       await reloadCurrentList('catalog')
+    } catch {
+      // 通信断や HTML のエラーページで res.json() が例外になった場合（#2573）
+      setError(networkErrorMessage('マッチング用データの準備'))
     } finally {
       setWarming(false)
     }
@@ -113,12 +117,18 @@ export function useCompanyBatchActions({
         return
       }
 
+      // 事前確認は「対象を確認」と同じ条件で問い合わせ、失敗したら更新を始めない（#2573）
       const preview = await postCompanyBatch('/api/admin/companies/warm-l1', {
         limit: 100,
         dry_run: true,
         include_info: true,
         include_persona: true,
+        concurrency: GLOBAL_BATCH_CONCURRENCY,
       })
+      if (!preview.ok) {
+        setError(String(preview.data.error || preview.data.message || 'マッチング用データの更新に失敗しました'))
+        return
+      }
       let progress = emptyBatchProgress(
         Math.max(candidateCountFromResponse(preview.data), coverage?.needs_warm ?? 0),
       )
@@ -203,6 +213,11 @@ export function useCompanyBatchActions({
         primary_only: true,
         concurrency: GLOBAL_BATCH_CONCURRENCY,
       })
+      // 事前確認が失敗したら取得を始めない（マッチング用データの更新と同じ扱い。SOCAIAGENT-716）
+      if (!preview.ok) {
+        setError(String(preview.data.error || preview.data.message || `まとめて取得に失敗しました (${preview.status})`))
+        return
+      }
       let progress = emptyBatchProgress(candidateCountFromResponse(preview.data))
       setBatchProgress(progress)
       setFetchMessage(formatBatchProgressLabel(progress, true))

@@ -75,7 +75,6 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 
 	// 質問数を計算（進捗表示用）
 	answeredCount := countUserAnswers(history)
-	_ = allPhasesReachedMax(completedProgresses, allPhases)
 
 	// 完了判定: 質問数やフェーズの消化ではなく、判定できたかで決める（SOCAIAGENT-668）。
 	// 15 問に満たなくても、判定できていれば完了。15 問を超えても、判定できなければ続ける。
@@ -183,6 +182,10 @@ func (s *ChatService) selectNextQuestion(ctx context.Context, input processQuest
 		currentPhaseName = currentPhase.Phase.PhaseName
 	}
 	predefinedQ, err := s.tryGetPredefinedQuestion(req.UserID, req.SessionID, targetCategory, req.IndustryID, jobCategoryID, targetLevel, askedTexts, currentPhaseName)
+	if err != nil {
+		// 取得に失敗しても AI 生成へ進む（流れは変えない）。原因を追えるように残す(#2573)。
+		log.Printf("Warning: failed to get predefined question: %v\n", err)
+	}
 
 	if err == nil && predefinedQ != nil {
 		log.Printf("[RuleBased] Using predefined question (ID: %d) for category: %s\n", predefinedQ.ID, predefinedQ.Category)

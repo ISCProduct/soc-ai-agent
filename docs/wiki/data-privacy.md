@@ -45,12 +45,20 @@
 
 S3 削除は DB コミット後の best-effort です。失敗時は監査ログ `metadata.s3_errors` に記録します。
 
+### 使われなくなったゲストの掃除（SOCAIAGENT-689）
+
+最後に使ってから7日たったゲスト（リフレッシュトークンの最終発行で判定。トークンが無ければ作成日時）を、日次ジョブが上と同じ経路で論理退会させます。データは通常の退会と同じく **12ヶ月保持**し、その後に物理削除します。保持期間は `WithdrawalRetentionMonths`（`Backend/internal/services/auth/user_deletion_service.go`）です。
+
+- 対象: ゲスト・管理者でない・未退会。1回 500 件まで
+- 一覧を取ったあとで本登録した・使ったゲストは、退会のトランザクションの中で確かめ直して対象から外します
+
 ### 監査ログ
 
 | Action | 実行者 |
 |--------|--------|
 | `user.self_withdraw` | 本人 |
 | `user.admin_withdraw` | 管理者（`X-Admin-Email`） |
+| `user.guest_expire` | システム（使われなくなったゲストの掃除） |
 | `user.purge` | システム（バッチ / 管理者パージ） |
 
 `GET /api/admin/audit-logs` で確認できます。

@@ -126,3 +126,7 @@ export function groupCompaniesByIndustry(companies: Company[]): { key: string; l
   }
   return groups
 }
+
+/** 通信断など、応答を受け取れなかったときの文言（#2573） */
+export const networkErrorMessage = (action: string) =>
+  `${action}中に通信エラーが発生しました。時間をおいて再度お試しください。`

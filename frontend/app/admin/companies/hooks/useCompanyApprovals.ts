@@ -12,16 +12,20 @@ export function useCompanyApprovals(schoolId: number | undefined) {
   const [approvedCompanyIds, setApprovedCompanyIds] = useState<Set<number> | null>(null)
   const [approvalBusyId, setApprovalBusyId] = useState<number | null>(null)
   const [approvalError, setApprovalError] = useState('')
+  // 取得中。取得失敗（null）と同じ「不明」表示にしないために分ける（#2573）
+  const [approvalLoading, setApprovalLoading] = useState(false)
 
   useEffect(() => {
     if (schoolId === undefined) {
       setApprovedCompanyIds(null)
       setApprovalError('')
+      setApprovalLoading(false)
       return
     }
     let cancelled = false
     const load = async () => {
       setApprovalError('')
+      setApprovalLoading(true)
       try {
         // adminFetchJson は非2xx・タイムアウト・ALB の HTML エラーページを
         // すべて日本語メッセージ付きの例外へ正規化する(#1066)。素の fetch だと
@@ -37,6 +41,8 @@ export function useCompanyApprovals(schoolId: number | undefined) {
         if (cancelled) return
         setApprovedCompanyIds(null)
         setApprovalError(toAdminErrorMessage(e))
+      } finally {
+        if (!cancelled) setApprovalLoading(false)
       }
     }
     void load()
@@ -73,5 +79,5 @@ export function useCompanyApprovals(schoolId: number | undefined) {
     }
   }
 
-  return { approvedCompanyIds, approvalBusyId, approvalError, toggleCompanyApproval }
+  return { approvedCompanyIds, approvalLoading, approvalBusyId, approvalError, toggleCompanyApproval }
 }

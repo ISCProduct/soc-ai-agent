@@ -41,7 +41,7 @@ type UseInterviewReportArgs = {
 
 /**
  * 面接後のレポート（生成待ちのポーリング・再試行・面接後スコア・メール送信）。
- * ポーリングの停止（pollRef の clear）は cleanupConnection も行う。
+ * ポーリングの停止（stopReportPolling）は cleanupConnection も呼ぶ。
  */
 export function useInterviewReport({ session, user }: UseInterviewReportArgs) {
   const [report, setReport] = useState<InterviewReport | null>(null)
@@ -221,7 +221,7 @@ export function useInterviewReport({ session, user }: UseInterviewReportArgs) {
     emailSent,
     emailError,
     scoresAfter,
-    pollRef,
+    stopReportPolling,
     startReportPolling,
     retryReportPolling,
     sendReportEmail,

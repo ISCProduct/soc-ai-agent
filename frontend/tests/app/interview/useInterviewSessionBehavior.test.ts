@@ -15,6 +15,7 @@ import { act, renderHook } from '@testing-library/react'
 Object.assign(globalThis, { TextEncoder, TextDecoder })
 
 import { useInterviewSession } from '@/app/interview/hooks/useInterviewSession'
+import { useInterviewClock } from '@/app/interview/hooks/useInterviewClock'
 import type { InterviewMedia } from '@/app/interview/hooks/useInterviewMedia'
 import type { InterviewCompany, InterviewStatus, Position } from '@/app/interview/types'
 import { FINISH_FAILED_MESSAGE, FORCED_STOP_MESSAGE } from '@/app/interview/finishOutcome'
@@ -477,6 +478,142 @@ describe('useInterviewSession の挙動', () => {
       expect(result.current.questionElapsedSeconds).toBe(180)
 
       unmount()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  const fakeTimersExceptDate = () => jest.useFakeTimers({
+    doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate', 'performance', 'requestAnimationFrame', 'cancelAnimationFrame'],
+  })
+
+  it('/turn には録音開始時ではなく送信時点の残り時間・経過・質問総数を送る (#2573)', async () => {
+    // 冒頭の質問の応答を止めておき、録音中に届かせて質問総数を変える
+    let releaseStartTurn: () => void = () => {}
+    route = (url) => {
+      if (!url.includes('/start-turn')) return undefined
+      return new Promise<FakeResponse>(resolve => {
+        releaseStartTurn = () => resolve(turnResponse({ ai_text: '自己紹介をお願いします', total_questions: 5 }))
+      })
+    }
+    fakeTimersExceptDate()
+    try {
+      const { result, unmount } = renderSession(fakeMedia())
+      await act(async () => {
+        void result.current.handleJoin()
+        await jest.advanceTimersByTimeAsync(0)
+      })
+      expect(calls.some(u => u.includes('/start-turn'))).toBe(true)
+      await act(async () => { await jest.advanceTimersByTimeAsync(10_000) })
+
+      // 10秒時点で録音を始め、その間に冒頭の質問(総数5)が届き、さらに20秒たってから送る
+      act(() => { result.current.startRecording() })
+      await act(async () => {
+        releaseStartTurn()
+        await jest.advanceTimersByTimeAsync(20_000)
+      })
+      expect(result.current.totalQuestionCount).toBe(5)
+      act(() => { result.current.stopRecording() })
+      await act(async () => { await jest.advanceTimersByTimeAsync(0) })
+
+      const body = turnBodies[0]
+      expect(body.get('remaining_seconds')).toBe(String(30 * 60 - 30))
+      expect(body.get('question_elapsed_seconds')).toBe('30')
+      expect(body.get('total_questions')).toBe('5')
+      expect(body.get('question_index')).toBe('1')
+
+      unmount()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('時間切れの後片付けが録画の取得を待つ間もタイマーで終了処理を重ねない (#2573)', async () => {
+    let releaseVideo: () => void = () => {}
+    const media = fakeMedia()
+    ;(media.stopAndCollectVideoBlob as jest.Mock).mockImplementation(
+      () => new Promise<null>(resolve => { releaseVideo = () => resolve(null) }),
+    )
+    fakeTimersExceptDate()
+    try {
+      const { result, unmount } = renderSession(media)
+      await act(async () => { await result.current.handleJoin() })
+
+      // 時間切れ後、録画の取得が返るまでにタイマーが何度も鳴る
+      await act(async () => { await jest.advanceTimersByTimeAsync(30 * 60 * 1000 + 5000) })
+      await act(async () => {
+        releaseVideo()
+        await jest.advanceTimersByTimeAsync(0)
+      })
+      await act(async () => { await jest.advanceTimersByTimeAsync(0) })
+
+      expect(media.stopAndCollectVideoBlob).toHaveBeenCalledTimes(1)
+      expect(calls.filter(u => u.endsWith('/finish'))).toHaveLength(1)
+      expect(result.current.errorMessage).toBe(FORCED_STOP_MESSAGE)
+
+      unmount()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('終了後に再び参加すれば、もう一度終了できる (#2573)', async () => {
+    const { result, unmount } = renderSession(fakeMedia())
+    await act(async () => { await result.current.handleJoin() })
+    await act(async () => { await result.current.handleStop() })
+    await act(async () => { await result.current.handleJoin() })
+    await act(async () => { await result.current.handleStop() })
+    await flush()
+
+    expect(calls.filter(u => u.endsWith('/finish'))).toHaveLength(2)
+
+    unmount()
+  })
+
+  it('残り2分の警告は1回だけ立てる (#2573)', async () => {
+    // useInterviewClock が setState に true を渡した回数を数える（true を渡すのは警告だけ）
+    // 名前空間 import は複製になりスパイが届かないので、フックと同じモジュール本体を差し替える
+    const ReactModule = jest.requireActual<typeof import('react')>('react')
+    const realUseState = ReactModule.useState
+    let trueCalls = 0
+    jest.spyOn(ReactModule, 'useState').mockImplementation(((initial: unknown) => {
+      const [value, set] = realUseState(initial)
+      const counted = (v: unknown) => { if (v === true) trueCalls++; set(v) }
+      return [value, counted]
+    }) as typeof ReactModule.useState)
+    fakeTimersExceptDate()
+    try {
+      const handleStop = jest.fn().mockResolvedValue(undefined)
+      const { result, unmount } = renderHook(() => useInterviewClock({ selectedPosition, handleStop }))
+      act(() => { result.current.startTimer() })
+      await act(async () => { await jest.advanceTimersByTimeAsync((28 * 60 + 10) * 1000) })
+
+      expect(result.current.sessionWarningShown).toBe(true)
+      expect(trueCalls).toBe(1)
+
+      if (result.current.timerRef.current) clearInterval(result.current.timerRef.current)
+      unmount()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('アンマウントでレポートのポーリングを止める', async () => {
+    route = (url) => (isDetail(url) ? jsonResponse({ session: { id: 1 }, report: null }) : undefined)
+    fakeTimersExceptDate()
+    try {
+      const { result, unmount } = renderSession(fakeMedia())
+      await act(async () => { await result.current.handleJoin() })
+      await act(async () => {
+        await result.current.handleStop()
+        await jest.advanceTimersByTimeAsync(3000)
+      })
+      const detailCalls = calls.filter(isDetail).length
+      expect(detailCalls).toBeGreaterThan(0)
+
+      unmount()
+      await act(async () => { await jest.advanceTimersByTimeAsync(9000) })
+      expect(calls.filter(isDetail)).toHaveLength(detailCalls)
     } finally {
       jest.useRealTimers()
     }

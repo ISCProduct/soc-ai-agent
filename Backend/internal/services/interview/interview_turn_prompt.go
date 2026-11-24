@@ -282,25 +282,26 @@ func currentQuestionSection(directive *questionDirective, customQuestions []mode
 	// 【企業情報】の囲みを迂回して system プロンプトへ戻ってくる経路になる。
 	// 「そのまま投げかける」という外側の指示は残し、中の指示文には従わせない。
 	// カテゴリも出自が同じなので同じブロックへ入れる（囲みの外に置くと迂回路になる）。
-	question := directive.Text
+	var notes string
 	if directive.Category != "" {
-		question += fmt.Sprintf("\n（カテゴリ: %s）", directive.Category)
+		notes += fmt.Sprintf("\n（カテゴリ: %s）", directive.Category)
 	}
 	intent := evaluationIntentFor(customQuestions, directive.CompanyQuestionID)
 	if intent != "" {
-		question += fmt.Sprintf("\n（評価したい観点: %s）", intent)
+		notes += fmt.Sprintf("\n（評価したい観点: %s）", intent)
 	}
 	if directive.IsDeepening {
 		// 深掘りの定型文（directive.Text）は学生の回答の一部を含む。システムプロンプトは伏字の対象外なので
 		// 入れない。回答そのものは履歴（伏字を通る）にあるので、元の質問と狙いだけ渡して言い直させる。
+		// カテゴリ・評価したい観点は元の質問と同じ囲みへ入れる（#2573。外に置くと迂回路になる）。
 		s += fmt.Sprintf("\n直前の回答を踏まえ、具体性を引き出す深掘り質問を1問だけ、面接官として自然な言葉で投げかけてください。元の質問:\n%s",
-			shared.WrapUntrustedText(directive.DeepeningOf, "質問文"))
+			shared.WrapUntrustedText(directive.DeepeningOf+notes, "質問文"))
 		if directive.DeepeningFocus != "" {
 			s += "\n" + directive.DeepeningFocus
 		}
 	} else {
 		s += fmt.Sprintf("\n次の質問文をそのまま面接官として投げかけてください（1問のみ）:\n%s",
-			shared.WrapUntrustedText(question, "質問文"))
+			shared.WrapUntrustedText(directive.Text+notes, "質問文"))
 	}
 	if intent != "" {
 		s += "\n" + evaluationIntentNote
