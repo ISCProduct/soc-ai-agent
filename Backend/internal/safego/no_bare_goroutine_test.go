@@ -37,6 +37,9 @@ var allowed = map[string]string{
 	// 移行の成否を WaitGroup と first へ返す。safego.Go だと panic を成功扱いにして、
 	// 移行済みマーカーを書いてしまう。
 	"internal/services/discord/links_dynamo.go": "結果を返す goroutine（自前 recover 済み）",
+	// 読み上げを文ごとに同時に作る。panic を失敗として結果へ返す必要があり、
+	// safego.Go だと失敗が空の音声として扱われ、途中が欠けた音声をつなげてしまう。
+	"internal/openai/tts.go": "結果を返す goroutine（自前 recover 済み）",
 }
 
 func TestNoBareGoroutine(t *testing.T) {

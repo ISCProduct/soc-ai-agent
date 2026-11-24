@@ -1,6 +1,7 @@
 package aibench
 
 import (
+	"maps"
 	"slices"
 	"sort"
 
@@ -156,6 +157,12 @@ type Summary struct {
 	MaxScoreStdDev  float64 `json:"max_score_stddev"`
 	// UnstableCaseIDs は標準偏差が UnstableStdDevThreshold を超えたケース。
 	UnstableCaseIDs []string `json:"unstable_case_ids,omitempty"`
+	// AxisMaxSpread は採点軸ごとの「同一入力を複数回採点したときの最大−最小」の、全ケースでの最大（元の点）。
+	// 平均のスコアでは軸どうしのゆらぎが打ち消し合って見えなくなるため、軸別に出す（SOCAIAGENT-699）。
+	// 破損した実行と、1回しか採点できなかったケースは数えない。
+	AxisMaxSpread map[string]float64 `json:"axis_max_spread,omitempty"`
+	// UnstableAxes は AxisMaxSpread が AxisSpreadWarnPoints を超えた軸。警告のみで失敗にはしない。
+	UnstableAxes []string `json:"unstable_axes,omitempty"`
 
 	// 弁別力: ゴールドラベル（良/中/悪）とスコアの順位相関（1.0が完全一致）。
 	LabelRankCorrelation float64 `json:"label_rank_correlation"`
@@ -226,6 +233,10 @@ type Summary struct {
 // UnstableStdDevThreshold は「再現性が低い」とみなす標準偏差の閾値（正規化スコア）。
 // 0.1 は 10点満点で1点、100点満点で10点のばらつきに相当する。
 const UnstableStdDevThreshold = 0.1
+
+// AxisSpreadWarnPoints は軸別の最大差を警告する閾値（元の点。差がこれを超えたら警告）。
+// 整数で採点する軸では 2点以上の差で警告になる。実測前の仮の値なので、失敗にはせず警告だけにする（SOCAIAGENT-699）。
+const AxisSpreadWarnPoints = 1.0
 
 // Aggregate は実行結果を集計する。
 //
@@ -349,6 +360,12 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 					axisTrue[axis] = append(axisTrue[axis], want)
 				}
 			}
+			for axis, spread := range axisSpreads(runs) {
+				if s.AxisMaxSpread == nil {
+					s.AxisMaxSpread = map[string]float64{}
+				}
+				s.AxisMaxSpread[axis] = max(s.AxisMaxSpread[axis], spread)
+			}
 			cs.ScoreStdDev = StdDev(scores)
 			stddevs = append(stddevs, cs.ScoreStdDev)
 			if cs.ScoreStdDev > UnstableStdDevThreshold {
@@ -372,6 +389,11 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 		}
 	}
 	sort.Strings(s.UnstableCaseIDs)
+	for _, axis := range slices.Sorted(maps.Keys(s.AxisMaxSpread)) {
+		if s.AxisMaxSpread[axis] > AxisSpreadWarnPoints {
+			s.UnstableAxes = append(s.UnstableAxes, axis)
+		}
+	}
 	s.LabelRankCorrelation = SpearmanCorrelation(labelSeries, scoreSeries)
 	s.PairwiseAgreement, s.PairwiseComparable = PairwiseAgreement(labelSeries, scoreSeries)
 	s.LengthRankCorrelation = SpearmanCorrelation(charSeries, scoreSeries)
@@ -499,4 +521,24 @@ func newLengthStratum(group []CaseSummary) LengthStratum {
 		st.MeanScoreByLabel[label] = Mean(xs)
 	}
 	return st
+}
+
+// axisSpreads は1ケースの実行から、軸ごとの最大−最小を返す。破損した実行は除き、2回以上採点できた軸だけを返す。
+func axisSpreads(runs []Observation) map[string]float64 {
+	vals := map[string][]float64{}
+	for _, o := range runs {
+		if o.Broken {
+			continue
+		}
+		for axis, v := range o.AxisScores {
+			vals[axis] = append(vals[axis], v)
+		}
+	}
+	out := map[string]float64{}
+	for axis, vs := range vals {
+		if len(vs) >= 2 {
+			out[axis] = slices.Max(vs) - slices.Min(vs)
+		}
+	}
+	return out
 }
