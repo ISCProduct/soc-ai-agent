@@ -110,6 +110,16 @@ func NewQualityService(
 	}
 }
 
+// FindReport は学生・セッションの診断妥当性レポートを返す（無ければ repository.ErrNotFound）。
+func (s *QualityService) FindReport(userID uint, sessionID string) (*models.DiagnosisQualityReport, error) {
+	return s.reportRepo.FindByUserAndSession(userID, sessionID)
+}
+
+// ListRecentReports は更新の新しい順にレポートを返す（limit の既定・上限はリポジトリ側）。
+func (s *QualityService) ListRecentReports(limit int) ([]models.DiagnosisQualityReport, error) {
+	return s.reportRepo.ListRecent(limit)
+}
+
 type qualityLLMResult struct {
 	Confidence int      `json:"confidence"`
 	Flags      []string `json:"flags"`

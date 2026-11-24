@@ -240,7 +240,7 @@ func TestBuildInterviewSystemPromptWithDirective(t *testing.T) {
 	prompt := buildInterviewSystemPrompt(
 		"テスト株式会社", "", "エンジニア", "", "general",
 		nil, nil, 0, 0, 1, 5, 0, 180,
-		&questionDirective{Text: "具体的な失敗経験を教えてください。", Source: questionSourceCustom, Category: "強み・弱み", IsDeepening: true},
+		&questionDirective{Text: "定型の追質問", DeepeningOf: "具体的な失敗経験を教えてください。", Source: questionSourceCustom, Category: "強み・弱み", IsDeepening: true},
 	)
 	if !containsAll(prompt, []string{"【今回の質問】", "深掘り質問", "具体的な失敗経験を教えてください。"}) {
 		t.Fatalf("prompt missing directive section: %s", prompt)

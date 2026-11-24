@@ -63,3 +63,21 @@ func TestBuildInterviewSystemPrompt_TopicDirectiveHasNoEvaluationIntent(t *testi
 		t.Fatalf("標準トピックに観点が付いている:\n%s", p)
 	}
 }
+
+// 深掘りでも、元のカスタム質問の観点を元の質問と同じ囲みに入れる（#2573）。
+// 定型文（Text）は学生の回答を含むので、観点を足してもプロンプトには入れない（#2564）。
+func TestBuildInterviewSystemPrompt_DeepeningDirectiveCarriesEvaluationIntent(t *testing.T) {
+	qid := uint(1)
+	d := &questionDirective{Text: "「架空の回答テキスト」について…", Source: questionSourceFollowUp, Category: "志望動機",
+		CompanyQuestionID: &qid, IsDeepening: true, DeepeningOf: "志望理由を教えてください"}
+	p := buildInterviewSystemPrompt("テスト株式会社", "", "エンジニア", "", "general",
+		intentQuestions(), nil, 0, 0, 1, 5, 0, 180, d)
+	untrustedtest.AssertInside(t, p, "質問文", intentPayload)
+	untrustedtest.AssertInside(t, p, "質問文", "志望理由を教えてください")
+	if !strings.Contains(p, evaluationIntentNote) {
+		t.Fatalf("観点の扱いの指示が無い:\n%s", p)
+	}
+	if strings.Contains(p, "架空の回答テキスト") {
+		t.Fatalf("深掘りの定型文（学生の回答を含む）がシステムプロンプトに入っている:\n%s", p)
+	}
+}

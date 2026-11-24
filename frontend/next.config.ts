@@ -78,6 +78,12 @@ const nextConfig: NextConfig = {
         headers: securityHeaders,
       },
       {
+        // Live2D の資産（Core・モデル・テクスチャ）はデプロイ時にしか変わらない。
+        // 既定の max-age=0 だと面接のたびに全部を問い合わせ直すので、1日はキャッシュさせる。
+        source: '/live2d/:path*',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=86400, stale-while-revalidate=604800' }],
+      },
+      {
         // 面接ページのみカメラ・マイクを許可（他ページは securityHeaders で引き続き禁止）
         source: '/interview(.*)',
         headers: [
