@@ -5,8 +5,11 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services/prompts"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -201,14 +204,22 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	}
 
 	// 選択肢必須フェーズで選択肢がない場合は再生成
+	// 代わりの質問を AI が作り直したら、保存するのは AI の文なので版を残す(#2573)。
 	if requiresChoice && isTextBasedQuestion(questionText) {
-		questionText = s.ensureChoiceQuestion(ctx, questionText, targetCategory)
+		var rewritten bool
+		questionText, rewritten = s.ensureChoiceQuestion(ctx, questionText, targetCategory)
+		if rewritten {
+			promptVersion = resolvedVersion
+		}
 	}
 
 	// 重複チェック（完全一致および類似度チェック）を最大3回まで試行
-	questionText, err = s.regenerateIfDuplicate(ctx, questionText, askedTexts, targetCategory)
+	questionText, rewritten, err := s.regenerateIfDuplicate(ctx, questionText, askedTexts, targetCategory)
 	if err != nil {
 		return "", 0, "", err
+	}
+	if rewritten {
+		promptVersion = resolvedVersion
 	}
 
 	// AI生成質問をデータベースに保存（空文字は保存しない）
@@ -226,7 +237,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		Weight:        7, // 戦略的質問は重み高め
 		IsAnswered:    false,
 		PromptVersion: promptVersion,
-		ContextData:   fmt.Sprintf(`{"target_category": "%s", "purpose": "%s"}`, targetCategory, questionPurpose),
+		ContextData:   buildQuestionContextData(targetCategory, questionPurpose),
 	}
 
 	if err := s.aiGeneratedQuestionRepo.Create(aiGenQuestion); err != nil {
@@ -234,6 +245,26 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	}
 
 	return questionText, aiGenQuestion.ID, targetCategory, nil
+}
+
+// buildQuestionContextData は保存する質問の文脈（狙った軸と目的）を JSON にする。
+// 値に引用符などが入っても壊れないよう encoding/json で組み立てる(#2573)。
+func buildQuestionContextData(targetCategory, purpose string) string {
+	b, err := json.Marshal(struct {
+		TargetCategory string `json:"target_category"`
+		Purpose        string `json:"purpose"`
+	}{targetCategory, purpose})
+	if err != nil {
+		// 文字列だけの構造体なので失敗しない
+		return "{}"
+	}
+	return string(b)
+}
+
+// sortedAskedTexts は既に聞いた質問を決まった順（文字列順）に並べる。
+// map をそのまま回すとプロンプトの並びが毎回変わる(#2573)。
+func sortedAskedTexts(askedTexts map[string]bool) []string {
+	return slices.Sorted(maps.Keys(askedTexts))
 }
 
 // buildHistoryText は会話履歴をプロンプト用の「role: 本文」の行に並べる。
@@ -252,7 +283,7 @@ func buildAskedQuestionsText(askedTexts map[string]bool) string {
 		askedQuestionsText += "（まだ質問していません）\n"
 	} else {
 		questionCount := 0
-		for text := range askedTexts {
+		for _, text := range sortedAskedTexts(askedTexts) {
 			questionCount++
 			askedQuestionsText += fmt.Sprintf("%d. %s\n", questionCount, text)
 		}
@@ -378,7 +409,9 @@ func cleanGeneratedQuestion(text string) string {
 // ensureChoiceQuestion は選択肢の無い質問を最大2回まで AI に作り直させる。
 // それでも選択肢が無ければ、評価軸ごとの決まった選択肢で補う。
 // 作り直しの呼び出しに失敗したときは、その時点の質問文で打ち切る（エラーは返さない）。
-func (s *ChatService) ensureChoiceQuestion(ctx context.Context, questionText, targetCategory string) string {
+// rewritten は AI が作り直した文を採用したかどうか。
+func (s *ChatService) ensureChoiceQuestion(ctx context.Context, questionText, targetCategory string) (string, bool) {
+	rewritten := false
 	for attempt := 0; attempt < 2; attempt++ {
 		choicePrompt := fmt.Sprintf(`以下の質問は選択肢が不足しています。
 "%s"
@@ -394,6 +427,7 @@ func (s *ChatService) ensureChoiceQuestion(ctx context.Context, questionText, ta
 		regenerated = cleanGeneratedQuestion(regenerated)
 		if regenerated != "" {
 			questionText = regenerated
+			rewritten = true
 		}
 		if !isTextBasedQuestion(questionText) {
 			break
@@ -402,7 +436,7 @@ func (s *ChatService) ensureChoiceQuestion(ctx context.Context, questionText, ta
 	if isTextBasedQuestion(questionText) {
 		questionText = buildChoiceFallback(questionText, targetCategory)
 	}
-	return questionText
+	return questionText, rewritten
 }
 
 // findDuplicateQuestion は既に聞いた質問との完全一致・類似を調べ、重複なら理由を返す。
@@ -412,7 +446,7 @@ func findDuplicateQuestion(questionText string, askedTexts map[string]bool) (boo
 		return true, fmt.Sprintf("完全一致: %s", questionText)
 	}
 	// 類似度チェック
-	for askedQ := range askedTexts {
+	for _, askedQ := range sortedAskedTexts(askedTexts) {
 		similarity := calculateSimilarity(questionText, askedQ)
 		if similarity > 0.6 { // 閾値を0.6に下げて、より厳格に
 			return true, fmt.Sprintf("類似度%.2f: %s", similarity, askedQ)
@@ -423,7 +457,9 @@ func findDuplicateQuestion(questionText string, askedTexts map[string]bool) (boo
 
 // regenerateIfDuplicate は重複している間、最大3回まで質問を作り直させる。
 // 最後の試行で重複してもそのまま使う（無限ループ防止）。AI 呼び出しの失敗はそのまま返す。
-func (s *ChatService) regenerateIfDuplicate(ctx context.Context, questionText string, askedTexts map[string]bool, targetCategory string) (string, error) {
+// rewritten は AI が作り直した文に置き換えたかどうか。
+func (s *ChatService) regenerateIfDuplicate(ctx context.Context, questionText string, askedTexts map[string]bool, targetCategory string) (string, bool, error) {
+	rewritten := false
 	maxRetries := 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		isDuplicate, duplicateReason := findDuplicateQuestion(questionText, askedTexts)
@@ -447,7 +483,7 @@ func (s *ChatService) regenerateIfDuplicate(ctx context.Context, questionText st
 			func() string {
 				var list string
 				count := 0
-				for q := range askedTexts {
+				for _, q := range sortedAskedTexts(askedTexts) {
 					count++
 					list += fmt.Sprintf("%d. %s\n", count, q)
 				}
@@ -458,14 +494,15 @@ func (s *ChatService) regenerateIfDuplicate(ctx context.Context, questionText st
 		var err error
 		questionText, err = s.questionAICall(ctx, retryPrompt)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		questionText = cleanGeneratedQuestion(questionText)
+		rewritten = true
 
 		// 最後の試行で重複してもそのまま使用（無限ループ防止）
 		if attempt == maxRetries-1 {
 			log.Printf("Max retries reached, using question anyway: chars=%d\n", logsafe.Chars(questionText))
 		}
 	}
-	return questionText, nil
+	return questionText, rewritten, nil
 }
