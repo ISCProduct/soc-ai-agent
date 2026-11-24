@@ -783,6 +783,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AuthResponse" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/auth/verify-email:
     get:
@@ -1343,7 +1344,11 @@ paths:
     get:
       tags: [interviews]
       summary: セッション詳細
-      description: report.teacher_report_json は職員・管理者にのみ含まれる（認証ユーザーの実ロールで決まる。#1814）。
+      description: |
+        report.teacher_report_json は職員・管理者にのみ含まれる（認証ユーザーの実ロールで決まる。#1814）。
+        report.category_breakdown_json は質問の種類ごとの評価（SOCAIAGENT-610）。
+        `[{category, score(0〜5), weakness, practice}]` の JSON 文字列で、カテゴリは面接の進め方の5種類と「企業別の質問」。
+        この列を足す前のレポートは null。
       security: [{ userToken: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -1381,21 +1386,25 @@ paths:
     post:
       tags: [interviews]
       summary: 1ターンを開始する
+      description: "発話数・StartedAt からの経過時間・（フラグ有効時）予算の上限に達すると、AI を呼ばずに固定の締め文と limit_reached=true（limit_reason: utterances / duration / budget）を返す。クライアントは /finish で面接を終える。"
       security: [{ userToken: [] }]
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses:
-        "200": { description: 開始した }
+        "200": { description: 開始した（上限時は締め文と limit_reached） }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: 開始前（ready）のセッション }
 
   /api/interviews/{id}/turn:
     post:
       tags: [interviews]
       summary: 1ターンの応答を処理する
+      description: "発話数・StartedAt からの経過時間・（フラグ有効時）予算の上限に達すると、AI を呼ばずに固定の締め文と limit_reached=true（limit_reason: utterances / duration / budget）を返す。クライアントは /finish で面接を終える。"
       security: [{ userToken: [] }]
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses:
-        "200": { description: 次の質問 }
+        "200": { description: 次の質問（上限時は締め文と limit_reached） }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: 開始前（ready）のセッション }
 
   /api/interviews/{id}/utterances:
     post:
