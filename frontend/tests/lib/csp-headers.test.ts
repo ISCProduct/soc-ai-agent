@@ -65,3 +65,10 @@ describe('本番の Content-Security-Policy', () => {
   })
 })
 
+
+describe('Live2D の資産のキャッシュ', () => {
+  it('面接のたびに問い合わせ直さないよう、キャッシュさせる', async () => {
+    const cache = (await headersFor('/live2d')).find((h) => h.key === 'Cache-Control')
+    expect(cache?.value).toMatch(/max-age=[1-9]\d*/)
+  })
+})
