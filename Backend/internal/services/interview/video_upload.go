@@ -10,7 +10,6 @@ import (
 	"io"
 	"log"
 	"time"
-
 )
 
 // MaxVideoSize は面接動画1本の上限(500MB)。
