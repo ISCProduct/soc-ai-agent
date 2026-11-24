@@ -18,7 +18,7 @@ export default defineConfig({
     'home-next-actions.spec.ts',
     'home-consult.spec.ts',
     'chat-ui-states.spec.ts',
-    'correlation-diagram-a11y.spec.ts',
+    'correlation-explorer.spec.ts',
     'assessments.spec.ts',
     'ability-assessments.spec.ts',
     'schedule.spec.ts',
