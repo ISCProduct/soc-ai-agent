@@ -47,7 +47,7 @@ func TestAIRoutesRejectWhenUserRateExceeded(t *testing.T) {
 	budget := AIBudgetGuards{Immediate: noop, Deferred: noop}
 	e := echo.New()
 	api := e.Group("/api")
-	SetupChatRoutes(api, nil, nil, secret, nil, nil, budget)
+	SetupChatRoutes(api, nil, secret, nil, nil, budget)
 	SetupInterviewRoutes(api, nil, nil, secret, nil, nil, budget)
 	SetupResumeRoutes(api, nil, secret, nil, nil, budget)
 
@@ -60,7 +60,8 @@ func TestAIRoutesRejectWhenUserRateExceeded(t *testing.T) {
 		path   string
 	}{
 		{http.MethodPost, "/api/chat"},
-		{http.MethodPost, "/api/questions/generate"},
+		{http.MethodGet, "/api/chat/analysis"},
+		{http.MethodPost, "/api/chat/send-report"},
 		{http.MethodPost, "/api/interviews/1/turn"},
 		{http.MethodPost, "/api/interviews/1/start-turn"},
 		{http.MethodPost, "/api/interviews/1/report/regenerate"},

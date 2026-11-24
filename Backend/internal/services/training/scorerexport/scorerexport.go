@@ -14,7 +14,7 @@
 //	<prefix>/runs/<実行ID>/manifest.json             最後に書く。これがある回だけが書き出しを終えた回
 //
 // subject は利用者 ID の HMAC。学生ごとにファイルを分けるのは、同意の撤回・退会のときに
-// その学生の書き出し済みデータを、ほかの学生のデータを書き直さずに消せるようにするため（次の PR）。
+// その学生の書き出し済みデータを、ほかの学生のデータを書き直さずに消せるようにするため（sweep.go）。
 package scorerexport
 
 import (
@@ -117,6 +117,8 @@ type Store interface {
 	ListTrainingSessions(ctx context.Context, userID uint) ([]repositories.TrainingSession, error)
 	ListTrainingUtterances(ctx context.Context, sessionID uint) ([]repositories.TrainingUtterance, error)
 	ListTrainingMaskingTerms(ctx context.Context) (repositories.TrainingMaskingTerms, error)
+	// SweepStore は、書き出しの前に行う「書き出し済みのデータの削除」（Sweeper.Sweep）で使う。
+	SweepStore
 	StartTrainingExportRun(ctx context.Context, destination string, startedAt time.Time) (uint, error)
 	FinishTrainingExportRun(ctx context.Context, id uint, status string, students, sessions int, errMsg string, finishedAt time.Time) error
 }
@@ -161,6 +163,9 @@ type Manifest struct {
 	StudentCount  int       `json:"student_count"`
 	SessionCount  int       `json:"session_count"`
 	Files         []string  `json:"files"`
+	// FileSessions はファイルごとの面接の数。同意の取り消し・退会でファイルを消すときに、
+	// 学生のファイルを読まずに session_count を直すために使う（sweep.go）。
+	FileSessions map[string]int `json:"file_sessions"`
 }
 
 // Result は書き出しの結果。
@@ -253,6 +258,7 @@ func (j *Job) export(ctx context.Context, runPrefix, runID string, startedAt tim
 	}
 
 	var files []string
+	fileSessions := map[string]int{}
 	for _, subj := range subjects {
 		lines, skipped, err := j.subjectLines(ctx, subj, terms)
 		res.SkippedSessions += skipped
@@ -276,8 +282,8 @@ func (j *Job) export(ctx context.Context, runPrefix, runID string, startedAt tim
 		}
 		// 書く直前の判定と書き込みの間に同意を取り消した（または退会した）学生のファイルを残さないよう、
 		// 書いた後にもう一度判定し、外れていれば消す（#2325 のレビュー）。消せなければ実行を失敗にする。
-		// それでも残る「判定し直した後の取り消し」は、取り消し・退会のときに書き出し済みのデータを
-		// 消す処理（#2168 の次の PR）が拾う。
+		// それでも残る「判定し直した後の取り消し」は、次の Sweeper.Sweep（次の書き出しの最初・定期実行）と
+		// 退会のパージ（Sweeper.DeleteUser）が拾う。
 		ok, err = j.store.IsTrainingEligible(ctx, subj.UserID)
 		if err != nil || !ok {
 			if delErr := j.writer.DeleteObject(ctx, key); delErr != nil {
@@ -288,7 +294,9 @@ func (j *Job) export(ctx context.Context, runPrefix, runID string, startedAt tim
 			}
 			continue
 		}
-		files = append(files, strings.TrimPrefix(key, runPrefix))
+		rel := strings.TrimPrefix(key, runPrefix)
+		files = append(files, rel)
+		fileSessions[rel] = len(lines)
 		res.Students++
 		res.Sessions += len(lines)
 	}
@@ -304,6 +312,7 @@ func (j *Job) export(ctx context.Context, runPrefix, runID string, startedAt tim
 		StudentCount:  res.Students,
 		SessionCount:  res.Sessions,
 		Files:         files,
+		FileSessions:  fileSessions,
 	}
 	if manifest.Files == nil {
 		manifest.Files = []string{}
@@ -370,7 +379,12 @@ func (j *Job) subjectLines(ctx context.Context, subj repositories.TrainingSubjec
 // hash は ID を秘密鍵の HMAC-SHA256 にする。kind で利用者と面接を分け、同じ数値の ID が同じ値にならないようにする。
 // 書き方は管理者トークンの署名（middleware.adminTokenSignature）に合わせた。
 func (j *Job) hash(kind string, id uint) string {
-	mac := hmac.New(sha256.New, j.cfg.HMACKey)
+	return subjectHash(j.cfg.HMACKey, kind, id)
+}
+
+// subjectHash は ID を秘密鍵の HMAC-SHA256 の16進にする。書き出し（Job）と削除（Sweeper）で同じ値を作るため、1か所にする。
+func subjectHash(key []byte, kind string, id uint) string {
+	mac := hmac.New(sha256.New, key)
 	fmt.Fprintf(mac, "%s:%d", kind, id)
 	return hex.EncodeToString(mac.Sum(nil))
 }
@@ -486,30 +500,72 @@ func buildTurns(utts []repositories.TrainingUtterance, m *masking.Masker) []Turn
 	return turns
 }
 
-// RunFromEnv は CLI（cmd/training-export）の本体。環境変数から設定を読み、DB と出力先を用意して書き出しを1回行う。
-// 設定の確認を DB への接続より先に行い、鍵か出力先が無ければ DB にもつながない。
-// cmd のパッケージは CI のテストの対象外なので、配線をここに置いてテストする。
+// RunFromEnv は CLI（cmd/training-export）の本体。環境変数から設定を読み、DB と出力先を用意して、
+// 書き出し済みのデータの削除（Sweep）→ 書き出し、の順に1回行う。設定の確認を DB への接続より先に行う。
+// Sweep に失敗したら書き出さない（取り消した学生のデータが残っている状態を、成功の書き出しで隠さないため）。
+// cmd/ は CI のテストの対象外なので、配線をここに置いてテストする。
 func RunFromEnv(
 	ctx context.Context,
 	getenv func(string) string,
 	connect func() (Store, error),
-	newWriter func(ctx context.Context, bucket string) (ObjectWriter, error),
-) (Result, error) {
+	newObjects func(ctx context.Context, bucket string) (ObjectStore, error),
+) (Result, SweepResult, error) {
+	cfg, store, objects, err := setupFromEnv(ctx, getenv, connect, newObjects)
+	if err != nil {
+		return Result{}, SweepResult{}, err
+	}
+	sweeper, err := NewSweeper(cfg, store, objects)
+	if err != nil {
+		return Result{}, SweepResult{}, err
+	}
+	swept, err := sweeper.Sweep(ctx)
+	if err != nil {
+		return Result{}, swept, fmt.Errorf("scorerexport: 書き出し済みのデータを消せなかったので、書き出しを止めました: %w", err)
+	}
+	job, err := NewJob(cfg, store, objects)
+	if err != nil {
+		return Result{}, swept, err
+	}
+	res, err := job.Run(ctx)
+	return res, swept, err
+}
+
+// SweepFromEnv は、書き出し済みのデータの削除（Sweep）だけを1回行う（cmd/training-export -sweep-only）。
+// 同意の取り消し・退会を、書き出しの間隔より短い間隔（毎日など）で反映するために、定期的に動かす。
+func SweepFromEnv(
+	ctx context.Context,
+	getenv func(string) string,
+	connect func() (Store, error),
+	newObjects func(ctx context.Context, bucket string) (ObjectStore, error),
+) (SweepResult, error) {
+	cfg, store, objects, err := setupFromEnv(ctx, getenv, connect, newObjects)
+	if err != nil {
+		return SweepResult{}, err
+	}
+	sweeper, err := NewSweeper(cfg, store, objects)
+	if err != nil {
+		return SweepResult{}, err
+	}
+	return sweeper.Sweep(ctx)
+}
+
+func setupFromEnv(
+	ctx context.Context,
+	getenv func(string) string,
+	connect func() (Store, error),
+	newObjects func(ctx context.Context, bucket string) (ObjectStore, error),
+) (Config, Store, ObjectStore, error) {
 	cfg, err := ConfigFromEnv(getenv)
 	if err != nil {
-		return Result{}, err
+		return Config{}, nil, nil, err
 	}
 	store, err := connect()
 	if err != nil {
-		return Result{}, fmt.Errorf("scorerexport: DB に接続できませんでした: %w", err)
+		return Config{}, nil, nil, fmt.Errorf("scorerexport: DB に接続できませんでした: %w", err)
 	}
-	writer, err := newWriter(ctx, cfg.Bucket)
+	objects, err := newObjects(ctx, cfg.Bucket)
 	if err != nil {
-		return Result{}, fmt.Errorf("scorerexport: 出力先を用意できませんでした: %w", err)
+		return Config{}, nil, nil, fmt.Errorf("scorerexport: 出力先を用意できませんでした: %w", err)
 	}
-	job, err := NewJob(cfg, store, writer)
-	if err != nil {
-		return Result{}, err
-	}
-	return job.Run(ctx)
+	return cfg, store, objects, nil
 }

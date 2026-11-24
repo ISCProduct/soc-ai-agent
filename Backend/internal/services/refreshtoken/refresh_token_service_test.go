@@ -1,6 +1,7 @@
 package refreshtoken
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -41,10 +42,19 @@ func (f *fakeRefreshTokenStore) Revoke(id uint, at time.Time) error {
 	return nil
 }
 
-func (f *fakeRefreshTokenStore) RevokeAllByUser(userID uint, at time.Time) error {
-	for _, t := range f.tokens {
-		if t.UserID == userID && t.RevokedAt == nil {
-			t.RevokedAt = &at
+func (f *fakeRefreshTokenStore) Delete(_ context.Context, id uint) error {
+	for h, t := range f.tokens {
+		if t.ID == id {
+			delete(f.tokens, h)
+		}
+	}
+	return nil
+}
+
+func (f *fakeRefreshTokenStore) DeleteAllByUser(_ context.Context, userID uint) error {
+	for h, t := range f.tokens {
+		if t.UserID == userID {
+			delete(f.tokens, h)
 		}
 	}
 	return nil
@@ -228,5 +238,47 @@ func TestHashRefreshToken(t *testing.T) {
 	}
 	if len(first) != 64 {
 		t.Errorf("ハッシュ長 = %d, want 64 (SHA-256 hex)", len(first))
+	}
+}
+
+// 明示的な失効（ログアウト・全端末失効）はローテーションの猶予の対象外 (SOCAIAGENT-688)
+func TestRefreshTokenService_ExplicitRevokeHasNoGrace(t *testing.T) {
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name   string
+		revoke func(svc *RefreshTokenService, plain string) error
+	}{
+		{name: "ログアウト直後", revoke: func(svc *RefreshTokenService, plain string) error { return svc.Revoke(plain) }},
+		{name: "全端末失効直後", revoke: func(svc *RefreshTokenService, _ string) error { return svc.RevokeAllForUser(1) }},
+		{
+			name: "ローテーション直後の旧トークンをログアウト",
+			revoke: func(svc *RefreshTokenService, plain string) error {
+				if _, _, err := svc.Rotate(plain); err != nil {
+					return err
+				}
+				return svc.Revoke(plain)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newFakeRefreshTokenStore()
+			svc := newTestService(store, now)
+			plain, _ := svc.Issue(1)
+			other, _ := svc.Issue(2)
+
+			if err := tt.revoke(svc, plain); err != nil {
+				t.Fatalf("失効に失敗: %v", err)
+			}
+			// 猶予（60秒）の内側でも使えないこと
+			svc.now = func() time.Time { return now.Add(time.Second) }
+			if _, _, err := svc.Rotate(plain); err != ErrInvalidRefreshToken {
+				t.Errorf("明示失効後のトークンが猶予内に使えた: err = %v", err)
+			}
+			if _, _, err := svc.Rotate(other); err != nil {
+				t.Errorf("別ユーザーのトークンまで失効している: %v", err)
+			}
+		})
 	}
 }

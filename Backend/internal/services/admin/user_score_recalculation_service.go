@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -338,7 +339,7 @@ func (s *UserScoreRecalculationService) saveRecalculatedScores(
 	ctx context.Context,
 	jobID uint,
 	target repositories.UserScoreRecalculationTarget,
-	scores map[string]int,
+	scores map[string]float64,
 	version string,
 ) string {
 	if err := s.scores.ReplaceChatSessionScores(jobID, target.UserID, target.SessionID, scores, version); err != nil {
@@ -411,9 +412,9 @@ func (s *UserScoreRecalculationService) Rollback(ctx context.Context, id, afterI
 
 // RecalculationDryRunScore は1カテゴリの現在の値と再計算後の値。値がなければ nil。
 type RecalculationDryRunScore struct {
-	Category     string `json:"category"`
-	Current      *int   `json:"current"`
-	Recalculated *int   `json:"recalculated"`
+	Category     string   `json:"category"`
+	Current      *float64 `json:"current"`
+	Recalculated *float64 `json:"recalculated"`
 }
 
 // RecalculationDryRunSession は1セッションのドライラン結果。
@@ -465,7 +466,7 @@ func (s *UserScoreRecalculationService) DryRun(ctx context.Context, limit int) (
 	return &UserScoreRecalculationDryRun{Sessions: sessions, Text: FormatUserScoreRecalculationDryRun(sessions)}, nil
 }
 
-func compareRecalculatedScores(current, recalculated map[string]int) []RecalculationDryRunScore {
+func compareRecalculatedScores(current, recalculated map[string]float64) []RecalculationDryRunScore {
 	categories := make(map[string]struct{}, len(current)+len(recalculated))
 	for category := range current {
 		categories[category] = struct{}{}
@@ -515,18 +516,23 @@ func FormatUserScoreRecalculationDryRun(sessions []RecalculationDryRunSession) s
 	return b.String()
 }
 
-func dryRunValue(value *int) string {
+func dryRunValue(value *float64) string {
 	if value == nil {
 		return "-"
 	}
-	return strconv.Itoa(*value)
+	return strconv.FormatFloat(*value, 'f', -1, 64)
 }
 
 func dryRunDelta(score RecalculationDryRunScore) string {
 	if score.Current == nil || score.Recalculated == nil {
 		return "-"
 	}
-	return fmt.Sprintf("%+d", *score.Recalculated-*score.Current)
+	d := math.Round((*score.Recalculated-*score.Current)*100) / 100
+	sign := ""
+	if d >= 0 {
+		sign = "+"
+	}
+	return sign + strconv.FormatFloat(d, 'f', -1, 64)
 }
 
 func IsRecalculationJobAlreadyRunning(err error) bool {

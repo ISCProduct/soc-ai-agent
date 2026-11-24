@@ -19,6 +19,15 @@ type ChatModalsProps = {
   onViewResults: () => void
   onCancelEndChat: () => void
   onConfirmEndChat: () => void
+  /** 強制終了モーダルの「新しいセッションを開始」。既定はセッションの記録を消して読み込み直す。 */
+  onStartNewSession?: () => void
+}
+
+/** 新しいセッションを開始する（いまのセッションの記録を消して、ページを読み込み直す）。 */
+function startNewSession() {
+  sessionStorage.removeItem('chatSessionId')
+  localStorage.removeItem('currentSessionId')
+  window.location.reload()
 }
 
 /** 完了 / 終了確認 / 強制終了のダイアログ群 */
@@ -31,12 +40,15 @@ export function ChatModals({
   onViewResults,
   onCancelEndChat,
   onConfirmEndChat,
+  onStartNewSession = startNewSession,
 }: ChatModalsProps) {
   return (
     <>
       {/* 分析完了モーダル */}
       <Dialog
         open={showCompletionModal}
+        // 全フェーズを終えた後は、続けるチャットが無い（「チャットを続ける」も出さない）ので、意図して閉じない。
+        // 閉じると、次にすることの無い画面に戻ってしまう。押せる操作「結果を見る」を必ず残す（キーボードでも届く）。
         onClose={allPhasesCompleted ? undefined : onContinueChat}
         maxWidth="sm"
         fullWidth
@@ -134,8 +146,10 @@ export function ChatModals({
       {/* 強制終了モーダル（3回の無効回答） */}
       <Dialog
         open={showTerminationModal}
-        onClose={() => {}} // 閉じられないようにする
-        disableEscapeKeyDown // Escキーでも閉じられない
+        // このセッションは続けられない（サーバー側で終了済み）ので、意図して閉じない（Esc・幕のタップでも閉じない）。
+        // 閉じられない理由を画面の文で示し、押せる操作「新しいセッションを開始」を必ず残す（開いたときにフォーカスを置く）。
+        onClose={() => {}}
+        disableEscapeKeyDown
         maxWidth="sm"
         fullWidth
         PaperProps={{
@@ -168,21 +182,18 @@ export function ChatModals({
           <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
             ここまでの回答は残っています。答えにくい質問が続くときは、先生にも相談してみてください。
           </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 1 }}>
+            このチャットは続けられないため、この画面は閉じられません。下のボタンから新しく始めてください。
+          </Typography>
         </DialogContent>
         <DialogActions sx={{ justifyContent: 'center', pb: 2 }}>
           <Button
-            onClick={() => {
-              // 新しいセッションを開始（ページリロード）
-              sessionStorage.removeItem('chatSessionId')
-              localStorage.removeItem('currentSessionId')
-              window.location.reload()
-            }}
+            onClick={onStartNewSession}
             variant="contained"
             color="error"
             size="large"
             sx={{ minWidth: 180 }}
-            autoFocus={false}
-            tabIndex={-1}
+            autoFocus
           >
             新しいセッションを開始
           </Button>

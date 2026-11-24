@@ -31,10 +31,13 @@ jobs:
 
       # 対象は develop 宛のみ。main 宛で自動マージすると、依存更新が
       # develop・release のゲートを通らずに本番(ECS on Fargate)へ自動デプロイされる。
+      # Terraform プロバイダの minor は、本番のインフラへ承認だけで入らないように外す。
+      # Docker のベースイメージ更新は semver-minor になりうるが、ここでは従来どおり対象に残す。
       - name: Enable auto-merge for minor/patch updates
         if: |
-          steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-patch'
+          steps.metadata.outputs.package-ecosystem != 'terraform' &&
+          (steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
+           steps.metadata.outputs.update-type == 'version-update:semver-patch')
         run: gh pr merge "$PR_URL" --auto --squash
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}

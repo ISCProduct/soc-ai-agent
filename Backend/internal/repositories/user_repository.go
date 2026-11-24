@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"context"
 	"errors"
 	"time"
 
@@ -149,10 +150,10 @@ func (r *UserRepository) RenewEmailVerification(userID uint, token string, expir
 	return res.RowsAffected > 0, res.Error
 }
 
-// GetUserByPasswordResetToken パスワードリセットトークンでユーザー取得
-func (r *UserRepository) GetUserByPasswordResetToken(token string) (*models.User, error) {
+// GetUserByPasswordResetTokenHash はパスワード再設定トークンの SHA-256 hex でユーザーを取得する (SOCAIAGENT-693)
+func (r *UserRepository) GetUserByPasswordResetTokenHash(ctx context.Context, hash string) (*models.User, error) {
 	var m models.User
-	if err := r.db.Where("password_reset_token = ?", token).First(&m).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("password_reset_token_hash = ?", hash).First(&m).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}

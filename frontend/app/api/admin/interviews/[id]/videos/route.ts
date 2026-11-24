@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const resolvedParams = await params
-  const url = `${BACKEND_URL}/api/admin/interviews/${resolvedParams.id}/videos`
+  const url = `${BACKEND_URL}/api/admin/interviews/${encodeURIComponent(resolvedParams.id)}/videos`
   const response = await fetch(url, {
     headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '',
       'X-Admin-Token': request.headers.get('x-admin-token') || '' },

@@ -16,9 +16,8 @@ const (
 	// MinEvaluatedCategories は、評価済みカテゴリ数の下限。
 	//
 	// 推薦を暫定表示にする下限（matching.MinEvaluatedCategoriesForFinal = 4）より大きくする。
-	// 実データで、使う軸の数ごとに、推薦の上位10件が全軸の場合とどれだけ重なるかを測った（SOCAIAGENT-670）。
-	// 4軸で42%、5軸で51%、6軸で62%。4軸で完了すると、全軸で出した推薦と6割近く違う。
-	// 6軸に上げると、重なりが約20ポイント上がる。質問は2〜3問増える。
+	// 使う軸が少ないと、推薦の上位が、全軸で出した場合と大きく変わる（不安定になる）。
+	// 軸の数を増やすほど安定するので、早すぎる完了を避けるため 6 にしている（質問は 2〜3 問増える）。
 	// matching は chat を経由してこのパッケージに循環するので import できない。
 	// 完了の下限が暫定表示の下限を下回らないことは、judgment_sync_test.go で守る。
 	MinEvaluatedCategories = 6
@@ -34,7 +33,7 @@ type Input struct {
 	// ValidAnswers は有効に答えた質問数（スキップ・無効な回答は含めない）。
 	ValidAnswers int
 	// Scores は、カテゴリごとのスコア（0〜100）。0 は未評価として数える。
-	Scores map[string]int
+	Scores map[string]float64
 }
 
 // Result は判定の結果。
@@ -49,7 +48,7 @@ type Result struct {
 
 // Evaluate は、会話の状態から判定の進み具合を計算する。
 func Evaluate(in Input) Result {
-	evaluated, lo, hi := 0, 101, -1
+	evaluated, lo, hi := 0, 101.0, -1.0
 	for _, s := range in.Scores {
 		if s == 0 {
 			continue
@@ -62,7 +61,7 @@ func Evaluate(in Input) Result {
 			hi = s
 		}
 	}
-	spread := 0
+	spread := 0.0
 	if evaluated >= 2 {
 		spread = hi - lo
 	}
@@ -70,7 +69,7 @@ func Evaluate(in Input) Result {
 	r := Result{
 		Floor:    ratio(in.ValidAnswers, FloorValidAnswers),
 		Coverage: ratio(evaluated, MinEvaluatedCategories),
-		Spread:   ratio(spread, MinScoreSpread),
+		Spread:   ratioF(spread, float64(MinScoreSpread)),
 	}
 
 	// 職種が決まっているかは、完了の条件にしない。「まだ決めていない」人も、適性（スコア）の傾向が十分に出れば、
@@ -90,6 +89,16 @@ func Evaluate(in Input) Result {
 // SuggestProvisional は、暫定の結果を見る導線を出すか。判定できていなくて、目安の回答数を超えたとき。
 func SuggestProvisional(answered int, ready bool) bool {
 	return !ready && answered >= SoftCapAnswers
+}
+
+func ratioF(n, d float64) float64 {
+	if n <= 0 {
+		return 0
+	}
+	if n >= d {
+		return 1
+	}
+	return n / d
 }
 
 func ratio(n, d int) float64 {
