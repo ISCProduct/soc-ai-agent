@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { clientIpHeaders } from '@/lib/api-proxy'
+import { rejectCrossSiteSessionPost } from '@/lib/auth/session-request'
 import { respondWithCompanySession } from '@/lib/auth/issue-session'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 export async function POST(request: NextRequest) {
+  const rejected = rejectCrossSiteSessionPost(request, 'company-register')
+  if (rejected) return rejected
   const body = await request.text()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
