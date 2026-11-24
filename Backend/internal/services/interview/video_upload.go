@@ -10,6 +10,8 @@ import (
 	"io"
 	"log"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // MaxVideoSize は面接動画1本の上限(500MB)。
@@ -128,7 +130,14 @@ func (s *VideoUploadService) ListForUser(ctx context.Context, sessionID, userID 
 // セッションIDとユーザーIDが一致しない録画は、存在しないものとして扱う。
 func (s *VideoUploadService) PresignForUser(ctx context.Context, sessionID, videoID, userID uint) (string, time.Time, error) {
 	video, err := s.repo.FindByID(ctx, videoID)
-	if err != nil || video == nil || video.SessionID != sessionID || video.UserID != userID {
+	if err != nil {
+		// 存在しない録画だけを404にする。DB障害まで404にすると、障害が「動画が無い」に化けて気づけない。
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", time.Time{}, ErrVideoNotFound
+		}
+		return "", time.Time{}, fmt.Errorf("録画の取得に失敗しました: %w", err)
+	}
+	if video == nil || video.SessionID != sessionID || video.UserID != userID {
 		return "", time.Time{}, ErrVideoNotFound
 	}
 	if video.Status != "done" || video.DriveFileID == "" {

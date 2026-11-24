@@ -4,10 +4,13 @@ import (
 	"Backend/internal/models"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 func TestReviewCues_UsesSessionStartAndHidesMissingAnchor(t *testing.T) {
@@ -36,6 +39,7 @@ func TestReviewCues_UsesSessionStartAndHidesMissingAnchor(t *testing.T) {
 
 type playbackRepo struct {
 	byID      *models.InterviewVideo
+	findErr   error
 	bySession []models.InterviewVideo
 }
 
@@ -47,6 +51,9 @@ func (r *playbackRepo) FindBySessionID(context.Context, uint) ([]models.Intervie
 	return r.bySession, nil
 }
 func (r *playbackRepo) FindByID(context.Context, uint) (*models.InterviewVideo, error) {
+	if r.findErr != nil {
+		return nil, r.findErr
+	}
 	return r.byID, nil
 }
 
@@ -106,5 +113,32 @@ func TestPresignForUser_RejectsOtherSessionAndOtherUser(t *testing.T) {
 	}
 	if url != "https://example.test/presigned" || store.key != "secret-key" {
 		t.Fatalf("url=%s key=%s", url, store.key)
+	}
+}
+
+func TestPresignForUser_NotFoundVsRepositoryError(t *testing.T) {
+	dbErr := errors.New("connection refused")
+	tests := []struct {
+		name    string
+		findErr error
+		wantNF  bool
+	}{
+		{"レコードが無い場合は ErrVideoNotFound", gorm.ErrRecordNotFound, true},
+		{"DB障害は ErrVideoNotFound にしない", dbErr, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewVideoUploadService(&playbackRepo{findErr: tt.findErr}, &playbackStore{})
+			_, _, err := svc.PresignForUser(context.Background(), 9, 1, 3)
+			if err == nil {
+				t.Fatal("エラーが返らなかった")
+			}
+			if errors.Is(err, ErrVideoNotFound) != tt.wantNF {
+				t.Fatalf("errors.Is(ErrVideoNotFound) = %v, want %v (err=%v)", !tt.wantNF, tt.wantNF, err)
+			}
+			if !tt.wantNF && !errors.Is(err, dbErr) {
+				t.Fatalf("元のエラーが辿れない: %v", err)
+			}
+		})
 	}
 }
