@@ -57,9 +57,12 @@ service_secret_plain = "change-me-service-secret"
 # github_dispatch_token = "<GitHub Fine-grained PAT: Actions=Read and write>"
 # github_dispatch_repo  = "ISCProduct/soc-ai-agent"
 #
-# /link で Backlog のメンバー一覧を引くAPIキー(読み取りのみ)。
-# 未設定なら /link /unlink /link-list は「利用できません」を返す。他のコマンドには影響しない。
-# backlog_api_key = "<Backlog API キー>"
+# Discord が Backlog を更新する Bot 専用 API キー。個人のキーは入れない。
+# 初回 apply で Secrets Manager <project>/discord-backlog-bot に書き、以降は CLI で更新する。
+# 未設定でも apply できる。その場合は automation/discord/README.md の手順で書いてから /link と /deadline が動く。
+# backlog_bot_api_key_plain = "<Backlog Bot ユーザーの API キー>"
+#
+# backlog_api_key は Lambda に渡さない。tfvars に残っていても環境変数には入らない。
 #
 # Backlog の期限リマインドの投稿先 Webhook URL。未設定ならリマインドは動かない。
 # discord_reminder_webhook_url = "https://discord.com/api/webhooks/<id>/<token>"
