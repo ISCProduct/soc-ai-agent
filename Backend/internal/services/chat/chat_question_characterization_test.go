@@ -277,7 +277,7 @@ func TestGenerateStrategicQuestion_Characterization(t *testing.T) {
 				conversationContextRepo: &charConversationRepo{intent: tc.intent},
 			}
 
-			q, id, cat, err := s.generateStrategicQuestion(context.Background(), tc.history, 42, "char-session",
+			q, id, cat, err := s.generateStrategicQuestion(guardedCtx(), tc.history, 42, "char-session",
 				tc.scoreMap, tc.allCategories, tc.askedTexts, 3, tc.jobCategoryID, tc.targetLevel, tc.phase, tc.asked)
 
 			var b strings.Builder
@@ -394,7 +394,7 @@ func TestProcessAnswerAndNextQuestion_Characterization(t *testing.T) {
 			}
 			phaseByID := map[uint]*models.AnalysisPhase{1: &phases[0], 2: &phases[1]}
 
-			resp, err := s.processAnswerAndNextQuestion(context.Background(), processQuestionInput{
+			resp, err := s.processAnswerAndNextQuestion(guardedCtx(), processQuestionInput{
 				req:                 ChatRequest{UserID: 42, SessionID: "char-session", Message: tc.message, IndustryID: 3},
 				history:             tc.history,
 				jobCategoryID:       tc.jobCategoryID,

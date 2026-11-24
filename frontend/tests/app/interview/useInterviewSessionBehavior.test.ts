@@ -135,9 +135,9 @@ describe('useInterviewSession の挙動', () => {
         turnBodies.push(init?.body as FormData)
         return turnResponse({ user_text: '回答', ai_text: '次の質問です' })
       }
-      if (url.includes('/api/user/weight-scores')) return jsonResponse({ weight_scores: [] })
-      if (url.includes('/api/interviews') && url.endsWith('/start')) return jsonResponse({ id: 1, status: 'in_progress' })
-      if (url.endsWith('/api/interviews')) return jsonResponse({ id: 1, status: 'created' })
+      if (url.includes('/user/weight-scores')) return jsonResponse({ weight_scores: [] })
+      if (url.includes('/interviews') && url.endsWith('/start')) return jsonResponse({ id: 1, status: 'in_progress' })
+      if (url.endsWith('/interviews')) return jsonResponse({ id: 1, status: 'created' })
       return jsonResponse({})
     }) as unknown as typeof fetch
   })
@@ -161,7 +161,7 @@ describe('useInterviewSession の挙動', () => {
       setStatus,
     }))
 
-  const isDetail = (u: string) => /\/api\/interviews\/1(\?|$)/.test(u)
+  const isDetail = (u: string) => /\/interviews\/1(\?|$)/.test(u)
 
   it('参加すると作成→開始→/start-turn の順に呼び、冒頭の質問を書き起こしに出す', async () => {
     const media = fakeMedia()
@@ -170,8 +170,8 @@ describe('useInterviewSession の挙動', () => {
     await act(async () => { await result.current.handleJoin() })
 
     const order = calls.filter(u => !u.includes('/api/auth/session'))
-    expect(order[0]).toMatch(/\/api\/interviews$/)
-    expect(order[1]).toMatch(/\/api\/interviews\/1\/start$/)
+    expect(order[0]).toMatch(/\/interviews$/)
+    expect(order[1]).toMatch(/\/interviews\/1\/start$/)
     expect(order[2]).toMatch(/\/start-turn$/)
     expect(setStatus.mock.calls.map(c => c[0])).toEqual(['connecting', 'connected'])
     expect(result.current.session?.id).toBe(1)
@@ -192,7 +192,7 @@ describe('useInterviewSession の挙動', () => {
     expect(setStatus.mock.calls.map(c => c[0])).toEqual(['connecting', 'error'])
     expect(result.current.errorMessage).toContain('アクセスが拒否されました')
     expect(media.stopStream).toHaveBeenCalled()
-    expect(calls.some(u => u.endsWith('/api/interviews'))).toBe(false)
+    expect(calls.some(u => u.endsWith('/interviews'))).toBe(false)
 
     unmount()
   })
@@ -290,8 +290,8 @@ describe('useInterviewSession の挙動', () => {
   it('終了するとスコア取得→終了API→ポーリングの順に進み、レポートが届いたら ready にする', async () => {
     route = (url) => {
       if (isDetail(url)) return jsonResponse({ session: { id: 1 }, report: { id: 9, summary: 'よかった' } })
-      if (url.includes('/api/user/weight-scores')) {
-        const n = calls.filter(u => u.includes('/api/user/weight-scores')).length
+      if (url.includes('/user/weight-scores')) {
+        const n = calls.filter(u => u.includes('/user/weight-scores')).length
         return jsonResponse({ weight_scores: [{ category: n === 1 ? 'before' : 'after' }] })
       }
       return undefined
@@ -311,7 +311,7 @@ describe('useInterviewSession の挙動', () => {
     expect(result.current.scoresBefore).toEqual([{ category: 'before' }])
     expect(result.current.scoresAfter).toEqual([{ category: 'after' }])
 
-    const scoreIdx = calls.findIndex(u => u.includes('/api/user/weight-scores'))
+    const scoreIdx = calls.findIndex(u => u.includes('/user/weight-scores'))
     const finishIdx = calls.findIndex(u => u.endsWith('/finish'))
     const detailIdx = calls.findIndex(isDetail)
     expect(scoreIdx).toBeLessThan(finishIdx)
