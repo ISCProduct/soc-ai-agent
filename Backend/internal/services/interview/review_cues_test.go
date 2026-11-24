@@ -1,6 +1,7 @@
 package interview
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"context"
 	"encoding/json"
@@ -9,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 func TestReviewCues_UsesSessionStartAndHidesMissingAnchor(t *testing.T) {
@@ -123,7 +122,7 @@ func TestPresignForUser_NotFoundVsRepositoryError(t *testing.T) {
 		findErr error
 		wantNF  bool
 	}{
-		{"レコードが無い場合は ErrVideoNotFound", gorm.ErrRecordNotFound, true},
+		{"レコードが無い場合は ErrVideoNotFound", repository.ErrNotFound, true},
 		{"DB障害は ErrVideoNotFound にしない", dbErr, false},
 	}
 	for _, tt := range tests {
