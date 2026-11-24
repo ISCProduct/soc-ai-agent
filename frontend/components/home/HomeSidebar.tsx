@@ -295,6 +295,9 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
       bgcolor: UI.field,
       borderRight: `1px solid ${UI.ruleSoft}`,
       overflowY: 'auto',
+      // バーだけ隠し、ホイール・タッチ・キーボードでのスクロールは維持する。
+      scrollbarWidth: 'none',
+      '&::-webkit-scrollbar': { display: 'none' },
     },
   }
 
