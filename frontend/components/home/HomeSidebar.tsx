@@ -21,7 +21,8 @@ import Quiz from '@mui/icons-material/Quiz'
 import RecordVoiceOver from '@mui/icons-material/RecordVoiceOver'
 import Search from '@mui/icons-material/Search'
 import { authService, type User } from '@/lib/auth'
-import { HOME_COLORS, HOME_LAYOUT } from '@/lib/home-theme'
+import { HOME_LAYOUT } from '@/lib/home-theme'
+import { UI } from '@/lib/design/tokens'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { getApplicationsNavTarget } from '@/lib/sidebar-navigation'
 import {
@@ -81,7 +82,7 @@ const NAV_ICONS: Record<string, React.ComponentType<SvgIconProps>> = {
   '/admin': AdminPanelSettings,
 }
 
-const headingSx = { fontWeight: 700, fontSize: 16, lineHeight: 1.5, color: HOME_COLORS.ink } as const
+const headingSx = { fontWeight: 700, fontSize: 16, lineHeight: 1.5, color: UI.ink } as const
 
 /**
  * ホーム（相談中心）の左サイドバー（Figma「改善G／相談中心」ノード 37:340）。
@@ -165,23 +166,24 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           gap: 1.5,
           minHeight: 44,
           px: 1.5,
-          borderRadius: '4px',
+          borderRadius: '8px',
           textDecoration: 'none',
-          bgcolor: current ? HOME_COLORS.activeBg : 'transparent',
-          color: current ? HOME_COLORS.primary : HOME_COLORS.navInk,
+          bgcolor: current ? UI.markTint : 'transparent',
+          color: current ? UI.mark : UI.inkSoft,
           fontWeight: current ? 700 : 400,
           fontSize: 16,
           lineHeight: 1.5,
-          '&:hover': { bgcolor: current ? HOME_COLORS.activeBg : HOME_COLORS.page },
+          '&:hover': { bgcolor: current ? UI.markTint : UI.tint },
+          '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
         }}
       >
         {/* 現在地のバー（色に加えて形でも示す） */}
-        <Box aria-hidden sx={{ width: 4, height: 24, flexShrink: 0, bgcolor: current ? HOME_COLORS.primary : 'transparent' }} />
-        {Icon && <Icon aria-hidden fontSize="small" sx={{ flexShrink: 0, color: current ? HOME_COLORS.primary : HOME_COLORS.link }} />}
+        <Box aria-hidden sx={{ width: 4, height: 24, flexShrink: 0, borderRadius: '2px', bgcolor: current ? UI.mark : 'transparent' }} />
+        {Icon && <Icon aria-hidden fontSize="small" sx={{ flexShrink: 0, color: 'inherit' }} />}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           {label}
           {opts.secondary && (
-            <Typography component="span" sx={{ display: 'block', fontSize: 12, color: HOME_COLORS.soft, fontWeight: 400 }}>
+            <Typography component="span" sx={{ display: 'block', fontSize: 12, color: UI.inkSoft, fontWeight: 400 }}>
               {opts.secondary}
             </Typography>
           )}
@@ -191,22 +193,26 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
   }
 
   const content = (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100%', p: 2, bgcolor: HOME_COLORS.white }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100%', p: 2, bgcolor: UI.field }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, gap: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-          <Avatar sx={{ width: 32, height: 32, bgcolor: HOME_COLORS.link, fontSize: 16 }}>{user.name.charAt(0).toUpperCase()}</Avatar>
+          <Avatar sx={{ width: 32, height: 32, bgcolor: UI.markTint, color: UI.mark, fontSize: 16 }}>{user.name.charAt(0).toUpperCase()}</Avatar>
           <Typography noWrap sx={{ ...headingSx }}>
             {user.name}
           </Typography>
           {user.is_guest && (
-            <Typography component="span" sx={{ fontSize: 12, color: HOME_COLORS.soft }}>
+            <Typography component="span" sx={{ fontSize: 12, color: UI.inkSoft }}>
               ゲスト
             </Typography>
           )}
         </Box>
         <Button
           onClick={onLogout}
-          sx={{ minWidth: 0, p: 0.5, fontSize: 16, fontWeight: 400, color: HOME_COLORS.soft, textTransform: 'none', flexShrink: 0 }}
+          sx={{
+            minWidth: 0, p: 0.5, fontSize: 16, fontWeight: 400, color: UI.inkSoft, textTransform: 'none', flexShrink: 0,
+            '&:hover': { bgcolor: UI.tint },
+            '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
+          }}
         >
           ログアウト
         </Button>
@@ -228,7 +234,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           <Typography component="span" sx={headingSx}>
             {t('groups.analysis')}
           </Typography>
-          <Typography component="span" sx={{ fontSize: 16, color: HOME_COLORS.soft }}>
+          <Typography component="span" sx={{ fontSize: 16, color: UI.inkSoft }}>
             {`判定の進み具合 ${progress.percent}%`}
           </Typography>
         </Box>
@@ -239,9 +245,9 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={progress.percent}
-            sx={{ height: 8, borderRadius: '4px', bgcolor: HOME_COLORS.track, overflow: 'hidden' }}
+            sx={{ height: 8, borderRadius: '4px', bgcolor: UI.ruleSoft, overflow: 'hidden' }}
           >
-            <Box sx={{ height: '100%', width: `${progress.percent}%`, bgcolor: HOME_COLORS.primary }} />
+            <Box sx={{ height: '100%', width: `${progress.percent}%`, bgcolor: UI.mark }} />
           </Box>
         </Box>
         {HOME_SIDEBAR_ANALYSIS.map((i) => navItem(i.href, i.label))}
@@ -283,8 +289,8 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
     '& .MuiDrawer-paper': {
       width: HOME_LAYOUT.sidebarWidth,
       boxSizing: 'border-box',
-      bgcolor: HOME_COLORS.white,
-      borderRight: `1px solid ${HOME_COLORS.sidebarBorder}`,
+      bgcolor: UI.field,
+      borderRight: `1px solid ${UI.ruleSoft}`,
       overflowY: 'auto',
     },
   }

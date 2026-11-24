@@ -29,6 +29,7 @@ import HomeIcon from '@mui/icons-material/Home'
 import FactCheckIcon from '@mui/icons-material/FactCheck'
 import QuizIcon from '@mui/icons-material/Quiz'
 import SearchIcon from '@mui/icons-material/Search'
+import { UI } from '@/lib/design/tokens'
 import {
   GLOBAL_NAV_HOME_ITEMS,
   SIDEBAR_NAV_ITEMS,
@@ -43,22 +44,22 @@ import { useHasStoredUser } from './useHasStoredUser'
 type NavHref = (typeof SIDEBAR_NAV_ITEMS)[number]['href'] | (typeof GLOBAL_NAV_HOME_ITEMS)[number]['href']
 
 const NAV_ICONS: Record<NavHref, React.ReactNode> = {
-  '/': <HomeIcon color="primary" />,
-  '/results': <FactCheckIcon color="primary" />,
-  '/correlation-diagram': <BorderAllIcon color="primary" />,
-  '/chat-history': <HistoryIcon color="primary" />,
-  '/resume': <DescriptionIcon color="primary" />,
-  '/assessments': <QuizIcon color="primary" />,
-  '/ability-assessments': <QuizIcon color="primary" />,
-  '/interview': <RecordVoiceOverIcon color="primary" />,
-  '/interview/history': <AssessmentIcon color="primary" />,
-  '/es-rewrite': <EditNoteIcon color="primary" />,
-  '/schedule': <CalendarMonthIcon color="primary" />,
-  '/favorites': <FavoriteIcon color="primary" />,
-  '/applications': <AssignmentIcon color="primary" />,
-  '/companies': <SearchIcon color="primary" />,
-  '/scout': <MailOutlineIcon color="primary" />,
-  '/profile': <ManageAccountsIcon color="primary" />,
+  '/': <HomeIcon color="inherit" />,
+  '/results': <FactCheckIcon color="inherit" />,
+  '/correlation-diagram': <BorderAllIcon color="inherit" />,
+  '/chat-history': <HistoryIcon color="inherit" />,
+  '/resume': <DescriptionIcon color="inherit" />,
+  '/assessments': <QuizIcon color="inherit" />,
+  '/ability-assessments': <QuizIcon color="inherit" />,
+  '/interview': <RecordVoiceOverIcon color="inherit" />,
+  '/interview/history': <AssessmentIcon color="inherit" />,
+  '/es-rewrite': <EditNoteIcon color="inherit" />,
+  '/schedule': <CalendarMonthIcon color="inherit" />,
+  '/favorites': <FavoriteIcon color="inherit" />,
+  '/applications': <AssignmentIcon color="inherit" />,
+  '/companies': <SearchIcon color="inherit" />,
+  '/scout': <MailOutlineIcon color="inherit" />,
+  '/profile': <ManageAccountsIcon color="inherit" />,
 }
 
 /**
@@ -93,11 +94,19 @@ export function GlobalNavMenu() {
           right: 16,
           bottom: { xs: 'calc(72px + env(safe-area-inset-bottom))', md: 16 },
           zIndex: (t) => t.zIndex.appBar,
+          boxShadow: 1,
+          '&:hover': { boxShadow: 2 },
+          '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: 3 },
         }}
       >
         <MenuIcon />
       </Fab>
-      <Drawer anchor="right" open={open} onClose={() => setOpen(false)}>
+      <Drawer
+        anchor="right"
+        open={open}
+        onClose={() => setOpen(false)}
+        sx={{ '& .MuiDrawer-paper': { bgcolor: UI.field, boxShadow: 2 } }}
+      >
         <Box sx={{ width: 280 }} role="presentation">
           <List component="nav" aria-label={t('menu.label')}>
             {[...GLOBAL_NAV_HOME_ITEMS, ...SIDEBAR_NAV_ITEMS].map((item) => {
@@ -113,12 +122,30 @@ export function GlobalNavMenu() {
                     selected={current}
                     aria-current={current ? 'page' : undefined}
                     onClick={() => setOpen(false)}
+                    sx={{
+                      color: UI.inkSoft,
+                      '&:hover': { bgcolor: UI.tint },
+                      '&.Mui-selected, &.Mui-selected:hover': { bgcolor: UI.markTint, color: UI.mark },
+                      '&.Mui-selected::before': {
+                        content: '""',
+                        position: 'absolute',
+                        left: 0,
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        width: 4,
+                        height: 24,
+                        borderRadius: '2px',
+                        bgcolor: UI.mark,
+                      },
+                      '&.Mui-focusVisible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
+                    }}
                   >
-                    <ListItemIcon sx={{ minWidth: 36 }}>{NAV_ICONS[item.href]}</ListItemIcon>
+                    <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>{NAV_ICONS[item.href]}</ListItemIcon>
                     <ListItemText
                       primary={item.label}
                       secondary={current ? t('menu.current') : undefined}
                       primaryTypographyProps={{ fontWeight: current ? 700 : 400 }}
+                      secondaryTypographyProps={{ color: UI.inkSoft }}
                     />
                   </ListItemButton>
                 </ListItem>
