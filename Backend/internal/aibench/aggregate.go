@@ -29,6 +29,12 @@ const (
 	BrokenNetwork = "network_error"
 )
 
+// ModelTokens は1モデル分のトークン。
+type ModelTokens struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+}
+
 // Observation は1ケース1回の実行結果。
 type Observation struct {
 	CaseID string `json:"case_id"`
@@ -41,6 +47,9 @@ type Observation struct {
 	// TokensEstimated はトークン数が実測ではなく概算であることを示す。
 	// ES添削は RAG 経由で usage が返らないため概算になる。
 	TokensEstimated bool `json:"tokens_estimated"`
+	// TokensByModel はモデルごとのトークン（SOCAIAGENT-559）。ES 添削は評価と改善文でモデルが違い、
+	// 単価も違うので、あればモデルごとの単価でコストを見積もる。無ければ合計を対象のモデルの単価で見積もる。
+	TokensByModel map[string]ModelTokens `json:"tokens_by_model,omitempty"`
 
 	Broken       bool   `json:"broken"`
 	BrokenReason string `json:"broken_reason,omitempty"`
@@ -225,6 +234,9 @@ type Summary struct {
 	CostPerCallUSD  float64 `json:"cost_per_call_usd"`
 	TotalCostUSD    float64 `json:"total_cost_usd"`
 	CostIsEstimated bool    `json:"cost_is_estimated"`
+	// ModelsUsed は実際にトークンを使ったモデル（モデルごとの内訳があるときはその全部）。
+	// 改善文のモデルだけを変えた実行どうしを、Model（評価のモデル）だけで取り違えないように
+	ModelsUsed []string `json:"models_used,omitempty"`
 
 	CaseDetails  []CaseSummary `json:"cases_detail"`
 	Observations []Observation `json:"observations"`
@@ -265,6 +277,8 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	broken := 0
 	compliant, compliantDenom := 0, 0
 	var promptTokens, completionTokens int
+	var totalCost float64
+	modelsUsed := map[string]bool{}
 	estimated := false
 
 	measured := 0
@@ -285,6 +299,18 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 		measured++
 		promptTokens += o.PromptTokens
 		completionTokens += o.CompletionTokens
+		// モデルごとの内訳があれば、モデルごとの単価で見積もる（全量を対象のモデルの単価にしない）
+		if len(o.TokensByModel) > 0 {
+			for m, t := range o.TokensByModel {
+				totalCost += costs.EstimateCostUSD(m, t.PromptTokens, t.CompletionTokens)
+				modelsUsed[m] = true
+			}
+		} else {
+			totalCost += costs.EstimateCostUSD(model, o.PromptTokens, o.CompletionTokens)
+			if o.PromptTokens > 0 || o.CompletionTokens > 0 {
+				modelsUsed[model] = true
+			}
+		}
 		if o.TokensEstimated {
 			estimated = true
 		}
@@ -423,7 +449,11 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	}
 	s.FairnessPairs, s.FairnessMeanGap, s.FairnessMaxGap = FairnessGaps(pairMeans)
 
-	s.TotalCostUSD = costs.EstimateCostUSD(model, promptTokens, completionTokens)
+	s.TotalCostUSD = totalCost
+	for m := range modelsUsed {
+		s.ModelsUsed = append(s.ModelsUsed, m)
+	}
+	sort.Strings(s.ModelsUsed)
 	// 1件あたりは計測できた回数で割る。課金は破損した呼び出しにも発生するが、
 	// 通信エラーで応答が返らなかった回にはトークン課金が無い。
 	if measured > 0 {
