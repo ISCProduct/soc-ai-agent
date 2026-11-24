@@ -1,5 +1,4 @@
 import { authService } from '@/lib/auth'
-import { BACKEND_URL } from '@/lib/config'
 
 export type ScoutStatus = 'sent' | 'viewed' | 'accepted' | 'declined'
 
@@ -19,8 +18,7 @@ export interface StudentScoutList {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  await authService.ensureFreshUserToken()
-  const res = await fetch(`${BACKEND_URL}/api/user${path}`, {
+  const res = await fetch(`/api/bff/user${path}`, {
     ...init,
     headers: {
       ...authService.getUserFetchHeaders(),

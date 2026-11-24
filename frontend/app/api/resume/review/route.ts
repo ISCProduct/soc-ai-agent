@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
       headers['Content-Type'] = 'application/json'
     }
 
-    const response = await fetch(`${BACKEND_URL}/api/resume/review?document_id=${documentId}`, {
+    const response = await fetch(`${BACKEND_URL}/api/resume/review?document_id=${encodeURIComponent(documentId)}`, {
       method: 'POST',
       headers,
       body: body || undefined,

@@ -1,4 +1,4 @@
-import { extractTenantSlug, isAdminHost } from '@/lib/tenant'
+import { extractTenantSlug, isAdminHost, oauthStartUrl } from '@/lib/tenant'
 
 describe('tenant', () => {
   describe('extractTenantSlug', () => {
@@ -31,6 +31,17 @@ describe('tenant', () => {
       expect(isAdminHost('admin.example.com')).toBe(false)
       expect(isAdminHost('admin.foo.shukatsu-ai.jp')).toBe(false)
       expect(isAdminHost('administrator.shukatsu-ai.jp')).toBe(false)
+    })
+  })
+
+  describe('oauthStartUrl', () => {
+    it('学園サブドメインでは tenant を付ける', () => {
+      expect(oauthStartUrl('github', 'my-school.shukatsu-ai.jp')).toBe('/api/auth/oauth/start?provider=github&tenant=my-school')
+    })
+
+    it('学園でないホストでは tenant を付けない', () => {
+      expect(oauthStartUrl('google', 'shukatsu-ai.jp')).toBe('/api/auth/oauth/start?provider=google')
+      expect(oauthStartUrl('github', 'localhost:3000')).toBe('/api/auth/oauth/start?provider=github')
     })
   })
 })
