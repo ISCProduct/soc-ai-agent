@@ -42,6 +42,10 @@ DOC_TYPE_TO_COLLECTION = {
 
 _chroma_client: Any = None
 _chroma_lock = threading.Lock()
+# 文書の書き込み（set_cached_documents / replace_documents の upsert）と、backfill の
+# 「読み直し → fetched_at_ts の update」を同じプロセスの中で重ねないためのロック（SOCAIAGENT-659）。
+# backfill が読んだあとに新しい本文が書かれ、そこへ古い時刻を上書きしないようにする。
+_write_lock = threading.RLock()
 
 
 def reset_chroma_client_for_tests() -> None:
@@ -524,12 +528,13 @@ def set_cached_documents(
             }
             for _ in docs
         ]
-        collection.upsert(
-            ids=ids,
-            documents=docs,
-            embeddings=embeddings,
-            metadatas=metadatas,
-        )
+        with _write_lock:
+            collection.upsert(
+                ids=ids,
+                documents=docs,
+                embeddings=embeddings,
+                metadatas=metadatas,
+            )
         logger.info(
             "chromadb upsert key=%s collection=%s docs=%d source=%s doc_type=%s",
             cache_key,
@@ -665,7 +670,8 @@ def replace_documents(
     文書のうち、今回書いた id 以外のもの。役割（role）の違う旧文書もここで消すので、以前の
     「その用途の企業の文書を全部消してから書く」と同じ結果になる。ただし消すのは書けた後だけ。
     company_context は resume_review と company_research が共有しているので、用途の違う文書は消さない。
-    doc_type を持たない旧文書も消さない（delete_company_documents と同じ範囲。SOCAIAGENT-659）。
+    doc_type を持たない同じ企業の旧文書は消す（SOCAIAGENT-659 のレビュー）。残すと、backfill で
+    fetched_at_ts が付いたあと、検索（会社と TTL で絞り、doc_type では絞らない）が再取得前の旧文書を返すため。
 
     purge_doc_types を渡すと、消す用途をその集合にする（既定は doc_type だけ）。再埋め込みは
     resume_review を company_research として取り直すので、両方を渡して resume_review の旧文書も入れ替える。
@@ -681,40 +687,43 @@ def replace_documents(
     ids = _doc_ids(cache_key, len(docs), meta["doc_type"])
     now = datetime.now(timezone.utc)
     fetched_at = now.isoformat()
-    collection.upsert(
-        ids=ids,
-        documents=docs,
-        embeddings=embeddings,
-        metadatas=[
-            {
-                "company": meta["company"],
-                "company_hash": meta.get("company_hash", ""),
-                "role": meta["role"],
-                "doc_type": meta["doc_type"],
-                "source": source,
-                "fetched_at": fetched_at,
-                "fetched_at_ts": int(now.timestamp()),
-                "cache_key": meta["cache_key"],
-            }
-            for _ in docs
-        ],
-    )
+    with _write_lock:
+        collection.upsert(
+            ids=ids,
+            documents=docs,
+            embeddings=embeddings,
+            metadatas=[
+                {
+                    "company": meta["company"],
+                    "company_hash": meta.get("company_hash", ""),
+                    "role": meta["role"],
+                    "doc_type": meta["doc_type"],
+                    "source": source,
+                    "fetched_at": fetched_at,
+                    "fetched_at_ts": int(now.timestamp()),
+                    "cache_key": meta["cache_key"],
+                }
+                for _ in docs
+            ],
+        )
     written = collection.get(ids=ids, include=[]).get("ids") or []
     if len(set(written)) != len(ids):
         raise ReplaceDocumentsError(
             f"written documents not found collection={logical} expected={len(ids)} found={len(written)}"
         )
-    filters: Dict[str, Any] = _company_filter(
+    # Chroma の where では「doc_type が無い」を条件にできないので、同じ企業の文書を読み、
+    # 消す用途の文書と doc_type を持たない旧文書を選ぶ
+    where = _build_where(_company_filter(
         {"company": meta["company"], "company_hash": meta.get("company_hash", "")}
-    )
-    purge = sorted({t for t in (purge_doc_types or [meta.get("doc_type") or ""]) if t})
-    if len(purge) == 1:
-        filters["doc_type"] = purge[0]
-    elif purge:
-        filters["doc_type"] = {"$in": purge}
-    where = _build_where(filters)
-    existing = collection.get(where=where, include=[]).get("ids") or []
-    stale = [doc_id for doc_id in existing if doc_id not in set(ids)]
+    ))
+    purge = {t for t in (purge_doc_types or [meta.get("doc_type") or ""]) if t}
+    got = collection.get(where=where, include=["metadatas"])
+    written_ids = set(ids)
+    stale = [
+        doc_id
+        for doc_id, m in zip(got.get("ids") or [], got.get("metadatas") or [])
+        if doc_id not in written_ids and (str((m or {}).get("doc_type") or "") in purge or not (m or {}).get("doc_type"))
+    ]
     if stale:
         collection.delete(ids=stale)
     logger.info(
@@ -831,6 +840,9 @@ def backfill_collection(collection: Any, apply: bool = False, batch: Optional[in
       offset で読み進めると、途中で文書が消えたときに読み飛ばす
     - update には fetched_at_ts だけを渡す（Chroma の update は項目ごとにマージする）。読んでから
       update するまでに同じ ID が書き直されても、新しい本文に古いメタデータを付けない
+    - update の直前に、書き込みと同じロック（_write_lock）の中で読み直し、その間に数値の fetched_at_ts が
+      付いた・fetched_at が変わった（新しい本文が書かれた）ID は上書きしない。古い時刻に戻すと、
+      TTL 外になった新しい本文が検索から消えるため（レビューの Mid）
     """
     size = batch or BACKFILL_BATCH
     stats = _empty_backfill_stats()
@@ -839,8 +851,7 @@ def backfill_collection(collection: Any, apply: bool = False, batch: Optional[in
         got = collection.get(ids=all_ids[start:start + size], include=["metadatas"])
         ids: List[str] = list(got.get("ids") or [])
         metadatas = got.get("metadatas") or [{} for _ in ids]
-        update_ids: List[str] = []
-        update_metas: List[Dict[str, Any]] = []
+        planned: Dict[str, Tuple[Any, int]] = {}
         for doc_id, meta in zip(ids, metadatas):
             meta = meta or {}
             stats["scanned"] += 1
@@ -851,12 +862,28 @@ def backfill_collection(collection: Any, apply: bool = False, batch: Optional[in
             if ts is None:
                 stats["unreadable"] += 1
                 continue
-            update_ids.append(doc_id)
-            update_metas.append({"fetched_at_ts": ts})
-        if update_ids:
-            stats["filled"] += len(update_ids)
-            if apply:
+            planned[doc_id] = (meta.get("fetched_at"), ts)
+        if not planned:
+            continue
+        if not apply:
+            stats["filled"] += len(planned)
+            continue
+        with _write_lock:
+            # 読んでから今までに書き直された ID は除く（新しい本文には書き込み側が数値の時刻を付けている）
+            now = collection.get(ids=list(planned), include=["metadatas"])
+            update_ids: List[str] = []
+            update_metas: List[Dict[str, Any]] = []
+            for doc_id, meta in zip(now.get("ids") or [], now.get("metadatas") or []):
+                meta = meta or {}
+                fetched_at, ts = planned[doc_id]
+                if _has_numeric_ts(meta) or meta.get("fetched_at") != fetched_at:
+                    stats["already"] += 1
+                    continue
+                update_ids.append(doc_id)
+                update_metas.append({"fetched_at_ts": ts})
+            if update_ids:
                 collection.update(ids=update_ids, metadatas=update_metas)
+            stats["filled"] += len(update_ids)
     return stats
 
 

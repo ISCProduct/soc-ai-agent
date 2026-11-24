@@ -377,7 +377,7 @@ HttpClient 構成では RAG コンテナ内の `/app/chroma_db` 削除では消�
 | 操作 | 作用する範囲 |
 |---|---|
 | `delete_company_documents(company, doc_type=...)` | その企業の、指定した `doc_type` の文書だけ。`company_context` を共有する `resume_review` / `company_research` の片方を消しても、もう片方は残る。`doc_type` を持たない旧文書は消さない。`doc_type` を省いたときは今までどおり企業の文書をすべて消す。**企業の文書を完全に消すときは `doc_type` を付けない**（付けると、別の用途の文書と `doc_type` の無い旧文書が残る） |
-| `replace_documents`（`/vector/reembed` の再取得） | 書けたことを確かめたあと、同じ企業・消す用途（`purge_doc_types`。既定は書いた `doc_type`）の、今回書かなかった文書を消す（役割が違っても消す）。`resume_review` は `company_research` として取り直すので、`resume_review` を指定したとき・`doc_type` を省いたときは両方の旧文書を入れ替える。`doc_type` を持たない旧文書は残す |
+| `replace_documents`（`/vector/reembed` の再取得） | 書けたことを確かめたあと、同じ企業・消す用途（`purge_doc_types`。既定は書いた `doc_type`）の、今回書かなかった文書を消す（役割が違っても消す）。`resume_review` は `company_research` として取り直すので、`resume_review` を指定したとき・`doc_type` を省いたときは両方の旧文書を入れ替える。同じ企業の `doc_type` を持たない旧文書も消す（残すと、backfill で `fetched_at_ts` が付いたあと、会社と TTL で絞る検索が再取得前の旧文書を返すため） |
 | `set_cached_documents`（件数が減る更新） | 書いたあと、同じ `cache_key` かつ同じ `doc_type` で、今回書かなかった ID（前回の余ったチャンク）を消す。今回より後に書かれたもの（`fetched_at` が新しい）は消さない（同時に書いたときは最後に書いたものが勝つ）。掃除の失敗は `stale cleanup failed` の WARNING（書き込み自体は成功） |
 | 文書の ID | `cache_key` と `doc_type` から作る。`resume_review` と `company_research` は職種が同じなら `cache_key` も同じだが、ID が分かれるので、片方を書いてももう片方を上書き・削除しない。読み出しは今までどおり共有（`resume_review` の検索は `company_research` の文書も使う） |
 | 検索の TTL | where に `今 - RAG_SEARCH_CACHE_TTL_SECONDS <= fetched_at_ts <= 今 + 5分` を足して検索する。取れた文書の後段の確認も同じ整数の範囲で行う。期限切れや、ありえない未来の日付の文書が類似度の上位を占めても、有効な文書が `n_results` 件まで返る。`fetched_at_ts` を持たない文書は古い扱い |
@@ -390,6 +390,7 @@ HttpClient 構成では RAG コンテナ内の `/app/chroma_db` 削除では消�
 手順は要りません。デプロイ中に旧版が書いた文書も、次の起動で補われます。起動直後の補い終わるまでは、補っていない文書が
 キャッシュミスになりえます。
 
+- 読んでから書くまでに同じ ID へ新しい本文が書かれた文書は上書きしない（書き込みと同じロックの中で読み直し、数値の `fetched_at_ts` が付いた・`fetched_at` が変わった文書を除く）。手で流すスクリプトは別のプロセスなのでロックは共有しないが、読み直しの確認はする
 - 結果はログの `fetched_at_ts backfill done result=...`
 - chroma に届かない・一部のコレクションが失敗したときは、`RAG_BACKFILL_ATTEMPTS`（既定 4）回まで、`RAG_BACKFILL_RETRY_DELAY_SEC`（既定 5 秒）から倍々に待って試し直す。1つのコレクションが失敗しても残りは補う（ログ `fetched_at_ts backfill failed collection=...`）。最後まで失敗したら `gave up`（起動は止めない。次の起動でまた試す）
 - 止めるときは `RAG_BACKFILL_ON_STARTUP=0`

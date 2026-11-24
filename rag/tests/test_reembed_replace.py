@@ -25,7 +25,7 @@ def _matches(meta: Dict[str, Any], where: Dict[str, Any]) -> bool:
 
 
 class FakeCollection:
-    """テストの chromadb はスタブなので、使う操作（upsert / get / delete / count）だけを持つ偽物。"""
+    """テストの chromadb はスタブなので、使う操作（upsert / get / delete / count）だけを持つ偽物。get は ids・documents・metadatas を返す。"""
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -37,7 +37,11 @@ class FakeCollection:
 
     def get(self, ids=None, where=None, include=None):
         picked = [i for i in self.rows if (ids is None or i in ids) and _matches(self.rows[i]["metadata"], where or {})]
-        return {"ids": picked, "documents": [self.rows[i]["document"] for i in picked]}
+        return {
+            "ids": picked,
+            "documents": [self.rows[i]["document"] for i in picked],
+            "metadatas": [dict(self.rows[i]["metadata"]) for i in picked],
+        }
 
     def delete(self, ids=None, where=None):
         for i in [i for i in self.rows if (ids is None or i in ids) and _matches(self.rows[i]["metadata"], where or {})]:
@@ -105,19 +109,23 @@ def test_replace_documents_removes_old_chunks_and_other_roles(chroma):
     assert _docs(chroma, "company_context", "B社") == ["B社の文書"]
 
 
-def test_replace_documents_keeps_other_doc_types_and_legacy_docs(chroma):
+def test_replace_documents_keeps_other_doc_types_and_purges_legacy_docs(chroma):
     # company_context は resume_review と company_research が共有している。再取得は指定した用途だけを
-    # 置き換え、別の用途と doc_type を持たない旧文書は残す（SOCAIAGENT-659。delete_company_documents と同じ範囲）
+    # 置き換え、別の用途は残す。doc_type を持たない同じ企業の旧文書は消す（残すと、backfill のあと
+    # 検索が会社と TTL だけで旧文書を返す。SOCAIAGENT-659 のレビューの Mid）。別の企業の旧文書は消さない
     key = _seed(chroma, "company_context", "A社", "指定なし", ["旧1", "旧2"], "company_research")
     _seed(chroma, "company_context", "A社", "エンジニア", ["添削用"], "resume_review")
     col = chroma.get_or_create_collection(vs.physical_collection_name("company_context"))
     col.upsert(ids=["legacy"], documents=["doc_type の無い旧文書"], embeddings=[EMB],
                metadatas=[{"company": "A社", "company_hash": vs._company_hash("A社")}])
+    col.upsert(ids=["legacy-b"], documents=["B社の doc_type の無い旧文書"], embeddings=[EMB],
+               metadatas=[{"company": "B社", "company_hash": vs._company_hash("B社")}])
 
     outcome = vs.replace_documents(key, ["新"], [EMB], source="web_search", doc_type="company_research")
 
-    assert outcome["deleted"] == 1
-    assert _docs(chroma, "company_context", "A社") == ["doc_type の無い旧文書", "新", "添削用"]
+    assert outcome["deleted"] == 2
+    assert _docs(chroma, "company_context", "A社") == ["新", "添削用"]
+    assert _docs(chroma, "company_context", "B社") == ["B社の doc_type の無い旧文書"]
 
 
 def test_replace_documents_purges_given_doc_types(chroma):
@@ -133,9 +141,9 @@ def test_replace_documents_purges_given_doc_types(chroma):
         purge_doc_types=["company_research", "resume_review"],
     )
 
-    # company_research の旧文書は同じ ID に上書きされ、resume_review の2件が消える
-    assert outcome["deleted"] == 2
-    assert _docs(chroma, "company_context", "A社") == ["doc_type の無い旧文書", "新"]
+    # company_research の旧文書は同じ ID に上書きされ、resume_review の2件と doc_type の無い旧文書が消える
+    assert outcome["deleted"] == 3
+    assert _docs(chroma, "company_context", "A社") == ["新"]
 
 
 def test_replace_documents_keeps_old_when_write_cannot_be_confirmed(chroma):

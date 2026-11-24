@@ -456,6 +456,41 @@ def test_backfill_does_not_skip_docs_when_others_are_deleted_meanwhile(client, m
         assert "fetched_at_ts" in real_get(ids=[f"d{i}"])["metadatas"][0], f"d{i} を読み飛ばした"
 
 
+@pytest.mark.parametrize("rewrite", ["numeric_ts", "new_fetched_at"])
+def test_backfill_does_not_overwrite_docs_rewritten_meanwhile(client, rewrite):
+    # 起動時の backfill が読んだあと、update までに同じ ID へ新しい本文が書かれたら、古い時刻で上書きしない
+    # （TTL 外の時刻に戻すと、新しい本文が検索から消える。レビューの Mid）
+    old = "2026-11-01T00:00:00+00:00"
+    _put(client, "company_context", "doc", "旧本文", {"company": "A社", "fetched_at": old})
+    _put(client, "company_context", "other", "書き直されない", {"company": "A社", "fetched_at": old})
+    col = _col(client, "company_context")
+    real_get = col.get
+    calls = []
+    new_at = datetime.now(timezone.utc)
+
+    def get_then_rewrite(**kwargs):
+        got = real_get(**kwargs)
+        if "metadatas" in (kwargs.get("include") or []):
+            calls.append(1)
+            if len(calls) == 1:  # 1回目に読んだ直後に、書き込み側が同じ ID を書き直す
+                meta = {"company": "A社", "fetched_at": new_at.isoformat()}
+                if rewrite == "numeric_ts":
+                    meta["fetched_at_ts"] = int(new_at.timestamp())
+                col.upsert(ids=["doc"], documents=["新本文"], embeddings=[[0.1, 0.2, 0.3]], metadatas=[meta])
+        return got
+
+    col.get = get_then_rewrite
+    stats = vs.backfill_collection(col, apply=True)
+
+    meta = real_get(ids=["doc"], include=["metadatas"])["metadatas"][0]
+    if rewrite == "numeric_ts":
+        assert meta["fetched_at_ts"] == int(new_at.timestamp())
+    else:
+        assert "fetched_at_ts" not in meta  # 次の backfill が新しい fetched_at から補う
+    assert "fetched_at_ts" in real_get(ids=["other"], include=["metadatas"])["metadatas"][0]
+    assert stats["filled"] == 1 and stats["already"] == 1
+
+
 def test_search_quality_harness_checks_ttl(monkeypatch):
     # 評価の期限切れ文書は数値の取得時刻を持つので、TTL の下限を外すと期限切れが返って検出される
     from evaluation.search_quality.dataset import default_dataset_path, load_dataset
