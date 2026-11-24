@@ -40,7 +40,8 @@ export default function PageContent() {
   } = list
   const [fetchMessage, setFetchMessage] = useState('')
   const [fetchSeverity, setFetchSeverity] = useState<'success' | 'warning'>('success')
-  const { approvedCompanyIds, approvalBusyId, approvalError, toggleCompanyApproval } = useCompanyApprovals(schoolId)
+  const { approvedCompanyIds, approvalLoading, approvalBusyId, approvalError, toggleCompanyApproval } =
+    useCompanyApprovals(schoolId)
   const batch = useCompanyBatchActions({
     coverage: list.coverage,
     setCoverage: list.setCoverage,
@@ -161,6 +162,7 @@ export default function PageContent() {
             toggleSelect: list.toggleSelect,
             schoolId,
             approvedCompanyIds,
+            approvalLoading,
             approvalBusyId,
             toggleCompanyApproval,
             setFilterIndustry: list.setFilterIndustry,

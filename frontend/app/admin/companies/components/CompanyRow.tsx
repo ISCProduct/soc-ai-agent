@@ -31,6 +31,7 @@ export type CompanyRowProps = {
   toggleSelect: (companyId: number) => void
   schoolId: number | undefined
   approvedCompanyIds: Set<number> | null
+  approvalLoading: boolean
   approvalBusyId: number | null
   toggleCompanyApproval: (companyId: number, approved: boolean) => void
   setFilterIndustry: Dispatch<SetStateAction<string>>
@@ -51,6 +52,7 @@ export function CompanyRow({
   toggleSelect,
   schoolId,
   approvedCompanyIds,
+  approvalLoading,
   approvalBusyId,
   toggleCompanyApproval,
   setFilterIndustry,
@@ -136,7 +138,10 @@ export function CompanyRow({
               ) : null}
               {schoolId !== undefined ? (
                 // 取得できていない状態を「未承認」と同じ見た目にしない(#1452)。
-                approvalChipState(approvedCompanyIds, company.id) === 'unknown' ? (
+                // 読み込み中は失敗（不明）とも分けて出す(#2573)。
+                approvalLoading ? (
+                  <Chip label="承認状態 読み込み中" variant="outlined" size="small" />
+                ) : approvalChipState(approvedCompanyIds, company.id) === 'unknown' ? (
                   <Chip label="承認状態 不明" color="warning" variant="outlined" size="small" />
                 ) : (
                   (() => {
