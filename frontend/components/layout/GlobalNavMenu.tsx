@@ -22,6 +22,7 @@ import AssessmentIcon from '@mui/icons-material/Assessment'
 import EditNoteIcon from '@mui/icons-material/EditNote'
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
 import AssignmentIcon from '@mui/icons-material/Assignment'
+import FavoriteIcon from '@mui/icons-material/Favorite'
 import MailOutlineIcon from '@mui/icons-material/MailOutline'
 import ManageAccountsIcon from '@mui/icons-material/ManageAccounts'
 import HomeIcon from '@mui/icons-material/Home'
@@ -53,6 +54,7 @@ const NAV_ICONS: Record<NavHref, React.ReactNode> = {
   '/interview/history': <AssessmentIcon color="primary" />,
   '/es-rewrite': <EditNoteIcon color="primary" />,
   '/schedule': <CalendarMonthIcon color="primary" />,
+  '/favorites': <FavoriteIcon color="primary" />,
   '/applications': <AssignmentIcon color="primary" />,
   '/companies': <SearchIcon color="primary" />,
   '/scout': <MailOutlineIcon color="primary" />,

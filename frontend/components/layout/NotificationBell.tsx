@@ -67,7 +67,8 @@ export function NotificationBell() {
 
   useEffect(() => {
     const user = authService.getStoredUser()
-    setLoggedIn(Boolean(user && !user.is_admin && authService.getUserFetchHeaders()['X-User-Token']))
+    // トークンは httpOnly Cookie にだけあり JS からは見えない（SOCAIAGENT-683）。保存済みのユーザーで判定する
+    setLoggedIn(Boolean(user && !user.is_admin))
   }, [pathname])
 
   const refreshCount = useCallback(async () => {

@@ -428,14 +428,12 @@ UserRefreshTokenRepository.Create
 UserRefreshTokenRepository.DeleteExpired
 UserRefreshTokenRepository.FindByHash
 UserRefreshTokenRepository.Revoke
-UserRefreshTokenRepository.RevokeAllByUser
 UserRepository.CreateUser
 UserRepository.DeleteUser
 UserRepository.FindLastActivityByUsers
 UserRepository.GetUserByEmail
 UserRepository.GetUserByID
 UserRepository.GetUserByOAuth
-UserRepository.GetUserByPasswordResetToken
 UserRepository.GetUserByVerificationToken
 UserRepository.ListStudentsPaged
 UserRepository.ListUsersPaged

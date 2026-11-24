@@ -192,7 +192,7 @@ export default function PageContent() {
     if (!adminEmail) return
     setLoading(true)
     setError('')
-    const h = { 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' }
+    const h = { 'X-Admin-Email': adminEmail }
     try {
       const [sumRes, dailyRes, monthlyRes, breakdownRes] = await Promise.all([
         fetch('/api/admin/costs', { headers: h }),

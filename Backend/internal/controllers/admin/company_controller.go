@@ -14,6 +14,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -514,9 +515,15 @@ func mergeCompany(existing *models.Company, payload *models.Company) error {
 		existing.FoundedYear = payload.FoundedYear
 	}
 	if strings.TrimSpace(payload.WebsiteURL) != "" {
+		if !isHTTPURL(payload.WebsiteURL) {
+			return errors.New("website_url must be an http or https URL")
+		}
 		existing.WebsiteURL = payload.WebsiteURL
 	}
 	if strings.TrimSpace(payload.LogoURL) != "" {
+		if !isHTTPURL(payload.LogoURL) {
+			return errors.New("logo_url must be an http or https URL")
+		}
 		existing.LogoURL = payload.LogoURL
 	}
 	if strings.TrimSpace(payload.CorporateNumber) != "" {
@@ -563,4 +570,10 @@ func mergeCompany(existing *models.Company, payload *models.Company) error {
 	}
 	// IsProvisional は呼び出し側が「送られてきた場合だけ」反映する。
 	return nil
+}
+
+// isHTTPURL は画面にリンク・画像として出す URL が http/https でホストを持つかを見る。
+func isHTTPURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }

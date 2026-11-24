@@ -33,13 +33,13 @@ func TestDeriveShortBusiness_EmptyWhenMissing(t *testing.T) {
 func TestCompanyCorrelationMapService_Build_DistinguishesSubsidiaryAndAffiliate(t *testing.T) {
 	companyRepo := &mocks.CompanyRepositoryMock{}
 	companyRepo.On("FindByID", uint(1)).Return(&models.Company{
-		ID: 1, Name: "起点", NameReading: "きてん", MainBusiness: "業務システムを企画・開発する。",
+		ID: 1, IsActive: true, Name: "起点", NameReading: "きてん", MainBusiness: "業務システムを企画・開発する。",
 	}, nil)
 	companyRepo.On("FindByIDs", mock.Anything).Return([]models.Company{
-		{ID: 1, Name: "起点", NameReading: "きてん", MainBusiness: "業務システムを企画・開発する。"},
-		{ID: 2, Name: "子会社A", NameReading: "あ"},
-		{ID: 3, Name: "関連会社B", NameReading: "い"},
-		{ID: 4, Name: "親会社", NameReading: "おや"},
+		{ID: 1, IsActive: true, Name: "起点", NameReading: "きてん", MainBusiness: "業務システムを企画・開発する。"},
+		{ID: 2, IsActive: true, Name: "子会社A", NameReading: "あ"},
+		{ID: 3, IsActive: true, Name: "関連会社B", NameReading: "い"},
+		{ID: 4, IsActive: true, Name: "親会社", NameReading: "おや"},
 	}, nil)
 
 	relRepo := &relationRepoMock{}
@@ -93,17 +93,17 @@ func TestCompanyCorrelationMapService_Build_DistinguishesSubsidiaryAndAffiliate(
 
 func TestCompanyCorrelationMapService_Build_InitialChildLimit(t *testing.T) {
 	companyRepo := &mocks.CompanyRepositoryMock{}
-	companyRepo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "親"}, nil)
+	companyRepo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, IsActive: true, Name: "親"}, nil)
 
 	children := make([]models.Company, 0, 6)
 	rels := make([]models.CompanyRelation, 0, 6)
 	for i := 2; i <= 7; i++ {
 		children = append(children, models.Company{
-			ID: uint(i), Name: string(rune('A' + i - 2)), NameReading: string(rune('a' + i - 2)),
+			ID: uint(i), IsActive: true, Name: string(rune('A' + i - 2)), NameReading: string(rune('a' + i - 2)),
 		})
 		rels = append(rels, capitalRel(1, uint(i), "capital_subsidiary"))
 	}
-	all := append([]models.Company{{ID: 1, Name: "親"}}, children...)
+	all := append([]models.Company{{ID: 1, IsActive: true, Name: "親"}}, children...)
 	companyRepo.On("FindByIDs", mock.Anything).Return(all, nil)
 
 	relRepo := &relationRepoMock{}
@@ -123,8 +123,8 @@ func TestCompanyCorrelationMapService_Build_InitialChildLimit(t *testing.T) {
 func TestCompanyCorrelationMapService_CompareBusiness(t *testing.T) {
 	companyRepo := &mocks.CompanyRepositoryMock{}
 	companyRepo.On("FindByIDs", mock.Anything).Return([]models.Company{
-		{ID: 1, Name: "A", MainBusiness: "業務システム全体を企画・開発する。"},
-		{ID: 2, Name: "B", MainBusiness: "システムを動かすクラウド環境を構築する。"},
+		{ID: 1, IsActive: true, Name: "A", MainBusiness: "業務システム全体を企画・開発する。"},
+		{ID: 2, IsActive: true, Name: "B", MainBusiness: "システムを動かすクラウド環境を構築する。"},
 	}, nil)
 
 	svc := company.NewCompanyCorrelationMapService(companyRepo, &relationRepoMock{})
@@ -139,10 +139,10 @@ func TestCompanyCorrelationMapService_CompareBusiness(t *testing.T) {
 // 同じ2社を「親かつ子」にしない。
 func TestCompanyCorrelationMapService_Build_CollapsesMirroredCapitalEdges(t *testing.T) {
 	companyRepo := &mocks.CompanyRepositoryMock{}
-	companyRepo.On("FindByID", uint(18)).Return(&models.Company{ID: 18, Name: "親会社", NameReading: "おや"}, nil)
+	companyRepo.On("FindByID", uint(18)).Return(&models.Company{ID: 18, IsActive: true, Name: "親会社", NameReading: "おや"}, nil)
 	companyRepo.On("FindByIDs", mock.Anything).Return([]models.Company{
-		{ID: 18, Name: "親会社", NameReading: "おや"},
-		{ID: 20, Name: "子会社", NameReading: "こ"},
+		{ID: 18, IsActive: true, Name: "親会社", NameReading: "おや"},
+		{ID: 20, IsActive: true, Name: "子会社", NameReading: "こ"},
 	}, nil)
 
 	r100 := 100.0
@@ -151,8 +151,8 @@ func TestCompanyCorrelationMapService_Build_CollapsesMirroredCapitalEdges(t *tes
 		18: {CompanyID: 18, MarketType: "prime", IsListed: true},
 	}, nil)
 	relRepo.On("GetRelationsByCompanyIDs", mock.Anything).Return([]models.CompanyRelation{
-		{ID: 1, ParentID: ptrUint(18), ChildID: ptrUint(20), RelationType: "capital_subsidiary", Ratio: &r100},
-		{ID: 2, ParentID: ptrUint(20), ChildID: ptrUint(18), RelationType: "capital_subsidiary", Ratio: &r100},
+		{ID: 1, IsActive: true, ParentID: ptrUint(18), ChildID: ptrUint(20), RelationType: "capital_subsidiary", Ratio: &r100},
+		{ID: 2, IsActive: true, ParentID: ptrUint(20), ChildID: ptrUint(18), RelationType: "capital_subsidiary", Ratio: &r100},
 	}, nil)
 
 	svc := company.NewCompanyCorrelationMapService(companyRepo, relRepo)
@@ -168,10 +168,10 @@ func TestCompanyCorrelationMapService_Build_CollapsesMirroredCapitalEdges(t *tes
 
 func TestCompanyCorrelationMapService_Build_BusinessDirectionNotTrusted(t *testing.T) {
 	companyRepo := &mocks.CompanyRepositoryMock{}
-	companyRepo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "A"}, nil)
+	companyRepo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, IsActive: true, Name: "A"}, nil)
 	companyRepo.On("FindByIDs", mock.Anything).Return([]models.Company{
-		{ID: 1, Name: "A"},
-		{ID: 2, Name: "B"},
+		{ID: 1, IsActive: true, Name: "A"},
+		{ID: 2, IsActive: true, Name: "B"},
 	}, nil)
 
 	relRepo := &relationRepoMock{}
@@ -198,9 +198,9 @@ func TestCompanyCorrelationMapService_Build_BusinessDirectionNotTrusted(t *testi
 
 func TestCompanyCorrelationMapService_Build_HidesUnpublishedGuestEntry(t *testing.T) {
 	companyRepo := &mocks.CompanyRepositoryMock{}
-	companyRepo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "公開企業"}, nil)
+	companyRepo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, IsActive: true, Name: "公開企業"}, nil)
 	companyRepo.On("FindByIDs", mock.Anything).Return([]models.Company{
-		{ID: 1, Name: "公開企業"},
+		{ID: 1, IsActive: true, Name: "公開企業"},
 		{ID: 99, Name: "ゲスト投稿", DataStatus: "draft", IsGuestEntry: true, IsActive: true},
 	}, nil)
 
@@ -224,7 +224,7 @@ func TestCompanyCorrelationMapService_Build_HidesUnpublishedGuestEntry(t *testin
 func TestCompanyCorrelationMapService_CompareBusiness_HidesUnpublishedGuestEntry(t *testing.T) {
 	companyRepo := &mocks.CompanyRepositoryMock{}
 	companyRepo.On("FindByIDs", mock.Anything).Return([]models.Company{
-		{ID: 1, Name: "公開企業", MainBusiness: "事業A"},
+		{ID: 1, IsActive: true, Name: "公開企業", MainBusiness: "事業A"},
 		{ID: 99, Name: "ゲスト投稿", MainBusiness: "事業B", DataStatus: "draft", IsGuestEntry: true, IsActive: true},
 	}, nil)
 
@@ -249,11 +249,11 @@ func (s *tagRepoStub) ReplaceForCompany(context.Context, uint, []string) error {
 
 func TestCompanyCorrelationMapService_Build_BusinessTags(t *testing.T) {
 	companyRepo := &mocks.CompanyRepositoryMock{}
-	companyRepo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "親"}, nil)
-	all := []models.Company{{ID: 1, Name: "親", Industry: "情報通信業"}}
+	companyRepo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "親", IsActive: true}, nil)
+	all := []models.Company{{ID: 1, Name: "親", Industry: "情報通信業", IsActive: true}}
 	rels := []models.CompanyRelation{}
 	for i := 2; i <= 7; i++ {
-		all = append(all, models.Company{ID: uint(i), Name: string(rune('A' + i - 2)), NameReading: string(rune('a' + i - 2))})
+		all = append(all, models.Company{ID: uint(i), Name: string(rune('A' + i - 2)), NameReading: string(rune('a' + i - 2)), IsActive: true})
 		rels = append(rels, capitalRel(1, uint(i), "capital_subsidiary"))
 	}
 	companyRepo.On("FindByIDs", mock.Anything).Return(all, nil)
@@ -281,4 +281,42 @@ func TestCompanyCorrelationMapService_Build_BusinessTags(t *testing.T) {
 			assert.Equal(t, "unavailable", n.BusinessTagsStatus)
 		}
 	}
+}
+
+// SOCAIAGENT-694: 停止中(is_active=false)の企業は、ゲスト投稿でなくても相関図に出さない。
+func TestCompanyCorrelationMapService_Build_HidesInactiveCompany(t *testing.T) {
+	companyRepo := &mocks.CompanyRepositoryMock{}
+	companyRepo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "公開企業", IsActive: true}, nil)
+	companyRepo.On("FindByIDs", mock.Anything).Return([]models.Company{
+		{ID: 1, Name: "公開企業", IsActive: true},
+		{ID: 98, Name: "停止中企業", DataStatus: "published", IsActive: false},
+	}, nil)
+
+	relRepo := &relationRepoMock{}
+	relRepo.On("GetMarketInfoByCompanyIDs", mock.Anything).Return(map[uint]*models.CompanyMarketInfo{}, nil)
+	relRepo.On("GetRelationsByCompanyIDs", mock.Anything).Return([]models.CompanyRelation{
+		capitalRel(1, 98, "capital_subsidiary"),
+	}, nil)
+
+	svc := company.NewCompanyCorrelationMapService(companyRepo, relRepo)
+	got, err := svc.Build(context.Background(), 1)
+	require.NoError(t, err)
+	for _, n := range got.Nodes {
+		assert.NotEqual(t, uint(98), n.ID)
+	}
+	assert.Empty(t, got.CapitalEdges)
+}
+
+// 停止中の企業そのものの相関図は返さない。
+func TestCompanyCorrelationMapService_Build_InactiveFocusNotFound(t *testing.T) {
+	companyRepo := &mocks.CompanyRepositoryMock{}
+	companyRepo.On("FindByID", uint(98)).Return(&models.Company{ID: 98, Name: "停止中企業", IsActive: false}, nil)
+	companyRepo.On("FindByIDs", mock.Anything).Return([]models.Company{{ID: 98, Name: "停止中企業", IsActive: false}}, nil)
+	relRepo := &relationRepoMock{}
+	relRepo.On("GetMarketInfoByCompanyIDs", mock.Anything).Return(map[uint]*models.CompanyMarketInfo{}, nil)
+	relRepo.On("GetRelationsByCompanyIDs", mock.Anything).Return([]models.CompanyRelation{}, nil)
+
+	svc := company.NewCompanyCorrelationMapService(companyRepo, relRepo)
+	_, err := svc.Build(context.Background(), 98)
+	require.Error(t, err)
 }
