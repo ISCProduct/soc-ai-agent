@@ -110,7 +110,7 @@ export function InterviewVideoRetentionCard() {
           面接動画を残す期間
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          学校ごとに 30日、90日、180日、期限なしから選びます。過ぎた録画は削除されます。退会した学生の録画は、約30日で削除します。
+          学校ごとに 30日、90日、180日、期限なしから選びます。過ぎた録画は削除されます。退会した学生の録画は、退会後12ヶ月で削除します。
         </Typography>
         {loading && <Typography variant="body2">学校の設定を読み込んでいます</Typography>}
         {!loading && error && (

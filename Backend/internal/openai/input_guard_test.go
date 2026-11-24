@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"Backend/internal/usagectx"
 )
 
 // 受け取ったリクエストの本文を記録する疑似サーバー。経路ごとに最小の正常応答を返す。
@@ -177,5 +179,48 @@ func TestWithoutInputGuard_RemovesGuard(t *testing.T) {
 	}
 	if got, err := guardInput(WithoutInputGuard(ctx), "山田電機"); err != nil || got != "山田電機" {
 		t.Fatalf("ガードを外せていない: %q, %v", got, err)
+	}
+}
+
+// 学生由来の機能名が付いた呼び出しは、ガードが無ければ送らない（fail-closed。SOCAIAGENT-697）。
+// 学生由来でない機能名・機能名なしは今まで通り素通しし、WithoutInputGuard で明示的に外したものも通す。
+func TestGuardInput_StudentFeatureRequiresGuard(t *testing.T) {
+	identity := func(s string) (string, error) { return s, nil }
+	cases := []struct {
+		name    string
+		ctx     context.Context
+		wantErr bool
+	}{
+		{"学生由来・ガード無しは送らない", usagectx.WithFeature(context.Background(), usagectx.FeatureGitHubSummary), true},
+		{"学生由来・ガード有りは送る", WithInputGuard(usagectx.WithFeature(context.Background(), usagectx.FeatureChatSummary), identity), false},
+		{"学生由来・明示的に外したものは送る", WithoutInputGuard(usagectx.WithFeature(context.Background(), usagectx.FeatureInterviewTurn)), false},
+		{"学生由来でない機能名・ガード無しは送る", usagectx.WithFeature(context.Background(), usagectx.FeatureCompanySearch), false},
+		{"機能名なし・ガード無しは送る", context.Background(), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := guardInput(tc.ctx, "本文")
+			if tc.wantErr {
+				if !errors.Is(err, ErrInputGuardFailed) || got != "" {
+					t.Fatalf("got=%q err=%v, want ErrInputGuardFailed", got, err)
+				}
+				return
+			}
+			if err != nil || got != "本文" {
+				t.Fatalf("got=%q err=%v, want 素通し", got, err)
+			}
+		})
+	}
+}
+
+// 学生由来の一覧が、実在する機能名だけで出来ていること（綴りの誤りで一覧が空振りしないように）。
+func TestStudentDerivedFeatures_AreKnown(t *testing.T) {
+	if len(studentDerivedFeatures) == 0 {
+		t.Fatal("学生由来の機能名の一覧が空")
+	}
+	for f := range studentDerivedFeatures {
+		if f == "" || f == usagectx.FeatureUnknown {
+			t.Errorf("一覧に不正な機能名 %q がある", f)
+		}
 	}
 }

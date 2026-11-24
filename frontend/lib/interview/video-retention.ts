@@ -12,12 +12,12 @@ const ENDPOINT = `${BACKEND_URL}/api/user/interview-video-retention`
 export function videoRetentionSentence(retention: VideoRetention | null, status: 'loading' | 'error' | 'ready'): string {
   if (status === 'loading') return '録画を残す期間を確認しています。'
   if (status === 'error' || retention == null) {
-    return '録画を残す期間を読み込めませんでした。学校が 30日・90日・180日・期限なし のどれかを選びます。選んでいない学校は90日です。退会したあとは約30日で削除します。'
+    return '録画を残す期間を読み込めませんでした。学校が 30日・90日・180日・期限なし のどれかを選びます。選んでいない学校は90日です。退会したあとは12ヶ月で削除します。'
   }
   if (retention.unlimited || retention.days == null) {
-    return 'この学校では、録画の保管期限を決めていません。退会したあとは約30日で削除します。'
+    return 'この学校では、録画の保管期限を決めていません。退会したあとは12ヶ月で削除します。'
   }
-  return `この学校では、録画を${retention.days}日で削除します。それより前に退会した場合は、退会後約30日で削除します。`
+  return `この学校では、録画を${retention.days}日で削除します。それより前に退会した場合は、退会後12ヶ月で削除します。`
 }
 
 export async function fetchVideoRetention(): Promise<VideoRetention> {

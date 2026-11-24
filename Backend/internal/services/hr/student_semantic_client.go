@@ -1,13 +1,13 @@
 package hr
 
 import (
+	"Backend/internal/config"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -48,7 +48,7 @@ func NewStudentSemanticClient() *StudentSemanticClient {
 }
 
 func ragBaseURL() string {
-	return strings.TrimRight(strings.TrimSpace(os.Getenv("RAG_REVIEW_URL")), "/")
+	return strings.TrimRight(config.RAGReviewURL(), "/")
 }
 
 func (c *StudentSemanticClient) do(ctx context.Context, method, path string, payload any, out any) error {

@@ -67,8 +67,8 @@ type LatestScores interface {
 }
 
 type CategoryScore struct {
-	Category string `json:"category"`
-	Score    int    `json:"score"`
+	Category string  `json:"category"`
+	Score    float64 `json:"score"`
 }
 
 type Diagnosis struct {
@@ -172,7 +172,7 @@ func (s *Service) Build(userID uint, sections []string) (*Portfolio, error) {
 			for _, r := range rows {
 				scores := []CategoryScore{}
 				for k, v := range parseIntMap(r.CategoryScoresJSON) {
-					scores = append(scores, CategoryScore{Category: k, Score: v})
+					scores = append(scores, CategoryScore{Category: k, Score: float64(v)})
 				}
 				sortScores(scores)
 				p.Assessments = append(p.Assessments, Assessment{CreatedAt: r.CreatedAt, Title: r.Title, Scores: scores})

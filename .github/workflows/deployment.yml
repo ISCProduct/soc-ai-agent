@@ -412,6 +412,13 @@ jobs:
               if [ -f .env ] && ! grep -q ^TRUSTED_PROXY_HOPS= .env; then
                 echo "TRUSTED_PROXY_HOPS=2" >> .env
               fi
+              # Backend → RAG の内部認証(#1158)。RAG は値が無いと全要求を 503 で拒否する(fail-closed)。
+              # 両者は同じホストの .env を読み、Backend は同じホストの rag-review を呼ぶので、ホストごとの乱数で足りる。
+              # 既に値があれば触らない（デプロイのたびに変えると、入れ替え中の要求が 401 になる）。
+              if [ -f .env ] && ! grep -q '^RAG_INTERNAL_TOKEN=.' .env; then
+                sed -i /^RAG_INTERNAL_TOKEN=/d .env
+                echo "RAG_INTERNAL_TOKEN=$(openssl rand -hex 32)" >> .env
+              fi
               df -h /
               # アプリを動かしたまま先に pull する。変更のないイメージは取得されないので、
               # 停止時間は down から up までの間だけになる(#678)。
@@ -732,6 +739,18 @@ jobs:
           task-definition: backend-task-def.json
           container-name: soc-backend
           image: ${{ env.ECR_REGISTRY }}/soc-backend:${{ env.IMAGE_TAG }}
+
+      # プロンプト版の設定を、マイグレーションとサービスの差し替えより前に確かめる（SOCAIAGENT-661）。
+      # Backend は宣言されていない版を指定されると起動しないので、新しいイメージとタスク定義の
+      # PROMPT_VERSION* で同じ検証だけを実行し、起動できない設定ならここでジョブを止める。
+      - name: Validate prompt version settings
+        if: steps.changes.outputs.backend == 'true'
+        run: |
+          jq -r '.containerDefinitions[] | select(.name=="soc-backend") | .environment[]?
+            | select(.name | test("^PROMPT_VERSION")) | "\(.name)=\(.value)"' \
+            "${{ steps.render-backend.outputs.task-definition }}" > prompt-env.list
+          docker run --rm --platform linux/amd64 --entrypoint /bin/promptcheck \
+            --env-file prompt-env.list "$ECR_REGISTRY/soc-backend:$IMAGE_TAG"
 
       # DBマイグレーション適用(#618)。新イメージのタスク定義を先に登録し、
       # backendサービスと同じネットワーク設定でワンオフタスクとしてmigrateを

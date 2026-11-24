@@ -37,6 +37,7 @@ export function mapRecommendationToCompany(
     matchId: rec.match_id || undefined,
     name: rec.category_name || rec.name || `企業 ${index + 1}`,
     industry: rec.industry || 'IT・ソフトウェア',
+    jobTitle: rec.job_title || undefined,
     location: rec.location || '東京都',
     employees: rec.employees || '未定',
     description: rec.reason || '詳細情報は準備中です',
@@ -70,16 +71,29 @@ export function normalizeCategoryScores(
   return normalized
 }
 
+/** 推薦が空のときの、主な次の操作（#2220）。chat: 診断チャットを続ける / reload: ページを読み込み直す */
+export type EmptyRecommendationsAction = 'chat' | 'reload'
+
 /**
- * 推薦が空のときのユーザー向けメッセージを組み立てる。
+ * 推薦が空のときの主な次の操作。根拠が足りないときは診断を続けるのが次の一歩。
+ * それ以外（診断直後の計算待ち・企業側のデータ不足）は、少し待って読み込み直す。
+ */
+export function emptyRecommendationsAction(reason?: string): EmptyRecommendationsAction {
+  return reason === 'insufficient_user_scores' ? 'chat' : 'reload'
+}
+
+/**
+ * 推薦が空のときのユーザー向けメッセージ（なぜ無いか・次にすること）を組み立てる。
+ * 何が無いか（「おすすめ企業がまだありません」）は、表示側の見出しで言う（#2220）。
  */
 export function buildEmptyRecommendationsMessage(
   reason?: string,
   diagnostics?: RecommendationsDiagnostics | null,
 ): string {
-  let message = 'データがありません。診断を完了してから数秒待ち、ページを更新してください。'
+  let message =
+    '診断を終えた直後は、計算に数秒かかります。少し待ってから読み込み直してください。診断の途中なら、診断チャットを続けてください。'
   if (reason === 'insufficient_user_scores') {
-    message = '判定結果を出すための根拠が不足しています。チャットで質問に回答してください。'
+    message = '判定結果を出すための回答の根拠が足りません。診断チャットで質問に答えると、おすすめ企業が並びます。'
   } else if (reason === 'insufficient_company_data') {
     message = '現在、公開済みの企業データがありません。管理者が企業情報を公開するまでお待ちください。'
   } else if (reason === 'insufficient_company_profiles') {

@@ -66,6 +66,11 @@ func (r *InterviewVideoRepository) RetentionGraceUntil(ctx context.Context) (tim
 
 // ListRetentionDue は、学校の保持日数を過ぎた在籍者の録画を返す。
 // 期限なしの学校は対象外。学校が無い学生は 90 日。退会者は退会の削除に任せる。
+//
+// 判断(SOCAIAGENT-671): users.school_id が NULL の学生(学校に未所属、または学校が削除済み)は、
+// 既定の 90 日で削除する。保持期間を選べるのは学校だけで、学校に紐づかない録画を「期限なし」で
+// 残す根拠が無いため、意図して 90 日にしている。school_id の一括補完(backfill)は行わない。
+// 後から学校に所属した場合は、その学校の設定が次回の実行から適用される。
 func (r *InterviewVideoRepository) ListRetentionDue(ctx context.Context, now time.Time, limit int) ([]RetentionDueVideo, error) {
 	if limit <= 0 {
 		limit = 100

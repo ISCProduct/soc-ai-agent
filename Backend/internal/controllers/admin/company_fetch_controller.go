@@ -118,6 +118,12 @@ func (c *AdminCompanyController) ConfirmCompanyInfo(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
+	// 職員も確定できるため、画面にリンクとして出す URL は PUT と同じく http/https に限る。
+	for field, v := range map[string]string{"website_url": req.WebsiteURL, "source_url": req.SourceURL} {
+		if strings.TrimSpace(v) != "" && !isHTTPURL(v) {
+			return echo.NewHTTPError(http.StatusBadRequest, field+" must be an http or https URL")
+		}
+	}
 
 	result, err := c.infoFetcher.ConfirmAndSave(uint(id), &req)
 	if errors.Is(err, company.ErrInvalidPromptVersion) {
