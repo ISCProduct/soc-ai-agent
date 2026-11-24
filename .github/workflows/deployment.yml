@@ -412,6 +412,13 @@ jobs:
               if [ -f .env ] && ! grep -q ^TRUSTED_PROXY_HOPS= .env; then
                 echo "TRUSTED_PROXY_HOPS=2" >> .env
               fi
+              # Backend → RAG の内部認証(#1158)。RAG は値が無いと全要求を 503 で拒否する(fail-closed)。
+              # 両者は同じホストの .env を読み、Backend は同じホストの rag-review を呼ぶので、ホストごとの乱数で足りる。
+              # 既に値があれば触らない（デプロイのたびに変えると、入れ替え中の要求が 401 になる）。
+              if [ -f .env ] && ! grep -q '^RAG_INTERNAL_TOKEN=.' .env; then
+                sed -i /^RAG_INTERNAL_TOKEN=/d .env
+                echo "RAG_INTERNAL_TOKEN=$(openssl rand -hex 32)" >> .env
+              fi
               df -h /
               # アプリを動かしたまま先に pull する。変更のないイメージは取得されないので、
               # 停止時間は down から up までの間だけになる(#678)。
