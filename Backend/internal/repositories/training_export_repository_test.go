@@ -104,7 +104,7 @@ func TestTrainingExportRepository_ListOutcomeSessions(t *testing.T) {
 			WithArgs(withConsent("rejected", "offered", "accepted")...).
 			WillReturnRows(sqlmock.NewRows([]string{"session_id", "status"}).AddRow(1, "offered").AddRow(2, "rejected"))
 
-		got, err := NewTrainingExportRepository(db).ListOutcomeSessions(context.Background(), outcomeStatuses, 0)
+		got, err := NewTrainingExportRepository(db).ListOutcomeSessions(context.Background(), outcomeStatuses, 0, 0)
 		if err != nil || len(got) != 2 || got[0].SessionID != 1 || got[0].Status != "offered" || got[1].SessionID != 2 {
 			t.Fatalf("got=%+v err=%v", got, err)
 		}
@@ -115,7 +115,18 @@ func TestTrainingExportRepository_ListOutcomeSessions(t *testing.T) {
 			WithArgs(append(withConsent("rejected", "offered", "accepted"), 5)...).
 			WillReturnRows(sqlmock.NewRows([]string{"session_id", "status"}))
 
-		got, err := NewTrainingExportRepository(db).ListOutcomeSessions(context.Background(), outcomeStatuses, 5)
+		got, err := NewTrainingExportRepository(db).ListOutcomeSessions(context.Background(), outcomeStatuses, 5, 0)
+		if err != nil || len(got) != 0 {
+			t.Fatalf("got=%+v err=%v", got, err)
+		}
+	})
+	t.Run("offset つきは OFFSET を付ける（ページング。SOCAIAGENT-694）", func(t *testing.T) {
+		db, mock := newTrainingExportTestDB(t)
+		mock.ExpectQuery("AND a.user_id IN " + consentIDs + " ORDER BY s.id LIMIT \\? OFFSET \\?").
+			WithArgs(append(withConsent("rejected", "offered", "accepted"), 5, 10)...).
+			WillReturnRows(sqlmock.NewRows([]string{"session_id", "status"}))
+
+		got, err := NewTrainingExportRepository(db).ListOutcomeSessions(context.Background(), outcomeStatuses, 5, 10)
 		if err != nil || len(got) != 0 {
 			t.Fatalf("got=%+v err=%v", got, err)
 		}
