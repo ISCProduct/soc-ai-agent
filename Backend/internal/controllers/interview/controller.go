@@ -341,10 +341,15 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrSessionFinished) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		if errors.Is(err, interviewsvc.ErrSessionNotStarted) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		return httpapi.InternalError(err)
 	}
 
 	return writeTurnMultipart(ctx, map[string]any{
+		"limit_reached":            result.LimitReached,
+		"limit_reason":             result.LimitReason,
 		"user_text":                result.UserText,
 		"ai_text":                  result.AIText,
 		"utterance_save_failed":    result.UtteranceSaveFailed,
@@ -413,10 +418,15 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrSessionFinished) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		if errors.Is(err, interviewsvc.ErrSessionNotStarted) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		return httpapi.InternalError(err)
 	}
 
 	return writeTurnMultipart(ctx, map[string]any{
+		"limit_reached":            result.LimitReached,
+		"limit_reason":             result.LimitReason,
 		"ai_text":                  result.AIText,
 		"utterance_save_failed":    result.UtteranceSaveFailed,
 		"question_source":          result.QuestionSource,

@@ -127,6 +127,7 @@ export function useInterviewSession({
     setUtterances,
     setErrorMessage,
     setUtteranceSaveFailed,
+    onLimitReached: () => { void handleStop(false, true) },
   })
 
   useHandsFreeVad({
@@ -241,7 +242,7 @@ export function useInterviewSession({
     }
   }
 
-  const handleStop = async (forced = false) => {
+  const handleStop = async (forced = false, limitReached = false) => {
     if (stoppingRef.current) return
     stoppingRef.current = true
     const videoBlob = await media.stopAndCollectVideoBlob()
@@ -254,7 +255,7 @@ export function useInterviewSession({
       setFinishFailed(false)
       setStatus('finished')
       setReportStatus('pending')
-      setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: false, forced }))
+      setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: false, forced, limitReached }))
       return
     }
 
@@ -272,7 +273,7 @@ export function useInterviewSession({
     setFinishFailed(false)
     setStatus('finished')
     setReportStatus('pending')
-    setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: false, forced }))
+    setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: false, forced, limitReached }))
 
     // 動画アップロードは発話保存と独立なので先に始める
     if (videoBlob) {
@@ -304,7 +305,7 @@ export function useInterviewSession({
     } catch {
       // 終了APIの失敗を握りつぶさず、レポート画面にエラーと再試行手段を出す(#1015)
       setFinishFailed(true)
-      setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: true, forced }))
+      setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: true, forced, limitReached }))
     }
     // ポーリングは終了API（=レポート生成のキュー投入）の後に始める。
     // 先に始めるとタイムアウトの3分が生成開始前から減り始める。
