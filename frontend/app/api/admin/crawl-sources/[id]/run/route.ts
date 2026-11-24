@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/crawl-sources/${id}/run`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/crawl-sources/${encodeURIComponent(id)}/run`, {
     method: 'POST',
     headers: {
       'X-Admin-Email': request.headers.get('x-admin-email') || '',

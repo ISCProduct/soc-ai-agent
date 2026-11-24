@@ -15,7 +15,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"unicode/utf8"
 
@@ -245,7 +244,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 		AvatarURL:                user.AvatarURL,
 		OAuthProvider:            "google",
 	}
-	if userSecret := os.Getenv("USER_SECRET"); userSecret != "" {
+	if userSecret := config.UserSecret(); userSecret != "" {
 		authResp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
 		authResp.RefreshToken = s.issueRefreshToken(user.ID)
 	}
@@ -253,7 +252,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 	// これが無いと Google ログインの管理者/職員は X-Admin-Token が空のまま
 	// 全管理APIが403になり、職員は /admin へ遷移しても何も操作できない。
 	if user.CanAccessAdminArea() {
-		if adminSecret := os.Getenv("ADMIN_SECRET"); adminSecret != "" {
+		if adminSecret := config.AdminSecret(); adminSecret != "" {
 			authResp.Token = middleware.GenerateAdminToken(user.ID, user.Email, adminSecret)
 		}
 	}
@@ -392,12 +391,12 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, te
 		AvatarURL:                user.AvatarURL,
 		OAuthProvider:            "github",
 	}
-	if userSecret := os.Getenv("USER_SECRET"); userSecret != "" {
+	if userSecret := config.UserSecret(); userSecret != "" {
 		authResp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
 		authResp.RefreshToken = s.issueRefreshToken(user.ID)
 	}
 	if user.CanAccessAdminArea() {
-		if adminSecret := os.Getenv("ADMIN_SECRET"); adminSecret != "" {
+		if adminSecret := config.AdminSecret(); adminSecret != "" {
 			authResp.Token = middleware.GenerateAdminToken(user.ID, user.Email, adminSecret)
 		}
 	}

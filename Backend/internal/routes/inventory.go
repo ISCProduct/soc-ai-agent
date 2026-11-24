@@ -29,6 +29,7 @@ var mainGoRoutes = []Route{
 	// /api の外。監視用。
 	{Method: "GET", Path: "/health"},
 	{Method: "GET", Path: "/healthz"},
+	{Method: "GET", Path: "/ready"},
 	{Method: "GET", Path: "/metrics"},
 
 	{Method: "POST", Path: "/api/company-entry"},
@@ -58,7 +59,7 @@ func Inventory() []Route {
 
 	SetupAuthRoutes(api, nil, nil, "", nil, nil)
 	budget := NewAIBudgetGuards(nil)
-	SetupChatRoutes(api, nil, nil, "", nil, nil, budget)
+	SetupChatRoutes(api, nil, "", nil, nil, budget)
 	SetupCompanyRoutes(api, nil, "", nil, nil, budget)
 	SetupCompanySearchRoutes(api, nil, "", nil, nil)
 	SetupAdminRoutes(api,

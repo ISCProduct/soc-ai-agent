@@ -4,7 +4,6 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"Backend/internal/services/chat"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
@@ -35,7 +34,7 @@ type ChatController struct {
 	userRepo        repository.UserRepository
 	emailService    ifaces.EmailService
 	jobs            shared.JobEnqueuer
-	qualityRepo     *repositories.DiagnosisQualityRepository
+	quality         *diagnosis.QualityService
 	matchingTimers  sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
 	matchingRunning sync.Map // key: sessionID, value: struct{}（実行中の多重起動防止, #1167）
 	aiBudget        costs.AIBudgetStatusProvider
@@ -76,16 +75,16 @@ func (c *ChatController) SetJobEnqueuer(j shared.JobEnqueuer) {
 	c.jobs = j
 }
 
-// SetDiagnosisQualityRepo は recommendations に診断信頼度を載せるための参照先。
-func (c *ChatController) SetDiagnosisQualityRepo(r *repositories.DiagnosisQualityRepository) {
-	c.qualityRepo = r
+// SetDiagnosisQualityService は recommendations に診断信頼度を載せるための参照先。
+func (c *ChatController) SetDiagnosisQualityService(s *diagnosis.QualityService) {
+	c.quality = s
 }
 
 func (c *ChatController) loadDiagnosisQuality(userID uint, sessionID string) (confidence int, flags []string, summary string) {
-	if c.qualityRepo == nil {
+	if c.quality == nil {
 		return 0, nil, ""
 	}
-	report, err := c.qualityRepo.FindByUserAndSession(userID, sessionID)
+	report, err := c.quality.FindReport(userID, sessionID)
 	if err != nil || report == nil {
 		return 0, nil, ""
 	}
@@ -486,6 +485,49 @@ func (c *ChatController) ToggleFavorite(ctx echo.Context) error {
 		return httpapi.InternalError(err)
 	}
 
+	return ctx.JSON(http.StatusOK, map[string]bool{"ok": true})
+}
+
+// GetFavorites は過去の診断を含め、お気に入り企業を1社1行で返す (GET /api/chat/favorites)
+func (c *ChatController) GetFavorites(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	if c.matchingService == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "matching service not available")
+	}
+
+	limit := httpapi.LimitQuery(ctx, "limit", 50)
+	matches, err := c.matchingService.ListFavoriteCompanies(ctx.Request().Context(), userID, limit)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	displayed := matching.DisplayableMatches(matches)
+	return ctx.JSON(http.StatusOK, matching.RecommendationResponse{
+		Recommendations: matching.BuildRecommendations(displayed, nil),
+	})
+}
+
+// RemoveFavoriteCompany は企業のお気に入りを診断をまたいで外す (POST /api/chat/favorites/remove)
+func (c *ChatController) RemoveFavoriteCompany(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+
+	var req struct {
+		CompanyID uint `json:"company_id"`
+	}
+	if err := ctx.Bind(&req); err != nil || req.CompanyID == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "company_id is required")
+	}
+	if c.matchingService == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "matching service not available")
+	}
+	if err := c.matchingService.UnfavoriteCompany(ctx.Request().Context(), userID, req.CompanyID); err != nil {
+		return httpapi.InternalError(err)
+	}
 	return ctx.JSON(http.StatusOK, map[string]bool{"ok": true})
 }
 

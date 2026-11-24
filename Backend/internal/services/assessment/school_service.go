@@ -185,11 +185,23 @@ type StudentStatus struct {
 	TopCategories []string   `json:"top_categories"`
 }
 
+// AssessmentRollup は在籍学生に対する受検率と完了率。クラスの列は users に無いので学校×検査単位。
+type AssessmentRollup struct {
+	StudentCount     int `json:"student_count"`
+	StartedCount     int `json:"started_count"`
+	SubmittedCount   int `json:"submitted_count"`
+	NotStartedCount  int `json:"not_started_count"`
+	OverdueCount     int `json:"overdue_count"`
+	StartedPercent   int `json:"started_percent"`
+	SubmittedPercent int `json:"submitted_percent"`
+}
+
 type StudentStatusList struct {
-	TemplateID uint            `json:"template_id"`
-	Title      string          `json:"title"`
-	DueAt      *time.Time      `json:"due_at,omitempty"`
-	Students   []StudentStatus `json:"students"`
+	TemplateID uint             `json:"template_id"`
+	Title      string           `json:"title"`
+	DueAt      *time.Time       `json:"due_at,omitempty"`
+	Students   []StudentStatus  `json:"students"`
+	Rollup     AssessmentRollup `json:"rollup"`
 }
 
 // 並び順: 期限超過 → 未受検 → 途中 → 完了。「誰を支援すべきか」が最上部に来る。
@@ -278,7 +290,38 @@ func (s *SchoolService) StudentStatuses(schoolID, templateID uint) (*StudentStat
 		rows = append(rows, row)
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return statusRank(rows[i]) < statusRank(rows[j]) })
-	return &StudentStatusList{TemplateID: t.ID, Title: t.Title, DueAt: t.DueAt, Students: rows}, nil
+	return &StudentStatusList{TemplateID: t.ID, Title: t.Title, DueAt: t.DueAt, Students: rows, Rollup: assessmentRollup(rows)}, nil
+}
+
+// assessmentRollup は受検を始めた人（途中と提出）と提出済みを、在籍数に対する百分率で返す。
+// 在籍0人のときは 0。四捨五入は n*100 を人数で割る。
+func assessmentRollup(rows []StudentStatus) AssessmentRollup {
+	var out AssessmentRollup
+	out.StudentCount = len(rows)
+	for _, row := range rows {
+		switch {
+		case row.Status == StatusSubmitted:
+			out.SubmittedCount++
+			out.StartedCount++
+		case row.Status != StatusNotStarted:
+			out.StartedCount++
+		default:
+			out.NotStartedCount++
+		}
+		if row.Overdue {
+			out.OverdueCount++
+		}
+	}
+	out.StartedPercent = percentOf(out.StartedCount, out.StudentCount)
+	out.SubmittedPercent = percentOf(out.SubmittedCount, out.StudentCount)
+	return out
+}
+
+func percentOf(part, whole int) int {
+	if whole <= 0 {
+		return 0
+	}
+	return (part*100 + whole/2) / whole
 }
 
 // topCategories はスコアの高い順に n 個のカテゴリ名。同点は正典の並びを優先する（結果が実行ごとに揺れない）。
