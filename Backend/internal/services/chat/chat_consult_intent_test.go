@@ -71,7 +71,7 @@ type intentJobRepo struct {
 	repository.JobCategoryRepository
 }
 
-func (intentJobRepo) GetTopCategories() ([]models.JobCategory, error) {
+func (intentJobRepo) GetTopCategories(context.Context) ([]models.JobCategory, error) {
 	return []models.JobCategory{{Name: "エンジニア"}, {Name: "営業"}}, nil
 }
 

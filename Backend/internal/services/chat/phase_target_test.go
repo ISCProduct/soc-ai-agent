@@ -9,7 +9,7 @@ import (
 
 func TestPickPhaseTarget_未採点の軸を繰り返さず次の軸へ進む(t *testing.T) {
 	allowed := phaseCategories["aptitude_analysis"]
-	scores := map[string]int{}
+	scores := map[string]float64{}
 	asked := map[string]int{}
 
 	first, _ := pickPhaseTarget(allowed, scores, asked)
@@ -26,7 +26,7 @@ func TestPickPhaseTarget_未採点の軸を繰り返さず次の軸へ進む(t *
 
 func TestPickPhaseTarget_前のフェーズで聞いた軸より未出題を優先する(t *testing.T) {
 	asked := map[string]int{"技術志向": 1, "創造性志向": 1, "成長志向": 1}
-	got, _ := pickPhaseTarget(phaseCategories["interest_analysis"], map[string]int{}, asked)
+	got, _ := pickPhaseTarget(phaseCategories["interest_analysis"], map[string]float64{}, asked)
 	if got != "チャレンジ志向" {
 		t.Fatalf("got %s, want チャレンジ志向", got)
 	}
@@ -43,7 +43,7 @@ func TestPhaseBudget_スコアが付かなくても全軸を1回は聞く(t *tes
 		{"future_analysis", 3},
 	}
 	asked := map[string]int{}
-	scores := map[string]int{}
+	scores := map[string]float64{}
 	for _, b := range budgets {
 		for range b.n {
 			cat, _ := pickPhaseTarget(phaseCategories[b.phase], scores, asked)

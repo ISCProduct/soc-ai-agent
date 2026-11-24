@@ -21,7 +21,13 @@ import (
 
 // Echo はテスト用の echo インスタンス。HTTPErrorHandler を直接使う
 // テストがあるため公開している。
-var Echo = echo.New()
+// Validator は本番の newEchoServer と同じものを載せる。載っていないと
+// ctx.Validate が 500 になる。
+var Echo = func() *echo.Echo {
+	e := echo.New()
+	e.Validator = middleware.NewCustomValidator()
+	return e
+}()
 
 // WithUserID はリクエストコンテキストにuserIDを設定するヘルパー
 func WithUserID(r *http.Request, userID uint) *http.Request {

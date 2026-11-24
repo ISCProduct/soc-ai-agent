@@ -224,6 +224,8 @@ export async function middleware(request: NextRequest) {
   // 値を入れるのは、この下でリフレッシュに成功したときだけ。
   requestHeaders.delete('X-Refreshed-Admin-Token')
   requestHeaders.delete('X-Refresh-Admin-Token')
+  // 管理者トークンも画面からは受け取らず、httpOnly Cookie から付け直す（SOCAIAGENT-683）
+  requestHeaders.delete('X-Admin-Token')
   let refreshed: RefreshedSession | null = null
   // リフレッシュが401/403で失敗した=失効が確定したセッション。Cookieを消して
   // 作り直させる(#1519)。一時障害(5xx・通信断)はここに含めない
@@ -291,6 +293,9 @@ export async function middleware(request: NextRequest) {
       // httpOnly CookieからX-User-*ヘッダーを注入（クライアント送信ヘッダーを上書き）
       requestHeaders.set('X-User-ID', effectiveUserId)
       requestHeaders.set('X-User-Token', effectiveToken)
+      // 更新したときは新しい値（学生なら無し）、それ以外は Cookie の値
+      const effectiveAdminToken = refreshed ? refreshed.adminToken : adminToken
+      if (effectiveAdminToken) requestHeaders.set('X-Admin-Token', effectiveAdminToken)
     }
   }
 
@@ -377,6 +382,6 @@ export const config = {
   // admin.shukatsu-ai.jpのrewriteはページ遷移でも必要なため、静的アセットを除く全パスに
   // マッチさせる。public/配下の拡張子付きファイル(3Dモデル・画像等)も対象外にする。
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|glb|gltf|mp3|mp4|woff|woff2)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|glb|gltf|mp3|mp4|woff|woff2|bcmap|pfb|ttf)$).*)',
   ],
 }

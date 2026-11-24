@@ -26,7 +26,6 @@ import type {
   MatchFeedbackVerdict,
 } from '../types'
 import {
-  buildEmptyRecommendationsMessage,
   mapAnalysisScores,
   mapRecommendationToCompany,
 } from '../utils'
@@ -38,8 +37,15 @@ export function useResultsData() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [companies, setCompanies] = useState<Company[]>([])
+  const [favoriteCompanies, setFavoriteCompanies] = useState<Company[]>([])
+  const [favoritesLoading, setFavoritesLoading] = useState(false)
+  const [favoritesError, setFavoritesError] = useState<string | null>(null)
+  const favoriteRequest = useRef(0)
+  const favoriteCompanyIds = useRef(new Set<string>())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // 推薦が0件のときの理由（API の reason）。0件はエラーではないので error とは分ける（#2220）
+  const [emptyReason, setEmptyReason] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
   const [isProvisional, setIsProvisional] = useState(false)
   const [diagnosisSummary, setDiagnosisSummary] = useState<string | null>(null)
@@ -149,6 +155,7 @@ export function useResultsData() {
         setLoading(true)
         // 再フェッチ時に前回の error が残ると一覧が描画されない（Bugbot）
         setError(null)
+        setEmptyReason(null)
         void fetchAnalysis()
 
         const response = await fetchWithTimeout(`/api/chat/recommendations?session_id=${sessionId}&limit=10`, {
@@ -188,20 +195,27 @@ export function useResultsData() {
         )
 
         if (!data || !data.recommendations || !Array.isArray(data.recommendations) || data.recommendations.length === 0) {
-          const reason = data?.reason || 'matching_results_empty'
-          const diagnostics = data?.diagnostics
+          const reason = typeof data?.reason === 'string' && data.reason ? data.reason : 'matching_results_empty'
+          if (data?.diagnostics) {
+            // 内部指標は画面に出さず、調査用に console へ出すだけにする
+            console.debug('[results] empty recommendations diagnostics', data.diagnostics)
+          }
           setCompanies([])
-          setError(buildEmptyRecommendationsMessage(reason, diagnostics))
+          setEmptyReason(reason)
           setLoading(false)
           return
         }
 
         if (data && data.recommendations && Array.isArray(data.recommendations)) {
-          const mappedCompanies = data.recommendations.map(
+          const mappedCompanies: Company[] = data.recommendations.map(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any -- API レスポンス
             (rec: any, index: number) => mapRecommendationToCompany(rec, index),
           )
-          setCompanies(mappedCompanies)
+          setCompanies(mappedCompanies.map((company) => (
+            favoriteCompanyIds.current.has(company.id)
+              ? { ...company, isFavorited: true }
+              : company
+          )))
           setError(null)
         } else {
           setError('企業データの形式が正しくありません')
@@ -274,6 +288,78 @@ export function useResultsData() {
     router.push('/')
   }
 
+  const loadFavorites = useCallback(async () => {
+    const requestId = favoriteRequest.current + 1
+    favoriteRequest.current = requestId
+    setFavoritesLoading(true)
+    setFavoritesError(null)
+    try {
+      const res = await fetch('/api/chat/favorites?limit=100', {
+        headers: authService.getUserFetchHeaders(),
+      })
+      if (requestId !== favoriteRequest.current) return
+      if (!res.ok) {
+        setFavoritesError('お気に入りを読み込めませんでした')
+        return
+      }
+      const data = await res.json()
+      if (requestId !== favoriteRequest.current) return
+      const rows = Array.isArray(data?.recommendations) ? data.recommendations : []
+      const mapped: Company[] = rows.map((rec: unknown, index: number) => mapRecommendationToCompany(rec, index))
+      favoriteCompanyIds.current = new Set(mapped.map((company) => company.id))
+      setFavoriteCompanies(mapped)
+      setCompanies((prev) => prev.map((company) => (
+        favoriteCompanyIds.current.has(company.id)
+          ? { ...company, isFavorited: true }
+          : { ...company, isFavorited: false }
+      )))
+    } catch {
+      if (requestId !== favoriteRequest.current) return
+      setFavoritesError('お気に入りを読み込めませんでした')
+    } finally {
+      if (requestId === favoriteRequest.current) setFavoritesLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!mounted || !userId) return
+    void loadFavorites()
+  }, [mounted, userId, loadFavorites])
+
+  const handleUnfavoriteCompany = async (e: MouseEvent, company: Company) => {
+    e.stopPropagation()
+    const companyID = Number(company.id)
+    if (!companyID || favoritingId !== null) return
+    // 読み込み中の一覧が、外した企業を戻さないように世代を進める。
+    favoriteRequest.current += 1
+    setFavoritesLoading(false)
+    setFavoritingId(company.matchId ?? companyID)
+    try {
+      const res = await fetch('/api/chat/favorites/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
+        body: JSON.stringify({ company_id: companyID }),
+      })
+      if (!res.ok) {
+        setSnackbar({ open: true, message: 'お気に入りの更新に失敗しました', severity: 'error' })
+        return
+      }
+      favoriteCompanyIds.current.delete(company.id)
+      setFavoriteCompanies((prev) => prev.filter((item) => item.id !== company.id))
+      setCompanies((prev) => prev.map((item) => (
+        item.id === company.id ? { ...item, isFavorited: false } : item
+      )))
+      setSnackbar({ open: true, message: 'すべての診断のお気に入りから外しました', severity: 'success' })
+    } catch {
+      setSnackbar({ open: true, message: 'お気に入りの更新に失敗しました', severity: 'error' })
+    } finally {
+      setFavoritingId(null)
+      // 失敗したときは、無効にした取得のまま空一覧で止まらないように取り直す。
+      // 成功したときも、サーバーの結果を正にする。
+      void loadFavorites()
+    }
+  }
+
   // 推薦への「合う／合わない」。同じ判定をもう一度押したら取り消す（SOCAIAGENT-670）
   const handleFeedback = async (e: MouseEvent, company: Company, verdict: MatchFeedbackVerdict) => {
     e.stopPropagation()
@@ -305,7 +391,14 @@ export function useResultsData() {
 
   const handleToggleFavorite = async (e: MouseEvent, company: Company) => {
     e.stopPropagation()
-    if (!company.matchId || favoritingId !== null) return
+    if (favoritingId !== null) return
+    // 付いているハートは企業単位で外す。この診断の1行だけ外すと、
+    // 別の診断に残ったお気に入りが「お気に入りだけ」と一覧で食い違う。
+    if (company.isFavorited) {
+      await handleUnfavoriteCompany(e, company)
+      return
+    }
+    if (!company.matchId) return
     setFavoritingId(company.matchId)
     try {
       const res = await fetch('/api/chat/favorite', {
@@ -315,13 +408,10 @@ export function useResultsData() {
       })
       if (res.ok) {
         setCompanies((prev) => prev.map((c) =>
-          c.matchId === company.matchId ? { ...c, isFavorited: !c.isFavorited } : c,
+          c.id === company.id ? { ...c, isFavorited: true } : c,
         ))
-        setSnackbar({
-          open: true,
-          message: company.isFavorited ? 'お気に入りを解除しました' : 'お気に入りに追加しました',
-          severity: 'success',
-        })
+        setSnackbar({ open: true, message: 'お気に入りに追加しました', severity: 'success' })
+        void loadFavorites()
       } else {
         setSnackbar({ open: true, message: 'お気に入りの更新に失敗しました', severity: 'error' })
       }
@@ -422,8 +512,13 @@ export function useResultsData() {
     userId,
     sessionId,
     companies,
+    favoriteCompanies,
+    favoritesLoading,
+    favoritesError,
+    retryFavorites: loadFavorites,
     loading,
     error,
+    emptyReason,
     isProvisional,
     diagnosisSummary,
     evaluatedCategories,
@@ -455,6 +550,7 @@ export function useResultsData() {
     handleBack,
     handleReset,
     handleToggleFavorite,
+    handleUnfavoriteCompany,
     handleApply,
     lowMatchTarget,
     // ダイアログを閉じるだけ。応募APIは呼ばない

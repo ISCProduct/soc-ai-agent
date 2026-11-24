@@ -31,9 +31,13 @@ function cspValue({ wasm }: { wasm: boolean }): string {
     "media-src 'self' blob:",
     // 開発モードの HMR の WebSocket 接続を許可
     isDev
-      ? "connect-src 'self' blob: http://localhost:* https://api.openai.com https://*.sentry.io ws://localhost:* wss://localhost:*"
-      : `connect-src 'self' blob: https://api.openai.com https://*.sentry.io${backendOrigin ? ` ${backendOrigin}` : ''}`,
+      ? "connect-src 'self' blob: http://localhost:* https://*.sentry.io ws://localhost:* wss://localhost:*"
+      : `connect-src 'self' blob: https://*.sentry.io${backendOrigin ? ` ${backendOrigin}` : ''}`,
     "frame-ancestors 'none'",
+    // <base> の差し替え・外部へのフォーム送信・プラグイン埋め込みを止める（いずれも使っていない）
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
   ].join('; ')
 }
 
@@ -59,7 +63,6 @@ const interviewCspHeader = {
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
   // zod v4 は ESM-first ("type":"module") のため Webpack が解決できない場合がある
   transpilePackages: ['zod'],
   // MUI emotion CSS-in-JS のSSR対応
@@ -73,6 +76,12 @@ const nextConfig: NextConfig = {
       {
         source: '/(.*)',
         headers: securityHeaders,
+      },
+      {
+        // Live2D の資産（Core・モデル・テクスチャ）はデプロイ時にしか変わらない。
+        // 既定の max-age=0 だと面接のたびに全部を問い合わせ直すので、1日はキャッシュさせる。
+        source: '/live2d/:path*',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=86400, stale-while-revalidate=604800' }],
       },
       {
         // 面接ページのみカメラ・マイクを許可（他ページは securityHeaders で引き続き禁止）

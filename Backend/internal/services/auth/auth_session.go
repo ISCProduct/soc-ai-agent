@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -97,12 +96,16 @@ func (s *AuthService) Login(req LoginRequest, tenantOrgID uint) (*AuthResponse, 
 					log.Printf("[AuthService] enqueue re-verification email failed, fallback goroutine: %v", err)
 					// メール送信は投げっぱなし。panic でプロセスを落とさない(#1446)。
 					safego.Go(func() {
-						s.emailService.SendReVerificationEmail(user, user.EmailVerificationToken, appURL)
+						if err := s.emailService.SendReVerificationEmail(user, user.EmailVerificationToken, appURL); err != nil {
+							log.Printf("[AuthService] re-verification email send failed: %v", err)
+						}
 					})
 				}
 			} else {
 				safego.Go(func() {
-					s.emailService.SendReVerificationEmail(user, user.EmailVerificationToken, appURL)
+					if err := s.emailService.SendReVerificationEmail(user, user.EmailVerificationToken, appURL); err != nil {
+						log.Printf("[AuthService] re-verification email send failed: %v", err)
+					}
 				})
 			}
 			requiresReVerification = true
@@ -181,7 +184,7 @@ func (s *AuthService) RefreshSession(refreshToken string) (*AuthResponse, error)
 	if s.refreshTokens == nil {
 		return nil, errors.New("refresh token service not configured")
 	}
-	userSecret := os.Getenv("USER_SECRET")
+	userSecret := config.UserSecret()
 	if userSecret == "" {
 		return nil, errors.New("USER_SECRET is not configured")
 	}
