@@ -80,8 +80,10 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
             query = f"{safe_company_name} 求める人物像 採用 価値観"
             parts: Dict[str, List[str]] = {}
             for v in views:
-                # エンジニア向けのキーが無いときに、同じ企業の一般の文書で代用しない（職種の代用をしない）
-                docs = m.get_cached_context(keys[v], query=query, allow_company_fallback=(v == "general"))
+                # 両方の観点とも、キーが無いときに同じ企業の別の役割の文書で代用しない。一般の観点が
+                # エンジニア向けの要約を拾うと、スタック無しの ES がそれを一般の企業情報として使うため。
+                # 無ければ Web Search に進む
+                docs = m.get_cached_context(keys[v], query=query, allow_company_fallback=False)
                 if docs:
                     parts[v] = docs
             missing = [v for v in views if v not in parts]

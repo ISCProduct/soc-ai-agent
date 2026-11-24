@@ -736,8 +736,9 @@ def test_es_cache_keys_are_separate_for_engineer_view(monkeypatch, client):
     assert len(store) == 2
 
 
-def test_engineer_cache_lookup_does_not_fall_back_to_general_docs(monkeypatch, client):
-    """エンジニア向けのキーを引くときは、同じ企業の一般の文書で代用しない（職種の代用を切る）。"""
+def test_es_cache_lookups_never_fall_back_to_other_role_docs(monkeypatch, client):
+    """両方の観点とも、同じ企業の別の役割の文書で代用しない。一般の観点がエンジニア向けの要約を拾うと、
+    スタック無しの ES がそれを一般の企業情報として使う（レビューの Mid）。"""
     import main
 
     got = MagicMock(return_value=[])
@@ -748,7 +749,7 @@ def test_engineer_cache_lookup_does_not_fall_back_to_general_docs(monkeypatch, c
     _post(client, "Go")
 
     fallbacks = {c.args[0].endswith("::es_review::engineer"): c.kwargs["allow_company_fallback"] for c in got.call_args_list}
-    assert fallbacks == {False: True, True: False}
+    assert fallbacks == {False: False, True: False}
 
 
 def test_es_review_cache_key_with_role_is_parsed_as_es_review():
