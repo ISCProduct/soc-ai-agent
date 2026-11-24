@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 )
 
@@ -203,7 +204,7 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromResumeReview(
 	// 高ければ高く、低ければ低く、スコア全域を使って反映する（#1528）。
 	wrote := 0
 	for _, mapped := range mapResumeScore(*review.Score, criticalCount) {
-		if err := s.applyMovingAverage(userID, chatSessionID, mapped.category, mapped.score); err != nil {
+		if err := s.applyMovingAverage(userID, chatSessionID, mapped.category, float64(mapped.score)); err != nil {
 			log.Printf("[CrossFeature] resume→score update failed (cat=%s): %v\n", mapped.category, err)
 			continue
 		}
@@ -247,7 +248,7 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromESReview(userID uint, r
 	for _, mapped := range mapESScore(
 		int(review.SpecificityScore), int(review.StarScore), int(review.LengthBalanceScore),
 	) {
-		if err := s.applyMovingAverage(userID, sessionID, mapped.category, mapped.score); err != nil {
+		if err := s.applyMovingAverage(userID, sessionID, mapped.category, float64(mapped.score)); err != nil {
 			failed++
 			log.Printf("[CrossFeature] es→score update failed (cat=%s): %v\n", mapped.category, err)
 			continue
@@ -305,7 +306,7 @@ func (s *CrossFeatureIntegrationService) BuildInterviewContextFromScores(
 			if i > 0 {
 				lines += "、"
 			}
-			lines += fmt.Sprintf("%s(%d点)", s.WeightCategory, s.Score)
+			lines += fmt.Sprintf("%s(%.0f点)", s.WeightCategory, s.Score)
 		}
 		lines += "\n"
 	}
@@ -315,7 +316,7 @@ func (s *CrossFeatureIntegrationService) BuildInterviewContextFromScores(
 			if i > 0 {
 				lines += "、"
 			}
-			lines += fmt.Sprintf("%s(%d点)", s.WeightCategory, s.Score)
+			lines += fmt.Sprintf("%s(%.0f点)", s.WeightCategory, s.Score)
 		}
 		lines += "\n"
 	}
@@ -339,7 +340,7 @@ func (s *CrossFeatureIntegrationService) BuildInterviewContextFromUser(userID ui
 			if i > 0 {
 				lines += "、"
 			}
-			lines += fmt.Sprintf("%s(%d点)", s.WeightCategory, s.Score)
+			lines += fmt.Sprintf("%s(%.0f点)", s.WeightCategory, s.Score)
 		}
 		lines += "\n"
 	}
@@ -349,7 +350,7 @@ func (s *CrossFeatureIntegrationService) BuildInterviewContextFromUser(userID ui
 			if i > 0 {
 				lines += "、"
 			}
-			lines += fmt.Sprintf("%s(%d点)", s.WeightCategory, s.Score)
+			lines += fmt.Sprintf("%s(%.0f点)", s.WeightCategory, s.Score)
 		}
 		lines += "\n"
 	}
@@ -371,7 +372,7 @@ func (s *CrossFeatureIntegrationService) BuildResumeContextFromUser(userID uint)
 
 	text := "【候補者の強み傾向（チャット診断より）】\n"
 	for _, s := range top {
-		text += fmt.Sprintf("- %s: %d点\n", s.WeightCategory, s.Score)
+		text += fmt.Sprintf("- %s: %.0f点\n", s.WeightCategory, s.Score)
 	}
 	text += "上記の強みが経歴書でどう表現されているか、特に確認してください。\n"
 	return text
@@ -394,7 +395,7 @@ func (s *CrossFeatureIntegrationService) BuildResumeContextFromScores(
 
 	text := "【候補者の強み傾向（チャット診断より）】\n"
 	for _, s := range top {
-		text += fmt.Sprintf("- %s: %d点\n", s.WeightCategory, s.Score)
+		text += fmt.Sprintf("- %s: %.0f点\n", s.WeightCategory, s.Score)
 	}
 	text += "上記の強みが経歴書でどう表現されているか、特に確認してください。\n"
 	return text
@@ -450,11 +451,11 @@ func (s *CrossFeatureIntegrationService) BuildIntegratedProfile(
 // applyMovingAverage 移動平均（新30% + 既存70%）でスコアを更新する
 // UpdateScore は加算式なので、差分（delta）を計算して渡す
 func (s *CrossFeatureIntegrationService) applyMovingAverage(
-	userID uint, sessionID, category string, newValue int,
+	userID uint, sessionID, category string, newValue float64,
 ) error {
 	// リポジトリ側も 0〜100 に丸めるが、呼び出し側でも範囲を守る。
 	// 丸めに頼ると、範囲外の値が「意図」なのか事故なのか読み取れなくなる（#1528）。
-	newValue = clampInt(newValue, 0, 100)
+	newValue = math.Max(0, math.Min(100, newValue))
 
 	existing, err := s.weightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, category)
 	if err != nil && !errors.Is(err, repository.ErrNotFound) {
@@ -465,8 +466,9 @@ func (s *CrossFeatureIntegrationService) applyMovingAverage(
 		return s.weightScoreRepo.SetScore(userID, sessionID, category, newValue)
 	}
 
-	delta := blendScore(existing.Score, newValue) - existing.Score
-	if delta == 0 {
+	delta := round2(blendScore(existing.Score, newValue) - existing.Score)
+	// 小数第2位に満たない差は DECIMAL(5,2) に載らないので書かない。
+	if math.Abs(delta) < 0.005 {
 		return nil
 	}
 	return s.weightScoreRepo.AddScore(userID, sessionID, category, delta)

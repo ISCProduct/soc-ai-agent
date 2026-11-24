@@ -10,7 +10,7 @@ async function silenceHome(page: Page) {
     await page.route(path, (route) => route.fulfill(json([])))
   }
   await page.route('**/api/applications', (route) => route.fulfill(json({ applications: [] })))
-  await page.route('**/api/user/guidances', (route) => route.fulfill(json({ guidances: [] })))
+  await page.route('**/api/bff/user/guidances', (route) => route.fulfill(json({ guidances: [] })))
   await page.route('**/api/resume/status', (route) =>
     route.fulfill(json({ has_document: true, latest_score: 90, needs_attention: false })),
   )

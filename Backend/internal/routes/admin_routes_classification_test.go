@@ -81,6 +81,10 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"GET /job-categories":                                   classStaff,
 		"GET /job-positions":                                    classStaff,
 		"GET /company-graph/target-year":                        classStaff,
+		// 企業情報の「取得」「確定」ボタンは職員にも開ける（オーナー決定 2026-11-22、SOCAIAGENT-692）
+		"POST /companies/:id/fetch-tech-stack": classStaff,
+		"POST /companies/:id/fetch-info":       classStaff,
+		"POST /companies/:id/confirm-info":     classStaff,
 	},
 	map[string]routeClass{
 		// ── 権限管理(requireAdmin) ──
@@ -90,22 +94,20 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"DELETE /schools/:id/members/:user_id": classRequireAdmin,
 	},
 	// ── 意図的に staff へ開放(要判断) ──
-	// 掲載申請の審査(#1507)で担当校の職員も企業情報・面接質問・求人を触る可能性があり、
-	// 現状は platform を掛けていない。ただし企業(PUT)・求人(POST)は全テナント共通データを
-	// 書き換え、generate は OpenAI を呼ぶ(AIコスト発生)。
-	// 締める場合は admin_routes.go の該当ルートへ platform を付け、ここの分類を
-	// classPlatform へ移すこと(テストが両者のずれを検出する)。
+	// 求人(POST)は全テナント共通データを書き換える。締める場合は admin_routes.go の該当ルートへ
+	// platform を付け、ここの分類を classPlatform へ移すこと(テストが両者のずれを検出する)。
 	map[string]routeClass{
-		"PUT /companies/:id":                               classStaffPendingReview,
-		"GET /companies/:id/relation-graph":                classStaffPendingReview,
-		"POST /companies/:id/interview-questions":          classStaffPendingReview,
-		"POST /companies/:id/interview-questions/generate": classStaffPendingReview,
-		"PUT /companies/:id/interview-questions/:qid":      classStaffPendingReview,
-		"DELETE /companies/:id/interview-questions/:qid":   classStaffPendingReview,
-		"POST /job-positions":                              classStaffPendingReview,
+		"GET /companies/:id/relation-graph": classStaffPendingReview,
+		"POST /job-positions":               classStaffPendingReview,
 	},
 	map[string]routeClass{
 		// ── 運用系(platform専用) ──
+		// 企業マスタと面接質問は全校共有のため書き込みは platform のみ(SOCAIAGENT-692)。
+		"PUT /companies/:id":                                   classPlatform,
+		"POST /companies/:id/interview-questions":              classPlatform,
+		"POST /companies/:id/interview-questions/generate":     classPlatform,
+		"PUT /companies/:id/interview-questions/:qid":          classPlatform,
+		"DELETE /companies/:id/interview-questions/:qid":       classPlatform,
 		"PATCH /companies/:id/publish":                         classPlatform,
 		"PATCH /companies/:id/verify":                          classPlatform,
 		"PATCH /companies/:id/reject":                          classPlatform,
@@ -172,9 +174,6 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"POST /companies/web-search-relations":                 classPlatform,
 		"GET /companies/:id/gbiz-search":                       classPlatform,
 		"POST /companies/:id/gbiz-sync":                        classPlatform,
-		"POST /companies/:id/fetch-tech-stack":                 classPlatform,
-		"POST /companies/:id/fetch-info":                       classPlatform,
-		"POST /companies/:id/confirm-info":                     classPlatform,
 		"POST /companies/:id/fetch-relations":                  classPlatform,
 		"POST /companies/:id/confirm-relations":                classPlatform,
 		"POST /companies/:id/fetch-jobs":                       classPlatform,
@@ -224,6 +223,7 @@ const (
 	staffNoSchoolID
 	adminNoSchoolID
 	adminWithSchoolID
+	studentID
 )
 
 type principal struct {
@@ -242,13 +242,16 @@ var (
 	pAdminNoSchool = principal{name: "admin_no_school", id: adminNoSchoolID, email: "admin1@example.com", isAdmin: true}
 	pAdminSchool   = principal{name: "admin_with_school", id: adminWithSchoolID, email: "admin2@example.com", isAdmin: true}
 	pAnonymous     = principal{name: "anonymous", anon: true}
-	allPrincipals  = []principal{pStaffSchool, pStaffNoSchool, pAdminNoSchool, pAdminSchool, pAnonymous}
+	// 管理エリアの権限を持たない利用者（学生など。is_admin=false かつ staff でない）。
+	pStudent      = principal{name: "student", id: studentID, email: "student@example.com"}
+	allPrincipals = []principal{pStaffSchool, pStaffNoSchool, pAdminNoSchool, pAdminSchool, pAnonymous, pStudent}
 )
 
 // 認可で拒否されたときの本文。echo_adapter.go のメッセージと対応する。
 // GetUserByEmail 失敗などの AdminAuth 由来の403("Forbidden")と取り違えないために本文で区別する。
 const (
 	msgUnauthorized = "Unauthorized"
+	msgForbidden    = "Forbidden" // EchoAdminAuth: 管理エリアに入れない利用者
 	msgPlatformOnly = "platform admin only"
 	msgAdminOnly    = "この操作は管理者のみ行えます"
 	msgSchoolDenied = "school access denied"
@@ -400,6 +403,8 @@ func expectedAuthz(class routeClass, who principal) (pass bool, code int, msg st
 	switch {
 	case who.anon:
 		return false, http.StatusUnauthorized, msgUnauthorized
+	case !who.isAdmin && who.role != models.UserRoleStaff:
+		return false, http.StatusForbidden, msgForbidden
 	case class == classPlatform && (!who.isAdmin || who.id == adminWithSchoolID):
 		return false, http.StatusForbidden, msgPlatformOnly
 	case class == classRequireAdmin && !who.isAdmin:
@@ -408,7 +413,7 @@ func expectedAuthz(class routeClass, who principal) (pass bool, code int, msg st
 	return true, 0, ""
 }
 
-// 分類表どおりに実際の認可が効いていることを、全ルート×5主体で確認する。
+// 分類表どおりに実際の認可が効いていることを、全ルート×6主体で確認する。
 // 運用系(/audit-logs, /costs, /scraper-sessions, /companies/:id/fetch-*, 学校メンバー操作など)の
 // staff 403 もここで網羅される。拒否は本文で発生元(platform / requireAdmin / 認証)まで区別する。
 func TestAdminRoutes_ClassificationMatchesAuthorization(t *testing.T) {

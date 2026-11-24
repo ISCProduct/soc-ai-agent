@@ -28,6 +28,7 @@ type ChatService struct {
 	answerEvaluator         *AnswerEvaluator
 	jobValidator            *JobCategoryValidator
 	growthRecorder          growth.Recorder
+	questionEmb             questionEmbCache
 }
 
 // SetGrowthRecorder は、スコアが動いたあとに履歴を1行残す。未設定なら何もしない。

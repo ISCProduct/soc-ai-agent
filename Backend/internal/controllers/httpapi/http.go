@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strconv"
 
 	"Backend/internal/companyfetch"
@@ -141,24 +140,11 @@ func EnsureAdminSchoolAccessForUser(ctx echo.Context, schools *school.SchoolServ
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	isPlatform := middleware.AdminIsPlatformFromContext(ctx.Request().Context())
-	restricted, allowedSchoolIDs, err := schools.ResolveAccess(isPlatform, adminUserID)
+	allowed, err := schools.CanAdminAccessUser(isPlatform, adminUserID, targetOrganizationID, targetSchoolID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
 	}
-	if !restricted {
-		return nil
-	}
-	// 拒否が確定している場合は学校を引かない。担当校0件の職員や、担当校に含まれない
-	// 学校を指す対象は、学園を確かめるまでもなく 403 になる。
-	if len(allowedSchoolIDs) == 0 || targetSchoolID == nil || !slices.Contains(allowedSchoolIDs, *targetSchoolID) {
-		return echo.NewHTTPError(http.StatusForbidden, "school access denied")
-	}
-	// 担当校に含まれていても、その学校が対象ユーザーの学園のものでなければ通さない。
-	effective, err := schools.EffectiveSchoolID(targetOrganizationID, targetSchoolID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
-	}
-	if effective == nil {
+	if !allowed {
 		return echo.NewHTTPError(http.StatusForbidden, "school access denied")
 	}
 	return nil

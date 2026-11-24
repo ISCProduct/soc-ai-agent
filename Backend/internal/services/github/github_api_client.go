@@ -33,18 +33,31 @@ type githubAPIRepository struct {
 func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Client, token string) ([]models.GitHubRepo, error) {
 	seen := make(map[string]struct{})
 
-	// 1. /user/repos?affiliation=owner,collaborator,organization_member で全リポジトリを取得
-	// affiliation を明示指定することで、オーナー・コラボレーター・組織メンバーとして参加している
-	// リポジトリをすべて取得する（read:orgなしでも動く）
-	allTypeRepos, err := s.FetchRepoPages(ctx, client, token,
-		fmt.Sprintf("%s/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100", githubAPIBase))
+	// 1. /user/repos?affiliation=owner,collaborator で、本人が作成者・共同編集者のリポジトリを取得する。
+	// AI 要約の対象はこの一覧に限るので、ここで印を付けて保存する（SOCAIAGENT-698）。
+	ownRepos, err := s.FetchRepoPages(ctx, client, token,
+		fmt.Sprintf("%s/user/repos?affiliation=owner,collaborator&sort=updated&per_page=100", s.getAPIBase()))
 	if err != nil {
 		// 主取得の失敗（無効トークン・401 など）は握りつぶさず同期失敗として返す
 		return nil, fmt.Errorf("fetch repositories: %w", err)
 	}
-	allRepos := allTypeRepos
-	for _, r := range allTypeRepos {
-		seen[r.FullName] = struct{}{}
+	allRepos := ownRepos
+	for i := range allRepos {
+		allRepos[i].IsOwnerOrCollaborator = true
+		seen[allRepos[i].FullName] = struct{}{}
+	}
+
+	// 1b. 組織メンバーとして見えるリポジトリ（read:org なしでも動く）。他人のものなので印は付けない。
+	memberRepos, err := s.FetchRepoPages(ctx, client, token,
+		fmt.Sprintf("%s/user/repos?affiliation=organization_member&sort=updated&per_page=100", s.getAPIBase()))
+	if err != nil {
+		return nil, fmt.Errorf("fetch repositories: %w", err)
+	}
+	for _, r := range memberRepos {
+		if _, exists := seen[r.FullName]; !exists {
+			seen[r.FullName] = struct{}{}
+			allRepos = append(allRepos, r)
+		}
 	}
 
 	// 2. 組織リポジトリも明示的に取得してマージ（repo + read:org スコープが必要）
@@ -59,7 +72,7 @@ func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Clie
 	} else {
 		for _, org := range orgs {
 			orgRepos, err := s.FetchRepoPages(ctx, client, token,
-				fmt.Sprintf("%s/orgs/%s/repos?type=all&sort=updated&per_page=100", githubAPIBase, org))
+				fmt.Sprintf("%s/orgs/%s/repos?type=all&sort=updated&per_page=100", s.getAPIBase(), org))
 			if err != nil {
 				log.Printf("[GitHubService] fetchOrgRepos warning (%s): %v", org, err)
 				continue
@@ -125,7 +138,7 @@ func hasScopes(scopeHeader string, required ...string) []string {
 
 // fetchOrgs 認証ユーザーの所属組織名一覧を取得する
 func (s *GitHubService) fetchOrgs(ctx context.Context, client *http.Client, token string) ([]string, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/user/orgs?per_page=100", githubAPIBase), nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/user/orgs?per_page=100", s.getAPIBase()), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := client.Do(req)
@@ -288,7 +301,7 @@ func (s *GitHubService) fetchContributedRepos(ctx context.Context, client *http.
 			return nil, fmt.Errorf("failed to marshal graphql query: %w", err)
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, githubGraphQLURL, bytes.NewReader(queryBytes))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.getGraphQLURL(), bytes.NewReader(queryBytes))
 		if err != nil {
 			return nil, err
 		}

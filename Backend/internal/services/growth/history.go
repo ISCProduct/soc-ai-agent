@@ -44,8 +44,8 @@ type PhaseSnapshot struct {
 }
 
 // ScoresFromRows はそのセッションに実際にあるカテゴリだけを返す。無い軸は入れない。
-func ScoresFromRows(rows []models.UserWeightScore) map[string]int {
-	out := make(map[string]int, len(rows))
+func ScoresFromRows(rows []models.UserWeightScore) map[string]float64 {
+	out := make(map[string]float64, len(rows))
 	for _, row := range rows {
 		if row.WeightCategory == "" {
 			continue
@@ -105,17 +105,17 @@ type Point struct {
 	Source      string          `json:"source"`
 	SourceLabel string          `json:"source_label"`
 	CreatedAt   time.Time       `json:"created_at"`
-	Scores      map[string]int  `json:"scores"`
+	Scores      map[string]float64 `json:"scores"`
 	Phases      []PhaseSnapshot `json:"phases"`
 }
 
 // CategoryChange は直近の記録と、その1つ前との差。
 type CategoryChange struct {
-	Category    string `json:"category"`
-	Previous    *int   `json:"previous"`
-	Current     *int   `json:"current"`
-	Delta       *int   `json:"delta"`
-	ChangeLabel string `json:"change_label"`
+	Category    string   `json:"category"`
+	Previous    *float64 `json:"previous"`
+	Current     *float64 `json:"current"`
+	Delta       *float64 `json:"delta"`
+	ChangeLabel string   `json:"change_label"`
 }
 
 // PhaseChange は完了した診断フェーズの数の差。
@@ -139,7 +139,7 @@ type History struct {
 func BuildHistory(rows []models.UserGrowthSnapshot) History {
 	points := make([]Point, 0, len(rows))
 	for _, row := range rows {
-		var scores map[string]int
+		var scores map[string]float64
 		if err := json.Unmarshal([]byte(row.ScoresJSON), &scores); err != nil {
 			continue
 		}
@@ -151,7 +151,7 @@ func BuildHistory(rows []models.UserGrowthSnapshot) History {
 			phases = []PhaseSnapshot{}
 		}
 		if scores == nil {
-			scores = map[string]int{}
+			scores = map[string]float64{}
 		}
 		points = append(points, Point{
 			ID:          row.ID,
@@ -183,7 +183,7 @@ func BuildHistory(rows []models.UserGrowthSnapshot) History {
 	return history
 }
 
-func compareCategories(prev, cur map[string]int) []CategoryChange {
+func compareCategories(prev, cur map[string]float64) []CategoryChange {
 	seen := map[string]bool{}
 	names := make([]string, 0, len(valueobject.AllWeightCategories()))
 	for _, category := range valueobject.AllWeightCategories() {
@@ -233,7 +233,7 @@ func compareCategories(prev, cur map[string]int) []CategoryChange {
 			change.Delta = &delta
 		case hasPrev && hasCur:
 			change.ChangeLabel = ChangeUnchanged
-			delta := 0
+			delta := 0.0
 			change.Delta = &delta
 		case hasCur:
 			change.ChangeLabel = ChangeNew

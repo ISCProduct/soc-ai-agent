@@ -16,10 +16,6 @@ import {
   Typography,
   Alert,
   Snackbar,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
 } from '@mui/material'
 import PersonIcon from '@mui/icons-material/Person'
 import SchoolIcon from '@mui/icons-material/School'
@@ -33,8 +29,11 @@ import GitHubSkills from '@/components/github-skills'
 import { GrowthHistoryCard } from '@/components/profile/GrowthHistoryCard'
 import { ScoutPreferencesCard } from '@/components/profile/ScoutPreferencesCard'
 import { TrainingConsentCard } from '@/components/profile/TrainingConsentCard'
+import { DeleteAccountDialog } from '@/components/profile/DeleteAccountDialog'
+import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
 import { PageLoading } from '@/components/common/PageLoading'
 import { StudentThemeToggle } from '@/components/layout/StudentThemeToggle'
+import { isGoogleAuthUrl } from '@/lib/google-auth-url'
 
 export default function PageContent() {
   return (
@@ -197,6 +196,7 @@ function ProfilePageContent() {
       })
       if (!res.ok) throw new Error('Failed to get auth URL')
       const data = await res.json()
+      if (!isGoogleAuthUrl(data.auth_url)) throw new Error('Unexpected auth URL')
       window.location.href = data.auth_url
     } catch {
       setCalendarMessage('Googleカレンダー連携の開始に失敗しました')
@@ -578,42 +578,22 @@ function ProfilePageContent() {
       </Container>
 
       {/* アカウント削除確認ダイアログ */}
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>アカウントを退会しますか？</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary">
-            退会後すぐにログインできなくなり、サービス上でのデータ閲覧もできなくなります。
-            保管データ（チャット・面接録画・職務経歴書など）は約30日後に完全削除されます。この操作は取り消せません。
-          </Typography>
-          <Typography variant="body2" component="ul" sx={{ pl: 2, mt: 1, color: 'text.secondary' }}>
-            <li>退会直後: ログイン不可・データ閲覧不可</li>
-            <li>約30日後: チャット・スコア・マッチング結果を完全削除</li>
-            <li>約30日後: 面接練習の録画・レポートを完全削除</li>
-            <li>約30日後: 職務経歴書・アカウント情報を完全削除</li>
-          </Typography>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>
-            キャンセル
-          </Button>
-          <Button
-            onClick={handleDeleteAccount}
-            color="error"
-            variant="contained"
-            disabled={deleting}
-          >
-            {deleting ? '退会処理中...' : '退会する'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <DeleteAccountDialog
+        open={deleteDialogOpen}
+        deleting={deleting}
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={handleDeleteAccount}
+      />
 
       {/* 保存成功トースト */}
       <Snackbar
         open={saved}
-        autoHideDuration={3000}
+        autoHideDuration={SNACKBAR_AUTO_HIDE_MS}
         onClose={() => setSaved(false)}
         message="プロフィールを保存しました"
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        // 下部ナビの上へ逃がす（#2222）
+        sx={ABOVE_BOTTOM_NAV_SX}
       />
     </Box>
   )

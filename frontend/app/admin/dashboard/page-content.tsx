@@ -152,7 +152,7 @@ export default function PageContent() {
         ...(schoolId !== undefined ? { school_id: String(schoolId) } : {}),
       })
       const res = await fetch(`/api/admin/dashboard/users?${params}`, {
-        headers: { 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' },
+        headers: { 'X-Admin-Email': adminEmail },
       })
       if (!res.ok) throw new Error('データの取得に失敗しました')
       const data = await res.json()
@@ -182,7 +182,7 @@ export default function PageContent() {
       : '/api/admin/dashboard/export'
     const link = document.createElement('a')
     link.href = exportUrl
-    const headers = new Headers({ 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' })
+    const headers = new Headers({ 'X-Admin-Email': adminEmail })
     fetch(exportUrl, { headers })
       .then(res => res.blob())
       .then(blob => {
@@ -200,7 +200,7 @@ export default function PageContent() {
     setDetailLoading(true)
     try {
       const res = await fetch(`/api/admin/dashboard/users/${user.user_id}/sessions`, {
-        headers: { 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' },
+        headers: { 'X-Admin-Email': adminEmail },
       })
       const data = await res.json()
       setDetailSessions(data.sessions ?? [])
@@ -380,34 +380,36 @@ export default function PageContent() {
                   <InterviewTrendChart points={toTrendPoints(detailSessions)} />
                 </Box>
               )}
-            <Table size="small">
-              <TableHead>
-                <TableRow sx={{ bgcolor: '#f5f5f5' }}>
-                  <TableCell>終了日時</TableCell>
-                  <TableCell align="center">平均スコア</TableCell>
-                  {Object.keys(SCORE_LABELS).map(k => (
-                    <TableCell key={k} align="center">{SCORE_LABELS[k]}</TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {detailSessions.map(s => (
-                  <TableRow key={s.session_id} hover>
-                    <TableCell>
-                      {s.ended_at
-                        ? formatDateTime(s.ended_at, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                        : '—'}
-                    </TableCell>
-                    <TableCell align="center"><ScoreBadge score={s.avg_score} /></TableCell>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: '#f5f5f5' }}>
+                    <TableCell>終了日時</TableCell>
+                    <TableCell align="center">平均スコア</TableCell>
                     {Object.keys(SCORE_LABELS).map(k => (
-                      <TableCell key={k} align="center">
-                        <ScoreBadge score={s.scores?.[k] ?? null} />
-                      </TableCell>
+                      <TableCell key={k} align="center">{SCORE_LABELS[k]}</TableCell>
                     ))}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHead>
+                <TableBody>
+                  {detailSessions.map(s => (
+                    <TableRow key={s.session_id} hover>
+                      <TableCell>
+                        {s.ended_at
+                          ? formatDateTime(s.ended_at, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                          : '—'}
+                      </TableCell>
+                      <TableCell align="center"><ScoreBadge score={s.avg_score} /></TableCell>
+                      {Object.keys(SCORE_LABELS).map(k => (
+                        <TableCell key={k} align="center">
+                          <ScoreBadge score={s.scores?.[k] ?? null} />
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
             </>
           )}
         </DialogContent>

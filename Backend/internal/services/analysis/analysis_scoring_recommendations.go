@@ -47,7 +47,7 @@ func buildJobSuitabilityComment(scores []models.UserWeightScore) (string, []JobS
 		return "", nil
 	}
 
-	scoreMap := make(map[string]int)
+	scoreMap := make(map[string]float64)
 	for _, s := range scores {
 		scoreMap[s.WeightCategory] = s.Score
 	}
@@ -101,11 +101,11 @@ func buildJobSuitabilityComment(scores []models.UserWeightScore) (string, []JobS
 
 	type scoredRole struct {
 		role  roleCandidate
-		total int
+		total float64
 	}
 	var candidates []scoredRole
 	for _, mapping := range roleMappings {
-		total := 0
+		total := 0.0
 		matched := 0
 		for _, cat := range mapping.categories {
 			if v, ok := scoreMap[cat]; ok && v > 0 {

@@ -63,3 +63,37 @@ export function ensureCubismCore(url: string = DEFAULT_CORE_URL): Promise<void> 
 
   return coreLoadPromise
 }
+
+let preloadStarted = false
+
+/**
+ * 面接が始まる前に、Live2D の Core・Framework・モデル一式を先に読み始める。
+ *
+ * 面接官を表示するときに読み始めると、Core → Framework → model3.json → moc3 → テクスチャ
+ * を1つずつ待つことになり、表示まで数秒かかる。企業を選んでいる間に読んでおけば、
+ * 表示のときは読み込み済み（HTTP キャッシュ）になる。失敗は無視する（本番の読み込みで改めて扱う）。
+ */
+export function preloadLive2D(gender: 'male' | 'female'): void {
+  if (preloadStarted || typeof window === 'undefined') return
+  if (process.env.NEXT_PUBLIC_LIVE2D_ENABLED !== 'true') return
+  preloadStarted = true
+
+  // Framework は Core のグローバルを参照するので、Core の後に読む（Live2DAvatar と同じ順番）
+  ensureCubismCore()
+    .then(() => import('./live2d-framework-model'))
+    .catch(() => {})
+
+  const modelUrl = modelUrlForGender(gender)
+  const dir = modelUrl.slice(0, modelUrl.lastIndexOf('/') + 1)
+  fetch(modelUrl)
+    .then((res) => (res.ok ? res.json() : null))
+    .then((model: { FileReferences?: { Moc?: unknown; Physics?: unknown; Textures?: unknown } } | null) => {
+      const refs = model?.FileReferences
+      if (!refs) return
+      const textures = Array.isArray(refs.Textures) ? refs.Textures : []
+      for (const file of [refs.Moc, refs.Physics, ...textures]) {
+        if (typeof file === 'string') void fetch(dir + file).catch(() => {})
+      }
+    })
+    .catch(() => {})
+}

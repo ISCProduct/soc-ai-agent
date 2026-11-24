@@ -74,7 +74,7 @@ func TestRecord_AssessmentUsesTheDiagnosisPhase(t *testing.T) {
 	if len(phases) != 1 || phases[0].Name != "適性分析" || !phases[0].IsCompleted {
 		t.Fatalf("phases: %+v", phases)
 	}
-	var scores map[string]int
+	var scores map[string]float64
 	if err := json.Unmarshal([]byte(store.inserted.ScoresJSON), &scores); err != nil {
 		t.Fatal(err)
 	}

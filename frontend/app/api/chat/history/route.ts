@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const response = await fetch(`${BACKEND_URL}/api/chat/history?session_id=${sessionId}`, {
+    const response = await fetch(`${BACKEND_URL}/api/chat/history?session_id=${encodeURIComponent(sessionId)}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
