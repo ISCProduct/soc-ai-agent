@@ -72,19 +72,51 @@ func SelectWaiting(prs []pullSnapshot) []WaitingPR {
 	return out
 }
 
+// opinionatedState は、レビュアーの「意見」を表す状態か。
+// COMMENTED / PENDING は意見ではないので、承認や変更要求を上書きしない。
+func opinionatedState(state string) bool {
+	switch state {
+	case "APPROVED", "CHANGES_REQUESTED", "DISMISSED":
+		return true
+	}
+	return false
+}
+
+// latestOpinions はレビュアーごとの最新の意見（APPROVED / CHANGES_REQUESTED / DISMISSED）を返す。
+// レビューは履歴なので、変更要求のあとに承認が付いていれば、その人の現在の意見は承認。
+// Reviews は古い順に並んでいる前提で、同じ人は後ろのものが勝つ。キーは小文字のログイン名。
+func latestOpinions(reviews []pullReview) map[string]pullReview {
+	latest := map[string]pullReview{}
+	for _, r := range reviews {
+		key := strings.ToLower(strings.TrimSpace(r.Login))
+		if key == "" || !opinionatedState(r.State) {
+			continue
+		}
+		latest[key] = r
+	}
+	return latest
+}
+
+// changesRequestedOnHead は、最新のコミットに対して変更要求が「今も」付いているか。
+// 同じ人が後から承認や却下をしていれば、変更要求とは数えない。
 func changesRequestedOnHead(pr pullSnapshot) bool {
-	for _, r := range pr.Reviews {
-		if r.State == "CHANGES_REQUESTED" && r.SHA == pr.HeadSHA && pr.HeadSHA != "" {
+	if pr.HeadSHA == "" {
+		return false
+	}
+	for _, r := range latestOpinions(pr.Reviews) {
+		if r.State == "CHANGES_REQUESTED" && r.SHA == pr.HeadSHA {
 			return true
 		}
 	}
 	return false
 }
 
+// staleChangeReviewers は、更新前のコミットに変更要求を出したまま、まだ見直していない人。
+// 変更要求のあとに承認した人は含めない。
 func staleChangeReviewers(pr pullSnapshot) []string {
 	var logins []string
-	for _, r := range pr.Reviews {
-		if r.State == "CHANGES_REQUESTED" && r.SHA != pr.HeadSHA && r.Login != "" {
+	for _, r := range latestOpinions(pr.Reviews) {
+		if r.State == "CHANGES_REQUESTED" && r.SHA != pr.HeadSHA {
 			logins = append(logins, r.Login)
 		}
 	}
@@ -186,6 +218,10 @@ func (c *GitHubReviewClient) Waiting(ctx context.Context) ([]WaitingPR, error) {
 	if len(parsed.Errors) > 0 {
 		return nil, errors.New("GitHub の問い合わせに失敗しました")
 	}
+	if parsed.Data.Repository.PullRequests.PageInfo.HasNextPage {
+		// 先頭 reviewQueryLimit 件までしか見ていない。古い更新の PR はリマインドに載らない。
+		log.Printf("[Reminder] 開いている PR が %d 件を超えたため、古い PR は載せていません", reviewQueryLimit)
+	}
 	var snaps []pullSnapshot
 	for _, n := range parsed.Data.Repository.PullRequests.Nodes {
 		snap := pullSnapshot{
@@ -200,7 +236,17 @@ func (c *GitHubReviewClient) Waiting(ctx context.Context) ([]WaitingPR, error) {
 				snap.Requested = append(snap.Requested, login)
 			}
 		}
+		// 履歴（古い順）に、ユーザーごとの最新の意見を後ろに足す。
+		// 履歴は直近10件しか取らないので、それより古い変更要求は最新の意見の側で拾う。
+		// latestOpinions は同じ人なら後ろが勝つため、最新の意見が履歴と食い違うときは最新が採用される。
 		for _, rev := range n.Reviews.Nodes {
+			snap.Reviews = append(snap.Reviews, pullReview{
+				Login: rev.Author.Login,
+				State: rev.State,
+				SHA:   rev.Commit.Oid,
+			})
+		}
+		for _, rev := range n.LatestOpinionatedReviews.Nodes {
 			snap.Reviews = append(snap.Reviews, pullReview{
 				Login: rev.Author.Login,
 				State: rev.State,
@@ -212,9 +258,18 @@ func (c *GitHubReviewClient) Waiting(ctx context.Context) ([]WaitingPR, error) {
 	return SelectWaiting(snaps), nil
 }
 
+// reviewQueryLimit は一度に見る開いている PR の数（reviewQuery の first と揃える）。
+const reviewQueryLimit = 50
+
+// reviewQuery の注意:
+//   - reviewRequests は User だけを取る。チーム宛てのレビュー依頼（Team）は login を持たないので
+//     載らない。チームにだけ依頼した PR は「依頼先なし」として出さない。
+//   - reviews は履歴、latestOpinionatedReviews はユーザーごとの最新の意見。
+//     後者だけが「変更要求のあとに承認された」を直接表す。
 const reviewQuery = `query($owner:String!,$name:String!){
   repository(owner:$owner, name:$name) {
     pullRequests(states:OPEN, first:50, orderBy:{field:UPDATED_AT, direction:DESC}) {
+      pageInfo { hasNextPage }
       nodes {
         number title url isDraft headRefOid
         reviewRequests(first:10) {
@@ -223,15 +278,33 @@ const reviewQuery = `query($owner:String!,$name:String!){
         reviews(last:10) {
           nodes { state author { login } commit { oid } }
         }
+        latestOpinionatedReviews(first:20) {
+          nodes { state author { login } commit { oid } }
+        }
       }
     }
   }
 }`
 
+type reviewNodesGQL struct {
+	Nodes []struct {
+		State  string
+		Author struct {
+			Login string
+		}
+		Commit struct {
+			Oid string
+		}
+	}
+}
+
 type reviewGQL struct {
 	Data struct {
 		Repository struct {
 			PullRequests struct {
+				PageInfo struct {
+					HasNextPage bool
+				}
 				Nodes []struct {
 					Number         int
 					Title          string
@@ -245,17 +318,8 @@ type reviewGQL struct {
 							}
 						}
 					}
-					Reviews struct {
-						Nodes []struct {
-							State  string
-							Author struct {
-								Login string
-							}
-							Commit struct {
-								Oid string
-							}
-						}
-					}
+					Reviews                  reviewNodesGQL
+					LatestOpinionatedReviews reviewNodesGQL
 				}
 			}
 		}

@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -143,6 +144,70 @@ func TestLink_同じBacklogユーザーを別のDiscordに紐づけられない(
 	got = contentOf(h.handleCommand(context.Background(), linkCmd(CommandNameLink, admin, opt(OptionNameMember, "111"), opt(OptionNameBacklog, "大橋和幸"))))
 	if !strings.Contains(got, "✅") {
 		t.Errorf("同一の再登録が通らない: %s", got)
+	}
+}
+
+func TestLink_同じGitHubログインを別のDiscordに大文字小文字を無視して紐づけられない(t *testing.T) {
+	mem := &memSSM{}
+	h := newLinkHandler(mem, backlogStub{users: testUsers})
+	admin := []string{"role-allowed"}
+	got := contentOf(h.handleCommand(context.Background(), linkCmd(CommandNameLink, admin,
+		opt(OptionNameMember, "111"), opt(OptionNameBacklog, "大橋和幸"), opt(OptionNameGitHub, "Octocat"))))
+	if !strings.Contains(got, "✅") {
+		t.Fatalf("登録に失敗: %s", got)
+	}
+	got = contentOf(h.handleCommand(context.Background(), linkCmd(CommandNameLink, admin,
+		opt(OptionNameMember, "222"), opt(OptionNameBacklog, "山田太郎"), opt(OptionNameGitHub, "@OCTOCAT"))))
+	if strings.Contains(got, "✅") || !strings.Contains(got, "既に <@111>") {
+		t.Errorf("GitHub の重複を拒否しない: %s", got)
+	}
+	if strings.Contains(*mem.value, "222") {
+		t.Errorf("拒否したのに保存された: %s", *mem.value)
+	}
+	// 同じ人の再登録（表記違い）は通る
+	got = contentOf(h.handleCommand(context.Background(), linkCmd(CommandNameLink, admin,
+		opt(OptionNameMember, "111"), opt(OptionNameBacklog, "大橋和幸"), opt(OptionNameGitHub, "octocat"))))
+	if !strings.Contains(got, "✅") {
+		t.Errorf("同じ人の再登録が通らない: %s", got)
+	}
+}
+
+func TestLinkService_GitHub未設定どうしは重複にしない(t *testing.T) {
+	s := &LinkService{client: &memSSM{}, paramName: "/p/links"}
+	ctx := context.Background()
+	if err := s.Set(ctx, "111", Link{BacklogID: 1, Name: "大橋和幸"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set(ctx, "222", Link{BacklogID: 2, Name: "山田太郎"}); err != nil {
+		t.Errorf("GitHub 未設定どうしが衝突した: %v", err)
+	}
+	if err := s.Set(ctx, "111", Link{BacklogID: 1, Name: "大橋和幸", GitHub: "Octocat"}); err != nil {
+		t.Fatal(err)
+	}
+	err := s.Set(ctx, "222", Link{BacklogID: 2, Name: "山田太郎", GitHub: " octocat "})
+	if err == nil || !strings.Contains(err.Error(), "既に <@111>") {
+		t.Errorf("大文字小文字違いの重複を拒否しない: %v", err)
+	}
+}
+
+func TestLink_一覧はDiscordの文字数上限に収める(t *testing.T) {
+	mem := &memSSM{}
+	// 2000 文字を超える一覧になる人数と名前の長さ。
+	links := map[string]Link{}
+	for i := 0; i < 40; i++ {
+		id := strings.Repeat("1", 18) + string(rune('a'+i%26)) + strings.Repeat("x", i/26)
+		links[id] = Link{BacklogID: i + 1, Name: strings.Repeat("山", 25) + string(rune('A'+i%26)) + string(rune('a'+i/26))}
+	}
+	b, _ := json.Marshal(links)
+	v := string(b)
+	mem.value = &v
+	h := newLinkHandler(mem, backlogStub{users: testUsers})
+	got := contentOf(h.handleCommand(context.Background(), linkCmd(CommandNameLinkList, []string{"role-allowed"})))
+	if n := len([]rune(got)); n > 2000 {
+		t.Errorf("一覧が %d 文字で Discord の上限を超える", n)
+	}
+	if !strings.Contains(got, "表示しきれません") {
+		t.Errorf("切り捨てた案内が無い: %s", got)
 	}
 }
 

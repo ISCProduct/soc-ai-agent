@@ -9,6 +9,13 @@ import (
 	"strings"
 )
 
+// Discord のメッセージ本文は 2000 文字まで。超えると応答が拒否されて一覧が見えなくなる。
+// linkListNoticeReserve は「ほか N 人」の案内を入れる余白。
+const (
+	linkListMaxChars      = 2000
+	linkListNoticeReserve = 60
+)
+
 const linkUnavailable = "現在この機能は利用できません(未設定)。"
 
 // link は /link member:@x backlog:名前 で Discord ユーザーと Backlog ユーザーを対応づける。
@@ -122,14 +129,22 @@ func (h *Handler) linkList(ctx context.Context, interaction *Interaction) *Inter
 	if len(links) == 0 {
 		return ephemeral("登録されているメンバーはいません。/link で登録してください。")
 	}
+	header := "Discord ↔ Backlog の紐づけ(" + strconv.Itoa(len(links)) + "人)\n"
 	var b strings.Builder
-	b.WriteString("Discord ↔ Backlog の紐づけ(" + strconv.Itoa(len(links)) + "人)\n")
-	for _, id := range SortedIDs(links) {
+	b.WriteString(header)
+	ids := SortedIDs(links)
+	for i, id := range ids {
 		line := "・<@" + id + "> ↔ " + links[id].Name
 		if links[id].GitHub != "" {
 			line += "（GitHub: " + links[id].GitHub + "）"
 		}
-		b.WriteString(line + "\n")
+		line += "\n"
+		// 切り捨ての案内（最大 linkListNoticeReserve 文字）を残せる範囲までで止める。
+		if len([]rune(b.String()))+len([]rune(line)) > linkListMaxChars-linkListNoticeReserve {
+			b.WriteString("…ほか" + strconv.Itoa(len(ids)-i) + "人は表示しきれません\n")
+			break
+		}
+		b.WriteString(line)
 	}
 	return ephemeral(b.String())
 }

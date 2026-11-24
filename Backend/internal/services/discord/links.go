@@ -89,6 +89,8 @@ func (s *LinkService) List(ctx context.Context) (map[string]Link, error) {
 // Set は discordID を Backlog ユーザーに対応づける。
 // 同じ Backlog ユーザーが別の Discord ユーザーに紐づいていると、通知が二重に飛んだり
 // 本人確認がどちらか不定になるので拒否する（解除してから登録し直す）。
+// GitHub のログイン名も同じ。大文字小文字は区別されないので、無視して比べる。
+// 空（未設定）どうしは重複として扱わない。
 func (s *LinkService) Set(ctx context.Context, discordID string, l Link) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -102,8 +104,19 @@ func (s *LinkService) Set(ctx context.Context, discordID string, l Link) error {
 			return fmt.Errorf("%s さんは既に <@%s> に紐づいています。先に /unlink で解除してください", l.Name, id)
 		}
 	}
+	if gh := normalizedGitHubKey(l.GitHub); gh != "" {
+		for id, other := range links {
+			if id != discordID && normalizedGitHubKey(other.GitHub) == gh {
+				return fmt.Errorf("GitHub「%s」は既に <@%s> に紐づいています。先に /unlink で解除してください", l.GitHub, id)
+			}
+		}
+	}
 	links[discordID] = l
 	return s.save(ctx, links)
+}
+
+func normalizedGitHubKey(login string) string {
+	return strings.ToLower(strings.TrimSpace(login))
 }
 
 // Remove は対応を外す。登録が無ければ false。
