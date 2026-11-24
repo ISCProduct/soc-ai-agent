@@ -2,7 +2,7 @@ package admin
 
 import (
 	"Backend/domain/repository"
-	"Backend/internal/repositories"
+	"Backend/internal/services/diagnosis"
 	"net/http"
 	"strconv"
 
@@ -11,11 +11,11 @@ import (
 
 // AdminDiagnosisQualityController は診断妥当性レポートの参照API。
 type AdminDiagnosisQualityController struct {
-	repo *repositories.DiagnosisQualityRepository
+	service *diagnosis.QualityService
 }
 
-func NewAdminDiagnosisQualityController(repo *repositories.DiagnosisQualityRepository) *AdminDiagnosisQualityController {
-	return &AdminDiagnosisQualityController{repo: repo}
+func NewAdminDiagnosisQualityController(service *diagnosis.QualityService) *AdminDiagnosisQualityController {
+	return &AdminDiagnosisQualityController{service: service}
 }
 
 // GetBySession GET /api/admin/diagnosis-quality?user_id=&session_id=
@@ -28,7 +28,7 @@ func (c *AdminDiagnosisQualityController) GetBySession(ctx echo.Context) error {
 	if err != nil || userID64 == 0 {
 		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "user_id is required"})
 	}
-	report, err := c.repo.FindByUserAndSession(uint(userID64), sessionID)
+	report, err := c.service.FindReport(uint(userID64), sessionID)
 	if err != nil {
 		if err == repository.ErrNotFound {
 			return ctx.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
@@ -44,7 +44,7 @@ func (c *AdminDiagnosisQualityController) List(ctx echo.Context) error {
 		return c.GetBySession(ctx)
 	}
 	limit, _ := strconv.Atoi(ctx.QueryParam("limit"))
-	rows, err := c.repo.ListRecent(limit)
+	rows, err := c.service.ListRecentReports(limit)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
