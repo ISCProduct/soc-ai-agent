@@ -22,6 +22,7 @@ import (
 	usercontrollers "Backend/internal/controllers/user"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
+	authsvc "Backend/internal/services/auth"
 	"Backend/internal/services/flywheel"
 	githubservice "Backend/internal/services/github"
 	"Backend/internal/services/shared"
@@ -187,7 +188,7 @@ func TestGitHubController_ListRepoSummaries_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	gh := &mocks.GitHubServiceMock{}
-	gh.On("ListRepoSummaries", uint(1)).Return([]models.GitHubRepoSummary{{UserID: 1}}, nil)
+	gh.On("ListRepoSummaries", tmock.Anything, uint(1)).Return([]models.GitHubRepoSummary{{UserID: 1}}, nil)
 	testsupport.AssertStatus(t, newGitHubController(gh, nil).ListRepoSummaries, testsupport.NewCtx(req, rec), http.StatusOK)
 	gh.AssertExpectations(t)
 }
@@ -300,6 +301,12 @@ func TestGitHubController_SummarizeRepo_ErrorStatus(t *testing.T) {
 			wantMessage: "このリポジトリを読む権限がありません。",
 		},
 		{
+			name:        "本人のリポジトリでない・未同期は 404 で同期を促す",
+			err:         githubservice.ErrRepoNotSummarizable,
+			wantStatus:  http.StatusNotFound,
+			wantMessage: "リポジトリを同期してください",
+		},
+		{
 			name:        "README の取得失敗は 500",
 			err:         fmt.Errorf("failed to fetch README: %w", &githubservice.GitHubAPIError{StatusCode: http.StatusInternalServerError}),
 			wantStatus:  http.StatusInternalServerError,
@@ -345,7 +352,7 @@ func TestGitHubController_SummarizeRepo_ErrorStatus(t *testing.T) {
 // ========== OAuthController ==========
 
 func newOAuthController(svc *mocks.OAuthServiceMock) *authcontrollers.OAuthController {
-	return authcontrollers.NewOAuthController(svc, nil)
+	return authcontrollers.NewOAuthController(svc, nil, authsvc.NewOAuthCodeStore(nil))
 }
 
 // ---- GoogleLogin ----

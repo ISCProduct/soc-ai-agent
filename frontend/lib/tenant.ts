@@ -18,3 +18,11 @@ export function extractTenantSlug(host: string): string | undefined {
 export function isAdminHost(host: string): boolean {
   return host.split(':')[0] === 'admin.shukatsu-ai.jp'
 }
+
+// OAuth 開始ルートの URL。学園サブドメインからは tenant を付ける（戻り先を同じ学園にし、
+// ホスト限定の照合値 Cookie が届くようにするため。SOCAIAGENT-683）。
+export function oauthStartUrl(provider: 'google' | 'github', host: string): string {
+  const slug = extractTenantSlug(host)
+  const tenantParam = slug ? `&tenant=${encodeURIComponent(slug)}` : ''
+  return `/api/auth/oauth/start?provider=${provider}${tenantParam}`
+}
