@@ -66,7 +66,7 @@ const NAV_ICONS: Record<NavHref, React.ReactNode> = {
  * 到達するための共通メニュー。ホームは HomeSidebar が同等の導線を持つため表示しない。
  * チャット進捗などホーム固有の責務は持たせず、ナビ項目のみを共通化する。
  */
-export function GlobalNavMenu() {
+export function GlobalNavMenu({ correlationSelection = false }: { correlationSelection?: boolean } = {}) {
   const pathname = usePathname() || ''
   const [open, setOpen] = useState(false)
   // AI面接のセッション画面表示中はFabが操作ボタンに重なるため隠す（StudentBottomNavと同じ理由、#1569）
@@ -75,6 +75,7 @@ export function GlobalNavMenu() {
   // 未ログインの訪問者には出さない（下部ナビと同じ判定。#2222）。中の項目はどれも認証が要る画面
   const { mounted, hasStoredUser } = useHasStoredUser()
 
+  if (pathname === '/correlation-diagram' && !correlationSelection) return null
   if (pathname === '/' || !shouldShowStudentBottomNav(pathname)) return null
   if (interviewSessionActive) return null
   if (!mounted || !hasStoredUser) return null
