@@ -64,6 +64,97 @@ func (s *InterviewService) Turn(
 	ctx, cancelBudget := s.withTurnBudget(ctx)
 	defer cancelBudget()
 	ctx = s.withPIIGuard(ctx, userID) // 学生の発話を外部 AI へ送る前に伏字にする
+	session, err := s.loadTurnSession(userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	// 上限は AI（STT/LLM/TTS）を呼ぶ前に判定する。このターンはユーザーと面接官の2件を保存する
+	if limited, err := s.checkTurnStart(ctx, session, 2); limited != nil || err != nil {
+		return limited, err
+	}
+
+	companyContextCh := s.prefetchCompanyContext(ctx, companyID, companyName, companyReading, companyReadingResolved, companyInfo)
+
+	userText, sttOutcome := s.transcribeTurnAudio(ctx, sessionID, turnCount, audioData, companyID, companyName, companyInfo)
+
+	// WEB検索・手入力で company_id=0 でも、企業名が DB 登録と一致すれば解決する (#567)
+	companyContext := <-companyContextCh
+	companyID = companyContext.id
+
+	// 読み仮名: 共有DB優先。無い場合のみモデル知識（Searchではない）
+	if companyName != "" && companyReading == "" {
+		companyReading = companyContext.reading
+	}
+
+	// 企業情報: 共有キャッシュ優先（general/sier 問わず）。無ければクライアント文面をフォールバック
+	companyInfo = companyContext.info
+	companyReadingResolved = companyContext.readingResolved
+
+	plan := s.planTurnQuestion(ctx, session, userID, companyID, position, companyName, userText, false, totalQuestions)
+	history, turnKey := s.turnHistory(sessionID, userText)
+
+	// Chat: 面接官として返答生成
+	systemPrompt := s.interviewerSystemPrompt(userID, buildInterviewSystemPrompt(
+		companyName,
+		companyReading,
+		position,
+		companyInfo,
+		companyType,
+		plan.customQuestions,
+		plan.skillScores,
+		turnCount,
+		remainingSeconds,
+		questionIndex,
+		plan.totalQuestions,
+		questionElapsedSeconds,
+		questionDurationSeconds,
+		plan.directive,
+	))
+	// Chat失敗時も面接官としての言い換え応答にフォールバックし、ターンを中断させない（#910）
+	aiText, llmOutcome, err := s.chatInterview(ctx, systemPrompt, history)
+	if err != nil {
+		log.Printf("[Interview] chat error: %v", err)
+		aiText = interviewFallbackReplyText
+	}
+	aiText = piimask.StripTokens(aiText)
+	followUpSaveFailed := err == nil && !s.saveFollowUpQuestionText(sessionID, plan.directive, aiText)
+
+	// TTS: AI返答を音声化（企業名は読み仮名に置換して誤読を防ぐ。表示用のaiTextはそのまま保持）。
+	audio, ttsOutcome := s.speakReply(ctx, session, aiText, companyName, companyReading)
+
+	// 書き起こしはサーバーが保存する（#1969）。ユーザー → 面接官の順に並べる。
+	// 応答を返す直前に保存し、クライアントが切断・タイムアウトした（context が終わった）ターンは
+	// 保存しない。届かなかった質問を書き起こしと次の履歴に残すと、会話とレポートが利用者の
+	// 体験とずれる。以前のクライアント保存（応答を受け取ったターンだけ保存）と同じ扱いにする。
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	utteranceSaveFailed := false
+	if err := s.saveTurnUtterances(sessionID, turnKey,
+		turnUtterance{role: "user", text: userText},
+		turnUtterance{role: "ai", text: aiText},
+	); err != nil {
+		log.Printf("[Interview] save turn utterances session=%d: %v", sessionID, err)
+		utteranceSaveFailed = true
+	}
+
+	result := &TurnResult{
+		UserText:               userText,
+		AIText:                 aiText,
+		Audio:                  audio,
+		CompanyReading:         companyReading,
+		CompanyReadingResolved: companyReadingResolved,
+		ResolvedCompanyID:      companyID,
+		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
+		AIFallback:             fallbackStages(sttOutcome, llmOutcome, ttsOutcome),
+		UtteranceSaveFailed:    utteranceSaveFailed || followUpSaveFailed,
+	}
+	applyDirectiveToResult(result, plan.directive)
+	return result, nil
+}
+
+// loadTurnSession はセッションを取得し、本人（または閲覧を許された利用者）か・終了済みでないかを確かめる。
+func (s *InterviewService) loadTurnSession(userID, sessionID uint) (*models.InterviewSession, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -74,17 +165,25 @@ func (s *InterviewService) Turn(
 	if session.Status == "finished" {
 		return nil, shared.ErrSessionFinished
 	}
-	// 上限は AI（STT/LLM/TTS）を呼ぶ前に判定する。このターンはユーザーと面接官の2件を保存する
-	if limited, err := s.checkTurnStart(ctx, session, 2); limited != nil || err != nil {
-		return limited, err
-	}
+	return session, nil
+}
 
-	type companyContextResult struct {
-		id              uint
-		reading         string
-		readingResolved bool
-		info            string
-	}
+// companyContextResult は企業コンテキストの先読み結果。
+type companyContextResult struct {
+	id              uint
+	reading         string
+	readingResolved bool
+	info            string
+}
+
+// prefetchCompanyContext は企業 ID・読み・企業情報の解決を STT と並行して始め、結果を1件だけ送るチャネルを返す。
+func (s *InterviewService) prefetchCompanyContext(
+	ctx context.Context,
+	companyID uint,
+	companyName, companyReading string,
+	companyReadingResolved bool,
+	companyInfo string,
+) <-chan companyContextResult {
 	companyContextCh := make(chan companyContextResult, 1)
 	go func() {
 		result := companyContextResult{
@@ -106,7 +205,18 @@ func (s *InterviewService) Turn(
 		}
 		result.info = s.resolveCompanyInfo(result.id, companyName, companyInfo)
 	}()
+	return companyContextCh
+}
 
+// transcribeTurnAudio はユーザー音声をテキスト化する。失敗・空なら「聞き取れなかった」扱いの文を返す。
+func (s *InterviewService) transcribeTurnAudio(
+	ctx context.Context,
+	sessionID uint,
+	turnCount int,
+	audioData []byte,
+	companyID uint,
+	companyName, companyInfo string,
+) (string, aifailover.Outcome) {
 	// STT: Whisper でユーザー音声をテキスト化。
 	// 破損音声・無音・タイムアウト等でTranscribe自体が失敗しても、ターンを
 	// 中断させず「聞き取れなかった」扱いで継続する（既存の空文字フォールバックに合流、#910）。
@@ -177,37 +287,55 @@ func (s *InterviewService) Turn(
 	if strings.TrimSpace(userText) == "" {
 		userText = "（聞き取れませんでした）"
 	}
+	return userText, sttOutcome
+}
 
-	// WEB検索・手入力で company_id=0 でも、企業名が DB 登録と一致すれば解決する (#567)
-	companyContext := <-companyContextCh
-	companyID = companyContext.id
+// turnQuestionPlan は今回のターンで使う企業別カスタム質問・スキルスコア・質問キューの指示。
+type turnQuestionPlan struct {
+	customQuestions []models.InterviewCompanyQuestion
+	skillScores     []models.SkillScore
+	directive       *questionDirective
+	// totalQuestions は質問キューの総数があればその値、無ければ呼び出し元の値
+	totalQuestions int
+}
 
-	// 読み仮名: 共有DB優先。無い場合のみモデル知識（Searchではない）
-	if companyName != "" && companyReading == "" {
-		companyReading = companyContext.reading
-	}
-
-	// 企業情報: 共有キャッシュ優先（general/sier 問わず）。無ければクライアント文面をフォールバック
-	companyInfo = companyContext.info
-	companyReadingResolved = companyContext.readingResolved
-
+// planTurnQuestion は企業別カスタム質問とスキルスコアを取得し、質問キューを進める。
+// 質問キューの失敗はログに残して面接を続ける。
+func (s *InterviewService) planTurnQuestion(
+	ctx context.Context,
+	session *models.InterviewSession,
+	userID, companyID uint,
+	position, companyName, userText string,
+	isStart bool,
+	totalQuestions int,
+) turnQuestionPlan {
 	// 企業別カスタム質問とGitHubスキルスコアを取得
-	customQuestions := s.fetchCustomQuestions(companyID, position)
-	skillScores := s.fetchSkillScores(userID)
-	directive, err := s.advanceQuestionPlan(ctx, session, companyID, position, companyName, userText, false)
+	plan := turnQuestionPlan{
+		customQuestions: s.fetchCustomQuestions(companyID, position),
+		skillScores:     s.fetchSkillScores(userID),
+		totalQuestions:  totalQuestions,
+	}
+	directive, err := s.advanceQuestionPlan(ctx, session, companyID, position, companyName, userText, isStart)
 	if err != nil {
 		log.Printf("[Interview] advanceQuestionPlan error: %v", err)
 	}
 	if directive != nil && directive.TotalQuestions > 0 {
-		totalQuestions = directive.TotalQuestions
+		plan.totalQuestions = directive.TotalQuestions
 	}
+	plan.directive = directive
+	return plan
+}
 
+// turnHistory は保存済みの発話から面接官に渡す履歴を組み、今回の発話を末尾に足す。
+// あわせて、今回のターンの発話 ID の元になるキーを返す。
+func (s *InterviewService) turnHistory(sessionID uint, userText string) ([]map[string]string, string) {
 	// 履歴はクライアントから受け取らず、保存済みの発話から組み直す（#1636）。
 	// クライアントの history は件数・長さ・role のどれも信頼できない。
 	// 取得に失敗しても面接は止めず、今回の発話だけで続ける。
 	var utterances []models.InterviewUtterance
 	utterancesLoaded := false
 	if s.utterRepo != nil {
+		var err error
 		if utterances, err = s.utterRepo.FindBySessionID(sessionID); err != nil {
 			log.Printf("[Interview] load utterances for history error: %v", err)
 			utterances = nil
@@ -219,40 +347,43 @@ func (s *InterviewService) Turn(
 	turnKey := turnUtteranceKey("turn", len(utterances), utterancesLoaded)
 	history := historyFromUtterances(utterances)
 	history = append(history, map[string]string{"role": "user", "content": userText})
+	return history, turnKey
+}
 
-	// Chat: 面接官として返答生成
-	systemPrompt := buildInterviewSystemPrompt(
-		companyName,
-		companyReading,
-		position,
-		companyInfo,
-		companyType,
-		customQuestions,
-		skillScores,
-		turnCount,
-		remainingSeconds,
-		questionIndex,
-		totalQuestions,
-		questionElapsedSeconds,
-		questionDurationSeconds,
-		directive,
-	)
+// interviewerSystemPrompt はプロフィール由来の文脈と氏名の扱いの指示を、システムプロンプトの前に足す。
+func (s *InterviewService) interviewerSystemPrompt(userID uint, systemPrompt string) string {
 	if s.crossFeature != nil {
 		if profileCtx := s.crossFeature.BuildInterviewContextFromUser(userID); profileCtx != "" {
 			systemPrompt = profileCtx + "\n" + systemPrompt
 		}
 	}
-	systemPrompt = studentNameInstruction + systemPrompt
-	// Chat失敗時も面接官としての言い換え応答にフォールバックし、ターンを中断させない（#910）
-	aiText, llmOutcome, err := s.chatInterview(ctx, systemPrompt, history)
-	if err != nil {
-		log.Printf("[Interview] chat error: %v", err)
-		aiText = interviewFallbackReplyText
-	}
-	aiText = piimask.StripTokens(aiText)
+	return studentNameInstruction + systemPrompt
+}
 
-	// TTS: AI返答を音声化（企業名は読み仮名に置換して誤読を防ぐ。表示用のaiTextはそのまま保持）。
-	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
+// saveFollowUpQuestionText は深掘りの状態行の質問文を、面接官が実際に投げかけた文で上書きする。
+// 上書きできなかったときだけ false を返す（上書きする対象が無ければ true）。
+func (s *InterviewService) saveFollowUpQuestionText(sessionID uint, directive *questionDirective, aiText string) bool {
+	// 深掘りの質問文は定型文で保存してある。実際に投げかけた文で上書きし、レポートと次の深掘りをずらさない。
+	// 失敗したら書き起こしの保存失敗と同じく呼び出し元へ知らせる
+	if directive == nil || directive.followUpState == nil || s.questionStateRepo == nil {
+		return true
+	}
+	directive.followUpState.QuestionText = aiText
+	if err := s.questionStateRepo.Update(directive.followUpState); err != nil {
+		log.Printf("[Interview] update follow-up question text session=%d: %v", sessionID, err)
+		return false
+	}
+	return true
+}
+
+// speakReply は面接官の返答を読み上げ音声にする。
+// 企業名は読み仮名に置換して誤読を防ぐ（表示用のaiTextはそのまま保持）。
+// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
+func (s *InterviewService) speakReply(
+	ctx context.Context,
+	session *models.InterviewSession,
+	aiText, companyName, companyReading string,
+) ([]byte, aifailover.Outcome) {
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
 	ttsText := applyCompanyReadingForTTS(aiText, companyName, companyReading)
 	ttsStart := time.Now()
@@ -266,41 +397,18 @@ func (s *InterviewService) Turn(
 		log.Printf("[Interview] tts error: %v", err)
 		audio = nil
 	}
+	return audio, ttsOutcome
+}
 
-	// 書き起こしはサーバーが保存する（#1969）。ユーザー → 面接官の順に並べる。
-	// 応答を返す直前に保存し、クライアントが切断・タイムアウトした（context が終わった）ターンは
-	// 保存しない。届かなかった質問を書き起こしと次の履歴に残すと、会話とレポートが利用者の
-	// 体験とずれる。以前のクライアント保存（応答を受け取ったターンだけ保存）と同じ扱いにする。
-	if err := ctx.Err(); err != nil {
-		return nil, err
+// applyDirectiveToResult は質問キューの指示（出所・カテゴリ・深掘りか・総数）を結果へ写す。
+func applyDirectiveToResult(result *TurnResult, directive *questionDirective) {
+	if directive == nil {
+		return
 	}
-	utteranceSaveFailed := false
-	if err := s.saveTurnUtterances(sessionID, turnKey,
-		turnUtterance{role: "user", text: userText},
-		turnUtterance{role: "ai", text: aiText},
-	); err != nil {
-		log.Printf("[Interview] save turn utterances session=%d: %v", sessionID, err)
-		utteranceSaveFailed = true
-	}
-
-	result := &TurnResult{
-		UserText:               userText,
-		AIText:                 aiText,
-		Audio:                  audio,
-		CompanyReading:         companyReading,
-		CompanyReadingResolved: companyReadingResolved,
-		ResolvedCompanyID:      companyID,
-		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
-		AIFallback:             fallbackStages(sttOutcome, llmOutcome, ttsOutcome),
-		UtteranceSaveFailed:    utteranceSaveFailed,
-	}
-	if directive != nil {
-		result.QuestionSource = directive.Source
-		result.QuestionCategory = directive.Category
-		result.IsDeepening = directive.IsDeepening
-		result.TotalQuestions = directive.TotalQuestions
-	}
-	return result, nil
+	result.QuestionSource = directive.Source
+	result.QuestionCategory = directive.Category
+	result.IsDeepening = directive.IsDeepening
+	result.TotalQuestions = directive.TotalQuestions
 }
 
 // StartTurn は面接開始の最初のAI発話を生成します
@@ -322,15 +430,9 @@ func (s *InterviewService) StartTurn(
 	ctx, cancelBudget := s.withTurnBudget(ctx)
 	defer cancelBudget()
 	ctx = s.withPIIGuard(ctx, userID) // 学生の発話を外部 AI へ送る前に伏字にする
-	session, err := s.sessionRepo.FindByID(sessionID)
+	session, err := s.loadTurnSession(userID, sessionID)
 	if err != nil {
 		return nil, err
-	}
-	if !s.isAllowed(userID, session.UserID) {
-		return nil, shared.ErrForbidden
-	}
-	if session.Status == "finished" {
-		return nil, shared.ErrSessionFinished
 	}
 	// 上限は AI を呼ぶ前に判定する。冒頭は面接官の1件を保存する
 	if limited, err := s.checkTurnStart(ctx, session, 1); limited != nil || err != nil {
@@ -361,39 +463,24 @@ func (s *InterviewService) StartTurn(
 	// 企業情報: 共有キャッシュ優先（general/sier 問わず）。無ければクライアント文面をフォールバック
 	companyInfo = s.resolveCompanyInfo(companyID, companyName, companyInfo)
 
-	// 企業別カスタム質問とGitHubスキルスコアを取得
-	customQuestions := s.fetchCustomQuestions(companyID, position)
-	skillScores := s.fetchSkillScores(userID)
-	directive, err := s.advanceQuestionPlan(ctx, session, companyID, position, companyName, "", true)
-	if err != nil {
-		log.Printf("[Interview] advanceQuestionPlan error: %v", err)
-	}
-	if directive != nil && directive.TotalQuestions > 0 {
-		totalQuestions = directive.TotalQuestions
-	}
+	plan := s.planTurnQuestion(ctx, session, userID, companyID, position, companyName, "", true, totalQuestions)
 
-	systemPromptStart := buildInterviewSystemPrompt(
+	systemPromptStart := s.interviewerSystemPrompt(userID, buildInterviewSystemPrompt(
 		companyName,
 		companyReading,
 		position,
 		companyInfo,
 		companyType,
-		customQuestions,
-		skillScores,
+		plan.customQuestions,
+		plan.skillScores,
 		0,
 		0,
 		questionIndex,
-		totalQuestions,
+		plan.totalQuestions,
 		questionElapsedSeconds,
 		questionDurationSeconds,
-		directive,
-	)
-	if s.crossFeature != nil {
-		if profileCtx := s.crossFeature.BuildInterviewContextFromUser(userID); profileCtx != "" {
-			systemPromptStart = profileCtx + "\n" + systemPromptStart
-		}
-	}
-	systemPromptStart = studentNameInstruction + systemPromptStart
+		plan.directive,
+	))
 	// Chat失敗時も面接開始を中断させず、定型の冒頭挨拶にフォールバックする（#910）
 	aiText, llmOutcome, err := s.chatInterview(ctx, systemPromptStart, []map[string]string{
 		{"role": "user", "content": "面接を開始してください。最初の自己紹介・志望動機の質問からお願いします。"},
@@ -405,20 +492,7 @@ func (s *InterviewService) StartTurn(
 	aiText = piimask.StripTokens(aiText)
 
 	// TTS: 企業名は読み仮名に置換して誤読を防ぐ（表示用のaiTextはそのまま保持）。
-	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
-	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
-	ttsText := applyCompanyReadingForTTS(aiText, companyName, companyReading)
-	ttsStart := time.Now()
-	audio, ttsOutcome, err := s.speak(ctx, ttsText, voice)
-	// 失敗しても課金されている可能性があるため、成否に関わらず記録する（#1294）。
-	// Breaker で OpenAI を飛ばしてローカルで読み上げたときだけ記録しない（#1833）。
-	if ttsOutcome.PrimaryTried {
-		recordTTSUsage(ctx, s.openaiClient, ttsText, time.Since(ttsStart))
-	}
-	if err != nil {
-		log.Printf("[Interview] tts error: %v", err)
-		audio = nil
-	}
+	audio, ttsOutcome := s.speakReply(ctx, session, aiText, companyName, companyReading)
 
 	// 冒頭の質問もサーバーが書き起こしへ保存する（#1969）。届かなかった質問は保存しない。
 	if err := ctx.Err(); err != nil {
@@ -440,12 +514,7 @@ func (s *InterviewService) StartTurn(
 		AIFallback:             fallbackStages(aifailover.Outcome{}, llmOutcome, ttsOutcome),
 		UtteranceSaveFailed:    utteranceSaveFailed,
 	}
-	if directive != nil {
-		result.QuestionSource = directive.Source
-		result.QuestionCategory = directive.Category
-		result.IsDeepening = directive.IsDeepening
-		result.TotalQuestions = directive.TotalQuestions
-	}
+	applyDirectiveToResult(result, plan.directive)
 	return result, nil
 }
 

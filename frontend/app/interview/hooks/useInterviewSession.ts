@@ -1,51 +1,21 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { authService, User } from '@/lib/auth'
-import { interviewApi, interviewLimits, InterviewReport, InterviewSession } from '@/lib/interview'
-import { extractApiErrorMessage, parseMediaError, parseMultipartResponse } from '@/lib/interview/utils'
+import { User } from '@/lib/auth'
+import { interviewApi, interviewLimits, InterviewSession } from '@/lib/interview'
+import { parseMediaError } from '@/lib/interview/utils'
 import { WeightScore } from '@/components/feedback/ScoreUpdateBanner'
 import type { InterviewMedia } from './useInterviewMedia'
 import { useHandsFreeVad } from './useHandsFreeVad'
-import { pickRecorderFormat, extFromMimeType, type RecorderFormat } from '../lib/recorderFormat'
-import { buildCompanyInfo } from '../utils'
-import { measureLevel, setAiAudioMeter } from '@/lib/interview/ai-audio-meter'
-import {
-  evaluateReportPollTick,
-  REPORT_POLL_INTERVAL_MS,
-  REPORT_POLL_TIMEOUT_MS,
-} from '../reportPolling'
-import {
-  advanceProgress,
-  INITIAL_PROGRESS_TRACKER,
-  parseReportProgress,
-  type ProgressTracker,
-  type ReportProgressView,
-} from '../reportProgress'
+import { useInterviewAudioPlayback } from './useInterviewAudioPlayback'
+import { useInterviewRecorder } from './useInterviewRecorder'
+import { useInterviewClock } from './useInterviewClock'
+import { useInterviewReport, resolveScoreSessionId } from './useInterviewReport'
+import { useInterviewTurns } from './useInterviewTurns'
 import { resolveFinishOutcomeMessage } from '../finishOutcome'
-import { applyCompanyReadingResponse } from '../companyReadingContext'
-import { nextQuestionIndex } from '../questionEvents'
-import { fetchAndReadWithTimeout } from '@/lib/fetch-timeout'
 import type { Utterance, InterviewCompany, Position, InterviewStatus } from '../types'
 
-export type ReportStatus = 'idle' | 'pending' | 'ready' | 'error' | 'timeout'
-
-/** レポート生成の再投入API自体が失敗したときの文言(#1476) */
-export const REPORT_RETRY_FAILED_MESSAGE =
-  'レポート生成の再試行リクエストに失敗しました。通信状況を確認して、もう一度お試しください。'
-
-/**
- * ターン(/turn, /start-turn)のタイムアウト(#1476)。
- * STT→LLM→TTS を通すので一覧系より長く取るが、無期限にはしない。
- * 半開きのまま固まると、ターンが終わらないので面接が進まず、
- * 終了時に「応答待ちのターン」を待つ処理（handleStop）も戻らなくなる。
- * ヘッダー受信後に本文（multipart の音声）で止まる場合も同じなので、
- * fetchWithTimeout ではなく本文の読み込みまで見る fetchAndReadWithTimeout を使う。
- *
- * トークンの更新は middleware が同じリクエストの中で行う（SOCAIAGENT-683）。
- * どこで固まっても、ターン1回は90秒で戻る（#1501）。
- */
-const TURN_FETCH_TIMEOUT_MS = 90_000
+export { REPORT_RETRY_FAILED_MESSAGE, type ReportStatus } from './useInterviewReport'
 
 type UseInterviewSessionArgs = {
   user: User | null
@@ -74,31 +44,7 @@ export function useInterviewSession({
   const [utterances, setUtterances] = useState<Utterance[]>([])
   const [partialUser, setPartialUser] = useState('')
   const [partialAi, setPartialAi] = useState('')
-  const [remainingSeconds, setRemainingSeconds] = useState(interviewLimits.maxMinutes * 60)
-  const [elapsedSeconds, setElapsedSeconds] = useState(0)
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(1)
-  const [totalQuestionCount, setTotalQuestionCount] = useState(Math.max(1, selectedPosition.questions))
-  const [questionElapsedSeconds, setQuestionElapsedSeconds] = useState(0)
-  const [isDeepeningQuestion, setIsDeepeningQuestion] = useState(false)
-  const [questionCategory, setQuestionCategory] = useState<string | null>(null)
-  const [sessionWarningShown, setSessionWarningShown] = useState(false)
   const [session, setSession] = useState<InterviewSession | null>(null)
-  const [report, setReport] = useState<InterviewReport | null>(null)
-  const [reportStatus, setReportStatus] = useState<ReportStatus>('idle')
-  /** レポート生成の進捗表示（バックエンドが返さない間は null で従来表示）。SOCAIAGENT-652 */
-  const [reportProgress, setReportProgress] = useState<ReportProgressView | null>(null)
-  const [reportFailedByServer, setReportFailedByServer] = useState(false)
-  /** 経過時間表示の基準（ポーリング開始時刻 ms） */
-  const [reportStartedAt, setReportStartedAt] = useState<number | null>(null)
-  const progressTrackerRef = useRef<ProgressTracker>(INITIAL_PROGRESS_TRACKER)
-  /** レポート生成の再投入API(regenerateReport)が失敗したときのメッセージ(#1476) */
-  const [reportRetryError, setReportRetryError] = useState('')
-  const [emailSending, setEmailSending] = useState(false)
-  const [emailSent, setEmailSent] = useState(false)
-  // メール送信失敗をUIへ伝えるためのメッセージ（#1056）
-  const [emailError, setEmailError] = useState('')
-  const [aiLevel, setAiLevel] = useState(0)
-  const [aiSpeaking, _setAiSpeaking] = useState(false)
   /** 学生の発話に区切りが来るたびに増える。面接官アバターの相槌の合図（#1646）。 */
   const [studentPauseCount, setStudentPauseCount] = useState(0)
   // 面接官は男性のみ。声(バックエンドの interviewer_gender)と見た目(Live2D)を揃える。
@@ -107,13 +53,10 @@ export function useInterviewSession({
   const [handsFreeMode, setHandsFreeMode] = useState(false)
   const [consentDialogOpen, setConsentDialogOpen] = useState(false)
   const [consentGiven, setConsentGiven] = useState(false)
-  const [isRecording, _setIsRecording] = useState(false)
-  const [turnPending, _setTurnPending] = useState(false)
   const [videoUploadStatus, setVideoUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
   const [videoUploadProgress, setVideoUploadProgress] = useState(0)
   const [videoSizeWarning, setVideoSizeWarning] = useState<string | null>(null)
   const [scoresBefore, setScoresBefore] = useState<WeightScore[] | null>(null)
-  const [scoresAfter, setScoresAfter] = useState<WeightScore[] | null>(null)
   /** 面接終了API(finishSession)が失敗したかどうか。true の間はレポート画面に再試行UIを出す(#1015) */
   const [finishFailed, setFinishFailed] = useState(false)
   /**
@@ -121,64 +64,65 @@ export function useInterviewSession({
    * 発話はサーバーが /start-turn・/turn の中で保存し、失敗を応答の utterance_save_failed で返す(#1969)。
    */
   const [utteranceSaveFailed, setUtteranceSaveFailed] = useState(false)
-  /**
-   * 応答待ちのターン(#1476)。
-   * 「完了する」は turnPending 中でも押せるし、時間切れの強制終了も割り込む。
-   * 終了処理が保存チェーンを読んだ後に /turn の応答が届くと、その発話は
-   * finishSession の後に保存され、レポートが最後のやり取り抜きで作られる。
-   * そこで終了処理はまずこれを待ってからチェーンを読む。
-   * 解決するのは「応答を保存チェーンに積み終えた時点」までで、音声再生は含めない
-   * （終了時は cleanupConnection が再生を止めるため、再生まで待つと解決しない）。
-   */
-  const inFlightTurnRef = useRef<Promise<void>>(Promise.resolve())
-  /**
-   * /start-turn の応答(#1969)。サーバーは冒頭の質問を応答の直前に保存するので、/turn はこれを
-   * 待ってから送る。先に送ると、回答と次の質問が冒頭の質問より前に保存され、面接官の履歴からも
-   * 冒頭の質問が抜ける。/start-turn はタイムアウト付きなので、待ちは必ず終わる。
-   */
-  const startTurnSettledRef = useRef<Promise<void>>(Promise.resolve())
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const recorderFormatRef = useRef<RecorderFormat>({ mimeType: '', ext: 'webm' })
-  // 発話が確定しなかった録音を送らずに捨てるためのフラグ。
-  // MediaRecorder.stop() は非同期で onstop を呼ぶため、
-  // 停止要求の時点でどちらの意図か記録しておく必要がある。
-  const discardTurnRef = useRef(false)
-  const audioChunksRef = useRef<Blob[]>([])
-  const historyRef = useRef<{ role: string; content: string }[]>([])
-  const companyContextRef = useRef({ reading: '', readingResolved: false })
-  const companyContextGenerationRef = useRef(0)
-  const aiAudioRef = useRef<HTMLAudioElement | null>(null)
-  const aiAudioCtxRef = useRef<AudioContext | null>(null)
-  const aiLevelRafRef = useRef<number | null>(null)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const pollStartedAtRef = useRef<number | null>(null)
-  const pollSessionRef = useRef<{ sessionId: number; userId: number } | null>(null)
-  /** 再試行時に古い tick の結果を破棄するための世代カウンタ */
-  const pollGenerationRef = useRef(0)
-  // レポートポーリングの連続fetch失敗数。成功したら0に戻す（#1057）
-  const pollFailureCountRef = useRef(0)
-  /** playAudioBlob の世代。cleanupConnection で increment し、古い再生を破棄する */
-  const audioGenerationRef = useRef(0)
-  const sessionStartRef = useRef<number | null>(null)
-  const questionStartedAtRef = useRef<number | null>(null)
   const transcriptEndRef = useRef<HTMLDivElement | null>(null)
-  const isRecordingRef = useRef(false)
-  const turnPendingRef = useRef(false)
-  const aiSpeakingRef = useRef(false)
   // タイマーのsetIntervalコールバックがstale closureでhandleStop実行時点の
   // session/userを読んでしまう(#926)のを防ぐため、常に最新値を反映するrefを使う
   const sessionRef = useRef<InterviewSession | null>(null)
   const userRef = useRef<User | null>(null)
-  // VAD effect は hooks 順序のため先に登録し、実装は ref 経由で呼ぶ
-  const startRecordingRef = useRef<() => void>(() => {})
-  const stopRecordingRef = useRef<() => void>(() => {})
-  const discardRecordingRef = useRef<() => void>(() => {})
 
-  // ref と state を常に同期（VAD の stale closure 対策）
-  const setIsRecording = (v: boolean) => { isRecordingRef.current = v; _setIsRecording(v) }
-  const setTurnPending = (v: boolean) => { turnPendingRef.current = v; _setTurnPending(v) }
-  const setAiSpeaking = (v: boolean) => { aiSpeakingRef.current = v; _setAiSpeaking(v) }
+  // 小さなフックへ渡す後段の関数（sendTurn / handleStop）は、このレンダーで後から定義するものを
+  // 呼び出し時に参照する。分割前と同じく「録音・タイマーを始めたレンダー」の関数が呼ばれる。
+  const {
+    aiLevel, setAiLevel, aiSpeaking, setAiSpeaking, aiSpeakingRef,
+    aiAudioRef, aiAudioCtxRef, aiLevelRafRef, audioGenerationRef, playAudioBlob,
+  } = useInterviewAudioPlayback()
+  const {
+    isRecording, setIsRecording, isRecordingRef, turnPending, setTurnPending, turnPendingRef,
+    mediaRecorderRef, recorderFormatRef, discardTurnRef, audioChunksRef,
+    startRecordingRef, stopRecordingRef, discardRecordingRef, startRecording, stopRecording,
+  } = useInterviewRecorder({ media, sendTurn: () => sendTurn() })
+  const {
+    remainingSeconds, setRemainingSeconds, elapsedSeconds, setElapsedSeconds,
+    currentQuestionIndex, setCurrentQuestionIndex, totalQuestionCount, setTotalQuestionCount,
+    questionElapsedSeconds, setQuestionElapsedSeconds, isDeepeningQuestion, setIsDeepeningQuestion,
+    questionCategory, setQuestionCategory, sessionWarningShown, setSessionWarningShown,
+    timerRef, questionStartedAtRef, startTimer,
+  } = useInterviewClock({ selectedPosition, handleStop: (forced?: boolean) => handleStop(forced) })
+  const {
+    report, setReport, reportStatus, setReportStatus, reportProgress, setReportProgress,
+    reportFailedByServer, setReportFailedByServer, reportStartedAt, reportRetryError, setReportRetryError,
+    emailSending, emailSent, emailError, scoresAfter, pollRef,
+    startReportPolling, retryReportPolling, sendReportEmail,
+  } = useInterviewReport({ session, user })
+  const {
+    inFlightTurnRef, startTurnSettledRef, historyRef, companyContextRef, companyContextGenerationRef,
+    doStartTurn, sendTurn,
+  } = useInterviewTurns({
+    user,
+    session,
+    interviewCompany,
+    companyQuestionHints,
+    selectedPosition,
+    remainingSeconds,
+    currentQuestionIndex,
+    totalQuestionCount,
+    questionElapsedSeconds,
+    setCurrentQuestionIndex,
+    setTotalQuestionCount,
+    setQuestionElapsedSeconds,
+    setIsDeepeningQuestion,
+    setQuestionCategory,
+    questionStartedAtRef,
+    audioChunksRef,
+    recorderFormatRef,
+    setTurnPending,
+    audioGenerationRef,
+    playAudioBlob,
+    setUtterances,
+    setErrorMessage,
+    setUtteranceSaveFailed,
+    onLimitReached: () => { void handleStop(false, true) },
+  })
 
   useHandsFreeVad({
     enabled: handsFreeMode,
@@ -228,218 +172,6 @@ export function useInterviewSession({
     setAiLevel(0)
     media.stopStream()
     setIsRecording(false); setTurnPending(false); setAiSpeaking(false)
-  }
-
-  const startTimer = () => {
-    sessionStartRef.current = Date.now()
-    questionStartedAtRef.current = Date.now()
-    timerRef.current = setInterval(() => {
-      if (!sessionStartRef.current) return
-      const elapsed = Math.floor((Date.now() - sessionStartRef.current) / 1000)
-      const remaining = Math.max(0, interviewLimits.maxMinutes * 60 - elapsed)
-      const safeQuestionDuration = Math.max(60, interviewLimits.questionDurationSeconds || 180)
-      const questionElapsed = Math.min(
-        safeQuestionDuration,
-        Math.max(0, Math.floor((Date.now() - (questionStartedAtRef.current ?? Date.now())) / 1000)),
-      )
-
-      setElapsedSeconds(elapsed)
-      setRemainingSeconds(remaining)
-      setQuestionElapsedSeconds(questionElapsed)
-      if (remaining <= 120 && !sessionWarningShown) setSessionWarningShown(true)
-      if (remaining <= 0) handleStop(true)
-    }, 1000)
-  }
-
-  /**
-   * ターンの応答音声を再生する。
-   * gen は「リクエストを投げた時点」の音声世代で、呼び出し側から引き継ぐ(#1501)。
-   * ここで audioGenerationRef を読むと、応答待ちの間に「完了する」で
-   * cleanupConnection が世代を進めていても更新後の値を読むため stale 判定を通過し、
-   * レポート画面へ遷移した後に面接官の音声が鳴り出す。
-   */
-  const playAudioBlob = async (blob: Blob, gen: number): Promise<void> => {
-    // 終了済み（または次のターンに切り替わった後）なら、再生を始めない
-    if (gen !== audioGenerationRef.current) return
-    const url = URL.createObjectURL(blob)
-    const el = new Audio()
-    aiAudioRef.current = el
-    el.src = url
-    setAiSpeaking(true)
-
-    let rafId: number | null = null
-
-    const cleanup = () => {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId)
-        rafId = null
-      }
-      // この要素が現在共有されている再生対象でない場合(=より新しいターンの
-      // 音声に切り替わった後の古いクリーンアップ)は、新しい方の再生状態
-      // (aiSpeaking/aiLevel/RAF)を巻き戻さないよう、自身のリソース解放のみ行う
-      const isCurrent = aiAudioRef.current === el
-      if (isCurrent) {
-        if (aiLevelRafRef.current !== null) {
-          cancelAnimationFrame(aiLevelRafRef.current)
-          aiLevelRafRef.current = null
-        }
-        setAiLevel(0)
-        setAiSpeaking(false)
-        setAiAudioMeter(null)
-        aiAudioRef.current = null
-      }
-      URL.revokeObjectURL(url)
-      el.removeAttribute('src')
-      el.load()
-    }
-
-    try {
-      if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
-        aiAudioCtxRef.current = new AudioContext()
-      }
-      const ctx = aiAudioCtxRef.current
-      await ctx.resume()
-      // await中に次のターンが始まっていれば、この古い音声は再生せず破棄する
-      if (gen !== audioGenerationRef.current) { cleanup(); return }
-
-      const source = ctx.createMediaElementSource(el)
-      const analyser = ctx.createAnalyser()
-      analyser.fftSize = 512
-      analyser.smoothingTimeConstant = 0.6
-      source.connect(analyser)
-      analyser.connect(ctx.destination)
-
-      const timeData = new Uint8Array(analyser.fftSize)
-      const trackLevel = () => {
-        setAiLevel(measureLevel(analyser, timeData))
-        rafId = requestAnimationFrame(trackLevel)
-      }
-      // Live2D は状態(再描画)を経由せずここから直接読む。出力遅延ぶん音より先に測れてしまうので、
-      // 遅れの秒数も渡して、描画側で口を遅らせる。
-      const meterBuf = new Uint8Array(analyser.fftSize)
-      setAiAudioMeter({
-        read: () => measureLevel(analyser, meterBuf),
-        latencySec: (ctx.outputLatency || 0) + (ctx.baseLatency || 0),
-      })
-      rafId = requestAnimationFrame(trackLevel)
-      aiLevelRafRef.current = rafId
-    } catch (err) {
-      // AudioContext 未対応時は Audio 要素のデフォルト出力にフォールバック（リップシンクなし）
-      console.warn('[Interview] AudioContext routing unavailable; playing via element output', err)
-    }
-
-    // AudioContext設定中に次のターンが始まっていれば、ここでも再生せず破棄する
-    if (gen !== audioGenerationRef.current) { cleanup(); return }
-
-    return new Promise<void>((resolve) => {
-      el.onended = () => {
-        cleanup()
-        resolve()
-      }
-      el.onerror = () => {
-        console.error('[Interview] AI audio element error', el.error)
-        cleanup()
-        resolve()
-      }
-      el.play().catch((err) => {
-        console.error('[Interview] AI audio play() failed (check CSP media-src / autoplay)', err)
-        cleanup()
-        resolve()
-      })
-    })
-  }
-
-  /**
-   * ターンの応答処理（発話を保存チェーンへ積み終えるまで）を「実行中のターン」として記録する(#1476)。
-   * handleStop はこれを待ってから保存チェーンを読む。
-   * 失敗しても終了処理を止めないよう、記録する側の Promise は必ず解決させる。
-   *
-   * 代入で上書きせず、実行中の全ターンを束ねる。handleJoin は /start-turn の完了前に
-   * 状態を connected にするので、その応答待ち中にユーザーが録音して /turn を始められる。
-   * 上書きすると handleStop は最後の1件しか待たず、遅れて返った /start-turn の質問が
-   * finishSession の後に保存され、質問を欠いた書き起こしでレポートが確定する。
-   */
-  const trackTurn = (receiving: Promise<Blob>): Promise<Blob> => {
-    const settled = receiving.then(() => {}, () => {})
-    inFlightTurnRef.current = Promise.all([inFlightTurnRef.current, settled]).then(() => {})
-    return receiving
-  }
-
-  /**
-   * ターンの応答を待って音声を再生する(#1501)。
-   * 音声世代はリクエスト開始時点（＝この関数に入った時点。receive() は既に呼ばれているが、
-   * 間に cleanupConnection が割り込む隙は無い）で取り、playAudioBlob へ引き継ぐ。
-   * 応答待ちの間に面接が終了していれば再生しない。/turn と /start-turn の両方をここに通す。
-   */
-  const playTurnAudio = async (receiving: Promise<Blob>): Promise<void> => {
-    const gen = audioGenerationRef.current
-    await playAudioBlob(await trackTurn(receiving), gen)
-  }
-
-  /**
-   * サーバーが上限（発話数・経過時間・予算）に達したと返したら、締めの文を表示したまま
-   * 既存の終了経路で面接を終え、途中までのレポートを作る（SOCAIAGENT-696）。
-   * handleStop は応答待ちのターン（＝この応答）を待つので、ここでは待たずに呼ぶ。
-   */
-  const endIfLimitReached = (meta: Record<string, string>) => {
-    if (String(meta.limit_reached) === 'true') void handleStop(false, true)
-  }
-
-  const doStartTurn = async (sessionId: number, userId: number) => {
-    const companyContextGeneration = companyContextGenerationRef.current
-    const receive = async (): Promise<Blob> => {
-      const { meta, audio } = await fetchAndReadWithTimeout(`/api/bff/interviews/${sessionId}/start-turn`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
-        body: JSON.stringify({
-          user_id: userId,
-          company_name: interviewCompany?.name || '',
-          company_reading: interviewCompany?.name_reading || '',
-          position: selectedPosition?.title || '',
-          company_info: buildCompanyInfo(interviewCompany),
-          company_id: interviewCompany?.id || 0,
-          company_type: selectedPosition?.category || 'general',
-          question_index: 1,
-          total_questions: totalQuestionCount,
-          question_elapsed_seconds: 0,
-          question_duration_seconds: Math.max(60, interviewLimits.questionDurationSeconds || 180),
-          question_hints: companyQuestionHints.slice(0, 5).map((question) => question.slice(0, 300)),
-        }),
-      }, TURN_FETCH_TIMEOUT_MS, async res => {
-        if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
-        return parseMultipartResponse(res)
-      })
-      if (companyContextGeneration !== companyContextGenerationRef.current) return audio
-      companyContextRef.current = applyCompanyReadingResponse(
-        companyContextRef.current,
-        meta,
-        companyContextGeneration,
-        companyContextGenerationRef.current,
-      )
-      const aiText: string = meta.ai_text || ''
-      const responseQuestionTotal = Number(meta.total_questions)
-      if (Number.isSafeInteger(responseQuestionTotal) && responseQuestionTotal > 0) {
-        setTotalQuestionCount(responseQuestionTotal)
-      }
-      if (typeof meta.question_source === 'string' && meta.question_source.trim() !== '') {
-        setCurrentQuestionIndex(1)
-        questionStartedAtRef.current = Date.now()
-        setQuestionElapsedSeconds(0)
-      }
-      setIsDeepeningQuestion(Boolean(meta.is_deepening))
-      setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
-      // 書き起こしはサーバーが保存済み(#1969)。ここでは表示だけを更新する。
-      if (String(meta.utterance_save_failed) === 'true') setUtteranceSaveFailed(true)
-      if (aiText) {
-        historyRef.current.push({ role: 'assistant', content: aiText })
-        setUtterances(p => [...p, { role: 'ai', text: aiText }])
-      }
-      endIfLimitReached(meta)
-      return audio
-    }
-    const receiving = receive()
-    startTurnSettledRef.current = receiving.then(() => {}, () => {})
-    await playTurnAudio(receiving)
   }
 
   const handleJoinWithConsent = () => {
@@ -500,16 +232,6 @@ export function useInterviewSession({
       setErrorMessage(parseMediaError(error))
       cleanupConnection()
     }
-  }
-
-  const resolveScoreSessionId = (userId: number) => {
-    if (typeof window !== 'undefined') {
-      const chatSession = window.localStorage.getItem('chat_session_id')
-      if (chatSession && chatSession.trim() !== '') {
-        return chatSession
-      }
-    }
-    return `interview-${userId}`
   }
 
   const handleStop = async (forced = false, limitReached = false) => {
@@ -592,292 +314,6 @@ export function useInterviewSession({
     } catch {
       setFinishFailed(true)
       setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: true, forced: false }))
-    }
-  }
-
-  const stopReportPolling = () => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current)
-      pollRef.current = null
-    }
-  }
-
-  const loadScoresAfter = async (userId: number) => {
-    const scoreSessionId = resolveScoreSessionId(userId)
-    try {
-      const res = await fetch(`/api/user/weight-scores?session_id=${encodeURIComponent(scoreSessionId)}`)
-      const data = await res.json()
-      setScoresAfter(data.weight_scores ?? null)
-    } catch { /* ignore */ }
-  }
-
-  const startReportPolling = (sessionId: number, userId: number) => {
-    stopReportPolling()
-    const generation = ++pollGenerationRef.current
-    pollSessionRef.current = { sessionId, userId }
-    pollStartedAtRef.current = Date.now()
-    setReportStartedAt(pollStartedAtRef.current)
-    pollFailureCountRef.current = 0
-    progressTrackerRef.current = INITIAL_PROGRESS_TRACKER
-    setReportProgress(null)
-    setReportFailedByServer(false)
-    setReportStatus('pending')
-
-    const tick = async () => {
-      if (generation !== pollGenerationRef.current) return
-
-      const startedAt = pollStartedAtRef.current ?? Date.now()
-      let hasReport = false
-      let reportPayload: InterviewReport | null = null
-      let serverFailed = false
-
-      try {
-        const detail = await interviewApi.getDetail(sessionId, userId)
-        // 通信が復帰したら連続失敗数をリセットする（#1057）
-        pollFailureCountRef.current = 0
-        if (detail.report) {
-          hasReport = true
-          reportPayload = detail.report
-        }
-        const progress = parseReportProgress(detail.session)
-        if (progress && !detail.report) {
-          if (progress.stage === 'failed') {
-            serverFailed = true
-          } else {
-            const next = advanceProgress(progressTrackerRef.current, progress, Date.now())
-            progressTrackerRef.current = next.tracker
-            if (generation === pollGenerationRef.current) setReportProgress(next.view)
-          }
-        }
-      } catch {
-        pollFailureCountRef.current += 1
-      }
-
-      if (generation !== pollGenerationRef.current) return
-
-      const outcome = evaluateReportPollTick({
-        startedAtMs: startedAt,
-        nowMs: Date.now(),
-        timeoutMs: REPORT_POLL_TIMEOUT_MS,
-        hasReport,
-        consecutiveFailures: pollFailureCountRef.current,
-      })
-
-      if (outcome === 'ready' && reportPayload) {
-        setReport(reportPayload)
-        setReportStatus('ready')
-        stopReportPolling()
-        await loadScoresAfter(userId)
-        return
-      }
-      // サーバーが失敗と確定した場合は、タイムアウトを待たずに失敗表示へ（最終リトライ後にだけ書かれる）
-      if (serverFailed && outcome !== 'ready') {
-        setReportFailedByServer(true)
-        setReportStatus('error')
-        stopReportPolling()
-        return
-      }
-      if (outcome === 'error') {
-        setReportStatus('error')
-        stopReportPolling()
-        return
-      }
-      if (outcome === 'timeout') {
-        setReportStatus('timeout')
-        stopReportPolling()
-      }
-    }
-
-    // 初回は即時、以降は interval
-    void tick()
-    pollRef.current = setInterval(() => { void tick() }, REPORT_POLL_INTERVAL_MS)
-  }
-
-  /**
-   * レポート取得の再試行(#1015, #1476)。
-   *
-   * ポーリングを再開するだけでは、生成ジョブ自体が失われている場合に永久に復旧しない
-   * （asynqの再試行を使い切る／フォールバックworkerで1回失敗する／キューが溢れる、
-   * かつ finishSession は終了済みセッションを再キューしない）。
-   * そこで再開の前に生成ジョブの再投入を依頼する。既にレポートがあればサーバー側で何もしない。
-   */
-  const retryReportPolling = async () => {
-    const target = pollSessionRef.current
-      ?? (session && user ? { sessionId: session.id, userId: user.user_id } : null)
-    if (!target) return
-    setReportRetryError('')
-    try {
-      await interviewApi.regenerateReport(target.sessionId, target.userId)
-    } catch (e) {
-      // 再投入が失敗した＝ジョブは入り直っていない。ここでポーリングへ戻すと、
-      // ユーザーは失敗を知らされないまま「生成中」をさらに3分見せられて再びタイムアウトする(#1476)。
-      console.error('[report regenerate error]', e)
-      setReportRetryError(REPORT_RETRY_FAILED_MESSAGE)
-      return
-    }
-    startReportPolling(target.sessionId, target.userId)
-  }
-
-  const startRecording = () => {
-    if (!media.streamRef.current || isRecordingRef.current || turnPendingRef.current) return
-    const audioTracks = media.streamRef.current.getAudioTracks()
-    if (audioTracks.length === 0) return
-    const micStream = new MediaStream(audioTracks)
-    audioChunksRef.current = []
-    discardTurnRef.current = false
-    // mimeType はブラウザが実際に出せる形式から選ぶ。'audio/webm' 固定だと
-    // Safari では NotSupportedError で例外になり、録音が始まらなかった。
-    const format = pickRecorderFormat()
-    recorderFormatRef.current = format
-    const mr = new MediaRecorder(
-      micStream,
-      format.mimeType
-        ? { mimeType: format.mimeType, audioBitsPerSecond: 128000 }
-        : { audioBitsPerSecond: 128000 },
-    )
-    mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
-    mr.onstop = () => {
-      if (discardTurnRef.current) {
-        discardTurnRef.current = false
-        audioChunksRef.current = []
-        return
-      }
-      void sendTurn()
-    }
-    mediaRecorderRef.current = mr
-    mr.start()
-    setIsRecording(true)
-  }
-  startRecordingRef.current = startRecording
-
-  const stopRecording = () => {
-    if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') return
-    mediaRecorderRef.current.stop()
-    setIsRecording(false)
-    setTurnPending(true)
-  }
-  stopRecordingRef.current = stopRecording
-
-  /**
-   * 発話が確定しなかった録音を破棄する（送信しない）。
-   *
-   * VAD は頭切れを避けるため低いしきい値で録音を始める。
-   * 物音で始まった録音まで送ると、無音や雑音だけの音声で
-   * STT を呼ぶことになり、費用と誤認識が増える。
-   */
-  const discardRecording = () => {
-    if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') return
-    discardTurnRef.current = true
-    mediaRecorderRef.current.stop()
-    setIsRecording(false)
-  }
-  discardRecordingRef.current = discardRecording
-
-  const sendTurn = async () => {
-    if (!user || !session) { setTurnPending(false); return }
-    const chunks = audioChunksRef.current
-    if (chunks.length === 0) { setTurnPending(false); return }
-    // 実際に録れた形式で送る。Blob の type と拡張子が実体とずれると、
-    // 受け側の形式判定とファイル名が食い違う。
-    const format = recorderFormatRef.current
-    const blobType = chunks[0]?.type || format.mimeType || 'audio/webm'
-    const ext = extFromMimeType(blobType) || format.ext
-    const audioBlob = new Blob(chunks, { type: blobType })
-    const formData = new FormData()
-    formData.append('audio', audioBlob, `audio.${ext}`)
-    formData.append('user_id', String(user.user_id))
-    formData.append('turn_count', String(Math.floor(historyRef.current.length / 2) + 1))
-    formData.append('remaining_seconds', String(remainingSeconds))
-    formData.append('question_index', String(currentQuestionIndex))
-    formData.append('total_questions', String(totalQuestionCount))
-    formData.append('question_elapsed_seconds', String(questionElapsedSeconds))
-    formData.append('question_duration_seconds', String(Math.max(60, interviewLimits.questionDurationSeconds || 180)))
-    formData.append('company_name', interviewCompany?.name || '')
-    formData.append('company_reading', companyContextRef.current.reading || interviewCompany?.name_reading || '')
-    formData.append('company_reading_resolved', String(
-      companyContextRef.current.readingResolved || Boolean(interviewCompany?.name_reading),
-    ))
-    formData.append('position', selectedPosition?.title || '')
-    formData.append('company_info', buildCompanyInfo(interviewCompany))
-    formData.append('company_type', selectedPosition?.category || 'general')
-    formData.append('company_id', String(interviewCompany?.id || 0))
-    formData.append(
-      'question_hints',
-      JSON.stringify(companyQuestionHints.slice(0, 5).map((question) => question.slice(0, 300))),
-    )
-    const companyContextGeneration = companyContextGenerationRef.current
-    const receive = async (): Promise<Blob> => {
-      // Backend は保存済みの発話から履歴を組み直す（#1636）。発話はサーバーがターンの中で
-      // 保存し終えてから応答する。冒頭の質問より先に回答が保存されないよう、/start-turn の
-      // 応答を待ってから送る(#1969)。
-      await startTurnSettledRef.current
-      const { meta, audio } = await fetchAndReadWithTimeout(`/api/bff/interviews/${session.id}/turn`, {
-        method: 'POST',
-        headers: { ...authService.getUserFetchHeaders() },
-        body: formData,
-      }, TURN_FETCH_TIMEOUT_MS, async res => {
-        if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
-        return parseMultipartResponse(res)
-      })
-      if (companyContextGeneration !== companyContextGenerationRef.current) return audio
-      companyContextRef.current = applyCompanyReadingResponse(
-        companyContextRef.current,
-        meta,
-        companyContextGeneration,
-        companyContextGenerationRef.current,
-      )
-      const userText: string = meta.user_text || ''
-      const aiText: string = meta.ai_text || ''
-      const responseQuestionTotal = Number(meta.total_questions)
-      if (Number.isSafeInteger(responseQuestionTotal) && responseQuestionTotal > 0) {
-        setTotalQuestionCount(responseQuestionTotal)
-      }
-      const questionEvent = typeof meta.question_source === 'string' && meta.question_source.trim() !== ''
-      if (questionEvent) {
-        setCurrentQuestionIndex((index) => nextQuestionIndex(index, meta.question_source))
-        questionStartedAtRef.current = Date.now()
-        setQuestionElapsedSeconds(0)
-      }
-      setIsDeepeningQuestion(Boolean(meta.is_deepening))
-      setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
-      // 書き起こしはサーバーが user → ai の順に保存済み(#1969)。ここでは表示だけを更新する。
-      if (String(meta.utterance_save_failed) === 'true') setUtteranceSaveFailed(true)
-      if (userText) {
-        historyRef.current.push({ role: 'user', content: userText })
-        setUtterances(p => [...p, { role: 'user', text: userText }])
-      }
-      if (aiText) {
-        historyRef.current.push({ role: 'assistant', content: aiText })
-        setUtterances(p => [...p, { role: 'ai', text: aiText }])
-      }
-      endIfLimitReached(meta)
-      return audio
-    }
-    try {
-      await playTurnAudio(receive())
-    } catch (e: unknown) {
-      if (companyContextGeneration === companyContextGenerationRef.current) {
-        setErrorMessage(parseMediaError(e))
-      }
-    } finally {
-      if (companyContextGeneration === companyContextGenerationRef.current) {
-        setTurnPending(false)
-      }
-    }
-  }
-
-  const sendReportEmail = async () => {
-    if (!session || !user) return
-    setEmailSending(true)
-    setEmailError('')
-    try {
-      await interviewApi.sendReportEmail(session.id, user.user_id)
-      setEmailSent(true)
-    } catch {
-      // 握り潰すとユーザーが送信成功と誤解するため、必ずUIへ伝える（#1056）
-      setEmailError('メールの送信に失敗しました。時間をおいて再度お試しください。')
-    } finally {
-      setEmailSending(false)
     }
   }
 
