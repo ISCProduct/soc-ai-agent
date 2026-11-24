@@ -175,7 +175,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           borderRadius: '8px',
           textDecoration: 'none',
           bgcolor: current ? UI.markTint : 'transparent',
-          color: current ? UI.mark : { xs: UI.ink, md: UI.inkSoft },
+          color: current ? UI.mark : UI.inkSoft,
           fontWeight: current ? 700 : 400,
           fontSize: { xs: 16, md: 15 },
           lineHeight: 1.5,
@@ -210,7 +210,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
           <Avatar sx={{ width: 32, height: 32, bgcolor: UI.markTint, color: UI.mark, fontSize: 16 }}>{user.name.charAt(0).toUpperCase()}</Avatar>
-          <Typography noWrap sx={{ fontWeight: 600, fontSize: { xs: 15, md: 14 }, lineHeight: 1.5, color: UI.ink }}>
+          <Typography noWrap sx={{ fontWeight: 600, fontSize: { xs: 15, md: 14 }, lineHeight: 1.5, color: UI.inkSoft }}>
             {user.name}
           </Typography>
           {user.is_guest && (
@@ -253,7 +253,8 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
         overflowY: { xs: 'auto', md: 'visible' },
         overscrollBehaviorY: { xs: 'contain', md: 'auto' },
         px: { xs: 2, md: 0 },
-        pb: { xs: 'max(16px, env(safe-area-inset-bottom))', md: 0 },
+        // 末尾の項目と画面端の間に32pxを確保（PCは外側の16pxと合わせる）。
+        pb: { xs: 'calc(32px + env(safe-area-inset-bottom))', md: 2 },
         ...hiddenScrollbarSx,
       }}>
         {navItem(HOME_SIDEBAR_TOP[0].href, HOME_SIDEBAR_TOP[0].label)}
