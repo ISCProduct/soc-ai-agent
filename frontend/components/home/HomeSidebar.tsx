@@ -82,7 +82,7 @@ const NAV_ICONS: Record<string, React.ComponentType<SvgIconProps>> = {
   '/admin': AdminPanelSettings,
 }
 
-const headingSx = { fontWeight: 700, fontSize: 16, lineHeight: 1.5, color: UI.ink } as const
+const sectionHeadingSx = { fontWeight: 600, fontSize: 13, lineHeight: 1.5, color: UI.inkSoft } as const
 
 /**
  * ホーム（相談中心）の左サイドバー（Figma「改善G／相談中心」ノード 37:340）。
@@ -171,7 +171,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           bgcolor: current ? UI.markTint : 'transparent',
           color: current ? UI.mark : UI.inkSoft,
           fontWeight: current ? 700 : 400,
-          fontSize: 16,
+          fontSize: 15,
           lineHeight: 1.5,
           '&:hover': { bgcolor: current ? UI.markTint : UI.tint },
           '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
@@ -197,7 +197,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, gap: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
           <Avatar sx={{ width: 32, height: 32, bgcolor: UI.markTint, color: UI.mark, fontSize: 16 }}>{user.name.charAt(0).toUpperCase()}</Avatar>
-          <Typography noWrap sx={{ ...headingSx }}>
+          <Typography noWrap sx={{ fontWeight: 600, fontSize: 14, lineHeight: 1.5, color: UI.ink }}>
             {user.name}
           </Typography>
           {user.is_guest && (
@@ -209,7 +209,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
         <Button
           onClick={onLogout}
           sx={{
-            minWidth: 0, p: 0.5, fontSize: 16, fontWeight: 400, color: UI.inkSoft, textTransform: 'none', flexShrink: 0,
+            minWidth: 0, p: 0.5, fontSize: 12, fontWeight: 400, color: UI.inkSoft, textTransform: 'none', flexShrink: 0,
             '&:hover': { bgcolor: UI.tint },
             '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
           }}
@@ -229,9 +229,9 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           },
         })}
 
-        <Box sx={{ height: 12 }} />
-        <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1, minHeight: 24, px: 1.5, fontSize: 16, lineHeight: 1.5 }}>
-          <Typography component="span" sx={headingSx}>
+        <Box sx={{ height: 24 }} />
+        <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1, minHeight: 24, px: 1.5 }}>
+          <Typography component="span" sx={sectionHeadingSx}>
             {t('groups.analysis')}
           </Typography>
           <Typography
@@ -257,8 +257,8 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
 
         {HOME_SIDEBAR_GROUPS.map((group) => (
           <Box key={group.heading} sx={{ display: 'flex', flexDirection: 'column' }}>
-            <Box sx={{ height: 12 }} />
-            <Typography component="p" sx={{ ...headingSx, px: 1.5 }}>
+            <Box sx={{ height: 24 }} />
+            <Typography component="p" sx={{ ...sectionHeadingSx, px: 1.5 }}>
               {group.heading}
             </Typography>
             {group.items.map((i) =>
@@ -279,7 +279,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           </Box>
         ))}
 
-        <Box sx={{ flex: 1, minHeight: 16 }} />
+        <Box sx={{ flex: 1, minHeight: 24 }} />
         {navItem(HOME_SIDEBAR_FOOTER.href, HOME_SIDEBAR_FOOTER.label)}
         {isAdmin && navItem(SIDEBAR_ADMIN_NAV.href, SIDEBAR_ADMIN_NAV.label)}
       </Box>
