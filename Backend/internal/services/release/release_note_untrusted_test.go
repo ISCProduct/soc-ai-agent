@@ -37,7 +37,7 @@ func TestSummarize_WrapsPRTitleAndBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	s := NewReleaseNoteService(nil, openai.NewWithBaseURL(server.URL, "gpt-4o-mini"))
+	s := NewReleaseNoteService(nil, nil, openai.NewWithBaseURL(server.URL, "gpt-4o-mini"))
 	if _, err := s.summarize(context.Background(), ReleaseNoteSource{Title: titleAttack, Body: bodyAttack}); err != nil {
 		t.Fatalf("summarize error: %v", err)
 	}
