@@ -230,11 +230,14 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
         })}
 
         <Box sx={{ height: 12 }} />
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, fontSize: 16, lineHeight: 1.5 }}>
+        <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1, minHeight: 24, px: 1.5, fontSize: 16, lineHeight: 1.5 }}>
           <Typography component="span" sx={headingSx}>
             {t('groups.analysis')}
           </Typography>
-          <Typography component="span" sx={{ fontSize: 16, color: UI.inkSoft }}>
+          <Typography
+            component="span"
+            sx={{ fontSize: 12, lineHeight: 1.5, fontWeight: 400, color: UI.inkSoft, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
+          >
             {`判定の進み具合 ${progress.percent}%`}
           </Typography>
         </Box>
