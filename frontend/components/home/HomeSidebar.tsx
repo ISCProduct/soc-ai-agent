@@ -83,7 +83,7 @@ const NAV_ICONS: Record<string, React.ComponentType<SvgIconProps>> = {
   '/admin': AdminPanelSettings,
 }
 
-const sectionHeadingSx = { fontWeight: 600, fontSize: { xs: 14, md: 13 }, lineHeight: 1.5, color: UI.inkSoft } as const
+const sectionHeadingSx = { fontWeight: 600, fontSize: 13, lineHeight: 1.5, color: UI.inkSoft } as const
 const hiddenScrollbarSx = {
   scrollbarWidth: 'none',
   '&::-webkit-scrollbar': { display: 'none' },
@@ -169,7 +169,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           display: 'flex',
           alignItems: 'center',
           gap: 1.5,
-          minHeight: { xs: 48, md: 44 },
+          minHeight: 44,
           flexShrink: 0,
           px: 1.5,
           borderRadius: '8px',
@@ -177,7 +177,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           bgcolor: current ? UI.markTint : 'transparent',
           color: current ? UI.mark : UI.inkSoft,
           fontWeight: current ? 700 : 400,
-          fontSize: { xs: 16, md: 15 },
+          fontSize: 15,
           lineHeight: 1.5,
           '&:hover': { bgcolor: current ? UI.markTint : UI.tint },
           '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
@@ -210,7 +210,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
           <Avatar sx={{ width: 32, height: 32, bgcolor: UI.markTint, color: UI.mark, fontSize: 16 }}>{user.name.charAt(0).toUpperCase()}</Avatar>
-          <Typography noWrap sx={{ fontWeight: 600, fontSize: { xs: 15, md: 14 }, lineHeight: 1.5, color: UI.inkSoft }}>
+          <Typography noWrap sx={{ fontWeight: 600, fontSize: 14, lineHeight: 1.5, color: UI.inkSoft }}>
             {user.name}
           </Typography>
           {user.is_guest && (
@@ -223,7 +223,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           <Button
             onClick={onLogout}
             sx={{
-              minWidth: 0, p: 0.5, fontSize: { xs: 13, md: 12 }, fontWeight: 400, color: UI.inkSoft, textTransform: 'none', flexShrink: 0,
+              minWidth: 0, p: 0.5, fontSize: 12, fontWeight: 400, color: UI.inkSoft, textTransform: 'none', flexShrink: 0,
               '&:hover': { bgcolor: UI.tint },
               '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
             }}
@@ -266,14 +266,14 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           },
         })}
 
-        <Box sx={{ height: { xs: 20, md: 24 }, flexShrink: 0 }} />
+        <Box sx={{ height: 24, flexShrink: 0 }} />
         <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1, minHeight: 24, flexShrink: 0, px: 1.5 }}>
           <Typography component="span" sx={sectionHeadingSx}>
             {t('groups.analysis')}
           </Typography>
           <Typography
             component="span"
-            sx={{ fontSize: { xs: 13, md: 12 }, lineHeight: 1.5, fontWeight: 400, color: UI.inkSoft, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
+            sx={{ fontSize: 12, lineHeight: 1.5, fontWeight: 400, color: UI.inkSoft, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
           >
             {`判定の進み具合 ${progress.percent}%`}
           </Typography>
@@ -294,7 +294,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
 
         {HOME_SIDEBAR_GROUPS.map((group) => (
           <Box key={group.heading} sx={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-            <Box sx={{ height: { xs: 20, md: 24 }, flexShrink: 0 }} />
+            <Box sx={{ height: 24, flexShrink: 0 }} />
             <Typography component="p" sx={{ ...sectionHeadingSx, px: 1.5 }}>
               {group.heading}
             </Typography>

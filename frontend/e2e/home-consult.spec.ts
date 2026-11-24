@@ -160,7 +160,7 @@ test.describe('ホーム（相談中心・広い画面）', () => {
 })
 
 test.describe('ホーム（相談中心・狭い画面）', () => {
-  test('モバイルは幅を広げて文字とタップ領域を確保し、末尾までスクロールしても閉じられる', async ({ page }) => {
+  test('モバイルも15pxの文字・44pxの行を使い、末尾までスクロールしても閉じられる', async ({ page }) => {
     await setupAuth(page, TEST_USER)
     await mockHome(page)
 
@@ -175,8 +175,8 @@ test.describe('ホーム（相談中心・狭い画面）', () => {
       const menu = drawer.getByRole('navigation', { name: 'メニュー' })
       const home = menu.getByRole('link', { name: 'ホーム', exact: true })
       await expect(drawer).toHaveCSS('width', `${Math.min(360, width - 24)}px`)
-      await expect(home).toHaveCSS('font-size', '16px')
-      await expect(home).toHaveCSS('min-height', '48px')
+      await expect(home).toHaveCSS('font-size', '15px')
+      await expect(home).toHaveCSS('min-height', '44px')
       await expect(menu).toHaveCSS('overflow-y', 'auto')
       await expect(menu).toHaveCSS('scrollbar-width', 'none')
       await expect(close).toHaveCSS('width', '44px')
