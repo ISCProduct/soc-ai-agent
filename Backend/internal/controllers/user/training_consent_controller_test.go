@@ -24,6 +24,7 @@ import (
 	usercontrollers "Backend/internal/controllers/user"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
+	"Backend/internal/services/userpreference"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
@@ -45,7 +46,7 @@ func newTrainingConsentController(t *testing.T) (*usercontrollers.UserPreference
 	if err != nil {
 		t.Fatal(err)
 	}
-	return usercontrollers.NewUserPreferenceController(repositories.NewUserPreferenceRepository(db), nil, nil), mock
+	return usercontrollers.NewUserPreferenceController(userpreference.NewService(repositories.NewUserPreferenceRepository(db)), nil, nil), mock
 }
 
 var (
