@@ -145,7 +145,12 @@ resource "aws_lambda_function" "discord" {
     ignore_changes = [filename, source_code_hash]
   }
 
-  depends_on = [aws_iam_role_policy.discord_lambda]
+  # 初回 apply で、値を書く前の空のシークレットを Lambda が読んでしまうのを防ぐ。
+  # 入れ物(secret)への参照だけでは secret_version の順序は保証されないため明示する。
+  depends_on = [
+    aws_iam_role_policy.discord_lambda,
+    aws_secretsmanager_secret_version.discord_backlog_bot,
+  ]
 
   tags = local.tags
 }
