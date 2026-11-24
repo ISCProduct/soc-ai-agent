@@ -2,8 +2,8 @@ package release
 
 import (
 	"Backend/internal/controllers/httpapi"
-	"Backend/internal/repositories"
 	"Backend/internal/services/release"
+	"errors"
 	"net/http"
 	"time"
 
@@ -11,12 +11,11 @@ import (
 )
 
 type ReleaseNoteController struct {
-	service  *release.ReleaseNoteService
-	userRepo *repositories.UserRepository
+	service *release.ReleaseNoteService
 }
 
-func NewReleaseNoteController(service *release.ReleaseNoteService, userRepo *repositories.UserRepository) *ReleaseNoteController {
-	return &ReleaseNoteController{service: service, userRepo: userRepo}
+func NewReleaseNoteController(service *release.ReleaseNoteService) *ReleaseNoteController {
+	return &ReleaseNoteController{service: service}
 }
 
 type releaseNoteResponse struct {
@@ -31,12 +30,10 @@ func (c *ReleaseNoteController) List(ctx echo.Context) error {
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	user, err := c.userRepo.GetUserByID(userID)
-	if err != nil || user == nil {
+	notes, err := c.service.ListForUser(ctx.Request().Context(), 20, userID)
+	if errors.Is(err, release.ErrReleaseNoteViewerNotFound) {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-
-	notes, err := c.service.List(ctx.Request().Context(), 20, user.Role, user.IsAdmin)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
