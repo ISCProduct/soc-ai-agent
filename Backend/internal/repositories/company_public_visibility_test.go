@@ -164,6 +164,22 @@ func TestPublicCompanyEndpoints_ExcludeUnreviewedGuestEntries(t *testing.T) {
 
 // ガード条件が data_status='published' を例外にしていること。
 // 管理者が公開した企業は、ゲスト投稿由来でも表示されなければならない。
+// 相関関係の一覧は、停止中の企業を端点に持つ行も除く（相関図で開けない企業を選ばせない）。
+func TestCompanyRelations_ExcludeInactiveCompanies(t *testing.T) {
+	want := normalizeSQL(`NOT EXISTS (SELECT 1 FROM companies c WHERE c.id IN (parent_id, child_id, from_id, to_id) AND c.is_active = false)`)
+	for name, call := range map[string]func(db *gorm.DB){
+		"全相関関係":     func(db *gorm.DB) { _, _ = repositories.NewCompanyQueryRepository(db).GetAll() },
+		"企業ごとの相関関係": func(db *gorm.DB) { _, _ = repositories.NewCompanyQueryRepository(db).GetByCompanyID(1) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			db, got := newCapturingDB(t)
+			call(db)
+			require.NotEmpty(t, *got)
+			require.Contains(t, (*got)[0], want)
+		})
+	}
+}
+
 func TestGuestEntryGuard_AllowsPublished(t *testing.T) {
 	db, got := newCapturingDB(t)
 	_, _ = repositories.NewCompanyQueryRepository(db).GetCompanyByID(1)

@@ -82,6 +82,12 @@ func guestEntryVisibilityGuard(cols ...string) string {
 )`, joined)
 }
 
+// inactiveCompanyGuard は端点のいずれかが停止中の企業である行を除く条件を返す。
+// 相関図(SOCAIAGENT-694)は停止中の企業を出さないため、関係一覧から選べても開けない企業が残らないよう揃える。
+func inactiveCompanyGuard(cols ...string) string {
+	return fmt.Sprintf(`NOT EXISTS (SELECT 1 FROM companies c WHERE c.id IN (%s) AND c.is_active = false)`, strings.Join(cols, ", "))
+}
+
 // GetByCompanyID 指定企業IDに関連する企業関係を取得
 func (r *CompanyQueryRepository) GetByCompanyID(companyID uint) ([]models.CompanyRelation, error) {
 	var relations []models.CompanyRelation
@@ -97,6 +103,7 @@ func (r *CompanyQueryRepository) GetByCompanyID(companyID uint) ([]models.Compan
 		// Preload("Parent"/"Child"/"From"/"To") が models.Company を丸ごと返すため、
 		// ここを塞がないと企業一覧を絞っても隣から読めてしまう。
 		Where(guestEntryVisibilityGuard("parent_id", "child_id", "from_id", "to_id")).
+		Where(inactiveCompanyGuard("parent_id", "child_id", "from_id", "to_id")).
 		Find(&relations).Error
 	return relations, err
 }
@@ -111,6 +118,7 @@ func (r *CompanyQueryRepository) GetAll() ([]models.CompanyRelation, error) {
 		Preload("To").
 		Where("is_active = ?", true).
 		Where(guestEntryVisibilityGuard("parent_id", "child_id", "from_id", "to_id")).
+		Where(inactiveCompanyGuard("parent_id", "child_id", "from_id", "to_id")).
 		Find(&relations).Error
 	return relations, err
 }
