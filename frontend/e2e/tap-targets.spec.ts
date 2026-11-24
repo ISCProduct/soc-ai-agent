@@ -106,14 +106,14 @@ test.describe('モバイルのタップ領域（#1481）', () => {
 })
 
 async function mockInterviewHistory(page: Page) {
-  await page.route('**/api/interviews/trend*', (route) =>
+  await page.route('**/api/bff/interviews/trend*', (route) =>
     route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ points: [] }),
     }),
   )
-  await page.route('**/api/interviews?*', (route) =>
+  await page.route('**/api/bff/interviews?*', (route) =>
     route.fulfill({
       status: 200,
       contentType: 'application/json',
