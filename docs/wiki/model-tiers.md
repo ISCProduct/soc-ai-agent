@@ -11,13 +11,14 @@ LLM を使う工程を「学生に見える判断」と「内部の定型処理�
 | 上位 | 面接レポート | `INTERVIEW_REPORT_MODEL` | アプリの既定（`AI_TEXT_MODEL` → `OPENAI_MODEL` → gpt-4o-mini） |
 | 上位 | チャット診断の回答の採点 | `AI_MODEL_SCORE_EVALUATION` | アプリの既定 |
 | 上位 | マッチング理由 | `AI_MODEL_MATCHING_REASON` | アプリの既定 |
-| 上位 | ES添削（RAG） | `OPENAI_ES_REVIEW_MODEL` | `OPENAI_CHAT_MODEL` → gpt-4o |
+| 上位 | ES添削の評価（RAG） | `OPENAI_ES_REVIEW_MODEL` | `OPENAI_CHAT_MODEL` → gpt-4o |
 | 上位 | 履歴書レビューのレポート（RAG） | `OPENAI_REVIEW_MODEL` | gpt-4o-mini |
 | 軽量（`AI_MODEL_LIGHT`） | 企業情報の抽出 | `OPENAI_COMPANY_EXTRACT_MODEL` | gpt-4o-mini |
 | 軽量 | 企業情報の parse | `OPENAI_COMPANY_PARSE_MODEL` | gpt-4o-mini |
 | 軽量 | チャットの要約 | `AI_MODEL_CHAT_SUMMARY` | アプリの既定 |
 | 軽量 | 検索結果の要約・ヒント（RAG） | （なし） | `OPENAI_CHAT_MODEL` → gpt-4o-mini |
 | 軽量 | ヒントの parse（RAG） | `OPENAI_HINTS_PARSE_MODEL` | gpt-4o-mini |
+| 軽量 | ES添削の改善文（RAG、SOCAIAGENT-559） | `OPENAI_ES_IMPROVE_MODEL` | gpt-4o-mini |
 
 工程表は Go が `Backend/internal/aimodel`、RAG が `rag/services/model_tiers.py`。分類を変えるときは両方のテストも直す。
 
@@ -28,6 +29,8 @@ LLM を使う工程を「学生に見える判断」と「内部の定型処理�
 3. 今までの既定
 
 **何も設定しなければ今までと同じモデル**になる。導入しただけではコストは変わらない。
+
+例外: ES添削の改善文（第2呼び出しと字数の作り直し）は、SOCAIAGENT-559 で既定を gpt-4o-mini に変えた。評価（良し悪しの判断）は上位のまま、改善文は評価のフィードバックに沿った書き直しなので軽量にしている。元に戻すときは `OPENAI_ES_IMPROVE_MODEL` に評価と同じモデルを入れる（Terraform の `es_improve_model` 変数。prod / staging とも空なら既定のまま）。評価と改善文でモデルが違うので、RAG は使用量をモデルごとの内訳（`usage.by_model`）でも返し、Backend はモデルごとに記録する。
 prod は工程ごとの環境変数をいくつか明示している（例: RAG の `OPENAI_HINTS_PARSE_MODEL`）。明示している工程は層の設定より優先されるので、
 層で一括に切り替えたいときはその値も見直す。
 
