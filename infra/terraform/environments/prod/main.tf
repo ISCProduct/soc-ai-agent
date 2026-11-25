@@ -12,6 +12,8 @@ locals {
     # 法人番号API / gBizINFO(#1360)。AWS 側には既にあったがコードに無く、
     # apply すると実行ロールからこの2つの取得許可が外れ、次のタスク起動が失敗する状態だった。
     [aws_secretsmanager_secret.houjin_bangou.arn, aws_secretsmanager_secret.gbizinfo.arn],
+    # EDINET API(SOCAIAGENT-726)。値は AWS 側で人が入れる（secret_version は持たない）。
+    [aws_secretsmanager_secret.edinet.arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
     var.additional_secret_arns
   ))
@@ -127,6 +129,10 @@ locals {
       {
         name      = "GBIZINFO_API_KEY"
         valueFrom = "${aws_secretsmanager_secret.gbizinfo.arn}:gbizinfo_api_key::"
+      },
+      {
+        name      = "EDINET_API_KEY"
+        valueFrom = "${aws_secretsmanager_secret.edinet.arn}:edinet_api_key::"
       }
     ]
   )
@@ -258,6 +264,19 @@ import {
 resource "aws_secretsmanager_secret" "gbizinfo" {
   name        = "${var.project_name}/gbizinfo"
   description = "gBizINFO Web-API のアクセストークン"
+  tags        = local.tags
+}
+
+# EDINET API のキー(SOCAIAGENT-726)。2026-11-25 に AWS 側へ手で作成済みなので import する。
+# gbizinfo と同じく secret_version は作らない（作ると入っている値を上書きしてしまう）。
+import {
+  to = aws_secretsmanager_secret.edinet
+  id = "arn:aws:secretsmanager:ap-northeast-1:508897596159:secret:soc-app/edinet-HjqjrO"
+}
+
+resource "aws_secretsmanager_secret" "edinet" {
+  name        = "${var.project_name}/edinet"
+  description = "EDINET API のAPIキー"
   tags        = local.tags
 }
 
