@@ -2,12 +2,21 @@ package company
 
 import (
 	"Backend/internal/models"
+	"context"
 	"log"
 	"time"
 )
 
 func (s *CrawlService) RunDueSources() {
-	s.runDueSources()
+	// タスクが複数起動していても、定期取得は DB のロックを取れた1本だけが実行する。
+	ok, err := s.repo.WithRunLock(context.Background(), s.runDueSources)
+	if err != nil {
+		log.Printf("[Crawl] run lock failed: %v", err)
+		return
+	}
+	if !ok {
+		log.Printf("[Crawl] 別のタスクが定期取得を実行中のためスキップします")
+	}
 }
 
 func (s *CrawlService) runDueSources() {

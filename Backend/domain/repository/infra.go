@@ -2,6 +2,7 @@ package repository
 
 import (
 	"Backend/internal/models"
+	"context"
 	"time"
 )
 
@@ -21,4 +22,6 @@ type CrawlRepository interface {
 	CreateRun(run *models.CrawlRun) error
 	UpdateRun(run *models.CrawlRun) error
 	ListRuns(sourceID uint, limit int) ([]models.CrawlRun, error)
+	// WithRunLock は定期取得を全タスクで1本に絞って fn を実行する。取れなければ fn を呼ばず false。
+	WithRunLock(ctx context.Context, fn func()) (bool, error)
 }

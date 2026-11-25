@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"context"
 	"time"
 
 	"gorm.io/gorm"
@@ -66,4 +67,31 @@ func (r *CrawlRepository) ListRuns(sourceID uint, limit int) ([]models.CrawlRun,
 	}
 	err := query.Find(&runs).Error
 	return runs, err
+}
+
+// crawlRunLockName は定期取得の実行権の名前。DB 全体で1つ。
+const crawlRunLockName = "crawl_run_due_sources"
+
+// WithRunLock は定期取得を全タスクで1本に絞って fn を実行する（SOCAIAGENT-723）。
+//
+// 定期取得はバックエンドのプロセス内タイマーで動くため、タスクが2つ起動すると
+// 同じソースを二重に実行し、外部APIの呼び出しと費用が倍になる。プロセス内の mutex
+// では防げないので MySQL の GET_LOCK で排他する。待たずに諦め、次の周期に回す。
+// 解放に失敗しても接続が閉じれば外れる。
+func (r *CrawlRepository) WithRunLock(ctx context.Context, fn func()) (bool, error) {
+	acquired := false
+	err := r.db.WithContext(ctx).Connection(func(tx *gorm.DB) error {
+		var got *int
+		if err := tx.Raw("SELECT GET_LOCK(?, 0)", crawlRunLockName).Scan(&got).Error; err != nil {
+			return err
+		}
+		if got == nil || *got != 1 {
+			return nil
+		}
+		acquired = true
+		defer tx.Exec("SELECT RELEASE_LOCK(?)", crawlRunLockName)
+		fn()
+		return nil
+	})
+	return acquired, err
 }
