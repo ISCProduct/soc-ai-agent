@@ -4,10 +4,12 @@ package company
 // 実行: cd Backend && go test ./internal/services/company/ -run TestWebsite -v
 
 import (
+	"Backend/internal/companyfetch"
 	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -17,10 +19,22 @@ func filler(n int) string {
 	return strings.Repeat("当社は東京都港区に本社を置く企業です。", n)
 }
 
+// TestMain は httptest(127.0.0.1) へ繋ぐため、外部サイト取得の宛先検査を外す。
+func TestMain(m *testing.M) {
+	restore := companyfetch.AllowPrivateURLsForTesting()
+	code := m.Run()
+	restore()
+	os.Exit(code)
+}
+
 func TestWebsite_会社概要ページを辿って本文を集める(t *testing.T) {
 	var gotPaths []string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r) // robots.txt が無いサイトは全て許可
+			return
+		}
 		gotPaths = append(gotPaths, r.URL.Path)
 		switch r.URL.Path {
 		case "/":
@@ -149,6 +163,49 @@ func TestRankAboutLinks(t *testing.T) {
 			}
 			if tt.name == "同じURLは重複させない" && len(got) != 1 {
 				t.Errorf("重複が除去されていない: %v", got)
+			}
+		})
+	}
+}
+
+// robots.txt で禁止されたページは読まない（SOCAIAGENT-723）。
+func TestWebsite_robotsTxtに従う(t *testing.T) {
+	tests := []struct {
+		name        string
+		robots      string
+		robotsCode  int
+		wantErr     bool
+		wantCompany bool // 会社概要ページを読んだか
+	}{
+		{name: "全面禁止なら読まない", robots: "User-agent: *\nDisallow: /\n", robotsCode: 200, wantErr: true},
+		{name: "会社概要だけ禁止ならトップだけ読む", robots: "User-agent: *\nDisallow: /company/\n", robotsCode: 200, wantErr: false, wantCompany: false},
+		{name: "robots.txt が落ちていたら読まない", robotsCode: 503, wantErr: true},
+		{name: "robots.txt が無ければ読む", robotsCode: 404, wantErr: false, wantCompany: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			readCompany := false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/robots.txt":
+					w.WriteHeader(tt.robotsCode)
+					fmt.Fprint(w, tt.robots)
+				case "/company/":
+					readCompany = true
+					fmt.Fprintf(w, `<html><body><p>%s</p></body></html>`, filler(60))
+				default:
+					// 会社概要を読まなくても本文の下限（1500字）を超える長さにする
+					fmt.Fprintf(w, `<html><body><a href="/company/">会社概要</a><p>%s</p></body></html>`, filler(100))
+				}
+			}))
+			defer srv.Close()
+
+			_, err := collectWebsiteText(context.Background(), srv.URL)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if readCompany != tt.wantCompany {
+				t.Errorf("会社概要ページを読んだか = %v, want %v", readCompany, tt.wantCompany)
 			}
 		})
 	}

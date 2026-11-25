@@ -1,6 +1,7 @@
 package company
 
 import (
+	"Backend/internal/companyfetch"
 	"fmt"
 	"html"
 	"io"
@@ -14,14 +15,17 @@ import (
 )
 
 // fetchBytes URLからレスポンスのバイト列とContent-TypeのCharsetを返す
+// 外部サイトの取得は companyfetch の共通の取得処理を通す（SOCAIAGENT-723）。
 func fetchBytes(url string) ([]byte, string, error) {
+	if err := companyfetch.ValidatePublicHTTPURL(url); err != nil {
+		return nil, "", err
+	}
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SocAI/1.0; +https://example.com/bot)")
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	req.Header.Set("User-Agent", companyfetch.UserAgent)
+	resp, err := companyfetch.NewSafeHTTPClient(30 * time.Second).Do(req)
 	if err != nil {
 		return nil, "", err
 	}
@@ -65,25 +69,8 @@ func decodeToUTF8(b []byte, charset string) ([]byte, error) {
 }
 
 func fetchText(url string) (string, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SocAI/1.0; +https://example.com/bot)")
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("fetch failed: status %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
-	if err != nil {
-		return "", err
-	}
-	return string(body), nil
+	body, _, err := fetchBytes(url)
+	return string(body), err
 }
 
 // Goの正規表現(RE2)は後方参照を持たないため、`<(script|style)...</\1>` は

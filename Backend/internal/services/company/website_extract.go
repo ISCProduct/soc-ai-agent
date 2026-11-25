@@ -30,6 +30,7 @@ package company
 // (トヨタで648字。同じく 2026-09 計測)。薄ければ呼び出し側が web_search へ戻す。
 
 import (
+	"Backend/internal/companyfetch"
 	"context"
 	"fmt"
 	"net/url"
@@ -75,6 +76,10 @@ func collectWebsiteText(ctx context.Context, websiteURL string) (string, error) 
 		return "", fmt.Errorf("公式サイトURLが空です")
 	}
 
+	// robots.txt で禁止されているページは読まない（SOCAIAGENT-723）。
+	if ok, err := companyfetch.RobotsAllowed(ctx, top); err != nil || !ok {
+		return "", fmt.Errorf("robots.txt により公式サイトの取得が許可されていません")
+	}
 	rawTop, err := fetchPageHTML(ctx, top)
 	if err != nil {
 		return "", fmt.Errorf("公式サイトの取得に失敗しました: %w", err)
@@ -94,6 +99,9 @@ func collectWebsiteText(ctx context.Context, websiteURL string) (string, error) 
 		case <-time.After(politeDelay):
 		}
 
+		if ok, err := companyfetch.RobotsAllowed(ctx, link); err != nil || !ok {
+			continue
+		}
 		rawSub, err := fetchPageHTML(ctx, link)
 		if err != nil {
 			continue // 1ページ落ちても残りで判断する
