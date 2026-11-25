@@ -374,11 +374,14 @@ describe('管理画面 企業一覧', () => {
         if (c.url === '/api/admin/companies/4/publish') return networkError()
         return undefined
       })
-      jest.spyOn(window, 'confirm').mockReturnValue(true)
       await renderPage()
       fireEvent.click(screen.getByLabelText('このページで公開できる企業（2 社）を選択'))
       fireEvent.click(screen.getByRole('button', { name: '選択した 2 社を学生に公開' }))
+      // 確認は MUI のダイアログで確定する（SOCAIAGENT-534）
+      fireEvent.click(within(await screen.findByRole('dialog', { name: '企業を一括公開' })).getByRole('button', { name: '公開する' }))
       expect(await screen.findByText('1 社を公開しました。1 社は公開できませんでした。')).toBeInTheDocument()
+      // 確認ダイアログが閉じきるまで、ダイアログ以外は読み上げの対象から外れている（MUI の Modal）
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
       expect(screen.getByText('公開できる企業 1 社を選択中')).toBeInTheDocument()
       expect(screen.getByRole('checkbox', { name: 'そろい二号株式会社を選択' })).toBeChecked()
     })
@@ -452,12 +455,15 @@ describe('管理画面 企業一覧', () => {
         if (c.url === '/api/admin/companies/4/publish') return jsonRes({}, false, 500)
         return undefined
       })
-      jest.spyOn(window, 'confirm').mockReturnValue(true)
       await renderPage()
       fireEvent.click(screen.getByLabelText('このページで公開できる企業（2 社）を選択'))
       const before = listCalls().length
       fireEvent.click(screen.getByRole('button', { name: '選択した 2 社を学生に公開' }))
+      // 確認は MUI のダイアログで確定する（SOCAIAGENT-534）
+      fireEvent.click(within(await screen.findByRole('dialog', { name: '企業を一括公開' })).getByRole('button', { name: '公開する' }))
       await screen.findByText('1 社を公開しました。1 社は公開できませんでした。')
+      // 確認ダイアログが閉じきるまで、ダイアログ以外は読み上げの対象から外れている（MUI の Modal）
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
       expect(listCalls().length).toBeGreaterThan(before)
       expect(screen.getByText('1 社の公開に失敗しました。')).toBeInTheDocument()
 
