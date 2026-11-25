@@ -412,6 +412,19 @@ jobs:
                 sed -i /^RAG_INTERNAL_TOKEN=/d .env
                 echo "RAG_INTERNAL_TOKEN=$(openssl rand -hex 32)" >> .env
               fi
+              # app-env シークレット(#1158)に後から足したキーを、稼働中インスタンスの .env へ届ける。
+              # user_data は新規インスタンスでしか走らないため、これが無いと EDINET_API_KEY
+              # (SOCAIAGENT-726)のような追加分が置換まで届かない。.env に既にあるキーは触らない。
+              if [ -f .env ]; then
+                APP_ENV_JSON=$(aws secretsmanager get-secret-value --region ${{ env.AWS_REGION }} --secret-id ${{ env.PROJECT_NAME }}/app-env --query SecretString --output text 2>/dev/null || true)
+                if [ -n "$APP_ENV_JSON" ]; then
+                  printf '%s' "$APP_ENV_JSON" | jq -r 'to_entries[] | select(.value != "") | "\(.key | ascii_upcase)=\(.value)"' | while IFS= read -r line; do
+                    grep -q "^${line%%=*}=." .env || { sed -i "/^${line%%=*}=/d" .env; printf '%s\n' "$line" >> .env; }
+                  done
+                else
+                  echo "WARN: ${{ env.PROJECT_NAME }}/app-env を読めませんでした。.env への追加分の反映を飛ばします" >&2
+                fi
+              fi
               df -h /
               # アプリを動かしたまま先に pull する。変更のないイメージは取得されないので、
               # 停止時間は down から up までの間だけになる(#678)。
