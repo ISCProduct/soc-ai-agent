@@ -12,9 +12,9 @@ import {
   Stack,
   Tooltip,
   Typography,
-  Alert,
   Button,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import CheckIcon from '@mui/icons-material/Check'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { InterviewReport, InterviewUtterance, PhraseSuggestion, interviewApi } from '@/lib/interview'
@@ -231,7 +231,7 @@ export default function InterviewSummary({ report, utterances, userId, theme = '
         >
           <Typography sx={{ color: textPrimary, fontWeight: 700, mb: 1.5 }}>発話ログ</Typography>
           {sourceUtterances.length > 0 && !sourceUtterances.some((utterance) => utterance.id === activeUtteranceId) && (
-            <Alert severity="warning" sx={{ mb: 1.5 }}>該当発言が見つかりません。</Alert>
+            <Alert role="alert" severity="warning" sx={{ mb: 1.5 }}>該当発言が見つかりません。</Alert>
           )}
           {sourceUtterances.length === 0 ? (
             <Typography variant="body2" sx={{ color: textMuted }}>この面接の発話ログはありません。</Typography>

@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { Box, Button, IconButton, AppBar, Toolbar, Typography, Alert, Link as MuiLink, useMediaQuery, useTheme } from '@mui/material'
+import { Box, Button, IconButton, AppBar, Toolbar, Typography, Link as MuiLink, useMediaQuery, useTheme } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import NextLink from 'next/link'
 import { Menu as MenuIcon } from '@mui/icons-material'
 import { HomeSidebar } from '@/components/home/HomeSidebar'
