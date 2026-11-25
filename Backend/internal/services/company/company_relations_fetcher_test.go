@@ -154,6 +154,7 @@ func TestCompanyRelationsFetcher_FetchAndSave_FillsNewRelatedCompanyDetails(t *t
 	tests := []struct {
 		name             string
 		infoServer       func(t *testing.T) *httptest.Server
+		autofetchMax     string
 		wantChildUpdated bool
 	}{
 		{
@@ -173,10 +174,22 @@ func TestCompanyRelationsFetcher_FetchAndSave_FillsNewRelatedCompanyDetails(t *t
 			},
 			wantChildUpdated: false,
 		},
+		{
+			// SOCAIAGENT-723: 上限 0 なら詳細を続けて取得しない（Web検索の連鎖を止める）。関係は保存する。
+			name: "自動取得の上限が0なら詳細を取得しない",
+			infoServer: func(t *testing.T) *httptest.Server {
+				return makeChatCompletionsServer(t, validCompanyInfoJSON())
+			},
+			autofetchMax:     "0",
+			wantChildUpdated: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.autofetchMax != "" {
+				t.Setenv("RELATION_AUTOFETCH_MAX", tt.autofetchMax)
+			}
 			relationsSrv := makeChatCompletionsServer(t, relationsJSON)
 			defer relationsSrv.Close()
 			infoSrv := tt.infoServer(t)

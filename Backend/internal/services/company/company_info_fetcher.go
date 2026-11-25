@@ -549,9 +549,12 @@ func websiteExtractEnabled() bool {
 }
 
 // companyInfoHasGaps は AI で補う必要のある空欄が残っているかを返す。
+//
+// 社風(Culture)・働き方(WorkStyle)は見ない（SOCAIAGENT-723）。gBizINFO では埋まらないため、
+// これを条件に入れると gBiz で基本情報がそろっても毎回 Web検索が走っていた。
+// 空のままなら「未確認」として扱い、推測で埋めない。
 func companyInfoHasGaps(r *CompanyInfoResult) bool {
-	return r.Description == "" || r.MainBusiness == "" || r.Industry == "" ||
-		r.Culture == "" || r.WorkStyle == "" || r.WebsiteURL == ""
+	return r.Description == "" || r.MainBusiness == "" || r.Industry == "" || r.WebsiteURL == ""
 }
 
 // acquireFromWebsite は公式サイトの本文から情報を組み立てる（web_search を使わない）。

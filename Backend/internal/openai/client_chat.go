@@ -341,7 +341,9 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 		log.Printf("[openai] web_search ignore retired model=%s use=%s", requested, model)
 	}
 
-	const maxAttempts = 3
+	// 再試行は1回まで（SOCAIAGENT-723）。空応答も検索自体は課金されているため、
+	// 3回まで試すと1件の取得で最大3回分の検索料がかかっていた。
+	const maxAttempts = 2
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		started := time.Now()

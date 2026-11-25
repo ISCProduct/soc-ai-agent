@@ -104,14 +104,14 @@ func LoadConfig() (*Config, error) {
 	}
 
 	cfg := &Config{
-		DBUser:            os.Getenv("DB_USER"),
-		DBPass:            os.Getenv("DB_PASSWORD"),
-		DBHost:            os.Getenv("DB_HOST"),
-		DBPort:            os.Getenv("DB_PORT"),
-		DBName:            os.Getenv("DB_NAME"),
-		ServerPort:        get("SERVER_PORT", "8080"),
-		GBizInfoBaseURL:   get("GBIZINFO_BASE_URL", ""),
-		GBizInfoToken:     getFirst("GBIZINFO_API_KEY", "GBIZINFO_API_TOKEN"),
+		DBUser:          os.Getenv("DB_USER"),
+		DBPass:          os.Getenv("DB_PASSWORD"),
+		DBHost:          os.Getenv("DB_HOST"),
+		DBPort:          os.Getenv("DB_PORT"),
+		DBName:          os.Getenv("DB_NAME"),
+		ServerPort:      get("SERVER_PORT", "8080"),
+		GBizInfoBaseURL: get("GBIZINFO_BASE_URL", ""),
+		GBizInfoToken:   getFirst("GBIZINFO_API_KEY", "GBIZINFO_API_TOKEN"),
 		// EDINET API（有価証券報告書の取得）。キーが空なら EDINET の取り込みは行わない（SOCAIAGENT-726）。
 		EDINETBaseURL:     get("EDINET_BASE_URL", "https://api.edinet-fsa.go.jp/api/v2"),
 		EDINETAPIKey:      os.Getenv("EDINET_API_KEY"),
