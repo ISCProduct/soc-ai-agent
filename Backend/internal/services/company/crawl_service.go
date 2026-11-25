@@ -20,7 +20,9 @@ type CrawlService struct {
 	aiClient    *openai.Client
 	jobFetcher  *JobFetchService
 	infoFetcher *CompanyInfoFetcher
-	mu          sync.Mutex
+	// numberFinder は法人番号の補完に使う（未設定なら補完ジョブは作らない）
+	numberFinder corporateNumberFinder
+	mu           sync.Mutex
 }
 
 func NewCrawlService(repo repository.CrawlRepository, companyRepo repository.CompanyRepository, popularRepo repository.CompanyPopularityRepository, aiClient *openai.Client) *CrawlService {
@@ -176,7 +178,7 @@ func validateCrawlSource(source *models.CrawlSource) error {
 		"mynavi_company":    true,
 		"openwork_company":  true,
 	}
-	allTypes := []string{"company", "popular_companies", "job_site_company", "job_listing", "mynavi_company", "openwork_company", "fetch_info_all", "fetch_jobs_all", "fetch_persona_all", "warm_l1_catalog"}
+	allTypes := []string{"company", "popular_companies", "job_site_company", "job_listing", "mynavi_company", "openwork_company", "fetch_info_all", "fetch_jobs_all", "fetch_persona_all", "warm_l1_catalog", fillCorporateNumbersTarget}
 	validType := false
 	for _, t := range allTypes {
 		if source.TargetType == t {

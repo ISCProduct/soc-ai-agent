@@ -331,7 +331,8 @@ func main() {
 	gbizInfoService.SetDetailFetcher(infoFetcher)
 	// gBizINFO は法人番号が無いと何も引けない。商号しか分かっていない企業のために、
 	// 国税庁 法人番号システムで法人番号を特定できるようにする(未設定なら無効)。
-	gbizInfoService.SetCorporateNumberFinder(houjinbangou.NewClientFromEnv())
+	houjinBangouClient := houjinbangou.NewClientFromEnv()
+	gbizInfoService.SetCorporateNumberFinder(houjinBangouClient)
 	relationsFetcher := company.NewCompanyRelationsFetcher(companyRepo, companyRelationRepo, aiClient, gbizInfoService)
 	relationsFetcher.SetSearchBudget(companySearchBudget)
 	relationsFetcher.SetSearchFlight(companySearchFlight)
@@ -342,6 +343,7 @@ func main() {
 	jobFetcher.SetSearchFlight(companySearchFlight)
 	crawlService.SetInfoFetcher(infoFetcher)
 	crawlService.SetJobFetcher(jobFetcher)
+	crawlService.SetCorporateNumberFinder(houjinBangouClient)
 	auditLogService := admin.NewAuditLogService(auditLogRepo)
 	analysisService := analysis.NewAnalysisScoringService(
 		userWeightScoreRepo,
