@@ -19,18 +19,21 @@ type GitHubProfile struct {
 
 // GitHubRepo GitHubリポジトリ情報
 type GitHubRepo struct {
-	ID              uint   `gorm:"primaryKey"`
-	UserID          uint   `gorm:"index;not null"`
-	Name            string `gorm:"size:255;not null"`
-	FullName        string `gorm:"size:500;not null"`
-	Description     string `gorm:"type:text"`
-	Language        string `gorm:"size:100"` // メイン言語
-	Stars           int
-	Forks           int
-	IsForked        bool
-	GitHubUpdatedAt time.Time // GitHubのupdated_at
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID          uint   `gorm:"primaryKey"`
+	UserID      uint   `gorm:"index;not null"`
+	Name        string `gorm:"size:255;not null"`
+	FullName    string `gorm:"size:500;not null"`
+	Description string `gorm:"type:text"`
+	Language    string `gorm:"size:100"` // メイン言語
+	Stars       int
+	Forks       int
+	IsForked    bool
+	// IsOwnerOrCollaborator 本人が作成者または共同編集者のリポジトリか。
+	// 所属組織の他人のリポジトリ・コントリビュートしただけのリポジトリは false。AI 要約はこれが true のものに限る（SOCAIAGENT-698）。
+	IsOwnerOrCollaborator bool      `gorm:"not null"`
+	GitHubUpdatedAt       time.Time // GitHubのupdated_at
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // GitHubLanguageStat 言語使用比率

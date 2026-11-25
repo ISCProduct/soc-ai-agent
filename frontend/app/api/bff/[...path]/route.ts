@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { SERVER_BACKEND_URL } from '@/lib/auth/session-cookies'
+import { respondWithStudentSession } from '@/lib/auth/issue-session'
+import { rejectCrossSiteSessionPost } from '@/lib/auth/session-request'
 import { buildProxyNetworkErrorResponse, extractUserAuthHeaders } from '@/lib/api-proxy'
 
 /**
@@ -8,13 +10,15 @@ import { buildProxyNetworkErrorResponse, extractUserAuthHeaders } from '@/lib/ap
  * 画面は JWT を持たなくてよい。中継するのは下の許可リストに合うパスだけ。
  */
 const ALLOWED_PATHS = [
-  // 本登録。ゲストを引き継ぐとき、画面はもうトークンを持たないので Cookie のセッションを渡す必要がある
-  /^auth\/register$/,
+  // ログイン・本登録・ゲスト作成。応答のトークンはここで Cookie にし、画面へは渡さない
+  /^auth\/(login|register|guest)$/,
   /^interviews(\/|$)/,
   /^user\/(preferences|industries|guidances|training-consent|scouts|scout-blocks)(\/|$)/,
   /^auth\/user$/,
   /^realtime\/token$/,
 ]
+
+const SESSION_ISSUING = /^auth\/(login|register|guest)$/
 
 // 応答に載っていても画面へは渡さない項目（トークンは Cookie にだけ置く）
 const TOKEN_FIELDS = ['token', 'user_token', 'refresh_token']
@@ -35,6 +39,12 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
     return NextResponse.json({ error: 'not found' }, { status: 404 })
   }
 
+  // ログイン・登録・ゲスト作成はセッション Cookie を発行するので、他サイトからの送信を落とす
+  if (SESSION_ISSUING.test(joined)) {
+    const rejected = rejectCrossSiteSessionPost(request, `bff-${joined}`)
+    if (rejected) return rejected
+  }
+
   const headers: Record<string, string> = extractUserAuthHeaders(request)
   const contentType = request.headers.get('content-type')
   if (contentType) headers['Content-Type'] = contentType
@@ -43,9 +53,10 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
   // multipart（面接の音声）もそのまま渡す
   const body = hasBody ? await request.arrayBuffer() : undefined
 
-  // 本登録に今のセッションを渡すのは、ゲストを引き継ぐときだけ
+  const issuesSession = SESSION_ISSUING.test(joined)
+  // ログイン・登録に今のセッションを渡さない。本登録でゲストを引き継ぐときだけ渡す
   // （通常の登録で渡すと、別アカウントを作りたい場合に引き継ぎ判定へ入ってしまう）
-  if (joined === 'auth/register' && !wantsGuestPromotion(body)) {
+  if (issuesSession && !(joined === 'auth/register' && wantsGuestPromotion(body))) {
     delete headers['X-User-ID']
     delete headers['X-User-Token']
   }
@@ -63,6 +74,11 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
   }
 
   const resType = res.headers.get('Content-Type') || 'application/json'
+  if (issuesSession && res.ok && resType.includes('application/json')) {
+    const data: unknown = await res.json().catch(() => null)
+    if (!data || typeof data !== 'object') return NextResponse.json(data, { status: res.status })
+    return respondWithStudentSession(data as Record<string, unknown>, res.status)
+  }
   if (joined === 'auth/user' && res.ok && resType.includes('application/json')) {
     const data: unknown = await res.json().catch(() => null)
     if (data && typeof data === 'object') {

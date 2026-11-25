@@ -1,13 +1,13 @@
 package openai
 
 import (
+	"Backend/internal/config"
 	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
@@ -122,7 +122,7 @@ const DefaultTranscribeModel = GPTTranscribeModel
 // 片方だけ変えても誰も気づかず、ログに出るモデル名と実際に叩くモデルが
 // 食い違いうる状態だった。解決はここ1箇所に集約する。
 func resolveTranscribeModel() string {
-	if m := os.Getenv("OPENAI_WHISPER_MODEL"); m != "" {
+	if m := config.OpenAIWhisperModel(); m != "" {
 		return m
 	}
 	return DefaultTranscribeModel
