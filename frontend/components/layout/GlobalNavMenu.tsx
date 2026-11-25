@@ -141,7 +141,7 @@ export function GlobalNavMenu() {
                       '&.Mui-focusVisible': { outline: STUDENT_FOCUS_OUTLINE, outlineOffset: -2 },
                     }}
                   >
-                    <ListItemIcon sx={{ minWidth: 36, color: current ? UI.mark : UI.inkSoft }}>{NAV_ICONS[item.href]}</ListItemIcon>
+                    <ListItemIcon sx={{ minWidth: 36, color: UI.mark }}>{NAV_ICONS[item.href]}</ListItemIcon>
                     <ListItemText
                       primary={item.label}
                       secondary={current ? t('menu.current') : undefined}

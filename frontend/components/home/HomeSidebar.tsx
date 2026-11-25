@@ -22,8 +22,9 @@ import Quiz from '@mui/icons-material/Quiz'
 import RecordVoiceOver from '@mui/icons-material/RecordVoiceOver'
 import Search from '@mui/icons-material/Search'
 import { authService, type User } from '@/lib/auth'
-import { HOME_LAYOUT } from '@/lib/home-theme'
+import { HOME_COLORS, HOME_LAYOUT } from '@/lib/home-theme'
 import { STUDENT_FOCUS_OUTLINE, UI } from '@/lib/design/tokens'
+import { useStudentTheme } from '@/components/providers/MuiProvider'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { getApplicationsNavTarget } from '@/lib/sidebar-navigation'
 import {
@@ -97,6 +98,9 @@ const hiddenScrollbarSx = {
 export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose }: HomeSidebarProps) {
   const router = useRouter()
   const pathname = usePathname() ?? '/'
+  const { mode } = useStudentTheme()
+  // 通常表示は既存ホームの青を保ち、高コントラスト時はテーマの青に追従する。
+  const navIconColor = mode === 'high-contrast' ? UI.mark : HOME_COLORS.link
   // ナビの表示名は辞書（messages/ja.json の nav）が正本
   const t = useTranslations('nav')
   const [questionCount, setQuestionCount] = useState(0)
@@ -184,7 +188,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
       >
         {/* 現在地のバー（色に加えて形でも示す） */}
         <Box aria-hidden sx={{ width: 4, height: 24, flexShrink: 0, borderRadius: '2px', bgcolor: current ? UI.mark : 'transparent' }} />
-        {Icon && <Icon aria-hidden fontSize="small" sx={{ flexShrink: 0, color: current ? UI.mark : UI.inkSoft }} />}
+        {Icon && <Icon aria-hidden fontSize="small" sx={{ flexShrink: 0, color: current ? UI.mark : navIconColor }} />}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           {label}
           {opts.secondary && (

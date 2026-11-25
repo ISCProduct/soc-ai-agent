@@ -161,8 +161,8 @@ test.describe('ホーム（相談中心・広い画面）', () => {
 
 test.describe('ホーム（相談中心・狭い画面）', () => {
   for (const appearance of [
-    { mode: 'comfortable', ink: 'rgb(15, 23, 42)', soft: 'rgb(71, 85, 105)', mark: 'rgb(0, 114, 178)', radius: '12px', focus: '2px' },
-    { mode: 'high-contrast', ink: 'rgb(0, 0, 0)', soft: 'rgb(26, 26, 26)', mark: 'rgb(11, 61, 145)', radius: '4px', focus: '3px' },
+    { mode: 'comfortable', ink: 'rgb(15, 23, 42)', icon: 'rgb(31, 95, 139)', mark: 'rgb(0, 114, 178)', radius: '12px', focus: '2px' },
+    { mode: 'high-contrast', ink: 'rgb(0, 0, 0)', icon: 'rgb(11, 61, 145)', mark: 'rgb(11, 61, 145)', radius: '4px', focus: '3px' },
   ]) {
     test(`${appearance.mode}: メニューの色の役割・角丸・キーボードフォーカスが共通基準に従う`, async ({ page }) => {
       await setupAuth(page, TEST_USER)
@@ -180,7 +180,7 @@ test.describe('ホーム（相談中心・狭い画面）', () => {
         const home = menu.getByRole('link', { name: 'ホーム', exact: true })
         const results = menu.getByRole('link', { name: 'マッチング結果', exact: true })
         await expect(results).toHaveCSS('color', appearance.ink)
-        await expect(results.locator('svg')).toHaveCSS('color', appearance.soft)
+        await expect(results.locator('svg')).toHaveCSS('color', appearance.icon)
         await expect(home).toHaveCSS('color', appearance.mark)
         await expect(home.locator('svg')).toHaveCSS('color', appearance.mark)
         await expect(results).toHaveCSS('font-size', '16px')
