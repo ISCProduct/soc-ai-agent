@@ -185,7 +185,7 @@ export function createStudentMuiTheme(mode: StudentThemeMode) {
     components: {
       MuiCssBaseline: {
         styleOverrides: {
-          ':root': surfaceCssVars(mode),
+          ':root': { ...surfaceCssVars(mode), '--ui-focus-width': `${focusWidth}px` },
           body: { fontFamily: FONT_FAMILY },
           '*:focus-visible': {
             outline: `${focusWidth}px solid ${p.primary}`,

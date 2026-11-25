@@ -29,7 +29,7 @@ import HomeIcon from '@mui/icons-material/Home'
 import FactCheckIcon from '@mui/icons-material/FactCheck'
 import QuizIcon from '@mui/icons-material/Quiz'
 import SearchIcon from '@mui/icons-material/Search'
-import { UI } from '@/lib/design/tokens'
+import { STUDENT_FOCUS_OUTLINE, UI } from '@/lib/design/tokens'
 import {
   GLOBAL_NAV_HOME_ITEMS,
   SIDEBAR_NAV_ITEMS,
@@ -94,9 +94,9 @@ export function GlobalNavMenu() {
           right: 16,
           bottom: { xs: 'calc(72px + env(safe-area-inset-bottom))', md: 16 },
           zIndex: (t) => t.zIndex.appBar,
-          boxShadow: 1,
-          '&:hover': { boxShadow: 2 },
-          '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: 3 },
+          boxShadow: 'none',
+          '&:hover': { boxShadow: 'none' },
+          '&:focus-visible': { outline: STUDENT_FOCUS_OUTLINE, outlineOffset: 3 },
         }}
       >
         <MenuIcon />
@@ -105,7 +105,7 @@ export function GlobalNavMenu() {
         anchor="right"
         open={open}
         onClose={() => setOpen(false)}
-        sx={{ '& .MuiDrawer-paper': { bgcolor: UI.field, boxShadow: 2 } }}
+        sx={{ '& .MuiDrawer-paper': { bgcolor: UI.field, boxShadow: 'none', borderLeft: `1px solid ${UI.ruleSoft}` } }}
       >
         <Box sx={{ width: 280 }} role="presentation">
           <List component="nav" aria-label={t('menu.label')}>
@@ -123,7 +123,8 @@ export function GlobalNavMenu() {
                     aria-current={current ? 'page' : undefined}
                     onClick={() => setOpen(false)}
                     sx={{
-                      color: UI.inkSoft,
+                      color: UI.ink,
+                      minHeight: 44,
                       '&:hover': { bgcolor: UI.tint },
                       '&.Mui-selected, &.Mui-selected:hover': { bgcolor: UI.markTint, color: UI.mark },
                       '&.Mui-selected::before': {
@@ -137,10 +138,10 @@ export function GlobalNavMenu() {
                         borderRadius: '2px',
                         bgcolor: UI.mark,
                       },
-                      '&.Mui-focusVisible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
+                      '&.Mui-focusVisible': { outline: STUDENT_FOCUS_OUTLINE, outlineOffset: -2 },
                     }}
                   >
-                    <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>{NAV_ICONS[item.href]}</ListItemIcon>
+                    <ListItemIcon sx={{ minWidth: 36, color: current ? UI.mark : UI.inkSoft }}>{NAV_ICONS[item.href]}</ListItemIcon>
                     <ListItemText
                       primary={item.label}
                       secondary={current ? t('menu.current') : undefined}

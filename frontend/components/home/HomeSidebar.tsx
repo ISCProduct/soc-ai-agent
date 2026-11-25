@@ -23,7 +23,7 @@ import RecordVoiceOver from '@mui/icons-material/RecordVoiceOver'
 import Search from '@mui/icons-material/Search'
 import { authService, type User } from '@/lib/auth'
 import { HOME_LAYOUT } from '@/lib/home-theme'
-import { UI } from '@/lib/design/tokens'
+import { STUDENT_FOCUS_OUTLINE, UI } from '@/lib/design/tokens'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { getApplicationsNavTarget } from '@/lib/sidebar-navigation'
 import {
@@ -172,20 +172,19 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           minHeight: 44,
           flexShrink: 0,
           px: 1.5,
-          borderRadius: '8px',
+          borderRadius: 1,
           textDecoration: 'none',
           bgcolor: current ? UI.markTint : 'transparent',
-          color: current ? UI.mark : UI.inkSoft,
+          color: current ? UI.mark : UI.ink,
+          typography: 'body1',
           fontWeight: current ? 700 : 400,
-          fontSize: 15,
-          lineHeight: 1.5,
           '&:hover': { bgcolor: current ? UI.markTint : UI.tint },
-          '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
+          '&:focus-visible': { outline: STUDENT_FOCUS_OUTLINE, outlineOffset: -2 },
         }}
       >
         {/* 現在地のバー（色に加えて形でも示す） */}
         <Box aria-hidden sx={{ width: 4, height: 24, flexShrink: 0, borderRadius: '2px', bgcolor: current ? UI.mark : 'transparent' }} />
-        {Icon && <Icon aria-hidden fontSize="small" sx={{ flexShrink: 0, color: 'inherit' }} />}
+        {Icon && <Icon aria-hidden fontSize="small" sx={{ flexShrink: 0, color: current ? UI.mark : UI.inkSoft }} />}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           {label}
           {opts.secondary && (
@@ -210,7 +209,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
           <Avatar sx={{ width: 32, height: 32, bgcolor: UI.markTint, color: UI.mark, fontSize: 16 }}>{user.name.charAt(0).toUpperCase()}</Avatar>
-          <Typography noWrap sx={{ fontWeight: 600, fontSize: 14, lineHeight: 1.5, color: UI.inkSoft }}>
+          <Typography noWrap sx={{ fontWeight: 600, fontSize: 14, lineHeight: 1.5, color: UI.ink }}>
             {user.name}
           </Typography>
           {user.is_guest && (
@@ -225,7 +224,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
             sx={{
               minWidth: 0, p: 0.5, fontSize: 12, fontWeight: 400, color: UI.inkSoft, textTransform: 'none', flexShrink: 0,
               '&:hover': { bgcolor: UI.tint },
-              '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
+              '&:focus-visible': { outline: STUDENT_FOCUS_OUTLINE, outlineOffset: -2 },
             }}
           >
             ログアウト
@@ -237,7 +236,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
               sx={{
                 width: 44, height: 44, flexShrink: 0, color: UI.inkSoft,
                 '&:hover': { bgcolor: UI.tint },
-                '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
+                '&:focus-visible': { outline: STUDENT_FOCUS_OUTLINE, outlineOffset: -2 },
               }}
             >
               <Close />
@@ -331,6 +330,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
       height: { xs: '100dvh', md: '100%' },
       boxSizing: 'border-box',
       bgcolor: UI.field,
+      boxShadow: 'none',
       borderRight: `1px solid ${UI.ruleSoft}`,
       // モバイルは nav だけをスクロールさせ、上部の閉じる操作を残す。
       overflowY: { xs: 'hidden', md: 'auto' },

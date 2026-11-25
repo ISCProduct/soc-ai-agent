@@ -160,7 +160,44 @@ test.describe('ホーム（相談中心・広い画面）', () => {
 })
 
 test.describe('ホーム（相談中心・狭い画面）', () => {
-  test('モバイルも15pxの文字・44pxの行を使い、末尾までスクロールしても閉じられる', async ({ page }) => {
+  for (const appearance of [
+    { mode: 'comfortable', ink: 'rgb(15, 23, 42)', soft: 'rgb(71, 85, 105)', mark: 'rgb(0, 114, 178)', radius: '12px', focus: '2px' },
+    { mode: 'high-contrast', ink: 'rgb(0, 0, 0)', soft: 'rgb(26, 26, 26)', mark: 'rgb(11, 61, 145)', radius: '4px', focus: '3px' },
+  ]) {
+    test(`${appearance.mode}: メニューの色の役割・角丸・キーボードフォーカスが共通基準に従う`, async ({ page }) => {
+      await setupAuth(page, TEST_USER)
+      await mockHome(page)
+      await page.addInitScript((mode) => window.localStorage.setItem('student-theme-mode', mode), appearance.mode)
+
+      for (const width of [375, 1440]) {
+        await page.setViewportSize({ width, height: 900 })
+        await page.goto('/')
+        await expect(heading(page)).toBeVisible({ timeout: 20000 })
+        if (width < 900) await page.getByRole('button', { name: 'メニューを開く' }).click()
+
+        const drawer = page.locator('.MuiDrawer-paper:visible')
+        const menu = drawer.getByRole('navigation', { name: 'メニュー' })
+        const home = menu.getByRole('link', { name: 'ホーム', exact: true })
+        const results = menu.getByRole('link', { name: 'マッチング結果', exact: true })
+        await expect(results).toHaveCSS('color', appearance.ink)
+        await expect(results.locator('svg')).toHaveCSS('color', appearance.soft)
+        await expect(home).toHaveCSS('color', appearance.mark)
+        await expect(home.locator('svg')).toHaveCSS('color', appearance.mark)
+        await expect(results).toHaveCSS('font-size', '16px')
+        await expect(results).toHaveCSS('line-height', '25.6px')
+        await expect(results).toHaveCSS('border-radius', appearance.radius)
+        await expect(drawer).toHaveCSS('box-shadow', 'none')
+
+        await home.focus()
+        await page.keyboard.press('Tab')
+        await expect(results).toBeFocused()
+        await expect(results).toHaveCSS('outline-width', appearance.focus)
+        await expect(results).toHaveCSS('outline-color', appearance.mark)
+      }
+    })
+  }
+
+  test('モバイルも基準の16pxの文字・44pxの行を使い、末尾までスクロールしても閉じられる', async ({ page }) => {
     await setupAuth(page, TEST_USER)
     await mockHome(page)
 
@@ -175,7 +212,7 @@ test.describe('ホーム（相談中心・狭い画面）', () => {
       const menu = drawer.getByRole('navigation', { name: 'メニュー' })
       const home = menu.getByRole('link', { name: 'ホーム', exact: true })
       await expect(drawer).toHaveCSS('width', `${Math.min(360, width - 24)}px`)
-      await expect(home).toHaveCSS('font-size', '15px')
+      await expect(home).toHaveCSS('font-size', '16px')
       await expect(home).toHaveCSS('min-height', '44px')
       await expect(menu).toHaveCSS('overflow-y', 'auto')
       await expect(menu).toHaveCSS('scrollbar-width', 'none')
@@ -196,7 +233,7 @@ test.describe('ホーム（相談中心・狭い画面）', () => {
     }
   })
 
-  test('PCは280px幅・15pxの文字・44pxの行を維持する', async ({ page }) => {
+  test('PCは280px幅・44pxの行を保ち、基準の16pxの文字を使う', async ({ page }) => {
     await setupAuth(page, TEST_USER)
     await mockHome(page)
 
@@ -207,7 +244,7 @@ test.describe('ホーム（相談中心・狭い画面）', () => {
       const drawer = page.locator('.MuiDrawer-paper:visible')
       const home = drawer.getByRole('link', { name: 'ホーム', exact: true })
       await expect(drawer).toHaveCSS('width', '280px')
-      await expect(home).toHaveCSS('font-size', '15px')
+      await expect(home).toHaveCSS('font-size', '16px')
       await expect(home).toHaveCSS('min-height', '44px')
       await expect(drawer.getByRole('button', { name: 'メニューを閉じる' })).toHaveCount(0)
     }

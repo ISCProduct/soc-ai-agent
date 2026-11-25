@@ -7,7 +7,7 @@ import BusinessIcon from '@mui/icons-material/Business'
 import RecordVoiceOverIcon from '@mui/icons-material/RecordVoiceOver'
 import DescriptionIcon from '@mui/icons-material/Description'
 import ManageAccountsIcon from '@mui/icons-material/ManageAccounts'
-import { UI } from '@/lib/design/tokens'
+import { STUDENT_FOCUS_OUTLINE, UI } from '@/lib/design/tokens'
 import { STUDENT_BOTTOM_NAV_ITEMS, isCurrentNav, shouldShowStudentBottomNav } from '@/lib/sidebar-nav'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { useInterviewSessionActive } from '@/app/interview/sessionChrome'
@@ -95,14 +95,15 @@ export function StudentBottomNav() {
               // 0 にして等分させる。文字は隠さない。
               minWidth: 0,
               px: 0.25,
-              color: UI.inkSoft,
+              color: UI.ink,
+              '& .MuiSvgIcon-root': { color: current === item.href ? UI.mark : UI.inkSoft },
               '&:hover': { bgcolor: UI.tint },
               '&.Mui-selected': {
                 color: UI.mark,
                 bgcolor: UI.markTint,
                 boxShadow: 'inset 0 3px 0 currentColor',
               },
-              '&.Mui-focusVisible': { outline: `2px solid ${UI.mark}`, outlineOffset: -2 },
+              '&.Mui-focusVisible': { outline: STUDENT_FOCUS_OUTLINE, outlineOffset: -2 },
               '& .MuiBottomNavigationAction-label': {
                 // 等分すると320pxでは1項目64px。「プロフィール」(6字)が収まる大きさまで
                 // 縮める。読めなくなる大きさにはしない。
