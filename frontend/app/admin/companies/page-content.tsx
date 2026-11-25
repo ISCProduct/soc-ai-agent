@@ -139,7 +139,7 @@ export default function PageContent() {
         />
         <ConfirmDialog
           open={row.bulkPublishTargets !== null}
-          title="企業を学生に公開"
+          title="企業を一括公開"
           message={`選択した ${row.bulkPublishTargets?.length ?? 0} 社を学生に公開しますか？`}
           confirmLabel="公開する"
           busy={row.bulkPublishing}

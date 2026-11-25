@@ -211,14 +211,17 @@ describe('管理画面 企業一覧', () => {
 
   it('一括公開: 確認後に選択した企業を順に公開する', async () => {
     mockFetch()
-    jest.spyOn(window, 'confirm').mockReturnValue(true)
     await renderPage()
     fireEvent.click(screen.getByLabelText('このページで公開できる企業（1 社）を選択'))
     expect(screen.getByText('公開できる企業 1 社を選択中')).toBeInTheDocument()
     const before = calls.length
     fireEvent.click(screen.getByRole('button', { name: '選択した 1 社を学生に公開' }))
+    // 確認は MUI のダイアログ（SOCAIAGENT-534）。確定するまで公開しない
+    const dialog = await screen.findByRole('dialog', { name: '企業を一括公開' })
+    expect(dialog).toHaveTextContent('選択した 1 社を学生に公開しますか？')
+    expect(calls.length).toBe(before)
+    fireEvent.click(within(dialog).getByRole('button', { name: '公開する' }))
     await screen.findByText('1 社を学生に公開しました。')
-    expect(window.confirm).toHaveBeenCalledWith('選択した 1 社を学生に公開しますか？')
     expect(calls.slice(before).map((c) => `${c.method} ${c.url}`)).toEqual([
       'PATCH /api/admin/companies/1/publish',
       'GET /api/admin/companies?limit=50&offset=0',

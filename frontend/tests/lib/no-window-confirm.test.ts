@@ -8,6 +8,8 @@ const TARGETS = [
   'app/admin/users/page-content.tsx',
   'app/admin/job-positions/page-content.tsx',
   'app/admin/companies/page-content.tsx',
+  // 一括公開の確認はフックに移った（develop の分割のあと）
+  'app/admin/companies/hooks/useCompanyRowActions.ts',
   'components/admin/CompanyUsersPanel.tsx',
 ]
 
