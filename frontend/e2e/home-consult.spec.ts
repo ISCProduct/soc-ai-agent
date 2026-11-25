@@ -218,11 +218,14 @@ test.describe('ホーム（相談中心・狭い画面）', () => {
       await expect(menu).toHaveCSS('scrollbar-width', 'none')
       await expect(close).toHaveCSS('width', '44px')
       await expect(close).toHaveCSS('height', '44px')
+      await expect(drawer.getByTestId('menu-scroll-fade')).toBeVisible()
+      await expect(drawer.getByTestId('menu-scroll-fade')).toHaveCSS('pointer-events', 'none')
 
       const before = await close.boundingBox()
       expect(before).not.toBeNull()
       await menu.evaluate((el) => { el.scrollTop = el.scrollHeight })
       await expect(menu.getByRole('link', { name: 'プロフィール設定' })).toBeInViewport()
+      await expect(drawer.getByTestId('menu-scroll-fade')).toHaveCount(0)
       expect(await menu.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
       const after = await close.boundingBox()
       expect(after).not.toBeNull()
@@ -247,6 +250,18 @@ test.describe('ホーム（相談中心・狭い画面）', () => {
       await expect(home).toHaveCSS('font-size', '16px')
       await expect(home).toHaveCSS('min-height', '44px')
       await expect(drawer.getByRole('button', { name: 'メニューを閉じる' })).toHaveCount(0)
+
+      const scroller = drawer.getByTestId('desktop-menu-scroll')
+      await expect(scroller).toHaveCSS('scrollbar-width', 'none')
+      await page.setViewportSize({ width, height: 640 })
+      await expect(drawer.getByTestId('menu-scroll-fade')).toBeVisible()
+      await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight })
+      await expect(drawer.getByRole('link', { name: 'プロフィール設定' })).toBeInViewport()
+      await expect(drawer.getByTestId('menu-scroll-fade')).toHaveCount(0)
+      await scroller.evaluate((el) => { el.scrollTop = 0 })
+      await expect(drawer.getByTestId('menu-scroll-fade')).toBeVisible()
+      await page.setViewportSize({ width, height: 1600 })
+      await expect(drawer.getByTestId('menu-scroll-fade')).toHaveCount(0)
     }
   })
 

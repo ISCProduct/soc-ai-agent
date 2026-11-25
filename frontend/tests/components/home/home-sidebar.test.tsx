@@ -19,17 +19,48 @@ jest.mock('next/navigation', () => ({
 
 const user = { user_id: 1, name: '山田 太郎', email: 'student@example.com' } as unknown as User
 
+const resizeObservers: TestResizeObserver[] = []
+class TestResizeObserver implements ResizeObserver {
+  readonly targets = new Set<Element>()
+  constructor(private readonly callback: ResizeObserverCallback) {
+    resizeObservers.push(this)
+  }
+  observe(target: Element) { this.targets.add(target) }
+  unobserve(target: Element) { this.targets.delete(target) }
+  disconnect = jest.fn(() => this.targets.clear())
+  notify() { this.callback([], this) }
+}
+
+function resize(target: Element) {
+  act(() => resizeObservers.filter((observer) => observer.targets.has(target)).forEach((observer) => observer.notify()))
+}
+
+// jsdom はレイアウトを計算しないため、スクロール領域の寸法だけを再現する。
+function scrollMetrics(viewport: HTMLElement) {
+  const metrics = { clientHeight: 500, scrollHeight: 900 }
+  Object.defineProperties(viewport, {
+    clientHeight: { configurable: true, get: () => metrics.clientHeight },
+    scrollHeight: { configurable: true, get: () => metrics.scrollHeight },
+  })
+  return metrics
+}
+
 /** サイドバーはモバイル用とデスクトップ用の2つが描画される。デスクトップ用（後ろ）を見る。 */
 function nav() {
   return screen.getAllByRole('navigation', { name: 'メニュー' }).at(-1) as HTMLElement
 }
 
 describe('HomeSidebar（ホームの左サイドバー）', () => {
+  const originalResizeObserver = global.ResizeObserver
   beforeEach(() => {
     mockPathname = '/'
     push.mockReset()
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+    resizeObservers.length = 0
+    global.ResizeObserver = TestResizeObserver
   })
+
+  afterEach(() => { global.ResizeObserver = originalResizeObserver })
 
   it('SIDEBAR_NAV_ITEMS の全件が、リンクとして描画される（#403: 適性検査・スカウトの欠落回帰防止）', () => {
     render(<HomeSidebar user={user} onLogout={jest.fn()} />)
@@ -153,5 +184,73 @@ describe('HomeSidebar（ホームの左サイドバー）', () => {
     expect(profile).toHaveAttribute('href', '/profile')
     fireEvent.click(profile)
     expect(onMobileClose).toHaveBeenCalledTimes(1)
+  })
+
+  describe.each([false, true])('下端のスクロール案内（mobile=%s）', (mobile) => {
+    function viewport() {
+      return mobile ? screen.getByRole('navigation', { name: 'メニュー' }) : screen.getByTestId('desktop-menu-scroll')
+    }
+
+    it('下に続きがある間だけフェードを出し、最下部では消え、上に戻ると再表示する', () => {
+      render(<HomeSidebar user={user} onLogout={jest.fn()} mobileOpen={mobile} />)
+      const scroller = viewport()
+      scrollMetrics(scroller)
+      resize(scroller)
+
+      const fade = screen.getByTestId('menu-scroll-fade')
+      expect(fade).toHaveAttribute('aria-hidden', 'true')
+      expect(fade).toHaveStyle({ pointerEvents: 'none' })
+      fireEvent.scroll(scroller, { target: { scrollTop: 200 } })
+      expect(screen.getByTestId('menu-scroll-fade')).toBeInTheDocument()
+      // 小数点以下の誤差で最下部のフェードが残らない。
+      fireEvent.scroll(scroller, { target: { scrollTop: 399.5 } })
+      expect(screen.queryByTestId('menu-scroll-fade')).not.toBeInTheDocument()
+      fireEvent.scroll(scroller, { target: { scrollTop: 0 } })
+      expect(screen.getByTestId('menu-scroll-fade')).toBeInTheDocument()
+    })
+
+    it('全項目が収まる高さでは消え、画面が狭くなると再表示する', () => {
+      render(<HomeSidebar user={user} onLogout={jest.fn()} mobileOpen={mobile} />)
+      const scroller = viewport()
+      const metrics = scrollMetrics(scroller)
+      metrics.clientHeight = 900
+      resize(scroller)
+      expect(screen.queryByTestId('menu-scroll-fade')).not.toBeInTheDocument()
+      metrics.clientHeight = 500
+      resize(scroller)
+      expect(screen.getByTestId('menu-scroll-fade')).toBeInTheDocument()
+      metrics.clientHeight = 1000
+      fireEvent(window, new Event('resize'))
+      expect(screen.queryByTestId('menu-scroll-fade')).not.toBeInTheDocument()
+    })
+
+    it('管理者項目の追加などで内容の高さが変わったときも再判定する', () => {
+      const { rerender, unmount } = render(<HomeSidebar user={user} onLogout={jest.fn()} mobileOpen={mobile} />)
+      const scroller = viewport()
+      const metrics = scrollMetrics(scroller)
+      fireEvent.scroll(scroller, { target: { scrollTop: 400 } })
+      expect(screen.queryByTestId('menu-scroll-fade')).not.toBeInTheDocument()
+
+      rerender(<HomeSidebar user={{ ...user, is_admin: true }} onLogout={jest.fn()} mobileOpen={mobile} />)
+      expect(within(scroller).getByRole('link', { name: '管理者機能' })).toBeInTheDocument()
+      metrics.scrollHeight = 944
+      resize(scroller.firstElementChild!)
+      expect(screen.getByTestId('menu-scroll-fade')).toBeInTheDocument()
+      unmount()
+      for (const observer of resizeObservers) expect(observer.disconnect).toHaveBeenCalled()
+    })
+  })
+
+  it('閉じているモバイルメニューの寸法が変わっても、開き直したときに再判定する', () => {
+    const { rerender } = render(<HomeSidebar user={user} onLogout={jest.fn()} mobileOpen />)
+    const scroller = screen.getByRole('navigation', { name: 'メニュー' })
+    const metrics = scrollMetrics(scroller)
+    resize(scroller)
+    expect(screen.getByTestId('menu-scroll-fade')).toBeInTheDocument()
+    rerender(<HomeSidebar user={user} onLogout={jest.fn()} mobileOpen={false} />)
+    expect(screen.queryByTestId('menu-scroll-fade')).not.toBeInTheDocument()
+    metrics.clientHeight = 1000
+    rerender(<HomeSidebar user={user} onLogout={jest.fn()} mobileOpen />)
+    expect(screen.queryByTestId('menu-scroll-fade')).not.toBeInTheDocument()
   })
 })
