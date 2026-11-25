@@ -189,6 +189,7 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 	// 同じ goroutine に入れると、ここが落ちたときにクロールごと止まる。
 	safego.Go(crawlService.EnsureL1WarmCrawlSource)
 	safego.Go(crawlService.EnsureCorporateNumberFillCrawlSource)
+	safego.Go(crawlService.EnsureEDINETDailyCrawlSource)
 	safego.Every(1*time.Minute, false, crawlService.RunDueSources)
 	// 予定（締切・面接など）の前日通知（#2033）。同じ予定には1件だけ（dedupe_key）
 	safego.Every(1*time.Hour, true, notificationService.NotifyUpcomingSchedules)

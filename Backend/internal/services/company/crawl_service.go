@@ -22,6 +22,9 @@ type CrawlService struct {
 	infoFetcher *CompanyInfoFetcher
 	// numberFinder は法人番号の補完に使う（未設定なら補完ジョブは作らない）
 	numberFinder corporateNumberFinder
+	// edinet / researchRepo は EDINET の取り込みに使う（未設定なら取り込みジョブは作らない）
+	edinet       edinetFetcher
+	researchRepo repository.CompanyResearchRepository
 	mu           sync.Mutex
 }
 
@@ -178,7 +181,7 @@ func validateCrawlSource(source *models.CrawlSource) error {
 		"mynavi_company":    true,
 		"openwork_company":  true,
 	}
-	allTypes := []string{"company", "popular_companies", "job_site_company", "job_listing", "mynavi_company", "openwork_company", "fetch_info_all", "fetch_jobs_all", "fetch_persona_all", "warm_l1_catalog", fillCorporateNumbersTarget}
+	allTypes := []string{"company", "popular_companies", "job_site_company", "job_listing", "mynavi_company", "openwork_company", "fetch_info_all", "fetch_jobs_all", "fetch_persona_all", "warm_l1_catalog", fillCorporateNumbersTarget, edinetDailyTarget}
 	validType := false
 	for _, t := range allTypes {
 		if source.TargetType == t {

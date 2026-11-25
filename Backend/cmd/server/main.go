@@ -41,6 +41,7 @@ import (
 	"Backend/internal/services/companyportal"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
+	"Backend/internal/services/edinet"
 	"Backend/internal/services/email"
 	"Backend/internal/services/esreview"
 	"Backend/internal/services/flywheel"
@@ -344,6 +345,7 @@ func main() {
 	crawlService.SetInfoFetcher(infoFetcher)
 	crawlService.SetJobFetcher(jobFetcher)
 	crawlService.SetCorporateNumberFinder(houjinBangouClient)
+	crawlService.SetEDINETIngest(edinet.NewClient(cfg.EDINETBaseURL, cfg.EDINETAPIKey), repositories.NewCompanyResearchRepository(db))
 	auditLogService := admin.NewAuditLogService(auditLogRepo)
 	analysisService := analysis.NewAnalysisScoringService(
 		userWeightScoreRepo,

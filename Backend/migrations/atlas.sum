@@ -1,4 +1,4 @@
-h1:A6wXA8KrhqAqavH0sbTaFw4Wwb1JXUXkxyvdMs7+1EU=
+h1:6Lo423nvarbM0MuLN+kBxnSCfG5jB5gAYbQFKWeMhx4=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -87,4 +87,4 @@ h1:A6wXA8KrhqAqavH0sbTaFw4Wwb1JXUXkxyvdMs7+1EU=
 20261122030156_invalidate_plain_password_reset_tokens.up.sql h1:ZdQQ+B7+xGRaF1rFZTvxUCyHboChYS1ijwRgrNTPlhM=
 20261122211106_git_hub_repos_add_is_owner_or_collaborator.up.sql h1:2bCMGa5zSnveZ3UxIAxfNp0YKFxTrdWfSRapGjOW/no=
 20261124144122_interview_report_category_breakdown.up.sql h1:WM/vvhg+EW96dGIehPzXcYjWu3lKZb7uiZJJOiPIt48=
-20261125225559_create_company_research_tables.up.sql h1:ecepGS9xhIxcp6es/n5lAA5ZheFg6jK4qT56l9ZllOY=
+20261125225559_create_company_research_tables.up.sql h1:doMkKdh+mE1LgIbohmOIVESsWaFPLtr+9eLpwIadPjM=

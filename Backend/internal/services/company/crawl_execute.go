@@ -73,6 +73,8 @@ func (s *CrawlService) executeCrawl(source *models.CrawlSource) error {
 		return s.executeWarmL1Catalog()
 	case fillCorporateNumbersTarget:
 		return s.executeFillCorporateNumbers()
+	case edinetDailyTarget:
+		return s.executeEDINETDaily(source)
 	default:
 		return fmt.Errorf("unsupported target_type: %s", source.TargetType)
 	}
