@@ -299,9 +299,11 @@ export const authService = {
   },
 
   async createGuest(): Promise<AuthResponse> {
+    // セッションを発行する POST は JSON 形式のみ受け付ける（他サイトからのフォーム送信を落とすため）
     const res = await fetch('/api/bff/auth/guest', {
       method: 'POST',
-      headers: getTenantHeaders(),
+      headers: { ...getTenantHeaders(), 'Content-Type': 'application/json' },
+      body: '{}',
     })
     if (!res.ok) throw new Error(await extractErrorMessage(res, 'ゲストログインに失敗しました。時間をおいて再度お試しください。'))
     return res.json()

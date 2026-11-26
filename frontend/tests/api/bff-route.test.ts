@@ -72,7 +72,7 @@ describe('/api/bff/[...path]', () => {
       fetchMock.mockResolvedValue(Response.json(issued))
       const request = new NextRequest(`http://localhost:3000/api/bff/${path}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', cookie: 'admin_token=previous-admin' },
+        headers: { 'content-type': 'application/json', origin: 'http://localhost:3000', cookie: 'admin_token=previous-admin' },
         body: JSON.stringify({ email: 'a@example.com', password: 'x' }),
       })
       const response = await POST(request, ctx(path))
@@ -88,7 +88,7 @@ describe('/api/bff/[...path]', () => {
 
     it('管理者のログインは admin_token も Cookie に張る', async () => {
       fetchMock.mockResolvedValue(Response.json({ ...issued, token: 'admin-jwt' }))
-      const request = new NextRequest('http://localhost:3000/api/bff/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+      const request = new NextRequest('http://localhost:3000/api/bff/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' }, body: '{}' })
       const response = await POST(request, ctx('auth/login'))
       expect(response.headers.get('set-cookie') ?? '').toContain('admin_token=admin-jwt')
       expect(await response.json()).not.toHaveProperty('token')
@@ -96,7 +96,7 @@ describe('/api/bff/[...path]', () => {
 
     it('ログイン失敗（403 など）はそのまま返し、Cookie は張らない', async () => {
       fetchMock.mockResolvedValue(Response.json({ error: 'email_not_verified' }, { status: 403 }))
-      const request = new NextRequest('http://localhost:3000/api/bff/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+      const request = new NextRequest('http://localhost:3000/api/bff/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' }, body: '{}' })
       const response = await POST(request, ctx('auth/login'))
       expect(response.status).toBe(403)
       expect(response.headers.get('set-cookie')).toBeNull()
@@ -107,7 +107,7 @@ describe('/api/bff/[...path]', () => {
       fetchMock.mockResolvedValue(Response.json(issued))
       const request = new NextRequest('http://localhost:3000/api/bff/auth/login', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'X-User-ID': '1', 'X-User-Token': 'current-jwt' },
+        headers: { 'content-type': 'application/json', origin: 'http://localhost:3000', 'X-User-ID': '1', 'X-User-Token': 'current-jwt' },
         body: '{}',
       })
       await POST(request, ctx('auth/login'))
@@ -122,7 +122,7 @@ describe('/api/bff/[...path]', () => {
       fetchMock.mockResolvedValue(Response.json(issued))
       const request = new NextRequest('http://localhost:3000/api/bff/auth/register', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'X-User-Token': 'current-jwt' },
+        headers: { 'content-type': 'application/json', origin: 'http://localhost:3000', 'X-User-Token': 'current-jwt' },
         body: JSON.stringify({ email: 'a@example.com', promote_guest: promote }),
       })
       await POST(request, ctx('auth/register'))

@@ -40,6 +40,13 @@ type esReviewResponse struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 		Calls            int `json:"calls"`
+		// ByModel はモデルごとの内訳（SOCAIAGENT-559）。改善文を軽量のモデルにした分のコストを測るのに使う
+		ByModel []struct {
+			Model            string `json:"model"`
+			PromptTokens     int    `json:"prompt_tokens"`
+			CompletionTokens int    `json:"completion_tokens"`
+			Calls            int    `json:"calls"`
+		} `json:"by_model"`
 	} `json:"usage"`
 }
 
@@ -184,6 +191,18 @@ func evaluateESResponse(o Observation, c Case, status int, body []byte) Observat
 		o.PromptTokens = resp.Usage.PromptTokens
 		o.CompletionTokens = resp.Usage.CompletionTokens
 		o.TokensEstimated = false
+		for _, m := range resp.Usage.ByModel {
+			if m.Model == "" || (m.PromptTokens == 0 && m.CompletionTokens == 0) {
+				continue
+			}
+			if o.TokensByModel == nil {
+				o.TokensByModel = map[string]ModelTokens{}
+			}
+			t := o.TokensByModel[m.Model]
+			t.PromptTokens += m.PromptTokens
+			t.CompletionTokens += m.CompletionTokens
+			o.TokensByModel[m.Model] = t
+		}
 	}
 	if resp.SpecificityScore == nil || resp.StarScore == nil || resp.LengthBalanceScore == nil {
 		o.Broken, o.BrokenReason, o.Error = true, BrokenSchema, "スコアのキーが欠けている"

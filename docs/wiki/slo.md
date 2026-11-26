@@ -93,11 +93,21 @@ Google SRE の多重ウィンドウ・バーンレートアラート（1h+5m で
 
 ### 通知先
 
-#1355 で入れた Discord 通知経路に合流させる。CloudWatch アラーム → SNS → Lambda → Discord。
-Discord Lambda は既にリポジトリにある（`Backend/cmd/discord-lambda`）。
+本番のアラームは `infra/terraform/environments/prod/alarms.tf` にある。SNS トピック `soc-app-alarms` からメール（`alarm_email`）へ送る。購読はメールの Confirm まで有効にならない。起動失敗などの運用通知（#1355、`Backend/cmd/discord-lambda`）とは別経路である。
 
-**未実装**: CloudWatch アラームと SNS の Terraform 定義。本番の `terraform apply` は #1360 の
-ドリフトが解消されるまで実行できないため、コード追加もそのあとに行う。
+staging には CloudWatch アラームが無い。
+
+実装している条件は、上の設計表と違う。正は Terraform と `operations.md` の「本番の可観測性」。
+
+| アラーム | 実装 |
+|---|---|
+| `target-5xx` | 5分でアプリの 5xx が 5件超。ELB 自身の 5xx は見ない |
+| `target-latency` | p95 が 3秒超を 2回 |
+| `rds-free-storage` | 空き 2GiB 未満 |
+| `rds-connections` | 接続数が 68 超を 2回 |
+| `rds-cpu` | CPU 80% 超が 10分 |
+
+`treat_missing_data` は `notBreaching`。設計表の「5xx が 10件」「p95 が 10秒」「HealthyHostCount が 0」は、この Terraform には無い。
 
 ## エラーバジェットポリシー
 
