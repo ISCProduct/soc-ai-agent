@@ -18,9 +18,9 @@ import {
   FormControl,
   InputLabel,
   Snackbar,
-  Alert,
   IconButton,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { ArrowBack, Edit, Check } from '@mui/icons-material'
 import { authService } from '@/lib/auth'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
@@ -271,7 +271,7 @@ function ApplicationsContent() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         sx={ABOVE_BOTTOM_NAV_SX}
       >
-        <Alert severity={snackbar.severity} onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}>
+        <Alert role="alert" severity={snackbar.severity} onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}>
           {snackbar.message}
         </Alert>
       </Snackbar>

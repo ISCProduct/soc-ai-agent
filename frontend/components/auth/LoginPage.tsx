@@ -11,9 +11,9 @@ import {
   Tabs,
   Tab,
   Divider,
-  Alert,
 } from '@mui/material'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
+import { Alert } from '@/components/common/Alert'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import GoogleIcon from '@mui/icons-material/Google'
 import Link from 'next/link'
@@ -176,7 +176,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
             </Alert>
           )}
           {resendNotice && (
-            <Alert severity="success" sx={{ mb: 2 }}>
+            <Alert role="alert" severity="success" sx={{ mb: 2 }}>
               {resendNotice}
             </Alert>
           )}
@@ -231,7 +231,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
 
           <TabPanel idPrefix={AUTH_TABS_ID} value={1} selectedValue={tabValue}>
             {registrationEmailSent ? (
-              <Alert severity="success">
+              <Alert role="alert" severity="success">
                 <strong>確認メールを送信しました</strong><br />
                 {email} 宛に確認リンクを送りました。メールを確認して登録を完了してください。
               </Alert>
