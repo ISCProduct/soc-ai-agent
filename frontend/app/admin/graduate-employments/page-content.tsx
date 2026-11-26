@@ -17,6 +17,7 @@ import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ListSkeleton } from '@/components/common/ListSkeleton'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
+import { placementCsv, type PlacementBucket, type PlacementSummary } from '@/lib/admin/graduate-summary'
 
 type GraduateEmployment = {
   id: number
@@ -32,6 +33,17 @@ type GraduateEmployment = {
   job_position?: { id: number; title: string }
 }
 
+function BucketLine({ title, rows }: { title: string; rows: PlacementBucket[] }) {
+  if (!rows || rows.length === 0) {
+    return <Typography variant="body2">{title}: なし</Typography>
+  }
+  return (
+    <Typography variant="body2">
+      {title}: {rows.map((row) => `${row.label} ${row.count}件（${row.share_percent}%）`).join('、')}
+    </Typography>
+  )
+}
+
 export default function PageContent() {
   useEffect(() => {
     const user = authService.getStoredUser()
@@ -44,6 +56,9 @@ export default function PageContent() {
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [summary, setSummary] = useState<PlacementSummary | null>(null)
+  const [summaryError, setSummaryError] = useState('')
+  const [summaryLoading, setSummaryLoading] = useState(true)
 
   useEffect(() => {
     // 学校を素早く切り替えたとき、後着の古い応答で一覧を上書きしない
@@ -68,6 +83,41 @@ export default function PageContent() {
       })
     return () => { stale = true }
   }, [schoolId])
+
+  useEffect(() => {
+    let stale = false
+    setSummaryLoading(true)
+    setSummaryError('')
+    const params = new URLSearchParams()
+    if (schoolId !== undefined) params.set('school_id', String(schoolId))
+    const query = params.toString()
+    fetch(`/api/admin/graduate-employments/summary${query ? `?${query}` : ''}`, {
+      headers: authService.getAdminFetchHeaders(),
+    })
+      .then(async (r) => {
+        const data = await r.json()
+        if (!r.ok) throw new Error(data?.error || '就職先の内訳を取得できませんでした')
+        if (!stale) setSummary(data as PlacementSummary)
+      })
+      .catch((e: unknown) => {
+        if (!stale) setSummaryError(e instanceof Error ? e.message : '就職先の内訳を取得できませんでした')
+      })
+      .finally(() => {
+        if (!stale) setSummaryLoading(false)
+      })
+    return () => { stale = true }
+  }, [schoolId])
+
+  const downloadCsv = () => {
+    if (!summary) return
+    const blob = new Blob([placementCsv(summary)], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'graduate-placement-summary.csv'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
@@ -95,6 +145,32 @@ export default function PageContent() {
           </>
         }
       />
+
+      <AdminPanel title="就職先の内訳">
+        <AdminPanelBody>
+          {summaryLoading ? (
+            <ListSkeleton rows={2} label="就職先の内訳を読み込み中" />
+          ) : summaryError ? (
+            <ErrorAlert error={summaryError} />
+          ) : summary && summary.recorded_count === 0 ? (
+            <EmptyState
+              title="集計できる就職先がありません"
+              description="就職先を登録すると、年度・業界・学校の内訳がここに出ます。"
+            />
+          ) : summary ? (
+            <Stack spacing={1}>
+              <Typography variant="body2">{summary.note}</Typography>
+              <Typography variant="body2">登録 {summary.recorded_count} 件</Typography>
+              <BucketLine title="年度" rows={summary.by_year} />
+              <BucketLine title="業界" rows={summary.by_industry} />
+              <BucketLine title="学校" rows={summary.by_school} />
+              <Button variant="outlined" size="small" onClick={downloadCsv} sx={{ alignSelf: 'flex-start' }}>
+                内訳をCSVでダウンロード
+              </Button>
+            </Stack>
+          ) : null}
+        </AdminPanelBody>
+      </AdminPanel>
 
       <AdminPanel title="就職情報一覧">
         <AdminPanelBody>

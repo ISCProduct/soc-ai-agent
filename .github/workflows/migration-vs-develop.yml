@@ -1,0 +1,30 @@
+name: Migration versions vs develop
+
+# develop にマイグレーションが入っても、開いている PR の Test は再実行されない。
+# 同じ版番号を先にマージされると、残った PR は更新するまで衝突に気づけない
+# （SOCAIAGENT-503）。ここでは版番号の検査だけを、各 PR の head に付け直す。
+# Test 全体は再実行しない。develop 自身の成否とは別の check なので、
+# 衝突があってもこのジョブは成功させる（失敗は各 PR の check に出す）。
+
+on:
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+jobs:
+  recheck:
+    name: 開いている PR の版番号
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 開いている PR を最新の develop と比べる
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/migration_vs_develop.py

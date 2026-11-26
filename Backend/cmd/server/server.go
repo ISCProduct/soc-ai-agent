@@ -98,7 +98,7 @@ func bootstrap() (*config.Config, *gorm.DB, *openai.Client, *config.OAuthConfig)
 }
 
 // newEchoServer はグローバルミドルウェア・メトリクス・ヘルスチェックを設定した Echo を返す。
-func newEchoServer(sentryOn bool, organizationService *organization.OrganizationService) *echo.Echo {
+func newEchoServer(sentryOn bool, organizationService *organization.OrganizationService, db *gorm.DB) *echo.Echo {
 	// Echo初期化
 	e := echo.New()
 	e.HideBanner = true
@@ -146,16 +146,37 @@ func newEchoServer(sentryOn bool, organizationService *organization.Organization
 		log.Println("[metrics] /metrics を有効化しました（Bearer 認証）")
 	}
 
-	// ヘルスチェックエンドポイント
-	// /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
-	// /health は後方互換のため維持
+	// /health と /healthz は生存確認。DB を見ない。
+	// ALB と ECS のヘルスチェックは /healthz のままにする。DB の瞬断でタスクを落とさないため。
+	// DB まで見る確認は /ready。
 	healthHandler := func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	}
 	e.GET("/health", healthHandler)
 	e.GET("/healthz", healthHandler)
+	e.GET("/ready", readyHandler(db))
 
 	return e
+}
+
+func readyHandler(db *gorm.DB) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if db == nil {
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		}
+		sqlDB, err := db.DB()
+		if err != nil {
+			slog.Warn("readiness: db handle", "err", err)
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		}
+		ctx, cancel := context.WithTimeout(c.Request().Context(), 2*time.Second)
+		defer cancel()
+		if err := sqlDB.PingContext(ctx); err != nil {
+			slog.Warn("readiness: ping failed", "err", err)
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		}
+		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	}
 }
 
 // startMaintenanceJobs は定期実行ジョブを safego 経由で起動する。
@@ -181,6 +202,14 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 		} else if failed > 0 {
 			// 残り続けると気づけないので、0件になるまで毎回出す
 			slog.Warn("scout index reconcile incomplete", "attempted", attempted, "failed", failed)
+		}
+
+		// 使われなくなったゲスト（リフレッシュトークンの最終発行から7日）を退会させる（SOCAIAGENT-689）。
+		// 通常の退会と同じく12か月残し、保持期間を過ぎたらこの下のパージで物理削除される。
+		if expired, err := userDeletionService.ExpireStaleGuests(context.Background(), time.Now().UTC()); err != nil {
+			slog.Error("expire stale guests failed", "error", err)
+		} else if expired > 0 {
+			slog.Info("expired stale guests", "count", expired)
 		}
 
 		n, err := userDeletionService.PurgeExpiredWithdrawals(time.Now().UTC())

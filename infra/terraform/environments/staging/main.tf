@@ -470,6 +470,7 @@ resource "aws_launch_template" "app" {
     openai_model                  = var.openai_model
     ai_model_premium              = var.ai_model_premium
     ai_model_light                = var.ai_model_light
+    es_improve_model              = var.es_improve_model
     ai_failover_local_stt_url     = var.ai_failover_local_stt_url
     ai_failover_local_llm_url     = var.ai_failover_local_llm_url
     ai_failover_local_llm_model   = var.ai_failover_local_llm_model
