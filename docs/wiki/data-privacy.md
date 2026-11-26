@@ -184,7 +184,8 @@ PUT /api/collective-insights/consent
 | `anonymous_user_id` | SHA-256ハッシュ | 不可 |
 | `company_id` | 企業ID（整数） | 不可 |
 | `action_type` | viewed / applied / passed / rejected | 不可 |
-| `score_snapshot` | カテゴリ別スコア（JSON） | 不可（スコアのみ） |
+| `score_snapshot` | 応募時点のカテゴリ別スコア、総合マッチ度、軸別マッチ度（JSON。設問本文は含めない） | 不可（スコアのみ） |
+| `application_status_events` | 選考ステータスの遷移と変更者のロール | 退会時にユーザー単位で削除 |
 | `created_at` | タイムスタンプ | 単独では不可 |
 
 **記録しないデータ:**

@@ -1,4 +1,4 @@
-h1:SLBRphpoVurV67RxTEhbTw7sP/i14gN8wDFbfRdD140=
+h1:nKq5pzmrUEDLIVmV7Mne/N8SeRIAvuRf8i7aHs6Rh60=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -90,3 +90,4 @@ h1:SLBRphpoVurV67RxTEhbTw7sP/i14gN8wDFbfRdD140=
 20261124184459_create_business_tags.up.sql h1:GQM8Fj2xFanHxBbMKBrojezTLMEp3AkOueigInSJgAg=
 20261126214041_interview_research_snapshots.up.sql h1:oX5AtFHJp7G8xeo4RE480d/wthVYIiBl52gKgXgCa9I=
 20261126214042_interview_shadow_scores.up.sql h1:aX3M9uDIr9fDOIrQLtElNtxDZArfXRAwUOffJv/mneY=
+20261126214043_application_status_events.up.sql h1:xRJ5MnnyHs9DaHFAp3XXBt3Gx/oTKvqFCQdCk4VgkVQ=

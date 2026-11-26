@@ -564,6 +564,7 @@ func main() {
 	appService := application.NewApplicationService(appStatusRepo, matchRepo, companyAccessRepo)
 	appService.SetNotifier(notificationService)
 	appService.SetScoreSnapshotReader(userWeightScoreRepo)
+	appService.SetStatusEventRecorder(appStatusRepo)
 	appController := applicationcontrollers.NewApplicationController(appService)
 	appController.SetSchoolAccess(schoolService)
 	hrStudentAnalysisService := hr.NewStudentAnalysisService(
