@@ -12,7 +12,7 @@
 |-------|-------------|------------|
 | Go | 1.25 以上 | `go version` |
 | Node.js | 24.22.1（`frontend/.nvmrc`） | `node --version` |
-| Python | 3.10 以上 | `python3 --version` |
+| Python | 3.12（RAG イメージと同じ） | `python3 --version` |
 | Docker | 24 以上 | `docker --version` |
 | Docker Compose | v2 (Plugin) | `docker compose version` |
 | Git | — | `git --version` |

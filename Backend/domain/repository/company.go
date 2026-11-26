@@ -2,6 +2,7 @@ package repository
 
 import (
 	"Backend/internal/models"
+	"context"
 	"time"
 )
 
@@ -67,6 +68,17 @@ type CompanyRelationRepository interface {
 	GetMarketInfoByCompanyID(companyID uint) (*models.CompanyMarketInfo, error)
 	GetMarketInfoByCompanyIDs(companyIDs []uint) (map[uint]*models.CompanyMarketInfo, error)
 	UpsertMarketInfo(info *models.CompanyMarketInfo) error
+}
+
+// CompanyBusinessTagRepository は企業の事業タグ（SOCAIAGENT-717）の永続化インターフェース。
+type CompanyBusinessTagRepository interface {
+	// ListAll は共通のタグ一覧を名前順で返す。
+	ListAll(ctx context.Context) ([]models.BusinessTag, error)
+	// NamesByCompanyIDs は企業ごとのタグ名を名前順で返す。タグの無い企業はキーを持たない。
+	NamesByCompanyIDs(ctx context.Context, companyIDs []uint) (map[uint][]string, error)
+	// ReplaceForCompany は企業のタグを names で丸ごと置き換える。一覧に無い名前は作る。
+	// names は models.NormalizeBusinessTagNames を通したものを渡す。
+	ReplaceForCompany(ctx context.Context, companyID uint, names []string) error
 }
 
 // CompanyPopularityRepository は企業人気情報の永続化インターフェース。
