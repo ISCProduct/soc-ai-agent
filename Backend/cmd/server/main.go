@@ -612,6 +612,8 @@ func main() {
 	aiBudgetGuards := routes.NewAIBudgetGuards(aiBudgetService)
 	routes.SetupChatRoutes(api, chatController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupCompanyRoutes(api, relationController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
+	researchChatService := company.NewResearchChatService(companyRepo, companyResearchRepo, researchRAG, aiClient, apiCallLogRepo)
+	routes.SetupCompanyResearchRoutes(api, companycontrollers.NewResearchChatController(researchChatService, subjectReader), cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 学生向けの企業検索（SOCAIAGENT-612）。業界・地域・職種で絞り込み、企業名順で返す
 	routes.SetupCompanySearchRoutes(api, companysearchcontrollers.NewController(repositories.NewCompanySearchRepository(db)), cfg.UserSecret, userDeletionService, organizationService)
 	industryWeightProfileRepo := repositories.NewIndustryWeightProfileRepository(db)

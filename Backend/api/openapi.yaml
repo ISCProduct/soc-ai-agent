@@ -4832,6 +4832,81 @@ paths:
         "429":
           description: レート制限超過
 
+  /api/companies/{id}/research-chat:
+    post:
+      tags: [companies]
+      summary: 企業研究AIチャット（企業について質問し、出典つきで答えを受け取る）
+      description: |
+        登録済みの企業情報・有価証券報告書（EDINET）などの材料だけで答える。Web検索はしない（SOCAIAGENT-724）。
+        材料から答えられないときは status=not_found を 200 で返し、回答の生成に失敗したときは 503 を返す。
+        質問は外部の AI へ送る前に伏字にする。COMPANY_RESEARCH_CHAT_ENABLED=true の環境だけ有効（無効なら 404）。
+      security: [{ userToken: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+          description: 質問する企業のID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question:
+                  type: string
+                  maxLength: 500
+                compare_with:
+                  type: integer
+                  description: 比べる企業のID（省略時は1社だけ）
+      responses:
+        "200":
+          description: 回答（answered）または材料から確認できない（not_found）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [answered, not_found]
+                  answer:
+                    type: string
+                  company_ids:
+                    type: array
+                    items:
+                      type: integer
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        company_id:
+                          type: integer
+                        type:
+                          type: string
+                          description: edinet / gbizinfo / official_site / registered
+                        title:
+                          type: string
+                        url:
+                          type: string
+                        as_of:
+                          type: string
+                        fetched_at:
+                          type: string
+        "400":
+          description: 質問が空、または500文字を超える
+        "401":
+          description: 未ログイン
+        "404":
+          description: 企業が見つからない、または機能が無効
+        "429":
+          description: 1日の質問回数の上限、またはAI予算の上限
+        "503":
+          description: 回答を作れなかった（時間をおいて再試行）
   /api/companies/web-search:
     get:
       tags: [companies]

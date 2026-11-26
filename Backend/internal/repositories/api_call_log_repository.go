@@ -234,3 +234,13 @@ func (r *APICallLogRepository) CountSearchCallsSince(since time.Time) (int64, er
 		Count(&count).Error
 	return count, err
 }
+
+// CountByFeatureAndUserSince は since 以降の、利用者 userID の機能 feature の呼び出し行数を返す。
+// 企業研究AIチャットの1日の質問回数の上限に使う（SOCAIAGENT-724）。
+func (r *APICallLogRepository) CountByFeatureAndUserSince(ctx context.Context, feature string, userID uint, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&models.APICallLog{}).
+		Where("feature = ? AND user_id = ? AND called_at >= ?", feature, userID, since).
+		Count(&count).Error
+	return count, err
+}
