@@ -435,8 +435,10 @@ jobs:
       - name: Run type check
         run: npx next typegen && npx tsc --noEmit
 
+      # カバレッジを測り、frontend/jest.config.ts の coverageThreshold を下回ったら落とす（#2046）。
+      # 以前は --no-coverage で、テストの網羅の後退に気づけなかった。
       - name: Run unit tests
-        run: npm test -- --no-coverage
+        run: npm test -- --coverage --coverageReporters=text-summary
 
   e2e-frontend:
     name: Frontend E2E Tests (Playwright)
