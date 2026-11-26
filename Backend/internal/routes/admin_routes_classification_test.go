@@ -51,6 +51,7 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"GET /teacher/students/:id/es-reviews":                  classStaff,
 		"GET /students/:id/growth-history":                      classStaff,
 		"GET /interviews":                                       classStaff,
+		"GET /interviews/:id/shadow-score":                      classStaff,
 		"GET /interviews/:id/videos":                            classStaff,
 		"GET /interviews/videos/:video_id/url":                  classStaff,
 		"GET /dashboard/users":                                  classStaff,
