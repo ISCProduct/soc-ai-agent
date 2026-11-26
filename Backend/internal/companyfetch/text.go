@@ -166,7 +166,8 @@ func ValidatePublicHTTPURL(rawURL string) error {
 	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("invalid url: %w", err)
+		// url.Parse のエラーは元の URL（クエリのトークン等）を含むので、ログに出る値へ混ぜない
+		return fmt.Errorf("invalid url")
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return fmt.Errorf("only http/https urls are allowed")
@@ -197,37 +198,6 @@ func safeTransport() http.RoundTripper {
 	return netsafe.NewTransport()
 }
 
-// UserAgent は外部サイトを取得するときの User-Agent。
-const UserAgent = "Mozilla/5.0 (compatible; SocAI/1.0; +https://example.com/bot)"
-
-// NewSafeHTTPClient は外部サイトを取得するための http.Client を返す。
-// 外部サイトの取得は必ずこれを通す（宛先とリダイレクト先を検査する）。
-func NewSafeHTTPClient(timeout time.Duration) *http.Client {
-	return &http.Client{
-		Timeout: timeout,
-		// 接続直前に解決済みIPを検査する(#1408)。ValidatePublicHTTPURL だけだと
-		// 検査と接続で別々に名前解決するため、短いTTLを返すDNSサーバーで
-		// 検査後に内部アドレスへ差し替えられる(DNSリバインディング)。
-		// リダイレクト先もこの Transport を通るので同じ検査が掛かる。
-		Transport: safeTransport(),
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= maxRedirects {
-				return fmt.Errorf("stopped after %d redirects", maxRedirects)
-			}
-			// スキームとホスト表記の検査はこちらで行う。IPの検査は Transport 側。
-			return ValidatePublicHTTPURL(req.URL.String())
-		},
-	}
-}
-
-// AllowPrivateURLsForTesting は単体テストで httptest(127.0.0.1) へ繋ぐために検査を外し、
-// 元に戻す関数を返す。他パッケージのテストから使う。本番コードから呼ばないこと。
-func AllowPrivateURLsForTesting() (restore func()) {
-	prev := allowPrivateURLs
-	allowPrivateURLs = true
-	return func() { allowPrivateURLs = prev }
-}
-
 // FetchURLText は URL から HTML を取得し、正規化・トリムしたテキストを返す。
 func FetchURLText(ctx context.Context, rawURL string) (string, error) {
 	if err := ValidatePublicHTTPURL(rawURL); err != nil {
@@ -238,8 +208,26 @@ func FetchURLText(ctx context.Context, rawURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", UserAgent)
-	resp, err := NewSafeHTTPClient(15 * time.Second).Do(req)
+	req.Header.Set("User-Agent", UserAgent())
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		// 接続直前に解決済みIPを検査する(#1408)。ValidatePublicHTTPURL だけだと
+		// 検査と接続で別々に名前解決するため、短いTTLを返すDNSサーバーで
+		// 検査後に内部アドレスへ差し替えられる(DNSリバインディング)。
+		// リダイレクト先もこの Transport を通るので同じ検査が掛かる。
+		Transport: safeTransport(),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxRedirects {
+				return fmt.Errorf("stopped after %d redirects", maxRedirects)
+			}
+			// スキームとホスト表記の検査はこちらで行う。IPの検査は Transport 側。
+			if err := ValidatePublicHTTPURL(req.URL.String()); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

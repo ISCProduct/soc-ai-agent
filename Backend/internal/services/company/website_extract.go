@@ -22,6 +22,7 @@ package company
 // 減らさないことを優先している。
 //
 // この経路は既定で無効（#1345）。有効化の条件は enrichGapsWithAI 側のコメントを見ること。
+// 読む前に robots.txt を確認し、禁止されたページは読まない(website_robots.go)。
 //
 // 数値はプロンプト文面・抽出モデル・minWebsiteTextRunes に依存する。
 // そのどれかを変えたら測り直すこと。
@@ -30,9 +31,10 @@ package company
 // (トヨタで648字。同じく 2026-09 計測)。薄ければ呼び出し側が web_search へ戻す。
 
 import (
-	"Backend/internal/companyfetch"
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"sort"
@@ -53,9 +55,17 @@ const (
 	// 「会社概要」は1ページに収まることが多く、増やすほど相手サーバへの負荷も増える。
 	maxAboutPages = 2
 
+	// maxAboutTries は下位ページへ送るリクエストの上限。
+	// robots.txt で禁止された先へ転送された候補は maxAboutPages に数えないが、
+	// 転送元へのリクエストは発生するので、候補が多いサイトでも送りすぎないよう別に抑える。
+	maxAboutTries = 5
+
 	// politeDelay は同一サイトへの連続アクセスの間隔。
 	politeDelay = 700 * time.Millisecond
 )
+
+// errRobotsRedirect は robots.txt で禁止されたページへの転送を追従しなかったことを表す。
+var errRobotsRedirect = errors.New("robots.txt で禁止されたページへのリダイレクトです")
 
 var anchorRe = regexp.MustCompile(`(?is)<a[^>]+href=["']([^"']+)["'][^>]*>(.*?)</a>`)
 
@@ -76,11 +86,15 @@ func collectWebsiteText(ctx context.Context, websiteURL string) (string, error) 
 		return "", fmt.Errorf("公式サイトURLが空です")
 	}
 
-	// robots.txt で禁止されているページは読まない（SOCAIAGENT-723）。
-	if ok, err := companyfetch.RobotsAllowed(ctx, top); err != nil || !ok {
-		return "", fmt.Errorf("robots.txt により公式サイトの取得が許可されていません")
+	robots, err := fetchRobots(ctx, top)
+	if err != nil {
+		return "", fmt.Errorf("robots.txt を確認できないため取得しません: %w", err)
 	}
-	rawTop, err := fetchPageHTML(ctx, top)
+	if !robots.allows(top) {
+		return "", fmt.Errorf("robots.txt で取得が禁止されています: %s", top)
+	}
+
+	rawTop, err := fetchPageHTML(ctx, robots, top)
 	if err != nil {
 		return "", fmt.Errorf("公式サイトの取得に失敗しました: %w", err)
 	}
@@ -88,10 +102,16 @@ func collectWebsiteText(ctx context.Context, websiteURL string) (string, error) 
 	var sb strings.Builder
 	sb.WriteString(normalizeHTMLText(rawTop))
 
-	for i, link := range rankAboutLinks(rawTop, top) {
-		if i >= maxAboutPages {
+	read, tries := 0, 0
+	for _, link := range rankAboutLinks(rawTop, top) {
+		if read >= maxAboutPages || tries >= maxAboutTries {
 			break
 		}
+		if !robots.allows(link) {
+			continue
+		}
+		read++
+		tries++
 		// 相手は自社サーバではない。連続アクセスは間隔を空ける。
 		select {
 		case <-ctx.Done():
@@ -99,11 +119,12 @@ func collectWebsiteText(ctx context.Context, websiteURL string) (string, error) 
 		case <-time.After(politeDelay):
 		}
 
-		if ok, err := companyfetch.RobotsAllowed(ctx, link); err != nil || !ok {
-			continue
-		}
-		rawSub, err := fetchPageHTML(ctx, link)
+		rawSub, err := fetchPageHTML(ctx, robots, link)
 		if err != nil {
+			// 禁止先への転送は「読めないページ」なので枠を返し、次の候補を読む
+			if errors.Is(err, errRobotsRedirect) {
+				read--
+			}
 			continue // 1ページ落ちても残りで判断する
 		}
 		sb.WriteString(" ")
@@ -123,7 +144,19 @@ func collectWebsiteText(ctx context.Context, websiteURL string) (string, error) 
 
 // fetchPageHTML は1ページ取得して文字コードをUTF-8へ揃える。
 // fetchText は Content-Type の charset を見ないため、Shift-JIS のサイトが文字化けする。
-func fetchPageHTML(ctx context.Context, pageURL string) (string, error) {
+// 同じホストへのリダイレクトは、追従する前に robots の規則と照合する。
+func fetchPageHTML(ctx context.Context, robots *robotsRules, pageURL string) (string, error) {
+	origin, err := url.Parse(pageURL)
+	if err != nil {
+		return "", err
+	}
+	client := newFetchClient(30*time.Second, func(req *http.Request) error {
+		if req.URL.Host == origin.Host && !robots.allows(req.URL.String()) {
+			return fmt.Errorf("%w: %s", errRobotsRedirect, req.URL)
+		}
+		return nil
+	})
+
 	type result struct {
 		html string
 		err  error
@@ -139,7 +172,7 @@ func fetchPageHTML(ctx context.Context, pageURL string) (string, error) {
 				done <- result{err: fmt.Errorf("ページ取得中に panic しました: %v", r)}
 			}
 		}()
-		body, charset, err := fetchBytes(pageURL)
+		body, charset, err := fetchBytesWith(client, pageURL)
 		if err != nil {
 			done <- result{err: err}
 			return
