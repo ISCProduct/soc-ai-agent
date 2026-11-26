@@ -75,6 +75,7 @@ func SetupAdminRoutes(
 	admin.PATCH("/applications/:id/status", appController.AdminUpdateStatus)
 
 	admin.GET("/graduate-employments", adminJobController.GraduateEmployments, schoolScope)
+	admin.GET("/graduate-employments/summary", adminJobController.GraduateEmploymentSummary, schoolScope)
 	admin.POST("/graduate-employments", adminJobController.CreateGraduateEmployment)
 	admin.GET("/graduate-employments/:id", adminJobController.GetGraduateEmployment)
 	admin.PUT("/graduate-employments/:id", adminJobController.UpdateGraduateEmployment)

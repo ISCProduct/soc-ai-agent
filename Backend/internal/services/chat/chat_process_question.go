@@ -110,8 +110,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	// 完了している場合は要約を生成して応答に含める
 	var sessionSummary *SessionSummary
 	if isComplete {
-		summary, _ := s.buildAndSaveSessionSummary(ctx, req.UserID, req.SessionID)
-		sessionSummary = summary
+		sessionSummary = s.sessionSummaryForResponse(ctx, req.UserID, req.SessionID)
 	}
 	return &ChatResponse{
 		Response:            aiResponse,

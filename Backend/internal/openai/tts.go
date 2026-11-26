@@ -2,6 +2,7 @@ package openai
 
 import (
 	"Backend/internal/aimodel"
+	"Backend/internal/config"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -171,7 +172,7 @@ func splitForTTS(text string, max int) []string {
 // ttsOne は1回の API 呼び出しで読み上げる。
 func (cli *Client) ttsOne(ctx context.Context, text, voice string) ([]byte, error) {
 
-	model := os.Getenv("OPENAI_TTS_MODEL")
+	model := config.OpenAITTSModel()
 	if model == "" {
 		model = DefaultTTSModel
 	}

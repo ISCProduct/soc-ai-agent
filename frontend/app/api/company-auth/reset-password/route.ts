@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { clientIpHeaders } from '@/lib/api-proxy'
+import { rejectCrossSiteSessionPost } from '@/lib/auth/session-request'
 import { respondWithCompanySession } from '@/lib/auth/issue-session'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
@@ -8,6 +9,8 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 //
 // ログイン・登録・招待の受け入れと同じく、成功したらここで httpOnly Cookie を張る（SOCAIAGENT-683）。
 export async function POST(request: NextRequest) {
+  const rejected = rejectCrossSiteSessionPost(request, 'company-reset-password')
+  if (rejected) return rejected
   const body = await request.text()
   const res = await fetch(`${BACKEND_URL}/api/company-auth/reset-password`, {
     method: 'POST',

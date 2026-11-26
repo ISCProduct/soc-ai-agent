@@ -595,7 +595,7 @@ func main() {
 	scraperSessionService := admin.NewScraperSessionService(scraperSessionRepo)
 	scraperSessionController := admincontrollers.NewAdminScraperSessionController(scraperSessionService)
 
-	e := newEchoServer(sentryOn, organizationService)
+	e := newEchoServer(sentryOn, organizationService, db)
 
 	// APIルートグループ
 	api := e.Group("/api")
