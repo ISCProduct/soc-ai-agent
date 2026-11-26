@@ -50,4 +50,12 @@ describe('LowMatchConfirmDialog', () => {
     }
     expect(text).toContain('応募できないわけではありません')
   })
+
+  // スクリーンリーダーが用途と本文を読み上げられるよう、タイトルと本文を結び付ける（#2101）
+  it('タイトルがダイアログの名前に、本文が説明になる', () => {
+    setup()
+    const dialog = screen.getByRole('dialog', { name: 'この企業に応募しますか？' })
+    expect(dialog).toHaveAccessibleDescription(/^株式会社サンプル とのマッチ度は 32点/)
+    expect(dialog).toHaveAccessibleDescription(/先生に相談してみてください。$/)
+  })
 })

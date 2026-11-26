@@ -41,6 +41,9 @@ type InterviewService struct {
 	aiBudget             costs.AIBudgetStatusProvider
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
 	questionStateRepo    repository.InterviewQuestionStateRepository
+	researchRepo         repository.InterviewResearchRepository
+	researchTTL          time.Duration // 生成時に環境変数から1回だけ読む
+	skipScoreThreshold   *int          // 生成時に環境変数から1回だけ読む
 	skillScoreRepo       SkillScoreReader
 	companyRepo          shared.CompanyBriefReader
 	jobCh                chan uint
@@ -115,6 +118,8 @@ func NewInterviewService(
 		workerStop:           make(chan struct{}),
 		workerFinished:       make(chan struct{}),
 		inFlightJobs:         map[uint]struct{}{},
+		researchTTL:          researchTTLFromEnv(),
+		skipScoreThreshold:   skipScoreThresholdFromEnv(),
 	}
 }
 
@@ -126,6 +131,11 @@ func (s *InterviewService) SetCompanyQuestionRepo(r repository.InterviewCompanyQ
 // SetQuestionStateRepo 面接質問キューリポジトリを注入する（オプション）
 func (s *InterviewService) SetQuestionStateRepo(r repository.InterviewQuestionStateRepository) {
 	s.questionStateRepo = r
+}
+
+// SetResearchRepo は Web 調査の質問候補を期限つきで読む保存先を注入する。
+func (s *InterviewService) SetResearchRepo(r repository.InterviewResearchRepository) {
+	s.researchRepo = r
 }
 
 // SetSkillScoreRepo GitHubスキルスコアリポジトリを注入する（オプション）
