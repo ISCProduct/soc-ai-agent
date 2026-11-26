@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, Box, Button, Skeleton, Stack, Typography } from '@mui/material'
+import { Box, Button, Skeleton, Stack, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { UI } from '@/lib/design/tokens'
 import { AxisBreakdownNotFoundError, axisLabel, fetchAxisBreakdown, type AxisBreakdown, type AxisRow } from '@/lib/axis-match'
 
@@ -51,9 +52,9 @@ export default function AxisBreakdownPanel({ matchId, cache }: Props) {
   if (error) {
     // 見られない推薦（404）は何度読み直しても同じなので、再読み込みは出さない
     return error.notFound ? (
-      <Alert severity="info" sx={{ mt: 1.5 }}>{error.message}</Alert>
+      <Alert role="alert" severity="info" sx={{ mt: 1.5 }}>{error.message}</Alert>
     ) : (
-      <Alert severity="warning" sx={{ mt: 1.5 }} action={<Button color="inherit" size="small" onClick={() => void load()}>再読み込み</Button>}>
+      <Alert role="alert" severity="warning" sx={{ mt: 1.5 }} action={<Button color="inherit" size="small" onClick={() => void load()}>再読み込み</Button>}>
         {error.message}
       </Alert>
     )

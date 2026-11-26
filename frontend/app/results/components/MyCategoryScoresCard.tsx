@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, Box, Button, Skeleton, Stack, Typography } from '@mui/material'
+import { Box, Button, Skeleton, Stack, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { UI } from '@/lib/design/tokens'
 import { fetchMyCategoryScores, type MyCategoryScore } from '@/lib/axis-match'
 
@@ -41,7 +42,7 @@ export default function MyCategoryScoresCard({ sessionId }: { sessionId: string 
       </Typography>
 
       {error && (
-        <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => void load()}>再読み込み</Button>}>
+        <Alert role="alert" severity="warning" action={<Button color="inherit" size="small" onClick={() => void load()}>再読み込み</Button>}>
           傾向のスコアを読み込めませんでした。
         </Alert>
       )}
