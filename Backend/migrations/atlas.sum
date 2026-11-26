@@ -1,4 +1,4 @@
-h1:wZos9v87qnKrAl5UIe7ctyxaSR+RIMlWWeAKBtKsxRs=
+h1:ySfWoiW/99nanYJrTJlwZ130znmYcbmnlDXe2inG3o0=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -94,3 +94,4 @@ h1:wZos9v87qnKrAl5UIe7ctyxaSR+RIMlWWeAKBtKsxRs=
 20261126214044_api_call_log_daily_retention.up.sql h1:STMQVndB5BV98JzTMgfj+q40k53DSlp2+qEHSyYiBuQ=
 20261126214045_user_company_match_tie_key.up.sql h1:NfTvFH2wpJkgkn8SmHfOwBxFUPGCQLK+i+yrt/ksVU4=
 20261126214046_create_user_growth_snapshots.up.sql h1:AUYTxIJwCiSUfE8SXT28NljMZ2Gq205SKCVKnvwP32Q=
+20261126214047_school_interview_video_retention.up.sql h1:O7yI4cQ9cU60cP8GpAZxga2Fu3JKfXGFBzjZ+6v9OFk=

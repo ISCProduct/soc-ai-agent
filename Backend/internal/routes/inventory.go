@@ -88,7 +88,7 @@ func Inventory() []Route {
 		"", nil, nil)
 	SetupUserRoutes(api, nil, nil, nil, nil,
 		&usercontrollers.StudentScoutController{},
-		"", nil, nil, &usercontrollers.AIBudgetController{}, nil)
+		"", nil, nil, &usercontrollers.AIBudgetController{}, nil, nil)
 	SetupCollectiveInsightRoutes(api, nil, "", nil, nil)
 	SetupAssessmentRoutes(api, nil, "", nil, nil, budget)
 	SetupAssessmentSchoolRoutes(api, nil, nil, nil, "")

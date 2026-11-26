@@ -109,6 +109,7 @@ POST /api/admin/schools/:id/company-applications/:appId/reject
 GET /api/admin/schools/:id/company-approvals
 POST /api/admin/schools/:id/company-approvals
 DELETE /api/admin/schools/:id/company-approvals/:company_id
+PUT /api/admin/schools/:id/interview-video-retention
 GET /api/admin/schools/:id/job-suppressions
 POST /api/admin/schools/:id/job-suppressions
 DELETE /api/admin/schools/:id/job-suppressions/:jobId
@@ -318,6 +319,7 @@ GET /api/user/growth-history
 GET /api/user/guidances
 POST /api/user/guidances/:id/dismiss
 GET /api/user/industries
+GET /api/user/interview-video-retention
 GET /api/user/preferences
 PUT /api/user/preferences
 GET /api/user/profile
