@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import NextLink from 'next/link'
-import { Alert, Box, Button, Card, CardContent, Chip, Link, Skeleton, Stack, Typography } from '@mui/material'
+import { Box, Button, Card, CardContent, Chip, Link, Skeleton, Stack, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import SchoolIcon from '@mui/icons-material/School'
 import { fetchCompanyGraduateOutcome, totalLabel, yearLabel, type GraduateOutcomeCompany } from '@/lib/graduate-outcomes'
 
@@ -41,7 +42,7 @@ export function GraduateOutcomeCard({ companyId }: { companyId: string }) {
   if (loading) return <Skeleton variant="rounded" height={96} sx={{ mb: 3 }} aria-label="先輩の進路実績を読み込み中" />
   if (failed) {
     return (
-      <Alert severity="warning" sx={{ mb: 3 }} action={<Button color="inherit" size="small" onClick={() => void load()}>再読み込み</Button>}>
+      <Alert role="alert" severity="warning" sx={{ mb: 3 }} action={<Button color="inherit" size="small" onClick={() => void load()}>再読み込み</Button>}>
         先輩の進路実績を読み込めませんでした
       </Alert>
     )

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import NextLink from 'next/link'
 import {
-  Alert,
   Box,
   Button,
   Card,
@@ -17,6 +16,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { fetchGraduateOutcomes, totalLabel, yearLabel, type GraduateOutcomeList } from '@/lib/graduate-outcomes'
 
 /**
