@@ -113,12 +113,27 @@ func TestAdminDiagnosisQuality_List(t *testing.T) {
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
-	t.Run("limit を渡す", func(t *testing.T) {
-		c, mock := newDiagnosisQualityController(t)
-		mock.ExpectQuery(selectQualityRecent).WithArgs(10).WillReturnRows(sqlmock.NewRows([]string{"id"}))
-		testsupport.AssertStatus(t, c.List, testsupport.NewCtx(diagnosisQualityRequest("?limit=10"), httptest.NewRecorder()), http.StatusOK)
-		assert.NoError(t, mock.ExpectationsWereMet())
-	})
+	// 上限 100 で頭打ち（SOCAIAGENT-530）。SQL の LIMIT に渡る値で確かめる。
+	limitCases := []struct {
+		name      string
+		query     string
+		wantLimit int
+	}{
+		{name: "上限内はそのまま", query: "?limit=10", wantLimit: 10},
+		{name: "上限ちょうど", query: "?limit=100", wantLimit: 100},
+		{name: "上限超過は100へ頭打ち", query: "?limit=101", wantLimit: 100},
+		{name: "極端な値も100へ頭打ち", query: "?limit=1000000", wantLimit: 100},
+		{name: "0は既定の50", query: "?limit=0", wantLimit: 50},
+		{name: "数値以外は既定の50", query: "?limit=abc", wantLimit: 50},
+	}
+	for _, tt := range limitCases {
+		t.Run("limit: "+tt.name, func(t *testing.T) {
+			c, mock := newDiagnosisQualityController(t)
+			mock.ExpectQuery(selectQualityRecent).WithArgs(tt.wantLimit).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+			testsupport.AssertStatus(t, c.List, testsupport.NewCtx(diagnosisQualityRequest(tt.query), httptest.NewRecorder()), http.StatusOK)
+			assert.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 
 	t.Run("DBエラーは500", func(t *testing.T) {
 		c, mock := newDiagnosisQualityController(t)

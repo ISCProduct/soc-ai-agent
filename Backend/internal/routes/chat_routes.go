@@ -11,13 +11,13 @@ import (
 func SetupChatRoutes(api *echo.Group, chatController *chatcontrollers.ChatController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver, budget AIBudgetGuards) {
 	// チャットエンドポイント（認証必須）
 	chat := api.Group("/chat", EchoUserAuth(userSecret, access, orgs))
-	chat.POST("", chatController.Chat, budget.Immediate)
+	chat.POST("", chatController.Chat, echoAuthenticatedAIRateLimit(), budget.Immediate)
 	chat.GET("/history", chatController.GetHistory)
 	chat.GET("/scores", chatController.GetScores)
 	chat.GET("/recommendations", chatController.GetRecommendations)
-	chat.GET("/analysis", chatController.GetAnalysisSummary, budget.Immediate)
+	chat.GET("/analysis", chatController.GetAnalysisSummary, echoAuthenticatedAIRateLimit(), budget.Immediate)
 	chat.GET("/sessions", chatController.GetSessions)
-	chat.POST("/send-report", chatController.SendReport, budget.Immediate)
+	chat.POST("/send-report", chatController.SendReport, echoAuthenticatedAIRateLimit(), budget.Immediate)
 	chat.POST("/favorite", chatController.ToggleFavorite)
 	// 推薦1件の軸別のマッチの内訳（SOCAIAGENT-611）
 	chat.GET("/matches/:id/axes", chatController.GetAxisBreakdown)
