@@ -628,7 +628,8 @@ rejected         → 不合格
 
 | メソッド | パス | 概要 |
 |---------|------|------|
-| GET | `/health` | ヘルスチェック（後方互換） |
-| GET | `/healthz` | ヘルスチェック（ECS/K8s標準） |
+| GET | `/health` | 生存確認（後方互換）。DB は見ない |
+| GET | `/healthz` | 生存確認。ALB / ECS が使う。DB は見ない |
+| GET | `/ready` | DB へ ping する。失敗時は 503 `{"status":"unavailable"}`。ALB の向き先にはしない |
 
-レスポンス: `{"status":"ok"}`
+生存確認の成功レスポンス: `{"status":"ok"}`

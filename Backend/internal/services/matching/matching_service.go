@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"os"
 	"sort"
 	"strings"
 )
@@ -587,8 +586,7 @@ func MatchingReasonPrompts(match *models.UserCompanyMatch, userScores []models.U
 }
 
 func matchingReasonUseAI() bool {
-	v := strings.TrimSpace(os.Getenv("MATCHING_REASON_USE_AI"))
-	return strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
+	return config.MatchingReasonUseAI()
 }
 
 func buildMatchingReasonUserPrompt(match *models.UserCompanyMatch, userScores []models.UserWeightScore) string {

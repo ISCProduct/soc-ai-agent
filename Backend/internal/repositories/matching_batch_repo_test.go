@@ -300,6 +300,8 @@ func TestFindFavoritedByUser_PicksNewestSessionAndRequiresProfile(t *testing.T) 
 		"is_favorited = ?",
 		"company_weight_profiles",
 		"job_position_id IS NULL",
+		// 無修飾の company_id だと内側の cwp.company_id に解決され、対象企業と結びつかない
+		"cwp.company_id = user_company_matches.company_id",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("発行SQLに %q が無い:\n%s", want, sql)

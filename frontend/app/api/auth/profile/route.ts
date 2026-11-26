@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { extractUserAuthHeaders } from '@/lib/api-proxy'
+import { rejectCrossSiteSessionPost } from '@/lib/auth/session-request'
 import { respondWithStudentSession } from '@/lib/auth/issue-session'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 async function handleProfile(request: NextRequest) {
+  const rejected = rejectCrossSiteSessionPost(request, 'profile')
+  if (rejected) return rejected
   try {
     const body = await request.json()
     const authHeaders = extractUserAuthHeaders(request)
