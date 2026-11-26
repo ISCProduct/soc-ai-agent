@@ -1,4 +1,5 @@
-import { Alert, Box, Button, Chip, CircularProgress, Paper, TextField, Typography } from '@mui/material'
+import { Box, Button, Chip, CircularProgress, Paper, TextField, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import RateReviewIcon from '@mui/icons-material/RateReview'
 import { UI } from '@/lib/design/tokens'

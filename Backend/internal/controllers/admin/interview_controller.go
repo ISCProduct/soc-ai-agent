@@ -504,6 +504,33 @@ func (c *AdminInterviewController) ListVideos(ctx echo.Context) error {
 	})
 }
 
+// ShadowScore は管理者だけが、LLM の採点とローカル採点の並びを見る。
+// 学生向けの API には出さない。担当校の外は拒否する。
+func (c *AdminInterviewController) ShadowScore(ctx echo.Context) error {
+	sessionID, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
+	}
+	if c.sessionRepo == nil || c.interviewService == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "school access check is not configured")
+	}
+	session, err := c.sessionRepo.FindByID(uint(sessionID))
+	if err != nil || session == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	if err := c.ensureSchoolAccessForUser(ctx, session.UserID); err != nil {
+		return err
+	}
+	view, err := c.interviewService.ShadowComparison(ctx.Request().Context(), uint(sessionID))
+	if errors.Is(err, repository.ErrNotFound) {
+		return echo.NewHTTPError(http.StatusNotFound, "シャドー採点はありません")
+	}
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch shadow score")
+	}
+	return ctx.JSON(http.StatusOK, view)
+}
+
 // VideoURL handles GET /api/admin/interviews/:id/videos/:video_id/url
 // Returns a presigned S3 URL valid for 15 minutes.
 func (c *AdminInterviewController) VideoURL(ctx echo.Context) error {
