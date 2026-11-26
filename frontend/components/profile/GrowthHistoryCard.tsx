@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import {
-  Alert,
   Box,
   Button,
   Card,
@@ -14,6 +13,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { Alert } from '@/components/common/Alert'
 import { BACKEND_URL } from '@/lib/config'
 
 const ENDPOINT = `${BACKEND_URL}/api/user/growth-history`
