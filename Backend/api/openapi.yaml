@@ -1242,11 +1242,17 @@ paths:
         閲覧や再計算で進む更新時刻では選ばない。並びは適合度の高い順。
         重みプロファイルの無い企業は件数を数える前に外す。
         `limit` は 1 以上 100 以下。未指定・0以下・数値でないときは 50。100 を超える指定は 100。
+        `offset` は何社目から返すか。未指定・0以下・数値でないときは 0。末尾を超えても空の配列を返す。
+        対象ユーザーは認証だけを見る。クエリの user_id では他人のお気に入りを読めない。
       security: [{ userToken: [] }]
       parameters:
         - in: query
           name: limit
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - in: query
+          name: offset
+          description: 何社目から返すか。0 が先頭。
+          schema: { type: integer, minimum: 0, default: 0 }
       responses:
         "200":
           description: お気に入り企業
@@ -1267,6 +1273,13 @@ paths:
                         score: { type: integer }
                         industry: { type: string }
                         job_title: { type: string }
+                  total:
+                    type: integer
+                    description: ページを切る前の社数。0件のときは省略することがある。
+                  favorite_company_ids:
+                    type: array
+                    description: ページに載らない企業も含めた、お気に入りの企業ID。適合度の高い順。
+                    items: { type: integer }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "503": { description: マッチングサービスが無い }
 
