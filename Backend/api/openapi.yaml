@@ -67,6 +67,8 @@ tags:
     description: エントリーシートの添削とリライト（未ログインでも使える）
   - name: schedule
     description: 選考スケジュール
+  - name: graduate-outcomes
+    description: 卒業生の進路実績（学生向け、自分の学校の実績を人数で）
   - name: portfolio
     description: 自己分析ポートフォリオ（診断・面接・ES・適性検査のまとめ）
   - name: notifications
@@ -2112,6 +2114,43 @@ paths:
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { description: 通知が見つからない }
+
+  /api/graduate-outcomes:
+    get:
+      tags: [graduate-outcomes]
+      summary: 自分の学校の卒業生の進路実績（企業ごとの人数）
+      description: |
+        学生は `X-User-Token` から決まり、学校もその学生の登録から決まる（#2032）。学校の学園が本人の学園と一致するときだけ実績を返す。
+        卒業生の氏名・学科・メモは返さず人数だけ。学校が未登録なら `school_linked: false` で実績は空（他校の実績は返さない）。
+        人数が3人未満の区分（企業 × 年度 × 職種）は数を出さない。企業の `total`・年度別・一覧の `total` はどれも、見せる区分の和
+        （隠した人数は入れない）。3人未満の区分があれば `total_few`・`by_year_few` を立てる。見せる区分の無い企業は `total` が null。
+        並びは人数の多い順で、見せる区分の無い企業は末尾に企業名順。年度が未登録の実績は `year: 0` で、絞り込みの選択肢には出さない。
+        無効・削除済み・審査前のゲスト投稿の企業は含めない。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: year, description: 卒業年度で絞る（1900〜2100）, schema: { type: integer } }
+        - { in: query, name: industry, description: 業界で絞る, schema: { type: string } }
+      responses:
+        "200": { description: 企業ごとの人数と、絞り込みの選択肢（年度・業界） }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/graduate-outcomes/companies/{id}:
+    get:
+      tags: [graduate-outcomes]
+      summary: 自分の学校の卒業生の、1社への進路実績（年度別・職種別の人数）
+      description: |
+        3人未満の区分（年度 × 職種）は数を出さず、`total`・年度別・職種別はどれも見せる区分の和にする（年度別の和も職種別の和も `total` と一致する）。
+        3人未満の区分があれば `total_few`・`by_year_few`・`by_position_few` を立てる。見せる区分が無ければ `total` は null で内訳も返さない。
+        企業が存在しない、または学生に見せない企業なら 404。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: 年度別・職種別の人数 }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 企業が見つからない }
 
   /api/schedule:
     get:
