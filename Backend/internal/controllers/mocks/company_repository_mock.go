@@ -2,6 +2,7 @@ package mocks
 
 import (
 	"Backend/internal/models"
+	"context"
 	"time"
 
 	"github.com/stretchr/testify/mock"
@@ -194,4 +195,9 @@ func (m *CompanyRepositoryMock) ListActiveMissingFetchCandidates(limit int, prim
 		return v.([]models.Company), args.Error(1)
 	}
 	return nil, args.Error(1)
+}
+
+func (m *CompanyRepositoryMock) FillCorporateNumberIfEmpty(ctx context.Context, id uint, corporateNumber string) (bool, error) {
+	args := m.Called(ctx, id, corporateNumber)
+	return args.Bool(0), args.Error(1)
 }

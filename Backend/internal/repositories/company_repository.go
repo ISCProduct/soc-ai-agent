@@ -4,6 +4,7 @@ import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/companyfields"
 	"Backend/internal/models"
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -174,6 +175,15 @@ func (r *CompanyRepository) FindByCorporateNumber(corporateNumber string) (*mode
 		return nil, err
 	}
 	return &company, nil
+}
+
+// FillCorporateNumberIfEmpty は法人番号が空のときだけ、その列だけを書き込む。
+// 行全体を保存（Save）すると、読んでから書くまでの間の他の更新を古い値で戻してしまうため、条件付きの UPDATE にする。
+func (r *CompanyRepository) FillCorporateNumberIfEmpty(ctx context.Context, id uint, corporateNumber string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&models.Company{}).
+		Where("id = ? AND (corporate_number = '' OR corporate_number IS NULL)", id).
+		Update("corporate_number", corporateNumber)
+	return res.RowsAffected > 0, res.Error
 }
 
 // GetWeightProfile 企業の重視度プロファイルを取得

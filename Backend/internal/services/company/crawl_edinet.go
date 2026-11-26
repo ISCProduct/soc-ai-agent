@@ -34,6 +34,9 @@ const (
 
 var jst = time.FixedZone("JST", 9*60*60)
 
+// errEDINETPermanent は取り直しても直らない失敗（書類の中身が読めないなど）。この書類は飛ばして先へ進む。
+var errEDINETPermanent = errors.New("edinet: 書類を読み取れません")
+
 // edinetFetcher は edinet.Client が満たす。テストでは偽物に差し替える。
 type edinetFetcher interface {
 	Enabled() bool
@@ -94,18 +97,28 @@ func (s *CrawlService) executeEDINETDaily(source *models.CrawlSource) error {
 				continue
 			}
 			c, err := s.companyRepo.FindByCorporateNumber(doc.JCN)
-			if err != nil || c == nil || !c.IsActive {
+			if err != nil && !errors.Is(err, repository.ErrNotFound) {
+				// DB の一時的な障害を「自社に無い会社」として読み飛ばすと、この書類を二度と拾えない。
+				log.Printf("%s: 法人番号での検索に失敗: %v", edinetDailyTarget, err)
+				stopped = true
+				break
+			}
+			if c == nil || !c.IsActive {
 				continue
 			}
 			matched++
 			switch err := s.ingestEDINETDocument(ctx, c, doc); {
-			case errors.Is(err, edinet.ErrRateLimited):
-				stopped = true
-			case err != nil:
+			case err == nil:
+				ingested++
+			case errors.Is(err, errEDINETPermanent):
+				// 書類の中身が読めないなど、取り直しても直らない失敗は飛ばして先へ進む。
 				failed++
 				log.Printf("%s: company=%d doc=%s: %v", edinetDailyTarget, c.ID, doc.DocID, err)
 			default:
-				ingested++
+				// 429・通信・DB など、取り直せば直り得る失敗はこの日を進めずに打ち切る。
+				failed++
+				log.Printf("%s: company=%d doc=%s: %v", edinetDailyTarget, c.ID, doc.DocID, err)
+				stopped = true
 			}
 			if stopped {
 				break
@@ -113,7 +126,7 @@ func (s *CrawlService) executeEDINETDaily(source *models.CrawlSource) error {
 		}
 		if stopped {
 			// この日は途中までなので進めない（次回この日を最初から処理する。取り込み済みは本文が同じなら書かない）。
-			log.Printf("%s: 429 のため %s の途中で打ち切り、次回再開します", edinetDailyTarget, d.Format("2006-01-02"))
+			log.Printf("%s: %s の途中で打ち切り、次回この日から再開します", edinetDailyTarget, d.Format("2006-01-02"))
 			break
 		}
 		source.ProgressCursor = d.Format("2006-01-02")
@@ -144,7 +157,7 @@ func (s *CrawlService) ingestEDINETDocument(ctx context.Context, c *models.Compa
 	}
 	rep, err := edinet.ParseAnnualReportZip(zipBytes)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %v", errEDINETPermanent, err)
 	}
 
 	now := time.Now()
@@ -189,12 +202,22 @@ func (s *CrawlService) hasNewerEDINETReport(ctx context.Context, companyID uint,
 	if asOf == nil {
 		return false, nil
 	}
+	// 文章は本文が同じだと対象年度（as_of）を更新しないので、毎回書き直す数字の対象年度も見る。
 	docs, err := s.researchRepo.ListDocuments(ctx, companyID)
 	if err != nil {
 		return false, err
 	}
 	for _, d := range docs {
 		if d.SourceType == models.ResearchSourceEDINET && d.AsOf != nil && d.AsOf.After(*asOf) {
+			return true, nil
+		}
+	}
+	facts, err := s.researchRepo.ListFacts(ctx, companyID)
+	if err != nil {
+		return false, err
+	}
+	for _, f := range facts {
+		if f.SourceType == models.ResearchSourceEDINET && f.AsOf != nil && f.AsOf.After(*asOf) {
 			return true, nil
 		}
 	}

@@ -41,8 +41,11 @@ def test_index_replaces_document_chunks(client):
     body = res.json()
     assert body["chunks"] >= 1
     assert body["usage"]["calls"] == 1 and body["usage"]["prompt_tokens"] > 0
-    col.delete.assert_called_once_with(where={"document_id": 11})  # 古いチャンクを先に消す
-    meta = col.add.call_args.kwargs["metadatas"][0]
+    # 新しいチャンクを先に入れてから、余った古いチャンクだけを消す（登録に失敗しても検索できなくならない）
+    assert col.upsert.called
+    n = res.json()["chunks"]
+    col.delete.assert_called_once_with(where={"$and": [{"document_id": 11}, {"chunk_index": {"$gte": n}}]})
+    meta = col.upsert.call_args.kwargs["metadatas"][0]
     assert meta["company_id"] == 5 and meta["document_id"] == 11 and meta["source_type"] == "edinet"
 
 
@@ -78,3 +81,21 @@ def test_requires_internal_token():
     import main
     res = TestClient(main.app).post("/company-research/query", json={"company_ids": [5], "question": "x"})
     assert res.status_code in (401, 403)
+
+
+def test_split_text_overlap_never_exceeds_size():
+    # 200字の文のあとに280字の文が続いても、size=300 を超えない（レビュー指摘）
+    text = "あ" * 199 + "。" + "い" * 279 + "。"
+    chunks = store.split_text(text, size=300, overlap=50)
+    assert all(len(c) <= 300 for c in chunks), [len(c) for c in chunks]
+
+
+def test_index_accepts_special_token_text(client):
+    col, chroma = _collection()
+    with patch.object(store, "get_chroma_client", return_value=chroma), \
+         patch("routers.company_research.embed_texts", side_effect=lambda ts: [[0.1] for _ in ts]):
+        res = client.post("/company-research/index", json={
+            "company_id": 5,
+            "documents": [{"document_id": 12, "source_type": "edinet", "body": "合成の本文 <|endoftext|> です。"}],
+        })
+    assert res.status_code == 200, res.text

@@ -72,7 +72,7 @@ func (s *CrawlService) executeCrawl(source *models.CrawlSource) error {
 	case "warm_l1_catalog":
 		return s.executeWarmL1Catalog()
 	case fillCorporateNumbersTarget:
-		return s.executeFillCorporateNumbers()
+		return s.executeFillCorporateNumbers(source)
 	case edinetDailyTarget:
 		return s.executeEDINETDaily(source)
 	case researchIndexTarget:

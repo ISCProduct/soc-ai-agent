@@ -113,7 +113,8 @@ func (c *Client) get(ctx context.Context, path string, q url.Values) ([]byte, er
 	q.Set("Subscription-Key", c.apiKey)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path+"?"+q.Encode(), nil)
 	if err != nil {
-		return nil, err
+		// URL の解析エラーには URL（＝キー）が含まれるので、元のエラー文は返さない。
+		return nil, fmt.Errorf("edinet: %s のリクエストを作れません（EDINET_BASE_URL を確認）", path)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -131,7 +132,25 @@ func (c *Client) get(ctx context.Context, path string, q url.Values) ([]byte, er
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("edinet: %s がステータス %d を返しました", path, resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 50*1024*1024))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 50*1024*1024))
+	if err != nil {
+		return nil, err
+	}
+	// 認証エラーなどは HTTP 200 のまま {"StatusCode":401,"message":"..."} の JSON で返る（仕様書 3-3）。
+	// 書類一覧なら空の一覧、書類取得なら壊れた ZIP と取り違えないよう、ここでエラーにする。
+	if len(body) > 0 && body[0] == '{' {
+		var e struct {
+			StatusCode int    `json:"StatusCode"`
+			Message    string `json:"message"`
+		}
+		if json.Unmarshal(body, &e) == nil && e.StatusCode != 0 && e.StatusCode != http.StatusOK {
+			if e.StatusCode == http.StatusTooManyRequests {
+				return nil, ErrRateLimited
+			}
+			return nil, fmt.Errorf("edinet: %s がエラーを返しました: StatusCode=%d %s", path, e.StatusCode, e.Message)
+		}
+	}
+	return body, nil
 }
 
 // wait は前回の呼び出しから minInterval 空ける。

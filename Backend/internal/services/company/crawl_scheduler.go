@@ -91,3 +91,21 @@ func computeNextRun(now time.Time, source *models.CrawlSource) *time.Time {
 func lastDayOfMonth(year int, month time.Month, loc *time.Location) int {
 	return time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
 }
+
+// EnsureDefaultCrawlSources は自動で作る定期取得ジョブ（L1 温存・法人番号の補完・EDINET・RAG への登録）を、
+// 無ければ作る。「無いことを確かめてから作る」間に別のタスクが同じことをすると二重に作られるので、
+// 定期取得と同じ DB ロックの中で1台だけが行う。取れなかったときは、ロックを持っているタスクが
+// 自分の起動時に作っているので何もしない（次の起動で改めて確かめる）。
+func (s *CrawlService) EnsureDefaultCrawlSources() {
+	ok, err := s.repo.WithRunLock(context.Background(), func() {
+		s.EnsureL1WarmCrawlSource()
+		s.EnsureCorporateNumberFillCrawlSource()
+		s.EnsureEDINETDailyCrawlSource()
+		s.EnsureResearchIndexCrawlSource()
+	})
+	if err != nil {
+		log.Printf("[Crawl] ensure sources: lock failed: %v", err)
+	} else if !ok {
+		log.Printf("[Crawl] ensure sources: 別のタスクが実行中のためスキップします")
+	}
+}

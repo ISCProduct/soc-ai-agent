@@ -44,18 +44,38 @@ func corporateNumberFillLimit() int {
 	return 300
 }
 
+// corporateNumberFiller は repositories.CompanyRepository が満たす。法人番号の列だけを、空のときだけ書き込む。
+// 行全体を保存（Update）すると、読んでから書くまでの間の他の更新を古い値で戻してしまう。
+type corporateNumberFiller interface {
+	FillCorporateNumberIfEmpty(ctx context.Context, id uint, corporateNumber string) (bool, error)
+}
+
 // executeFillCorporateNumbers は法人番号が空の企業を上限まで特定して埋める。
-func (s *CrawlService) executeFillCorporateNumbers() error {
+//
+// 前回どこまで試したかを source.ProgressCursor（最後に試した企業のID）に持ち、続きから再開する。
+// 一覧は ID の降順なので、前回より小さい ID から試す。最後まで見たら空に戻して次回は先頭から。
+// これが無いと、特定できない企業が先頭に上限件数あるだけで、後ろの企業がいつまでも埋まらない。
+func (s *CrawlService) executeFillCorporateNumbers(source *models.CrawlSource) error {
 	if s.numberFinder == nil || !s.numberFinder.Enabled() {
 		return fmt.Errorf("法人番号APIが設定されていません（HOUJIN_BANGOU_APP_ID）")
 	}
+	filler, ok := s.companyRepo.(corporateNumberFiller)
+	if !ok {
+		return fmt.Errorf("企業リポジトリが法人番号の書き込みに対応していません")
+	}
+	var after uint64 // 0 なら先頭から
+	if source.ProgressCursor != "" {
+		after, _ = strconv.ParseUint(source.ProgressCursor, 10, 64)
+	}
 	limit := corporateNumberFillLimit()
 	var tried, filled, unresolved, failed int
+	var lastTried uint
 	err := s.forEachActiveCompanyPage(200, func(c models.Company) error {
-		if tried >= limit || c.IsGuestEntry || strings.TrimSpace(c.CorporateNumber) != "" {
+		if tried >= limit || (after != 0 && uint64(c.ID) >= after) || c.IsGuestEntry || strings.TrimSpace(c.CorporateNumber) != "" {
 			return nil
 		}
 		tried++
+		lastTried = c.ID
 		corp, err := s.numberFinder.ResolveCorporateNumber(context.Background(), c.Name, c.Location)
 		if err != nil {
 			failed++
@@ -65,24 +85,22 @@ func (s *CrawlService) executeFillCorporateNumbers() error {
 			unresolved++
 			return nil
 		}
-		// 一覧を読んでから時間が経っているので、書く直前に読み直して法人番号だけを埋める。
-		cur, err := s.companyRepo.FindByID(c.ID)
-		if err != nil || cur == nil {
-			failed++
-			return fmt.Errorf("企業の再取得に失敗: %v", err)
-		}
-		if strings.TrimSpace(cur.CorporateNumber) != "" {
-			return nil
-		}
-		cur.CorporateNumber = corp.CorporateNumber
-		if err := s.companyRepo.Update(cur); err != nil {
+		wrote, err := filler.FillCorporateNumberIfEmpty(context.Background(), c.ID, corp.CorporateNumber)
+		if err != nil {
 			failed++
 			return err
 		}
-		filled++
+		if wrote {
+			filled++
+		}
 		return nil
 	}, fillCorporateNumbersTarget)
-	log.Printf("%s: tried=%d filled=%d unresolved=%d failed=%d limit=%d", fillCorporateNumbersTarget, tried, filled, unresolved, failed, limit)
+	if tried >= limit {
+		source.ProgressCursor = strconv.FormatUint(uint64(lastTried), 10)
+	} else {
+		source.ProgressCursor = "" // 最後まで見たので、次回は先頭（新しく登録された企業）から
+	}
+	log.Printf("%s: tried=%d filled=%d unresolved=%d failed=%d limit=%d cursor=%q", fillCorporateNumbersTarget, tried, filled, unresolved, failed, limit, source.ProgressCursor)
 	return err
 }
 

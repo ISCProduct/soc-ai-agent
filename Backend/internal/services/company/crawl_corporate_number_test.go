@@ -45,15 +45,15 @@ func (f *fakeFinder) ResolveCorporateNumber(_ context.Context, name, _ string) (
 	return f.byName[name], nil
 }
 
-// 法人番号の日次補完: 一意に特定できた空欄だけを埋める（SOCAIAGENT-726 の前提）。
+// 法人番号の日次補完: 一意に特定できた空欄だけを、法人番号の列だけ埋める（SOCAIAGENT-726）。
 func TestCrawlService_FillCorporateNumbers(t *testing.T) {
-	companies := []models.Company{
-		{ID: 1, Name: "特定できる", IsActive: true},
-		{ID: 2, Name: "特定できない", IsActive: true},
-		{ID: 3, Name: "閉鎖済み", IsActive: true},
-		{ID: 4, Name: "番号あり", IsActive: true, CorporateNumber: "1111111111111"},
-		{ID: 5, Name: "ゲスト投稿", IsActive: true, IsGuestEntry: true},
+	companies := []models.Company{ // FindAllActive と同じく ID の降順
 		{ID: 6, Name: "桁がおかしい", IsActive: true},
+		{ID: 5, Name: "ゲスト投稿", IsActive: true, IsGuestEntry: true},
+		{ID: 4, Name: "番号あり", IsActive: true, CorporateNumber: "1111111111111"},
+		{ID: 3, Name: "閉鎖済み", IsActive: true},
+		{ID: 2, Name: "特定できない", IsActive: true},
+		{ID: 1, Name: "特定できる", IsActive: true},
 	}
 	finder := &fakeFinder{byName: map[string]*houjinbangou.Corporation{
 		"特定できる":  {CorporateNumber: "2222222222222"},
@@ -62,36 +62,40 @@ func TestCrawlService_FillCorporateNumbers(t *testing.T) {
 	}}
 	repo := &mocks.CompanyRepositoryMock{}
 	repo.On("FindAllActive", 200, 0).Return(companies, nil)
-	repo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "特定できる"}, nil)
-	var updated []models.Company
-	repo.On("Update", mock.AnythingOfType("*models.Company")).Return(nil).Run(func(a mock.Arguments) {
-		updated = append(updated, *a.Get(0).(*models.Company))
-	})
+	repo.On("FillCorporateNumberIfEmpty", mock.Anything, uint(1), "2222222222222").Return(true, nil).Once()
 
-	svc := company.NewCrawlService(&fakeCrawlRepo{src: models.CrawlSource{ID: 9, TargetType: "fill_corporate_numbers", ScheduleType: "daily", ScheduleTime: "04:00"}}, repo, nil, nil)
+	cr := &fakeCrawlRepo{src: models.CrawlSource{ID: 9, TargetType: "fill_corporate_numbers", ScheduleType: "daily", ScheduleTime: "04:00"}}
+	svc := company.NewCrawlService(cr, repo, nil, nil)
 	svc.SetCorporateNumberFinder(finder)
 	run, err := svc.RunSource(9)
 	require.NoError(t, err)
 	assert.Equal(t, "success", run.Status)
-
-	require.Len(t, updated, 1, "特定できた1社だけを書く")
-	assert.Equal(t, uint(1), updated[0].ID)
-	assert.Equal(t, "2222222222222", updated[0].CorporateNumber)
+	repo.AssertExpectations(t) // 特定できた1社だけを、列だけ書く（Update は呼ばない）
+	repo.AssertNotCalled(t, "Update", mock.Anything)
 	assert.ElementsMatch(t, []string{"特定できる", "特定できない", "閉鎖済み", "桁がおかしい"}, finder.calls,
 		"番号のある企業とゲスト投稿には問い合わせない")
+	assert.Equal(t, "", cr.src.ProgressCursor, "最後まで見たら次回は先頭から")
 }
 
-// 1回の上限を超えて問い合わせない。
-func TestCrawlService_FillCorporateNumbers_Limit(t *testing.T) {
+// 上限で止まったら、次回は続き（前回より小さい ID）から再開する。特定できない企業が先頭にあっても後ろが埋まる。
+func TestCrawlService_FillCorporateNumbers_ResumesFromCursor(t *testing.T) {
 	t.Setenv("CORPORATE_NUMBER_FILL_DAILY_LIMIT", "2")
-	companies := []models.Company{{ID: 1, Name: "a", IsActive: true}, {ID: 2, Name: "b", IsActive: true}, {ID: 3, Name: "c", IsActive: true}}
+	companies := []models.Company{{ID: 30, Name: "a", IsActive: true}, {ID: 20, Name: "b", IsActive: true}, {ID: 10, Name: "c", IsActive: true}}
 	finder := &fakeFinder{byName: map[string]*houjinbangou.Corporation{}}
 	repo := &mocks.CompanyRepositoryMock{}
 	repo.On("FindAllActive", 200, 0).Return(companies, nil)
-
-	svc := company.NewCrawlService(&fakeCrawlRepo{src: models.CrawlSource{ID: 9, TargetType: "fill_corporate_numbers", ScheduleType: "daily", ScheduleTime: "04:00"}}, repo, nil, nil)
+	cr := &fakeCrawlRepo{src: models.CrawlSource{ID: 9, TargetType: "fill_corporate_numbers", ScheduleType: "daily", ScheduleTime: "04:00"}}
+	svc := company.NewCrawlService(cr, repo, nil, nil)
 	svc.SetCorporateNumberFinder(finder)
+
 	_, err := svc.RunSource(9)
 	require.NoError(t, err)
-	assert.Len(t, finder.calls, 2)
+	assert.Equal(t, []string{"a", "b"}, finder.calls)
+	assert.Equal(t, "20", cr.src.ProgressCursor)
+
+	finder.calls = nil
+	_, err = svc.RunSource(9)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"c"}, finder.calls, "続きから再開する")
+	assert.Equal(t, "", cr.src.ProgressCursor, "最後まで見たので先頭に戻る")
 }

@@ -40,7 +40,8 @@ def _truncate_text(text: str, model: str) -> str:
     import main as m
 
     enc = _encoder_for(model)
-    tokens = enc.encode(text)
+    # 本文に "<|endoftext|>" のような特殊トークンの文字列があっても例外にせず、ただの文字として数える
+    tokens = enc.encode(text, disallowed_special=())
     if len(tokens) > m.MAX_EMBED_TOKENS:
         logger.warning(
             "truncating text from %d to %d tokens for model=%s",

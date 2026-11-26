@@ -52,6 +52,9 @@ def split_text(text: str, size: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP)
         if len(buf) + len(s) > size and buf:
             chunks.append(buf)
             buf = buf[-overlap:]
+            # 重なりを残しても次の文と合わせて size を超えるなら、重なりを削って上限を守る
+            if len(buf) + len(s) > size:
+                buf = buf[len(buf) + len(s) - size:]
         buf += s
     if buf.strip():
         chunks.append(buf)
@@ -59,13 +62,17 @@ def split_text(text: str, size: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP)
 
 
 def replace_document(company_id: int, document_id: int, chunks: List[str], embeddings: List[List[float]], meta: Dict[str, Any]) -> int:
-    """1文書のチャンクを置き換える（古いチャンクを消してから入れる）。入れたチャンク数を返す。"""
+    """1文書のチャンクを置き換える。入れたチャンク数を返す。
+
+    新しいチャンクを先に upsert し、そのあとで余った古いチャンク（chunk_index が新しい件数以上）を消す。
+    先に消すと、登録に失敗したときにその文書が検索できなくなるため。
+    """
     collection = _collection()
-    collection.delete(where={"document_id": int(document_id)})
     if not chunks:
+        collection.delete(where={"document_id": int(document_id)})
         return 0
     now = datetime.now(timezone.utc).isoformat()
-    collection.add(
+    collection.upsert(
         ids=[f"doc-{document_id}-{i}" for i in range(len(chunks))],
         documents=chunks,
         embeddings=embeddings,
@@ -80,6 +87,7 @@ def replace_document(company_id: int, document_id: int, chunks: List[str], embed
             for i in range(len(chunks))
         ],
     )
+    collection.delete(where={"$and": [{"document_id": int(document_id)}, {"chunk_index": {"$gte": len(chunks)}}]})
     return len(chunks)
 
 

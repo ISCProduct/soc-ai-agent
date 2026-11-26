@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,8 @@ import (
 type fakeEDINET struct {
 	docsByDate map[string][]edinet.Document
 	rateAt     string // この日の一覧で 429 を返す
+	fetchErr   map[string]error
+	badZip     map[string]bool
 	listed     []string
 	fetched    []string
 }
@@ -39,6 +42,12 @@ func (f *fakeEDINET) ListDocuments(_ context.Context, d time.Time) ([]edinet.Doc
 }
 func (f *fakeEDINET) FetchCSVZip(_ context.Context, docID string) ([]byte, error) {
 	f.fetched = append(f.fetched, docID)
+	if err := f.fetchErr[docID]; err != nil {
+		return nil, err
+	}
+	if f.badZip[docID] {
+		return []byte("not a zip"), nil
+	}
 	return annualReportZip(), nil
 }
 
@@ -192,4 +201,43 @@ func (f *fakeResearch) MarkIndexed(_ context.Context, ids []uint, at time.Time) 
 		}
 	}
 	return nil
+}
+
+// 取り直せば直り得る失敗（通信・DB）はその日を進めず、読めない書類は飛ばして進める（レビュー指摘）。
+func TestCrawlService_EDINETDaily_FailureHandling(t *testing.T) {
+	t.Run("書類の取得に失敗したら日を進めない", func(t *testing.T) {
+		fe := &fakeEDINET{
+			docsByDate: map[string][]edinet.Document{day(-2): {annual("S1", "1000000000001", "2025-03-31")}},
+			fetchErr:   map[string]error{"S1": errors.New("connection reset")},
+		}
+		svc, cr := newEDINETService(t, day(-3), fe, &fakeResearch{})
+		_, _ = svc.RunSource(9)
+		assert.Equal(t, day(-3), cr.src.ProgressCursor)
+	})
+	t.Run("読めない書類は飛ばして進める", func(t *testing.T) {
+		fe := &fakeEDINET{
+			docsByDate: map[string][]edinet.Document{day(-2): {annual("S1", "1000000000001", "2025-03-31")}},
+			badZip:     map[string]bool{"S1": true},
+		}
+		svc, cr := newEDINETService(t, day(-3), fe, &fakeResearch{})
+		_, _ = svc.RunSource(9)
+		assert.Equal(t, day(-1), cr.src.ProgressCursor)
+	})
+	t.Run("法人番号の検索が DB エラーなら日を進めない", func(t *testing.T) {
+		repo := &mocks.CompanyRepositoryMock{}
+		repo.On("FindByCorporateNumber", mock.Anything).Return(nil, errors.New("db down"))
+		cr := &fakeCrawlRepo{src: models.CrawlSource{ID: 9, TargetType: "edinet_daily", ScheduleType: "daily", ScheduleTime: "05:00", ProgressCursor: day(-3)}}
+		svc := company.NewCrawlService(cr, repo, nil, nil)
+		svc.SetEDINETIngest(&fakeEDINET{docsByDate: map[string][]edinet.Document{day(-2): {annual("S1", "1000000000001", "2025-03-31")}}}, &fakeResearch{})
+		_, _ = svc.RunSource(9)
+		assert.Equal(t, day(-3), cr.src.ProgressCursor)
+	})
+	t.Run("数字が新しい期なら古い期で上書きしない", func(t *testing.T) {
+		newer := time.Date(2025, 3, 31, 0, 0, 0, 0, time.FixedZone("JST", 9*60*60))
+		fr := &fakeResearch{facts: []models.CompanyFact{{CompanyID: 1, Field: "employees_consolidated", Value: "110", SourceType: "edinet", AsOf: &newer}}}
+		fe := &fakeEDINET{docsByDate: map[string][]edinet.Document{day(-1): {annual("OLD", "1000000000001", "2024-03-31")}}}
+		svc, _ := newEDINETService(t, day(-2), fe, fr)
+		_, _ = svc.RunSource(9)
+		assert.Empty(t, fe.fetched)
+	})
 }

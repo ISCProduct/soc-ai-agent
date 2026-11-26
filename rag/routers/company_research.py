@@ -47,7 +47,7 @@ def _usage(texts: List[str]) -> dict:
         enc = tiktoken.encoding_for_model(model)
     except KeyError:
         enc = tiktoken.get_encoding("cl100k_base")
-    tokens = sum(len(enc.encode(t)) for t in texts)
+    tokens = sum(len(enc.encode(t, disallowed_special=())) for t in texts)
     return {"model": model, "prompt_tokens": tokens, "completion_tokens": 0, "calls": 1 if texts else 0}
 
 
