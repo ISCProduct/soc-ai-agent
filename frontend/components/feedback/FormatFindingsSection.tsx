@@ -1,7 +1,8 @@
 'use client'
 
 import { useId, useState } from 'react'
-import { Alert, Box, Button, Card, CardContent, Chip, Stack, Typography } from '@mui/material'
+import { Box, Button, Card, CardContent, Chip, Stack, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { getSeverityConfig } from '@/lib/severity'
 
 /**
