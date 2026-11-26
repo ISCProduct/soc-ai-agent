@@ -1,4 +1,4 @@
-h1:NqoiZDLXcB9Md8lFHTo75IyAnCdicXn2C2cAyeRyqWE=
+h1:sVz5F02AHyTRJ9GUFbeOXqDwLfacuE8zWpuV4uvDDiU=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -87,5 +87,5 @@ h1:NqoiZDLXcB9Md8lFHTo75IyAnCdicXn2C2cAyeRyqWE=
 20261122030156_invalidate_plain_password_reset_tokens.up.sql h1:ZdQQ+B7+xGRaF1rFZTvxUCyHboChYS1ijwRgrNTPlhM=
 20261122211106_git_hub_repos_add_is_owner_or_collaborator.up.sql h1:2bCMGa5zSnveZ3UxIAxfNp0YKFxTrdWfSRapGjOW/no=
 20261124144122_interview_report_category_breakdown.up.sql h1:WM/vvhg+EW96dGIehPzXcYjWu3lKZb7uiZJJOiPIt48=
-20261124180002_api_call_log_daily_retention.up.sql h1:yQCyA0te/H5b7YoEJutkRF53U3obLMS0w+ZjZZ8UVDM=
-20261124184459_create_business_tags.up.sql h1:o/DUZbU2lSnvqdj10xGhtu4wcciNlJY3cQSdXTUtD04=
+20261124184459_create_business_tags.up.sql h1:GQM8Fj2xFanHxBbMKBrojezTLMEp3AkOueigInSJgAg=
+20261126214044_api_call_log_daily_retention.up.sql h1:MXEtycnJeo23J1+5lhOHZ+tFh4eS9PAI02iMM1syCk8=
