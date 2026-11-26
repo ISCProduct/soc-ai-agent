@@ -22,6 +22,7 @@ import { parseJsonSafe } from '@/lib/interview/utils'
 import QuestionCategoryBreakdown from './QuestionCategoryBreakdown'
 
 import { UI } from '@/lib/design/tokens'
+import { NIGHT_SURFACE_ATTR } from '@/lib/student-theme'
 
 const SCORE_LABELS: Record<string, string> = {
   logic: '論理性',
@@ -130,7 +131,7 @@ export default function InterviewSummary({ report, utterances, userId, theme = '
     // AIの生成文に空白を含まない長い文字列（URLなど）が混じると、既定の
     // overflow-wrap では折り返さずページ全体が横にはみ出す（#1863）。
     // overflow-wrap は継承するので、根で一度指定すれば配下の文に効く。
-    <Stack spacing={2} sx={{ overflowWrap: 'anywhere' }}>
+    <Stack spacing={2} sx={{ overflowWrap: 'anywhere' }} {...(isDark ? NIGHT_SURFACE_ATTR : {})}>
       {/* Summary text */}
       <Paper sx={{ bgcolor: paperBg, border: paperBorder, p: 3, borderRadius: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>

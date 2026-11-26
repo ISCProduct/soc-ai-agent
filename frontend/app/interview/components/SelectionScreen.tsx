@@ -26,7 +26,7 @@ import { interviewLimits } from '@/lib/interview'
 import { POSITIONS } from '../constants'
 import type { InterviewCompany, Position } from '../types'
 import { resolveCompanyByName, mergeResolvedCompany } from '../utils'
-import { UI } from '@/lib/design/tokens'
+import { focusRingSx, UI } from '@/lib/design/tokens'
 import { withStableKeys } from '@/lib/list-keys'
 
 const COMPANY_RESOLVE_DEBOUNCE_MS = 400
@@ -267,8 +267,10 @@ export default function SelectionScreen({
                       width: '100%', pl: '40px', pr: 2, py: 1.5,
                       bgcolor: UI.tint, border: `1px solid ${UI.ruleSoft}`,
                       borderRadius: 2, fontSize: 14, color: UI.ink,
-                      outline: 'none', boxSizing: 'border-box',
-                      '&:focus': { borderColor: UI.mark, boxShadow: `0 0 0 2px color-mix(in srgb, ${UI.mark} 13%, transparent)` },
+                      boxSizing: 'border-box',
+                      // 以前は outline を消し、薄い影（青 13%）だけを出していたため、フォーカスが見えにくかった（#2219）。
+                      '&:focus': { borderColor: UI.mark },
+                      '&:focus-visible': focusRingSx(),
                       fontFamily: 'inherit',
                     }}
                   />
@@ -381,7 +383,7 @@ export default function SelectionScreen({
                                 bgcolor: isSelected ? `color-mix(in srgb, ${UI.mark} 3%, transparent)` : UI.tint,
                                 transition: 'all 0.15s',
                                 '&:hover': { borderColor: UI.mark, bgcolor: `color-mix(in srgb, ${UI.mark} 2%, transparent)` },
-                                '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: 2 },
+                                '&:focus-visible': focusRingSx(),
                               }}
                             >
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -475,7 +477,7 @@ export default function SelectionScreen({
                           bgcolor: isSelected ? `color-mix(in srgb, ${UI.mark} 3%, transparent)` : UI.tint,
                           transition: 'all 0.15s',
                           '&:hover': { borderColor: isSelected ? UI.mark : UI.rule },
-                          '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: 2 },
+                          '&:focus-visible': focusRingSx(),
                         }}
                       >
                         <Typography sx={{ fontSize: 22 }}>{pos.icon}</Typography>

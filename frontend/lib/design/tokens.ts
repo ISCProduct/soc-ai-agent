@@ -1,4 +1,13 @@
-import { STUDENT_SURFACES, surfaceVar, type StudentSurface } from '../student-theme'
+import {
+  FOCUS_WIDTH,
+  FOCUS_WIDTH_VAR,
+  SCHEDULE_STAGE_COLORS,
+  STUDENT_SURFACES,
+  scheduleStageVar,
+  surfaceVar,
+  type ScheduleStage,
+  type StudentSurface,
+} from '../student-theme'
 
 /**
  * 学生向け画面の地・面・文字・罫線（#1572）。
@@ -14,6 +23,19 @@ import { STUDENT_SURFACES, surfaceVar, type StudentSurface } from '../student-th
 export const UI = Object.fromEntries(
   Object.entries(STUDENT_SURFACES.comfortable).map(([k, v]) => [k, `var(${surfaceVar(k as keyof StudentSurface)}, ${v})`]),
 ) as Record<keyof StudentSurface, string>
+
+/**
+ * 個別の部品で書くフォーカスの枠（#2219）。太さは表示設定に追従する（既定 2px・高コントラスト 3px）。
+ * 太さを固定値で書くと、高コントラストでも細いままになるので、こちらを使う。
+ */
+export function focusRingSx(color: string = UI.mark) {
+  return { outline: `var(${FOCUS_WIDTH_VAR}, ${FOCUS_WIDTH.comfortable}px) solid ${color}`, outlineOffset: 2 }
+}
+
+/** 選考の段階の色（#2219）。テーマが表示設定に応じて差し替える。テーマの外では既定配色にフォールバックする。 */
+export function scheduleStageColor(stage: ScheduleStage): string {
+  return `var(${scheduleStageVar(stage)}, ${SCHEDULE_STAGE_COLORS.comfortable[stage]})`
+}
 
 /**
  * 本文の列幅。ヘッダーの帯と本文で同じ値を使い、列の左端を揃える。

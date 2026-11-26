@@ -4,7 +4,7 @@ import type { MouseEvent } from 'react'
 import { Box, Button, IconButton, Tooltip, Typography } from '@mui/material'
 import { Favorite, FavoriteBorder } from '@mui/icons-material'
 import type { Company } from '../../types'
-import { leadSentences, UI } from '@/lib/design/tokens'
+import { focusRingSx, leadSentences, UI } from '@/lib/design/tokens'
 import { buildMetaLine, isThinEvidence } from './companyRules'
 import { CompanyActions } from './CompanyActions'
 import { FitScore } from './FitScore'
@@ -48,7 +48,7 @@ export function CompanyRow({ company, rank, ctx }: { company: Company; rank: num
                 component="button"
                 type="button"
                 onClick={() => ctx.onSelectCompany(company)}
-                sx={{ font: 'inherit', color: UI.ink, textAlign: 'left', cursor: 'pointer', p: 0, border: 0, background: 'none', '&:focus-visible': { outline: `3px solid ${UI.mark}`, outlineOffset: 2 } }}
+                sx={{ font: 'inherit', color: UI.ink, textAlign: 'left', cursor: 'pointer', p: 0, border: 0, background: 'none', '&:focus-visible': focusRingSx() }}
               >
                 {company.name}
               </Box>

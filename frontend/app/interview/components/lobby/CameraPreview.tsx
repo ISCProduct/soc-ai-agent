@@ -2,6 +2,7 @@ import type { RefObject } from 'react'
 import { Box, Typography } from '@mui/material'
 import VideocamOffIcon from '@mui/icons-material/VideocamOff'
 import { UI } from '@/lib/design/tokens'
+import { NIGHT_SURFACE_ATTR } from '@/lib/student-theme'
 import styles from '../interview.module.css'
 import DeviceToggles from './DeviceToggles'
 import PermissionError from './PermissionError'
@@ -35,7 +36,8 @@ export default function CameraPreview({
 }: CameraPreviewProps) {
   const hideVideo = Boolean(permissionError) || !cameraEnabled
   return (
-    <Box sx={previewFrameSx}>
+    // カメラの枠は暗い面で、オン/オフのボタンが載るので、フォーカスの枠を明るい色にする（#2219）
+    <Box {...NIGHT_SURFACE_ATTR} sx={previewFrameSx}>
       <video ref={videoRef} muted playsInline className={`${styles.cameraVideo} ${hideVideo ? styles.cameraVideoHidden : ''}`} />
       {permissionError ? (
         <PermissionError message={permissionError} onRetry={onRetryPermissions} />

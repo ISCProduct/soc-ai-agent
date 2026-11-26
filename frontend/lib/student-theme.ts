@@ -74,8 +74,10 @@ export const STUDENT_SURFACES: Record<StudentThemeMode, StudentSurface> = {
     tint: '#f1f5f9',
     ink: '#0f172a',
     inkSoft: '#475569',
-    // 旧 #94a3b8 は白地で 2.6:1 しかなく本文に使えない。4.5:1 を満たす #64748b に寄せた。
-    inkFaint: '#64748b',
+    // 旧 #94a3b8 は白地で 2.6:1 しかなく本文に使えない。#64748b も paper で 4.43:1・tint で 4.34:1 と
+    // わずかに届かなかった（#2219）。field・paper・tint のどれの上でも 4.5:1 を満たす #5f6b7f にした
+    // （tint で 4.92:1）。比は tests/lib/student-theme-contrast.test.ts で固定している。
+    inkFaint: '#5f6b7f',
     rule: '#d0d7de',
     ruleSoft: '#e2e8f0',
     mark: COMFORTABLE.primary,
@@ -114,15 +116,67 @@ export const STUDENT_SURFACES: Record<StudentThemeMode, StudentSurface> = {
   },
 }
 
+/**
+ * 選考の段階の色（#2219）。予定画面の札とカレンダーの帯の塗りで、文字は白を載せる。
+ * 白文字で 4.5:1 以上になる濃さにしてある（2次面接 #0288d1・最終面接 #e65100・内定 #388e3c は届いていなかった）。
+ * 高コントラストの表示では、さらに濃い色にする。比は tests/lib/student-theme-contrast.test.ts で固定している。
+ */
+export const SCHEDULE_STAGES = ['書類選考', '1次面接', '2次面接', '最終面接', '内定', 'その他'] as const
+export type ScheduleStage = (typeof SCHEDULE_STAGES)[number]
+
+export const SCHEDULE_STAGE_COLORS: Record<StudentThemeMode, Record<ScheduleStage, string>> = {
+  comfortable: {
+    書類選考: '#9c27b0',
+    '1次面接': '#1976d2',
+    '2次面接': '#01579b',
+    最終面接: '#bf360c',
+    内定: '#2e7d32',
+    その他: '#757575',
+  },
+  'high-contrast': {
+    書類選考: '#6a1b9a',
+    '1次面接': '#0d47a1',
+    '2次面接': '#005a70',
+    最終面接: '#8a2c00',
+    内定: '#1b5e20',
+    その他: '#424242',
+  },
+}
+
+/** 段階の札・帯に載せる文字の色。 */
+export const SCHEDULE_STAGE_TEXT = '#ffffff'
+
+/** 段階の色の CSS 変数名。テーマ（:root）が表示設定に応じて差し替える。 */
+export function scheduleStageVar(stage: ScheduleStage): string {
+  return `--ui-stage-${SCHEDULE_STAGES.indexOf(stage)}`
+}
+
+/**
+ * フォーカスの枠の太さ（px）。高コントラストでは太くする。
+ * 個別の部品で枠を書くときも、固定値ではなく CSS 変数（FOCUS_WIDTH_VAR）を使い、表示設定に追従させる（#2219）。
+ */
+export const FOCUS_WIDTH: Record<StudentThemeMode, number> = { comfortable: 2, 'high-contrast': 3 }
+export const FOCUS_WIDTH_VAR = '--ui-focus-width'
+
+/**
+ * 暗い面（面接中の画面・カメラの枠など）に付ける印。この中では、フォーカスの枠を明るい色（nightInk）にする。
+ * primary の青は暗い面の上で 3:1 に届かない（nightPanel 上で 2.62:1）ため（#2219）。
+ */
+export const NIGHT_SURFACE_ATTR = { 'data-surface': 'night' } as const
+
 /** UI トークンが参照する CSS 変数名。 */
 export function surfaceVar(key: keyof StudentSurface): string {
   return `--ui-${key.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase())}`
 }
 
 function surfaceCssVars(mode: StudentThemeMode): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(STUDENT_SURFACES[mode]).map(([k, v]) => [surfaceVar(k as keyof StudentSurface), v]),
-  )
+  return {
+    ...Object.fromEntries(
+      Object.entries(STUDENT_SURFACES[mode]).map(([k, v]) => [surfaceVar(k as keyof StudentSurface), v]),
+    ),
+    ...Object.fromEntries(SCHEDULE_STAGES.map((stage) => [scheduleStageVar(stage), SCHEDULE_STAGE_COLORS[mode][stage]])),
+    [FOCUS_WIDTH_VAR]: `${FOCUS_WIDTH[mode]}px`,
+  }
 }
 
 export function isStudentThemeMode(value: string | null | undefined): value is StudentThemeMode {
@@ -143,11 +197,14 @@ export function writeStudentThemeMode(
 
 export function createStudentMuiTheme(mode: StudentThemeMode) {
   const p = mode === 'high-contrast' ? HIGH_CONTRAST : COMFORTABLE
-  const focusWidth = mode === 'high-contrast' ? 3 : 2
+  const focusWidth = FOCUS_WIDTH[mode]
 
   return createTheme({
     palette: {
       mode: 'light',
+      // 塗りの部品（Chip・Button など）の文字色を、塗りとの比が 4.5:1 以上になる側に選ばせる（#2219）。
+      // MUI の既定は 3 で、success #009E73（白文字 3.42:1）や info #0288d1（同 3.86:1）にも白文字を載せていた。
+      contrastThreshold: 4.5,
       primary: { main: p.primary },
       secondary: { main: p.warning },
       success: { main: p.success },
@@ -190,6 +247,9 @@ export function createStudentMuiTheme(mode: StudentThemeMode) {
           '*:focus-visible': {
             outline: `${focusWidth}px solid ${p.primary}`,
             outlineOffset: 2,
+          },
+          '[data-surface="night"] *:focus-visible, [data-surface="night"]:focus-visible': {
+            outlineColor: STUDENT_SURFACES[mode].nightInk,
           },
         },
       },

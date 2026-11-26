@@ -21,6 +21,8 @@ import {
   Typography,
 } from '@mui/material'
 import { Alert } from '@/components/common/Alert'
+import { scheduleStageColor } from '@/lib/design/tokens'
+import { SCHEDULE_STAGE_TEXT, type ScheduleStage } from '@/lib/student-theme'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos'
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos'
@@ -35,14 +37,15 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { ListSkeleton } from '@/components/common/ListSkeleton'
 
 // short はカレンダーの帯に出す略称。種類を色だけでなく文字でも示す（#2218）
+// 色は lib/student-theme.ts の SCHEDULE_STAGE_COLORS（白文字で 4.5:1 以上・高コントラストに追従。#2219）
 const STAGE_OPTIONS = [
-  { value: '書類選考', label: '書類選考', short: '書類', color: '#9c27b0' },
-  { value: '1次面接', label: '1次面接', short: '1次', color: '#1976d2' },
-  { value: '2次面接', label: '2次面接', short: '2次', color: '#0288d1' },
-  { value: '最終面接', label: '最終面接', short: '最終', color: '#e65100' },
-  { value: '内定',    label: '内定',    short: '内定', color: '#388e3c' },
-  { value: 'その他',  label: 'その他',  short: '他',   color: '#757575' },
-]
+  { value: '書類選考', label: '書類選考', short: '書類' },
+  { value: '1次面接', label: '1次面接', short: '1次' },
+  { value: '2次面接', label: '2次面接', short: '2次' },
+  { value: '最終面接', label: '最終面接', short: '最終' },
+  { value: '内定',    label: '内定',    short: '内定' },
+  { value: 'その他',  label: 'その他',  short: '他' },
+] satisfies { value: ScheduleStage; label: string; short: string }[]
 
 type ScheduleEvent = {
   id: number
@@ -72,8 +75,9 @@ const EMPTY_FORM: EventFormState = {
   notes: '',
 }
 
+/** 段階の塗りの色。知らない種類は「その他」の色にする */
 function stageColor(stage: string): string {
-  return STAGE_OPTIONS.find(s => s.value === stage)?.color ?? '#757575'
+  return scheduleStageColor(STAGE_OPTIONS.find(s => s.value === stage)?.value ?? 'その他')
 }
 
 /** カレンダーの帯に出す種類の略称。知らない種類はそのまま出す */
@@ -351,7 +355,7 @@ export default function PageContent() {
                                   onClick={e => { e.stopPropagation(); openEditDialog(ev) }}
                                   sx={{
                                     bgcolor: stageColor(ev.stage),
-                                    color: '#fff',
+                                    color: SCHEDULE_STAGE_TEXT,
                                     borderRadius: 0.5,
                                     px: 0.5,
                                     fontSize: { xs: '0.55rem', sm: '0.7rem' },
@@ -402,7 +406,7 @@ export default function PageContent() {
                 <Box flex={1} minWidth={0}>
                   <Stack direction="row" alignItems="center" spacing={1} mb={0.5} flexWrap="wrap" useFlexGap>
                     <Typography fontWeight={600} sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>{ev.company_name}</Typography>
-                    <Chip label={ev.stage} size="small" sx={{ bgcolor: stageColor(ev.stage), color: '#fff', height: 20, fontSize: '0.7rem', flexShrink: 0 }} />
+                    <Chip label={ev.stage} size="small" sx={{ bgcolor: stageColor(ev.stage), color: SCHEDULE_STAGE_TEXT, height: 20, fontSize: '0.7rem', flexShrink: 0 }} />
                   </Stack>
                   <Typography variant="body2" color="text.secondary">
                     {formatDateTime(ev.scheduled_at, { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}

@@ -9,6 +9,7 @@ import {
   DialogActions,
   Typography,
 } from '@mui/material'
+import { UI } from '@/lib/design/tokens'
 
 type ChatModalsProps = {
   showCompletionModal: boolean
@@ -110,7 +111,7 @@ export function ChatModals({
         }}
       >
         <DialogTitle sx={{ textAlign: 'center', pb: 1 }}>
-          <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: 'warning.main' }}>
+          <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: UI.flag }}>
             チャットを終了しますか？
           </Typography>
         </DialogTitle>
