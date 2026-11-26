@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { Avatar, Box, Button, Drawer, IconButton, Tooltip, Typography, type SvgIconProps } from '@mui/material'
@@ -13,6 +13,7 @@ import CalendarMonth from '@mui/icons-material/CalendarMonth'
 import Close from '@mui/icons-material/Close'
 import Description from '@mui/icons-material/Description'
 import EditNote from '@mui/icons-material/EditNote'
+import ExpandMore from '@mui/icons-material/ExpandMore'
 import Favorite from '@mui/icons-material/Favorite'
 import History from '@mui/icons-material/History'
 import Home from '@mui/icons-material/Home'
@@ -96,13 +97,19 @@ function useSidebarScrollHint(enabled = true) {
   const [viewport, viewportRef] = useState<HTMLElement | null>(null)
   const [content, contentRef] = useState<HTMLDivElement | null>(null)
   const [hasMoreBelow, setHasMoreBelow] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     if (!enabled || !viewport || !content) return
 
     const update = () => {
       // 小数点を含むスクロール位置と、非表示のドロワーを考慮する。
-      setHasMoreBelow(viewport.clientHeight > 0 && viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight > 1)
+      const hasMore = viewport.clientHeight > 0 && viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight > 1
+      // 操作中の矢印が消えるときも、キーボードの現在地をメニュー内に保つ。
+      if (!hasMore && buttonRef.current === document.activeElement) {
+        Array.from(content.querySelectorAll<HTMLAnchorElement>('a[href]')).at(-1)?.focus({ preventScroll: true })
+      }
+      setHasMoreBelow(hasMore)
     }
     update()
     const observer = new ResizeObserver(update)
@@ -117,21 +124,53 @@ function useSidebarScrollHint(enabled = true) {
     }
   }, [enabled, viewport, content])
 
-  return { viewportRef, contentRef, hasMoreBelow: enabled && hasMoreBelow }
+  const scrollDown = () => {
+    if (!viewport) return
+    viewport.scrollBy({
+      top: viewport.clientHeight * 0.75,
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    })
+  }
+
+  return { viewportRef, contentRef, buttonRef, scrollDown, hasMoreBelow: enabled && hasMoreBelow }
 }
 
-function ScrollHint({ visible }: { visible: boolean }) {
+function ScrollHint({ visible, buttonRef, onScrollDown }: {
+  visible: boolean
+  buttonRef: Ref<HTMLButtonElement>
+  onScrollDown: () => void
+}) {
   if (!visible) return null
   return (
     <Box
-      data-testid="menu-scroll-fade"
-      aria-hidden="true"
       sx={{
-        position: 'absolute', bottom: 0, left: 0, right: 0, height: 24, zIndex: 1,
+        position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 1,
+        display: 'flex', justifyContent: 'center', pt: 2,
+        pb: { xs: 'calc(8px + env(safe-area-inset-bottom))', md: 1 },
         pointerEvents: 'none',
-        background: `linear-gradient(to bottom, transparent, ${UI.field})`,
       }}
-    />
+    >
+      <Box
+        data-testid="menu-scroll-fade"
+        aria-hidden="true"
+        sx={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: `linear-gradient(to bottom, transparent, ${UI.field})` }}
+      />
+      <Tooltip title="下のメニュー項目を表示" placement="top" disableTouchListener>
+        <IconButton
+          ref={buttonRef}
+          aria-label="下のメニュー項目を表示"
+          onClick={onScrollDown}
+          sx={{
+            width: 44, height: 44, pointerEvents: 'auto', color: UI.mark, bgcolor: UI.field,
+            border: `1px solid ${UI.ruleSoft}`,
+            '&:hover': { bgcolor: UI.markTint },
+            '&:focus-visible': { outline: STUDENT_FOCUS_OUTLINE, outlineOffset: 2 },
+          }}
+        >
+          <ExpandMore aria-hidden="true" fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    </Box>
   )
 }
 
@@ -259,15 +298,10 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
         borderBottom: { xs: `1px solid ${UI.ruleSoft}`, md: 'none' },
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-          <Avatar sx={{ width: 32, height: 32, bgcolor: UI.markTint, color: UI.mark, fontSize: 16 }}>{user.name.charAt(0).toUpperCase()}</Avatar>
+          <Avatar sx={{ width: 32, height: 32, flexShrink: 0, bgcolor: UI.markTint, color: UI.mark, fontSize: 16 }}>{user.is_guest ? 'G' : user.name.charAt(0).toUpperCase()}</Avatar>
           <Typography noWrap sx={{ fontWeight: 600, fontSize: 14, lineHeight: 1.5, color: UI.ink }}>
-            {user.name}
+            {user.is_guest ? 'ゲストユーザー' : user.name}
           </Typography>
-          {user.is_guest && (
-            <Typography component="span" sx={{ fontSize: 12, color: UI.inkSoft }}>
-              ゲスト
-            </Typography>
-          )}
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
           <Button
@@ -301,7 +335,7 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
         display: 'flex', flexDirection: 'column', flex: 1,
         minHeight: { xs: 0, md: 'auto' },
         overflowY: { xs: 'auto', md: 'visible' },
-        scrollPaddingBottom: 24,
+        scrollPaddingBottom: { xs: 'calc(68px + env(safe-area-inset-bottom))', md: 68 },
         overscrollBehaviorY: { xs: 'contain', md: 'auto' },
         px: { xs: 2, md: 0 },
         // 末尾の項目と画面端の間に32pxを確保（PCは外側の16pxと合わせる）。
@@ -396,18 +430,18 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
       {/* モバイル用: Temporary Drawer */}
       <Drawer variant="temporary" open={mobileOpen} onClose={onMobileClose} ModalProps={{ keepMounted: true }} className={styles.drawerMobile} sx={drawerSx}>
         {content(true)}
-        <ScrollHint visible={mobileScroll.hasMoreBelow} />
+        <ScrollHint visible={mobileScroll.hasMoreBelow} buttonRef={mobileScroll.buttonRef} onScrollDown={mobileScroll.scrollDown} />
       </Drawer>
       {/* デスクトップ用: Permanent Drawer */}
       <Drawer variant="permanent" className={styles.drawerDesktop} sx={drawerSx} open>
         <Box
           ref={desktopScroll.viewportRef}
           data-testid="desktop-menu-scroll"
-          sx={{ height: '100%', minHeight: 0, overflowY: 'auto', scrollPaddingBottom: 24, ...hiddenScrollbarSx }}
+          sx={{ height: '100%', minHeight: 0, overflowY: 'auto', scrollPaddingBottom: 68, ...hiddenScrollbarSx }}
         >
           {content(false)}
         </Box>
-        <ScrollHint visible={desktopScroll.hasMoreBelow} />
+        <ScrollHint visible={desktopScroll.hasMoreBelow} buttonRef={desktopScroll.buttonRef} onScrollDown={desktopScroll.scrollDown} />
       </Drawer>
     </>
   )

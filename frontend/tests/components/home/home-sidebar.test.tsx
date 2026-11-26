@@ -52,6 +52,7 @@ function nav() {
 
 describe('HomeSidebar（ホームの左サイドバー）', () => {
   const originalResizeObserver = global.ResizeObserver
+  const originalMatchMedia = window.matchMedia
   beforeEach(() => {
     mockPathname = '/'
     push.mockReset()
@@ -60,7 +61,10 @@ describe('HomeSidebar（ホームの左サイドバー）', () => {
     global.ResizeObserver = TestResizeObserver
   })
 
-  afterEach(() => { global.ResizeObserver = originalResizeObserver })
+  afterEach(() => {
+    global.ResizeObserver = originalResizeObserver
+    window.matchMedia = originalMatchMedia
+  })
 
   it('SIDEBAR_NAV_ITEMS の全件が、リンクとして描画される（#403: 適性検査・スカウトの欠落回帰防止）', () => {
     render(<HomeSidebar user={user} onLogout={jest.fn()} />)
@@ -150,6 +154,22 @@ describe('HomeSidebar（ホームの左サイドバー）', () => {
     expect(link).toHaveTextContent('ログインが必要です')
   })
 
+  it.each([false, true])('ゲスト名はIDや縦折り返しのラベルを出さず、1行で表示する（mobile=%s）', (mobile) => {
+    const guest = { ...user, name: 'Guest_random123456', is_guest: true }
+    render(<HomeSidebar user={guest} onLogout={jest.fn()} mobileOpen={mobile} />)
+    const account = screen.getByRole('button', { name: 'ログアウト' }).parentElement!.parentElement!
+    expect(within(account).getByText('ゲストユーザー')).toHaveStyle({ whiteSpace: 'nowrap' })
+    expect(within(account).queryByText(guest.name)).not.toBeInTheDocument()
+    expect(within(account).queryByText('ゲスト', { exact: true })).not.toBeInTheDocument()
+  })
+
+  it('ログイン済みの表示名は Guest で始まっていても書き換えない', () => {
+    render(<HomeSidebar user={{ ...user, name: 'Guestさん', is_guest: false }} onLogout={jest.fn()} />)
+    const account = screen.getByRole('button', { name: 'ログアウト' }).parentElement!.parentElement!
+    expect(within(account).getByText('Guestさん')).toBeInTheDocument()
+    expect(within(account).queryByText('ゲストユーザー')).not.toBeInTheDocument()
+  })
+
   it('管理者のときだけ、管理者機能のリンクを出す', () => {
     const { unmount } = render(<HomeSidebar user={user} onLogout={jest.fn()} />)
     expect(within(nav()).queryByRole('link', { name: '管理者機能' })).toBeNull()
@@ -191,7 +211,7 @@ describe('HomeSidebar（ホームの左サイドバー）', () => {
       return mobile ? screen.getByRole('navigation', { name: 'メニュー' }) : screen.getByTestId('desktop-menu-scroll')
     }
 
-    it('下に続きがある間だけフェードを出し、最下部では消え、上に戻ると再表示する', () => {
+    it('下に続きがある間だけ矢印を出し、最下部では消え、上に戻ると再表示する', () => {
       render(<HomeSidebar user={user} onLogout={jest.fn()} mobileOpen={mobile} />)
       const scroller = viewport()
       scrollMetrics(scroller)
@@ -200,13 +220,42 @@ describe('HomeSidebar（ホームの左サイドバー）', () => {
       const fade = screen.getByTestId('menu-scroll-fade')
       expect(fade).toHaveAttribute('aria-hidden', 'true')
       expect(fade).toHaveStyle({ pointerEvents: 'none' })
+      const arrow = screen.getByRole('button', { name: '下のメニュー項目を表示' })
+      expect(arrow.textContent).toBe('')
+      expect(arrow).toHaveStyle({ width: '44px', height: '44px', pointerEvents: 'auto' })
       fireEvent.scroll(scroller, { target: { scrollTop: 200 } })
       expect(screen.getByTestId('menu-scroll-fade')).toBeInTheDocument()
       // 小数点以下の誤差で最下部のフェードが残らない。
       fireEvent.scroll(scroller, { target: { scrollTop: 399.5 } })
       expect(screen.queryByTestId('menu-scroll-fade')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '下のメニュー項目を表示' })).not.toBeInTheDocument()
       fireEvent.scroll(scroller, { target: { scrollTop: 0 } })
       expect(screen.getByTestId('menu-scroll-fade')).toBeInTheDocument()
+    })
+
+    it.each([false, true])('矢印を押すとメニューを下へ送り、動きを減らす設定にも従う（reduce=%s）', (reduce) => {
+      window.matchMedia = jest.fn().mockImplementation((media: string) => ({ matches: reduce, media }))
+      const onMobileClose = jest.fn()
+      render(<HomeSidebar user={user} onLogout={jest.fn()} mobileOpen={mobile} onMobileClose={onMobileClose} />)
+      const scroller = viewport()
+      scrollMetrics(scroller)
+      scroller.scrollBy = jest.fn()
+      resize(scroller)
+      fireEvent.click(screen.getByRole('button', { name: '下のメニュー項目を表示' }))
+      expect(scroller.scrollBy).toHaveBeenCalledWith({ top: 375, behavior: reduce ? 'auto' : 'smooth' })
+      expect(onMobileClose).not.toHaveBeenCalled()
+    })
+
+    it('操作中の矢印が最下部で消えても、フォーカスを末尾の項目に残す', () => {
+      render(<HomeSidebar user={user} onLogout={jest.fn()} mobileOpen={mobile} />)
+      const scroller = viewport()
+      scrollMetrics(scroller)
+      resize(scroller)
+      const arrow = screen.getByRole('button', { name: '下のメニュー項目を表示' })
+      act(() => arrow.focus())
+      fireEvent.scroll(scroller, { target: { scrollTop: 400 } })
+      expect(arrow).not.toBeInTheDocument()
+      expect(within(scroller).getByRole('link', { name: 'プロフィール設定' })).toHaveFocus()
     })
 
     it('全項目が収まる高さでは消え、画面が狭くなると再表示する', () => {
