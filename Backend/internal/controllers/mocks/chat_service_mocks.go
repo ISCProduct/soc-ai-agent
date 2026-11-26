@@ -119,6 +119,22 @@ func (m *MatchingServiceMock) ReasonScores(_ uint, scores []models.UserWeightSco
 	return scores
 }
 
+func (m *MatchingServiceMock) GetAxisBreakdown(matchID, userID uint) (*matching.AxisBreakdown, error) {
+	args := m.Called(matchID, userID)
+	if v := args.Get(0); v != nil {
+		return v.(*matching.AxisBreakdown), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *MatchingServiceMock) GetMyAxisScores(userID uint, sessionID string) ([]matching.MyAxisScore, error) {
+	args := m.Called(userID, sessionID)
+	if v := args.Get(0); v != nil {
+		return v.([]matching.MyAxisScore), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 // AnalysisScoringServiceMock AnalysisScoringServiceのモック実装
 type AnalysisScoringServiceMock struct {
 	mock.Mock

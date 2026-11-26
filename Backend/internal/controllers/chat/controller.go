@@ -18,6 +18,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -486,6 +487,45 @@ func (c *ChatController) ToggleFavorite(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]bool{"ok": true})
+}
+
+// GetAxisBreakdown は GET /api/chat/matches/:id/axes（本人の推薦1件の、軸別のマッチの内訳。SOCAIAGENT-611）。
+// 他人の推薦・存在しない推薦は 404（ID の有無を探らせない）。
+func (c *ChatController) GetAxisBreakdown(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	matchID, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
+	if err != nil || matchID == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "id が不正です")
+	}
+	out, err := c.matchingService.GetAxisBreakdown(uint(matchID), userID)
+	if errors.Is(err, shared.ErrNotFound) {
+		return echo.NewHTTPError(http.StatusNotFound, "match not found")
+	}
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, out)
+}
+
+// GetMyAxisScores は GET /api/chat/axis-scores?session_id=（本人の診断の10軸のスコア。SOCAIAGENT-611）。
+// 「軸ごとの内訳」と同じく、適性検査を合流させた値を返す（/api/chat/scores は合流前のチャット由来の値）。
+func (c *ChatController) GetMyAxisScores(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	sessionID := ctx.QueryParam("session_id")
+	if sessionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
+	}
+	out, err := c.matchingService.GetMyAxisScores(userID, sessionID)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{"axes": out})
 }
 
 // GetFavorites は過去の診断を含め、お気に入り企業を1社1行で返す (GET /api/chat/favorites)

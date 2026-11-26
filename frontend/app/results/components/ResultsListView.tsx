@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type MouseEvent } from 'react'
+import { useRef, useState, type MouseEvent } from 'react'
 import { Box, Button, Snackbar, Stack, useMediaQuery, useTheme } from '@mui/material'
 import { Alert } from '@/components/common/Alert'
 import type { AnalysisScores, Company, MatchFeedbackVerdict, SnackbarState, SuggestedRole } from '../types'
@@ -18,9 +18,13 @@ import { ResultsFooterLinks } from './list/ResultsFooterLinks'
 import { ResultsHeader } from './list/ResultsHeader'
 import { RolesPanel } from './list/RolesPanel'
 import type { CompanyRowContext } from './list/rowContext'
+import MyCategoryScoresCard from './MyCategoryScoresCard'
+import type { AxisBreakdown } from '@/lib/axis-match'
 
 export interface ResultsListViewProps {
   companies: Company[]
+  /** 診断のセッション。あなたの10の傾向（SOCAIAGENT-611）の取得に使う。無ければ傾向を出さない */
+  sessionId?: string
   /** 診断をまたいで1社にまとめたお気に入り。並びは適合度の高い順 */
   favoriteCompanies: Company[]
   favoritesLoading: boolean
@@ -71,6 +75,7 @@ export interface ResultsListViewProps {
  */
 export default function ResultsListView({
   companies,
+  sessionId,
   favoriteCompanies,
   favoritesLoading,
   favoritesError,
@@ -109,6 +114,18 @@ export default function ResultsListView({
 }: ResultsListViewProps) {
   // この一覧は useResultsData の mounted 後にしか描画されない（page-content.tsx）。サーバー描画・hydration の最初の描画に
   // 出ないので、noSsr: true で最初から実際の幅で PC / SP を分けても不一致は起きない。
+  // 軸ごとの内訳を開いている推薦（match_id）。開いたときだけ取りに行く
+  const [openAxes, setOpenAxes] = useState<ReadonlySet<number>>(new Set())
+  // 取得済みの内訳。閉じて開き直すたびに取り直さない
+  const axesCache = useRef(new Map<number, AxisBreakdown>())
+  const toggleAxes = (matchId: number) => {
+    setOpenAxes((prev) => {
+      const next = new Set(prev)
+      if (next.has(matchId)) next.delete(matchId)
+      else next.add(matchId)
+      return next
+    })
+  }
   const isDesktop = useMediaQuery(useTheme().breakpoints.up('md'), { noSsr: true })
 
   // お気に入りは過去の診断も含め、同じ企業は1行。中身は呼び出し側がまとめて渡す（#2301）
@@ -121,6 +138,7 @@ export default function ResultsListView({
   const ctx: CompanyRowContext = {
     isDesktop, maxAxisCount: maxMatchedAxisCount(companies), isProvisional, isGuestUser, applyEnabled,
     favoritingId, applyingId, feedbackingId, onSelectCompany, onToggleFavorite, onFeedback, onApply, onNavigate,
+    openAxes, axesCache: axesCache.current, onToggleAxes: toggleAxes,
   }
   // PC はヘッダー右上、SP は一覧の下に1つだけ出す
   const email = <EmailButton isGuestUser={isGuestUser} emailSending={emailSending} onSendEmail={onSendEmail} fullWidth={!isDesktop} />
@@ -149,6 +167,8 @@ export default function ResultsListView({
         <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
           <Box sx={{ flex: 1, minWidth: 0, display: 'grid', gap: { xs: 2, md: 2.5 } }}>
             <AnalysisErrorAlert analysisError={analysisError} onRetryAnalysis={onRetryAnalysis} />
+            {/* 診断を切り替えたら作り直す（前の診断の10軸を残さない） */}
+            {sessionId && <MyCategoryScoresCard key={sessionId} sessionId={sessionId} />}
             {!isDesktop && coverage}
             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" role="group" aria-label="表示する企業">
               <Button variant={favoritesOnly ? 'text' : 'contained'} aria-pressed={!favoritesOnly} onClick={() => setFavoritesOnly(false)} sx={{ minHeight: 44 }}>

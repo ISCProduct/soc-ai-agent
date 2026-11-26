@@ -1141,6 +1141,9 @@ paths:
     get:
       tags: [chat]
       summary: 現在のスコアを取得する
+      description: |
+        チャット由来のスコア（適性検査を合流させる前の値）。推薦の計算・軸ごとの内訳と同じ合流後の値は
+        `GET /api/chat/axis-scores` を使う（SOCAIAGENT-611）。
       security: [{ userToken: [] }]
       parameters:
         - in: query
@@ -1231,6 +1234,41 @@ paths:
       responses:
         "200": { description: 切り替えた }
         "400": { description: match_id が無い }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/chat/matches/{id}/axes:
+    get:
+      tags: [chat]
+      summary: 推薦1件の、軸別のマッチの内訳（あなたのスコア・企業の重視度・一致度）
+      description: |
+        SOCAIAGENT-611。`id` は推薦の `match_id`（`UserCompanyMatch` の ID）。本人の推薦だけを返し、
+        他人の推薦・存在しない推薦・企業のプロファイルが無い推薦は 404。
+        10軸ごとに `user_score`（まだ診断で測れていない軸は null）・`company_weight`・`match`（100 - 差）を返す。
+        `strengths`（あなたも企業も60以上で差が15以内）と `gaps`（企業が60以上で、あなたが20以上下回る）は
+        決まった規則で作る文章で、それぞれ3件まで。推薦順位は変えない（自己理解のための説明）。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: 軸別の内訳 }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 推薦が見つからない }
+
+  /api/chat/axis-scores:
+    get:
+      tags: [chat]
+      summary: 本人の診断の10軸のスコア（「あなたの10の傾向」）
+      description: |
+        SOCAIAGENT-611。`/api/chat/matches/{id}/axes` の `user_score` と同じ基準（その診断のスコアに適性検査を合流させ、整数に丸めた値）で返す。
+        `/api/chat/scores` は合流前のチャット由来の値なので、同じ画面で内訳と並べると数値が食い違う。
+        `axes` は10軸の並びで、まだ測れていない軸の `score` は null。本人のスコアだけを返す。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: session_id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: 10軸のスコア }
+        "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/chat/favorites:
