@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -45,7 +44,7 @@ func (s *CalendarSyncService) ExchangeAndSave(ctx context.Context, userID uint, 
 		return fmt.Errorf("failed to exchange code: %w", err)
 	}
 
-	encKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
+	encKey := config.TokenEncryptionKey()
 	if encKey == "" {
 		encKey = "default-key-change-in-production"
 	}
@@ -95,7 +94,7 @@ func (s *CalendarSyncService) getOAuthClient(ctx context.Context, userID uint) (
 		return nil, "", fmt.Errorf("failed to get token: %w", err)
 	}
 
-	encKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
+	encKey := config.TokenEncryptionKey()
 	if encKey == "" {
 		encKey = "default-key-change-in-production"
 	}
