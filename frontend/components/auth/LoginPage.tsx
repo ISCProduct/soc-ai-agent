@@ -30,12 +30,13 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 /**
  * メールの形式の誤りの文（#2218）。何が起きたか＋次にすることの形にし、先頭に字形を付ける
  * （エラーの色は comfortable では黒になるので、色だけでは誤りと分からない）。
+ * 次にすることは、@ の抜け・ドメインのドットの抜けなど、どの誤りにも当てはまるよう、正しい形の例で示す。
  */
 function EmailFormatError() {
   return (
     <Box component="span" sx={{ display: 'inline-flex', alignItems: 'flex-start', gap: 0.5 }}>
       <ErrorOutlineIcon aria-hidden sx={{ fontSize: '1rem', mt: '1px' }} />
-      メールアドレスの形式が正しくありません。@ を含めて入力してください
+      メールアドレスの形式が正しくありません。name@example.com のように入力してください
     </Box>
   )
 }
