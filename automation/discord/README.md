@@ -132,3 +132,45 @@ Lambda は起動時に読んだキーを持ち続ける。書き換えたあと�
 
 Bot ユーザーと API キーの発行は Backlog の画面で行う。ここにはキーを書かない。
 
+## 実機確認（SOCAIAGENT-512）
+
+受け口は staging の Lambda です。書き込みの確認は、変更してよい課題を1つ決めてから行います。終わったら期限を元に戻します。
+
+1. `/deadline` でその課題の期限を動かす。Backlog の期限が変わり、コメントが残る。
+2. 同じコマンドで元の期限に戻す。
+3. 拒否を確認する。未紐づけのメンバー、他人の課題、過去の日付、今日から180日より先。いずれも本人にだけ失敗が返る。
+4. 朝のリマインドは、先に `{"source":"backlog-deadline-reminder","dry_run":true}` で本文を見る。投稿してよいと分かってから、スケジュールを有効にする。
+
+## 止める・障害に気付く
+
+朝のリマインドを止めるときは、スケジュールを `DISABLED` にする。staging は `soc-stg-backlog-deadline-reminder`、本番は `discord_reminder_schedule_enabled = false` で apply する。再試行はしないので、止めたあとに同じ通知が追い打ちされることはない。
+
+失敗は CloudWatch Logs `/aws/lambda/<project>-discord` の `[Reminder]` と `[Discord]` に残る。本番で受け口を有効にしているときは、Lambda の Errors が1件でも SNS `<project>-alarms`（`alarm_email`）へ届く。`alarm_email` が空だと、アラームは状態を持つだけでメールは飛ばない。
+
+本番の受け口は `discord_bot_enabled = true` で作る。既定は作らない。両方のスケジュールを ENABLED のままにすると、平日の朝に同じ内容が2回投稿される。
+
+### 本番への切り替え手順
+
+順番を守る。**apply → 実コードの配置 → Interactions Endpoint の切り替え**。
+
+1. **事前準備**
+   - staging の朝リマインド（`soc-stg-backlog-deadline-reminder`）を先に止める。
+   - `BACKLOG_API_KEY` の渡し方を揃える。いまの prod は terraform 変数 `backlog_api_key` を Lambda の環境変数に直接入れている。有効にする前に、#2563 の `DISCORD_BACKLOG_BOT_SECRET_ID`（Secrets Manager から読む方式）に合わせる。この PR では実装しない。
+2. **apply**: `infra/terraform/environments/prod` で `discord_bot_enabled = true` にして apply する。
+   - 初回は `archive` provider が増えているため、先に `terraform init -upgrade` が要る（`infra/terraform/environments/prod/README.md` も参照）。
+   - この時点の Lambda は **プレースホルダの bootstrap zip**（実体のない zip）。このまま Endpoint を切り替えると応答できず、Discord の検証に失敗する。
+3. **実コードの配置**: 次のどちらかで `cmd/discord-lambda` のビルド成果物を入れる。
+   - 手動（CLI）:
+     ```bash
+     cd Backend
+     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o bootstrap ./cmd/discord-lambda
+     zip -j discord-lambda.zip bootstrap
+     aws lambda update-function-code --function-name <project>-discord --zip-file fileb://discord-lambda.zip
+     aws lambda wait function-updated --function-name <project>-discord
+     ```
+   - CI: `deployment.yml` の `deploy-discord-lambda-prod` だけを再実行する（`main` の Deploy 実行から該当ジョブを Re-run）。
+     Deploy workflow を `workflow_dispatch` で実行すると `deploy-production`（ECS 本番デプロイ）も一緒に走る点に注意する。
+   - apply より前に `main` へ入った場合、関数が無いので `deploy-discord-lambda-prod` は ResourceNotFoundException のときだけスキップする。それ以外の AWS エラーはジョブが失敗する。
+4. **Interactions Endpoint の切り替え**: 実コードが入ったことを確認してから、Discord Developer Portal の Interactions Endpoint URL を本番の URL に変える。`register-commands.sh` が必要なら併せて再実行する。
+5. 朝リマインドを有効にするのは、切り替えを確認してから（`discord_reminder_schedule_enabled = true`）。
+
