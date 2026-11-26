@@ -17,7 +17,7 @@ describe('/api/bff/[...path]', () => {
     return { url: String(url), init: init as RequestInit, headers: (init as RequestInit).headers as Record<string, string> }
   }
 
-  it.each(['admin/users', 'user/profile-secret', 'interviewsX', 'auth/refresh', 'auth/login', 'auth/guest'])('許可リストに無いパス %s は 404 で、Backend に送らない', async (path) => {
+  it.each(['admin/users', 'user/profile-secret', 'interviewsX', 'auth/refresh'])('許可リストに無いパス %s は 404 で、Backend に送らない', async (path) => {
     const response = await GET(new NextRequest(`http://localhost:3000/api/bff/${path}`), ctx(path))
     expect(response.status).toBe(404)
     expect(fetchMock).not.toHaveBeenCalled()
@@ -65,32 +65,68 @@ describe('/api/bff/[...path]', () => {
     expect(body).toEqual({ user_id: 7, email: 'a@example.com' })
   })
 
-  describe('本登録', () => {
-    const issued = { user_id: 7, email: 'a@example.com', name: '学生', user_token: 'new-jwt' }
+  describe('ログイン・本登録・ゲスト作成', () => {
+    const issued = { user_id: 7, email: 'a@example.com', name: '学生', user_token: 'new-jwt', refresh_token: 'new-refresh' }
+
+    it.each(['auth/login', 'auth/register', 'auth/guest'])('%s はセッション Cookie を張り、画面へはトークンを返さない', async (path) => {
+      fetchMock.mockResolvedValue(Response.json(issued))
+      const request = new NextRequest(`http://localhost:3000/api/bff/${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: 'http://localhost:3000', cookie: 'admin_token=previous-admin' },
+        body: JSON.stringify({ email: 'a@example.com', password: 'x' }),
+      })
+      const response = await POST(request, ctx(path))
+      const setCookie = response.headers.get('set-cookie') ?? ''
+      expect(setCookie).toContain('user_token=new-jwt')
+      expect(setCookie).toContain('refresh_token=new-refresh')
+      expect(setCookie).toMatch(/admin_token=;/)
+      const body = await response.json()
+      expect(body).not.toHaveProperty('user_token')
+      expect(body).not.toHaveProperty('refresh_token')
+      expect(body.user_id).toBe(7)
+    })
+
+    it('管理者のログインは admin_token も Cookie に張る', async () => {
+      fetchMock.mockResolvedValue(Response.json({ ...issued, token: 'admin-jwt' }))
+      const request = new NextRequest('http://localhost:3000/api/bff/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' }, body: '{}' })
+      const response = await POST(request, ctx('auth/login'))
+      expect(response.headers.get('set-cookie') ?? '').toContain('admin_token=admin-jwt')
+      expect(await response.json()).not.toHaveProperty('token')
+    })
+
+    it('ログイン失敗（403 など）はそのまま返し、Cookie は張らない', async () => {
+      fetchMock.mockResolvedValue(Response.json({ error: 'email_not_verified' }, { status: 403 }))
+      const request = new NextRequest('http://localhost:3000/api/bff/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' }, body: '{}' })
+      const response = await POST(request, ctx('auth/login'))
+      expect(response.status).toBe(403)
+      expect(response.headers.get('set-cookie')).toBeNull()
+      expect(await response.json()).toEqual({ error: 'email_not_verified' })
+    })
+
+    it('ログインには今のセッションのトークンを渡さない', async () => {
+      fetchMock.mockResolvedValue(Response.json(issued))
+      const request = new NextRequest('http://localhost:3000/api/bff/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: 'http://localhost:3000', 'X-User-ID': '1', 'X-User-Token': 'current-jwt' },
+        body: '{}',
+      })
+      await POST(request, ctx('auth/login'))
+      expect(backendCall().headers['X-User-Token']).toBeUndefined()
+      expect(backendCall().headers['X-User-ID']).toBeUndefined()
+    })
 
     it.each([
       [true, 'current-jwt'],
       [false, undefined],
-    ])('promote_guest=%s のときだけゲストのセッションを渡す', async (promote, expected) => {
+    ])('本登録は promote_guest=%s のときだけゲストのセッションを渡す', async (promote, expected) => {
       fetchMock.mockResolvedValue(Response.json(issued))
       const request = new NextRequest('http://localhost:3000/api/bff/auth/register', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'X-User-Token': 'current-jwt' },
+        headers: { 'content-type': 'application/json', origin: 'http://localhost:3000', 'X-User-Token': 'current-jwt' },
         body: JSON.stringify({ email: 'a@example.com', promote_guest: promote }),
       })
       await POST(request, ctx('auth/register'))
       expect(backendCall().headers['X-User-Token']).toBe(expected)
-    })
-
-    it('応答はそのまま返す（Cookie は画面の saveAuth が張る。ログイン経路の見直しは別 PR）', async () => {
-      fetchMock.mockResolvedValue(Response.json(issued))
-      const request = new NextRequest('http://localhost:3000/api/bff/auth/register', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: '{}',
-      })
-      const response = await POST(request, ctx('auth/register'))
-      expect(await response.json()).toEqual(issued)
     })
   })
 

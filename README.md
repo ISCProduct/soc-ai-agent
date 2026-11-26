@@ -145,7 +145,7 @@ routes/                      ルーティング・ミドルウェア適用
 |----|---------|
 | Backend | Go 1.25 / Echo v4 / GORM (MySQL 8.0) / Redis / AWS SDK v2 / go-openai / Sentry |
 | Frontend | Next.js 16 / React 19 / TypeScript / MUI v7 / Radix UI / React Flow / Three.js / Sentry |
-| RAG | Python 3.10 / FastAPI / LangChain / ChromaDB / OpenAI Embeddings / Sentry |
+| RAG | Python 3.12 / FastAPI / LangChain / ChromaDB / OpenAI Embeddings / Sentry |
 | インフラ | AWS ECS（staging: on EC2 / 本番: on Fargate）+ ALB / RDS / S3 / Terraform |
 | CI・テスト | GitHub Actions / Docker Compose / Jest / Playwright E2E / pytest |
 

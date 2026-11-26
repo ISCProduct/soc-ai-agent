@@ -22,6 +22,7 @@ import dynamic from 'next/dynamic'
 import { authService, User } from '@/lib/auth'
 import { interviewApi, InterviewDetail, InterviewSession, InterviewTrendPoint, TeacherReport } from '@/lib/interview'
 import InterviewSummary from '../components/InterviewSummary'
+import AxisComparison from '@/components/interview/AxisComparison'
 import { parseJsonSafe } from '@/lib/interview/utils'
 
 import { INTERVIEW_HISTORY_CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
@@ -176,6 +177,7 @@ export default function PageContent() {
             </Box>
           )}
         </Paper>
+        {!trendLoading && !trendError ? <AxisComparison points={trendPoints} /> : null}
       </Box>
 
       <Box sx={{ display: 'flex', maxWidth: INTERVIEW_HISTORY_CONTENT_MAX_WIDTH, mx: 'auto', p: { xs: 2, md: 4 }, gap: 3, flexDirection: { xs: 'column', md: 'row' }, alignItems: 'flex-start' }}>

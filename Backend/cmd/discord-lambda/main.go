@@ -57,7 +57,7 @@ func main() {
 		os.Getenv("DISCORD_ALLOWED_ROLE_ID"),
 	)
 
-	// /link 系と期限リマインド。BACKLOG_API_KEY が無ければ付けない(コマンドは「利用できません」を返す)。
+	// /link 系と期限リマインド。Bot キーが無ければ付けない(コマンドは「利用できません」を返す)。
 	// 他のコマンドを巻き込んで起動失敗にはしない。
 	var reminder *discord.ReminderService
 	if backlog := discord.NewBacklogClientFromEnv(); backlog != nil {
