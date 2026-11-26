@@ -267,6 +267,11 @@ jobs:
       - name: 静的エラーページの検査
         run: ./infra/scripts/verify-error-pages.sh
 
+      # develop が進んでも、開いている PR の版番号検査は勝手には再実行されない。
+      # 再検査ワークフローが落ちると、同じ番号の先行マージに気づけない。
+      - name: develop 最新との版番号再検査
+        run: ./automation/test/migration-vs-develop-test.sh
+
       # automation/test のスクリプトがワークフローから呼ばれていること。
       # 手で並べているため、足して登録を忘れると CI で一度も走らない。
       - name: 検査スクリプトの登録漏れ検査
@@ -388,7 +393,7 @@ jobs:
 
       # 本アクションは浮動タグ(v5等)を公開していないため、完全バージョンで指定する
       - name: Dependency Review (high severity)
-        uses: actions/dependency-review-action@v5.0.0
+        uses: actions/dependency-review-action@v5.0.1
         with:
           fail-on-severity: high
 
@@ -430,8 +435,10 @@ jobs:
       - name: Run type check
         run: npx next typegen && npx tsc --noEmit
 
+      # カバレッジを測り、frontend/jest.config.ts の coverageThreshold を下回ったら落とす（#2046）。
+      # 以前は --no-coverage で、テストの網羅の後退に気づけなかった。
       - name: Run unit tests
-        run: npm test -- --no-coverage
+        run: npm test -- --coverage --coverageReporters=text-summary
 
   e2e-frontend:
     name: Frontend E2E Tests (Playwright)
