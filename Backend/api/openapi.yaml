@@ -1141,6 +1141,9 @@ paths:
     get:
       tags: [chat]
       summary: 現在のスコアを取得する
+      description: |
+        チャット由来のスコア（適性検査を合流させる前の値）。推薦の計算・軸ごとの内訳と同じ合流後の値は
+        `GET /api/chat/axis-scores` を使う（SOCAIAGENT-611）。
       security: [{ userToken: [] }]
       parameters:
         - in: query
@@ -1233,6 +1236,41 @@ paths:
         "400": { description: match_id が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/chat/matches/{id}/axes:
+    get:
+      tags: [chat]
+      summary: 推薦1件の、軸別のマッチの内訳（あなたのスコア・企業の重視度・一致度）
+      description: |
+        SOCAIAGENT-611。`id` は推薦の `match_id`（`UserCompanyMatch` の ID）。本人の推薦だけを返し、
+        他人の推薦・存在しない推薦・企業のプロファイルが無い推薦は 404。
+        10軸ごとに `user_score`（まだ診断で測れていない軸は null）・`company_weight`・`match`（100 - 差）を返す。
+        `strengths`（あなたも企業も60以上で差が15以内）と `gaps`（企業が60以上で、あなたが20以上下回る）は
+        決まった規則で作る文章で、それぞれ3件まで。推薦順位は変えない（自己理解のための説明）。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: 軸別の内訳 }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 推薦が見つからない }
+
+  /api/chat/axis-scores:
+    get:
+      tags: [chat]
+      summary: 本人の診断の10軸のスコア（「あなたの10の傾向」）
+      description: |
+        SOCAIAGENT-611。`/api/chat/matches/{id}/axes` の `user_score` と同じ基準（その診断のスコアに適性検査を合流させ、整数に丸めた値）で返す。
+        `/api/chat/scores` は合流前のチャット由来の値なので、同じ画面で内訳と並べると数値が食い違う。
+        `axes` は10軸の並びで、まだ測れていない軸の `score` は null。本人のスコアだけを返す。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: session_id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: 10軸のスコア }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /api/chat/favorites:
     get:
       tags: [chat]
@@ -1242,11 +1280,17 @@ paths:
         閲覧や再計算で進む更新時刻では選ばない。並びは適合度の高い順。
         重みプロファイルの無い企業は件数を数える前に外す。
         `limit` は 1 以上 100 以下。未指定・0以下・数値でないときは 50。100 を超える指定は 100。
+        `offset` は何社目から返すか。未指定・0以下・数値でないときは 0。末尾を超えても空の配列を返す。
+        対象ユーザーは認証だけを見る。クエリの user_id では他人のお気に入りを読めない。
       security: [{ userToken: [] }]
       parameters:
         - in: query
           name: limit
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - in: query
+          name: offset
+          description: 何社目から返すか。0 が先頭。
+          schema: { type: integer, minimum: 0, default: 0 }
       responses:
         "200":
           description: お気に入り企業
@@ -1267,6 +1311,13 @@ paths:
                         score: { type: integer }
                         industry: { type: string }
                         job_title: { type: string }
+                  total:
+                    type: integer
+                    description: ページを切る前の社数。0件のときは省略することがある。
+                  favorite_company_ids:
+                    type: array
+                    description: ページに載らない企業も含めた、お気に入りの企業ID。適合度の高い順。
+                    items: { type: integer }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "503": { description: マッチングサービスが無い }
 
@@ -5192,6 +5243,56 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { description: 学生がいない }
+  /api/user/interview-video-retention:
+    get:
+      tags: [user]
+      summary: 自分の学校の面接動画の保持期間を取得
+      description: |
+        学校が選んだ保持期間（SOCAIAGENT-671）。30 / 90 / 180 日、または期限なし。
+        学校が無い学生は既定の 90 日。クエリの user_id は見ない。
+        退会者は対象外で、退会後12ヶ月の削除に従う。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [days, unlimited]
+                properties:
+                  days: { type: integer, nullable: true, description: 期限なしのときは null }
+                  unlimited: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/admin/schools/{id}/interview-video-retention:
+    put:
+      tags: [admin-schools]
+      summary: 学校の面接動画の保持期間を更新
+      description: |
+        学校管理者だけが変更できる（SOCAIAGENT-671）。職員は 403。
+        `days` は 30、90、180、または null（期限なし）。
+        短くしても、公開から30日の猶予が終わるまでは既存の録画を消さない。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [days]
+              properties:
+                days: { type: integer, nullable: true }
+      responses:
+        "200": { description: 更新した期間 }
+        "400": { description: 選べない日数 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 学校がいない }
   /api/user/training-consent:
     get:
       tags: [user]

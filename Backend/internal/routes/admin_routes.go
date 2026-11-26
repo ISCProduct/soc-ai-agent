@@ -87,6 +87,8 @@ func SetupAdminRoutes(
 
 	// 学校メンバー・企業承認は担当校の運営業務
 	admin.GET("/schools/:id", adminSchoolController.Get)
+	// 面接動画の保持期間（SOCAIAGENT-671）。学校管理者のみ。職員は変更できない。
+	admin.PUT("/schools/:id/interview-video-retention", adminSchoolController.UpdateInterviewVideoRetention, requireAdmin)
 	admin.POST("/schools/:id/members", adminSchoolController.AddMember, requireAdmin)
 	admin.DELETE("/schools/:id/members/:user_id", adminSchoolController.RemoveMember, requireAdmin)
 	admin.GET("/schools/:id/company-approvals", adminSchoolController.ListCompanyApprovals)

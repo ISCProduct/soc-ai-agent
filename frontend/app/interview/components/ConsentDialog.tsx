@@ -10,6 +10,7 @@ import {
   FormControlLabel,
   Typography,
 } from '@mui/material'
+import { useVideoRetentionSentence } from '@/components/interview/VideoRetentionNote'
 
 export interface ConsentDialogProps {
   open: boolean
@@ -23,6 +24,7 @@ export interface ConsentDialogProps {
  * 録画同意ダイアログ（LOBBY / SESSION 画面で共有）
  */
 export default function ConsentDialog({ open, consentGiven, onConsentChange, onClose, onConfirm }: ConsentDialogProps) {
+  const retentionSentence = useVideoRetentionSentence()
   return (
     <Dialog
       open={open}
@@ -46,7 +48,7 @@ export default function ConsentDialog({ open, consentGiven, onConsentChange, onC
           ※ これらのデータは企業には提供されません。サービス内でのみ使用します。
         </Typography>
         <Typography variant="body2" sx={{ mb: 2 }}>
-          録画データは、アカウントが有効な間保管し、退会後12ヶ月で削除します。
+          {retentionSentence}
           AI の学習に使うかどうかは、プロフィールの設定で、いつでも選べます（同意しない場合は学習に使いません）。
           詳細は<Button size="small" sx={{ p: 0, minWidth: 0, textDecoration: 'underline', fontSize: 'inherit' }}
             onClick={() => window.open('/privacy', '_blank')}>プライバシーポリシー</Button>をご確認ください。

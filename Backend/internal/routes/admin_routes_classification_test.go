@@ -92,10 +92,11 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 	},
 	map[string]routeClass{
 		// ── 権限管理(requireAdmin) ──
-		"PUT /users/:id":                       classRequireAdmin,
-		"DELETE /users/:id":                    classRequireAdmin,
-		"POST /schools/:id/members":            classRequireAdmin,
-		"DELETE /schools/:id/members/:user_id": classRequireAdmin,
+		"PUT /users/:id":    classRequireAdmin,
+		"DELETE /users/:id": classRequireAdmin,
+		"PUT /schools/:id/interview-video-retention": classRequireAdmin,
+		"POST /schools/:id/members":                  classRequireAdmin,
+		"DELETE /schools/:id/members/:user_id":       classRequireAdmin,
 	},
 	// ── 意図的に staff へ開放(要判断) ──
 	// 求人(POST)は全テナント共通データを書き換える。締める場合は admin_routes.go の該当ルートへ
