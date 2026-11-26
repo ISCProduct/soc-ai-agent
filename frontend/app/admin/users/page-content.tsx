@@ -20,6 +20,7 @@ import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContaine
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
+import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 import { getAdminSchoolAccess } from '@/lib/admin/school-access'
@@ -47,6 +48,8 @@ export default function PageContent() {
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [loading, setLoading] = useState(false)
+  // 完全削除の確認ダイアログで確認中のユーザー。null なら閉じている
+  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null)
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
   // 担当校を持つ管理者(先生)かどうか。true のとき管理者権限の変更ボタンを出さない(#1157)。
   // null は「まだ分からない」。取得に失敗したときも安全側の true へ倒すので、
@@ -134,10 +137,8 @@ export default function PageContent() {
   const handleToggleAdmin = (user: AdminUser) => patchUser(user, { is_admin: !user.is_admin })
   const handleToggleStaff = (user: AdminUser) => patchUser(user, { is_staff: !user.is_staff })
 
+  // 完全削除は確認ダイアログで確定するまで実行しない
   const handleDeleteUser = async (user: AdminUser) => {
-    if (!window.confirm(`${user.email} を完全削除します。履歴書・面接動画を含む個人データは復元できません。よろしいですか？`)) {
-      return
-    }
     setLoading(true)
     setError('')
     try {
@@ -152,6 +153,7 @@ export default function PageContent() {
       setError(toAdminErrorMessage(e))
     } finally {
       setLoading(false)
+      setDeleteTarget(null)
     }
   }
 
@@ -273,7 +275,7 @@ export default function PageContent() {
                               variant="outlined"
                               color="error"
                               disabled={loading}
-                              onClick={() => handleDeleteUser(user)}
+                              onClick={() => setDeleteTarget(user)}
                             >
                               削除
                             </Button>
@@ -298,6 +300,18 @@ export default function PageContent() {
           )}
         </AdminPanelBody>
       </AdminPanel>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="ユーザーを完全削除"
+        message={deleteTarget ? `${deleteTarget.email} を完全削除します。履歴書・面接動画を含む個人データは復元できません。よろしいですか？` : ''}
+        confirmLabel="完全削除する"
+        destructive
+        onConfirm={async () => {
+          if (deleteTarget) await handleDeleteUser(deleteTarget)
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </PageContainer>
   )
 }
