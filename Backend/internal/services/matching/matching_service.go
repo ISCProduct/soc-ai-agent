@@ -481,12 +481,16 @@ func (s *MatchingService) ToggleFavorite(matchID uint, userID uint) error {
 }
 
 // ListFavoriteCompanies は過去の診断を含め、お気に入り企業を1社1行で返す。
-func (s *MatchingService) ListFavoriteCompanies(ctx context.Context, userID uint, limit int) ([]*models.UserCompanyMatch, error) {
+// offset 社目から limit 件。total はページを切る前の社数。
+// companyIDs は表示できる全社の企業IDで、ページの外のハートを付けるために使う。
+// 取得そのものは全件のまま。件数の上限はページを切るときに掛ける。
+func (s *MatchingService) ListFavoriteCompanies(ctx context.Context, userID uint, offset, limit int) ([]*models.UserCompanyMatch, int, []uint, error) {
 	rows, err := s.matchRepo.FindFavoritedByUser(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, 0, nil, err
 	}
-	return DedupedFavorites(rows, limit), nil
+	page, total, companyIDs := PageFavorites(rows, offset, limit)
+	return page, total, companyIDs, nil
 }
 
 // UnfavoriteCompany はそのユーザーの、その企業のお気に入りを診断をまたいで外す。

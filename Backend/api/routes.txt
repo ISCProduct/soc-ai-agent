@@ -185,11 +185,13 @@ GET /api/auth/verify-email
 POST /api/auth/verify-registration
 POST /api/chat
 GET /api/chat/analysis
+GET /api/chat/axis-scores
 POST /api/chat/favorite
 GET /api/chat/favorites
 POST /api/chat/favorites/remove
 GET /api/chat/history
 POST /api/chat/match-feedback
+GET /api/chat/matches/:id/axes
 GET /api/chat/recommendations
 GET /api/chat/scores
 POST /api/chat/send-report
