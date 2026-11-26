@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Alert, Box, Button, ButtonBase, Collapse, LinearProgress, Stack, Typography } from '@mui/material'
+import { Box, Button, ButtonBase, Collapse, LinearProgress, Stack, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import DownloadIcon from '@mui/icons-material/Download'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { UI } from '@/lib/design/tokens'
@@ -103,7 +104,7 @@ export function ResumeResultSummary({ review, counts, annotatedAvailable, annota
         </Alert>
       )}
       {annotateError && (
-        <Alert severity="warning" sx={{ mt: 1 }}>
+        <Alert role="alert" severity="warning" sx={{ mt: 1 }}>
           {annotateError}
         </Alert>
       )}
