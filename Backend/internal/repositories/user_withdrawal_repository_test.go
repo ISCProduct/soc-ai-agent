@@ -92,6 +92,7 @@ var hardDeleteTargets = []string{
 	"AIGeneratedQuestion",
 	"ConversationContext",
 	"UserWeightScore",
+	"UserGrowthSnapshot",
 	"UserScoreRecalculationSnapshot",
 	"UserAnalysisProgress",
 	"UserEmbedding",
