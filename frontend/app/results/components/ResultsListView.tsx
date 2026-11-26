@@ -1,7 +1,8 @@
 'use client'
 
 import { useRef, useState, type MouseEvent } from 'react'
-import { Alert, Box, Button, Snackbar, Stack, useMediaQuery, useTheme } from '@mui/material'
+import { Box, Button, Snackbar, Stack, useMediaQuery, useTheme } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import type { AnalysisScores, Company, MatchFeedbackVerdict, SnackbarState, SuggestedRole } from '../types'
 import { CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
@@ -199,7 +200,7 @@ export default function ResultsListView({
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         sx={ABOVE_BOTTOM_NAV_SX}
       >
-        <Alert
+        <Alert role="alert"
           severity={snackbar.severity}
           onClose={onCloseSnackbar}
           action={

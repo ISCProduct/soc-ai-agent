@@ -1,4 +1,5 @@
-import { Alert, Box, Typography } from '@mui/material'
+import { Box, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { UI } from '@/lib/design/tokens'
 import type { CharLimitResult } from '../types'
 
