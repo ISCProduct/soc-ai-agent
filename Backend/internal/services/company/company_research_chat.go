@@ -119,18 +119,17 @@ func (s *ResearchChatService) Ask(ctx context.Context, userID, companyID, compar
 		companies = append(companies, c)
 	}
 
+	ctx = usagectx.WithFeature(ctx, FeatureCompanyResearchChat)
+	// AI 予算を先に確かめる。回数を数えた後に予算超過で断ると、AI を呼ばないのに回数だけ減る（原さんのレビュー指摘）。
+	if err := usagectx.CheckAIBudget(ctx); err != nil {
+		return nil, err
+	}
 	// 質問1回を1回分として、確認と加算を1つの操作で行う（同時に質問しても上限を超えない）。
 	// ベクトル化（RAG の検索）にも費用がかかるので、材料を集める前に数える。
 	if ok, err := s.quota.Reserve(ctx, userID, startOfDayJST(time.Now()), researchChatDailyLimit()); err != nil {
 		return nil, err
 	} else if !ok {
 		return nil, ErrResearchChatDailyLimit
-	}
-
-	ctx = usagectx.WithFeature(ctx, FeatureCompanyResearchChat)
-	// RAG の検索（ベクトル化）にも費用がかかるので、材料を集める前に AI 予算を確かめる。
-	if err := usagectx.CheckAIBudget(ctx); err != nil {
-		return nil, err
 	}
 	materials, err := s.collectMaterials(ctx, companies, question)
 	if err != nil {

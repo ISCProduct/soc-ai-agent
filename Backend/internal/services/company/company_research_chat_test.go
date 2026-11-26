@@ -15,6 +15,7 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/ragclient"
 	"Backend/internal/services/company"
+	"Backend/internal/usagectx"
 )
 
 type fakeLLM struct {
@@ -184,4 +185,19 @@ func TestResearchChat_CompareKeepsCompanyPerSource(t *testing.T) {
 	require.Len(t, ans.Sources, 2, "同じ種類の出典でも会社ごとに残す")
 	assert.ElementsMatch(t, []uint{1, 3}, []uint{ans.Sources[0].CompanyID, ans.Sources[1].CompanyID})
 	assert.Contains(t, llm.prompt, "合成B（事業の内容）: 当社の売上は100", "文章にどの会社のものかを付ける")
+}
+
+// AI 予算を超えていたら、1日の質問回数を減らさずに断る（原さんのレビュー指摘）。
+func TestResearchChat_BudgetExceededDoesNotConsumeQuota(t *testing.T) {
+	t.Setenv("COMPANY_RESEARCH_CHAT_ENABLED", "true")
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "合成テック", IsActive: true}, nil)
+	q := &fakeQuota{}
+	llm := &fakeLLM{}
+	svc := company.NewResearchChatService(repo, &fakeResearch{}, &fakeQuerier{}, llm, q)
+	ctx := usagectx.WithAIBudgetCheck(context.Background(), func(context.Context) error { return usagectx.ErrAIBudgetExceeded })
+	_, err := svc.Ask(ctx, 7, 1, 0, "事業は？")
+	assert.ErrorIs(t, err, usagectx.ErrAIBudgetExceeded)
+	assert.Zero(t, q.used, "回数は減らさない")
+	assert.Zero(t, llm.calls)
 }
