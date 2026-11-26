@@ -16,7 +16,7 @@ const authResponse = {
 function jsonRequest(url: string, body: unknown): NextRequest {
   return new NextRequest(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', origin: 'http://localhost:3000' },
     body: JSON.stringify(body),
   })
 }
@@ -30,7 +30,7 @@ describe('POST /api/company-auth/forgot-password', () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ message: 'パスワード再設定用のメールを送信しました' }), {
         status: 200,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', origin: 'http://localhost:3000' },
       }),
     )
 
@@ -60,7 +60,7 @@ describe('POST /api/company-auth/forgot-password', () => {
     jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ message: 'パスワード再設定用のメールを送信しました' }), {
         status: 200,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', origin: 'http://localhost:3000' },
       }),
     )
 
@@ -78,7 +78,7 @@ describe('POST /api/company-auth/forgot-password', () => {
     jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ error: 'too many requests' }), {
         status: 429,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', origin: 'http://localhost:3000' },
       }),
     )
 
@@ -101,7 +101,7 @@ describe('POST /api/company-auth/reset-password', () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(JSON.stringify(authResponse), {
         status: 200,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', origin: 'http://localhost:3000' },
       }),
     )
 
@@ -136,7 +136,7 @@ describe('POST /api/company-auth/reset-password', () => {
     jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ error: 'invalid or expired token' }), {
         status: 400,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', origin: 'http://localhost:3000' },
       }),
     )
 

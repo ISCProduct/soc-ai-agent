@@ -1,6 +1,7 @@
 'use client'
 
-import { Box, Card, CardContent, Stack, TableBody, TableCell, TableHead, TableRow, Typography, useMediaQuery, useTheme } from '@mui/material'
+import { useState } from 'react'
+import { Box, Button, Card, CardContent, LinearProgress, Stack, TableBody, TableCell, TableHead, TableRow, Typography, useMediaQuery, useTheme } from '@mui/material'
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { EmptyState } from '@/components/common/EmptyState'
 import { TableSkeletonRows, ListSkeleton } from '@/components/common/ListSkeleton'
@@ -29,7 +30,10 @@ interface Props {
 // 列は5つに留める。点数は並べない（成績表として読まれ、学生が正直に答えなくなるため）。
 const COLUMNS = 5
 
+const needsFollowUp = (s: StudentAssessmentStatus) => s.status === 'not_started' || s.overdue
+
 export function StatusList({ data, loading }: Props) {
+  const [followOnly, setFollowOnly] = useState(false)
   // 375px では表を縦のカードに切り替える（横スクロールさせない）。
   const narrow = useMediaQuery(useTheme().breakpoints.down('sm'))
 
@@ -53,10 +57,36 @@ export function StatusList({ data, loading }: Props) {
     )
   }
 
+  const rows = followOnly ? data.students.filter(needsFollowUp) : data.students
+  const rollup = data.rollup
+
+  const summary = (
+    <Stack spacing={1} mb={1.5}>
+      <Typography variant="body2">
+        在籍{rollup.student_count}人。受検を始めた人は{rollup.started_count}人（{rollup.started_percent}%）、
+        提出済みは{rollup.submitted_count}人（{rollup.submitted_percent}%）。
+        期限を過ぎて未提出の人は{rollup.overdue_count}人です。
+      </Typography>
+      <LinearProgress
+        variant="determinate"
+        value={rollup.submitted_percent}
+        aria-label={`提出済み ${rollup.submitted_percent}%`}
+      />
+      <Button size="small" variant="outlined" onClick={() => setFollowOnly((v) => !v)} sx={{ alignSelf: 'flex-start' }}>
+        {followOnly ? '全員を見る' : '未受検と期限超過だけ見る'}
+      </Button>
+    </Stack>
+  )
+
   if (narrow) {
     return (
-      <Stack spacing={1.5} component="ul" sx={{ listStyle: 'none', p: 0, m: 0 }} aria-label="学生ごとの受検状況">
-        {data.students.map((s) => {
+      <Stack spacing={1.5}>
+        {summary}
+        {rows.length === 0 ? (
+          <EmptyState title="該当する学生はいません" description="未受検と期限超過の学生はいません。" />
+        ) : (
+          <Stack spacing={1.5} component="ul" sx={{ listStyle: 'none', p: 0, m: 0 }} aria-label="学生ごとの受検状況">
+        {rows.map((s) => {
           const st = statusDisplay(s)
           return (
             <Card key={s.student_id} variant="outlined" component="li">
@@ -81,12 +111,18 @@ export function StatusList({ data, loading }: Props) {
             </Card>
           )
         })}
+          </Stack>
+        )}
       </Stack>
     )
   }
 
   return (
     <Box>
+      {summary}
+      {rows.length === 0 ? (
+        <EmptyState title="該当する学生はいません" description="未受検と期限超過の学生はいません。" />
+      ) : (
       <AdminTableWrapper tableProps={{ 'aria-label': '学生ごとの受検状況' }}>
         <TableHead>
           <TableRow>
@@ -98,7 +134,7 @@ export function StatusList({ data, loading }: Props) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.students.map((s) => {
+          {rows.map((s) => {
             const st = statusDisplay(s)
             return (
               <TableRow key={s.student_id}>
@@ -115,6 +151,7 @@ export function StatusList({ data, loading }: Props) {
           })}
         </TableBody>
       </AdminTableWrapper>
+      )}
     </Box>
   )
 }

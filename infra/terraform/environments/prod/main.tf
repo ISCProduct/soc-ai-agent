@@ -850,6 +850,7 @@ module "rag_review" {
     # 工程ごとのモデルの二層化（#1526）。空なら工程ごとの既定のまま
     AI_MODEL_PREMIUM         = var.ai_model_premium
     AI_MODEL_LIGHT           = var.ai_model_light
+    OPENAI_ES_IMPROVE_MODEL  = var.es_improve_model
     OPENAI_EMBEDDING_MODEL   = "text-embedding-3-small"
     OPENAI_HINTS_MODEL       = "gpt-4o-mini"
     OPENAI_HINTS_PARSE_MODEL = "gpt-4o-mini"
