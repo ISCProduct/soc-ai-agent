@@ -1,11 +1,11 @@
 package prompts
 
 import (
+	"Backend/internal/config"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"log/slog"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -131,7 +131,7 @@ type abArm struct {
 
 // abArms は工程の A/B 設定を読む。無効な設定なら nil を返し、一度だけ警告を出す。
 func abArms(stage Stage) []abArm {
-	raw := strings.TrimSpace(os.Getenv("PROMPT_AB_" + strings.ToUpper(string(stage))))
+	raw := config.PromptABSpec(string(stage))
 	if raw == "" {
 		return nil
 	}

@@ -60,6 +60,7 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"GET /applications":                                     classStaff,
 		"PATCH /applications/:id/status":                        classStaff,
 		"GET /graduate-employments":                             classStaff,
+		"GET /graduate-employments/summary":                     classStaff,
 		"POST /graduate-employments":                            classStaff,
 		"GET /graduate-employments/:id":                         classStaff,
 		"PUT /graduate-employments/:id":                         classStaff,
@@ -75,6 +76,8 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"DELETE /schools/:id/job-suppressions/:jobId":           classStaff,
 		"GET /companies":                                        classStaff,
 		"GET /companies/industries":                             classStaff,
+		"GET /business-tags":                                    classStaff,
+		"GET /companies/:id/business-tags":                      classStaff,
 		"GET /companies/names":                                  classStaff,
 		"GET /companies/:id":                                    classStaff,
 		"GET /companies/:id/interview-questions":                classStaff,
@@ -111,6 +114,7 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"PATCH /companies/:id/publish":                         classPlatform,
 		"PATCH /companies/:id/verify":                          classPlatform,
 		"PATCH /companies/:id/reject":                          classPlatform,
+		"PUT /companies/:id/business-tags":                     classPlatform,
 		"PATCH /job-positions/:id/:action":                     classPlatform,
 		"POST /users/purge-expired":                            classPlatform,
 		"GET /organizations":                                   classPlatform,
@@ -215,6 +219,7 @@ var schoolScopedRoutes = map[string]bool{
 	"GET /dashboard/funnel":                   true,
 	"GET /applications":                       true,
 	"GET /graduate-employments":               true,
+	"GET /graduate-employments/summary":       true,
 }
 
 // 主体ごとの固定ID。fakeSchoolRepo の担当校は userID で引かれる。

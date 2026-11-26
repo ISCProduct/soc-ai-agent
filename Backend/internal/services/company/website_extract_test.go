@@ -21,6 +21,10 @@ func TestWebsite_会社概要ページを辿って本文を集める(t *testing.
 	var gotPaths []string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r) // robots.txt が無いサイト = 制限なし
+			return
+		}
 		gotPaths = append(gotPaths, r.URL.Path)
 		switch r.URL.Path {
 		case "/":
@@ -38,6 +42,7 @@ func TestWebsite_会社概要ページを辿って本文を集める(t *testing.
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
+	allowTestServer(t, srv)
 
 	text, err := collectWebsiteText(context.Background(), srv.URL)
 	if err != nil {
@@ -64,6 +69,7 @@ func TestWebsite_本文が薄ければエラーにする(t *testing.T) {
 		fmt.Fprint(w, `<html><body><div id="root"></div><script>render()</script></body></html>`)
 	}))
 	defer srv.Close()
+	allowTestServer(t, srv)
 
 	if _, err := collectWebsiteText(context.Background(), srv.URL); err == nil {
 		t.Error("本文が薄いのでエラーを返すべき")
@@ -81,6 +87,7 @@ func TestWebsite_上限で切り詰める(t *testing.T) {
 		fmt.Fprintf(w, `<html><body><p>%s</p></body></html>`, filler(4000))
 	}))
 	defer srv.Close()
+	allowTestServer(t, srv)
 
 	text, err := collectWebsiteText(context.Background(), srv.URL)
 	if err != nil {

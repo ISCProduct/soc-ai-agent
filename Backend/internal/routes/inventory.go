@@ -29,6 +29,7 @@ var mainGoRoutes = []Route{
 	// /api の外。監視用。
 	{Method: "GET", Path: "/health"},
 	{Method: "GET", Path: "/healthz"},
+	{Method: "GET", Path: "/ready"},
 	{Method: "GET", Path: "/metrics"},
 
 	{Method: "POST", Path: "/api/company-entry"},

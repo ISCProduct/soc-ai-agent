@@ -1,6 +1,7 @@
 'use client'
 
 import { Box } from '@mui/material'
+import { visuallyHidden } from '@mui/utils'
 import type { InterviewReport, InterviewSession } from '@/lib/interview'
 import type { WeightScore } from '@/components/feedback/ScoreUpdateBanner'
 import type { ReportStatus } from '../hooks/useInterviewSession'
@@ -62,8 +63,19 @@ export default function ReportScreen(props: ReportScreenProps) {
     : view === 'failed' && onRetryReport ? { kind: 'retry', label: resolveRetryLabel(reportFailedByServer), onClick: onRetryReport }
     : null
 
+  // レポートの待ちの状態を読み上げに伝える（#2217 のレビュー）。要素ごと差し込んだ status は読まれないことがあるので、
+  // 最初から置いたままの見えない status の文字だけを入れ替える（作成中 → 停滞 → 完了の切り替わりが届くように）
+  const announcement =
+    view === 'ready' ? 'レポートができました'
+    : view === 'stalled' ? '時間がかかっています'
+    : showsCard ? 'レポートを作っています'
+    : ''
+
   return (
     <Box sx={pageSx}>
+      <Box role="status" sx={visuallyHidden} data-testid="report-status-announcer">
+        {announcement}
+      </Box>
       <Box sx={columnSx(view === 'ready' ? REPORT_BODY_MAX_WIDTH : undefined)}>
         <CompletionHeader metaLine={metaLine} />
         <WarningBanners {...props} />
