@@ -1,6 +1,7 @@
 'use client'
 
-import { Alert, AlertTitle, Box, Button, Stack, Typography } from '@mui/material'
+import { AlertTitle, Box, Button, Stack, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 
 type ErrorStateProps = {
   /** 何が起きたか。対象を名指しする。「エラーが発生しました」では使えない。 */
