@@ -244,11 +244,11 @@ export function ChatInputBar({
               }}
             />
             {/*
-              送信もアイコンだけのボタンなので Tooltip を付け、押せる範囲を 44px にする（#2214）。
+              送信もアイコンだけのボタンなので、見える手がかりとして Tooltip を付ける（#2214）。押せる範囲の 44px はテーマで付く。
               押せないとき（disabled）も Tooltip が出るよう span で包む（音声入力と同じ）。
-              名前は aria-label が持つので、Tooltip は説明（aria-describedby）として付ける。
+              読み上げの名前はボタンの aria-label（メッセージを送信）が持つ。Tooltip は span に付くので、ボタンの名前・説明にはならない。
             */}
-            <Tooltip title="送信" describeChild>
+            <Tooltip title="送信">
               <span style={{ display: 'inline-flex' }}>
                 <IconButton
                   color="primary"
@@ -256,8 +256,6 @@ export function ChatInputBar({
                   disabled={!canSend || isLoading || !!historyLoadError}
                   aria-label="メッセージを送信"
                   sx={{
-                    width: 44,
-                    height: 44,
                     bgcolor: CHAT_ACCENT,
                     color: '#fff',
                     mb: 2.5,

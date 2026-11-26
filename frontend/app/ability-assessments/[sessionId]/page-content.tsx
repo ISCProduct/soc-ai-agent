@@ -295,9 +295,8 @@ export default function PageContent() {
                   value={answers[key] ?? ''}
                   onChange={(e) => answer(q.id, Number(e.target.value))}
                 >
-                  {/* Radio の既定の余白 9px だと行の高さが 42px。10px にして押せる範囲を 44px にする（#2214） */}
                   {q.choices.map((label, i) => (
-                    <FormControlLabel key={i} value={i} control={<Radio sx={{ p: '10px' }} />} label={label} />
+                    <FormControlLabel key={i} value={i} control={<Radio />} label={label} />
                   ))}
                 </RadioGroup>
                 <Typography variant="caption" role="status" color={state === 'error' ? 'error' : 'text.secondary'}>

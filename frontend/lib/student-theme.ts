@@ -18,6 +18,12 @@ const FONT_FAMILY = FONT_STACK_PROPORTIONAL
 /** 押せる範囲の最小の大きさ（px）。縦横ともこれ以上にする（#2214、資料 08章）。 */
 export const TOUCH_TARGET_MIN = 44
 
+/** Checkbox・Radio のアイコンの大きさ（px。MUI の既定）。 */
+const CHECK_CONTROL_ICON = 24
+
+/** Checkbox・Radio の余白（px）。アイコンと合わせて TOUCH_TARGET_MIN にする。 */
+export const CHECK_CONTROL_PADDING = (TOUCH_TARGET_MIN - CHECK_CONTROL_ICON) / 2
+
 /** パターン3 既定: Wong に近い色覚セーフ青 */
 export const COMFORTABLE_PRIMARY = '#0072B2'
 
@@ -213,6 +219,24 @@ export function createStudentMuiTheme(mode: StudentThemeMode) {
       MuiToggleButton: {
         styleOverrides: {
           root: { minWidth: TOUCH_TARGET_MIN, minHeight: TOUCH_TARGET_MIN },
+        },
+      },
+      // Checkbox・Radio は既定の余白 9px だと、24px のアイコンと合わせて 42px。余白を 10px にして 44px にする。
+      // 呼び出し側ごとに書くと漏れる（/company-entry の同意が 42px のままだった。#2624 のレビュー）ので、ここで1か所にする。
+      MuiCheckbox: {
+        styleOverrides: {
+          root: { padding: CHECK_CONTROL_PADDING },
+        },
+      },
+      MuiRadio: {
+        styleOverrides: {
+          root: { padding: CHECK_CONTROL_PADDING },
+        },
+      },
+      // 押せる Chip（onClick を渡したもの）は、既定の高さ 32px では足りないので 44px にする。角は丸いまま。
+      MuiChip: {
+        styleOverrides: {
+          clickable: { height: TOUCH_TARGET_MIN, borderRadius: TOUCH_TARGET_MIN / 2 },
         },
       },
       MuiCard: {

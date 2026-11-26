@@ -121,3 +121,62 @@ async function mockInterviewHistory(page: Page) {
     }),
   )
 }
+
+// CI ではバックエンドが起動していない。未モックの API は空応答で即座に返す（profile-layout.spec.ts と同じ）。
+async function stubApi(page: Page) {
+  await page.route('**/api/**', (route) =>
+    route.request().method() === 'GET'
+      ? route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+      : route.fulfill({ status: 204, body: '' }),
+  )
+}
+
+/** Checkbox・Radio は input が見えないので、押せる範囲（MUI の根の span）を測る。 */
+function controlRoot(input: Locator, className: 'MuiCheckbox-root' | 'MuiRadio-root'): Locator {
+  return input.locator(`xpath=ancestor::span[contains(concat(' ', @class, ' '), ' ${className} ')][1]`)
+}
+
+// #2214: 学生のテーマで押せる範囲を 44px 以上にしたもの（IconButton・ToggleButton・Checkbox・Radio・押せる Chip）を、
+// 実際の大きさで測る。単体テスト（jsdom）はレイアウトを計算しないので、指定が付いていることまでしか確かめられない（#2624 のレビュー）。
+test.describe('学生画面の押せる範囲（#2214）', () => {
+  test('企業登録のプライバシーポリシーの同意のチェックボックスは 44x44 以上', async ({ page }) => {
+    await page.context().clearCookies()
+    await page.goto('/company-entry')
+    const label = page.locator('label').filter({ hasText: 'プライバシーポリシー' })
+    await expectMinBox(controlRoot(label.getByRole('checkbox'), 'MuiCheckbox-root'), 44, 44)
+  })
+
+  test('プロフィールの画面の見え方の切り替え（Radio）は 44x44 以上', async ({ page }) => {
+    await stubApi(page)
+    await setupAuth(page, TEST_USER)
+    await page.goto('/profile')
+    for (const name of ['見やすい表示（推奨）', '高コントラスト（色弱・弱視向け）']) {
+      await expectMinBox(controlRoot(page.getByRole('radio', { name }), 'MuiRadio-root'), 44, 44)
+    }
+  })
+
+  test('ES添削の質問種別（押せる Chip）は高さ 44px 以上', async ({ page }) => {
+    await stubApi(page)
+    await setupAuth(page, TEST_USER)
+    await page.goto('/es-rewrite')
+    for (const name of ['志望動機', '自己PR']) {
+      await expectMinBox(page.getByRole('button', { name, exact: true }), 44)
+    }
+  })
+
+  test('企業相関図の切り替え（ToggleButton）は 44x44 以上', async ({ page }) => {
+    await setupAuth(page, TEST_USER)
+    const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+    const a = { id: 1, name: '親ホールディングス' }
+    const b = { id: 2, name: '子テック' }
+    await page.route('**/api/companies/relations*', (route) =>
+      route.fulfill(json([{ id: 10, parent_id: 1, child_id: 2, relation_type: 'capital_subsidiary', ratio: 60, description: '', parent: a, child: b }])),
+    )
+    await page.route('**/api/companies/market-info*', (route) => route.fulfill(json([])))
+    await page.route(/\/api\/companies\/\d+/, (route) => route.fulfill(json({ id: 2, name: b.name })))
+    await page.goto('/correlation-diagram?company_id=2')
+    for (const name of ['資本関連図', 'ビジネス関連図']) {
+      await expectMinBox(page.getByRole('button', { name, exact: true }), 44, 44)
+    }
+  })
+})

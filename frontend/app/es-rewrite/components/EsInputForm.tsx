@@ -77,8 +77,6 @@ export default function EsInputForm({
               label={type}
               onClick={() => setQuestionType(type)}
               sx={{
-                // 押せる Chip は高さ32pxでは足りないので 44px にする（#2214）。角は丸いまま
-                height: 44, borderRadius: '22px',
                 cursor: 'pointer', fontWeight: 600,
                 bgcolor: questionType === type ? UI.mark : UI.tint,
                 color: questionType === type ? '#fff' : UI.inkSoft,
@@ -172,8 +170,6 @@ export default function EsInputForm({
                 label={label}
                 onClick={() => setCharLimitMode(value)}
                 sx={{
-                  // 押せる Chip は高さ32pxでは足りないので 44px にする（#2214）。角は丸いまま
-                  height: 44, borderRadius: '22px',
                   cursor: 'pointer', fontWeight: 600,
                   bgcolor: charLimitMode === value ? UI.mark : UI.tint,
                   color: charLimitMode === value ? '#fff' : UI.inkSoft,

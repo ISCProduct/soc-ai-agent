@@ -58,8 +58,6 @@ export default function ConsentDialog({ open, consentGiven, onConsentChange, onC
             <Checkbox
               checked={consentGiven}
               onChange={(e) => onConsentChange(e.target.checked)}
-              // Checkbox の既定の余白 9px だと行の高さが 42px。10px にして押せる範囲を 44px にする（#2214）
-              sx={{ p: '10px' }}
             />
           }
           label="上記の内容に同意して面接練習を始める"
