@@ -59,6 +59,7 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"GET /applications":                                     classStaff,
 		"PATCH /applications/:id/status":                        classStaff,
 		"GET /graduate-employments":                             classStaff,
+		"GET /graduate-employments/summary":                     classStaff,
 		"POST /graduate-employments":                            classStaff,
 		"GET /graduate-employments/:id":                         classStaff,
 		"PUT /graduate-employments/:id":                         classStaff,
@@ -216,6 +217,7 @@ var schoolScopedRoutes = map[string]bool{
 	"GET /dashboard/funnel":                   true,
 	"GET /applications":                       true,
 	"GET /graduate-employments":               true,
+	"GET /graduate-employments/summary":       true,
 }
 
 // 主体ごとの固定ID。fakeSchoolRepo の担当校は userID で引かれる。

@@ -14,6 +14,7 @@ describe('POST /api/auth/profile', () => {
     const response = await POST(
       new NextRequest('http://localhost:3000/api/auth/profile', {
         method: 'POST',
+        headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' },
         body: JSON.stringify({ name: '更新後' }),
       }),
     )
