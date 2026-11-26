@@ -136,7 +136,9 @@ func (s *ResearchChatService) Ask(ctx context.Context, userID, companyID, compar
 	if err := usagectx.CheckAIBudget(ctx); err != nil {
 		return nil, err
 	}
-	raw, err := s.llm.ChatCompletionJSON(openai.WithoutInputGuard(ctx), researchSystemPrompt, buildResearchUserPrompt(companies, materials, question), 0.1, 500)
+	// 質問は呼び出し側で伏字済み。材料（企業の文章）まで伏字にすると企業名が崩れるので、ガードは外す。
+	llmCtx := usagectx.WithFeature(openai.WithoutInputGuard(ctx), FeatureCompanyResearchChat)
+	raw, err := s.llm.ChatCompletionJSON(llmCtx, researchSystemPrompt, buildResearchUserPrompt(companies, materials, question), 0.1, 500)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrResearchChatGeneration, err)
 	}
