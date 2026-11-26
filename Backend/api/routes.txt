@@ -286,6 +286,8 @@ POST /api/interviews/:id/start-turn
 POST /api/interviews/:id/turn
 POST /api/interviews/:id/upload-video
 POST /api/interviews/:id/utterances
+GET /api/interviews/:id/videos
+GET /api/interviews/:id/videos/:video_id/url
 GET /api/interviews/axis-comparison
 GET /api/interviews/trend
 GET /api/notifications
