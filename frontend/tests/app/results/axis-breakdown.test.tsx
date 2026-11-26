@@ -46,7 +46,7 @@ test('10軸のスコアをキーで固定の並びにそろえ、無い軸・数
     { key: 'teamwork', label: 'チームワーク', score: null },
   ])
   expect(got).toHaveLength(10)
-  // 表示名は推薦の一覧の「噛み合った軸」と同じ辞書（CATEGORY_SCORE_LABELS）
+  // 表示名は推薦の一覧の「一致している項目」と同じ辞書（CATEGORY_SCORE_LABELS）
   expect(got[0]).toEqual({ key: 'technical', label: '技術力', score: 80 })
   expect(got[4]).toEqual({ key: 'stability', label: '安定志向', score: 42 })
   expect(got[1]).toEqual({ key: 'teamwork', label: 'チームワーク', score: null })
@@ -222,15 +222,16 @@ describe('結果一覧への組み込み', () => {
     expect(onSelectCompany).not.toHaveBeenCalled()
   })
 
-  test('内訳を開いた行では「噛み合った軸」を隠す（同じ軸が別の値で並ばない）。閉じて開き直しても取り直さない', async () => {
+  test('内訳を開いた行では「一致している項目」を隠す（同じ軸が別の値で並ばない）。閉じて開き直しても取り直さない', async () => {
     const urls = respond((url) => (url.includes('/axes') ? [200, BREAKDOWN] : [200, []]))
     renderList({ ...company, categoryScores: { technical: 97, teamwork: 50, leadership: 50, creativity: 50, stability: 50, growth: 50, work_life: 50, challenge: 50, detail: 50, communication: 50 } })
-    expect(screen.getByText(/噛み合った軸：/)).toHaveTextContent('技術力 97')
+    expect(screen.getByText('一致している項目')).toBeInTheDocument()
+    expect(screen.getByText(/技術力 97/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '軸ごとの内訳を見る' }))
     await screen.findByRole('table')
-    expect(screen.queryByText(/噛み合った軸：/)).not.toBeInTheDocument()
+    expect(screen.queryByText('一致している項目')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '軸ごとの内訳を閉じる' }))
-    expect(screen.getByText(/噛み合った軸：/)).toBeInTheDocument()
+    expect(screen.getByText('一致している項目')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '軸ごとの内訳を見る' }))
     expect(screen.getByRole('table')).toBeInTheDocument()
     expect(urls.filter((u) => u.includes('/axes'))).toHaveLength(1)

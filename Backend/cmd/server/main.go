@@ -67,6 +67,7 @@ import (
 	"Backend/internal/services/teacher"
 	"Backend/internal/services/training"
 	"Backend/internal/services/training/scorerexport"
+	"Backend/internal/services/userpreference"
 	"context"
 	"log"
 	"log/slog"
@@ -410,7 +411,7 @@ func main() {
 	if jobEnqueuer != nil {
 		chatController.SetJobEnqueuer(jobEnqueuer)
 	}
-	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
+	chatController.SetDiagnosisQualityService(diagnosisQualityService)
 	relationController := companycontrollers.NewCompanyRelationController(companyQueryRepo, aiClient)
 	relationController.SetCorrelationMapService(company.NewCompanyCorrelationMapService(companyRepo, companyRelationRepo))
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
@@ -497,6 +498,7 @@ func main() {
 	adminInterviewController.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	adminInterviewController.SetCompanyRepo(companyRepo)
 	adminInterviewController.SetOpenAIClient(aiClient)
+	adminInterviewController.SetAIBudget(aiBudgetService)
 	adminInterviewController.SetUserAccessGuard(userDeletionService)
 	adminInterviewController.SetSchoolAccess(userRepo, interviewSessionRepo, schoolService)
 	adminJobController.SetSchoolAccess(schoolService)
@@ -526,8 +528,8 @@ func main() {
 	companyAuthController := companycontrollers.NewCompanyAuthController(companyUserService)
 	companyPortalController := companycontrollers.NewCompanyPortalController(companyUserService)
 	adminCompanyUserController := companycontrollers.NewAdminCompanyUserController(companyUserService)
-	releaseNoteService := release.NewReleaseNoteService(repositories.NewReleaseNoteRepository(db), aiClient)
-	releaseNoteController := releasecontrollers.NewReleaseNoteController(releaseNoteService, userRepo)
+	releaseNoteService := release.NewReleaseNoteService(repositories.NewReleaseNoteRepository(db), userRepo, aiClient)
+	releaseNoteController := releasecontrollers.NewReleaseNoteController(releaseNoteService)
 	githubController := githubcontrollers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := escontrollers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)
@@ -575,7 +577,7 @@ func main() {
 	authService.SetScoutIndexSyncer(scoutIndexSyncer)
 	// 退会時のベクトル削除と、日次のリコンサイル(ReconcileScoutIndex)も同じ同期処理を使う（#1094, #1204）。
 	userDeletionService.SetScoutIndexSyncer(scoutIndexSyncer)
-	userPreferenceController := usercontrollers.NewUserPreferenceController(userPreferenceRepo, scoutIndexSyncer, industryRepo)
+	userPreferenceController := usercontrollers.NewUserPreferenceController(userpreference.NewService(userPreferenceRepo), scoutIndexSyncer, industryRepo)
 	integratedProfileController := usercontrollers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
 	entitlementController := usercontrollers.NewEntitlementController(organizationService)
 	scoreValidationRepo := repositories.NewScoreValidationRepository(db)
@@ -583,7 +585,7 @@ func main() {
 	scoreValidationController := admincontrollers.NewAdminScoreValidationController(scoreValidationService)
 	// #203: 有効なキャリブレーション重みをマッチング計算へ適用（未アクティブなら全軸1.0）
 	matchingService.SetCalibrationWeightReader(scoreValidationRepo)
-	diagnosisQualityController := admincontrollers.NewAdminDiagnosisQualityController(diagnosisQualityRepo)
+	diagnosisQualityController := admincontrollers.NewAdminDiagnosisQualityController(diagnosisQualityService)
 	collectiveInsightRepo := repositories.NewCollectiveInsightRepository(db)
 	collectiveInsightService := flywheel.NewCollectiveInsightService(collectiveInsightRepo, userWeightScoreRepo)
 	collectiveInsightController := insightcontrollers.NewCollectiveInsightController(collectiveInsightService)
@@ -592,7 +594,7 @@ func main() {
 	scraperSessionService := admin.NewScraperSessionService(scraperSessionRepo)
 	scraperSessionController := admincontrollers.NewAdminScraperSessionController(scraperSessionService)
 
-	e := newEchoServer(sentryOn, organizationService)
+	e := newEchoServer(sentryOn, organizationService, db)
 
 	// APIルートグループ
 	api := e.Group("/api")

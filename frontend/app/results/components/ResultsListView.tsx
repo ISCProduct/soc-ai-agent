@@ -1,49 +1,24 @@
 'use client'
 
-import { useRef, useState, type MouseEvent, type ReactNode } from 'react'
-import type { SxProps, Theme } from '@mui/material/styles'
-import {
-  Box,
-  Typography,
-  Button,
-  Card,
-  CardContent,
-  Stack,
-  Avatar,
-  Chip,
-  Snackbar,
-  Alert,
-  IconButton,
-  Tooltip,
-} from '@mui/material'
-import {
-  ArrowBack,
-  LocationOn,
-  People,
-  TrendingUp as TrendingUpIcon,
-  Refresh,
-  Email,
-  Favorite,
-  FavoriteBorder,
-} from '@mui/icons-material'
+import { useRef, useState, type MouseEvent } from 'react'
+import { Alert, Box, Button, Snackbar, Stack, useMediaQuery, useTheme } from '@mui/material'
 import type { AnalysisScores, Company, MatchFeedbackVerdict, SnackbarState, SuggestedRole } from '../types'
-import { buildEsRewriteQuery, buildInterviewQuery, getTopCategoryScores } from '../utils'
-import { withStableKeys } from '@/lib/list-keys'
-import AnalysisScoreCard from './AnalysisScoreCard'
-import MyCategoryScoresCard from './MyCategoryScoresCard'
-import AxisBreakdownPanel from './AxisBreakdownPanel'
-import type { AxisBreakdown } from '@/lib/axis-match'
-import FavoritesCompareList from './FavoritesCompareList'
-import {
-  GUEST_REGISTER_CTA_LABEL,
-  GUEST_REGISTER_PATH,
-  getGuestApplicationsButtonProps,
-  getGuestEmailButtonProps,
-} from '@/lib/guest-limits'
-import { APPLY_CLOSED_LABEL, getApplyClosedButtonProps } from '@/lib/apply-availability'
-import { CONTENT_MAX_WIDTH, UI, leadSentences, scaleBand } from '@/lib/design/tokens'
+import { CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
+import { AnalysisErrorAlert } from './list/AnalysisErrorAlert'
+import { AnswerCoveragePanel } from './list/AnswerCoveragePanel'
+import { CompanyList } from './list/CompanyList'
+import { maxMatchedAxisCount } from './list/companyRules'
+import { EmailButton } from './list/EmailButton'
+import { FavoritesSection } from './list/FavoritesSection'
+import { NextStepBar } from './list/NextStepBar'
+import { ResultsFooterLinks } from './list/ResultsFooterLinks'
+import { ResultsHeader } from './list/ResultsHeader'
+import { RolesPanel } from './list/RolesPanel'
+import type { CompanyRowContext } from './list/rowContext'
+import MyCategoryScoresCard from './MyCategoryScoresCard'
+import type { AxisBreakdown } from '@/lib/axis-match'
 
 export interface ResultsListViewProps {
   companies: Company[]
@@ -87,25 +62,10 @@ export interface ResultsListViewProps {
   onNavigate: (path: string) => void
 }
 
-// 押せない理由の文の id（ボタンの aria-describedby から指す）。同じ画面に2つあるメール送信ボタンは別の id にする
-const EMAIL_REASON_TOP_ID = 'results-email-disabled-reason-top'
-const EMAIL_REASON_BOTTOM_ID = 'results-email-disabled-reason-bottom'
-const APPLICATIONS_REASON_ID = 'results-applications-disabled-reason'
-
 /**
- * 押せないボタンの理由を、常に見える文として出す（#2221）。
- * 吹き出し（Tooltip）はマウスを乗せないと出ず、タッチ端末では読めないので、吹き出しは補助にとどめる。
- */
-function DisabledReason({ id, children, sx }: { id: string; children: ReactNode; sx?: SxProps<Theme> }) {
-  return (
-    <Typography id={id} variant="caption" component="p" sx={[{ color: UI.inkSoft, mt: 0.5 }, ...(Array.isArray(sx) ? sx : [sx])]}>
-      {children}
-    </Typography>
-  )
-}
-
-/**
- * マッチング結果一覧（ヘッダー・スコア・職種適性・企業カード・フッター・Snackbar）。
+ * マッチング結果一覧。部品を並べるだけにし、判定は list/ 配下の純関数に置く。
+ * 並びは Figma「診断結果 改善案」v4。PC は 企業一覧（左）と「わかっていること」「向いていそうな職種」（右）の2カラム、
+ * SP は 次にやること → わかっていること → 企業一覧 → 向いていそうな職種 → メール・リンク の縦積み。
  */
 export default function ResultsListView({
   companies,
@@ -116,17 +76,18 @@ export default function ResultsListView({
   onRetryFavorites,
   isProvisional,
   diagnosisSummary = null,
-  evaluatedCategories = null,
-  minMatchedAxisCount = null,
-  diagnosisConfidence = null,
+  minMatchedAxisCount: _minMatchedAxisCount = null,
+  evaluatedCategories: _evaluatedCategories = null,
+  diagnosisConfidence: _diagnosisConfidence = null,
   analysisScores,
-  scoreComment,
+  scoreComment: _scoreComment = '',
   analysisError,
   onRetryAnalysis,
   jobSuitabilityComment,
   suggestedRoles,
   emailSending,
   favoritingId,
+  feedbackingId = null,
   applyingId,
   snackbar,
   isGuestUser,
@@ -139,10 +100,11 @@ export default function ResultsListView({
   onToggleFavorite,
   onUnfavoriteCompany,
   onFeedback,
-  feedbackingId = null,
   onApply,
   onNavigate,
 }: ResultsListViewProps) {
+  // この一覧は useResultsData の mounted 後にしか描画されない（page-content.tsx）。サーバー描画・hydration の最初の描画に
+  // 出ないので、noSsr: true で最初から実際の幅で PC / SP を分けても不一致は起きない。
   // 軸ごとの内訳を開いている推薦（match_id）。開いたときだけ取りに行く
   const [openAxes, setOpenAxes] = useState<ReadonlySet<number>>(new Set())
   // 取得済みの内訳。閉じて開き直すたびに取り直さない
@@ -155,567 +117,76 @@ export default function ResultsListView({
       return next
     })
   }
-  const guestEmailProps = getGuestEmailButtonProps(isGuestUser)
-  const guestApplicationsProps = getGuestApplicationsButtonProps(isGuestUser)
-  const applyClosedProps = getApplyClosedButtonProps(applyEnabled)
-  // お気に入りは過去の診断も含め、同じ企業は1行。中身は呼び出し側がまとめて渡す。
+  const isDesktop = useMediaQuery(useTheme().breakpoints.up('md'), { noSsr: true })
+
+  // お気に入りは過去の診断も含め、同じ企業は1行。中身は呼び出し側がまとめて渡す（#2301）
   const [favoritesOnly, setFavoritesOnly] = useState(false)
-  const favoriteCount = favoriteCompanies.length
   const listedCompanies = favoritesOnly ? favoriteCompanies : companies
-  // 「応募する」を押せない理由（応募済みは理由ではないので出さない）。ゲストの理由を先に出す
-  const applyReason = (company: Company): string => {
-    if (company.isApplied) return ''
-    if (guestApplicationsProps.disabled) return guestApplicationsProps.title
-    if (applyClosedProps.disabled) return applyClosedProps.title
-    return ''
+  // 見出しの文には実際の最小・最大を渡す（scaleBand は描画用に同点の幅を広げるので使わない）
+  const scores = listedCompanies.map((c) => c.matchScore)
+  const band = { min: Math.min(...scores), max: Math.max(...scores) }
+  const ctx: CompanyRowContext = {
+    isDesktop, maxAxisCount: maxMatchedAxisCount(companies), isProvisional, isGuestUser, applyEnabled,
+    favoritingId, applyingId, feedbackingId, onSelectCompany, onToggleFavorite, onFeedback, onApply, onNavigate,
+    openAxes, axesCache: axesCache.current, onToggleAxes: toggleAxes,
   }
-  const applyReasonId = (company: Company) => `results-apply-disabled-reason-${String(company.id).replace(/[^A-Za-z0-9_-]/g, '_')}`
-  // 一覧全体の幅。各社の位置はこの中で示す。並び順は渡されたまま（適合度順）。
-  const band = scaleBand(listedCompanies.map((c) => c.matchScore))
-  // 一覧の中で最も多い根拠軸数。これを下回る行だけ印を出す
-  const maxAxisCount = Math.max(
-    0,
-    ...companies.map((c) => (typeof c.matchedAxisCount === 'number' ? c.matchedAxisCount : 0)),
-  )
+  // PC はヘッダー右上、SP は一覧の下に1つだけ出す
+  const email = <EmailButton isGuestUser={isGuestUser} emailSending={emailSending} onSendEmail={onSendEmail} fullWidth={!isDesktop} />
+  const coverage = analysisScores ? <AnswerCoveragePanel scores={analysisScores} layout={isDesktop ? 'list' : 'row'} /> : null
+  const roles = <RolesPanel jobSuitabilityComment={jobSuitabilityComment} suggestedRoles={suggestedRoles} />
 
+  // SP はヘッダーと「次にやること」が長くなると画面を超えるので、画面全体をスクロールさせる。PC は一覧だけをスクロールする
   return (
-    <Box sx={{
-      height: '100vh',
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
-      backgroundColor: UI.paper,
-    }}>
-      {/* ヘッダー部分。
-          帯（背景と区切り線）は画面幅いっぱいに出し、中身は本文と同じ
-          maxWidth:1200 の列に揃える。揃えないと広い画面で見出しだけが
-          左端に残り、本文の列とずれて壊れて見える（2000px幅で376pxのずれ）。 */}
-      <Box sx={{
-        px: { xs: 2, sm: 4 },
-        py: { xs: 2, sm: 3 },
-        borderBottom: `1px solid ${UI.rule}`,
-        backgroundColor: UI.paper,
-        flexShrink: 0,
-      }}>
-        <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', width: '100%' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-          <Button variant="outlined" startIcon={<ArrowBack />} onClick={onBack}>
-            チャットに戻る
-          </Button>
-          <Box sx={{ width: { xs: '100%', sm: 'auto' } }}>
-            <Tooltip title={guestEmailProps.title} disableHoverListener={!guestEmailProps.disabled}>
-              <span>
-                <Button
-                  variant="contained"
-                  startIcon={<Email />}
-                  onClick={onSendEmail}
-                  disabled={emailSending || guestEmailProps.disabled}
-                  aria-describedby={guestEmailProps.disabled ? EMAIL_REASON_TOP_ID : undefined}
-                  sx={{ width: { xs: '100%', sm: 'auto' } }}
-                >
-                  {emailSending ? '送信中...' : '結果をメールで受け取る'}
-                </Button>
-              </span>
-            </Tooltip>
-            {guestEmailProps.disabled && (
-              <DisabledReason id={EMAIL_REASON_TOP_ID}>{guestEmailProps.title}</DisabledReason>
-            )}
-          </Box>
-        </Box>
-        {isGuestUser && (
-          <Alert
-            severity="info"
-            sx={{ mb: 2 }}
-            action={
-              <Button color="inherit" size="small" onClick={() => onNavigate(GUEST_REGISTER_PATH)}>
-                {GUEST_REGISTER_CTA_LABEL}
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflowY: { xs: 'auto', md: 'hidden' }, backgroundColor: UI.paper }}>
+      <ResultsHeader
+        companyCount={listedCompanies.length}
+        favoritesOnly={favoritesOnly}
+        isProvisional={isProvisional}
+        diagnosisSummary={diagnosisSummary}
+        band={band}
+        isGuestUser={isGuestUser}
+        emailAction={isDesktop ? email : null}
+        onBack={onBack}
+      />
+      <NextStepBar analysisScores={analysisScores} isProvisional={isProvisional} onBack={onBack} />
+      <Box sx={{ flexGrow: 1, overflowY: { xs: 'visible', md: 'auto' }, px: { xs: 2, md: 4 }, pt: { xs: 2, md: 4 }, pb: { xs: 2, md: 7 } }}>
+        <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+          <Box sx={{ flex: 1, minWidth: 0, display: 'grid', gap: { xs: 2, md: 2.5 } }}>
+            <AnalysisErrorAlert analysisError={analysisError} onRetryAnalysis={onRetryAnalysis} />
+            {/* 診断を切り替えたら作り直す（前の診断の10軸を残さない） */}
+            {sessionId && <MyCategoryScoresCard key={sessionId} sessionId={sessionId} />}
+            {!isDesktop && coverage}
+            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" role="group" aria-label="表示する企業">
+              <Button variant={favoritesOnly ? 'text' : 'contained'} aria-pressed={!favoritesOnly} onClick={() => setFavoritesOnly(false)} sx={{ minHeight: 44 }}>
+                すべて
               </Button>
-            }
-          >
-            ゲスト利用中です。メール送信や選考管理はアカウント登録後に利用できます。
-            今の診断結果はそのまま引き継がれます。
-          </Alert>
-        )}
-        {/*
-          「AI分析完了！」をやめた理由。
-          学生が知りたいのは「どこを受けるか」であって、AIが動いたことではない。
-          製品が自分の手柄を先に言うと、結果そのものが軽く見える。
-          見出しは何のリストなのかだけを述べる。
-        */}
-        <Box>
-          <Typography
-            component="h1"
-            sx={{
-              fontSize: { xs: 22, sm: 28 },
-              fontWeight: 700,
-              letterSpacing: '0.01em',
-              color: UI.ink,
-              mb: 0.5,
-            }}
-          >
-            {favoritesOnly ? `お気に入りにした${listedCompanies.length}社` : `あなたに近い${companies.length}社`}
-          </Typography>
-          <Typography sx={{ fontSize: 15, color: UI.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 1.5 }}>
-            {favoritesOnly
-              ? '今までの診断でお気に入りにした企業です。同じ企業は1社にまとめています。適合度は、いちばん新しい診断のものです。'
-              : isProvisional
-                ? 'ここまでの回答で並べています。会話を続けると根拠が増え、順番も変わります。'
-                : '回答の傾向と、企業が重視する人物像を突き合わせた順に並べています。'}
-          </Typography>
-          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" role="group" aria-label="表示する企業" sx={{ mb: 1.5 }}>
-            <Button
-              variant={favoritesOnly ? 'text' : 'contained'}
-              aria-pressed={!favoritesOnly}
-              onClick={() => setFavoritesOnly(false)}
-            >
-              すべて
-            </Button>
-            <Button
-              variant={favoritesOnly ? 'contained' : 'text'}
-              aria-pressed={favoritesOnly}
-              onClick={() => setFavoritesOnly(true)}
-            >
-              お気に入りだけ（{favoriteCount}）
-            </Button>
-          </Stack>
-          {/*
-            適合度の幅を一度だけ述べる。実測では候補が狭い帯に密集しており、
-            78 と 71 の差は見た目ほど大きくない。各行に目盛りを並べるより、
-            ここで一度「差は小さい」と言うほうが正直で、読む手間も少ない。
-          */}
-          {listedCompanies.length > 1 && band.max - band.min <= 15 && (
-            <Typography sx={{ fontSize: 14, color: UI.inkSoft, mb: 1.5 }}>
-              適合度は{band.min}〜{band.max}に収まっています。順位の差はわずかなので、
-              上から順に決める必要はありません。
-            </Typography>
-          )}
-          {/*
-            「暫定評価」のチップを外した。同じことを下の注意書きが書いており、
-            孤立したピルは色がついているだけで情報を足していなかった。
-          */}
-          {isProvisional && (
-            <Box sx={{ mb: 1.5 }}>
-              <Alert
-                severity="warning"
-                icon={false}
-                sx={{
-                  textAlign: 'left',
-                  maxWidth: '68ch',
-                  backgroundColor: 'transparent',
-                  border: `1px solid ${UI.flag}`,
-                  borderRadius: 0.5,
-                  color: UI.ink,
-                  py: 1.25,
-                }}
-              >
-                {diagnosisSummary ||
-                  '回答の根拠がまだ薄いため、適合度は参考値です。選択肢に理由を添えると精度が上がります。'}
-              </Alert>
-            </Box>
-          )}
-        </Box>
-        </Box>
-      </Box>
-
-      {/* スクロール可能なコンテンツエリア */}
-      <Box sx={{
-        flexGrow: 1,
-        overflowY: 'auto',
-        p: { xs: 2, sm: 4 },
-        backgroundColor: UI.paper,
-      }}>
-        <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto' }}>
-          <AnalysisScoreCard
-            analysisScores={analysisScores}
-            scoreComment={scoreComment}
-            analysisError={analysisError}
-            onRetryAnalysis={onRetryAnalysis}
-          />
-
-          {/* 診断を切り替えたら作り直す（前の診断の10軸を残さない） */}
-          {sessionId && <MyCategoryScoresCard key={sessionId} sessionId={sessionId} />}
-
-          {/*
-            緑の枠とピルと「→」をやめた。職種名は見出しの重さで足り、
-            矢印は役割の説明を箇条書きに見せていただけだった。
-          */}
-          {(jobSuitabilityComment || suggestedRoles.length > 0) && (
-            <Box sx={{ mb: 4 }}>
-              <Typography sx={{ fontSize: 17, fontWeight: 700, color: UI.ink, mb: 1 }}>
-                向いていそうな職種
-              </Typography>
-              {jobSuitabilityComment && (
-                <Typography sx={{ fontSize: 14.5, lineHeight: 1.9, color: UI.inkSoft, maxWidth: '64ch', mb: 1.5 }}>
-                  {jobSuitabilityComment}
-                </Typography>
-              )}
-              <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, maxWidth: '72ch' }}>
-                {withStableKeys(suggestedRoles, (r) => r.title).map(({ key, item: role, index: i }) => (
-                  <Box
-                    component="li"
-                    key={key}
-                    sx={{
-                      py: 1.25,
-                      borderTop: i === 0 ? `1px solid ${UI.ruleSoft}` : 'none',
-                      borderBottom: `1px solid ${UI.ruleSoft}`,
-                    }}
-                  >
-                    <Typography sx={{ fontSize: 15, fontWeight: 700, color: UI.ink }}>
-                      {role.title}
-                    </Typography>
-                    {role.reason && (
-                      <Typography sx={{ fontSize: 14, lineHeight: 1.85, color: UI.inkSoft, mt: 0.25 }}>
-                        {role.reason}
-                      </Typography>
-                    )}
-                  </Box>
-                ))}
-              </Box>
-            </Box>
-          )}
-
-          {/*
-            カードをやめて罫線区切りの一覧にしている。
-            学生の用途は「見比べて絞る」ことなので、1社ずつ箱に入れると
-            隣と比べにくく、どれも同じ重みに見える。
-          */}
-          {favoritesOnly && favoritesLoading && listedCompanies.length === 0 ? (
-            <Typography sx={{ fontSize: 15, color: UI.inkSoft, py: 3 }}>
-              お気に入りを読み込んでいます
-            </Typography>
-          ) : favoritesOnly && favoritesError && listedCompanies.length === 0 ? (
-            <Box sx={{ py: 3 }}>
-              <Typography sx={{ fontSize: 16, fontWeight: 700, color: UI.ink, mb: 1 }}>
-                {favoritesError}
-              </Typography>
-              <Button variant="outlined" onClick={onRetryFavorites}>
-                再読み込み
-              </Button>
-            </Box>
-          ) : favoritesOnly && listedCompanies.length === 0 ? (
-            <Box sx={{ py: 3 }}>
-              <Typography sx={{ fontSize: 16, fontWeight: 700, color: UI.ink, mb: 1 }}>
-                お気に入りにした企業はまだありません
-              </Typography>
-              <Typography sx={{ fontSize: 15, color: UI.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 2 }}>
-                すべての企業に戻って、残しておきたい企業のハートを押してください。ここに残ります。
-              </Typography>
-              <Button variant="outlined" onClick={() => setFavoritesOnly(false)}>
-                すべての企業を見る
-              </Button>
-            </Box>
-          ) : favoritesOnly ? (
-            <FavoritesCompareList
-              companies={listedCompanies}
-              favoritingId={favoritingId}
-              onSelectCompany={onSelectCompany}
-              onToggleFavorite={onUnfavoriteCompany}
-            />
-          ) : (
-          <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0 }}>
-            {companies.map((company, index) => (
-              <Box
-                component="li"
-                key={`${company.id}-${index}`}
-                sx={{
-                  borderTop: index === 0 ? `1px solid ${UI.rule}` : 'none',
-                  borderBottom: `1px solid ${UI.rule}`,
-                  cursor: 'pointer',
-                  px: { xs: 2, sm: 3 },
-                  py: { xs: 2.5, sm: 3 },
-                  transition: 'background-color 120ms',
-                  '&:hover': { backgroundColor: 'rgba(255,255,255,0.55)' },
-                  '&:focus-visible': { outline: `3px solid ${UI.mark}`, outlineOffset: -3 },
-                }}
-                onClick={() => onSelectCompany(company)}
-              >
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 2 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: { xs: 1.5, sm: 2.5 }, minWidth: 0 }}>
-                      {/* 順位。実際に序列があるので番号は情報として機能する */}
-                      <Typography
-                        aria-hidden
-                        sx={{
-                          fontSize: { xs: 20, sm: 26 },
-                          fontWeight: 700,
-                          color: UI.rule,
-                          fontVariantNumeric: 'tabular-nums',
-                          lineHeight: 1,
-                          minWidth: { xs: 24, sm: 34 },
-                        }}
-                      >
-                        {index + 1}
-                      </Typography>
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography sx={{ fontSize: { xs: 17, sm: 20 }, fontWeight: 700, color: UI.ink, lineHeight: 1.4 }}>
-                          {company.name}
-                        </Typography>
-                        <Typography sx={{ fontSize: 13, color: UI.inkSoft, mt: 0.25 }}>
-                          {[company.industry, company.location, company.employees].filter(Boolean).join('　')}
-                        </Typography>
-                      </Box>
-                    </Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
-                      <Tooltip title={company.isFavorited ? 'お気に入りから外す' : 'お気に入りに入れる'}>
-                        <IconButton
-                          size="small"
-                          onClick={(e) => onToggleFavorite(e, company)}
-                          aria-pressed={Boolean(company.isFavorited)}
-                          aria-label={company.isFavorited ? `${company.name}をお気に入りから外す` : `${company.name}をお気に入りに入れる`}
-                          disabled={favoritingId === company.matchId}
-                          sx={{ color: company.isFavorited ? UI.flag : UI.rule }}
-                        >
-                          {company.isFavorited ? <Favorite fontSize="small" /> : <FavoriteBorder fontSize="small" />}
-                        </IconButton>
-                      </Tooltip>
-                      <Typography sx={{
-                        fontSize: { xs: 22, sm: 26 }, fontWeight: 700, color: UI.ink,
-                        fontVariantNumeric: 'tabular-nums', lineHeight: 1,
-                      }}>
-                        {company.matchScore}
-                      </Typography>
-                    </Box>
-                  </Box>
-                  {/*
-                    根拠軸数は全行に出さない。ほとんどの行が同じ値になるため、
-                    毎行に書くと読み飛ばされ、本当に薄い行も埋もれる。
-                    一覧の中で相対的に薄い行だけ印を出す。
-                  */}
-                  {typeof company.matchedAxisCount === 'number' &&
-                    company.matchedAxisCount < maxAxisCount && (
-                      <Typography sx={{ fontSize: 13, color: UI.flag, mt: 0.5 }}>
-                        根拠 {company.matchedAxisCount}軸（他の候補より少なめ）
-                      </Typography>
-                    )}
-
-                  {company.jobMatched && (
-                    <Typography sx={{ fontSize: 13, color: UI.inkSoft, mt: 0.5 }}>選んだ職種の募集があります。</Typography>
-                  )}
-                  {/* 参考の印は文字で出す（色だけで伝えない）。理由は文頭の「参考:」から続けて読める */}
-                  {company.isReference && company.fitNote && (
-                    <Typography sx={{ fontSize: 13, color: UI.flag, mt: 0.5 }}>{company.fitNote}</Typography>
-                  )}
-
-                  <Typography sx={{ fontSize: 15, lineHeight: 1.9, color: UI.ink, maxWidth: '68ch', mb: 2 }}>
-                    {leadSentences(company.description)}
-                  </Typography>
-
-                  {onFeedback && company.matchId && (
-                    <Box role="group" aria-label={`${company.name}の提案への回答`} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-                      <Typography sx={{ fontSize: 13, color: UI.inkSoft }}>この提案は？</Typography>
-                      {(['fit', 'unfit'] as const).map((verdict) => (
-                        <Button
-                          key={verdict}
-                          size="small"
-                          variant={company.feedback === verdict ? 'contained' : 'outlined'}
-                          aria-pressed={company.feedback === verdict}
-                          disabled={feedbackingId === company.matchId}
-                          onClick={(e) => onFeedback(e, company, verdict)}
-                        >
-                          {verdict === 'fit' ? '合う' : '合わない'}
-                        </Button>
-                      ))}
-                    </Box>
-                  )}
-
-
-                  {/*
-                    「技術スタック:」のラベルを外した。Go や AWS が並んでいれば
-                    それが何かは見れば分かる。ラベルは行数を増やすだけだった。
-                  */}
-                  {company.techStack && company.techStack.length > 0 && (
-                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
-                      {withStableKeys(company.techStack).map(({ key, item: tech }) => (
-                        <Box
-                          key={key}
-                          sx={{
-                            fontSize: 12.5,
-                            color: UI.inkSoft,
-                            border: `1px solid ${UI.ruleSoft}`,
-                            borderRadius: 0.5,
-                            px: 0.9,
-                            py: 0.2,
-                          }}
-                        >
-                          {tech}
-                        </Box>
-                      ))}
-                    </Stack>
-                  )}
-
-                  {company.tags && company.tags.length > 0 && (
-                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                      {withStableKeys(company.tags).map(({ key, item: tag }) => (
-                        <Chip key={key} label={tag} size="small" />
-                      ))}
-                    </Stack>
-                  )}
-
-                  {/*
-                    3本の棒グラフをやめた。値が 97/95/77 のように軒並み高い側へ寄るため、
-                    棒はどれも満杯に見えて差を伝えない。どの軸が噛み合ったかだけを
-                    1行で書くほうが速く読める。
-                  */}
-                  {/*
-                    内訳を開いた行では隠す。一覧の値は推薦を計算した時点のもので、内訳は今のスコアから計算するので、
-                    推薦のあとに適性検査を受けるなどすると、同じ軸が別の値で並ぶ。
-                  */}
-                  {company.categoryScores && !(company.matchId !== undefined && openAxes.has(company.matchId)) && (
-                    <Typography sx={{ fontSize: 13.5, color: UI.inkSoft, mb: 2 }}>
-                      噛み合った軸：
-                      {getTopCategoryScores(company.categoryScores, 3)
-                        .map(({ label, score }) => `${label} ${Math.round(score)}`)
-                        .join('　')}
-                    </Typography>
-                  )}
-
-                  {/*
-                    軸ごとの内訳（SOCAIAGENT-611）。行全体が企業詳細を開くので、この中のクリック・キー操作は行へ伝えない。
-                  */}
-                  {company.matchId !== undefined && (
-                    <Box
-                      sx={{ mb: 2 }}
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    >
-                      <Button
-                        size="small"
-                        variant="text"
-                        aria-expanded={openAxes.has(company.matchId)}
-                        aria-controls={`axes-${company.matchId}`}
-                        onClick={() => toggleAxes(company.matchId as number)}
-                        sx={{ px: 0, minWidth: 0 }}
-                      >
-                        {openAxes.has(company.matchId) ? '軸ごとの内訳を閉じる' : '軸ごとの内訳を見る'}
-                      </Button>
-                      {openAxes.has(company.matchId) && (
-                        <Box id={`axes-${company.matchId}`}>
-                          <AxisBreakdownPanel matchId={company.matchId} cache={axesCache.current} />
-                        </Box>
-                      )}
-                    </Box>
-                  )}
-
-                  {/*
-                    4つのボタンが同じ重さで並んでいた。学生がこの行で次に取る行動は
-                    ほぼ「応募する」か「面接を練習する」で、残り2つは寄り道。
-                    主・副・副次の3段にして、迷う時間を減らす。
-                  */}
-                  <Stack direction="row" spacing={1} sx={{ mt: 2, alignItems: 'center', flexWrap: 'wrap', gap: 1 }} useFlexGap>
-                    <Button
-                      variant="contained"
-                      size="small"
-                      color="secondary"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onNavigate(`/interview?${buildInterviewQuery(company)}`)
-                      }}
-                    >
-                      この企業の面接を練習する
-                    </Button>
-                    <Button
-                      variant="text"
-                      size="small"
-                      sx={{ color: UI.inkSoft, fontWeight: 500 }}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onNavigate(`/correlation-diagram?company_id=${company.id}`)
-                      }}
-                    >
-                      関連企業を見る
-                    </Button>
-                    <Button
-                      variant="text"
-                      size="small"
-                      sx={{ color: UI.inkSoft, fontWeight: 500 }}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onNavigate(`/es-rewrite?${buildEsRewriteQuery(company)}`)
-                      }}
-                    >
-                      ES添削・リライト
-                    </Button>
-                    <Tooltip
-                      title={guestApplicationsProps.title || (company.isApplied ? '' : applyClosedProps.title)}
-                      disableHoverListener={!guestApplicationsProps.disabled && (company.isApplied || !applyClosedProps.disabled)}
-                    >
-                      <span>
-                        <Button
-                          variant={company.isApplied ? 'contained' : 'outlined'}
-                          size="small"
-                          color="primary"
-                          aria-describedby={applyReason(company) ? applyReasonId(company) : undefined}
-                          disabled={
-                            company.isApplied ||
-                            applyingId === company.matchId ||
-                            guestApplicationsProps.disabled ||
-                            applyClosedProps.disabled
-                          }
-                          onClick={(e) => onApply(e, company)}
-                        >
-                          {company.isApplied
-                            ? '応募済み'
-                            : applyClosedProps.disabled
-                              ? APPLY_CLOSED_LABEL
-                              : applyingId === company.matchId
-                                ? '応募中...'
-                                : '応募する'}
-                        </Button>
-                      </span>
-                    </Tooltip>
-                  </Stack>
-                  {applyReason(company) && (
-                    <DisabledReason id={applyReasonId(company)}>{applyReason(company)}</DisabledReason>
-                  )}
-              </Box>
-            ))}
-          </Box>
-          )}
-
-          <Box sx={{ textAlign: 'center', mt: 4, mb: 4 }}>
-            <Stack direction="row" spacing={2} justifyContent="center" flexWrap="wrap" useFlexGap>
-              <Tooltip title={guestEmailProps.title} disableHoverListener={!guestEmailProps.disabled}>
-                <span>
-                  <Button
-                    variant="contained"
-                    startIcon={<Email />}
-                    onClick={onSendEmail}
-                    disabled={emailSending || guestEmailProps.disabled}
-                    aria-describedby={guestEmailProps.disabled ? EMAIL_REASON_BOTTOM_ID : undefined}
-                  >
-                    {emailSending ? '送信中...' : '結果をメールで受け取る'}
-                  </Button>
-                </span>
-              </Tooltip>
-              {isGuestUser && (
-                <Button variant="contained" color="secondary" onClick={() => onNavigate(GUEST_REGISTER_PATH)}>
-                  {GUEST_REGISTER_CTA_LABEL}
-                </Button>
-              )}
-              <Tooltip title={guestApplicationsProps.title} disableHoverListener={!guestApplicationsProps.disabled}>
-                <span>
-                  <Button
-                    variant="outlined"
-                    size="large"
-                    disabled={guestApplicationsProps.disabled}
-                    aria-describedby={guestApplicationsProps.disabled ? APPLICATIONS_REASON_ID : undefined}
-                    onClick={() => onNavigate('/applications')}
-                  >
-                    選考管理を見る
-                  </Button>
-                </span>
-              </Tooltip>
-              <Button variant="outlined" size="large" startIcon={<Refresh />} onClick={onReset}>
-                最初からやり直す
+              <Button variant={favoritesOnly ? 'contained' : 'text'} aria-pressed={favoritesOnly} onClick={() => setFavoritesOnly(true)} sx={{ minHeight: 44 }}>
+                お気に入りだけ（{favoriteCompanies.length}）
               </Button>
             </Stack>
-            {/* 押せない理由は吹き出しだけでなく、常に見える文で出す（タッチ端末では吹き出しが出ない。#2221） */}
-            {guestEmailProps.disabled && (
-              <DisabledReason id={EMAIL_REASON_BOTTOM_ID} sx={{ mt: 1.5 }}>{guestEmailProps.title}</DisabledReason>
+            {favoritesOnly ? (
+              <FavoritesSection
+                companies={favoriteCompanies}
+                loading={favoritesLoading}
+                error={favoritesError}
+                favoritingId={favoritingId}
+                onRetry={onRetryFavorites}
+                onShowAll={() => setFavoritesOnly(false)}
+                onSelectCompany={onSelectCompany}
+                onUnfavorite={onUnfavoriteCompany}
+              />
+            ) : (
+              <CompanyList companies={companies} ctx={ctx} />
             )}
-            {guestApplicationsProps.disabled && (
-              <DisabledReason id={APPLICATIONS_REASON_ID}>{guestApplicationsProps.title}</DisabledReason>
-            )}
+            {!isDesktop && roles}
+            <ResultsFooterLinks isGuestUser={isGuestUser} emailAction={isDesktop ? null : email} onReset={onReset} />
           </Box>
+          {isDesktop && (
+            <Box sx={{ width: 340, flexShrink: 0, display: 'grid', gap: 2 }}>
+              {coverage}
+              {roles}
+            </Box>
+          )}
         </Box>
       </Box>
 

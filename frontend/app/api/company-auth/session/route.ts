@@ -6,8 +6,8 @@ import {
 } from '@/lib/auth/session-cookies'
 import { parseSessionPost } from '@/lib/auth/session-request'
 
-// middleware が Cookie をリフレッシュしたあと、有効な company_user_token をクライアントへ返す。
-// Backend 直叩き API は sessionStorage の JWT を使うため、Cookie と同期する (#1091, #616踏襲)。
+// 企業ユーザーがログインしているか（middleware が必要なら Cookie を更新したあと）を返す。
+// トークンの値は返さない（SOCAIAGENT-683）。
 export async function GET(request: NextRequest) {
   const companyUserId =
     request.headers.get('X-Company-User-ID') ||
@@ -20,10 +20,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  return NextResponse.json({
-    company_user_id: Number(companyUserId),
-    company_user_token: companyUserToken,
-  })
+  // トークンの値は返さない。Backend へは middleware が Cookie から付ける（SOCAIAGENT-683）
+  return NextResponse.json({ company_user_id: Number(companyUserId) })
 }
 
 export async function POST(request: NextRequest) {

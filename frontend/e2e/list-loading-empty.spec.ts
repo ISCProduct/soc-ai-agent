@@ -95,10 +95,10 @@ test.describe('一覧の Loading / Empty', () => {
   })
 
   test('面接履歴: 空ならAI面接を始める導線を出す', async ({ page }) => {
-    await page.route('**/api/interviews/trend*', (route) =>
+    await page.route('**/api/bff/interviews/trend*', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ points: [] }) }),
     )
-    const release = holdThenFulfill(page, '**/api/interviews?*', { sessions: [], total: 0 })
+    const release = holdThenFulfill(page, '**/api/bff/interviews?*', { sessions: [], total: 0 })
     await page.goto('/interview/history')
     await expect(page.getByRole('status', { name: '面接履歴を読み込み中' })).toBeVisible({ timeout: 15000 })
     release()

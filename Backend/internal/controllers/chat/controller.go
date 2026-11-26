@@ -4,7 +4,6 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"Backend/internal/services/chat"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
@@ -36,7 +35,7 @@ type ChatController struct {
 	userRepo        repository.UserRepository
 	emailService    ifaces.EmailService
 	jobs            shared.JobEnqueuer
-	qualityRepo     *repositories.DiagnosisQualityRepository
+	quality         *diagnosis.QualityService
 	matchingTimers  sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
 	matchingRunning sync.Map // key: sessionID, value: struct{}（実行中の多重起動防止, #1167）
 	aiBudget        costs.AIBudgetStatusProvider
@@ -77,16 +76,16 @@ func (c *ChatController) SetJobEnqueuer(j shared.JobEnqueuer) {
 	c.jobs = j
 }
 
-// SetDiagnosisQualityRepo は recommendations に診断信頼度を載せるための参照先。
-func (c *ChatController) SetDiagnosisQualityRepo(r *repositories.DiagnosisQualityRepository) {
-	c.qualityRepo = r
+// SetDiagnosisQualityService は recommendations に診断信頼度を載せるための参照先。
+func (c *ChatController) SetDiagnosisQualityService(s *diagnosis.QualityService) {
+	c.quality = s
 }
 
 func (c *ChatController) loadDiagnosisQuality(userID uint, sessionID string) (confidence int, flags []string, summary string) {
-	if c.qualityRepo == nil {
+	if c.quality == nil {
 		return 0, nil, ""
 	}
-	report, err := c.qualityRepo.FindByUserAndSession(userID, sessionID)
+	report, err := c.quality.FindReport(userID, sessionID)
 	if err != nil || report == nil {
 		return 0, nil, ""
 	}
