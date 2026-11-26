@@ -84,7 +84,7 @@ func (s *ApplicationService) UpdateStatusForCompanyPortal(
 	}
 
 	// 遷移表と値の検証は共通の実装を使う。isAdmin=true のとき
-	// UpdateStatus は userID を参照しないため 0 を渡す。
-	// 企業スコープの検証は上で済ませている。
-	return s.UpdateStatus(applicationID, 0, status, notes, true)
+	// userID は参照しないため 0 を渡す。企業スコープの検証は上で済ませている。
+	// 履歴の変更者は企業ロールだけ残す。
+	return s.updateStatus(applicationID, 0, status, notes, true, "company")
 }
