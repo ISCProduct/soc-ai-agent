@@ -221,6 +221,16 @@ export function createStudentMuiTheme(mode: StudentThemeMode) {
           root: { minWidth: TOUCH_TARGET_MIN, minHeight: TOUCH_TARGET_MIN },
         },
       },
+      // Autocomplete の ▼（popupIndicator）・×（clearIndicator）も中身は IconButton なので、上の 44px が効いてしまう。
+      // MUI は入力欄の右に、この2つの分の余白を固定で取っている（▼だけで 39px・両方で 65px）ため、44px にすると
+      // 入力した文字の上に重なる（相関図の企業検索。#2624 のレビュー）。▼・× は Tab で止まらず（tabIndex -1）、
+      // 入力欄そのものを押しても開けるので、44px の対象から外して MUI 既定の大きさに戻す。
+      MuiAutocomplete: {
+        styleOverrides: {
+          popupIndicator: { minWidth: 'auto', minHeight: 'auto' },
+          clearIndicator: { minWidth: 'auto', minHeight: 'auto' },
+        },
+      },
       // Checkbox・Radio は既定の余白 9px だと、24px のアイコンと合わせて 42px。余白を 10px にして 44px にする。
       // 呼び出し側ごとに書くと漏れる（/company-entry の同意が 42px のままだった。#2624 のレビュー）ので、ここで1か所にする。
       MuiCheckbox: {

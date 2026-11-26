@@ -4,7 +4,7 @@ import { createRef, type ReactNode } from 'react'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { Checkbox, Chip, IconButton, Radio, ThemeProvider, ToggleButton, ToggleButtonGroup, createTheme } from '@mui/material'
+import { Autocomplete, Checkbox, Chip, IconButton, Radio, TextField, ThemeProvider, ToggleButton, ToggleButtonGroup, createTheme } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import { CHECK_CONTROL_PADDING, createStudentMuiTheme, TOUCH_TARGET_MIN } from '@/lib/student-theme'
 import ScoreUpdateBanner from '@/components/feedback/ScoreUpdateBanner'
@@ -73,6 +73,30 @@ describe('学生のテーマ: IconButton / ToggleButton の押せる範囲', () 
     )
     expect(screen.getByRole('button', { name: '資本関連図' })).toHaveStyle({ minWidth: '44px', minHeight: '44px' })
     expect(screen.getByRole('button', { name: 'ビジネス関連図' })).toHaveStyle({ minHeight: '44px' })
+  })
+
+  it('Autocomplete の ▼・× は 44px の対象から外す（入力欄の右の固定の余白に収まらず、文字に重なるため）', () => {
+    withStudentTheme(
+      <Autocomplete
+        size="small"
+        options={['株式会社テスト']}
+        value="株式会社テスト"
+        renderInput={(params) => <TextField {...params} label="企業を検索" />}
+      />,
+    )
+    // × は入力欄にフォーカスがあるときだけ出る
+    fireEvent.focus(screen.getByRole('combobox', { name: '企業を検索' }))
+    const popup = document.querySelector('.MuiAutocomplete-popupIndicator')
+    const clear = document.querySelector('.MuiAutocomplete-clearIndicator')
+    expect(popup).not.toBeNull()
+    expect(clear).not.toBeNull()
+    for (const button of [popup, clear]) {
+      expect(button).toHaveClass('MuiIconButton-root')
+      expect(button).toHaveStyle({ minWidth: 'auto', minHeight: 'auto' })
+      expect(button).not.toHaveStyle({ minHeight: '44px' })
+    }
+    // ほかの IconButton には、今までどおり 44px が付く
+    expect(studentTheme.components?.MuiIconButton?.styleOverrides?.root).toEqual({ minWidth: 44, minHeight: 44 })
   })
 
   it('スコア更新の通知を閉じるボタンが 44px 以上になる', () => {
