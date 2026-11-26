@@ -167,10 +167,15 @@ export default function CompanyPortalScoutTemplatesPage() {
         </Stack>
       )}
 
-      <Dialog open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)}>
-        <DialogTitle>テンプレートを削除しますか</DialogTitle>
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        aria-labelledby="scout-template-delete-title"
+        aria-describedby="scout-template-delete-description"
+      >
+        <DialogTitle id="scout-template-delete-title">テンプレートを削除しますか</DialogTitle>
         <DialogContent>
-          <Typography>「{deleteTarget?.title}」を削除します。送信済みの文面は残ります。</Typography>
+          <Typography id="scout-template-delete-description">「{deleteTarget?.title}」を削除します。送信済みの文面は残ります。</Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteTarget(null)}>キャンセル</Button>
