@@ -49,7 +49,16 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 
 - 管理者トークンはフロントの httpOnly Cookie `admin_token` にだけ置き、画面（JS）は値を持ちません。
   管理APIへの `X-Admin-Token` は middleware が Cookie から付け、画面が送った値は捨てます（SOCAIAGENT-683）。
-- `GET /api/auth/session`（フロントの Route Handler）は、管理者トークンの値ではなく `has_admin_token` を返します。
+- 学生の `user_token` / `refresh_token` もフロントの httpOnly Cookie にだけ置き、画面（JS）は保存しません。
+  Backend へは middleware が Cookie から `X-User-Token` を付けます（SOCAIAGENT-683）。
+- 画面から Backend を直接呼んでいた API（面接・スカウト受信・スカウト設定・先生からの指導・学習データ同意・
+  `auth/user`、ログイン・本登録・ゲスト作成）は、フロントの中継ルート `/api/bff/<Backend の /api 以下のパス>` を通します。
+  中継するのは許可リストに合うパスだけです。ログイン・本登録・ゲスト作成は、中継ルートがセッション Cookie を張り、
+  応答からトークンを取り除きます。本登録のゲスト引き継ぎ（`promote_guest: true`）のときだけ、今のセッションを Backend へ渡します。
+- `GET /api/auth/session`（フロントの Route Handler）はトークンの値を返さず、`user_id` と `has_admin_token` だけを返します。
+- 企業ユーザーも同じです。`company_user_token` はフロントの httpOnly Cookie にだけ置き、`X-Company-User-Token` は middleware が付けます。
+  企業のログイン・登録・招待の受け入れ・パスワード再設定の Route Handler は、成功したらその場で Cookie を張り、応答からトークンを取り除きます。
+  `GET /api/company-auth/session` は `company_user_id` だけを返します。
   管理画面（`AdminShell`）は `X-Refresh-Admin-Token: 1` を付けてこれを呼び、Cookie が無い・期限が近いときは
   middleware がログインセッションの更新で取り直します（確認は10分に1回まで）。
 - `POST /api/auth/session` で `adminToken` が無いとき、`DELETE` のときは `admin_token` Cookie を削除します。
@@ -606,6 +615,8 @@ rejected         → 不合格
 | GET | `/api/admin/ai-budgets` | AI利用予算の一覧 |
 | PUT | `/api/admin/ai-budgets` | AI利用予算の設定 |
 | DELETE | `/api/admin/ai-budgets/:scope/:scope_id` | AI利用予算の削除 |
+
+個別の設定が無いゲストには、1日100円相当（`GUEST_AI_DAILY_LIMIT_USD`、既定 0.6667 USD = 1ドル150円で換算。0 で上限なし）の日次上限が掛かります。超えると 429（`code: ai_budget_exceeded`）を返し、AI を呼びません。
 | GET | `/api/admin/costs/summary` | APIコストサマリー |
 | GET | `/api/admin/costs/daily` | 日別コスト |
 | GET | `/api/admin/costs/monthly` | 月別コスト |
@@ -617,7 +628,8 @@ rejected         → 不合格
 
 | メソッド | パス | 概要 |
 |---------|------|------|
-| GET | `/health` | ヘルスチェック（後方互換） |
-| GET | `/healthz` | ヘルスチェック（ECS/K8s標準） |
+| GET | `/health` | 生存確認（後方互換）。DB は見ない |
+| GET | `/healthz` | 生存確認。ALB / ECS が使う。DB は見ない |
+| GET | `/ready` | DB へ ping する。失敗時は 503 `{"status":"unavailable"}`。ALB の向き先にはしない |
 
-レスポンス: `{"status":"ok"}`
+生存確認の成功レスポンス: `{"status":"ok"}`

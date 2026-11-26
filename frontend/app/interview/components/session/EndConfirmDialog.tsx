@@ -16,10 +16,10 @@ const buttonSx = { minHeight: 48, borderRadius: 999, fontWeight: 700 } as const
  */
 export default function EndConfirmDialog({ open, currentQuestionIndex, onContinue, onConfirmEnd }: Props) {
   return (
-    <Dialog open={open} onClose={onContinue} aria-labelledby="end-confirm-title" fullWidth maxWidth="xs" PaperProps={{ sx: { borderRadius: 4 } }}>
+    <Dialog open={open} onClose={onContinue} aria-labelledby="end-confirm-title" aria-describedby="end-confirm-description" fullWidth maxWidth="xs" PaperProps={{ sx: { borderRadius: 4 } }}>
       <DialogTitle id="end-confirm-title" sx={{ fontWeight: 700 }}>面接を終了しますか？</DialogTitle>
       <DialogContent>
-        <DialogContentText>
+        <DialogContentText id="end-confirm-description">
           ここまでの回答（質問{currentQuestionIndex}まで）でレポートを作ります。続けて答えると、より詳しいレポートになります。
         </DialogContentText>
       </DialogContent>

@@ -96,27 +96,27 @@ async function mockInterviewApis(page: Page, opts: Options = {}) {
   await page.route('**/api/user/weight-scores**', (route) => json(route, { weight_scores: [] }))
   await page.route('**/api/notifications**', (route) => json(route, { notifications: [], unread_count: 0 }))
 
-  await page.route('**/api/interviews**', async (route) => {
+  await page.route('**/api/bff/interviews**', async (route) => {
     const req = route.request()
     const path = new URL(req.url()).pathname
     const method = req.method()
     const session = { id: SESSION_ID, user_id: TEST_USER.user_id, status: 'in_progress', language: 'ja', created_at: '2026-11-13T05:00:00Z' }
 
-    if (path === '/api/interviews' && method === 'POST') return json(route, session)
-    if (path === `/api/interviews/${SESSION_ID}/start`) return json(route, { ...session, status: 'in_progress' })
-    if (path === `/api/interviews/${SESSION_ID}/start-turn`) {
+    if (path === '/api/bff/interviews' && method === 'POST') return json(route, session)
+    if (path === `/api/bff/interviews/${SESSION_ID}/start`) return json(route, { ...session, status: 'in_progress' })
+    if (path === `/api/bff/interviews/${SESSION_ID}/start-turn`) {
       return fulfillTurn(route, { ai_text: QUESTION_1, total_questions: '3', question_source: 'plan' })
     }
-    if (path === `/api/interviews/${SESSION_ID}/turn`) {
+    if (path === `/api/bff/interviews/${SESSION_ID}/turn`) {
       calls.turn++
       if (opts.turnFails) return json(route, { message: 'turn failed' }, 500)
       return fulfillTurn(route, { user_text: ANSWER_1, ai_text: QUESTION_2, total_questions: '3', question_source: 'plan' })
     }
-    if (path === `/api/interviews/${SESSION_ID}/finish`) {
+    if (path === `/api/bff/interviews/${SESSION_ID}/finish`) {
       calls.finish++
       return json(route, { ...session, status: 'finished' })
     }
-    if (path === `/api/interviews/${SESSION_ID}` && method === 'GET') {
+    if (path === `/api/bff/interviews/${SESSION_ID}` && method === 'GET') {
       calls.detail++
       const failed = opts.failedPolls ?? 0
       const pending = opts.pendingPolls ?? 0
@@ -195,7 +195,7 @@ test.describe('AI 面接の本編フロー', () => {
 
     await endInterview(page)
     // 終了 API を待たずにレポート画面へ進み、生成中を出す
-    await expect(page.getByText('レポートを作っています')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByRole('heading', { name: 'レポートを作っています' })).toBeVisible({ timeout: 15000 })
     // ポーリング（3秒ごと）で2回目にレポートが届く
     await expect(page.getByText(REPORT.summary_text).first()).toBeVisible({ timeout: 20000 })
     expect(calls.finish).toBe(1)

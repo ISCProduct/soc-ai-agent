@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -169,9 +170,18 @@ type BacklogClient struct {
 	http       *http.Client
 }
 
-// NewBacklogClientFromEnv は BACKLOG_API_KEY が無ければ nil を返す（機能を無効にする）。
+// NewBacklogClientFromEnv は Bot キーも BACKLOG_API_KEY も無ければ nil を返す（機能を無効にする）。
+// シークレットの読み取りに失敗したときも nil を返し、他のコマンドの起動は止めない。
 func NewBacklogClientFromEnv() *BacklogClient {
-	key := os.Getenv("BACKLOG_API_KEY")
+	key, err := ResolveBacklogAPIKey(context.Background())
+	if err != nil {
+		log.Printf("[Discord] Backlog の Bot キーを読めませんでした: %v", err)
+		return nil
+	}
+	return newBacklogClient(key)
+}
+
+func newBacklogClient(key string) *BacklogClient {
 	if key == "" {
 		return nil
 	}

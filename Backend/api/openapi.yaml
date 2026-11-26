@@ -184,6 +184,13 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    CompanyBusinessTags:
+      type: object
+      properties:
+        company_id: { type: integer }
+        business_tags:
+          type: array
+          items: { type: string }
     Error:
       type: object
       description: |
@@ -785,6 +792,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AuthResponse" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/auth/verify-email:
     get:
@@ -1341,11 +1349,33 @@ paths:
         "200": { description: 推移 }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/interviews/axis-comparison:
+    get:
+      tags: [interviews]
+      summary: 2回の面接の軸別差分
+      description: |
+        比較先のスコアから比較元を引く。本人のセッションだけ比較できる。
+        `/:id` より先に登録している。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: base, required: true, schema: { type: integer }, description: 比較元のセッションID }
+        - { in: query, name: target, required: true, schema: { type: integer }, description: 比較先のセッションID }
+      responses:
+        "200": { description: 軸ごとの差分 }
+        "400": { description: セッション指定が不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: セッションまたはレポートが無い }
+
   /api/interviews/{id}:
     get:
       tags: [interviews]
       summary: セッション詳細
-      description: report.teacher_report_json は職員・管理者にのみ含まれる（認証ユーザーの実ロールで決まる。#1814）。
+      description: |
+        report.teacher_report_json は職員・管理者にのみ含まれる（認証ユーザーの実ロールで決まる。#1814）。
+        report.category_breakdown_json は質問の種類ごとの評価（SOCAIAGENT-610）。
+        `[{category, score(0〜5), weakness, practice}]` の JSON 文字列で、カテゴリは面接の進め方の5種類と「企業別の質問」。
+        この列を足す前のレポートは null。
       security: [{ userToken: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -1383,21 +1413,25 @@ paths:
     post:
       tags: [interviews]
       summary: 1ターンを開始する
+      description: "発話数・StartedAt からの経過時間・（フラグ有効時）予算の上限に達すると、AI を呼ばずに固定の締め文と limit_reached=true（limit_reason: utterances / duration / budget）を返す。クライアントは /finish で面接を終える。"
       security: [{ userToken: [] }]
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses:
-        "200": { description: 開始した }
+        "200": { description: 開始した（上限時は締め文と limit_reached） }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: 開始前（ready）のセッション }
 
   /api/interviews/{id}/turn:
     post:
       tags: [interviews]
       summary: 1ターンの応答を処理する
+      description: "発話数・StartedAt からの経過時間・（フラグ有効時）予算の上限に達すると、AI を呼ばずに固定の締め文と limit_reached=true（limit_reason: utterances / duration / budget）を返す。クライアントは /finish で面接を終える。"
       security: [{ userToken: [] }]
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses:
-        "200": { description: 次の質問 }
+        "200": { description: 次の質問（上限時は締め文と limit_reached） }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: 開始前（ready）のセッション }
 
   /api/interviews/{id}/utterances:
     post:
@@ -2310,6 +2344,96 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/admin/business-tags:
+    get:
+      tags: [admin-companies]
+      summary: 事業タグの一覧を取得
+      description: |
+        全企業で共通の事業タグ一覧（名前順）。登録時に既存のタグを選び、表記ゆれを防ぐために使う。
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: タグ一覧
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  business_tags:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        created_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/companies/{id}/business-tags:
+    get:
+      tags: [admin-companies]
+      summary: 企業の事業タグを取得
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 企業の事業タグ（名前順。未登録なら空配列）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyBusinessTags"
+        "404":
+          description: 企業が存在しない
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [admin-companies]
+      summary: 企業の事業タグを置き換える
+      description: |
+        システム管理者専用（担当校つき管理者・職員は 403）。送った一覧で丸ごと置き換え、空配列で全解除する。
+        各名前は NFKC で全角・半角をそろえ、前後と連続の空白を整える。重複は1つにまとめ、
+        一覧に無い名前は新しいタグとして作る。1件64文字・1社20件まで。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [business_tags]
+              properties:
+                business_tags:
+                  type: array
+                  maxItems: 20
+                  items: { type: string, maxLength: 64 }
+              example:
+                business_tags: [クラウド, 業務システム]
+      responses:
+        "200":
+          description: 置き換え後の事業タグ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyBusinessTags"
+        "400":
+          description: business_tags が無い・上限超過
+        "404":
+          description: 企業が存在しない
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   /api/admin/companies/{id}:
     get:
       tags: [admin-companies]
@@ -2355,10 +2479,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Company"
+        "400":
+          description: 入力が不正（website_url / logo_url が http/https 以外など）
         "404":
           description: 存在しない
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 
   /api/admin/companies/{id}/publish:
     patch:
@@ -2482,7 +2608,7 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 
   /api/admin/companies/{id}/interview-questions/generate:
     post:
@@ -2499,7 +2625,8 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/admin/companies/{id}/interview-questions/{qid}:
     put:
@@ -2526,7 +2653,7 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
     delete:
       tags: [admin-companies]
       summary: 企業の面接質問を削除
@@ -2546,14 +2673,14 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 
   /api/admin/companies/{id}/fetch-info:
     post:
       tags: [admin-companies]
       summary: 企業情報を取得する
       description: |
-        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+        外部APIとLLMを呼ぶため従量課金が発生する（Search の月次予算で全体を抑える）。管理者と職員（staff）が使える（オーナー決定 2026-11-22、SOCAIAGENT-692）。管理エリアの権限が無い利用者は 403。
       security: [{ adminAuth: [] }]
       parameters:
         - in: path
@@ -2565,14 +2692,14 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/admin/companies/{id}/confirm-info:
     post:
       tags: [admin-companies]
       summary: 取得した企業情報を確定する
       description: |
-        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+        プレビュー済みの結果を LLM 再実行なしで確定保存する。管理者と職員（staff）が使える（オーナー決定 2026-11-22、SOCAIAGENT-692）。管理エリアの権限が無い利用者は 403。
       security: [{ adminAuth: [] }]
       parameters:
         - in: path
@@ -2584,9 +2711,9 @@ paths:
         "200":
           description: 成功
         "400":
-          description: プロンプトの版の形式が不正（invalid prompt_version）
+          description: プロンプトの版の形式が不正（invalid prompt_version）、または website_url / source_url が http/https の URL でない
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/admin/companies/{id}/fetch-relations:
     post:
@@ -2650,7 +2777,7 @@ paths:
       tags: [admin-companies]
       summary: 技術スタックを取得する
       description: |
-        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+        外部APIとLLMを呼ぶため従量課金が発生する（Search の月次予算で全体を抑える）。管理者と職員（staff）が使える（オーナー決定 2026-11-22、SOCAIAGENT-692）。管理エリアの権限が無い利用者は 403。
       security: [{ adminAuth: [] }]
       parameters:
         - in: path
@@ -2662,7 +2789,7 @@ paths:
         "200":
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/admin/companies/{id}/fetch-persona:
     post:
@@ -3807,6 +3934,27 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/admin/interviews/{id}/shadow-score:
+    get:
+      tags: [admin-analytics]
+      summary: 面接のローカル採点と LLM 採点の並び
+      description: |
+        管理者だけが見る。学生向けの画面やマッチングには使わない。担当校の外は拒否する。
+        シャドー採点が無いときは 404。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: セッションまたはシャドー採点が無い
+
   /api/admin/interviews/{id}/videos:
     get:
       tags: [admin-analytics]
@@ -3871,6 +4019,25 @@ paths:
       tags: [admin-analytics]
       summary: 就職実績を登録する
       security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/graduate-employments/summary:
+    get:
+      tags: [admin-analytics]
+      summary: 就職先の内訳（氏名なし）
+      description: |
+        担当校スコープ。年度・業界・学校ごとの件数と、登録件数に占める割合を返す。
+        卒業生全体の人数が無いため内定率は計算しない。氏名は含めない。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: query
+          name: school_id
+          schema:
+            type: integer
       responses:
         "200":
           description: 成功
@@ -4569,7 +4736,10 @@ paths:
   /health:
     get:
       tags: [ops]
-      summary: ヘルスチェック
+      summary: 生存確認
+      description: |
+        プロセスが応答できることだけを返す。DB は見ない。
+        ALB と ECS のヘルスチェックはこちら（または `/healthz`）のままにする。
       security: []
       responses:
         "200":
@@ -4578,11 +4748,26 @@ paths:
   /healthz:
     get:
       tags: [ops]
-      summary: ヘルスチェック（別名）
+      summary: 生存確認（別名）
+      description: ECS ターゲットグループと ALB が使うパス。`/health` と同じで、DB は見ない。
       security: []
       responses:
         "200":
           description: "`{\"status\":\"ok\"}`"
+
+  /ready:
+    get:
+      tags: [ops]
+      summary: 起動準備の確認
+      description: |
+        DB へ ping する。失敗時は 503。
+        ALB のヘルスチェック先にはしない。DB の瞬断でタスクが落ちるため。
+      security: []
+      responses:
+        "200":
+          description: "`{\"status\":\"ok\"}`"
+        "503":
+          description: "`{\"status\":\"unavailable\"}`"
 
   /metrics:
     get:
@@ -4755,7 +4940,9 @@ paths:
         カード用の短い事業説明・上場区分・出典、初期表示用の直接子会社リスト（読み仮名順）を含む。
         資本の鏡像行（A→B と B→A）は1本に畳む。取引の `direction_known` は現状常に false
         （from/to は取得起点→相手であり、提供側→利用側ではない）。
-        事業タグ専用データは未整備のため `business_tags` は空・`business_tags_status=unavailable`。
+        各ノードの `business_tags` は登録済みの事業タグ（名前順）。初期表示で折りたたまれる企業も含め、
+        返すノード全件に付く。タグがあれば `business_tags_status=available`、未登録・未確認なら
+        `business_tags=[]`・`business_tags_status=unavailable`（業種などから推測して補わない）。
         採用情報は含めない。審査前のゲスト投稿企業と停止中（is_active=false）の企業はノードから除外する。
 
         レート制限は IP 単位 300回/10分（`CORRELATION_MAP_RATE_LIMIT_PER_IP`、compare と共通）。

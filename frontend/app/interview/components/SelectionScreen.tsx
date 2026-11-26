@@ -2,7 +2,6 @@
 
 import { useEffect, type Dispatch, type KeyboardEvent, type SetStateAction } from 'react'
 import {
-  Alert,
   Box,
   Button,
   Chip,
@@ -13,6 +12,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import SearchIcon from '@mui/icons-material/Search'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'

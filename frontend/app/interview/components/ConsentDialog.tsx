@@ -24,10 +24,17 @@ export interface ConsentDialogProps {
  */
 export default function ConsentDialog({ open, consentGiven, onConsentChange, onClose, onConfirm }: ConsentDialogProps) {
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>面接練習を開始する前に</DialogTitle>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      aria-labelledby="interview-consent-title"
+      aria-describedby="interview-consent-description"
+    >
+      <DialogTitle id="interview-consent-title">面接練習を開始する前に</DialogTitle>
       <DialogContent>
-        <Typography variant="body2" sx={{ mb: 2 }}>
+        <Typography id="interview-consent-description" variant="body2" sx={{ mb: 2 }}>
           面接練習では、より良いフィードバックのために以下のデータを収集します。
         </Typography>
         <Typography variant="body2" component="ul" sx={{ pl: 2, mb: 2, color: 'text.secondary' }}>

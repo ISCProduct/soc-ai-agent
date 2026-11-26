@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { extractUserAuthHeaders } from '@/lib/api-proxy'
+import { rejectCrossSiteSessionPost } from '@/lib/auth/session-request'
+import { respondWithStudentSession } from '@/lib/auth/issue-session'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 async function handleProfile(request: NextRequest) {
+  const rejected = rejectCrossSiteSessionPost(request, 'profile')
+  if (rejected) return rejected
   try {
     const body = await request.json()
     const authHeaders = extractUserAuthHeaders(request)
@@ -38,7 +42,7 @@ async function handleProfile(request: NextRequest) {
       }
       let data
       try { data = JSON.parse(retryText) } catch { data = { message: retryText } }
-      return NextResponse.json(data)
+      return respondWithStudentSession(data, 200)
     }
 
     const text = await response.text()
@@ -48,7 +52,8 @@ async function handleProfile(request: NextRequest) {
 
     let data
     try { data = JSON.parse(text) } catch { data = { message: text } }
-    return NextResponse.json(data)
+    // 更新時に Backend が再発行したトークンは Cookie に入れ、画面へは返さない (SOCAIAGENT-683)
+    return respondWithStudentSession(data, 200)
   } catch (error) {
     console.error('[auth/profile] error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

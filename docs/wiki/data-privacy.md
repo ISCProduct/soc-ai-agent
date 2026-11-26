@@ -45,12 +45,20 @@
 
 S3 削除は DB コミット後の best-effort です。失敗時は監査ログ `metadata.s3_errors` に記録します。
 
+### 使われなくなったゲストの掃除（SOCAIAGENT-689）
+
+最後に使ってから7日たったゲスト（リフレッシュトークンの最終発行で判定。トークンが無ければ作成日時）を、日次ジョブが上と同じ経路で論理退会させます。データは通常の退会と同じく **12ヶ月保持**し、その後に物理削除します。保持期間は `WithdrawalRetentionMonths`（`Backend/internal/services/auth/user_deletion_service.go`）です。
+
+- 対象: ゲスト・管理者でない・未退会。1回 500 件まで
+- 一覧を取ったあとで本登録した・使ったゲストは、退会のトランザクションの中で確かめ直して対象から外します
+
 ### 監査ログ
 
 | Action | 実行者 |
 |--------|--------|
 | `user.self_withdraw` | 本人 |
 | `user.admin_withdraw` | 管理者（`X-Admin-Email`） |
+| `user.guest_expire` | システム（使われなくなったゲストの掃除） |
 | `user.purge` | システム（バッチ / 管理者パージ） |
 
 `GET /api/admin/audit-logs` で確認できます。
@@ -176,7 +184,8 @@ PUT /api/collective-insights/consent
 | `anonymous_user_id` | SHA-256ハッシュ | 不可 |
 | `company_id` | 企業ID（整数） | 不可 |
 | `action_type` | viewed / applied / passed / rejected | 不可 |
-| `score_snapshot` | カテゴリ別スコア（JSON） | 不可（スコアのみ） |
+| `score_snapshot` | 応募時点のカテゴリ別スコア、総合マッチ度、軸別マッチ度（JSON。設問本文は含めない） | 不可（スコアのみ） |
+| `application_status_events` | 選考ステータスの遷移と変更者のロール | 退会時にユーザー単位で削除 |
 | `created_at` | タイムスタンプ | 単独では不可 |
 
 **記録しないデータ:**
@@ -213,6 +222,8 @@ PUT /api/collective-insights/consent
 | `anonymized_behavior_summaries` | 無期限 | 集計済みのため個人特定不可 |
 | `score_calibration_weights` | 無期限 | バージョン管理で履歴として保持 |
 | `audit_logs`（退会・パージ記録） | 無期限（推奨） | 法令対応・インシデント調査用。マスク済みメールが metadata に残る点に注意 |
+| `api_call_logs` | 呼び出しから 24 ヶ月 | 退会では消さない。それより古い行は利用者 ID を除いた日次合計へ畳んでから消す（SOCAIAGENT-528） |
+| `api_call_log_daily` | 無期限 | 日次の合計。利用者 ID は持たない |
 | STT評価用の発話音声（音声R&D Task 6） | **最長90日**（評価完了で即削除） | 個別同意が前提。本番S3とは別バケット。詳細は下記 |
 
 ### STT評価用に収集する発話音声（音声R&D Task 6）
