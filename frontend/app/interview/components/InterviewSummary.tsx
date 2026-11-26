@@ -37,9 +37,11 @@ interface Props {
   userId?: number
   /** dark = dark background (finished screen), light = light background (history page) */
   theme?: 'dark' | 'light'
+  /** 評価根拠の発話を、本人の録画のその位置から再生する */
+  onPlayEvidence?: (utteranceId: number) => void
 }
 
-export default function InterviewSummary({ report, utterances, userId, theme = 'dark' }: Props) {
+export default function InterviewSummary({ report, utterances, userId, theme = 'dark', onPlayEvidence }: Props) {
   const isDark = theme === 'dark'
   const paperBg = isDark ? UI.nightPanel : '#fff'
   const paperBorder = isDark ? '1px solid rgba(255,255,255,0.08)' : `1px solid ${UI.ruleSoft}`
@@ -195,6 +197,16 @@ export default function InterviewSummary({ report, utterances, userId, theme = '
                         {sourceLoading ? '発言を読み込み中...' : '発言を見る'}
                       </Button>
                     )}
+                    {onPlayEvidence && evidenceUtteranceIDs[key] ? (
+                      <Button
+                        size="small"
+                        aria-label={`${SCORE_LABELS[key] ?? key}の根拠を録画で再生`}
+                        onClick={() => onPlayEvidence(evidenceUtteranceIDs[key])}
+                        sx={{ mt: 0.25, minHeight: 36, px: 0.5, color: isDark ? '#8ab4f8' : '#1d4ed8', textTransform: 'none' }}
+                      >
+                        録画のこのあたりを再生
+                      </Button>
+                    ) : null}
                   </Box>
                 )}
               </Box>
