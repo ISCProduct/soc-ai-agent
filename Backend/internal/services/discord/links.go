@@ -33,9 +33,11 @@ const (
 
 // Link は Discord ユーザーと Backlog ユーザーの対応。
 // 名前は表示用で、突き合わせには BacklogID を使う（Backlog 側の改名に強くするため）。
+// GitHub は朝のリマインドでレビュー待ち PR をメンションするためのログイン名。空なら PR では名前だけ出す。
 type Link struct {
 	BacklogID int    `json:"id"`
 	Name      string `json:"name"`
+	GitHub    string `json:"github,omitempty"`
 }
 
 // linkStore は Discord ユーザーID → Backlog ユーザーの対応表。
@@ -125,6 +127,8 @@ func (s *ssmLinkStore) List(ctx context.Context) (map[string]Link, error) {
 // Set は discordID を Backlog ユーザーに対応づける。
 // 同じ Backlog ユーザーが別の Discord ユーザーに紐づいていると、通知が二重に飛んだり
 // 本人確認がどちらか不定になるので拒否する（解除してから登録し直す）。
+// GitHub のログイン名も同じ。大文字小文字は区別されないので、無視して比べる。
+// 空（未設定）どうしは重複として扱わない。
 func (s *ssmLinkStore) Set(ctx context.Context, discordID string, l Link) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -138,8 +142,19 @@ func (s *ssmLinkStore) Set(ctx context.Context, discordID string, l Link) error 
 			return fmt.Errorf("%s さんは既に <@%s> に紐づいています。先に /unlink で解除してください", l.Name, id)
 		}
 	}
+	if gh := normalizedGitHubKey(l.GitHub); gh != "" {
+		for id, other := range links {
+			if id != discordID && normalizedGitHubKey(other.GitHub) == gh {
+				return fmt.Errorf("GitHub「%s」は既に <@%s> に紐づいています。先に /unlink で解除してください", l.GitHub, id)
+			}
+		}
+	}
 	links[discordID] = l
 	return s.save(ctx, links)
+}
+
+func normalizedGitHubKey(login string) string {
+	return strings.ToLower(strings.TrimSpace(login))
 }
 
 // Remove は対応を外す。登録が無ければ false。

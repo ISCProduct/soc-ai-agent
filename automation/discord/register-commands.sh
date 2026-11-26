@@ -119,6 +119,12 @@ COMMANDS='[
         "type": 3,
         "required": true,
         "autocomplete": true
+      },
+      {
+        "name": "github",
+        "description": "GitHubのログイン名(レビュー待ちPRのメンションに使う。空なら外す)",
+        "type": 3,
+        "required": false
       }
     ]
   },

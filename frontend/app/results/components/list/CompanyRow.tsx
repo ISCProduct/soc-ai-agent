@@ -10,10 +10,12 @@ import { CompanyActions } from './CompanyActions'
 import { FitScore } from './FitScore'
 import { MatchedAxisLine } from './MatchedAxisLine'
 import type { CompanyRowContext } from './rowContext'
+import AxisBreakdownPanel from '../AxisBreakdownPanel'
 
 /** 企業1行。箱は作らず、罫線で区切る親（CompanyList）の中に置く。 */
 export function CompanyRow({ company, rank, ctx }: { company: Company; rank: number; ctx: CompanyRowContext }) {
   const { isDesktop } = ctx
+  const axesOpen = company.matchId !== undefined && ctx.openAxes.has(company.matchId)
   const thin = isThinEvidence(company, ctx.maxAxisCount, ctx.isProvisional)
 
   const favorite = (
@@ -79,7 +81,31 @@ export function CompanyRow({ company, rank, ctx }: { company: Company; rank: num
             △ 根拠にできた項目が{company.matchedAxisCount}つです（他の候補より少なめ）
           </Typography>
         )}
-        <MatchedAxisLine categoryScores={company.categoryScores} />
+        {/*
+          内訳を開いた行では隠す。一覧の値は推薦を計算した時点のもので、内訳は今のスコアから計算するので、
+          推薦のあとに適性検査を受けるなどすると、同じ軸が別の値で並ぶ。
+        */}
+        {!axesOpen && <MatchedAxisLine categoryScores={company.categoryScores} />}
+        {/* 軸ごとの内訳（SOCAIAGENT-611）。行全体が企業詳細を開くので、この中のクリック・キー操作は行へ伝えない。 */}
+        {company.matchId !== undefined && (
+          <Box onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            <Button
+              size="small"
+              variant="text"
+              aria-expanded={axesOpen}
+              aria-controls={`axes-${company.matchId}`}
+              onClick={() => ctx.onToggleAxes(company.matchId as number)}
+              sx={{ px: 0, minWidth: 0 }}
+            >
+              {axesOpen ? '軸ごとの内訳を閉じる' : '軸ごとの内訳を見る'}
+            </Button>
+            {axesOpen && (
+              <Box id={`axes-${company.matchId}`}>
+                <AxisBreakdownPanel matchId={company.matchId} cache={ctx.axesCache} />
+              </Box>
+            )}
+          </Box>
+        )}
         {ctx.onFeedback && company.matchId && (
           <Box role="group" aria-label={`${company.name}の提案への回答`} sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
             <Typography component="span" sx={{ fontSize: 13, color: UI.inkSoft }}>この提案は？</Typography>

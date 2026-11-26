@@ -156,6 +156,7 @@ resource "aws_lambda_function" "discord" {
       DISCORD_ALLOWED_ROLE_ID = var.discord_allowed_role_id
       GITHUB_DISPATCH_TOKEN   = var.github_dispatch_token
       GITHUB_DISPATCH_REPO    = var.github_dispatch_repo
+      GITHUB_PR_READ_TOKEN    = var.github_pr_read_token
       # キーそのものは置かない。個人の backlog_api_key は渡さない (SOCAIAGENT-510)。
       DISCORD_BACKLOG_BOT_SECRET_ID = aws_secretsmanager_secret.discord_backlog_bot.name
 

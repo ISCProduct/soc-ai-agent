@@ -146,6 +146,7 @@ const (
 	OptionNameMember          = "member"
 	OptionNamePage            = "page"
 	OptionNameBacklog         = "backlog"
+	OptionNameGitHub          = "github"
 	OptionNameState           = "state"
 	// OptionNameUntil は /prod の復帰日。state と結合して on:YYYY-MM-DD の形にする。
 	// state は選択肢(choices)固定で日付を入力できないため、別オプションで受ける。

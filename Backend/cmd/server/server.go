@@ -180,7 +180,7 @@ func readyHandler(db *gorm.DB) echo.HandlerFunc {
 }
 
 // startMaintenanceJobs は定期実行ジョブを safego 経由で起動する。
-func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionService *auth.UserDeletionService, notificationService *notificationsvc.Service, pendingRegistrationRepo *repositories.PendingRegistrationRepository, refreshTokenRepo *repositories.UserRefreshTokenRepository, companyUserRefreshRepo *repositories.CompanyUserRefreshTokenRepository, scoreValidationService *admin.ScoreValidationService) {
+func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionService *auth.UserDeletionService, notificationService *notificationsvc.Service, pendingRegistrationRepo *repositories.PendingRegistrationRepository, refreshTokenRepo *repositories.UserRefreshTokenRepository, companyUserRefreshRepo *repositories.CompanyUserRefreshTokenRepository, scoreValidationService *admin.ScoreValidationService, apiCallLogRepo *repositories.APICallLogRepository) {
 	// 以下の定期実行は safego 経由で起動する。素の go だと 1 回の panic で
 	// Backend プロセスが丸ごと落ち、全ユーザーが 502 になる(#1405, #1446)。
 	// Every は各回を個別に recover するので、1 回落ちても次の回は走る。
@@ -229,6 +229,13 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 	expiredTokenPurger := maintenance.NewExpiredTokenPurger(pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, slog.Default())
 	safego.Every(24*time.Hour, true, func() {
 		expiredTokenPurger.Run(time.Now().UTC())
+	})
+
+	// api_call_logs は退会では消さない。24ヶ月より古い行だけ、日次合計へ畳んでから消す（SOCAIAGENT-528）。
+	// 学校の利用額と、単価を変えたあとの再計算の元を残すため。
+	apiCallLogRetainer := maintenance.NewAPICallLogRetainer(apiCallLogRepo, slog.Default())
+	safego.Every(24*time.Hour, true, func() {
+		apiCallLogRetainer.Run(context.Background(), time.Now().UTC())
 	})
 
 	// #203 スコアキャリブレーション自動適用（1日1回）。

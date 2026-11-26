@@ -5,7 +5,6 @@ import { formatDateTime } from '@/lib/i18n/format'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Alert,
   Box,
   Button,
   Chip,
@@ -19,6 +18,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { ArrowBack } from '@mui/icons-material'
 import { authService } from '@/lib/auth'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
@@ -269,8 +269,8 @@ export default function PageContent() {
         </Box>
       )}
 
-      <Dialog open={Boolean(opened)} onClose={() => setOpened(null)} fullWidth maxWidth="sm">
-        <DialogTitle>{opened?.company_name}からのスカウト</DialogTitle>
+      <Dialog open={Boolean(opened)} onClose={() => setOpened(null)} fullWidth maxWidth="sm" aria-labelledby="scout-message-title">
+        <DialogTitle id="scout-message-title">{opened?.company_name}からのスカウト</DialogTitle>
         <DialogContent>
           <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', pt: 1 }}>
             {opened?.message}
@@ -281,10 +281,15 @@ export default function PageContent() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(blockTarget)} onClose={() => setBlockTarget(null)}>
-        <DialogTitle>この企業をブロックしますか</DialogTitle>
+      <Dialog
+        open={Boolean(blockTarget)}
+        onClose={() => setBlockTarget(null)}
+        aria-labelledby="scout-block-title"
+        aria-describedby="scout-block-description"
+      >
+        <DialogTitle id="scout-block-title">この企業をブロックしますか</DialogTitle>
         <DialogContent>
-          <Typography>
+          <Typography id="scout-block-description">
             {blockTarget?.company_name}
             からの新しいスカウトは届かなくなります。すでに届いている文面は履歴に残ります。
           </Typography>

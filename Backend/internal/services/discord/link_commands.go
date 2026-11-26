@@ -2,7 +2,9 @@ package discord
 
 import (
 	"context"
+	"errors"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -39,12 +41,40 @@ func (h *Handler) link(ctx context.Context, interaction *Interaction) *Interacti
 		return ephemeral(err.Error())
 	}
 
+	githubLogin, err := h.githubLoginFor(ctx, memberID, interaction.Data.Options)
+	if err != nil {
+		return ephemeral(err.Error())
+	}
+
 	log.Printf("[Discord] /link %s -> backlog:%d by %s", memberID, u.ID, interaction.ActorLabel())
-	if err := h.links.Set(ctx, memberID, Link{BacklogID: u.ID, Name: u.Name}); err != nil {
+	if err := h.links.Set(ctx, memberID, Link{BacklogID: u.ID, Name: u.Name, GitHub: githubLogin}); err != nil {
 		log.Printf("[Discord] link set error: %v", err)
 		return ephemeral(userFacingErrorMessage(err))
 	}
-	return ephemeral("✅ <@" + memberID + "> を Backlog の「" + u.Name + "」に紐づけました。")
+	msg := "✅ <@" + memberID + "> を Backlog の「" + u.Name + "」に紐づけました。"
+	if githubLogin != "" {
+		msg += " GitHub は「" + githubLogin + "」です。"
+	}
+	return ephemeral(msg)
+}
+
+// githubLoginFor は /link の任意の github 引数を読む。
+// 引数が無い再登録では、以前のログイン名を残す（Backlog 名だけ直したときに PR のメンションが消えないように）。
+func (h *Handler) githubLoginFor(ctx context.Context, memberID string, options []CommandOption) (string, error) {
+	raw, ok := findOption(options, OptionNameGitHub)
+	if !ok {
+		existing, err := h.links.List(ctx)
+		if err != nil {
+			log.Printf("[Discord] link list for github error: %v", err)
+			return "", errors.New("対応表を読めませんでした。時間を置いて再度お試しください。")
+		}
+		return existing[memberID].GitHub, nil
+	}
+	login, err := NormalizeGitHubLogin(raw)
+	if err != nil {
+		return "", err
+	}
+	return login, nil
 }
 
 func (h *Handler) unlink(ctx context.Context, interaction *Interaction) *InteractionResponse {
@@ -112,7 +142,11 @@ func linkListPages(links map[string]Link) []string {
 	title := "Discord ↔ Backlog の紐づけ(" + strconv.Itoa(len(links)) + "人)"
 	var lines []string
 	for _, id := range SortedIDs(links) {
-		lines = append(lines, "・<@"+id+"> ↔ "+links[id].Name)
+		line := "・<@" + id + "> ↔ " + links[id].Name
+		if links[id].GitHub != "" {
+			line += "（GitHub: " + links[id].GitHub + "）"
+		}
+		lines = append(lines, line)
 	}
 	const pageNote = 16 // 「（999/999ページ）」の余裕
 	var pages [][]string
@@ -237,4 +271,32 @@ func (h *Handler) deadlineAutocomplete(ctx context.Context, interaction *Interac
 		empty.Data.Choices = []Choice{}
 	}
 	return empty
+}
+
+// githubLoginPattern は GitHub のログイン名。先頭と末尾のハイフンは認めない。
+var githubLoginPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$`)
+
+// NormalizeGitHubLogin は @ 付きや空白を外し、空なら未設定として通す。
+func NormalizeGitHubLogin(raw string) (string, error) {
+	login := strings.TrimSpace(raw)
+	login = strings.TrimPrefix(login, "@")
+	login = strings.TrimSpace(login)
+	if login == "" {
+		return "", nil
+	}
+	if !githubLoginPattern.MatchString(login) {
+		return "", errors.New("GitHub のログイン名が不正です。例: octocat")
+	}
+	return login, nil
+}
+
+func findOption(options []CommandOption, name string) (string, bool) {
+	for _, o := range options {
+		if o.Name != name {
+			continue
+		}
+		v, _ := o.Value.(string)
+		return v, true
+	}
+	return "", false
 }
