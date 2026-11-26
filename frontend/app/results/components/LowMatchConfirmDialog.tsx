@@ -31,9 +31,16 @@ export function LowMatchConfirmDialog({
   onConfirm,
 }: LowMatchConfirmDialogProps) {
   return (
-    <Dialog open={open} onClose={onCancel} maxWidth="xs" fullWidth>
-      <DialogTitle>この企業に応募しますか？</DialogTitle>
-      <DialogContent>
+    <Dialog
+      open={open}
+      onClose={onCancel}
+      maxWidth="xs"
+      fullWidth
+      aria-labelledby="low-match-confirm-title"
+      aria-describedby="low-match-confirm-description"
+    >
+      <DialogTitle id="low-match-confirm-title">この企業に応募しますか？</DialogTitle>
+      <DialogContent id="low-match-confirm-description">
         <Stack spacing={1.5}>
           <Typography variant="body2">
             <strong>{companyName}</strong> とのマッチ度は{' '}

@@ -457,8 +457,8 @@ export default function PageContent() {
       </Box>
 
       {/* Create / Edit dialog */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{editingId ? 'イベントを編集' : 'イベントを追加'}</DialogTitle>
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth aria-labelledby="schedule-event-form-title">
+        <DialogTitle id="schedule-event-form-title">{editingId ? 'イベントを編集' : 'イベントを追加'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} mt={1}>
             <TextField
