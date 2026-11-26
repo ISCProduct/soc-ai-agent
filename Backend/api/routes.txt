@@ -125,6 +125,7 @@ GET /api/admin/score-validation/variants/results
 GET /api/admin/scraper-sessions
 POST /api/admin/scraper-sessions
 DELETE /api/admin/scraper-sessions/:site_key
+GET /api/admin/students/:id/growth-history
 GET /api/admin/teacher/students/:id/es-reviews
 POST /api/admin/teacher/students/:id/guidances
 GET /api/admin/teacher/students/tendency-analysis
@@ -309,6 +310,7 @@ GET /api/schedule/:id
 PUT /api/schedule/:id
 GET /api/schedule/export/ics
 GET /api/user/ai-budget
+GET /api/user/growth-history
 GET /api/user/guidances
 POST /api/user/guidances/:id/dismiss
 GET /api/user/industries

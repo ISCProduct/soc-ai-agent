@@ -228,6 +228,42 @@ components:
             本人が同意を最後に変更した日時（同意の履歴の最後の行）。一度も変更していなければ null。
             履歴の記録を始める前（20261117104108 の適用前）から同意していた人は、本人が操作するまでは 20261117104108 の適用時刻になる
 
+    GrowthHistory:
+      type: object
+      description: スコアと診断フェーズの記録（SOCAIAGENT-601）。比較は新しい2件。値はシステムの見立て。
+      required: [points, has_previous, categories, phase]
+      properties:
+        points:
+          type: array
+          description: 古い順。最大30件。
+          items: { type: object }
+        has_previous: { type: boolean, description: 比較できる1つ前の記録がある }
+        categories:
+          type: array
+          items:
+            type: object
+            required: [category, change_label]
+            properties:
+              category: { type: string }
+              previous: { type: integer, nullable: true }
+              current: { type: integer, nullable: true }
+              delta: { type: integer, nullable: true }
+              change_label:
+                type: string
+                description: 伸びた / 落ちた / 変化なし / 新しく出た / 今回は出ていない
+        phase:
+          type: object
+          required: [completed_previous, completed_current, change_label, newly_completed]
+          properties:
+            completed_previous: { type: integer }
+            completed_current: { type: integer }
+            change_label:
+              type: string
+              description: 進んだ / 戻った / 変化なし / 比較できない
+            newly_completed:
+              type: array
+              items: { type: string }
+
     CompanyInterviewQuestionInput:
       type: object
       required: [category, question_text]
@@ -5078,6 +5114,45 @@ paths:
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/user/growth-history:
+    get:
+      tags: [user]
+      summary: スコアと診断フェーズの成長履歴を取得
+      description: |
+        本人の10カテゴリ適性と診断フェーズの記録（SOCAIAGENT-601）。
+        クエリの user_id は見ない。トークンの本人だけを返す。
+        比較は新しい2件。記録はこの機能を入れてから始まり、過去のスコアは復元しない。
+        値はシステムの見立てであり、確定した適性ではない。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GrowthHistory" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/admin/students/{id}/growth-history:
+    get:
+      tags: [admin-users]
+      summary: 担当校の学生の成長履歴を取得
+      description: |
+        職員が担当校の学生について、スコアと診断フェーズの記録を見る（SOCAIAGENT-601）。
+        担当外の学生は 403。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GrowthHistory" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 学生がいない }
   /api/user/training-consent:
     get:
       tags: [user]
