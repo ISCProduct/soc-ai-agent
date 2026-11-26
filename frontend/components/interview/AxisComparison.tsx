@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import {
-  Alert,
   Box,
   Button,
   CircularProgress,
@@ -12,6 +11,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { formatDateTime } from '@/lib/i18n/format'
 import { interviewApi, type AxisComparisonResult, type InterviewTrendPoint } from '@/lib/interview'
 import { UI } from '@/lib/design/tokens'
@@ -130,7 +130,7 @@ export default function AxisComparison({ points }: AxisComparisonProps) {
             </TextField>
           </Stack>
           {baseId !== '' && baseId === targetId ? (
-            <Alert severity="info">異なる2回を選んでください。</Alert>
+            <Alert role="alert" severity="info">異なる2回を選んでください。</Alert>
           ) : null}
           {loading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }} aria-busy="true">

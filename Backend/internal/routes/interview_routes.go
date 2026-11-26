@@ -31,6 +31,8 @@ func SetupInterviewRoutes(api *echo.Group, interviewController *interviewcontrol
 	// 動画だけはグローバルの 32M 制限から除外してあるので、ここで上限を置く
 	// （maxVideoSize=500MB + multipart のオーバーヘッド分）。
 	interviews.POST("/:id/upload-video", interviewController.UploadVideo, echomw.BodyLimit("512M"))
+	interviews.GET("/:id/videos", interviewController.Playback)
+	interviews.GET("/:id/videos/:video_id/url", interviewController.VideoPlaybackURL)
 	interviews.GET("/:id/phrase-suggestions", interviewController.GetPhraseSuggestions, echoAuthenticatedAIRateLimit(), budget.Immediate)
 	interviews.POST("/:id/turn", interviewController.Turn, echoAuthenticatedAIRateLimit(), budget.Deferred)
 	interviews.POST("/:id/start-turn", interviewController.StartTurn, echoAuthenticatedAIRateLimit(), budget.Deferred)

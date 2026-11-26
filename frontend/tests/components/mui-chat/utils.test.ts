@@ -5,6 +5,7 @@ import {
   CHAT_STOP_TEXT,
   CHAT_WARN_TEXT,
   INITIAL_GREETING,
+  CHAT_UNSENT_DRAFT_KEY,
   clearChatSessionOnEnd,
   computeProgressTotals,
   extractChoices,
@@ -132,6 +133,18 @@ describe('clearChatSessionOnEnd', () => {
     expect(sessionStorage._store.chatMessages).toBeUndefined()
     expect(localStorage._store.chatMessages).toBeUndefined()
     expect(localStorage._store.chat_session_id).toBeUndefined()
+  })
+
+  it('送れなかった文章も消す（ログアウトのあと、共用 PC で次の利用者の入力欄に出さない）', () => {
+    const sessionStorage = createMemoryStorage({
+      chatSessionId: 'sess-42',
+      [CHAT_UNSENT_DRAFT_KEY]: JSON.stringify({ text: '前の学生の文章', userId: 1 }),
+    })
+    const localStorage = createMemoryStorage()
+
+    clearChatSessionOnEnd({ sessionStorage, localStorage })
+
+    expect(sessionStorage._store[CHAT_UNSENT_DRAFT_KEY]).toBeUndefined()
   })
 
   it('sessionId が無い場合も他キーは削除する', () => {
