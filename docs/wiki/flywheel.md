@@ -83,7 +83,7 @@
 ### #203 スコア精度検証・改善基盤
 
 **現状（自動ループ接続済み）:**
-- 応募時に `user_application_statuses.score_snapshot` へ診断セッションのカテゴリ別スコアを JSON 保存する。
+- 応募時に `user_application_statuses.score_snapshot` へ、診断セッションのカテゴリ別スコアと、その時点のマッチ度（総合・軸別・ロジック版）を JSON 保存する。選考の遷移は `application_status_events` にロール付きで残す。履歴の書き込みに失敗しても応募は成功させる。
 - 日次ジョブ `AutoCalibrateIfDue` が確定結果（通過/不採用）とスナップショットからカテゴリ軸重みを更新する。
 - 重みは「通過側平均スコア − 不採用側平均スコア」を縮小・ステップ制限したもの（0.1〜3.0）。
 - 有効な `ScoreCalibrationWeight` は次の `CalculateMatching` で軸重みとして適用される。

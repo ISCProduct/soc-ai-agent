@@ -498,15 +498,27 @@ func (c *ChatController) GetFavorites(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "matching service not available")
 	}
 
+	// ユーザーIDは認証だけを見る。クエリの user_id では他人のお気に入りを読めない。
 	limit := httpapi.LimitQuery(ctx, "limit", 50)
-	matches, err := c.matchingService.ListFavoriteCompanies(ctx.Request().Context(), userID, limit)
+	offset := httpapi.IntQuery(ctx, "offset", 0)
+	matches, total, companyIDs, err := c.matchingService.ListFavoriteCompanies(ctx.Request().Context(), userID, offset, limit)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
-	displayed := matching.DisplayableMatches(matches)
-	return ctx.JSON(http.StatusOK, matching.RecommendationResponse{
-		Recommendations: matching.BuildRecommendations(displayed, nil),
-	})
+	// 0件を null にすると、画面が空の案内ではなく読み込み失敗になる。
+	// 末尾を超えた offset も空配列で返し、画面が前のページへ戻れるようにする。
+	recommendations := matching.BuildRecommendations(matches, nil)
+	if recommendations == nil {
+		recommendations = []matching.Recommendation{}
+	}
+	resp := matching.RecommendationResponse{
+		Recommendations: recommendations,
+		Total:           total,
+	}
+	if len(companyIDs) > 0 {
+		resp.FavoriteCompanyIDs = companyIDs
+	}
+	return ctx.JSON(http.StatusOK, resp)
 }
 
 // RemoveFavoriteCompany は企業のお気に入りを診断をまたいで外す (POST /api/chat/favorites/remove)

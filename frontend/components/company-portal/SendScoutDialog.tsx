@@ -110,11 +110,18 @@ export function SendScoutDialog({
   }
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>スカウトを送る</DialogTitle>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      fullWidth
+      maxWidth="sm"
+      aria-labelledby="send-scout-title"
+      aria-describedby="send-scout-description"
+    >
+      <DialogTitle id="send-scout-title">スカウトを送る</DialogTitle>
       <DialogContent>
         <Stack spacing={2} component="form" id="send-scout-form" onSubmit={submit} sx={{ pt: 1 }}>
-          <Typography variant="body2" color="text.secondary">
+          <Typography id="send-scout-description" variant="body2" color="text.secondary">
             {studentName}さん向けに、定型文を差し込んで送ります。
           </Typography>
           {loading && <Alert severity="info">読み込み中...</Alert>}

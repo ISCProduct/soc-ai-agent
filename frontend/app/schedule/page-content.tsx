@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from 'react'
 import { formatDateTime } from '@/lib/i18n/format'
 import { useRouter } from 'next/navigation'
 import {
-  Alert,
   Box,
   Button,
   Chip,
@@ -21,6 +20,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos'
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos'
@@ -31,16 +31,18 @@ import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import { authService } from '@/lib/auth'
 import { datetimeLocalToISO, formatLocalDateKey, isoToDatetimeLocal } from '@/lib/datetime-local'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
+import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ListSkeleton } from '@/components/common/ListSkeleton'
 
+// short はカレンダーの帯に出す略称。種類を色だけでなく文字でも示す（#2218）
 const STAGE_OPTIONS = [
-  { value: '書類選考', label: '書類選考', color: '#9c27b0' },
-  { value: '1次面接', label: '1次面接', color: '#1976d2' },
-  { value: '2次面接', label: '2次面接', color: '#0288d1' },
-  { value: '最終面接', label: '最終面接', color: '#e65100' },
-  { value: '内定',    label: '内定',    color: '#388e3c' },
-  { value: 'その他',  label: 'その他',  color: '#757575' },
+  { value: '書類選考', label: '書類選考', short: '書類', color: '#9c27b0' },
+  { value: '1次面接', label: '1次面接', short: '1次', color: '#1976d2' },
+  { value: '2次面接', label: '2次面接', short: '2次', color: '#0288d1' },
+  { value: '最終面接', label: '最終面接', short: '最終', color: '#e65100' },
+  { value: '内定',    label: '内定',    short: '内定', color: '#388e3c' },
+  { value: 'その他',  label: 'その他',  short: '他',   color: '#757575' },
 ]
 
 type ScheduleEvent = {
@@ -73,6 +75,11 @@ const EMPTY_FORM: EventFormState = {
 
 function stageColor(stage: string): string {
   return STAGE_OPTIONS.find(s => s.value === stage)?.color ?? '#757575'
+}
+
+/** カレンダーの帯に出す種類の略称。知らない種類はそのまま出す */
+function stageShort(stage: string): string {
+  return STAGE_OPTIONS.find(s => s.value === stage)?.short ?? stage
 }
 
 function getDaysInMonth(year: number, month: number): Date[] {
@@ -109,6 +116,8 @@ export default function PageContent() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<EventFormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  // 削除の確認ダイアログで確認中のイベントID。null なら閉じている
+  const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null)
 
   useEffect(() => {
     const auth = authService.getStoredUser()
@@ -208,15 +217,24 @@ export default function PageContent() {
     }
   }
 
+  // 削除は確認ダイアログで確定するまで実行しない
+  const requestDelete = (id: number) => {
+    if (!userId) return
+    setDeleteTargetId(id)
+  }
+
   const handleDelete = async (id: number) => {
     if (!userId) return
-    if (!confirm('このイベントを削除しますか？')) return
+    // 編集ダイアログから削除した場合も閉じる。失敗時のエラーは画面側に出すため
+    setDialogOpen(false)
     try {
       const res = await fetch(`/api/schedule/${id}`, { method: 'DELETE' })
       if (!res.ok && res.status !== 204) throw new Error('削除に失敗しました')
       await fetchEvents()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDeleteTargetId(null)
     }
   }
 
@@ -355,6 +373,10 @@ export default function PageContent() {
                                     cursor: 'pointer',
                                   }}
                                 >
+                                  {/* 種類は色だけでなく略称でも示す（#2218）。名前は Tooltip にも出す */}
+                                  <Box component="span" data-testid="schedule-stage-short" sx={{ fontWeight: 700, mr: 0.5 }}>
+                                    {stageShort(ev.stage)}
+                                  </Box>
                                   {ev.company_name}
                                 </Box>
                               </Tooltip>
@@ -412,7 +434,7 @@ export default function PageContent() {
                   <IconButton size="small" onClick={() => openEditDialog(ev)} aria-label="予定を編集">
                     <EditIcon fontSize="small" />
                   </IconButton>
-                  <IconButton size="small" onClick={() => handleDelete(ev.id)} aria-label="予定を削除">
+                  <IconButton size="small" onClick={() => requestDelete(ev.id)} aria-label="予定を削除">
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </Stack>
@@ -435,8 +457,8 @@ export default function PageContent() {
       </Box>
 
       {/* Create / Edit dialog */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{editingId ? 'イベントを編集' : 'イベントを追加'}</DialogTitle>
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth aria-labelledby="schedule-event-form-title">
+        <DialogTitle id="schedule-event-form-title">{editingId ? 'イベントを編集' : 'イベントを追加'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} mt={1}>
             <TextField
@@ -486,10 +508,7 @@ export default function PageContent() {
           {editingId && (
             <Button
               color="error"
-              onClick={async () => {
-                setDialogOpen(false)
-                await handleDelete(editingId)
-              }}
+              onClick={() => requestDelete(editingId)}
             >
               削除
             </Button>
@@ -501,6 +520,17 @@ export default function PageContent() {
           </Button>
         </DialogActions>
       </Dialog>
+      <ConfirmDialog
+        open={deleteTargetId !== null}
+        title="イベントを削除"
+        message="このイベントを削除しますか？"
+        confirmLabel="削除する"
+        destructive
+        onConfirm={async () => {
+          if (deleteTargetId !== null) await handleDelete(deleteTargetId)
+        }}
+        onCancel={() => setDeleteTargetId(null)}
+      />
       <BottomNavSpacer />
     </Box>
   )

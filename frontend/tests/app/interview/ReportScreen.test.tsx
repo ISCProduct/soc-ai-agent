@@ -70,7 +70,7 @@ describe('ReportScreen', () => {
   it('進捗が null（旧バックエンド）なら段階リスト無しの不定表示にする', () => {
     renderScreen({ reportStatus: 'pending', reportProgress: null })
 
-    expect(screen.getByText('レポートを作っています')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'レポートを作っています' })).toBeInTheDocument()
     expect(screen.queryByText('順番待ち')).not.toBeInTheDocument()
     expect(screen.queryByRole('progressbar', { name: 'レポート作成の進み具合' })).not.toBeInTheDocument()
   })
@@ -89,8 +89,11 @@ describe('ReportScreen', () => {
   it('停滞中は見出しと案内が変わる', () => {
     renderScreen({ reportProgress: { stage: 'generating', percent: 42, stalled: true } })
 
-    expect(screen.getByText('時間がかかっています')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('いつもより時間がかかっています')
+    expect(screen.getByRole('heading', { name: '時間がかかっています' })).toBeInTheDocument()
+    // 置いたままの見えない status（見出しの文字）と、案内の status の両方を読み上げに届ける（#2217）
+    const statuses = screen.getAllByRole('status').map((el) => el.textContent ?? '')
+    expect(statuses).toContain('時間がかかっています')
+    expect(statuses.some((t) => t.includes('いつもより時間がかかっています'))).toBe(true)
   })
 
   it('動画アップロードは進捗カードの中の1行で出す', () => {
@@ -222,7 +225,7 @@ describe('ReportScreen レポート完成', () => {
       />,
     )
 
-    expect(screen.getByText('レポートができました')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'レポートができました' })).toBeInTheDocument()
     expect(screen.getByText('結論から話せています。')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'レポートを見る' })).toHaveAttribute('href', '#interview-report-body')
     // ゲストはメール送信不可＋登録導線
@@ -287,5 +290,56 @@ describe('ReportScreen メール送信エラー表示 (#1056)', () => {
     renderWithEmailError('メールの送信に失敗しました。時間をおいて再度お試しください。')
 
     expect(screen.getByRole('button', { name: 'レポートをメールで受け取る' })).not.toBeDisabled()
+  })
+})
+
+// #2217 のレビュー: 要素ごと差し込んだ status は読まれないことがある。置いたままの同じ status の文字を入れ替えて、
+// 作成中 → 停滞 → 完了の切り替わりを読み上げに届ける
+describe('ReportScreen レポートの待ちの読み上げ', () => {
+  const noop = () => {}
+  const base = {
+    onPracticeAgain: noop,
+    errorMessage: null,
+    scoresBefore: null,
+    scoresAfter: null,
+    session: null,
+    userId: 1,
+    emailSending: false,
+    emailSent: false,
+    emailError: '',
+    onSendEmail: noop,
+    isGuest: false,
+    onRegisterClick: noop,
+    videoUploadStatus: 'idle' as const,
+    videoUploadProgress: 0,
+    videoSizeWarning: null,
+  }
+  const READY = {
+    session_id: 1,
+    summary_text: '要約',
+    scores_json: '{}',
+    evidence_json: '{}',
+    created_at: '2026-09-07',
+    updated_at: '2026-09-07',
+  }
+
+  it('作成中から完了に変わると、同じ status の要素の文字が入れ替わる', () => {
+    const { rerender } = render(<ReportScreen {...base} reportStatus="pending" report={null} reportProgress={{ stage: 'generating', percent: 40, stalled: false }} />)
+    const announcer = screen.getByTestId('report-status-announcer')
+    expect(announcer).toHaveAttribute('role', 'status')
+    expect(announcer).toHaveTextContent('レポートを作っています')
+
+    rerender(<ReportScreen {...base} reportStatus="pending" report={null} reportProgress={{ stage: 'generating', percent: 60, stalled: true }} />)
+    expect(screen.getByTestId('report-status-announcer')).toBe(announcer)
+    expect(announcer).toHaveTextContent('時間がかかっています')
+
+    rerender(<ReportScreen {...base} reportStatus="ready" report={READY} />)
+    expect(screen.getByTestId('report-status-announcer')).toBe(announcer)
+    expect(announcer).toHaveTextContent('レポートができました')
+  })
+
+  it('読み上げる status に aria-busy を付けない（busy の間は読み上げが抑えられるため）', () => {
+    render(<ReportScreen {...base} reportStatus="pending" report={null} reportProgress={{ stage: 'generating', percent: 40, stalled: false }} />)
+    for (const el of screen.getAllByRole('status')) expect(el).not.toHaveAttribute('aria-busy')
   })
 })
