@@ -1,19 +1,13 @@
 /**
- * @jest-environment jsdom
+ * @jest-environment ./tests/env/jsdom-asia-tokyo.ts
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import PageContent from '@/app/schedule/page-content'
 
 // #2092: 選考スケジュールの画面の回帰テスト（カレンダーの描画・保存・日本時間での日付の表示）。
-// 日時は実行環境のタイムゾーンで扱われる（利用者の端末＝日本時間）。テストも日本時間に固定し、
+// 日時は実行環境のタイムゾーンで扱われる（利用者の端末＝日本時間）。テストも日本時間に固定し
+// （先頭の @jest-environment。CI の runner は UTC のため、テストの中で process.env.TZ を変えても効かない）、
 // UTC と日本時間で日付がずれる時刻（UTC 15:30 ＝ 日本時間の翌日 0:30。#137 で直したずれ）を確かめる。
-const ORIGINAL_TZ = process.env.TZ
-beforeAll(() => {
-  process.env.TZ = 'Asia/Tokyo'
-})
-afterAll(() => {
-  process.env.TZ = ORIGINAL_TZ
-})
 
 const mockPush = jest.fn()
 jest.mock('next/navigation', () => ({
