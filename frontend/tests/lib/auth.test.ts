@@ -84,6 +84,14 @@ describe('authService.logout', () => {
     expect(sessionStorage.getItem('user')).toBeNull()
     expect(localStorage.getItem('user')).toBeNull()
   })
+
+  it('接続エラーで送れなかったチャットの文章も消す（共用 PC で次の利用者の入力欄に出さない。#2213 のレビュー）', () => {
+    sessionStorage.setItem('chatUnsentDraft', JSON.stringify({ text: '前の学生の文章', userId: 1 }))
+
+    authService.logout()
+
+    expect(sessionStorage.getItem('chatUnsentDraft')).toBeNull()
+  })
 })
 
 describe('authService.verifyRegistration', () => {

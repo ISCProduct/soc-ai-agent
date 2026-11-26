@@ -3895,6 +3895,27 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/admin/interviews/{id}/shadow-score:
+    get:
+      tags: [admin-analytics]
+      summary: 面接のローカル採点と LLM 採点の並び
+      description: |
+        管理者だけが見る。学生向けの画面やマッチングには使わない。担当校の外は拒否する。
+        シャドー採点が無いときは 404。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: セッションまたはシャドー採点が無い
+
   /api/admin/interviews/{id}/videos:
     get:
       tags: [admin-analytics]
