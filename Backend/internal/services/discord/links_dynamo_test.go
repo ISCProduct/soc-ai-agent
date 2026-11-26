@@ -106,8 +106,24 @@ func condOK(expr string, item map[string]dynamotypes.AttributeValue, values map[
 	if expr == "" {
 		return true
 	}
+	if ands := strings.Split(expr, " AND "); len(ands) > 1 {
+		for _, a := range ands {
+			if !condOK(a, item, values) {
+				return false
+			}
+		}
+		return true
+	}
 	for _, part := range strings.Split(expr, " OR ") {
 		switch strings.TrimSpace(part) {
+		case condNoGitHub:
+			if item != nil && attrString(item, "github") == "" {
+				return true
+			}
+		case condSameGitHub:
+			if item != nil && attrString(item, "github") == attrString(values, ":prevgh") {
+				return true
+			}
 		case condAbsent:
 			if item == nil {
 				return true
@@ -311,4 +327,74 @@ func (m *memDynamo) putDiscord(id string, l Link) error {
 func (m *memDynamo) putLock(backlogID int, discordID string) error {
 	_, err := m.PutItem(context.Background(), &dynamodb.PutItemInput{Item: lockItem(backlogID, discordID)})
 	return err
+}
+
+func TestDynamoLink_GitHubを保存し同じログイン名は大文字小文字を問わず拒否する(t *testing.T) {
+	svc, db := newDynamoService(nil)
+	ctx := context.Background()
+	if err := svc.Set(ctx, "111", Link{BacklogID: 1, Name: "大橋和幸", GitHub: "OctoCat"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.List(ctx)
+	if err != nil || got["111"].GitHub != "OctoCat" {
+		t.Fatalf("一覧に GitHub が無い: %+v %v", got, err)
+	}
+	err = svc.Set(ctx, "222", Link{BacklogID: 2, Name: "別の人", GitHub: "octocat"})
+	if err == nil || !strings.Contains(err.Error(), "GitHub「octocat」は既に <@111>") {
+		t.Fatalf("GitHub の二重登録を拒否しない: %v", err)
+	}
+	if _, ok := db.items[discordPK("222")]; ok {
+		t.Fatal("拒否したのに 222 の行が残った")
+	}
+	// 付け替えると古いログイン名は空く
+	if err := svc.Set(ctx, "111", Link{BacklogID: 1, Name: "大橋和幸", GitHub: "hubot"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Set(ctx, "222", Link{BacklogID: 2, Name: "別の人", GitHub: "octocat"}); err != nil {
+		t.Fatalf("付け替え後の旧ログイン名を使えない: %v", err)
+	}
+	// 解除すると占有も外れる
+	if ok, err := svc.Remove(ctx, "111"); err != nil || !ok {
+		t.Fatalf("解除できない: %v %v", ok, err)
+	}
+	if _, ok := db.items[githubPK("hubot")]; ok {
+		t.Fatal("解除後も GitHub の占有が残った")
+	}
+	if err := svc.Set(ctx, "333", Link{BacklogID: 3, Name: "三人目", GitHub: "hubot"}); err != nil {
+		t.Fatalf("解除後のログイン名を使えない: %v", err)
+	}
+}
+
+func TestDynamoLink_GitHubを外すと占有も外れる(t *testing.T) {
+	svc, db := newDynamoService(nil)
+	ctx := context.Background()
+	if err := svc.Set(ctx, "111", Link{BacklogID: 1, Name: "大橋和幸", GitHub: "octocat"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Set(ctx, "111", Link{BacklogID: 1, Name: "大橋和幸"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := db.items[githubPK("octocat")]; ok {
+		t.Fatal("GitHub を外しても占有が残った")
+	}
+	if _, ok := db.items[discordPK("111")]["github"]; ok {
+		t.Fatal("GitHub を外しても行に残った")
+	}
+}
+
+func TestDynamoLink_移行でGitHubと占有も移す(t *testing.T) {
+	raw := `{"111":{"id":1,"name":"大橋和幸","github":"OctoCat"}}`
+	legacy := &ssmLinkStore{client: &memSSM{value: &raw}, paramName: "/p/links"}
+	svc, db := newDynamoService(legacy)
+	ctx := context.Background()
+	got, err := svc.List(ctx)
+	if err != nil || got["111"].GitHub != "OctoCat" {
+		t.Fatalf("移行で GitHub が消えた: %+v %v", got, err)
+	}
+	if attrString(db.items[githubPK("octocat")], "discord_id") != "111" {
+		t.Fatalf("移行で GitHub の占有が無い: %v", db.items[githubPK("octocat")])
+	}
+	if err := svc.Set(ctx, "222", Link{BacklogID: 2, Name: "別の人", GitHub: "octocat"}); err == nil {
+		t.Fatal("移行した GitHub の二重登録を拒否しない")
+	}
 }

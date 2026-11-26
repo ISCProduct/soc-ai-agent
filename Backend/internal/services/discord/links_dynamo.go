@@ -23,6 +23,9 @@ const (
 	condExists       = "attribute_exists(pk)"
 	condAbsentOrSelf = "attribute_not_exists(pk) OR discord_id = :discord"
 	condSameBacklog  = "backlog_id = :prev"
+	// GitHub ログイン名の占有行も、読み取ったときのままのときだけ付け替える（同時の /link で古い占有を残さない）
+	condNoGitHub   = "attribute_not_exists(github)"
+	condSameGitHub = "github = :prevgh"
 
 	// 移行は /link の 2.5 秒とは別枠。Lambda の 10 秒を超えない範囲で、途中で切れても次の回が続きから書く。
 	migrationBudget  = 6 * time.Second
@@ -72,6 +75,7 @@ func (d *dynamoLinkStore) List(ctx context.Context) (map[string]Link, error) {
 		out[strings.TrimPrefix(pk, "discord#")] = Link{
 			BacklogID: attrInt(item, "backlog_id"),
 			Name:      attrString(item, "name"),
+			GitHub:    attrString(item, "github"),
 		}
 	}
 	return out, nil
@@ -87,10 +91,16 @@ func (d *dynamoLinkStore) Set(ctx context.Context, discordID string, l Link) err
 	}
 	discordCond := condAbsent
 	var discordValues map[string]dynamotypes.AttributeValue
+	prevGitHub := attrString(current, "github")
 	if current != nil {
 		// 読み取った行のままのときだけ上書きする。同じ Discord への同時 /link が、後着で占有行だけ残すのを防ぐ。
-		discordCond = condSameBacklog
 		discordValues = map[string]dynamotypes.AttributeValue{":prev": nAttr(attrInt(current, "backlog_id"))}
+		if prevGitHub == "" {
+			discordCond = condSameBacklog + " AND " + condNoGitHub
+		} else {
+			discordCond = condSameBacklog + " AND " + condSameGitHub
+			discordValues[":prevgh"] = sAttr(prevGitHub)
+		}
 	}
 	items := []dynamotypes.TransactWriteItem{
 		d.put(discordItem(discordID, l), discordCond, discordValues),
@@ -98,6 +108,14 @@ func (d *dynamoLinkStore) Set(ctx context.Context, discordID string, l Link) err
 	}
 	if current != nil && attrInt(current, "backlog_id") != l.BacklogID {
 		items = append(items, d.del(backlogPK(attrInt(current, "backlog_id")), condAbsentOrSelf, discordValue(discordID)))
+	}
+	// GitHub のログイン名も1人に1つ。大文字小文字は区別しないので、占有行は小文字のキーで持つ
+	newGitHub := normalizedGitHubKey(l.GitHub)
+	if newGitHub != "" {
+		items = append(items, d.put(githubLockItem(newGitHub, discordID), condAbsentOrSelf, discordValue(discordID)))
+	}
+	if old := normalizedGitHubKey(prevGitHub); old != "" && old != newGitHub {
+		items = append(items, d.del(githubPK(old), condAbsentOrSelf, discordValue(discordID)))
 	}
 	if err := d.transact(ctx, items); err != nil {
 		if !errors.Is(err, errTxnCanceled) {
@@ -107,11 +125,19 @@ func (d *dynamoLinkStore) Set(ctx context.Context, discordID string, l Link) err
 		if oerr != nil {
 			return oerr
 		}
-		who := attrString(owner, "discord_id")
-		if who == "" || who == discordID {
-			return fmt.Errorf("対応表の更新に失敗しました")
+		if who := attrString(owner, "discord_id"); who != "" && who != discordID {
+			return fmt.Errorf("%s さんは既に <@%s> に紐づいています。先に /unlink で解除してください", l.Name, who)
 		}
-		return fmt.Errorf("%s さんは既に <@%s> に紐づいています。先に /unlink で解除してください", l.Name, who)
+		if newGitHub != "" {
+			ghOwner, gerr := d.get(ctx, githubPK(newGitHub))
+			if gerr != nil {
+				return gerr
+			}
+			if who := attrString(ghOwner, "discord_id"); who != "" && who != discordID {
+				return fmt.Errorf("GitHub「%s」は既に <@%s> に紐づいています。先に /unlink で解除してください", l.GitHub, who)
+			}
+		}
+		return fmt.Errorf("対応表の更新に失敗しました")
 	}
 	return nil
 }
@@ -130,6 +156,9 @@ func (d *dynamoLinkStore) Remove(ctx context.Context, discordID string) (bool, e
 	items := []dynamotypes.TransactWriteItem{
 		d.del(discordPK(discordID), condExists, nil),
 		d.del(backlogPK(attrInt(current, "backlog_id")), condAbsentOrSelf, discordValue(discordID)),
+	}
+	if gh := normalizedGitHubKey(attrString(current, "github")); gh != "" {
+		items = append(items, d.del(githubPK(gh), condAbsentOrSelf, discordValue(discordID)))
 	}
 	if err := d.transact(ctx, items); err != nil {
 		if errors.Is(err, errTxnCanceled) {
@@ -187,6 +216,9 @@ func (d *dynamoLinkStore) migrate(ctx context.Context) error {
 			}
 			if !have[backlogPK(l.BacklogID)] {
 				pending = append(pending, lockItem(l.BacklogID, id))
+			}
+			if gh := normalizedGitHubKey(l.GitHub); gh != "" && !have[githubPK(gh)] {
+				pending = append(pending, githubLockItem(gh, id))
 			}
 		}
 	}
@@ -329,12 +361,24 @@ var errTxnCanceled = errors.New("対応表の条件付き更新が競合しま�
 
 func discordPK(id string) string { return "discord#" + id }
 func backlogPK(id int) string    { return "backlog#" + strconv.Itoa(id) }
+func githubPK(key string) string { return "github#" + key }
 
 func discordItem(discordID string, l Link) map[string]dynamotypes.AttributeValue {
-	return map[string]dynamotypes.AttributeValue{
+	item := map[string]dynamotypes.AttributeValue{
 		"pk":         sAttr(discordPK(discordID)),
 		"backlog_id": nAttr(l.BacklogID),
 		"name":       sAttr(l.Name),
+	}
+	if l.GitHub != "" {
+		item["github"] = sAttr(l.GitHub)
+	}
+	return item
+}
+
+func githubLockItem(key, discordID string) map[string]dynamotypes.AttributeValue {
+	return map[string]dynamotypes.AttributeValue{
+		"pk":         sAttr(githubPK(key)),
+		"discord_id": sAttr(discordID),
 	}
 }
 
