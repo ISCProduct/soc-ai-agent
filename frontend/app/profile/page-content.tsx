@@ -14,9 +14,9 @@ import {
   MenuItem,
   TextField,
   Typography,
-  Alert,
   Snackbar,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import PersonIcon from '@mui/icons-material/Person'
 import SchoolIcon from '@mui/icons-material/School'
 import WorkIcon from '@mui/icons-material/Work'
@@ -508,7 +508,7 @@ function ProfilePageContent() {
                 連携することで、面接スケジュールを登録・変更・キャンセルした際にGoogleカレンダーへ自動同期されます。
               </Typography>
               {calendarMessage && (
-                <Alert
+                <Alert role="alert"
                   severity={calendarConnected && calendarMessage.includes('連携しました') ? 'success' : calendarMessage.includes('解除') ? 'info' : 'error'}
                   sx={{ mb: 2 }}
                 >
@@ -516,7 +516,7 @@ function ProfilePageContent() {
                 </Alert>
               )}
               {calendarStatusError ? (
-                <Alert
+                <Alert role="alert"
                   severity="warning"
                   sx={{ mb: 2 }}
                   action={
