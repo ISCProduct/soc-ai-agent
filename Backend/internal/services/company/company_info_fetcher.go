@@ -491,8 +491,9 @@ func (f *CompanyInfoFetcher) enrichGapsWithAI(ctx context.Context, companyName, 
 	// 公式サイトの本文から穴を埋める経路。既定では無効。
 	//
 	// 相手サイトの利用規約が自動取得を禁じている場合があり、規約は企業ごとに
-	// 異なるため機械的に判断できない。robots.txt も未対応。これらを詰めるまでは
-	// 動かさない。COMPANY_WEBSITE_EXTRACT=1 で明示的に有効化したときだけ走る。
+	// 異なるため機械的に判断できない。法務確認(SOCAIAGENT-327)が済むまでは
+	// 動かさない。COMPANY_WEBSITE_EXTRACT=1 と連絡先 COMPANY_BOT_CONTACT の
+	// 両方があるときだけ走る。robots.txt は collectWebsiteText が確認する。
 	//
 	// #1338 の時点では gBizINFO が 404 で必ず失敗していたため、この経路には
 	// そもそも到達していなかった。#1341 で gBizINFO を直した結果、意図せず
@@ -543,9 +544,10 @@ func (f *CompanyInfoFetcher) enrichGapsWithAI(ctx context.Context, companyName, 
 
 // websiteExtractEnabled は公式サイトからの本文取得を行うかを返す。
 //
-// 既定は無効。利用規約・robots.txt の扱いを詰めるまで自動では動かさない。
+// 既定は無効。利用規約の扱いを詰めるまで自動では動かさない。
+// 連絡先の無いボットで相手サイトを読まないよう、COMPANY_BOT_CONTACT も必須にする。
 func websiteExtractEnabled() bool {
-	return os.Getenv("COMPANY_WEBSITE_EXTRACT") == "1"
+	return os.Getenv("COMPANY_WEBSITE_EXTRACT") == "1" && companyfetch.BotContact() != ""
 }
 
 // companyInfoHasGaps は AI で補う必要のある空欄が残っているかを返す。
