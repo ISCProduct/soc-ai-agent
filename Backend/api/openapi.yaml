@@ -182,6 +182,13 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    CompanyBusinessTags:
+      type: object
+      properties:
+        company_id: { type: integer }
+        business_tags:
+          type: array
+          items: { type: string }
     Error:
       type: object
       description: |
@@ -2295,6 +2302,96 @@ paths:
       responses:
         "200":
           description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/business-tags:
+    get:
+      tags: [admin-companies]
+      summary: 事業タグの一覧を取得
+      description: |
+        全企業で共通の事業タグ一覧（名前順）。登録時に既存のタグを選び、表記ゆれを防ぐために使う。
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: タグ一覧
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  business_tags:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        created_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/companies/{id}/business-tags:
+    get:
+      tags: [admin-companies]
+      summary: 企業の事業タグを取得
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 企業の事業タグ（名前順。未登録なら空配列）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyBusinessTags"
+        "404":
+          description: 企業が存在しない
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [admin-companies]
+      summary: 企業の事業タグを置き換える
+      description: |
+        システム管理者専用（担当校つき管理者・職員は 403）。送った一覧で丸ごと置き換え、空配列で全解除する。
+        各名前は NFKC で全角・半角をそろえ、前後と連続の空白を整える。重複は1つにまとめ、
+        一覧に無い名前は新しいタグとして作る。1件64文字・1社20件まで。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [business_tags]
+              properties:
+                business_tags:
+                  type: array
+                  maxItems: 20
+                  items: { type: string, maxLength: 64 }
+              example:
+                business_tags: [クラウド, 業務システム]
+      responses:
+        "200":
+          description: 置き換え後の事業タグ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyBusinessTags"
+        "400":
+          description: business_tags が無い・上限超過
+        "404":
+          description: 企業が存在しない
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -4783,7 +4880,9 @@ paths:
         カード用の短い事業説明・上場区分・出典、初期表示用の直接子会社リスト（読み仮名順）を含む。
         資本の鏡像行（A→B と B→A）は1本に畳む。取引の `direction_known` は現状常に false
         （from/to は取得起点→相手であり、提供側→利用側ではない）。
-        事業タグ専用データは未整備のため `business_tags` は空・`business_tags_status=unavailable`。
+        各ノードの `business_tags` は登録済みの事業タグ（名前順）。初期表示で折りたたまれる企業も含め、
+        返すノード全件に付く。タグがあれば `business_tags_status=available`、未登録・未確認なら
+        `business_tags=[]`・`business_tags_status=unavailable`（業種などから推測して補わない）。
         採用情報は含めない。審査前のゲスト投稿企業と停止中（is_active=false）の企業はノードから除外する。
 
         レート制限は IP 単位 300回/10分（`CORRELATION_MAP_RATE_LIMIT_PER_IP`、compare と共通）。

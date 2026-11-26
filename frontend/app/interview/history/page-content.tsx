@@ -14,8 +14,8 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Typography,
-  Alert,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import PsychologyIcon from '@mui/icons-material/Psychology'
 import dynamic from 'next/dynamic'
@@ -347,7 +347,7 @@ export default function PageContent() {
                 </>
               ) : (
                 <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="text.secondary" role="status">
                     {selectedDetail.session.status === 'finished' ? 'レポートを生成中です...' : 'レポートは面接終了後に生成されます。'}
                   </Typography>
                 </Paper>
