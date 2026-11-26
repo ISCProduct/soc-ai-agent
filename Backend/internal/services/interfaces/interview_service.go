@@ -16,6 +16,7 @@ type InterviewService interface {
 	GetReport(userID uint, sessionID uint) (*models.InterviewReport, error)
 	GetPhraseSuggestions(ctx context.Context, userID uint, sessionID uint) ([]interview.PhraseSuggestion, error)
 	GetTrend(userID uint, limit int) ([]interview.InterviewTrendPoint, error)
+	CompareAxes(userID, baseSessionID, targetSessionID uint) (*interview.AxisComparison, error)
 	SendReportEmail(userID, sessionID uint) error
 	SaveUtterance(userID uint, sessionID uint, role string, text string, clientUtteranceID string) error
 	RegenerateReport(userID uint, sessionID uint) (bool, error)

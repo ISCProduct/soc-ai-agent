@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Alert,
   Box,
   Button,
   Card,
@@ -17,6 +16,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import PrintIcon from '@mui/icons-material/Print'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'

@@ -2,7 +2,6 @@
 
 import React from 'react'
 import {
-  Alert,
   Box,
   Button,
   Chip,
@@ -12,6 +11,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { visuallyHidden } from '@mui/utils'
 import { ErrorOutline, WarningAmber } from '@mui/icons-material'
 import { EmptyState } from '@/components/common/EmptyState'

@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from 'react'
 import { formatDateTime } from '@/lib/i18n/format'
 import { useRouter } from 'next/navigation'
 import {
-  Alert,
   Box,
   Button,
   Chip,
@@ -21,6 +20,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos'
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos'
@@ -34,13 +34,14 @@ import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ListSkeleton } from '@/components/common/ListSkeleton'
 
+// short はカレンダーの帯に出す略称。種類を色だけでなく文字でも示す（#2218）
 const STAGE_OPTIONS = [
-  { value: '書類選考', label: '書類選考', color: '#9c27b0' },
-  { value: '1次面接', label: '1次面接', color: '#1976d2' },
-  { value: '2次面接', label: '2次面接', color: '#0288d1' },
-  { value: '最終面接', label: '最終面接', color: '#e65100' },
-  { value: '内定',    label: '内定',    color: '#388e3c' },
-  { value: 'その他',  label: 'その他',  color: '#757575' },
+  { value: '書類選考', label: '書類選考', short: '書類', color: '#9c27b0' },
+  { value: '1次面接', label: '1次面接', short: '1次', color: '#1976d2' },
+  { value: '2次面接', label: '2次面接', short: '2次', color: '#0288d1' },
+  { value: '最終面接', label: '最終面接', short: '最終', color: '#e65100' },
+  { value: '内定',    label: '内定',    short: '内定', color: '#388e3c' },
+  { value: 'その他',  label: 'その他',  short: '他',   color: '#757575' },
 ]
 
 type ScheduleEvent = {
@@ -73,6 +74,11 @@ const EMPTY_FORM: EventFormState = {
 
 function stageColor(stage: string): string {
   return STAGE_OPTIONS.find(s => s.value === stage)?.color ?? '#757575'
+}
+
+/** カレンダーの帯に出す種類の略称。知らない種類はそのまま出す */
+function stageShort(stage: string): string {
+  return STAGE_OPTIONS.find(s => s.value === stage)?.short ?? stage
 }
 
 function getDaysInMonth(year: number, month: number): Date[] {
@@ -355,6 +361,10 @@ export default function PageContent() {
                                     cursor: 'pointer',
                                   }}
                                 >
+                                  {/* 種類は色だけでなく略称でも示す（#2218）。名前は Tooltip にも出す */}
+                                  <Box component="span" data-testid="schedule-stage-short" sx={{ fontWeight: 700, mr: 0.5 }}>
+                                    {stageShort(ev.stage)}
+                                  </Box>
                                   {ev.company_name}
                                 </Box>
                               </Tooltip>
