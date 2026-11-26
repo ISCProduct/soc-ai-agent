@@ -93,6 +93,13 @@ resource "aws_iam_role_policy" "discord_lambda" {
         ]
         Resource = [aws_dynamodb_table.discord_links.arn]
       },
+      {
+        # Bot 専用の Backlog API キー。個人のキーは読ませない (SOCAIAGENT-510)。
+        Sid      = "BacklogBotSecret"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = [aws_secretsmanager_secret.discord_backlog_bot.arn]
+      },
     ]
   })
 }
@@ -149,7 +156,8 @@ resource "aws_lambda_function" "discord" {
       DISCORD_ALLOWED_ROLE_ID = var.discord_allowed_role_id
       GITHUB_DISPATCH_TOKEN   = var.github_dispatch_token
       GITHUB_DISPATCH_REPO    = var.github_dispatch_repo
-      BACKLOG_API_KEY         = var.backlog_api_key
+      # キーそのものは置かない。個人の backlog_api_key は渡さない (SOCAIAGENT-510)。
+      DISCORD_BACKLOG_BOT_SECRET_ID = aws_secretsmanager_secret.discord_backlog_bot.name
 
       DISCORD_REMINDER_WEBHOOK_URL = var.discord_reminder_webhook_url
       BACKLOG_REVIEWER_IDS         = var.backlog_reviewer_ids
@@ -167,7 +175,12 @@ resource "aws_lambda_function" "discord" {
     ignore_changes = [filename, source_code_hash]
   }
 
-  depends_on = [aws_iam_role_policy.discord_lambda]
+  # 初回 apply で、値を書く前の空のシークレットを Lambda が読んでしまうのを防ぐ。
+  # 入れ物(secret)への参照だけでは secret_version の順序は保証されないため明示する。
+  depends_on = [
+    aws_iam_role_policy.discord_lambda,
+    aws_secretsmanager_secret_version.discord_backlog_bot,
+  ]
 
   tags = local.tags
 }

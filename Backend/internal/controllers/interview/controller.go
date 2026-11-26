@@ -67,6 +67,49 @@ func (c *InterviewController) GetTrend(ctx echo.Context) error {
 	})
 }
 
+// CompareAxes GET /api/interviews/axis-comparison?base=&target=
+// 2回の面接について、評価軸ごとの差分を返す。
+func (c *InterviewController) CompareAxes(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	baseID, err := queryUint(ctx, "base")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "base にセッションIDを指定してください")
+	}
+	targetID, err := queryUint(ctx, "target")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "target にセッションIDを指定してください")
+	}
+	result, err := c.interviewService.CompareAxes(userID, baseID, targetID)
+	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		if errors.Is(err, interviewsvc.ErrInvalidComparison) {
+			return echo.NewHTTPError(http.StatusBadRequest, "異なる2つのセッションを指定してください")
+		}
+		if errors.Is(err, interviewsvc.ErrReportNotReady) {
+			return echo.NewHTTPError(http.StatusNotFound, "report not yet available")
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		}
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, result)
+}
+
+func queryUint(ctx echo.Context, key string) (uint, error) {
+	raw := ctx.QueryParam(key)
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || id == 0 {
+		return 0, err
+	}
+	return uint(id), nil
+}
+
 // GetReport GET /api/interviews/:id/report
 func (c *InterviewController) GetReport(ctx echo.Context) error {
 	sessionID, err := httpapi.UintParam(ctx, "id")
@@ -298,10 +341,15 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrSessionFinished) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		if errors.Is(err, interviewsvc.ErrSessionNotStarted) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		return httpapi.InternalError(err)
 	}
 
 	return writeTurnMultipart(ctx, map[string]any{
+		"limit_reached":            result.LimitReached,
+		"limit_reason":             result.LimitReason,
 		"user_text":                result.UserText,
 		"ai_text":                  result.AIText,
 		"utterance_save_failed":    result.UtteranceSaveFailed,
@@ -370,10 +418,15 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrSessionFinished) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		if errors.Is(err, interviewsvc.ErrSessionNotStarted) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		return httpapi.InternalError(err)
 	}
 
 	return writeTurnMultipart(ctx, map[string]any{
+		"limit_reached":            result.LimitReached,
+		"limit_reason":             result.LimitReason,
 		"ai_text":                  result.AIText,
 		"utterance_save_failed":    result.UtteranceSaveFailed,
 		"question_source":          result.QuestionSource,
