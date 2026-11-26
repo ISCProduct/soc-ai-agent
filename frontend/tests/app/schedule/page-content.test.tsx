@@ -88,12 +88,18 @@ describe('選考スケジュールの画面', () => {
     mockFetch([event()])
     const { container } = render(<PageContent />)
     await screen.findAllByText('サンプル株式会社')
+    // マス＝最初の子が日付の数字で、子が2つ（数字と予定の入れ物）の div
     const cellOf = (day: number) =>
       Array.from(container.querySelectorAll('div')).find(
-        (el) => el.firstElementChild?.textContent === String(day) && el.style !== undefined && el.children.length === 2,
+        (el) => el.firstElementChild?.textContent === String(day) && el.children.length === 2,
       ) as HTMLElement | undefined
-    expect(cellOf(15)?.textContent).toContain('サンプル株式会社')
-    expect(cellOf(14)?.textContent ?? '').not.toContain('サンプル株式会社')
+    const cell15 = cellOf(15)
+    const cell14 = cellOf(14)
+    // 探し方がマスの DOM の形に頼るので、形が変わって見つからないまま「14日に無い」が通らないよう、両方あることを先に確かめる
+    expect(cell15).toBeDefined()
+    expect(cell14).toBeDefined()
+    expect(cell15?.textContent).toContain('サンプル株式会社')
+    expect(cell14?.textContent).not.toContain('サンプル株式会社')
   })
 
   it('月を移動できる（次の月・前の月）', async () => {
