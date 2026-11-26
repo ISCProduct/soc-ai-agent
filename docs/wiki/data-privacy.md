@@ -222,6 +222,8 @@ PUT /api/collective-insights/consent
 | `anonymized_behavior_summaries` | 無期限 | 集計済みのため個人特定不可 |
 | `score_calibration_weights` | 無期限 | バージョン管理で履歴として保持 |
 | `audit_logs`（退会・パージ記録） | 無期限（推奨） | 法令対応・インシデント調査用。マスク済みメールが metadata に残る点に注意 |
+| `api_call_logs` | 呼び出しから 24 ヶ月 | 退会では消さない。それより古い行は利用者 ID を除いた日次合計へ畳んでから消す（SOCAIAGENT-528） |
+| `api_call_log_daily` | 無期限 | 日次の合計。利用者 ID は持たない |
 | STT評価用の発話音声（音声R&D Task 6） | **最長90日**（評価完了で即削除） | 個別同意が前提。本番S3とは別バケット。詳細は下記 |
 
 ### STT評価用に収集する発話音声（音声R&D Task 6）
