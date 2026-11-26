@@ -1,4 +1,4 @@
-h1:QFMYELB1kEN1vlp1oOC3lomkN7axA/OypN0IaSsjlG8=
+h1:/EQUzw8huJvFo+f/4oo6FutZxOJ2W3onxnxHWR+q1CA=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -92,3 +92,4 @@ h1:QFMYELB1kEN1vlp1oOC3lomkN7axA/OypN0IaSsjlG8=
 20261126214042_interview_shadow_scores.up.sql h1:aX3M9uDIr9fDOIrQLtElNtxDZArfXRAwUOffJv/mneY=
 20261126214043_application_status_events.up.sql h1:xRJ5MnnyHs9DaHFAp3XXBt3Gx/oTKvqFCQdCk4VgkVQ=
 20261126214044_api_call_log_daily_retention.up.sql h1:STMQVndB5BV98JzTMgfj+q40k53DSlp2+qEHSyYiBuQ=
+20261126214045_user_company_match_tie_key.up.sql h1:NfTvFH2wpJkgkn8SmHfOwBxFUPGCQLK+i+yrt/ksVU4=
