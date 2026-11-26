@@ -14,8 +14,8 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Typography,
-  Alert,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import PsychologyIcon from '@mui/icons-material/Psychology'
 import dynamic from 'next/dynamic'
@@ -23,6 +23,7 @@ import { authService, User } from '@/lib/auth'
 import { interviewApi, InterviewDetail, InterviewPlayback, InterviewSession, InterviewTrendPoint, TeacherReport } from '@/lib/interview'
 import ReviewPlayer from '@/components/interview/ReviewPlayer'
 import InterviewSummary from '../components/InterviewSummary'
+import AxisComparison from '@/components/interview/AxisComparison'
 import { parseJsonSafe } from '@/lib/interview/utils'
 
 import { INTERVIEW_HISTORY_CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
@@ -210,6 +211,7 @@ export default function PageContent() {
             </Box>
           )}
         </Paper>
+        {!trendLoading && !trendError ? <AxisComparison points={trendPoints} /> : null}
       </Box>
 
       <Box sx={{ display: 'flex', maxWidth: INTERVIEW_HISTORY_CONTENT_MAX_WIDTH, mx: 'auto', p: { xs: 2, md: 4 }, gap: 3, flexDirection: { xs: 'column', md: 'row' }, alignItems: 'flex-start' }}>
@@ -389,7 +391,7 @@ export default function PageContent() {
                 </>
               ) : (
                 <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="text.secondary" role="status">
                     {selectedDetail.session.status === 'finished' ? 'レポートを生成中です...' : 'レポートは面接終了後に生成されます。'}
                   </Typography>
                 </Paper>

@@ -364,8 +364,8 @@ export default function PageContent() {
       )}
 
       {/* 作成/編集ダイアログ */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{editingId ? '質問を編集' : '質問を追加'}</DialogTitle>
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth aria-labelledby="admin-question-form-title">
+        <DialogTitle id="admin-question-form-title">{editingId ? '質問を編集' : '質問を追加'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2.5} sx={{ mt: 1 }}>
             <TextField
@@ -441,10 +441,17 @@ export default function PageContent() {
       </Dialog>
 
       {/* AI生成プレビューダイアログ */}
-      <Dialog open={generateDialogOpen} onClose={() => setGenerateDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>AIが生成した面接質問（{generatedQuestions.length}件）</DialogTitle>
+      <Dialog
+        open={generateDialogOpen}
+        onClose={() => setGenerateDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        aria-labelledby="admin-generated-questions-title"
+        aria-describedby="admin-generated-questions-description"
+      >
+        <DialogTitle id="admin-generated-questions-title">AIが生成した面接質問（{generatedQuestions.length}件）</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          <Typography id="admin-generated-questions-description" variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             企業情報・求人情報をもとにAIが生成しました。追加したい質問を選択してください。
           </Typography>
           <Stack spacing={1}>
@@ -508,10 +515,17 @@ export default function PageContent() {
       </Dialog>
 
       {/* 削除確認ダイアログ */}
-      <Dialog open={deleteConfirmId !== null} onClose={() => setDeleteConfirmId(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>質問を削除しますか？</DialogTitle>
+      <Dialog
+        open={deleteConfirmId !== null}
+        onClose={() => setDeleteConfirmId(null)}
+        maxWidth="xs"
+        fullWidth
+        aria-labelledby="admin-question-delete-title"
+        aria-describedby="admin-question-delete-description"
+      >
+        <DialogTitle id="admin-question-delete-title">質問を削除しますか？</DialogTitle>
         <DialogContent>
-          <Typography variant="body2">この操作は取り消せません。</Typography>
+          <Typography id="admin-question-delete-description" variant="body2">この操作は取り消せません。</Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setDeleteConfirmId(null)}>キャンセル</Button>

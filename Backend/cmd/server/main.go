@@ -49,6 +49,7 @@ import (
 	"Backend/internal/services/houjinbangou"
 	"Backend/internal/services/hr"
 	"Backend/internal/services/interview"
+	"Backend/internal/services/interview/shadowscorer"
 	"Backend/internal/services/matching"
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/oauth"
@@ -356,6 +357,15 @@ func main() {
 	)
 	analysisService.SetSubjectReader(subjectReader) // 直近の発言を外の LLM へ送る前に、同じ辞書で伏字にする
 	interviewService := interview.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
+	// 保存先は採点フラグと別に置く。フラグを切ったあとも、保存済みの結果を管理者が読めるようにする。
+	shadowStore := repositories.NewInterviewShadowScoreRepository(db)
+	interviewService.SetShadowStore(shadowStore)
+	interviewService.SetShadowMask(scorerexport.NewInterviewShadowMask(userRepo, repositories.NewTrainingScorerExportRepository(db)).ForUser)
+	if scorer, err := shadowscorer.LoadFromEnv(interview.RubricKeys(), interview.RubricScoreMin, interview.RubricScoreMax); err != nil {
+		log.Printf("シャドー採点を有効にできません: %v", err)
+	} else if scorer != nil {
+		interviewService.SetShadowScorer(scorer, shadowStore)
+	}
 	// 面接1回ごとに STT / LLM / TTS を叩くため、セッション数がそのまま費用に効く。
 	// 既定は監視のみで、止めるのは INTERVIEW_BUDGET_ENFORCE を明示したときだけ。
 	interviewService.SetBudgetGuard(costs.NewInterviewBudgetService(interviewSessionRepo, costs.NotifyInterviewBudgetToDiscord))
@@ -389,6 +399,7 @@ func main() {
 	interviewService.SetAIBudget(aiBudgetService)
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
+	interviewService.SetResearchRepo(repositories.NewInterviewResearchRepository(db))
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
 	interviewService.SetCompanyRepo(companyPublicRepo)
 	interviewService.SetSchoolAccess(schoolService)
@@ -413,7 +424,10 @@ func main() {
 	}
 	chatController.SetDiagnosisQualityService(diagnosisQualityService)
 	relationController := companycontrollers.NewCompanyRelationController(companyQueryRepo, aiClient)
-	relationController.SetCorrelationMapService(company.NewCompanyCorrelationMapService(companyRepo, companyRelationRepo))
+	businessTagRepo := repositories.NewCompanyBusinessTagRepository(db)
+	correlationMapService := company.NewCompanyCorrelationMapService(companyRepo, companyRelationRepo)
+	correlationMapService.SetBusinessTagRepository(businessTagRepo)
+	relationController.SetCorrelationMapService(correlationMapService)
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
 	companyValidator.SetSearchFlight(companySearchFlight)
@@ -427,6 +441,7 @@ func main() {
 	// 企業検索・マッチング・面接ヒントからも参照できるようになる（#1124）。
 	resumeService.SetCompanyProvisioner(infoFetcher)
 	adminCompanyController := admincontrollers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
+	adminCompanyController.SetBusinessTagRepository(businessTagRepo)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
 	adminCompanyController.SetSchoolRestrictionChecker(func(adminUserID uint) (bool, error) {
 		restricted, _, err := schoolService.ResolveAdminAccess(adminUserID)
@@ -549,6 +564,7 @@ func main() {
 	appService := application.NewApplicationService(appStatusRepo, matchRepo, companyAccessRepo)
 	appService.SetNotifier(notificationService)
 	appService.SetScoreSnapshotReader(userWeightScoreRepo)
+	appService.SetStatusEventRecorder(appStatusRepo)
 	appController := applicationcontrollers.NewApplicationController(appService)
 	appController.SetSchoolAccess(schoolService)
 	hrStudentAnalysisService := hr.NewStudentAnalysisService(
@@ -594,7 +610,7 @@ func main() {
 	scraperSessionService := admin.NewScraperSessionService(scraperSessionRepo)
 	scraperSessionController := admincontrollers.NewAdminScraperSessionController(scraperSessionService)
 
-	e := newEchoServer(sentryOn, organizationService)
+	e := newEchoServer(sentryOn, organizationService, db)
 
 	// APIルートグループ
 	api := e.Group("/api")
@@ -700,7 +716,7 @@ func main() {
 	// 共有シークレットのみで認証する(#861)
 	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.ServiceSecret))
 
-	startMaintenanceJobs(crawlService, userDeletionService, notificationService, pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, scoreValidationService)
+	startMaintenanceJobs(crawlService, userDeletionService, notificationService, pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, scoreValidationService, apiCallLogRepo)
 
 	startServer(e, cfg.ServerPort, interviewService, queueServer)
 }

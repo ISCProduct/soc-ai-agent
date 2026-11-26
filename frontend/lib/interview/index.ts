@@ -91,6 +91,8 @@ export type InterviewReport = {
   strengths_json?: string
   improvements_json?: string
   teacher_report_json?: string  // 教員のみ返却
+  /** 質問の種類ごとの評価（SOCAIAGENT-610）。この機能より前のレポートは null */
+  category_breakdown_json?: string | null
   created_at: string
   updated_at: string
 }
@@ -109,6 +111,22 @@ export type InterviewTrendPoint = {
   ownership: number | null
   communication: number | null
   enthusiasm: number | null
+}
+
+export type AxisScoreDelta = {
+  axis: string
+  label: string
+  base: number | null
+  target: number | null
+  delta: number | null
+  direction: 'improved' | 'declined' | 'unchanged' | 'unavailable'
+  change_label: string
+}
+
+export type AxisComparisonResult = {
+  base_session_id: number
+  target_session_id: number
+  axes: AxisScoreDelta[]
 }
 
 export type PhraseSuggestion = {
@@ -263,6 +281,16 @@ export const interviewApi = {
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const data = await res.json()
     return data.points as InterviewTrendPoint[]
+  },
+
+  async compareAxes(baseSessionId: number, targetSessionId: number): Promise<AxisComparisonResult> {
+    const params = new URLSearchParams({
+      base: String(baseSessionId),
+      target: String(targetSessionId),
+    })
+    const res = await interviewFetch(`/api/bff/interviews/axis-comparison?${params}`, undefined, LIST_FETCH_TIMEOUT_MS)
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+    return (await res.json()) as AxisComparisonResult
   },
 
   async sendReportEmail(sessionId: number, userId: number): Promise<{ message: string }> {

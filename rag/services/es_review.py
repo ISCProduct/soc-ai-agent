@@ -13,7 +13,7 @@ from services.output_schemas import (
 )
 from services.prompt_versions import log_prompt_call, prompt_version
 
-from services.model_tiers import es_review_model
+from services.model_tiers import es_improve_model, es_review_model
 import json
 import logging
 import math
@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 
-from models import ESReviewFeedbackItem, ESReviewResponse, ESReviewUsage, ESStarBreakdown
+from models import ESReviewFeedbackItem, ESReviewModelUsage, ESReviewResponse, ESReviewUsage, ESStarBreakdown
 from services.sanitize import _sanitize_company_name_for_query, _wrap_untrusted_text
 from services.settings import SCORING_SEED, SCORING_TEMPERATURE
 
@@ -156,11 +156,19 @@ class _UsageTally:
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.calls = 0
+        # モデルごとの内訳（呼んだ順）。評価と改善文でモデルが違う（SOCAIAGENT-559）
+        self.by_model: Dict[str, ESReviewModelUsage] = {}
 
-    def add(self, usage: Any) -> None:
+    def add(self, usage: Any, model: Optional[str] = None) -> None:
+        prompt = _as_int(getattr(usage, "prompt_tokens", 0))
+        completion = _as_int(getattr(usage, "completion_tokens", 0))
         self.calls += 1
-        self.prompt_tokens += _as_int(getattr(usage, "prompt_tokens", 0))
-        self.completion_tokens += _as_int(getattr(usage, "completion_tokens", 0))
+        self.prompt_tokens += prompt
+        self.completion_tokens += completion
+        entry = self.by_model.setdefault(model or self.model, ESReviewModelUsage(model=model or self.model))
+        entry.calls += 1
+        entry.prompt_tokens += prompt
+        entry.completion_tokens += completion
 
     def to_model(self) -> ESReviewUsage:
         return ESReviewUsage(
@@ -168,6 +176,7 @@ class _UsageTally:
             prompt_tokens=self.prompt_tokens,
             completion_tokens=self.completion_tokens,
             calls=self.calls,
+            by_model=list(self.by_model.values()),
             prompt_version=_PROMPT_VERSION,
         )
 
@@ -225,7 +234,7 @@ def _chat_json(
         logger.warning("structured outputs unsupported model=%s; falling back to json mode error=%s", model, exc)
         resp = create(json_mode)
     if tally is not None:
-        tally.add(getattr(resp, "usage", None))
+        tally.add(getattr(resp, "usage", None), model)
     choice = resp.choices[0]
     return (choice.message.content or "", getattr(choice, "finish_reason", "") or "")
 
@@ -541,6 +550,8 @@ def _run_es_review(
         max_retries=_OPENAI_MAX_RETRIES,
     )
     model = es_review_model()
+    # 改善文は評価のフィードバックに沿った書き直しなので軽量の層（SOCAIAGENT-559）
+    improve_model = es_improve_model()
     tally = _UsageTally(model)
     # 呼び出し元(routers/es.py)で既にサニタイズ済みだが、本関数単体でも安全性を
     # 保証するため防御的にもう一度サニタイズする(呼び出し元の実装変更に依存しない)。
@@ -761,7 +772,7 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
 
         improved_data = _call_json_with_retry(
             client,
-            model,
+            improve_model,
             improved_system_prompt,
             _improved_user_prompt(feedback),
             # 改善文の予算は char_limit があるときだけ渡す。
@@ -806,7 +817,7 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
                 try:
                     retry_data = _call_json_with_retry(
                         client,
-                        model,
+                        improve_model,
                         improved_system_prompt,
                         _improved_user_prompt(feedback, retry_note),
                         improved_budget,

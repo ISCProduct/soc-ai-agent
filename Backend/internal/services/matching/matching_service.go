@@ -5,6 +5,7 @@ import (
 	"Backend/domain/valueobject"
 	"Backend/internal/aimodel"
 	"Backend/internal/config"
+	"Backend/internal/matchrank"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/assessment"
@@ -16,7 +17,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"os"
 	"sort"
 	"strings"
 )
@@ -273,15 +273,16 @@ func (s *MatchingService) applyAIReasonsToTopMatches(
 
 // topMatchesByScore は MatchScore 降順の上位 limit 件を返す。
 // pending の並び順は保存順に影響するため変更せず、スライスだけ複製して並べ替える。
-// 同点時の順序を安定させるため SliceStable を使う。
+// 同点は DB の FindTopMatchesByUserAndSession と同じ副キー（matchrank）で決める。
 func topMatchesByScore(pending []*models.UserCompanyMatch, limit int) []*models.UserCompanyMatch {
 	if limit <= 0 || len(pending) == 0 {
 		return nil
 	}
 	sorted := make([]*models.UserCompanyMatch, len(pending))
 	copy(sorted, pending)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return sorted[i].MatchScore > sorted[j].MatchScore
+	sort.Slice(sorted, func(i, j int) bool {
+		a, b := sorted[i], sorted[j]
+		return matchrank.Less(a.MatchScore, a.UserID, a.CompanyID, a.ID, b.MatchScore, b.UserID, b.CompanyID, b.ID)
 	})
 	if limit > len(sorted) {
 		limit = len(sorted)
@@ -585,8 +586,7 @@ func MatchingReasonPrompts(match *models.UserCompanyMatch, userScores []models.U
 }
 
 func matchingReasonUseAI() bool {
-	v := strings.TrimSpace(os.Getenv("MATCHING_REASON_USE_AI"))
-	return strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
+	return config.MatchingReasonUseAI()
 }
 
 func buildMatchingReasonUserPrompt(match *models.UserCompanyMatch, userScores []models.UserWeightScore) string {

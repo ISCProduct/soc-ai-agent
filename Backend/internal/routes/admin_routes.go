@@ -62,6 +62,7 @@ func SetupAdminRoutes(
 	admin.GET("/teacher/students/:id/es-reviews", teacherESReviewController.List, schoolScope)
 
 	admin.GET("/interviews", adminInterviewController.ListSessions, schoolScope)
+	admin.GET("/interviews/:id/shadow-score", adminInterviewController.ShadowScore)
 	admin.GET("/interviews/:id/videos", adminInterviewController.ListVideos)
 	admin.GET("/interviews/videos/:video_id/url", adminInterviewController.VideoURL)
 
@@ -75,6 +76,7 @@ func SetupAdminRoutes(
 	admin.PATCH("/applications/:id/status", appController.AdminUpdateStatus)
 
 	admin.GET("/graduate-employments", adminJobController.GraduateEmployments, schoolScope)
+	admin.GET("/graduate-employments/summary", adminJobController.GraduateEmploymentSummary, schoolScope)
 	admin.POST("/graduate-employments", adminJobController.CreateGraduateEmployment)
 	admin.GET("/graduate-employments/:id", adminJobController.GetGraduateEmployment)
 	admin.PUT("/graduate-employments/:id", adminJobController.UpdateGraduateEmployment)
@@ -116,6 +118,10 @@ func SetupAdminRoutes(
 	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo)
 	admin.POST("/companies/:id/confirm-info", adminCompanyController.ConfirmCompanyInfo)
 	admin.GET("/companies/:id/relation-graph", adminCompanyGraphController.RelationGraph)
+	// 事業タグ（SOCAIAGENT-717）。タグ一覧は全校共有のため、書き込みはシステム管理者専用。
+	admin.GET("/business-tags", adminCompanyController.ListBusinessTags)
+	admin.GET("/companies/:id/business-tags", adminCompanyController.GetCompanyBusinessTags)
+	admin.PUT("/companies/:id/business-tags", adminCompanyController.UpdateCompanyBusinessTags, platform)
 	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
 	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion, platform)
 	admin.POST("/companies/:id/interview-questions/generate", adminInterviewController.GenerateCompanyQuestions, platform)
