@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Box, Button, CircularProgress, Paper, Stack, Typography } from '@mui/material'
+import { Box, Button, CircularProgress, Paper, Stack, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { interviewApi, type InterviewPlayback, type StudentVideo } from '@/lib/interview'
 import { UI } from '@/lib/design/tokens'
 
