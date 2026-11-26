@@ -75,6 +75,8 @@ func (s *CrawlService) executeCrawl(source *models.CrawlSource) error {
 		return s.executeFillCorporateNumbers()
 	case edinetDailyTarget:
 		return s.executeEDINETDaily(source)
+	case researchIndexTarget:
+		return s.executeResearchIndex()
 	default:
 		return fmt.Errorf("unsupported target_type: %s", source.TargetType)
 	}

@@ -172,3 +172,24 @@ func TestCrawlService_EDINETDaily_SkipsOlderPeriod(t *testing.T) {
 	assert.Empty(t, fe.fetched)
 	assert.True(t, strings.Contains(fr.docs[0].Body, "新しい期"))
 }
+
+func (f *fakeResearch) ListDocumentsToIndex(_ context.Context, limit int) ([]models.CompanyDocument, error) {
+	var out []models.CompanyDocument
+	for _, d := range f.docs {
+		if d.IndexedAt == nil && len(out) < limit {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeResearch) MarkIndexed(_ context.Context, ids []uint, at time.Time) error {
+	for i := range f.docs {
+		for _, id := range ids {
+			if f.docs[i].ID == id {
+				f.docs[i].IndexedAt = &at
+			}
+		}
+	}
+	return nil
+}

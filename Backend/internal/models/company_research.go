@@ -24,8 +24,10 @@ type CompanyDocument struct {
 	FetchedAt   time.Time  `gorm:"not null" json:"fetched_at"`
 	ContentHash string     `gorm:"type:char(64);not null" json:"content_hash"`
 	Body        string     `gorm:"type:mediumtext;not null" json:"body"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	// IndexedAt は RAG に登録した日時。本文が変わると nil に戻り、登録ジョブが拾い直す。
+	IndexedAt *time.Time `json:"indexed_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 // CompanyFact は数字1項目。出典と対象年度を必ず持つ。

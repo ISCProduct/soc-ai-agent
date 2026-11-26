@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"errors"
+	"time"
 
 	"Backend/internal/models"
 
@@ -40,7 +41,8 @@ func (r *CompanyResearchRepository) UpsertDocument(ctx context.Context, doc *mod
 		}
 		changed = true
 		doc.ID = cur.ID
-		return tx.Model(&cur).Select("title", "url", "as_of", "fetched_at", "content_hash", "body").Updates(doc).Error
+		doc.IndexedAt = nil // 本文が変わったので RAG に登録し直す
+		return tx.Model(&cur).Select("title", "url", "as_of", "fetched_at", "content_hash", "body", "indexed_at").Updates(doc).Error
 	})
 	return changed, err
 }
@@ -65,4 +67,19 @@ func (r *CompanyResearchRepository) ListFacts(ctx context.Context, companyID uin
 	var facts []models.CompanyFact
 	err := r.db.WithContext(ctx).Where("company_id = ?", companyID).Order("field, source_type").Find(&facts).Error
 	return facts, err
+}
+
+// ListDocumentsToIndex は RAG にまだ登録していない文章を、企業ごとにまとまるよう並べて返す。
+func (r *CompanyResearchRepository) ListDocumentsToIndex(ctx context.Context, limit int) ([]models.CompanyDocument, error) {
+	var docs []models.CompanyDocument
+	err := r.db.WithContext(ctx).Where("indexed_at IS NULL").Order("company_id, id").Limit(limit).Find(&docs).Error
+	return docs, err
+}
+
+// MarkIndexed は RAG に登録した文章に登録日時を入れる。
+func (r *CompanyResearchRepository) MarkIndexed(ctx context.Context, ids []uint, at time.Time) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&models.CompanyDocument{}).Where("id IN ?", ids).Update("indexed_at", at).Error
 }

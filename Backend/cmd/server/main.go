@@ -26,6 +26,7 @@ import (
 	"Backend/internal/observability"
 	"Backend/internal/openai"
 	"Backend/internal/queue"
+	"Backend/internal/ragclient"
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
 	"Backend/internal/scraper"
@@ -345,7 +346,10 @@ func main() {
 	crawlService.SetInfoFetcher(infoFetcher)
 	crawlService.SetJobFetcher(jobFetcher)
 	crawlService.SetCorporateNumberFinder(houjinBangouClient)
-	crawlService.SetEDINETIngest(edinet.NewClient(cfg.EDINETBaseURL, cfg.EDINETAPIKey), repositories.NewCompanyResearchRepository(db))
+	companyResearchRepo := repositories.NewCompanyResearchRepository(db)
+	researchRAG := ragclient.NewResearchClient(config.RAGReviewURL())
+	crawlService.SetEDINETIngest(edinet.NewClient(cfg.EDINETBaseURL, cfg.EDINETAPIKey), companyResearchRepo)
+	crawlService.SetResearchIndexer(researchRAG)
 	auditLogService := admin.NewAuditLogService(auditLogRepo)
 	analysisService := analysis.NewAnalysisScoringService(
 		userWeightScoreRepo,

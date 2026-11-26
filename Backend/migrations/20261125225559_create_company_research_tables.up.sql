@@ -17,9 +17,12 @@ CREATE TABLE `company_documents` (
   `fetched_at` datetime(3) NOT NULL,
   `content_hash` char(64) NOT NULL,
   `body` mediumtext NOT NULL,
+  -- RAG(Chroma)に登録した日時。本文が変わったら NULL に戻し、登録ジョブが拾い直す
+  `indexed_at` datetime(3) DEFAULT NULL,
   `created_at` datetime(3) NULL,
   `updated_at` datetime(3) NULL,
   PRIMARY KEY (`id`),
+  KEY `idx_company_documents_indexed_at` (`indexed_at`),
   UNIQUE KEY `uniq_company_documents_source` (`company_id`, `source_type`, `source_ref`),
   CONSTRAINT `fk_company_documents_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

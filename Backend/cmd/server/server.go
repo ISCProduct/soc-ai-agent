@@ -190,6 +190,7 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 	safego.Go(crawlService.EnsureL1WarmCrawlSource)
 	safego.Go(crawlService.EnsureCorporateNumberFillCrawlSource)
 	safego.Go(crawlService.EnsureEDINETDailyCrawlSource)
+	safego.Go(crawlService.EnsureResearchIndexCrawlSource)
 	safego.Every(1*time.Minute, false, crawlService.RunDueSources)
 	// 予定（締切・面接など）の前日通知（#2033）。同じ予定には1件だけ（dedupe_key）
 	safego.Every(1*time.Hour, true, notificationService.NotifyUpcomingSchedules)

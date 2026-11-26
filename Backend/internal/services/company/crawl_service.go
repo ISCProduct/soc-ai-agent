@@ -25,7 +25,9 @@ type CrawlService struct {
 	// edinet / researchRepo は EDINET の取り込みに使う（未設定なら取り込みジョブは作らない）
 	edinet       edinetFetcher
 	researchRepo repository.CompanyResearchRepository
-	mu           sync.Mutex
+	// indexer は企業研究AIの文章を RAG に登録する
+	indexer researchIndexer
+	mu      sync.Mutex
 }
 
 func NewCrawlService(repo repository.CrawlRepository, companyRepo repository.CompanyRepository, popularRepo repository.CompanyPopularityRepository, aiClient *openai.Client) *CrawlService {
@@ -181,7 +183,7 @@ func validateCrawlSource(source *models.CrawlSource) error {
 		"mynavi_company":    true,
 		"openwork_company":  true,
 	}
-	allTypes := []string{"company", "popular_companies", "job_site_company", "job_listing", "mynavi_company", "openwork_company", "fetch_info_all", "fetch_jobs_all", "fetch_persona_all", "warm_l1_catalog", fillCorporateNumbersTarget, edinetDailyTarget}
+	allTypes := []string{"company", "popular_companies", "job_site_company", "job_listing", "mynavi_company", "openwork_company", "fetch_info_all", "fetch_jobs_all", "fetch_persona_all", "warm_l1_catalog", fillCorporateNumbersTarget, edinetDailyTarget, researchIndexTarget}
 	validType := false
 	for _, t := range allTypes {
 		if source.TargetType == t {

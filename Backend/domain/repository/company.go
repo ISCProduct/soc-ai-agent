@@ -94,4 +94,7 @@ type CompanyResearchRepository interface {
 	// UpsertFacts は (company_id, field, source_type) で1行に保つ。
 	UpsertFacts(ctx context.Context, facts []models.CompanyFact) error
 	ListFacts(ctx context.Context, companyID uint) ([]models.CompanyFact, error)
+	// ListDocumentsToIndex / MarkIndexed は RAG への登録ジョブが使う（SOCAIAGENT-725）。
+	ListDocumentsToIndex(ctx context.Context, limit int) ([]models.CompanyDocument, error)
+	MarkIndexed(ctx context.Context, ids []uint, at time.Time) error
 }
