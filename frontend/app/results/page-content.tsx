@@ -52,6 +52,9 @@ function ResultsContent() {
     sessionId,
     companies,
     favoriteCompanies,
+    favoritesTotal,
+    favoritesOffset,
+    setFavoritesOffset,
     favoritesLoading,
     favoritesError,
     retryFavorites,
@@ -178,6 +181,9 @@ function ResultsContent() {
       companies={companies}
       sessionId={sessionId}
       favoriteCompanies={favoriteCompanies}
+      favoritesTotal={favoritesTotal}
+      favoritesOffset={favoritesOffset}
+      onFavoritesOffsetChange={setFavoritesOffset}
       favoritesLoading={favoritesLoading}
       favoritesError={favoritesError}
       onRetryFavorites={retryFavorites}

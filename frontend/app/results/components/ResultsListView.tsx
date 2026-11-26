@@ -29,6 +29,11 @@ export interface ResultsListViewProps {
   favoriteCompanies: Company[]
   favoritesLoading: boolean
   favoritesError: string | null
+  /** ページを切る前の社数。未指定なら今見えている件数 */
+  favoritesTotal?: number
+  /** 今のページの先頭が何社目か。0 が先頭 */
+  favoritesOffset?: number
+  onFavoritesOffsetChange?: (offset: number) => void
   onRetryFavorites: () => void
   isProvisional: boolean
   diagnosisSummary?: string | null
@@ -74,6 +79,9 @@ export default function ResultsListView({
   favoriteCompanies,
   favoritesLoading,
   favoritesError,
+  favoritesTotal: favoritesTotalProp,
+  favoritesOffset = 0,
+  onFavoritesOffsetChange,
   onRetryFavorites,
   isProvisional,
   diagnosisSummary = null,
@@ -123,6 +131,7 @@ export default function ResultsListView({
   // お気に入りは過去の診断も含め、同じ企業は1行。中身は呼び出し側がまとめて渡す（#2301）
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const listedCompanies = favoritesOnly ? favoriteCompanies : companies
+  const favoritesTotal = favoritesTotalProp ?? favoriteCompanies.length
   // 見出しの文には実際の最小・最大を渡す（scaleBand は描画用に同点の幅を広げるので使わない）
   const scores = listedCompanies.map((c) => c.matchScore)
   const band = { min: Math.min(...scores), max: Math.max(...scores) }
@@ -140,7 +149,11 @@ export default function ResultsListView({
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflowY: { xs: 'auto', md: 'hidden' }, backgroundColor: UI.paper }}>
       <ResultsHeader
-        companyCount={listedCompanies.length}
+        companyCount={
+          favoritesOnly && (favoritesTotal > listedCompanies.length || favoritesOffset > 0)
+            ? favoritesTotal
+            : listedCompanies.length
+        }
         favoritesOnly={favoritesOnly}
         isProvisional={isProvisional}
         diagnosisSummary={diagnosisSummary}
@@ -162,7 +175,7 @@ export default function ResultsListView({
                 すべて
               </Button>
               <Button variant={favoritesOnly ? 'contained' : 'text'} aria-pressed={favoritesOnly} onClick={() => setFavoritesOnly(true)} sx={{ minHeight: 44 }}>
-                お気に入りだけ（{favoriteCompanies.length}）
+                お気に入りだけ（{favoritesTotal}）
               </Button>
             </Stack>
             {favoritesOnly ? (
@@ -170,6 +183,9 @@ export default function ResultsListView({
                 companies={favoriteCompanies}
                 loading={favoritesLoading}
                 error={favoritesError}
+                total={favoritesTotal}
+                offset={favoritesOffset}
+                onOffsetChange={onFavoritesOffsetChange}
                 favoritingId={favoritingId}
                 onRetry={onRetryFavorites}
                 onShowAll={() => setFavoritesOnly(false)}

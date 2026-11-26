@@ -1,7 +1,7 @@
 # 実装に登録されている全エンドポイント。
 # 手で編集しない。次のコマンドで生成する:
 #   cd Backend && go test ./internal/routes/ -run TestRouteCatalog -update
-# 合計 326 本
+# 合計 332 本
 GET /api/ability-assessments
 POST /api/ability-assessments/:templateId/sessions
 GET /api/ability-assessments/sessions/:sessionId
@@ -125,6 +125,7 @@ GET /api/admin/score-validation/variants/results
 GET /api/admin/scraper-sessions
 POST /api/admin/scraper-sessions
 DELETE /api/admin/scraper-sessions/:site_key
+GET /api/admin/students/:id/growth-history
 GET /api/admin/teacher/students/:id/es-reviews
 POST /api/admin/teacher/students/:id/guidances
 GET /api/admin/teacher/students/tendency-analysis
@@ -270,6 +271,8 @@ GET /api/google-calendar/callback
 GET /api/google-calendar/connect
 DELETE /api/google-calendar/disconnect
 GET /api/google-calendar/status
+GET /api/graduate-outcomes
+GET /api/graduate-outcomes/companies/:id
 GET /api/hr/applications
 PATCH /api/hr/applications/:id/status
 GET /api/hr/interviews
@@ -287,6 +290,8 @@ POST /api/interviews/:id/start-turn
 POST /api/interviews/:id/turn
 POST /api/interviews/:id/upload-video
 POST /api/interviews/:id/utterances
+GET /api/interviews/:id/videos
+GET /api/interviews/:id/videos/:video_id/url
 GET /api/interviews/axis-comparison
 GET /api/interviews/trend
 GET /api/notifications
@@ -309,6 +314,7 @@ GET /api/schedule/:id
 PUT /api/schedule/:id
 GET /api/schedule/export/ics
 GET /api/user/ai-budget
+GET /api/user/growth-history
 GET /api/user/guidances
 POST /api/user/guidances/:id/dismiss
 GET /api/user/industries
