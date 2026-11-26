@@ -74,12 +74,12 @@ Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確
 |---|---|
 | `/link member:@誰か backlog:名前 github:ログイン名` | 紐づける。`github` は任意。朝のリマインドで、その人にレビューが来ている PR をメンションする |
 | `/unlink member:@誰か` | 解除する |
-| `/link-list` | 一覧を本人にだけ表示する |
+| `/link-list` | 一覧を本人にだけ表示する。2000文字を超えるときは `page` で続きを見る |
 
-- 表は SSM Parameter `/soc-app/discord-backlog-links` に JSON で持つ。突き合わせは Backlog のユーザーID。
+- 表は DynamoDB（`${project}-discord-backlog-links`、1人1項目）に持つ。突き合わせは Backlog のユーザーID。
+- 以前の SSM Parameter `/soc-app/discord-backlog-links` は、初回の読み出しで DynamoDB へ移す。移したあとは SSM へ書き戻さない。
 - 同じ Backlog ユーザー、同じ GitHub ログイン名（大文字小文字は区別しない）を別の Discord ユーザーに紐づけることはできない（先に `/unlink`）。
-- `/link-list` は Discord の上限（2000文字）に収め、超える分は「ほか N 人」と省略する。
-- 4KB の上限があり、40人強まで。超える場合は DynamoDB へ移す。
+- 人数の上限は置かない。別の人の `/link` が同時でも、相手の行は消えない。
 - 有効にするには Secrets Manager `<project>/discord-backlog-bot` に Bot ユーザーの API キーが要る。未設定なら `/link` 系は「利用できません」を返す。個人のキーは Lambda に置かない。
 - コマンドの追加後に `automation/discord/register-commands.sh` を再実行する。
 

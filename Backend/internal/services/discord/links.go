@@ -40,15 +40,20 @@ type Link struct {
 	GitHub    string `json:"github,omitempty"`
 }
 
-// LinkService は Discord ユーザーID → Backlog ユーザーの対応表を SSM に持つ。
-//
-// ponytail: 1パラメータに JSON で全員分を入れる。管理者だけが書く運用なので
-// 競合はプロセス内 mutex で足りる。40人を超える、または複数人が同時に書くなら
-// DynamoDB に移す。
+// linkStore は Discord ユーザーID → Backlog ユーザーの対応表。
+type linkStore interface {
+	List(ctx context.Context) (map[string]Link, error)
+	Set(ctx context.Context, discordID string, l Link) error
+	Remove(ctx context.Context, discordID string) (bool, error)
+}
+
+// LinkService は Discord ユーザーID → Backlog ユーザーの対応表。
+// 本番は DynamoDB（1人1項目）。表の環境変数が無いときだけ、従来の SSM 1本に書く。
 type LinkService struct {
 	client    ssmAPI
 	paramName string
-	mu        sync.Mutex
+	store     linkStore
+	once      sync.Once
 }
 
 // NewLinkServiceFromEnv は UptimeService と同じ資格情報の取り方で作る。
@@ -65,10 +70,42 @@ func NewLinkServiceFromEnv(ctx context.Context) (*LinkService, error) {
 	if name == "" {
 		name = defaultLinksParameterName
 	}
-	return &LinkService{client: ssm.NewFromConfig(cfg), paramName: name}, nil
+	ssmClient := ssm.NewFromConfig(cfg)
+	if table := os.Getenv("DISCORD_LINKS_TABLE"); table != "" {
+		return &LinkService{store: newDynamoLinkStore(cfg, table, &ssmLinkStore{client: ssmClient, paramName: name})}, nil
+	}
+	return &LinkService{client: ssmClient, paramName: name}, nil
+}
+
+func (s *LinkService) active() linkStore {
+	s.once.Do(func() {
+		if s.store == nil {
+			s.store = &ssmLinkStore{client: s.client, paramName: s.paramName}
+		}
+	})
+	return s.store
 }
 
 func (s *LinkService) List(ctx context.Context) (map[string]Link, error) {
+	return s.active().List(ctx)
+}
+
+func (s *LinkService) Set(ctx context.Context, discordID string, l Link) error {
+	return s.active().Set(ctx, discordID, l)
+}
+
+func (s *LinkService) Remove(ctx context.Context, discordID string) (bool, error) {
+	return s.active().Remove(ctx, discordID)
+}
+
+// ssmLinkStore は対応表を SSM の1パラメータに JSON で持つ。4KB で止まる。
+type ssmLinkStore struct {
+	client    ssmAPI
+	paramName string
+	mu        sync.Mutex
+}
+
+func (s *ssmLinkStore) List(ctx context.Context) (map[string]Link, error) {
 	out, err := s.client.GetParameter(ctx, &ssm.GetParameterInput{Name: aws.String(s.paramName)})
 	if err != nil {
 		var notFound *ssmtypes.ParameterNotFound
@@ -92,7 +129,7 @@ func (s *LinkService) List(ctx context.Context) (map[string]Link, error) {
 // 本人確認がどちらか不定になるので拒否する（解除してから登録し直す）。
 // GitHub のログイン名も同じ。大文字小文字は区別されないので、無視して比べる。
 // 空（未設定）どうしは重複として扱わない。
-func (s *LinkService) Set(ctx context.Context, discordID string, l Link) error {
+func (s *ssmLinkStore) Set(ctx context.Context, discordID string, l Link) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -121,7 +158,7 @@ func normalizedGitHubKey(login string) string {
 }
 
 // Remove は対応を外す。登録が無ければ false。
-func (s *LinkService) Remove(ctx context.Context, discordID string) (bool, error) {
+func (s *ssmLinkStore) Remove(ctx context.Context, discordID string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -136,7 +173,7 @@ func (s *LinkService) Remove(ctx context.Context, discordID string) (bool, error
 	return true, s.save(ctx, links)
 }
 
-func (s *LinkService) save(ctx context.Context, links map[string]Link) error {
+func (s *ssmLinkStore) save(ctx context.Context, links map[string]Link) error {
 	b, err := json.Marshal(links)
 	if err != nil {
 		return err

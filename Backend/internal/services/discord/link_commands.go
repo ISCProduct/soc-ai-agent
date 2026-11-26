@@ -7,13 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-)
-
-// Discord のメッセージ本文は 2000 文字まで。超えると応答が拒否されて一覧が見えなくなる。
-// linkListNoticeReserve は「ほか N 人」の案内を入れる余白。
-const (
-	linkListMaxChars      = 2000
-	linkListNoticeReserve = 60
+	"unicode/utf8"
 )
 
 const linkUnavailable = "現在この機能は利用できません(未設定)。"
@@ -129,24 +123,85 @@ func (h *Handler) linkList(ctx context.Context, interaction *Interaction) *Inter
 	if len(links) == 0 {
 		return ephemeral("登録されているメンバーはいません。/link で登録してください。")
 	}
-	header := "Discord ↔ Backlog の紐づけ(" + strconv.Itoa(len(links)) + "人)\n"
-	var b strings.Builder
-	b.WriteString(header)
-	ids := SortedIDs(links)
-	for i, id := range ids {
+	pages := linkListPages(links)
+	page := findOptionInt(interaction.Data.Options, OptionNamePage)
+	if page < 1 {
+		page = 1
+	}
+	if page > len(pages) {
+		return ephemeral("ページがありません。1 から " + strconv.Itoa(len(pages)) + " までです。")
+	}
+	return ephemeral(pages[page-1])
+}
+
+// discordMessageLimit は Discord のメッセージ本文の上限（文字数）。
+const discordMessageLimit = 2000
+
+// linkListPages は一覧を 2000 文字以内のページに分ける。1通にまとめると、人数が増えたとき Discord が拒否する。
+func linkListPages(links map[string]Link) []string {
+	title := "Discord ↔ Backlog の紐づけ(" + strconv.Itoa(len(links)) + "人)"
+	var lines []string
+	for _, id := range SortedIDs(links) {
 		line := "・<@" + id + "> ↔ " + links[id].Name
 		if links[id].GitHub != "" {
 			line += "（GitHub: " + links[id].GitHub + "）"
 		}
-		line += "\n"
-		// 切り捨ての案内（最大 linkListNoticeReserve 文字）を残せる範囲までで止める。
-		if len([]rune(b.String()))+len([]rune(line)) > linkListMaxChars-linkListNoticeReserve {
-			b.WriteString("…ほか" + strconv.Itoa(len(ids)-i) + "人は表示しきれません\n")
-			break
-		}
-		b.WriteString(line)
+		lines = append(lines, line)
 	}
-	return ephemeral(b.String())
+	const pageNote = 16 // 「（999/999ページ）」の余裕
+	var pages [][]string
+	var cur []string
+	used := utf8.RuneCountInString(title) + 1
+	for _, ln := range lines {
+		if utf8.RuneCountInString(ln) > discordMessageLimit-pageNote-used && len(cur) == 0 {
+			ln = trimRunes(ln, discordMessageLimit-pageNote-utf8.RuneCountInString(title)-2)
+		}
+		n := utf8.RuneCountInString(ln) + 1
+		if len(cur) > 0 && used+n+pageNote > discordMessageLimit {
+			pages = append(pages, cur)
+			cur = nil
+			used = utf8.RuneCountInString(title) + 1
+		}
+		cur = append(cur, ln)
+		used += n
+	}
+	if len(cur) > 0 {
+		pages = append(pages, cur)
+	}
+	out := make([]string, len(pages))
+	for i, lines := range pages {
+		body := title
+		if len(pages) > 1 {
+			body += "（" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(pages)) + "ページ）"
+		}
+		out[i] = body + "\n" + strings.Join(lines, "\n")
+	}
+	return out
+}
+
+func trimRunes(s string, n int) string {
+	r := []rune(s)
+	if n < 1 || len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+func findOptionInt(options []CommandOption, name string) int {
+	for _, o := range options {
+		if o.Name != name {
+			continue
+		}
+		switch v := o.Value.(type) {
+		case float64:
+			return int(v)
+		case int:
+			return v
+		case int64:
+			return int(v)
+		}
+	}
+	return 0
 }
 
 // handleAutocomplete は /link の backlog 引数に Backlog のメンバー名を候補で出す。

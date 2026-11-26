@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
@@ -81,6 +83,30 @@ func TestLink_登録して一覧と解除ができる(t *testing.T) {
 	got = contentOf(h.handleCommand(context.Background(), linkCmd(CommandNameUnlink, admin, opt(OptionNameMember, "111"))))
 	if !strings.Contains(got, "登録されていません") {
 		t.Fatalf("未登録の解除が成功扱い: %s", got)
+	}
+}
+
+func TestLinkListPages_100人でも1通が2000文字を超えない(t *testing.T) {
+	links := map[string]Link{}
+	for i := 0; i < 100; i++ {
+		links[fmt.Sprintf("%018d", i)] = Link{BacklogID: i + 1, Name: "名前"}
+	}
+	pages := linkListPages(links)
+	if len(pages) < 2 {
+		t.Fatalf("100人を1通にまとめた: %dページ", len(pages))
+	}
+	seen := 0
+	for i, page := range pages {
+		if n := utf8.RuneCountInString(page); n > discordMessageLimit {
+			t.Fatalf("%dページが %d文字", i+1, n)
+		}
+		seen += strings.Count(page, "\n・")
+	}
+	if seen != 100 {
+		t.Fatalf("載った人数 = %d", seen)
+	}
+	if !strings.Contains(pages[0], "1/"+fmt.Sprint(len(pages))+"ページ") {
+		t.Fatalf("ページ番号が無い: %s", pages[0])
 	}
 }
 
@@ -206,8 +232,9 @@ func TestLink_一覧はDiscordの文字数上限に収める(t *testing.T) {
 	if n := len([]rune(got)); n > 2000 {
 		t.Errorf("一覧が %d 文字で Discord の上限を超える", n)
 	}
-	if !strings.Contains(got, "表示しきれません") {
-		t.Errorf("切り捨てた案内が無い: %s", got)
+	// 収まらない分は切り捨てず、次のページに回す（SOCAIAGENT-511）
+	if !strings.Contains(got, "1/2ページ") {
+		t.Errorf("続きのページがあると分からない: %s", got)
 	}
 }
 

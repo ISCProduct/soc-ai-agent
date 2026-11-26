@@ -144,6 +144,7 @@ const (
 	OptionNameDate            = "date"
 	OptionNameReason          = "reason"
 	OptionNameMember          = "member"
+	OptionNamePage            = "page"
 	OptionNameBacklog         = "backlog"
 	OptionNameGitHub          = "github"
 	OptionNameState           = "state"
