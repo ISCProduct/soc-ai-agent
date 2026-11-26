@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { Alert, Box, Button, Snackbar, Typography } from '@mui/material'
+import { Box, Button, Snackbar, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { authService } from '@/lib/auth'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
@@ -137,7 +138,7 @@ export default function PageContent() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         sx={ABOVE_BOTTOM_NAV_SX}
       >
-        <Alert severity={snackbar.severity} onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}>
+        <Alert role="alert" severity={snackbar.severity} onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}>
           {snackbar.message}
         </Alert>
       </Snackbar>

@@ -5,7 +5,6 @@ import { formatDateTime } from '@/lib/i18n/format'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Alert,
   Box,
   Button,
   Chip,
@@ -19,6 +18,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { ArrowBack } from '@mui/icons-material'
 import { authService } from '@/lib/auth'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'

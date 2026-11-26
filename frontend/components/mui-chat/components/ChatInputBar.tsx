@@ -4,7 +4,6 @@ import React from 'react'
 import {
   Box,
   Button,
-  Alert,
   IconButton,
   Paper,
   Stack,
@@ -12,6 +11,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { Check, Mic, MicOff, Send } from '@mui/icons-material'
 import styles from '../MuiChat.module.css'
 import type { ChoiceOption } from '../types'

@@ -2,7 +2,8 @@
 
 import type { ReactNode } from 'react'
 import NextLink from 'next/link'
-import { Alert, Box, Button, Typography } from '@mui/material'
+import { Box, Button, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { ArrowBack } from '@mui/icons-material'
 import { GUEST_REGISTER_CTA_LABEL, GUEST_REGISTER_PATH } from '@/lib/guest-limits'
 import { CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
