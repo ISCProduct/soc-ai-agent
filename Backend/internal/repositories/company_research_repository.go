@@ -77,9 +77,18 @@ func (r *CompanyResearchRepository) ListDocumentsToIndex(ctx context.Context, li
 }
 
 // MarkIndexed は RAG に登録した文章に登録日時を入れる。
-func (r *CompanyResearchRepository) MarkIndexed(ctx context.Context, ids []uint, at time.Time) error {
-	if len(ids) == 0 {
+//
+// 登録している間に本文が変わる（UpsertDocument が indexed_at を NULL に戻す）ことがあるので、
+// 送ったときと同じ本文（content_hash）の行だけを登録済みにする。変わった行は次回また拾われる。
+func (r *CompanyResearchRepository) MarkIndexed(ctx context.Context, docs []models.CompanyDocument, at time.Time) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, d := range docs {
+			if err := tx.Model(&models.CompanyDocument{}).
+				Where("id = ? AND content_hash = ?", d.ID, d.ContentHash).
+				Update("indexed_at", at).Error; err != nil {
+				return err
+			}
+		}
 		return nil
-	}
-	return r.db.WithContext(ctx).Model(&models.CompanyDocument{}).Where("id IN ?", ids).Update("indexed_at", at).Error
+	})
 }

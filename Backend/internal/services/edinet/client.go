@@ -132,9 +132,14 @@ func (c *Client) get(ctx context.Context, path string, q url.Values) ([]byte, er
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("edinet: %s がステータス %d を返しました", path, resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 50*1024*1024))
+	const maxBody = 50 * 1024 * 1024
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(body) > maxBody {
+		// 途中で切れた ZIP を「読めない書類」として飛ばさないよう、取得の失敗として返す（次回やり直す）。
+		return nil, fmt.Errorf("edinet: %s の応答が %d バイトを超えています", path, maxBody)
 	}
 	// 認証エラーなどは HTTP 200 のまま {"StatusCode":401,"message":"..."} の JSON で返る（仕様書 3-3）。
 	// 書類一覧なら空の一覧、書類取得なら壊れた ZIP と取り違えないよう、ここでエラーにする。

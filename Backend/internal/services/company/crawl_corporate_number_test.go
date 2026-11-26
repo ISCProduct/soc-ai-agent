@@ -16,13 +16,19 @@ import (
 )
 
 // fakeCrawlRepo は法人番号補完ジョブ1件だけを持つ。
-type fakeCrawlRepo struct{ src models.CrawlSource }
+type fakeCrawlRepo struct {
+	src     models.CrawlSource
+	created []string // CreateSource された target_type
+}
 
 func (f *fakeCrawlRepo) ListSources() ([]models.CrawlSource, error) {
 	return []models.CrawlSource{f.src}, nil
 }
-func (f *fakeCrawlRepo) GetSource(uint) (*models.CrawlSource, error)            { return &f.src, nil }
-func (f *fakeCrawlRepo) CreateSource(*models.CrawlSource) error                 { return nil }
+func (f *fakeCrawlRepo) GetSource(uint) (*models.CrawlSource, error) { return &f.src, nil }
+func (f *fakeCrawlRepo) CreateSource(s *models.CrawlSource) error {
+	f.created = append(f.created, s.TargetType)
+	return nil
+}
 func (f *fakeCrawlRepo) UpdateSource(*models.CrawlSource) error                 { return nil }
 func (f *fakeCrawlRepo) ListDueSources(time.Time) ([]models.CrawlSource, error) { return nil, nil }
 func (f *fakeCrawlRepo) CreateRun(*models.CrawlRun) error                       { return nil }

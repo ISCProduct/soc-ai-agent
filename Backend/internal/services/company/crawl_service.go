@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,6 +29,8 @@ type CrawlService struct {
 	// indexer は企業研究AIの文章を RAG に登録する
 	indexer researchIndexer
 	mu      sync.Mutex
+	// defaultsEnsured は自動作成のジョブを確かめ終えたか（起動時にロックを取れなかったら定期取得の中で確かめる）
+	defaultsEnsured atomic.Bool
 }
 
 func NewCrawlService(repo repository.CrawlRepository, companyRepo repository.CompanyRepository, popularRepo repository.CompanyPopularityRepository, aiClient *openai.Client) *CrawlService {

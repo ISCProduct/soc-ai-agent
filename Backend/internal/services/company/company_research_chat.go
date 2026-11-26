@@ -128,6 +128,10 @@ func (s *ResearchChatService) Ask(ctx context.Context, userID, companyID, compar
 	}
 
 	ctx = usagectx.WithFeature(ctx, FeatureCompanyResearchChat)
+	// RAG の検索（ベクトル化）にも費用がかかるので、材料を集める前に AI 予算を確かめる。
+	if err := usagectx.CheckAIBudget(ctx); err != nil {
+		return nil, err
+	}
 	materials, err := s.collectMaterials(ctx, companies, question)
 	if err != nil {
 		return nil, err
@@ -135,9 +139,6 @@ func (s *ResearchChatService) Ask(ctx context.Context, userID, companyID, compar
 	answer := &ResearchChatAnswer{Status: "not_found", Answer: researchNotFoundText, Sources: []ResearchChatSource{}, CompanyIDs: ids}
 	if len(materials) == 0 {
 		return answer, nil
-	}
-	if err := usagectx.CheckAIBudget(ctx); err != nil {
-		return nil, err
 	}
 	// 質問は呼び出し側で伏字済み。材料（企業の文章）まで伏字にすると企業名が崩れるので、ガードは外す。
 	llmCtx := usagectx.WithFeature(openai.WithoutInputGuard(ctx), FeatureCompanyResearchChat)
@@ -153,8 +154,12 @@ func (s *ResearchChatService) Ask(ctx context.Context, userID, companyID, compar
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		return nil, fmt.Errorf("%w: 応答が JSON ではありません", ErrResearchChatGeneration)
 	}
-	if out.Status != "answered" || strings.TrimSpace(out.Answer) == "" {
+	switch {
+	case out.Status == "not_found":
 		return answer, nil
+	case out.Status != "answered" || strings.TrimSpace(out.Answer) == "":
+		// {} や未知の status は「情報が無い」ではなく生成の失敗として返す（画面で再試行を出せるように）。
+		return nil, fmt.Errorf("%w: 応答の形式が不正です（status=%q）", ErrResearchChatGeneration, out.Status)
 	}
 	// 渡した材料の番号だけを出典にする。1つも合わなければ、材料に基づかない回答とみなして捨てる。
 	byID := map[string]researchMaterial{}
@@ -168,7 +173,7 @@ func (s *ResearchChatService) Ask(ctx context.Context, userID, companyID, compar
 		if !ok {
 			return answer, nil
 		}
-		key := m.source.Type + "|" + m.source.URL + "|" + m.source.Title
+		key := strconv.FormatUint(uint64(m.source.CompanyID), 10) + "|" + m.source.Type + "|" + m.source.URL + "|" + m.source.Title
 		if !seen[key] {
 			seen[key] = true
 			sources = append(sources, m.source)
@@ -193,8 +198,10 @@ func (s *ResearchChatService) collectMaterials(ctx context.Context, companies []
 		mats = append(mats, researchMaterial{id: "M" + strconv.Itoa(len(mats)+1), text: text, source: src})
 	}
 	ids := make([]uint, 0, len(companies))
+	names := map[uint]string{}
 	for _, c := range companies {
 		ids = append(ids, c.ID)
+		names[c.ID] = c.Name
 		add(registeredProfileText(c), ResearchChatSource{CompanyID: c.ID, Type: "registered", Title: c.Name + " の登録情報", URL: c.SourceURL, FetchedAt: formatDate(c.SourceFetchedAt)})
 		facts, err := s.research.ListFacts(ctx, c.ID)
 		if err != nil {
@@ -215,7 +222,8 @@ func (s *ResearchChatService) collectMaterials(ctx context.Context, companies []
 				if !slices.Contains(ids, h.CompanyID) {
 					continue // 念のため、対象外の企業の文章は使わない
 				}
-				add(h.Text, ResearchChatSource{CompanyID: h.CompanyID, Type: h.SourceType, Title: h.Title, URL: h.URL, AsOf: h.AsOf})
+				// 2社を比べるとき、どちらの会社の文章か AI が分かるよう企業名を付ける（本文は「当社は…」と書かれている）。
+				add(names[h.CompanyID]+"（"+h.Title+"）: "+h.Text, ResearchChatSource{CompanyID: h.CompanyID, Type: h.SourceType, Title: h.Title, URL: h.URL, AsOf: h.AsOf})
 			}
 		}
 		// RAG が落ちていても、登録情報と数字だけで答える（文章が無いぶん「確認できない」が増えるだけ）。

@@ -155,3 +155,33 @@ func TestResearchChat_QuotaCountsOncePerQuestion(t *testing.T) {
 	}
 	assert.Equal(t, 3, q.used)
 }
+
+// {} や未知の status は「情報が無い」ではなく生成の失敗にする（CodeRabbit 指摘）。
+func TestResearchChat_InvalidFormatIsGenerationError(t *testing.T) {
+	for _, reply := range []string{`{}`, `null`, `{"status":"maybe"}`, `{"status":"answered","answer":""}`} {
+		_, err := newChat(t, &fakeLLM{reply: reply}, 0).Ask(context.Background(), 7, 1, 0, "事業は？")
+		assert.ErrorIs(t, err, company.ErrResearchChatGeneration, reply)
+	}
+}
+
+// 2社を比べるとき、材料に企業名が付き、出典は会社ごとに残る（CodeRabbit 指摘）。
+func TestResearchChat_CompareKeepsCompanyPerSource(t *testing.T) {
+	t.Setenv("COMPANY_RESEARCH_CHAT_ENABLED", "true")
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "合成A", IsActive: true}, nil)
+	repo.On("FindByID", uint(3)).Return(&models.Company{ID: 3, Name: "合成B", IsActive: true}, nil)
+	research := &fakeResearch{facts: []models.CompanyFact{
+		{CompanyID: 1, Field: "employees_single", Value: "100", Unit: "人", SourceType: "gbizinfo"},
+		{CompanyID: 3, Field: "employees_single", Value: "200", Unit: "人", SourceType: "gbizinfo"},
+	}}
+	rag := &fakeQuerier{hits: []ragclient.ResearchHit{{Text: "当社の売上は100", CompanyID: 3, SourceType: "edinet", Title: "事業の内容"}}}
+	llm := &fakeLLM{}
+	svc := company.NewResearchChatService(repo, research, rag, llm, &fakeQuota{})
+	// M1=Aの登録情報, M2=Aの従業員数, M3=Bの登録情報, M4=Bの従業員数, M5=Bの文章
+	llm.reply = `{"status":"answered","answer":"Aは100人、Bは200人です。","source_ids":["M2","M4"]}`
+	ans, err := svc.Ask(context.Background(), 7, 1, 3, "従業員数の違いは？")
+	require.NoError(t, err)
+	require.Len(t, ans.Sources, 2, "同じ種類の出典でも会社ごとに残す")
+	assert.ElementsMatch(t, []uint{1, 3}, []uint{ans.Sources[0].CompanyID, ans.Sources[1].CompanyID})
+	assert.Contains(t, llm.prompt, "合成B（事業の内容）: 当社の売上は100", "文章にどの会社のものかを付ける")
+}

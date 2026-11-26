@@ -109,3 +109,14 @@ func toDriverValues(vs []any) []driver.Value {
 	}
 	return out
 }
+
+// RAG に登録した文章は、送ったときと同じ本文（content_hash）の行だけを登録済みにする（CodeRabbit 指摘）。
+func TestCompanyResearchRepository_MarkIndexedMatchesHash(t *testing.T) {
+	repo, mock := newResearchRepo(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `company_documents` SET `indexed_at`=.*,`updated_at`=.* WHERE id = \\? AND content_hash = \\?").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), 3, "h3").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	require.NoError(t, repo.MarkIndexed(context.Background(), []models.CompanyDocument{{ID: 3, ContentHash: "h3"}}, time.Now()))
+	require.NoError(t, mock.ExpectationsWereMet())
+}

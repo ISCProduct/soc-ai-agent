@@ -192,10 +192,10 @@ func (f *fakeResearch) ListDocumentsToIndex(_ context.Context, limit int) ([]mod
 	return out, nil
 }
 
-func (f *fakeResearch) MarkIndexed(_ context.Context, ids []uint, at time.Time) error {
+func (f *fakeResearch) MarkIndexed(_ context.Context, docs []models.CompanyDocument, at time.Time) error {
 	for i := range f.docs {
-		for _, id := range ids {
-			if f.docs[i].ID == id {
+		for _, d := range docs {
+			if f.docs[i].ID == d.ID && f.docs[i].ContentHash == d.ContentHash {
 				f.docs[i].IndexedAt = &at
 			}
 		}

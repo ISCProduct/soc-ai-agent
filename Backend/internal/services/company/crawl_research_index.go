@@ -26,6 +26,7 @@ const (
 	researchIndexBatch   = 500
 	researchIndexPerCall = 20 // RAG 側の1リクエストあたりの上限と同じ
 	featureResearchIndex = "company_research_index"
+	researchMaxBodyRunes = 200_000 // rag/routers/company_research.py の ResearchDocument.body の上限と同じ
 )
 
 // researchIndexer は ragclient.ResearchClient が満たす。テストでは偽物に差し替える。
@@ -59,10 +60,8 @@ func (s *CrawlService) executeResearchIndex() error {
 		start = end
 
 		payload := make([]ragclient.ResearchDocument, 0, len(batch))
-		ids := make([]uint, 0, len(batch))
 		for _, d := range batch {
 			payload = append(payload, toResearchDocument(d))
-			ids = append(ids, d.ID)
 		}
 		began := time.Now()
 		usage, err := s.indexer.Index(ctx, batch[0].CompanyID, payload)
@@ -72,7 +71,7 @@ func (s *CrawlService) executeResearchIndex() error {
 			continue
 		}
 		s.reportRAGUsage(usagectx.WithFeature(ctx, featureResearchIndex), usage, time.Since(began))
-		if err := s.researchRepo.MarkIndexed(ctx, ids, time.Now()); err != nil {
+		if err := s.researchRepo.MarkIndexed(ctx, batch, time.Now()); err != nil {
 			return err
 		}
 		indexed += len(batch)
@@ -89,7 +88,13 @@ func toResearchDocument(d models.CompanyDocument) ragclient.ResearchDocument {
 	if d.AsOf != nil {
 		asOf = d.AsOf.Format("2006-01-02")
 	}
-	return ragclient.ResearchDocument{DocumentID: d.ID, SourceType: d.SourceType, Title: d.Title, URL: d.URL, AsOf: asOf, Body: d.Body}
+	// RAG 側は本文を 200,000 字までしか受け付けない（超えると同じ企業の文書がまとめて 422 になる）。
+	// 有報の1節がそこまで長いことはまず無いが、超えたら後ろを切って登録する。
+	body := d.Body
+	if r := []rune(body); len(r) > researchMaxBodyRunes {
+		body = string(r[:researchMaxBodyRunes])
+	}
+	return ragclient.ResearchDocument{DocumentID: d.ID, SourceType: d.SourceType, Title: d.Title, URL: d.URL, AsOf: asOf, Body: body}
 }
 
 // reportRAGUsage は RAG が実行したベクトル化の使用量を記録する（RAG は api_call_logs を持たない）。
