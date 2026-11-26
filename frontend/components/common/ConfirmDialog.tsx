@@ -58,6 +58,9 @@ export function ConfirmDialog({
     setPending(true)
     try {
       await onConfirm()
+    } catch (error) {
+      // 失敗の表示は呼び出し側の役目。部品の側では、処理されない reject として onClick の外へ出さず、ログに残す（#2614 のレビュー）
+      console.error('[ConfirmDialog] 確定の処理が失敗しました', error)
     } finally {
       pendingRef.current = false
       setPending(false)

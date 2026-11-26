@@ -287,13 +287,19 @@ export default function PageContent() {
   }
 
   const publishPosition = async (id: number) => {
-    const res = await fetch(`/api/admin/job-positions/${id}/publish`, {
-      method: 'PATCH',
-      headers: authService.getAdminFetchHeaders(),
-    })
-    if (!res.ok) {
-      const data = await res.json()
-      setError(data?.error || '承認に失敗しました')
+    // 通信が切れたときや、エラーの応答が JSON でないときも、黙って終わらずにエラーを出す（#2614 のレビュー）
+    try {
+      const res = await fetch(`/api/admin/job-positions/${id}/publish`, {
+        method: 'PATCH',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        setError(data?.error || '承認に失敗しました')
+        return
+      }
+    } catch {
+      setError('承認に失敗しました。通信状況を確かめて、もう一度お試しください')
       return
     }
     fetchJobPositions()

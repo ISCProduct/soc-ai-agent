@@ -117,6 +117,23 @@ describe('ConfirmDialog', () => {
     expect(cancelButton).not.toBeDisabled()
   })
 
+  it('onConfirm が失敗しても、reject を外へ出さずにログに残し、操作できる状態に戻る', async () => {
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const failure = new Error('通信が切れました')
+    const onConfirm = jest.fn(() => Promise.reject(failure))
+    renderDialog({ onConfirm })
+
+    const confirmButton = screen.getByRole('button', { name: '完全削除する' })
+    await act(async () => {
+      fireEvent.click(confirmButton)
+    })
+
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+    expect(consoleError).toHaveBeenCalledWith('[ConfirmDialog] 確定の処理が失敗しました', failure)
+    expect(confirmButton).not.toBeDisabled()
+    consoleError.mockRestore()
+  })
+
   it('呼び出し側から busy を渡すと、確定もキャンセルもできない', () => {
     const { onConfirm, onCancel } = renderDialog({ busy: true })
     fireEvent.click(screen.getByRole('button', { name: '完全削除する' }))

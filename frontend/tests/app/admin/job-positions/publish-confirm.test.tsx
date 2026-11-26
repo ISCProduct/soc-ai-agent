@@ -31,10 +31,11 @@ function res(body: unknown, ok = true) {
   return { ok, status: ok ? 200 : 500, json: async () => body }
 }
 
-function mockFetch({ publishOk = true }: { publishOk?: boolean } = {}) {
+function mockFetch({ publishOk = true, publishThrows = false }: { publishOk?: boolean; publishThrows?: boolean } = {}) {
   const fetchMock = jest.fn().mockImplementation(async (input: RequestInfo | URL) => {
     const url = String(input)
     if (url.startsWith('/api/admin/job-positions?')) return res({ positions: POSITIONS })
+    if (url.endsWith('/publish') && publishThrows) throw new TypeError('Failed to fetch')
     if (url.endsWith('/publish')) return publishOk ? res({}) : res({ error: '承認できませんでした' }, false)
     return res({})
   })
@@ -109,5 +110,16 @@ describe('求人管理 未公開企業の求人の承認', () => {
     expect(await screen.findByText('承認できませんでした')).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(publishCalls(fetchMock)).toEqual([['/api/admin/job-positions/1/publish', 'PATCH']])
+  })
+
+  it('通信が切れて承認できなかったときも、ダイアログを閉じてエラーを出す', async () => {
+    mockFetch({ publishThrows: true })
+    await clickApprove('求人A')
+
+    const dialog = await screen.findByRole('dialog', { name: '未公開企業の求人を承認' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '承認する' }))
+
+    expect(await screen.findByText('承認に失敗しました。通信状況を確かめて、もう一度お試しください')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 })
