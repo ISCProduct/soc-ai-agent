@@ -264,6 +264,8 @@ func hardDeleteUserData(tx *gorm.DB, userID uint, collectiveAnonymousID string) 
 		&models.Notification{},
 		// 学習利用の同意の履歴（#2168）。users への FK CASCADE でも落ちるが、依存を暗黙にしない。
 		&models.TrainingConsentEvent{},
+		// 企業研究AIチャットの1日の質問回数（SOCAIAGENT-724）。users への FK CASCADE でも落ちるが、依存を暗黙にしない。
+		&models.CompanyResearchChatQuota{},
 	}
 	for _, m := range deletes {
 		if err := tx.Where("user_id = ?", userID).Delete(m).Error; err != nil {

@@ -26,7 +26,8 @@ import (
 //   - 材料が1つも無ければ AI を呼ばずに not_found を返す（費用をかけない）。
 //   - 質問は外部の AI（ベクトル化と回答）へ送る前に、呼び出し側（コントローラ）で伏字にしておく。
 
-// FeatureCompanyResearchChat は api_call_logs の機能名。1日の質問回数の上限もこの行数で数える。
+// FeatureCompanyResearchChat は api_call_logs の機能名（費用の集計軸）。
+// 1日の質問回数は api_call_logs では数えない（1問でベクトル化と回答の2行が付くため）。researchQuota で数える。
 const FeatureCompanyResearchChat = "company_research_chat"
 
 var (
@@ -66,8 +67,9 @@ type researchLLM interface {
 	ReportProxyUsage(ctx context.Context, u openai.ProxyUsage)
 }
 
-type researchCallCounter interface {
-	CountByFeatureAndUserSince(ctx context.Context, feature string, userID uint, since time.Time) (int64, error)
+// researchQuota は repositories.ResearchChatQuotaRepository が満たす。確認と加算を1つの操作で行う。
+type researchQuota interface {
+	Reserve(ctx context.Context, userID uint, day time.Time, limit int) (bool, error)
 }
 
 type ResearchChatService struct {
@@ -75,18 +77,18 @@ type ResearchChatService struct {
 	research  repository.CompanyResearchRepository
 	rag       researchQuerier
 	llm       researchLLM
-	calls     researchCallCounter
+	quota     researchQuota
 }
 
-func NewResearchChatService(companies repository.CompanyRepository, research repository.CompanyResearchRepository, rag researchQuerier, llm researchLLM, calls researchCallCounter) *ResearchChatService {
-	return &ResearchChatService{companies: companies, research: research, rag: rag, llm: llm, calls: calls}
+func NewResearchChatService(companies repository.CompanyRepository, research repository.CompanyResearchRepository, rag researchQuerier, llm researchLLM, quota researchQuota) *ResearchChatService {
+	return &ResearchChatService{companies: companies, research: research, rag: rag, llm: llm, quota: quota}
 }
 
 func researchChatEnabled() bool { return os.Getenv("COMPANY_RESEARCH_CHAT_ENABLED") == "true" }
 
-func researchChatDailyLimit() int64 {
+func researchChatDailyLimit() int {
 	if v, err := strconv.Atoi(os.Getenv("COMPANY_RESEARCH_CHAT_DAILY_LIMIT")); err == nil && v > 0 {
-		return int64(v)
+		return v
 	}
 	return 30
 }
@@ -117,10 +119,11 @@ func (s *ResearchChatService) Ask(ctx context.Context, userID, companyID, compar
 		companies = append(companies, c)
 	}
 
-	since := startOfDayJST(time.Now())
-	if n, err := s.calls.CountByFeatureAndUserSince(ctx, FeatureCompanyResearchChat, userID, since); err != nil {
+	// 質問1回を1回分として、確認と加算を1つの操作で行う（同時に質問しても上限を超えない）。
+	// ベクトル化（RAG の検索）にも費用がかかるので、材料を集める前に数える。
+	if ok, err := s.quota.Reserve(ctx, userID, startOfDayJST(time.Now()), researchChatDailyLimit()); err != nil {
 		return nil, err
-	} else if n >= researchChatDailyLimit() {
+	} else if !ok {
 		return nil, ErrResearchChatDailyLimit
 	}
 

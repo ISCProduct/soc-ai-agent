@@ -44,3 +44,14 @@ type CompanyFact struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 }
+
+// CompanyResearchChatQuota は企業研究AIチャットの1日の質問回数（利用者×日本時間の日付で1行）。
+type CompanyResearchChatQuota struct {
+	UserID    uint      `gorm:"primaryKey;autoIncrement:false" json:"user_id"`
+	QuotaDate time.Time `gorm:"primaryKey;type:date" json:"quota_date"`
+	Used      uint      `gorm:"not null;default:0" json:"used"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TableName は gorm の複数形の推測が "quota" を複数形にしないため、テーブル名を明示する。
+func (CompanyResearchChatQuota) TableName() string { return "company_research_chat_quotas" }
