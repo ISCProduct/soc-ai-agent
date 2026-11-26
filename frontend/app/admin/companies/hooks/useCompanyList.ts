@@ -2,7 +2,7 @@
 
 // 企業一覧の取得・絞り込み・一括公開用の選択を受け持つ。
 // effect の宣言順は分割前の page-content.tsx と同じに保つ（取得の順序が変わらないように）。
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { authService } from '@/lib/auth'
 import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin/fetch'
@@ -75,6 +75,9 @@ export function useCompanyList() {
     }
   }, [])
 
+  // 絞り込みを変えたあと、古い企業一覧が後から届いて上書きしない。
+  const companiesRequestRef = useRef(0)
+
   const fetchCompanies = useCallback(
     async (
       p: number,
@@ -86,6 +89,7 @@ export function useCompanyList() {
       // 操作後の取り直しでは false にし、操作で出たエラー表示を残す（SOCAIAGENT-716）
       clearError = true,
     ) => {
+      const requestId = ++companiesRequestRef.current
       if (clearError) setError('')
       const offset = (p - 1) * PAGE_SIZE
       const params = new URLSearchParams({
@@ -106,9 +110,11 @@ export function useCompanyList() {
           { headers: authService.getAdminFetchHeaders(), cache: 'no-store' },
           '企業一覧の取得に失敗しました',
         )
+        if (requestId !== companiesRequestRef.current) return
         setCompanies(data?.companies || [])
         setTotal(data?.total ?? 0)
       } catch (e) {
+        if (requestId !== companiesRequestRef.current) return
         setError(toAdminErrorMessage(e))
       }
     },

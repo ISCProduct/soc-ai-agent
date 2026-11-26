@@ -423,7 +423,10 @@ func main() {
 	}
 	chatController.SetDiagnosisQualityService(diagnosisQualityService)
 	relationController := companycontrollers.NewCompanyRelationController(companyQueryRepo, aiClient)
-	relationController.SetCorrelationMapService(company.NewCompanyCorrelationMapService(companyRepo, companyRelationRepo))
+	businessTagRepo := repositories.NewCompanyBusinessTagRepository(db)
+	correlationMapService := company.NewCompanyCorrelationMapService(companyRepo, companyRelationRepo)
+	correlationMapService.SetBusinessTagRepository(businessTagRepo)
+	relationController.SetCorrelationMapService(correlationMapService)
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
 	companyValidator.SetSearchFlight(companySearchFlight)
@@ -437,6 +440,7 @@ func main() {
 	// 企業検索・マッチング・面接ヒントからも参照できるようになる（#1124）。
 	resumeService.SetCompanyProvisioner(infoFetcher)
 	adminCompanyController := admincontrollers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
+	adminCompanyController.SetBusinessTagRepository(businessTagRepo)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
 	adminCompanyController.SetSchoolRestrictionChecker(func(adminUserID uint) (bool, error) {
 		restricted, _, err := schoolService.ResolveAdminAccess(adminUserID)
@@ -604,7 +608,7 @@ func main() {
 	scraperSessionService := admin.NewScraperSessionService(scraperSessionRepo)
 	scraperSessionController := admincontrollers.NewAdminScraperSessionController(scraperSessionService)
 
-	e := newEchoServer(sentryOn, organizationService)
+	e := newEchoServer(sentryOn, organizationService, db)
 
 	// APIルートグループ
 	api := e.Group("/api")

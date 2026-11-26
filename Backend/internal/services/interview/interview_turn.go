@@ -68,6 +68,10 @@ func (s *InterviewService) Turn(
 	if err != nil {
 		return nil, err
 	}
+	// 上限は AI（STT/LLM/TTS）を呼ぶ前に判定する。このターンはユーザーと面接官の2件を保存する
+	if limited, err := s.checkTurnStart(ctx, session, 2); limited != nil || err != nil {
+		return limited, err
+	}
 
 	companyContextCh := s.prefetchCompanyContext(ctx, companyID, companyName, companyReading, companyReadingResolved, companyInfo)
 
@@ -429,6 +433,10 @@ func (s *InterviewService) StartTurn(
 	session, err := s.loadTurnSession(userID, sessionID)
 	if err != nil {
 		return nil, err
+	}
+	// 上限は AI を呼ぶ前に判定する。冒頭は面接官の1件を保存する
+	if limited, err := s.checkTurnStart(ctx, session, 1); limited != nil || err != nil {
+		return limited, err
 	}
 
 	// 冒頭の質問の発話 ID を決める。同じ /start-turn が応答の前にもう一度走っても二重に保存しない
