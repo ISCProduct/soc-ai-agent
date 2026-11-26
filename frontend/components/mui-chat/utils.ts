@@ -163,9 +163,50 @@ export function shouldAutoScrollToBottom(args: {
   return distanceFromBottom <= threshold
 }
 
+/** 接続エラーで送れなかった文章を、エラー画面から戻ったときに入力欄へ戻すための sessionStorage のキー（#2213） */
+export const CHAT_UNSENT_DRAFT_KEY = 'chatUnsentDraft'
+
 /**
- * チャット終了時にセッション ID とメッセージ／キャッシュを削除する。
+ * 送れなかった文章を、書いた利用者の ID と一緒に取っておく（#2213）。
+ * 学校の共用 PC で、同じタブに別の学生がログインしても、前の学生の文章を戻さないようにするため。
+ */
+export function saveUnsentDraft(storage: Pick<Storage, 'setItem'>, text: string, userId: number | null | undefined): void {
+  if (userId == null) return
+  storage.setItem(CHAT_UNSENT_DRAFT_KEY, JSON.stringify({ text, userId }))
+}
+
+/**
+ * 取っておいた文章を取り出す。書いた利用者が今の利用者と同じときだけ返す。
+ * 取っておいた分は、返すかどうかにかかわらず消す（別の利用者の文章をタブに残さない）。
+ */
+export function takeUnsentDraft(
+  storage: Pick<Storage, 'getItem' | 'removeItem'>,
+  userId: number | null | undefined,
+): string | null {
+  const raw = storage.getItem(CHAT_UNSENT_DRAFT_KEY)
+  if (raw == null) return null
+  storage.removeItem(CHAT_UNSENT_DRAFT_KEY)
+  if (userId == null) return null
+  try {
+    const draft: unknown = JSON.parse(raw)
+    if (
+      draft &&
+      typeof draft === 'object' &&
+      typeof (draft as { text?: unknown }).text === 'string' &&
+      (draft as { userId?: unknown }).userId === userId
+    ) {
+      return (draft as { text: string }).text
+    }
+  } catch {
+    // 形式の違うもの（利用者の ID が無いものなど）は戻さない
+  }
+  return null
+}
+
+/**
+ * チャット終了時（ログアウトを含む）にセッション ID とメッセージ／キャッシュを削除する。
  * sessionId は remove 前に取得する（先に消すと chat_cache_ が残る）。
+ * 送れなかった文章（CHAT_UNSENT_DRAFT_KEY）も消す。共用 PC で次の利用者の入力欄に出さないため（#2213 のレビュー）。
  */
 export function clearChatSessionOnEnd(storage: {
   sessionStorage: Pick<Storage, 'getItem' | 'removeItem'>
@@ -178,6 +219,7 @@ export function clearChatSessionOnEnd(storage: {
   }
   storage.sessionStorage.removeItem('chatSessionId')
   storage.sessionStorage.removeItem('chatMessages')
+  storage.sessionStorage.removeItem(CHAT_UNSENT_DRAFT_KEY)
   storage.localStorage.removeItem('chatMessages')
   storage.localStorage.removeItem('chat_session_id')
 }
