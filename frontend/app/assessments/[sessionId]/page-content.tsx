@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import {
-  Alert,
   Box,
   Button,
   FormControl,
@@ -16,6 +15,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { ListSkeleton } from '@/components/common/ListSkeleton'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import {

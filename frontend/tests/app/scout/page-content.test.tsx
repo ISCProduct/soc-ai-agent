@@ -119,6 +119,23 @@ describe('学生のスカウト受信箱', () => {
     expect(screen.queryByRole('button', { name: 'このスカウトを承諾' })).not.toBeInTheDocument()
   })
 
+  // スクリーンリーダーが何のダイアログかを読み上げられるよう、タイトルを名前にする（#2101）
+  it('スカウトの本文とブロックの確認のダイアログは、タイトルが名前になる', async () => {
+    render(<PageContent />)
+    expect(await screen.findByText('デモ株式会社')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '内容を確認' }))
+    expect(await screen.findByRole('dialog', { name: 'デモ株式会社からのスカウト' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '閉じる' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'この企業をブロック' }))
+    const blockDialog = await screen.findByRole('dialog', { name: 'この企業をブロックしますか' })
+    expect(blockDialog).toHaveAccessibleDescription(
+      'デモ株式会社からの新しいスカウトは届かなくなります。すでに届いている文面は履歴に残ります。',
+    )
+  })
+
   it('スカウトが0件のとき理由と次の操作を表示する（SOCAIAGENT-401）', async () => {
     list.mockResolvedValueOnce({ items: [], total: 0, blocked_company_ids: [] })
 
