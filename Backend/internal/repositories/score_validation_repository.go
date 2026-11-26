@@ -250,8 +250,19 @@ func (r *ScoreValidationRepository) GetCategoryPassStats() ([]CategoryPassStats,
 }
 
 func parseScoreSnapshot(raw string) (map[string]float64, bool) {
+	// 版付きスナップショットは categories が従来のカテゴリ別スコア。
+	// 平坦な JSON（旧形式）もそのまま読む。match_score は較正の入力にしない。
+	var versioned struct {
+		Categories map[string]float64 `json:"categories"`
+	}
+	if err := json.Unmarshal([]byte(raw), &versioned); err == nil && len(versioned.Categories) > 0 {
+		return versioned.Categories, true
+	}
 	snap := map[string]float64{}
 	if err := json.Unmarshal([]byte(raw), &snap); err == nil {
+		if !looksLikeCategoryMap(snap) {
+			return nil, false
+		}
 		return snap, len(snap) > 0
 	}
 	intSnap := map[string]int{}
@@ -262,6 +273,20 @@ func parseScoreSnapshot(raw string) (map[string]float64, bool) {
 		snap[k] = float64(v)
 	}
 	return snap, len(snap) > 0
+}
+
+// looksLikeCategoryMap は平坦な旧スナップショットと、版付き文書の数値フィールドを分ける。
+// version や chat_weight だけが float として拾われる文書はカテゴリではない。
+func looksLikeCategoryMap(snap map[string]float64) bool {
+	for key := range snap {
+		switch key {
+		case "version", "chat_weight", "match_score", "matched_axis_count":
+			continue
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func isCalibrationPassStatus(status string) bool {

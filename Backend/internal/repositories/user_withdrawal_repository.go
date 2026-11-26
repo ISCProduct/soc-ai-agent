@@ -241,6 +241,7 @@ func hardDeleteUserData(tx *gorm.DB, userID uint, collectiveAnonymousID string) 
 		// 推薦へのフィードバック（SOCAIAGENT-670）。推薦（user_company_matches）への FK があるので、推薦より先に消す
 		&models.UserMatchFeedback{},
 		&models.UserCompanyMatch{},
+		&models.ApplicationStatusEvent{},
 		&models.UserApplicationStatus{},
 		&models.CompanyReview{},
 		&models.ResumeDocument{},

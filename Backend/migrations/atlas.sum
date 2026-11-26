@@ -1,4 +1,4 @@
-h1:fk27BcPOdQE7EF8UUR/IxCJ9FGSMn8QbAIj4pBEEHk0=
+h1:/EQUzw8huJvFo+f/4oo6FutZxOJ2W3onxnxHWR+q1CA=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -88,4 +88,8 @@ h1:fk27BcPOdQE7EF8UUR/IxCJ9FGSMn8QbAIj4pBEEHk0=
 20261122211106_git_hub_repos_add_is_owner_or_collaborator.up.sql h1:2bCMGa5zSnveZ3UxIAxfNp0YKFxTrdWfSRapGjOW/no=
 20261124144122_interview_report_category_breakdown.up.sql h1:WM/vvhg+EW96dGIehPzXcYjWu3lKZb7uiZJJOiPIt48=
 20261124184459_create_business_tags.up.sql h1:GQM8Fj2xFanHxBbMKBrojezTLMEp3AkOueigInSJgAg=
-20261126214045_user_company_match_tie_key.up.sql h1:3IxHFg8i+0NRoA1D51zz/K4ZC8HMxDZVqYZuQ5kDH30=
+20261126214041_interview_research_snapshots.up.sql h1:oX5AtFHJp7G8xeo4RE480d/wthVYIiBl52gKgXgCa9I=
+20261126214042_interview_shadow_scores.up.sql h1:aX3M9uDIr9fDOIrQLtElNtxDZArfXRAwUOffJv/mneY=
+20261126214043_application_status_events.up.sql h1:xRJ5MnnyHs9DaHFAp3XXBt3Gx/oTKvqFCQdCk4VgkVQ=
+20261126214044_api_call_log_daily_retention.up.sql h1:STMQVndB5BV98JzTMgfj+q40k53DSlp2+qEHSyYiBuQ=
+20261126214045_user_company_match_tie_key.up.sql h1:NfTvFH2wpJkgkn8SmHfOwBxFUPGCQLK+i+yrt/ksVU4=
