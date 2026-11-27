@@ -77,7 +77,10 @@ func (s *InterviewService) Turn(
 
 	companyContextCh := s.prefetchCompanyContext(ctx, companyID, companyName, companyReading, companyReadingResolved, companyInfo)
 
+	usedAnswerText := strings.TrimSpace(answerText) != ""
 	userText, sttOutcome := s.resolveTurnAnswer(ctx, sessionID, turnCount, audioData, answerText, companyID, companyName, companyInfo)
+	// テキスト回答経路では STT を呼ばない。聞き取れなかった扱いは音声経路だけ。
+	sttFailed := !usedAnswerText && userText == "（聞き取れませんでした）"
 
 	// WEB検索・手入力で company_id=0 でも、企業名が DB 登録と一致すれば解決する (#567)
 	companyContext := <-companyContextCh
@@ -149,6 +152,7 @@ func (s *InterviewService) Turn(
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
 		AIFallback:             fallbackStages(sttOutcome, llmOutcome, ttsOutcome),
+		STTFailed:              sttFailed,
 		UtteranceSaveFailed:    utteranceSaveFailed || followUpSaveFailed,
 	}
 	applyDirectiveToResult(result, plan.directive)

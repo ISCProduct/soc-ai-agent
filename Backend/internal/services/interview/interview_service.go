@@ -316,6 +316,9 @@ type TurnResult struct {
 	CustomQuestionsEnabled bool
 	// AIFallback はローカルへ縮退した工程（stt / llm / tts）。OpenAI だけで済んだら空（#1833）。
 	AIFallback []string
+	// STTFailed は音声認識に失敗し「聞き取れませんでした」扱いにしたこと（#1831）。
+	// FE は文字回答欄への切替に使う。テキスト回答経路では false。
+	STTFailed bool
 	// UtteranceSaveFailed はターンの発話を書き起こしへ保存できなかったことを示す（#1969）。
 	// 面接は止めず、画面に「記録できていない」ことを出すために返す（#1476 と同じ扱い）。
 	UtteranceSaveFailed bool

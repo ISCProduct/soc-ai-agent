@@ -448,6 +448,7 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		"user_text":                result.UserText,
 		"ai_text":                  result.AIText,
 		"utterance_save_failed":    result.UtteranceSaveFailed,
+		"stt_failed":               result.STTFailed,
 		"question_source":          result.QuestionSource,
 		"question_category":        result.QuestionCategory,
 		"is_deepening":             result.IsDeepening,

@@ -157,6 +157,28 @@ describe('SessionScreen', () => {
     expect(screen.queryByText(UTTERANCE_SAVE_FAILED_MESSAGE)).not.toBeInTheDocument()
   })
 
+  it('テキスト継続時は文字回答欄を出し、面接官発話中は送信できない', () => {
+    const onSubmitTextAnswer = jest.fn()
+    renderScreen({
+      textContinueMode: true,
+      voiceDegradeText: '面接官の音声を再生できません。',
+      aiSpeaking: true,
+      onSubmitTextAnswer,
+    })
+    expect(screen.getByText('面接官の音声を再生できません。')).toBeInTheDocument()
+    expect(screen.getByLabelText('文字で回答')).toBeDisabled()
+    expect(screen.getByRole('button', { name: '送信' })).toBeDisabled()
+  })
+
+  it('テキスト継続で待機中なら文字回答を送れる', () => {
+    const onSubmitTextAnswer = jest.fn()
+    renderScreen({ textContinueMode: true, onSubmitTextAnswer })
+    const input = screen.getByLabelText('文字で回答')
+    fireEvent.change(input, { target: { value: 'チームで開発しました' } })
+    fireEvent.click(screen.getByRole('button', { name: '送信' }))
+    expect(onSubmitTextAnswer).toHaveBeenCalledWith('チームで開発しました')
+  })
+
   // #1569: セッション画面表示中は学生下部ナビを隠す。SelectionScreen/LobbyScreenと
   // 同一パス(/interview)のため、マウント中かどうかで判定する。
   it('マウント中はsetInterviewSessionActiveをtrueにし、アンマウントでfalseに戻す', () => {

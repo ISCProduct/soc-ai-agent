@@ -258,6 +258,7 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 		result, err := svc.Turn(context.Background(), 1, 200, []byte("dummy-audio"), "", "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, "（聞き取れませんでした）", result.UserText)
+		assert.True(t, result.STTFailed)
 	})
 
 	t.Run("テキスト回答があればSTTを使わず継続する", func(t *testing.T) {
@@ -290,6 +291,7 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "チームで開発しました", result.UserText)
 		assert.False(t, transcribeCalled)
+		assert.False(t, result.STTFailed)
 	})
 
 	t.Run("Chat失敗時は言い換え応答にフォールバックする", func(t *testing.T) {

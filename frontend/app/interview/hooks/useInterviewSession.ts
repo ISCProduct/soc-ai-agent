@@ -13,7 +13,11 @@ import { useInterviewClock } from './useInterviewClock'
 import { useInterviewReport, resolveScoreSessionId } from './useInterviewReport'
 import { useInterviewTurns } from './useInterviewTurns'
 import { resolveFinishOutcomeMessage } from '../finishOutcome'
-import { voiceDegradeBannerText, type VoiceDegradeReason } from '../lib/aiFallback'
+import {
+  shouldEnterTextContinue,
+  voiceDegradeBannerText,
+  type VoiceDegradeReason,
+} from '../lib/aiFallback'
 import type { Utterance, InterviewCompany, Position, InterviewStatus } from '../types'
 
 export { REPORT_RETRY_FAILED_MESSAGE, type ReportStatus } from './useInterviewReport'
@@ -65,7 +69,10 @@ export function useInterviewSession({
    * 発話はサーバーが /start-turn・/turn の中で保存し、失敗を応答の utterance_save_failed で返す(#1969)。
    */
   const [utteranceSaveFailed, setUtteranceSaveFailed] = useState(false)
-  /** 音声縮退・テキスト継続（#1831）。一度入ったらセッション中は sticky。 */
+  /**
+   * 音声縮退・テキスト継続（#1831）。
+   * バナー理由は直近ターンの結果（復旧したら null）。文字回答欄だけ sticky。
+   */
   const [voiceDegradeReason, setVoiceDegradeReason] = useState<VoiceDegradeReason>(null)
   const [textContinueMode, setTextContinueMode] = useState(false)
   const transcriptEndRef = useRef<HTMLDivElement | null>(null)
@@ -132,15 +139,18 @@ export function useInterviewSession({
     setErrorMessage,
     setUtteranceSaveFailed,
     onLimitReached: () => { void handleStop(false, true) },
-    onVoiceDegraded: (reason) => {
-      setVoiceDegradeReason((prev) => (prev === 'no_audio' ? prev : reason))
-      setTextContinueMode(true)
-      setCaptionsVisible(true)
+    onVoiceDegradeUpdate: (reason) => {
+      setVoiceDegradeReason(reason)
+      if (shouldEnterTextContinue(reason)) {
+        setTextContinueMode(true)
+        setCaptionsVisible(true)
+      }
     },
   })
 
   useHandsFreeVad({
-    enabled: handsFreeMode,
+    // 文字回答中はタイピング音で VAD が録音を始めないよう止める（#1831 レビュー）
+    enabled: handsFreeMode && !textContinueMode,
     status,
     streamRef: media.streamRef,
     isRecordingRef,

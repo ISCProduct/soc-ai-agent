@@ -13,6 +13,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	interviewcontrollers "Backend/internal/controllers/interview"
@@ -94,6 +95,88 @@ func TestInterviewController_Create_ServiceError(t *testing.T) {
 	svc := &mocks.InterviewServiceMock{}
 	svc.On("CreateSession", uint(1), "ja", "").Return(nil, errors.New("guest limit exceeded"))
 	testsupport.AssertStatus(t, newInterviewController(svc).Create, testsupport.NewCtx(req, rec), http.StatusBadRequest)
+}
+
+func TestInterviewController_Turn_AnswerTextOnly(t *testing.T) {
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	for key, value := range map[string]string{
+		"answer_text": "チームで開発しました", "company_name": "Example",
+		"company_info": "profile", "company_type": "general", "company_id": "1",
+	} {
+		if err := form.WriteField(key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := form.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/interviews/10/turn", &body)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	ctx := testsupport.NewCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("10")
+
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("Turn",
+		mock.Anything, uint(1), uint(10), mock.Anything, "チームで開発しました",
+		"Example", "", false, "", "profile", "general", uint(1),
+		0, 0, 0, 0, 0, 0,
+	).Return(&interview.TurnResult{
+		UserText: "チームで開発しました",
+		AIText:   "具体的には？",
+		Audio:    []byte("audio"),
+	}, nil)
+	if err := newInterviewController(svc).Turn(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, http.StatusOK, rec.Code)
+	metadata := readInterviewMetadata(t, rec)
+	assert.Equal(t, "チームで開発しました", metadata["user_text"])
+	assert.Equal(t, false, metadata["stt_failed"])
+	svc.AssertExpectations(t)
+}
+
+func TestInterviewController_Turn_AnswerTextTooLong(t *testing.T) {
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	long := strings.Repeat("あ", 2001)
+	if err := form.WriteField("answer_text", long); err != nil {
+		t.Fatal(err)
+	}
+	if err := form.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/interviews/10/turn", &body)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	ctx := testsupport.NewCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("10")
+	testsupport.AssertStatus(t, newInterviewController(nil).Turn, ctx, http.StatusBadRequest)
+}
+
+func TestInterviewController_Turn_RequiresAudioOrAnswerText(t *testing.T) {
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	if err := form.WriteField("company_name", "Example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := form.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/interviews/10/turn", &body)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	ctx := testsupport.NewCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("10")
+	testsupport.AssertStatus(t, newInterviewController(nil).Turn, ctx, http.StatusBadRequest)
 }
 
 func TestInterviewController_Turn_OmitsCompanyInfoFromResponse(t *testing.T) {

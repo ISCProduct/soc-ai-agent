@@ -150,7 +150,7 @@ export default function SessionScreen(props: SessionScreenProps) {
 
       {props.textContinueMode && props.onSubmitTextAnswer && (
         <TextAnswerBar
-          disabled={!isConnected || props.turnPending || props.isRecording}
+          disabled={!isConnected || props.turnPending || props.isRecording || props.aiSpeaking}
           onSubmit={props.onSubmitTextAnswer}
         />
       )}
