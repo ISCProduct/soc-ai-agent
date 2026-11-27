@@ -137,4 +137,10 @@ python scripts/rebuild_collections.py --drop-student-old
 ```
 
 切り戻し: `student_profiles` を消して（または別名にして）、`student_profiles__l2old554` を `student_profiles` に改名する。
+旧いコレクションを残している間の削除（同意撤回・退会）は旧いほうにも反映する（`student_profile_store.delete_student`）ので、切り戻しても消した学生は戻らない。
+更新（index）は旧いほうに反映しないので、切り戻したら、その間に更新した学生を index し直す。
+
+改名の途中で止まったとき（`student_profiles` が無い、または止まったあとに rag-review が空の `student_profiles` を作った）は、
+もう一度 `--student-profiles --apply` を動かす。写し（`student_profiles__cos554`）が元と同じ件数そろっていれば再開し、
+そろっていなければ元に戻す（`--apply` なしなら、どちらをするかだけを出す）。空の `student_profiles` は件数 0 のときだけ消す。
 staging で確かめてから本番で行う。

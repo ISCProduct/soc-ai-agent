@@ -411,3 +411,66 @@ def test_rebuild_student_profiles_stops_when_old_collection_is_left():
     client.get_or_create_collection("student_profiles__l2old554")
     with pytest.raises(RuntimeError, match="drop-student-old"):
         rb.rebuild_student_profiles(client, apply=True)
+
+
+def _interrupt_after_old_rename(client):
+    """元を旧い名前にした直後に止まった状態を作る（写しはそろっている）。"""
+    from scripts import rebuild_collections as rb
+
+    _seed_students(client, 3)
+    swap = client.get_or_create_collection(rb.STUDENT_SWAP, metadata={"hnsw:space": "cosine"})
+    rb._copy_all(client.collections["student_profiles"], swap)
+    client.collections["student_profiles"].modify(name=rb.STUDENT_OLD)
+    return rb
+
+
+@pytest.mark.parametrize("service_created_empty", [False, True])
+def test_rebuild_student_profiles_resumes_interrupted_swap(service_created_empty):
+    client = FakeFullChroma()
+    rb = _interrupt_after_old_rename(client)
+    if service_created_empty:
+        # 中断のあとに rag-review が起動し、空の cosine の student_profiles を作った
+        client.get_or_create_collection("student_profiles", metadata={"hnsw:space": "cosine"})
+
+    assert rb.rebuild_student_profiles(client) == {"status": "interrupted", "action": "resume", "old_count": 3}
+    out = rb.rebuild_student_profiles(client, apply=True)
+
+    assert out["status"] == "resumed"
+    assert vs.collection_space(client.collections["student_profiles"]) == "cosine"
+    assert len(client.collections["student_profiles"].rows) == 3
+    assert rb.STUDENT_SWAP not in client.collections
+
+
+def test_rebuild_student_profiles_rolls_back_when_swap_is_incomplete():
+    client = FakeFullChroma()
+    rb = _interrupt_after_old_rename(client)
+    del client.collections[rb.STUDENT_SWAP].rows["student-0"]  # 写しが足りない
+
+    out = rb.rebuild_student_profiles(client, apply=True)
+
+    assert out == {"status": "rolled_back", "count": 3}
+    assert vs.collection_space(client.collections["student_profiles"]) == "l2"
+    assert len(client.collections["student_profiles"].rows) == 3
+    # もう一度動かせば写し直して入れ替える
+    assert rb.rebuild_student_profiles(client, apply=True)["status"] == "swapped"
+
+
+def test_delete_student_also_removes_from_old_collection(monkeypatch):
+    import student_profile_store as sps
+    from scripts import rebuild_collections as rb
+
+    client = FakeFullChroma()
+    monkeypatch.setattr(sps, "get_chroma_client", lambda: client)
+    _seed_students(client, 2)
+    rb.rebuild_student_profiles(client, apply=True)
+
+    sps.delete_student(1)
+
+    # 切り戻し用の旧いコレクションからも消える（切り戻しで同意撤回・退会した学生が戻らない）
+    assert "student-1" not in client.collections["student_profiles"].rows
+    assert "student-1" not in client.collections[rb.STUDENT_OLD].rows
+    assert "student-0" in client.collections[rb.STUDENT_OLD].rows
+
+    rb.drop_student_old(client)
+    sps.delete_student(0)  # 旧いコレクションが無くても例外にしない
+    assert "student-0" not in client.collections["student_profiles"].rows

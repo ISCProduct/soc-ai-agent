@@ -15,6 +15,9 @@ from vector_store import COLLECTION_METADATA, collection_space, get_chroma_clien
 logger = logging.getLogger("rag-review")
 
 COLLECTION_STUDENT_PROFILES = "student_profiles"
+# cosine へ切り替える前の l2 のコレクション（SOCAIAGENT-554。scripts/rebuild_collections.py --student-profiles が作る）。
+# 切り戻し用に7日残すので、その間の削除（同意撤回・退会）はこちらにも反映する
+COLLECTION_STUDENT_PROFILES_OLD = "student_profiles__l2old554"
 
 
 def _collection() -> Any:
@@ -59,11 +62,26 @@ def upsert_student(user_id: int, text: str, embedding: List[float]) -> None:
 
 
 def delete_student(user_id: int) -> int:
-    """学生のベクトルを削除する。存在しない場合も正常終了する（冪等）。"""
+    """学生のベクトルを削除する。存在しない場合も正常終了する（冪等）。
+
+    cosine へ切り替える前のコレクション（切り戻し用に残しているもの）があれば、そこからも消す。
+    消さないと、切り戻したときに同意撤回・退会した学生が検索に戻る（SOCAIAGENT-554）。
+    """
     collection = _collection()
     collection.delete(ids=[_doc_id(user_id)])
+    _delete_from_old(user_id)
     logger.info("student profile deleted user_id=%s", user_id)
     return 1
+
+
+def _delete_from_old(user_id: int) -> None:
+    """切り替え前のコレクションからも消す。無ければ何もしない。"""
+    client = get_chroma_client()
+    try:
+        old = client.get_collection(COLLECTION_STUDENT_PROFILES_OLD)
+    except Exception:
+        return  # 切り替え前のコレクションが無い（切り替えていない・消し終わった）
+    old.delete(ids=[_doc_id(user_id)])
 
 
 def query_students(embedding: List[float], top_k: int, min_score: float = 0.0) -> List[Dict[str, Any]]:

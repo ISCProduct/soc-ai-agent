@@ -25,6 +25,10 @@
   3. rag-review を起動し、学生検索の疎通を確かめる。旧いコレクションは 7日 残し（切り戻し用）、
      そのあと --drop-student-old で消す。旧いコレクションにも退会・同意撤回した学生の埋め込みが残るので、必ず消す
   切り戻し: student_profiles を消して（または別名にして）、student_profiles__l2old554 を student_profiles に改名する。
+  旧いコレクションを残している間の削除（同意撤回・退会）は旧いほうにも反映する（student_profile_store.delete_student）。
+  更新（index）は反映しないので、切り戻したら、その間に更新した学生を index し直す。
+  改名の途中で止まったとき（student_profiles が無い・空のまま）は、もう一度 --student-profiles --apply を動かす。
+  写しがそろっていれば再開し、そろっていなければ元に戻す（--apply なしなら、どちらをするかだけを出す）。
   埋め込みは写すだけなので OpenAI は呼ばない。関連度は距離関数によらず同じ値になる（student_profile_store.relevance_score）。
 """
 from __future__ import annotations
@@ -36,13 +40,14 @@ from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import student_profile_store as sps  # noqa: E402
 import vector_store as vs  # noqa: E402
 
 BATCH = 500
 
-STUDENT_PROFILES = "student_profiles"
+STUDENT_PROFILES = sps.COLLECTION_STUDENT_PROFILES
 STUDENT_SWAP = "student_profiles__cos554"
-STUDENT_OLD = "student_profiles__l2old554"
+STUDENT_OLD = sps.COLLECTION_STUDENT_PROFILES_OLD
 
 
 def _copy_all(src: Any, dst: Any) -> int:
@@ -120,14 +125,18 @@ def rebuild_student_profiles(client: Any, apply: bool = False) -> Dict[str, Any]
 
     apply=False なら件数と今の距離関数だけを返す。既に cosine なら何もしない。
     学生プロフィールの書き込みを止めてから動かすこと（モジュールの説明を参照）。
+    前回の改名の途中で止まっていたら、まずそれを直す（_recover_interrupted）。
     """
     existing = vs._collection_names(client)
+    recovered = _recover_interrupted(client, existing, apply)
+    if recovered is not None:
+        return recovered
     if STUDENT_PROFILES not in existing:
         return {"status": "missing"}
     src = client.get_collection(STUDENT_PROFILES)
     info: Dict[str, Any] = {"space": vs.collection_space(src), "count": src.count()}
     if info["space"] == "cosine":
-        return {**info, "status": "already_cosine"}
+        return {**info, "status": "already_cosine", "old_left": STUDENT_OLD in existing}
     if STUDENT_OLD in existing:
         raise RuntimeError(f"{STUDENT_OLD} が残っている。前回の切り替えを確かめ、--drop-student-old で消してからやり直す")
     if not apply:
@@ -147,6 +156,37 @@ def rebuild_student_profiles(client: Any, apply: bool = False) -> Dict[str, Any]
         src.modify(name=STUDENT_PROFILES)
         raise
     return {**info, "status": "swapped", "copied": total, "old": STUDENT_OLD}
+
+
+def _recover_interrupted(client: Any, existing: set, apply: bool) -> Optional[Dict[str, Any]]:
+    """前回の改名の途中で止まった状態を見つけて直す。止まっていなければ None。
+
+    止まった状態: 元を student_profiles__l2old554 に改名した後、写しを student_profiles に改名する前に
+    プロセスが終わった・接続が切れた。student_profiles が無いか、その後に rag-review が空の student_profiles を
+    作っている（学生検索は空のまま）。
+    - 写し（student_profiles__cos554）が cosine で元と同じ件数そろっていれば、写しを student_profiles にする（再開）
+    - そろっていなければ、元を student_profiles に戻す（切り戻し。もう一度 --apply すれば写し直す）
+    apply=False なら、どちらをするかだけを返す。空の student_profiles は件数 0 のときだけ消す。
+    """
+    if STUDENT_OLD not in existing:
+        return None
+    old = client.get_collection(STUDENT_OLD)
+    old_count = old.count()
+    current = client.get_collection(STUDENT_PROFILES) if STUDENT_PROFILES in existing else None
+    if current is not None and not (current.count() == 0 and old_count > 0):
+        return None  # 切り替えは済んでいる（旧いコレクションを残している期間）
+    swap = client.get_collection(STUDENT_SWAP) if STUDENT_SWAP in existing else None
+    resume = swap is not None and vs.collection_space(swap) == "cosine" and swap.count() == old_count
+    action = "resume" if resume else "rollback"
+    if not apply:
+        return {"status": "interrupted", "action": action, "old_count": old_count}
+    if current is not None:
+        client.delete_collection(STUDENT_PROFILES)  # 中断のあとに作られた空のコレクション
+    if resume:
+        swap.modify(name=STUDENT_PROFILES)
+        return {"status": "resumed", "count": old_count, "old": STUDENT_OLD}
+    old.modify(name=STUDENT_PROFILES)
+    return {"status": "rolled_back", "count": old_count}
 
 
 def drop_student_old(client: Any) -> List[str]:
