@@ -29,6 +29,12 @@ import {
   mapAnalysisScores,
   mapRecommendationToCompany,
 } from '../utils'
+import {
+  FAVORITES_PAGE_SIZE,
+  favoritesListUrl,
+  readFavoriteCompanyIds,
+  readFavoritesTotal,
+} from '@/lib/favorites-page'
 
 /**
  * 結果ページのデータ取得・セッション導線・応募/お気に入り/メール操作。
@@ -38,6 +44,8 @@ export function useResultsData() {
   const searchParams = useSearchParams()
   const [companies, setCompanies] = useState<Company[]>([])
   const [favoriteCompanies, setFavoriteCompanies] = useState<Company[]>([])
+  const [favoritesOffset, setFavoritesOffset] = useState(0)
+  const [favoritesTotal, setFavoritesTotal] = useState(0)
   const [favoritesLoading, setFavoritesLoading] = useState(false)
   const [favoritesError, setFavoritesError] = useState<string | null>(null)
   const favoriteRequest = useRef(0)
@@ -293,8 +301,9 @@ export function useResultsData() {
     favoriteRequest.current = requestId
     setFavoritesLoading(true)
     setFavoritesError(null)
+    let steppingBack = false
     try {
-      const res = await fetch('/api/chat/favorites?limit=100', {
+      const res = await fetch(favoritesListUrl(favoritesOffset), {
         headers: authService.getUserFetchHeaders(),
       })
       if (requestId !== favoriteRequest.current) return
@@ -306,7 +315,19 @@ export function useResultsData() {
       if (requestId !== favoriteRequest.current) return
       const rows = Array.isArray(data?.recommendations) ? data.recommendations : []
       const mapped: Company[] = rows.map((rec: unknown, index: number) => mapRecommendationToCompany(rec, index))
-      favoriteCompanyIds.current = new Set(mapped.map((company) => company.id))
+      // 最後の1社を外すと、そのページは空になる。前の100社へ戻す。
+      // 戻るまではハート用のIDを消さない。
+      if (mapped.length === 0 && favoritesOffset > 0) {
+        steppingBack = true
+        setFavoritesOffset((current) => Math.max(0, current - FAVORITES_PAGE_SIZE))
+        return
+      }
+      const ids = readFavoriteCompanyIds(
+        data?.favorite_company_ids,
+        mapped.map((company) => company.id),
+      )
+      favoriteCompanyIds.current = new Set(ids)
+      setFavoritesTotal(readFavoritesTotal(data?.total, mapped.length))
       setFavoriteCompanies(mapped)
       setCompanies((prev) => prev.map((company) => (
         favoriteCompanyIds.current.has(company.id)
@@ -317,9 +338,9 @@ export function useResultsData() {
       if (requestId !== favoriteRequest.current) return
       setFavoritesError('お気に入りを読み込めませんでした')
     } finally {
-      if (requestId === favoriteRequest.current) setFavoritesLoading(false)
+      if (requestId === favoriteRequest.current && !steppingBack) setFavoritesLoading(false)
     }
-  }, [])
+  }, [favoritesOffset])
 
   useEffect(() => {
     if (!mounted || !userId) return
@@ -513,6 +534,9 @@ export function useResultsData() {
     sessionId,
     companies,
     favoriteCompanies,
+    favoritesTotal,
+    favoritesOffset,
+    setFavoritesOffset,
     favoritesLoading,
     favoritesError,
     retryFavorites: loadFavorites,

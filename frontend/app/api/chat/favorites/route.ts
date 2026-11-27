@@ -7,8 +7,11 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   try {
-    const limit = new URL(request.url).searchParams.get('limit') || '50'
-    const response = await fetch(`${BACKEND_URL}/api/chat/favorites?limit=${encodeURIComponent(limit)}`, {
+    const params = new URL(request.url).searchParams
+    const query = new URLSearchParams({ limit: params.get('limit') || '50' })
+    const offset = params.get('offset')
+    if (offset) query.set('offset', offset)
+    const response = await fetch(`${BACKEND_URL}/api/chat/favorites?${query.toString()}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

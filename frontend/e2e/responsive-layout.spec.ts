@@ -378,6 +378,10 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
       if (pathname === '/api/bff/interviews/1') {
         return json({ session: SESSION_RESPONSE.sessions[0], utterances: [], report: REPORT })
       }
+      // 録画が無い応答。stubApi の [] だと videos が無く、詳細パネルごと落ちる。
+      if (pathname === '/api/interviews/1/videos') {
+        return json({ videos: [], cues: [], anchor: 'session_started_at' })
+      }
       return route.fallback()
     })
 
