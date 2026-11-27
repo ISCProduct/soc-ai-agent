@@ -1,0 +1,6 @@
+.env
+*.log
+.bench-out/
+# 手元でモデルを置いた場合（Compose の volume を使わず bind するとき）
+models/
+*.bin
