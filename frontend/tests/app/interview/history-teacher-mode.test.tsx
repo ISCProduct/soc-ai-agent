@@ -28,7 +28,7 @@ jest.mock('@/lib/auth', () => ({
 }))
 jest.mock('@/lib/interview', () => ({
   ...jest.requireActual('@/lib/interview'),
-  interviewApi: { listSessions: jest.fn(), getTrend: jest.fn(), getDetail: jest.fn() },
+  interviewApi: { listSessions: jest.fn(), getTrend: jest.fn(), getDetail: jest.fn(), listPlayback: jest.fn() },
 }))
 // 推移グラフと総評パネルはこのテストの対象外。描画コストと外部依存を避ける。
 jest.mock('@/components/interview/InterviewTrendChart', () => () => <div />)
@@ -38,6 +38,7 @@ const mockUser = authService.getStoredUser as jest.MockedFunction<typeof authSer
 const mockList = interviewApi.listSessions as jest.MockedFunction<typeof interviewApi.listSessions>
 const mockTrend = interviewApi.getTrend as jest.MockedFunction<typeof interviewApi.getTrend>
 const mockDetail = interviewApi.getDetail as jest.MockedFunction<typeof interviewApi.getDetail>
+const mockPlayback = interviewApi.listPlayback as jest.MockedFunction<typeof interviewApi.listPlayback>
 
 const session = {
   id: 1, user_id: 1, status: 'completed', language: 'ja', estimated_cost_usd: 0,
@@ -69,6 +70,7 @@ describe('面接履歴の教員モード', () => {
     mockList.mockResolvedValue({ sessions: [session], total: 1 })
     mockTrend.mockResolvedValue([])
     mockDetail.mockResolvedValue(detailWithTeacherReport)
+    mockPlayback.mockResolvedValue({ videos: [], cues: [], anchor: 'session_started_at' })
   })
 
   // チップは保存済み利用者情報の is_staff / is_admin で出す。

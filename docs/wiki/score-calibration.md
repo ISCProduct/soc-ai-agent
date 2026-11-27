@@ -8,7 +8,7 @@
 
 Backend 起動中に **24時間ごと**（起動時にも1回） `AutoCalibrateIfDue` が走る。
 
-1. `user_application_statuses.score_snapshot` がある**確定結果**だけを使う（通過 = 書類通過以降、不採用 = `rejected`。進行中・辞退は除外）
+1. `user_application_statuses.score_snapshot` がある**確定結果**だけを使う（通過 = 書類通過以降、不採用 = `rejected`。進行中・辞退は除外）。版付き JSON のときは `categories`（応募時点のカテゴリ別スコア）を読む。`match_score` は較正の入力にしない。旧い平坦な JSON もそのまま読む。過去の空欄は埋めない。
 2. カテゴリごとに `Signal = avg(score|通過) - avg(score|不採用)` を計算
 3. 重み = `1 + Signal/50` をサンプル数で 1.0 へ縮小し、前回から最大 ±0.3、全体は 0.1〜3.0 にクランプ
 4. 有意な変化がなければ保存スキップ。次の `CalculateMatching` から軸重みとして効く

@@ -506,3 +506,66 @@ describe('middleware: 管理者トークンをログイン更新で残す (SOCAI
     expect(response.headers.get('x-middleware-request-cookie') ?? '').not.toContain('admin_token')
   })
 })
+
+// 管理者トークンも画面からは受け取らず、httpOnly Cookie から付け直す（SOCAIAGENT-683）
+describe('middleware: X-Admin-Token は Cookie から付ける', () => {
+  const originalFetch = global.fetch
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  const jwt = (expiresInSeconds: number) =>
+    `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: '1', exp: Math.floor(Date.now() / 1000) + expiresInSeconds })}.sig`
+
+  afterEach(() => {
+    global.fetch = originalFetch
+    jest.restoreAllMocks()
+  })
+
+  it('画面が送った X-Admin-Token は捨て、Cookie の値を付ける', async () => {
+    const request = new NextRequest('http://localhost:3000/api/admin/users', {
+      headers: { 'X-Admin-Token': 'forged-admin', cookie: `user_id=1; user_token=${jwt(3600)}; admin_token=cookie-admin` },
+    })
+    const response = await middleware(request)
+    expect(response.headers.get('x-middleware-request-x-admin-token')).toBe('cookie-admin')
+  })
+
+  it('Cookie に管理者トークンが無ければ、画面が送った値も通さない', async () => {
+    const request = new NextRequest('http://localhost:3000/api/admin/users', {
+      headers: { 'X-Admin-Token': 'forged-admin', cookie: `user_id=1; user_token=${jwt(3600)}` },
+    })
+    const response = await middleware(request)
+    expect(response.headers.get('x-middleware-request-x-admin-token')).toBeNull()
+  })
+
+  it('ログインしていなければ管理者トークンを付けない', async () => {
+    const request = new NextRequest('http://localhost:3000/api/admin/users', {
+      headers: { 'X-Admin-Token': 'forged-admin', cookie: 'admin_token=cookie-admin' },
+    })
+    const response = await middleware(request)
+    expect(response.headers.get('x-middleware-request-x-admin-token')).toBeNull()
+  })
+
+  it('セッションを更新したときは、新しい管理者トークンを付ける', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ user_id: 1, user_token: jwt(3600), refresh_token: 'r2', token: 'fresh-admin' }),
+    })
+    const request = new NextRequest('http://localhost:3000/api/admin/users', {
+      headers: { cookie: `user_id=1; user_token=${jwt(-60)}; refresh_token=r1; admin_token=old-admin` },
+    })
+    const response = await middleware(request)
+    expect(response.headers.get('x-middleware-request-x-admin-token')).toBe('fresh-admin')
+  })
+
+  it('更新で管理者でなくなったら、古い管理者トークンを付けない', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ user_id: 1, user_token: jwt(3600), refresh_token: 'r2' }),
+    })
+    const request = new NextRequest('http://localhost:3000/api/admin/users', {
+      headers: { cookie: `user_id=1; user_token=${jwt(-60)}; refresh_token=r1; admin_token=old-admin` },
+    })
+    const response = await middleware(request)
+    expect(response.headers.get('x-middleware-request-x-admin-token')).toBeNull()
+  })
+})

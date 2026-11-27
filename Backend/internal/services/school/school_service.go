@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/go-sql-driver/mysql"
@@ -21,6 +22,8 @@ var (
 	ErrSchoolOrgRequired       = errors.New("organization_id is required")
 	ErrSchoolAlreadyAssigned   = errors.New("admin already assigned to this school")
 	ErrCompanyAlreadyApproved  = errors.New("company already approved for this school")
+	// ErrInvalidVideoRetention は 30/90/180/期限なし 以外を拒否する。
+	ErrInvalidVideoRetention = errors.New("interview video retention must be 30, 90, 180, or unlimited")
 )
 
 // UserReader は担当校割当の学園一致チェックに使う最小のユーザー参照（#1675）。
@@ -57,10 +60,12 @@ func (s *SchoolService) Create(input CreateSchoolInput) (*models.School, error) 
 	if input.OrganizationID == 0 {
 		return nil, ErrSchoolOrgRequired
 	}
+	days := models.DefaultInterviewVideoRetentionDays
 	school := &models.School{
-		OrganizationID: input.OrganizationID,
-		Name:           name,
-		Status:         models.SchoolStatusActive,
+		OrganizationID:              input.OrganizationID,
+		Name:                        name,
+		Status:                      models.SchoolStatusActive,
+		InterviewVideoRetentionDays: &days,
 	}
 	if err := s.repo.Create(school); err != nil {
 		return nil, err
@@ -77,6 +82,35 @@ func (s *SchoolService) Get(id uint) (*models.School, error) {
 		return nil, ErrSchoolNotFound
 	}
 	return school, nil
+}
+
+// AllowedInterviewVideoRetention は 30/90/180 と、nil（期限なし）だけを認める。
+func AllowedInterviewVideoRetention(days *int) bool {
+	if days == nil {
+		return true
+	}
+	switch *days {
+	case 30, 90, 180:
+		return true
+	default:
+		return false
+	}
+}
+
+// UpdateInterviewVideoRetention は学校管理者の設定を保存する。nil は期限なし。
+func (s *SchoolService) UpdateInterviewVideoRetention(id uint, days *int) (*models.School, error) {
+	if !AllowedInterviewVideoRetention(days) {
+		return nil, ErrInvalidVideoRetention
+	}
+	found, err := s.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	found.InterviewVideoRetentionDays = days
+	if err := s.repo.Update(found); err != nil {
+		return nil, err
+	}
+	return found, nil
 }
 
 func (s *SchoolService) List(limit, offset int) ([]models.School, int64, error) {
@@ -201,6 +235,31 @@ func (s *SchoolService) CanAdminAccessSchool(isAdmin bool, adminUserID uint, tar
 		}
 	}
 	return false, nil
+}
+
+// CanAdminAccessUser は「対象ユーザー」に対する担当校スコープ判定（#1675）。
+//
+// users.school_id は自己申告の学校名から解決されるため、担当校に含まれていても
+// その学校が対象ユーザーの学園のものでなければ通さない（fail-close）。
+// 無制限の管理者は学校で絞らないため、学校の引き直しもしない。
+// httpapi.EnsureAdminSchoolAccessForUser と面接サービスの所有者判定（SOCAIAGENT-687）が共有する。
+func (s *SchoolService) CanAdminAccessUser(isAdmin bool, actorID, targetOrganizationID uint, targetSchoolID *uint) (bool, error) {
+	restricted, allowedSchoolIDs, err := s.ResolveAccess(isAdmin, actorID)
+	if err != nil {
+		return false, err
+	}
+	if !restricted {
+		return true, nil
+	}
+	// 拒否が確定している場合は学校を引かない。
+	if targetSchoolID == nil || !slices.Contains(allowedSchoolIDs, *targetSchoolID) {
+		return false, nil
+	}
+	effective, err := s.EffectiveSchoolID(targetOrganizationID, targetSchoolID)
+	if err != nil {
+		return false, err
+	}
+	return effective != nil, nil
 }
 
 // ListAccessibleSchools は主体がフィルタUIで選べる学校一覧を返す。

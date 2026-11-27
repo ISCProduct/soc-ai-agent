@@ -132,7 +132,7 @@ func (c *GitHubController) ListRepoSummaries(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
-	summaries, err := c.githubService.ListRepoSummaries(userID)
+	summaries, err := c.githubService.ListRepoSummaries(ctx.Request().Context(), userID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get repo summaries")
 	}
@@ -173,6 +173,11 @@ func (c *GitHubController) SummarizeRepo(ctx echo.Context) error {
 		// full_name の形が正しくないのは利用者の入力の誤りなので 400 にする（#2176）
 		if errors.Is(err, github.ErrInvalidRepoFullName) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		// 本人が作成者・共同編集者として同期済みのリポジトリでなければ 404 にし、同期を促す文言を返す（SOCAIAGENT-698）。
+		// 403 にすると「存在するが権限が無い」と読めるので、存在の有無を伝えない 404 にする。
+		if errors.Is(err, github.ErrRepoNotSummarizable) {
+			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
 		// トークンの失効（401）と、レート制限以外の 403（SSO 未承認・権限不足）は、利用者が再連携・権限の付与で
 		// 直せるので 403 にし、サービスの文言（何をすればよいか）をそのまま返す（#2231 のレビュー）。

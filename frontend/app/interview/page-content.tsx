@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, Suspense } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { interviewLimits } from '@/lib/interview'
+import { preloadLive2D } from '@/lib/interview/live2d-loader'
 import { authService, User } from '@/lib/auth'
 import ConsentDialog from './components/ConsentDialog'
 import SelectionScreen, { type CompanyHints } from './components/SelectionScreen'
@@ -68,6 +69,11 @@ function InterviewContent() {
     status,
     setStatus,
   })
+
+  // 企業を選んでいる間に面接官（Live2D）の資産を読み始める。面接開始時の表示待ちを短くするため
+  useEffect(() => {
+    preloadLive2D('male')
+  }, [])
 
   // Auth check
   useEffect(() => {

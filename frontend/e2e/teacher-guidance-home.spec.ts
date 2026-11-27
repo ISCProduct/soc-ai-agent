@@ -27,7 +27,7 @@ test.describe('ホームの教員案内（狭い画面）', () => {
 
   test('取得に失敗したらエラーと再読み込みを出し、再読み込みで案内が出る', async ({ page }) => {
     let fail = true
-    await page.route('**/api/user/guidances', (route) =>
+    await page.route('**/api/bff/user/guidances', (route) =>
       fail
         ? route.fulfill({ status: 500, contentType: 'application/json', body: '{}' })
         : route.fulfill({
@@ -46,11 +46,12 @@ test.describe('ホームの教員案内（狭い画面）', () => {
     fail = false
     await errorAlert.getByRole('button', { name: '再読み込み' }).click()
     await expect(errorAlert).toHaveCount(0)
-    await expect(page.getByRole('alert').filter({ hasText: '応募先を一緒に見直しましょう' })).toBeVisible()
+    // 案内そのものは画面に出ている注意なので role="status"。取得の失敗だけが role="alert"（#2217）
+    await expect(page.getByRole('status').filter({ hasText: '応募先を一緒に見直しましょう' })).toBeVisible()
   })
 
   test('案内が0件ならエラーは出ない', async ({ page }) => {
-    await page.route('**/api/user/guidances', (route) =>
+    await page.route('**/api/bff/user/guidances', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ guidances: [] }) }),
     )
 

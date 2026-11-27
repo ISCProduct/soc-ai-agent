@@ -9,7 +9,12 @@
 
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-WF="$ROOT/.github/workflows/deployment.yml"
+WF="$ROOT/.github/workflows/deploy-production-job.yml"
+CALLER="$ROOT/.github/workflows/deployment.yml"
+if ! grep -q 'uses: \./\.github/workflows/deploy-production-job.yml' "$CALLER"; then
+  echo "FAIL deployment.yml が deploy-production-job.yml を呼んでいない" >&2
+  exit 1
+fi
 
 fail=0
 line_of() { grep -n "$1" "$WF" | head -1 | cut -d: -f1; }
