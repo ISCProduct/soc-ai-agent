@@ -188,6 +188,7 @@ def _recover_interrupted(client: Any, existing: set, apply: bool) -> Optional[Di
     if current is not None:
         client.delete_collection(STUDENT_PROFILES)  # 中断のあとに作られた空のコレクション
     if resume:
+        assert swap is not None  # resume は swap があるときだけ
         swap.modify(name=STUDENT_PROFILES)
         return {"status": "resumed", "count": old_count, "old": STUDENT_OLD}
     old.modify(name=STUDENT_PROFILES)

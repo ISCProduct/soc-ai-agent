@@ -522,12 +522,7 @@ def test_prune_students_removes_unlisted_students_from_current_and_old(monkeypat
     _seed_students(client, 5)
     rb.rebuild_student_profiles(client, apply=True)
     keep = tmp_path / "visible.txt"
-    keep.write_text("# 公開してよい学生
-0
-2
-
-4
-", encoding="utf-8")
+    keep.write_text("\n".join(["# 公開してよい学生", "0", "2", "", "4", ""]), encoding="utf-8")
 
     assert rb.prune_students(client, rb._read_user_ids(str(keep))) == {
         "apply": False, "student_profiles": 2, rb.STUDENT_OLD: 2,
