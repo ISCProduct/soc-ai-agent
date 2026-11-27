@@ -238,21 +238,11 @@ resource "aws_secretsmanager_secret_version" "admin" {
 #
 # 値は Terraform で管理しない(#1158 と同じ方針)。ここでは入れ物だけを持つ。
 # secret_version を作ると、既存の値を空文字で上書きしてしまう。
-import {
-  to = aws_secretsmanager_secret.houjin_bangou
-  id = "arn:aws:secretsmanager:ap-northeast-1:508897596159:secret:soc-app/houjin-bangou-5RpFkr"
-}
-
 resource "aws_secretsmanager_secret" "houjin_bangou" {
   name = "${var.project_name}/houjin-bangou"
   # AWS 側に入っている説明をそのまま持つ。書かないと import で消える。
   description = "国税庁 法人番号システムWeb-API のアプリケーションID"
   tags        = local.tags
-}
-
-import {
-  to = aws_secretsmanager_secret.gbizinfo
-  id = "arn:aws:secretsmanager:ap-northeast-1:508897596159:secret:soc-app/gbizinfo-KojOzj"
 }
 
 resource "aws_secretsmanager_secret" "gbizinfo" {
