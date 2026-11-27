@@ -10,7 +10,13 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from vector_store import COLLECTION_METADATA, collection_space, get_chroma_client, to_cosine_distance
+from vector_store import (
+    COLLECTION_METADATA,
+    _collection_names,
+    collection_space,
+    get_chroma_client,
+    to_cosine_distance,
+)
 
 logger = logging.getLogger("rag-review")
 
@@ -75,13 +81,35 @@ def delete_student(user_id: int) -> int:
 
 
 def _delete_from_old(user_id: int) -> None:
-    """切り替え前のコレクションからも消す。無ければ何もしない。"""
+    """切り替え前のコレクションからも消す。無ければ何もしない。
+
+    「無い」と分かったときだけ何もしない。接続の失敗などはそのまま上げる（呼び出し元の
+    DELETE /student-search/{user_id} が失敗を返し、Backend にログが出る）。握りつぶすと、
+    旧いほうに残ったまま切り戻したときに、同意撤回・退会した学生が検索に戻る。
+    """
     client = get_chroma_client()
+    if COLLECTION_STUDENT_PROFILES_OLD not in _collection_names(client):
+        return  # 切り替え前のコレクションが無い（切り替えていない・消し終わった）
     try:
         old = client.get_collection(COLLECTION_STUDENT_PROFILES_OLD)
-    except Exception:
-        return  # 切り替え前のコレクションが無い（切り替えていない・消し終わった）
+    except _MISSING_COLLECTION_ERRORS:
+        return  # 一覧を見たあとに消された
     old.delete(ids=[_doc_id(user_id)])
+
+
+def _missing_collection_errors() -> tuple:
+    """コレクションが無いときに get_collection が投げる例外（chromadb 0.6 は InvalidCollectionException、それより前は ValueError）。"""
+    errors: list = [ValueError]
+    try:
+        from chromadb.errors import InvalidCollectionException
+    except ImportError:
+        pass
+    else:
+        errors.append(InvalidCollectionException)
+    return tuple(errors)
+
+
+_MISSING_COLLECTION_ERRORS = _missing_collection_errors()
 
 
 def query_students(embedding: List[float], top_k: int, min_score: float = 0.0) -> List[Dict[str, Any]]:

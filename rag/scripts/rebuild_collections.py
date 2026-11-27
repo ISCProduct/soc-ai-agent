@@ -18,15 +18,20 @@
 
 学生プロフィール（student_profiles）は世代の接尾辞を持たないので、名前を入れ替えて cosine にする（SOCAIAGENT-554）。
   1. 学生プロフィールの書き込みを止める（/student-search/index と DELETE /student-search/{user_id}。rag-review を止め、
-     このスクリプトは別プロセスで動かすのが確実）。止めずに動かすと、写した後の更新・削除（同意撤回・退会）が失われる
+     このスクリプトは別プロセスで動かすのが確実）。止めずに動かすと、写した後の更新・削除（同意撤回・退会）が失われる。
+     rag-review を止めると企業検索・ES 添削なども止まるので、利用の少ない時間帯に行う
   2. python scripts/rebuild_collections.py --student-profiles            # 確認だけ（件数と今の距離関数）
      python scripts/rebuild_collections.py --student-profiles --apply    # 写して名前を入れ替える
      student_profiles__cos554 に cosine で写し、元を student_profiles__l2old554 に、写しを student_profiles に改名する
-  3. rag-review を起動し、学生検索の疎通を確かめる。旧いコレクションは 7日 残し（切り戻し用）、
-     そのあと --drop-student-old で消す。旧いコレクションにも退会・同意撤回した学生の埋め込みが残るので、必ず消す
+  3. rag-review を起動し、学生検索の疎通を確かめる
+  4. 止めていた間の削除は届いていない（Backend はやり直さない）。DB から今公開してよい学生の user_id を出し、
+     --prune-students <ファイル> で確かめてから --apply で消す（今と旧いコレクションの両方）
+  5. 旧いコレクションは 7日 残し（切り戻し用）、そのあと --drop-student-old で消す。
+     旧いコレクションにも退会・同意撤回した学生の埋め込みが残るので、必ず消す
   切り戻し: student_profiles を消して（または別名にして）、student_profiles__l2old554 を student_profiles に改名する。
   旧いコレクションを残している間の削除（同意撤回・退会）は旧いほうにも反映する（student_profile_store.delete_student）。
-  更新（index）は反映しないので、切り戻したら、その間に更新した学生を index し直す。
+  更新（index）は反映しないので、切り替えのあとに保存した学生は、切り戻すと切り替え前の内容で検索される
+  （Backend に index し直す経路は無く、本人が次に保存したときに直る）。切り戻したら --prune-students も流す。
   改名の途中で止まったとき（student_profiles が無い・空のまま）は、もう一度 --student-profiles --apply を動かす。
   写しがそろっていれば再開し、そろっていなければ元に戻す（--apply なしなら、どちらをするかだけを出す）。
   埋め込みは写すだけなので OpenAI は呼ばない。関連度は距離関数によらず同じ値になる（student_profile_store.relevance_score）。
@@ -36,7 +41,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -189,6 +194,54 @@ def _recover_interrupted(client: Any, existing: set, apply: bool) -> Optional[Di
     return {"status": "rolled_back", "count": old_count}
 
 
+def _all_ids(col: Any) -> List[str]:
+    """コレクションの全件の id。"""
+    ids: List[str] = []
+    offset = 0
+    while True:
+        got = list(col.get(include=[], limit=BATCH, offset=offset).get("ids") or [])
+        if not got:
+            return ids
+        ids.extend(got)
+        offset += len(got)
+
+
+def prune_students(client: Any, keep_user_ids: Set[int], apply: bool = False) -> Dict[str, Any]:
+    """公開してよい学生（keep_user_ids）以外の埋め込みを、学生プロフィールの今と旧いコレクションから消す。
+
+    rag-review を止めている間に Backend から来た削除（公開の同意を外した・退会）は届かず、Backend も
+    やり直さない（StudentIndexSyncer.Sync は WARN のログだけ。日次の EnsureDeleted は退会者だけ）。
+    そのため切り替えのあとと切り戻しのあとに、DB の「今公開してよい学生」に合わせて消す。
+    apply=False なら消す件数だけを返す。keep_user_ids が空なら全件消すことになるので止める。
+    """
+    if not keep_user_ids:
+        raise ValueError("公開してよい学生の一覧が空。全件消すことになるので止める（一覧の出力を確かめる）")
+    keep = {sps._doc_id(u) for u in keep_user_ids}
+    existing = vs._collection_names(client)
+    out: Dict[str, Any] = {"apply": apply}
+    for name in (STUDENT_PROFILES, STUDENT_OLD):
+        if name not in existing:
+            continue
+        col = client.get_collection(name)
+        stale = [i for i in _all_ids(col) if i not in keep]
+        if apply:
+            for start in range(0, len(stale), BATCH):
+                col.delete(ids=stale[start:start + BATCH])
+        out[name] = len(stale)
+    return out
+
+
+def _read_user_ids(path: str) -> Set[int]:
+    """1行に1つの user_id（空行と # で始まる行は飛ばす）。"""
+    ids: Set[int] = set()
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                ids.add(int(line))
+    return ids
+
+
 def drop_student_old(client: Any) -> List[str]:
     """切り替え前の学生プロフィールのコレクション（l2）を消す。"""
     if STUDENT_OLD not in vs._collection_names(client):
@@ -205,8 +258,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--drop-suffix", default=None, help="この世代のコレクションを消す（写しはしない）")
     parser.add_argument("--status", action="store_true", help="コレクションの距離関数と件数を出す（書き込まない）")
     parser.add_argument("--student-profiles", action="store_true", help="学生プロフィールを cosine のコレクションへ入れ替える")
-    parser.add_argument("--apply", action="store_true", help="--student-profiles で実際に写して入れ替える（省くと確認だけ）")
+    parser.add_argument("--apply", action="store_true", help="--student-profiles・--prune-students で実際に書き込む（省くと確認だけ）")
     parser.add_argument("--drop-student-old", action="store_true", help="切り替え前の学生プロフィールのコレクションを消す")
+    parser.add_argument(
+        "--prune-students",
+        metavar="FILE",
+        help="公開してよい学生の user_id の一覧（1行1つ）に無い学生を、学生プロフィールから消す（--apply を付けないと件数だけ）",
+    )
     args = parser.parse_args(argv)
 
     client = vs.get_chroma_client()
@@ -216,6 +274,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     if args.student_profiles:
         print("student_profiles:", rebuild_student_profiles(client, apply=args.apply))
+        return 0
+    if args.prune_students:
+        print("pruned:", prune_students(client, _read_user_ids(args.prune_students), apply=args.apply))
         return 0
     if args.drop_student_old:
         print("dropped:", drop_student_old(client))

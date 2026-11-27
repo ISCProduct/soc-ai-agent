@@ -474,3 +474,77 @@ def test_delete_student_also_removes_from_old_collection(monkeypatch):
     rb.drop_student_old(client)
     sps.delete_student(0)  # 旧いコレクションが無くても例外にしない
     assert "student-0" not in client.collections["student_profiles"].rows
+
+
+@pytest.mark.parametrize("error", [ConnectionError("chroma down"), RuntimeError("timeout")])
+def test_delete_student_raises_when_old_collection_delete_fails(monkeypatch, error):
+    """旧いコレクションがあるのに消せないときは、握りつぶさずに失敗を返す（Backend にログが出る）。"""
+    import student_profile_store as sps
+    from scripts import rebuild_collections as rb
+
+    client = FakeFullChroma()
+    monkeypatch.setattr(sps, "get_chroma_client", lambda: client)
+    _seed_students(client, 2)
+    rb.rebuild_student_profiles(client, apply=True)
+
+    def broken_get(name, *a, **kw):
+        raise error
+
+    monkeypatch.setattr(client, "get_collection", broken_get)
+    with pytest.raises(type(error)):
+        sps.delete_student(1)
+
+
+def test_delete_student_ignores_old_collection_dropped_after_listing(monkeypatch):
+    """一覧を見たあとに旧いコレクションが消された（コレクションが無い）ときは、何もしない。"""
+    import student_profile_store as sps
+    from scripts import rebuild_collections as rb
+
+    client = FakeFullChroma()
+    monkeypatch.setattr(sps, "get_chroma_client", lambda: client)
+    _seed_students(client, 2)
+    rb.rebuild_student_profiles(client, apply=True)
+
+    def missing(name, *a, **kw):
+        raise ValueError(f"Collection {name} does not exist.")
+
+    monkeypatch.setattr(client, "get_collection", missing)
+    assert sps.delete_student(1) == 1
+    assert "student-1" not in client.collections["student_profiles"].rows
+
+
+def test_prune_students_removes_unlisted_students_from_current_and_old(monkeypatch, tmp_path):
+    """止めていた間に公開をやめた学生を、DB の一覧に合わせて今と旧いコレクションから消す。"""
+    from scripts import rebuild_collections as rb
+
+    client = FakeFullChroma()
+    monkeypatch.setattr(rb, "BATCH", 2)  # ページングも通す
+    _seed_students(client, 5)
+    rb.rebuild_student_profiles(client, apply=True)
+    keep = tmp_path / "visible.txt"
+    keep.write_text("# 公開してよい学生
+0
+2
+
+4
+", encoding="utf-8")
+
+    assert rb.prune_students(client, rb._read_user_ids(str(keep))) == {
+        "apply": False, "student_profiles": 2, rb.STUDENT_OLD: 2,
+    }
+    assert len(client.collections["student_profiles"].rows) == 5  # 確認だけでは消さない
+
+    monkeypatch.setattr(rb.vs, "get_chroma_client", lambda: client)
+    assert rb.main(["--prune-students", str(keep), "--apply"]) == 0
+    for name in ("student_profiles", rb.STUDENT_OLD):
+        assert sorted(client.collections[name].rows) == ["student-0", "student-2", "student-4"]
+
+
+def test_prune_students_refuses_empty_list():
+    from scripts import rebuild_collections as rb
+
+    client = FakeFullChroma()
+    _seed_students(client, 2)
+    with pytest.raises(ValueError):
+        rb.prune_students(client, set(), apply=True)
+    assert len(client.collections["student_profiles"].rows) == 2

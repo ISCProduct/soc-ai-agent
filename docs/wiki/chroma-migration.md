@@ -126,21 +126,58 @@ python scripts/rebuild_collections.py --drop-suffix ""
 学生プロフィールは世代の接尾辞を持たないので、名前を入れ替える。
 
 ```sh
-# 0. 学生プロフィールの書き込みを止める（rag-review を止め、スクリプトは別プロセスで動かす）
+# 0. 学生プロフィールの書き込みを止める（rag-review を止め、スクリプトは別プロセスで動かす）。止めた時刻を控える
 # 1. 確認（件数と今の距離関数。書き込まない）
 python scripts/rebuild_collections.py --student-profiles
 # 2. student_profiles__cos554 に cosine で写し、元を student_profiles__l2old554 に、写しを student_profiles に改名する
 python scripts/rebuild_collections.py --student-profiles --apply
-# 3. rag-review を起動して学生検索の疎通を確かめる。7日 後に旧いコレクションを消す
-#    （旧いコレクションにも退会・同意撤回した学生の埋め込みが残るので、必ず消す）
+# 3. rag-review を起動して学生検索の疎通を確かめる
+# 4. 止めていた間の削除をそろえる（下の「止めていた間の削除と更新」）
+python scripts/rebuild_collections.py --prune-students visible.txt          # 消す件数だけを出す
+python scripts/rebuild_collections.py --prune-students visible.txt --apply  # 今と旧いコレクションから消す
+# 5. 7日 後に旧いコレクションを消す（旧いコレクションにも退会・同意撤回した学生の埋め込みが残るので、必ず消す）
 python scripts/rebuild_collections.py --drop-student-old
 ```
 
-切り戻し: `student_profiles` を消して（または別名にして）、`student_profiles__l2old554` を `student_profiles` に改名する。
-旧いコレクションを残している間の削除（同意撤回・退会）は旧いほうにも反映する（`student_profile_store.delete_student`）ので、切り戻しても消した学生は戻らない。
-更新（index）は旧いほうに反映しないので、切り戻したら、その間に更新した学生を index し直す。
+rag-review を止めると、学生検索だけでなく企業検索・ES 添削なども止まる。利用の少ない時間帯に行う。
+止める時間は、写す件数 ÷ 500 件（1回に写す件数）の往復ぶんに、起動と確認を足した程度（学生数を `--status` で見てから見積もる）。
 
-改名の途中で止まったとき（`student_profiles` が無い、または止まったあとに rag-review が空の `student_profiles` を作った）は、
-もう一度 `--student-profiles --apply` を動かす。写し（`student_profiles__cos554`）が元と同じ件数そろっていれば再開し、
-そろっていなければ元に戻す（`--apply` なしなら、どちらをするかだけを出す）。空の `student_profiles` は件数 0 のときだけ消す。
+#### 止めていた間の削除と更新
+
+止めている間に Backend から来た削除（希望条件の画面などで公開の同意を外した・退会した）は RAG に届かない。
+Backend の `StudentIndexSyncer.Sync` は、RAG への削除が失敗しても WARN のログ（`student vector delete failed user_id=...`）を出すだけでやり直さず、
+日次で取りこぼしを拾う `EnsureDeleted` は退会したユーザーだけが対象になる。そのままだと、公開の同意を外した学生が切り替えのあとも企業の学生検索に出続ける。
+
+そこで手順 4 で、DB の「今公開してよい学生」（`StudentSearchRepository.IsVisible` と同じ条件）に無い学生を、今と旧いコレクションの両方から消す。
+一覧は1行に1つの user_id で出す。
+
+```sql
+SELECT id FROM users
+WHERE allow_scout_visibility = 1 AND withdrawn_at IS NULL AND role = 'student' AND is_guest = 0;
+```
+
+一覧が空のときは、全件を消すことになるので止める（出力を確かめる）。消す件数が、止めていた間の WARN ログの件数より大きく違うときは、一覧の条件を見直してから `--apply` する。
+
+止めていた間に保存した学生の更新（WARN ログ `student vector index failed user_id=...`）は、止める前の内容のまま残る。
+これは RAG が落ちていたときと同じ扱いで、Backend に index し直す経路は無く、本人が次に保存したときに直る。公開の判定は手順 4 でそろうので、公開をやめた学生が出ることは無い。
+
+#### 切り戻し
+
+`student_profiles` を消して（または別名にして）、`student_profiles__l2old554` を `student_profiles` に改名する。そのあと手順 4 と同じく `--prune-students` を流す。
+
+- 旧いコレクションを残している間の削除（同意撤回・退会）は旧いほうにも反映する（`student_profile_store.delete_student`）。旧いほうから消せなかったときは失敗を返し、Backend にログが出る。手順 4 の `--prune-students` も旧いほうを対象にする
+- 更新（index）は旧いほうに反映しない。切り替えのあとに保存した学生（`users.updated_at` か `user_preferences.updated_at` が切り替えの時刻より後）は、切り戻すと切り替え前の内容で検索される。上と同じく index し直す経路は無く、本人が次に保存したときに直る。並び順は距離関数によらず同じなので、切り戻しは学生検索が壊れたときに限る
+
+#### 改名の途中で止まったとき
+
+`student_profiles` が無い、または止まったあとに rag-review が空の `student_profiles` を作ったときは、もう一度 `--student-profiles --apply` を動かす。
+写し（`student_profiles__cos554`）が元と同じ件数そろっていれば再開し、そろっていなければ元に戻す（`--apply` なしなら、どちらをするかだけを出す）。空の `student_profiles` は件数 0 のときだけ消す。
+
+#### 企業データの世代と、fetched_at_ts のバックフィル（#2455）の順番
+
+`--to-suffix` はメタデータごと写す。#2455 では rag-review が起動のたびに今の世代（`RAG_COLLECTION_SUFFIX`）へ `fetched_at_ts` を補うので、
+新しい世代は切り替えて起動したときに補われる。切り戻し先の旧い世代にも付けておくには、写す前に今の世代へ
+`scripts/backfill_fetched_at_ts.py --apply` を流す（起動時の補いが済んでいれば不要。dry-run の件数で確かめる）。
+本番の手順を組むときに、両方の PR がマージされた状態で順番を確かめる。
+
 staging で確かめてから本番で行う。
