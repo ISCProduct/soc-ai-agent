@@ -255,7 +255,7 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 		sRepo.On("FindByID", uint(200)).Return(session, nil)
 		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1, Name: "テスト太郎"}, nil)
 
-		result, err := svc.Turn(context.Background(), 1, 200, []byte("dummy-audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
+		result, err := svc.Turn(context.Background(), 1, 200, []byte("dummy-audio"), "", "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, "（聞き取れませんでした）", result.UserText)
 	})
@@ -316,7 +316,7 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 		sRepo.On("FindByID", uint(201)).Return(session, nil)
 		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1, Name: "テスト太郎"}, nil)
 
-		result, err := svc.Turn(context.Background(), 1, 201, []byte("dummy-audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
+		result, err := svc.Turn(context.Background(), 1, 201, []byte("dummy-audio"), "", "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, result.AIText)
 		assert.NotContains(t, result.AIText, "chat error")
@@ -346,7 +346,7 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 		sRepo.On("FindByID", uint(202)).Return(session, nil)
 		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1, Name: "テスト太郎"}, nil)
 
-		result, err := svc.Turn(context.Background(), 1, 202, []byte("dummy-audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
+		result, err := svc.Turn(context.Background(), 1, 202, []byte("dummy-audio"), "", "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 		assert.NoError(t, err)
 		assert.Empty(t, result.Audio)
 	})

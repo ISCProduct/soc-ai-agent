@@ -49,7 +49,7 @@ func TestTurn_DeepeningUsesSingleLLMCall(t *testing.T) {
 	)
 	svc.questionStateRepo = repo
 
-	res, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
+	res, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "", "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 	if err != nil {
 		t.Fatalf("Turn error: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestTurn_DeepeningReportsFollowUpSaveFailure(t *testing.T) {
 	)
 	svc.questionStateRepo = repo
 
-	res, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
+	res, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "", "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 	if err != nil {
 		t.Fatalf("Turn error: %v", err)
 	}

@@ -41,7 +41,7 @@ func TestTurn_OpenAI障害時はローカルへ縮退して続ける(t *testing.
 		newSessionRepoStub(&models.InterviewSession{ID: 1, UserID: 10, Status: "in_progress", Language: "ja"}),
 		&utterRepoStub{}, nil, nil, nil, openai.NewWithBaseURL(openaiDown.URL, "gpt-4o-mini"), nil,
 	)
-	result, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
+	result, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "", "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 	if err != nil {
 		t.Fatalf("Turn: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestTurn_ローカル未設定なら今まで通り(t *testing.T) {
 		newSessionRepoStub(&models.InterviewSession{ID: 1, UserID: 10, Status: "in_progress", Language: "ja"}),
 		&utterRepoStub{}, nil, nil, nil, openai.NewWithBaseURL(openaiDown.URL, "gpt-4o-mini"), nil,
 	)
-	result, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
+	result, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "", "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 	if err != nil {
 		t.Fatalf("Turn: %v", err)
 	}

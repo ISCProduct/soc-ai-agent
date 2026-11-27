@@ -285,7 +285,7 @@ func TestTurn_SavesUserThenAIUtterance(t *testing.T) {
 		utters, nil, nil, nil, openai.NewWithBaseURL(server.URL, "gpt-4o-mini"), nil,
 	)
 
-	result, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
+	result, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "", "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 	if err != nil {
 		t.Fatalf("Turn error: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestTurn_ReportsUtteranceSaveFailure(t *testing.T) {
 		&utterRepoStub{createErr: errors.New("db down")}, nil, nil, nil, openai.NewWithBaseURL(server.URL, "gpt-4o-mini"), nil,
 	)
 
-	result, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
+	result, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "", "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 	if err != nil {
 		t.Fatalf("保存の失敗でターンを止めないこと: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestTurn_DoesNotSaveWhenClientIsGone(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := svc.Turn(ctx, 10, 1, []byte("audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0); !errors.Is(err, context.Canceled) {
+	if _, err := svc.Turn(ctx, 10, 1, []byte("audio"), "", "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 	if _, err := svc.StartTurn(ctx, 10, 1, "", "", "", "", "", 0, 1, 1, 0, 0); !errors.Is(err, context.Canceled) {
