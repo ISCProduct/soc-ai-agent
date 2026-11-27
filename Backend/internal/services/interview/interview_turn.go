@@ -44,12 +44,14 @@ func historyFromUtterances(utterances []models.InterviewUtterance) []map[string]
 	return history
 }
 
-// Turn はユーザー音声を受け取り、STT→Chat→TTSを実行してTurnResultを返します
+// Turn はユーザー音声（またはテキスト回答）を受け取り、STT→Chat→TTSを実行してTurnResultを返します。
+// answerText が空でなければ STT をスキップし、その文を回答として使う（#1831 全音声失敗時のテキスト継続）。
 func (s *InterviewService) Turn(
 	ctx context.Context,
 	userID uint,
 	sessionID uint,
 	audioData []byte,
+	answerText string,
 	companyName, companyReading string,
 	companyReadingResolved bool,
 	position, companyInfo, companyType string,
@@ -75,7 +77,7 @@ func (s *InterviewService) Turn(
 
 	companyContextCh := s.prefetchCompanyContext(ctx, companyID, companyName, companyReading, companyReadingResolved, companyInfo)
 
-	userText, sttOutcome := s.transcribeTurnAudio(ctx, sessionID, turnCount, audioData, companyID, companyName, companyInfo)
+	userText, sttOutcome := s.resolveTurnAnswer(ctx, sessionID, turnCount, audioData, answerText, companyID, companyName, companyInfo)
 
 	// WEB検索・手入力で company_id=0 でも、企業名が DB 登録と一致すれば解決する (#567)
 	companyContext := <-companyContextCh
@@ -206,6 +208,26 @@ func (s *InterviewService) prefetchCompanyContext(
 		result.info = s.resolveCompanyInfo(result.id, companyName, companyInfo)
 	}()
 	return companyContextCh
+}
+
+// resolveTurnAnswer はテキスト回答があればそれを使い、無ければ STT する（#1831）。
+func (s *InterviewService) resolveTurnAnswer(
+	ctx context.Context,
+	sessionID uint,
+	turnCount int,
+	audioData []byte,
+	answerText string,
+	companyID uint,
+	companyName, companyInfo string,
+) (string, aifailover.Outcome) {
+	if trimmed := strings.TrimSpace(answerText); trimmed != "" {
+		runes := []rune(trimmed)
+		if len(runes) > maxUtteranceRunes {
+			trimmed = string(runes[:maxUtteranceRunes])
+		}
+		return trimmed, aifailover.Outcome{}
+	}
+	return s.transcribeTurnAudio(ctx, sessionID, turnCount, audioData, companyID, companyName, companyInfo)
 }
 
 // transcribeTurnAudio はユーザー音声をテキスト化する。失敗・空なら「聞き取れなかった」扱いの文を返す。

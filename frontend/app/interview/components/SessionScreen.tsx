@@ -14,6 +14,7 @@ import QuestionCaption from './session/QuestionCaption'
 import SelfView from './session/SelfView'
 import SidePanel from './session/SidePanel'
 import StatusOverlay from './session/StatusOverlay'
+import TextAnswerBar from './session/TextAnswerBar'
 import { deriveTranscriptView, sessionWarningText, urgencyOf } from './session/sessionDerive'
 import { talkDisabled, turnPhaseOf } from './session/turnPhase'
 
@@ -48,6 +49,9 @@ export interface SessionScreenProps {
   errorMessage: string | null
   /** 発話保存が再試行しても失敗したか。true なら「記録できていない」ことを画面に出す（#1476） */
   utteranceSaveFailed?: boolean
+  /** 音声縮退・テキスト継続の案内（#1831） */
+  voiceDegradeText?: string | null
+  textContinueMode?: boolean
   /** video 要素がマウントした瞬間にストリームをアタッチするための callback ref（page.tsx 側で理由を解説） */
   sessionVideoCallbackRef: RefCallback<HTMLVideoElement>
   transcriptEndRef: RefObject<HTMLDivElement | null>
@@ -59,6 +63,7 @@ export interface SessionScreenProps {
   onToggleHandsFree: () => void
   onStartRecording: () => void
   onStopRecording: () => void
+  onSubmitTextAnswer?: (text: string) => void
   onJoin: () => void
   onStop: (forced: boolean) => void
 }
@@ -92,6 +97,7 @@ export default function SessionScreen(props: SessionScreenProps) {
         warningText={isConnected ? sessionWarningText(props.sessionWarningShown, remainingSeconds) : null}
         sessionEnded={remainingSeconds <= 0}
         utteranceSaveFailed={!!props.utteranceSaveFailed}
+        voiceDegradeText={props.voiceDegradeText}
       />
 
       <Box sx={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', gap: 1.5, p: 1.5 }}>
@@ -141,6 +147,13 @@ export default function SessionScreen(props: SessionScreenProps) {
         onStopRecording={props.onStopRecording}
         onRequestEnd={() => setEndConfirmOpen(true)}
       />
+
+      {props.textContinueMode && props.onSubmitTextAnswer && (
+        <TextAnswerBar
+          disabled={!isConnected || props.turnPending || props.isRecording}
+          onSubmit={props.onSubmitTextAnswer}
+        />
+      )}
 
       <EndConfirmDialog
         open={endConfirmOpen}

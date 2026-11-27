@@ -255,9 +255,41 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 		sRepo.On("FindByID", uint(200)).Return(session, nil)
 		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1, Name: "テスト太郎"}, nil)
 
-		result, err := svc.Turn(context.Background(), 1, 200, []byte("dummy-audio"), "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
+		result, err := svc.Turn(context.Background(), 1, 200, []byte("dummy-audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, "（聞き取れませんでした）", result.UserText)
+	})
+
+	t.Run("テキスト回答があればSTTを使わず継続する", func(t *testing.T) {
+		transcribeCalled := false
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/audio/transcriptions":
+				transcribeCalled = true
+				w.WriteHeader(http.StatusInternalServerError)
+			case "/audio/speech":
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("audio"))
+			default:
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"具体的には？"}}],"text":"具体的には？"}`))
+			}
+		}))
+		defer server.Close()
+
+		sRepo := new(mockSessionRepo)
+		uRepo := new(mockUserRepo)
+		client := openai.NewWithBaseURL(server.URL, "gpt-4o-mini")
+		svc := interview.NewInterviewService(sRepo, nil, nil, uRepo, nil, client, nil)
+
+		session := newSession(205)
+		sRepo.On("FindByID", uint(205)).Return(session, nil)
+		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1, Name: "テスト太郎"}, nil)
+
+		result, err := svc.Turn(context.Background(), 1, 205, nil, "チームで開発しました", "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, "チームで開発しました", result.UserText)
+		assert.False(t, transcribeCalled)
 	})
 
 	t.Run("Chat失敗時は言い換え応答にフォールバックする", func(t *testing.T) {
@@ -284,7 +316,7 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 		sRepo.On("FindByID", uint(201)).Return(session, nil)
 		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1, Name: "テスト太郎"}, nil)
 
-		result, err := svc.Turn(context.Background(), 1, 201, []byte("dummy-audio"), "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
+		result, err := svc.Turn(context.Background(), 1, 201, []byte("dummy-audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, result.AIText)
 		assert.NotContains(t, result.AIText, "chat error")
@@ -314,7 +346,7 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 		sRepo.On("FindByID", uint(202)).Return(session, nil)
 		uRepo.On("GetUserByID", uint(1)).Return(&models.User{ID: 1, Name: "テスト太郎"}, nil)
 
-		result, err := svc.Turn(context.Background(), 1, 202, []byte("dummy-audio"), "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
+		result, err := svc.Turn(context.Background(), 1, 202, []byte("dummy-audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 		assert.NoError(t, err)
 		assert.Empty(t, result.Audio)
 	})

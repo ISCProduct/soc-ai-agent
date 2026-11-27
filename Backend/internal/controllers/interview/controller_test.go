@@ -126,7 +126,7 @@ func TestInterviewController_Turn_OmitsCompanyInfoFromResponse(t *testing.T) {
 
 	svc := &mocks.InterviewServiceMock{}
 	svc.On("Turn",
-		mock.Anything, uint(1), uint(10), []byte("audio"),
+		mock.Anything, uint(1), uint(10), []byte("audio"), "",
 		"Example", "", true, "", "private company profile", "general", uint(42),
 		0, 0, 0, 0, 0, 0,
 	).Return(&interview.TurnResult{

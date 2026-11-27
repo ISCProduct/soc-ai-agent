@@ -51,8 +51,11 @@ staging は新規インスタンスの user_data にしか届かないので、�
 
 接続先 URL を上記の環境変数へ渡せば、この縮退が有効になる。ただし **本番 Backend は Fargate のため、推論 PC の LAN IP をそのまま書いても届かない**。VPN・SSM ポートフォワード・PrivateLink などで Backend → 推論 PC の到達経路を用意したうえで URL を渡す。推論側の API は認証なしなので、公開バインドは `LOCAL_AI_BIND`（既定 `127.0.0.1`）で絞る。
 
+## テキスト継続（フロント）
+
+全音声が失敗したとき（TTS が空、または `ai_fallback` あり）は、面接画面に案内バナーを出し、字幕をオンにしたうえで文字回答欄を出す。文字回答は `POST /turn` の `answer_text`（音声は任意）で送る。マイク録音も引き続き使える。
+
 ## 未対応（別の PR）
 
-- 全音声失敗時のテキストでの面接継続の画面（フロント）。`ai_fallback` と音声なしの応答を使う
 - Realtime 失敗時の、確定した履歴からの Turn 方式への移行（今の画面は Realtime の経路を使っていない）
 - 実機（Ubuntu 8GB・GPU なし）での応答時間・品質の確認（[`infra/local-ai`](../../infra/local-ai/README.md) のチェックリスト）

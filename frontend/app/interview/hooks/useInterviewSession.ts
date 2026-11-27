@@ -13,6 +13,7 @@ import { useInterviewClock } from './useInterviewClock'
 import { useInterviewReport, resolveScoreSessionId } from './useInterviewReport'
 import { useInterviewTurns } from './useInterviewTurns'
 import { resolveFinishOutcomeMessage } from '../finishOutcome'
+import { voiceDegradeBannerText, type VoiceDegradeReason } from '../lib/aiFallback'
 import type { Utterance, InterviewCompany, Position, InterviewStatus } from '../types'
 
 export { REPORT_RETRY_FAILED_MESSAGE, type ReportStatus } from './useInterviewReport'
@@ -64,6 +65,9 @@ export function useInterviewSession({
    * 発話はサーバーが /start-turn・/turn の中で保存し、失敗を応答の utterance_save_failed で返す(#1969)。
    */
   const [utteranceSaveFailed, setUtteranceSaveFailed] = useState(false)
+  /** 音声縮退・テキスト継続（#1831）。一度入ったらセッション中は sticky。 */
+  const [voiceDegradeReason, setVoiceDegradeReason] = useState<VoiceDegradeReason>(null)
+  const [textContinueMode, setTextContinueMode] = useState(false)
   const transcriptEndRef = useRef<HTMLDivElement | null>(null)
   // タイマーのsetIntervalコールバックがstale closureでhandleStop実行時点の
   // session/userを読んでしまう(#926)のを防ぐため、常に最新値を反映するrefを使う
@@ -102,7 +106,7 @@ export function useInterviewSession({
   } = useInterviewReport({ session, user })
   const {
     inFlightTurnRef, startTurnSettledRef, historyRef, companyContextRef, companyContextGenerationRef,
-    doStartTurn, sendTurn,
+    doStartTurn, sendTurn, sendTurnText,
   } = useInterviewTurns({
     user,
     session,
@@ -128,6 +132,11 @@ export function useInterviewSession({
     setErrorMessage,
     setUtteranceSaveFailed,
     onLimitReached: () => { void handleStop(false, true) },
+    onVoiceDegraded: (reason) => {
+      setVoiceDegradeReason((prev) => (prev === 'no_audio' ? prev : reason))
+      setTextContinueMode(true)
+      setCaptionsVisible(true)
+    },
   })
 
   useHandsFreeVad({
@@ -196,6 +205,8 @@ export function useInterviewSession({
     setErrorMessage(null)
     setUtterances([])
     setPartialUser(''); setPartialAi('')
+    setVoiceDegradeReason(null)
+    setTextContinueMode(false)
     setReport(null); setReportStatus('idle'); setReportRetryError(''); setReportProgress(null); setReportFailedByServer(false)
     setRemainingSeconds(interviewLimits.maxMinutes * 60)
     setElapsedSeconds(0)
@@ -372,6 +383,9 @@ export function useInterviewSession({
     scoresAfter,
     finishFailed,
     utteranceSaveFailed,
+    voiceDegradeText: voiceDegradeBannerText(voiceDegradeReason),
+    textContinueMode,
+    sendTurnText,
     retryFinish,
     aiAudioRef,
     transcriptEndRef,

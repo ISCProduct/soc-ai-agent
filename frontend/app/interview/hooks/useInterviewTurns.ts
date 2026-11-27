@@ -9,6 +9,7 @@ import { buildCompanyInfo } from '../utils'
 import { applyCompanyReadingResponse } from '../companyReadingContext'
 import { nextQuestionIndex } from '../questionEvents'
 import { fetchAndReadWithTimeout } from '@/lib/fetch-timeout'
+import { isEmptyAudio, parseAIFallback, voiceDegradeReason } from '../lib/aiFallback'
 import type { Utterance, InterviewCompany, Position } from '../types'
 
 /**
@@ -50,6 +51,8 @@ type UseInterviewTurnsArgs = {
   setUtteranceSaveFailed: Dispatch<SetStateAction<boolean>>
   /** サーバーが上限（発話数・経過時間・予算）に達したと返したときに呼ぶ（SOCAIAGENT-696） */
   onLimitReached: () => void
+  /** 音声縮退・空音声を検出したとき（#1831）。sticky なテキスト継続 UI 用 */
+  onVoiceDegraded: (reason: 'no_audio' | 'fallback') => void
 }
 
 /**
@@ -81,14 +84,21 @@ export function useInterviewTurns({
   setErrorMessage,
   setUtteranceSaveFailed,
   onLimitReached,
+  onVoiceDegraded,
 }: UseInterviewTurnsArgs) {
   /**
    * サーバーが上限（発話数・経過時間・予算）に達したと返したら、締めの文を表示したまま
    * 既存の終了経路で面接を終え、途中までのレポートを作る（SOCAIAGENT-696）。
    * 終了処理は応答待ちのターン（＝この応答）を待つので、ここでは待たずに呼ぶ。
    */
-  const endIfLimitReached = (meta: Record<string, string>) => {
+  const endIfLimitReached = (meta: Record<string, unknown>) => {
     if (String(meta.limit_reached) === 'true') onLimitReached()
+  }
+
+  /** 空音声は再生しない。縮退メタがあれば親へ伝える（#1831）。 */
+  const noteVoiceDegrade = (meta: Record<string, unknown>, audio: Blob) => {
+    const reason = voiceDegradeReason(audio, parseAIFallback(meta))
+    if (reason) onVoiceDegraded(reason)
   }
   /**
    * 応答待ちのターン(#1476)。
@@ -140,7 +150,10 @@ export function useInterviewTurns({
    */
   const playTurnAudio = async (receiving: Promise<Blob>): Promise<void> => {
     const gen = audioGenerationRef.current
-    await playAudioBlob(await trackTurn(receiving), gen)
+    const audio = await trackTurn(receiving)
+    // TTS 失敗時は空のパートが来る。再生を試みるとエラーになり面接の流れが乱れる。
+    if (isEmptyAudio(audio)) return
+    await playAudioBlob(audio, gen)
   }
 
   const doStartTurn = async (sessionId: number, userId: number) => {
@@ -174,7 +187,7 @@ export function useInterviewTurns({
         companyContextGeneration,
         companyContextGenerationRef.current,
       )
-      const aiText: string = meta.ai_text || ''
+      const aiText = typeof meta.ai_text === 'string' ? meta.ai_text : ''
       const responseQuestionTotal = Number(meta.total_questions)
       if (Number.isSafeInteger(responseQuestionTotal) && responseQuestionTotal > 0) {
         setTotalQuestionCount(responseQuestionTotal)
@@ -192,6 +205,7 @@ export function useInterviewTurns({
         historyRef.current.push({ role: 'assistant', content: aiText })
         setUtterances(p => [...p, { role: 'ai', text: aiText }])
       }
+      noteVoiceDegrade(meta, audio)
       endIfLimitReached(meta)
       return audio
     }
@@ -254,8 +268,8 @@ export function useInterviewTurns({
         companyContextGeneration,
         companyContextGenerationRef.current,
       )
-      const userText: string = meta.user_text || ''
-      const aiText: string = meta.ai_text || ''
+      const userText = typeof meta.user_text === 'string' ? meta.user_text : ''
+      const aiText = typeof meta.ai_text === 'string' ? meta.ai_text : ''
       const responseQuestionTotal = Number(meta.total_questions)
       if (Number.isSafeInteger(responseQuestionTotal) && responseQuestionTotal > 0) {
         setTotalQuestionCount(responseQuestionTotal)
@@ -278,6 +292,95 @@ export function useInterviewTurns({
         historyRef.current.push({ role: 'assistant', content: aiText })
         setUtterances(p => [...p, { role: 'ai', text: aiText }])
       }
+      noteVoiceDegrade(meta, audio)
+      endIfLimitReached(meta)
+      return audio
+    }
+    try {
+      await playTurnAudio(receive())
+    } catch (e: unknown) {
+      if (companyContextGeneration === companyContextGenerationRef.current) {
+        setErrorMessage(parseMediaError(e))
+      }
+    } finally {
+      if (companyContextGeneration === companyContextGenerationRef.current) {
+        setTurnPending(false)
+      }
+    }
+  }
+
+  /** 音声の代わりに文字回答を送る（#1831）。 */
+  const sendTurnText = async (answerText: string) => {
+    if (!user || !session) return
+    const trimmed = answerText.trim()
+    if (!trimmed) return
+    setTurnPending(true)
+    setErrorMessage(null)
+    const formData = new FormData()
+    formData.append('answer_text', trimmed.slice(0, 2000))
+    formData.append('user_id', String(user.user_id))
+    formData.append('turn_count', String(Math.floor(historyRef.current.length / 2) + 1))
+    const progress = progressRef.current
+    formData.append('remaining_seconds', String(progress.remainingSeconds))
+    formData.append('question_index', String(progress.currentQuestionIndex))
+    formData.append('total_questions', String(progress.totalQuestionCount))
+    formData.append('question_elapsed_seconds', String(progress.questionElapsedSeconds))
+    formData.append('question_duration_seconds', String(Math.max(60, interviewLimits.questionDurationSeconds || 180)))
+    formData.append('company_name', interviewCompany?.name || '')
+    formData.append('company_reading', companyContextRef.current.reading || interviewCompany?.name_reading || '')
+    formData.append('company_reading_resolved', String(
+      companyContextRef.current.readingResolved || Boolean(interviewCompany?.name_reading),
+    ))
+    formData.append('position', selectedPosition?.title || '')
+    formData.append('company_info', buildCompanyInfo(interviewCompany))
+    formData.append('company_type', selectedPosition?.category || 'general')
+    formData.append('company_id', String(interviewCompany?.id || 0))
+    formData.append(
+      'question_hints',
+      JSON.stringify(companyQuestionHints.slice(0, 5).map((question) => question.slice(0, 300))),
+    )
+    const companyContextGeneration = companyContextGenerationRef.current
+    const receive = async (): Promise<Blob> => {
+      await startTurnSettledRef.current
+      const { meta, audio } = await fetchAndReadWithTimeout(`/api/bff/interviews/${session.id}/turn`, {
+        method: 'POST',
+        headers: { ...authService.getUserFetchHeaders() },
+        body: formData,
+      }, TURN_FETCH_TIMEOUT_MS, async res => {
+        if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+        return parseMultipartResponse(res)
+      })
+      if (companyContextGeneration !== companyContextGenerationRef.current) return audio
+      companyContextRef.current = applyCompanyReadingResponse(
+        companyContextRef.current,
+        meta,
+        companyContextGeneration,
+        companyContextGenerationRef.current,
+      )
+      const userText = typeof meta.user_text === 'string' ? meta.user_text : trimmed
+      const aiText = typeof meta.ai_text === 'string' ? meta.ai_text : ''
+      const responseQuestionTotal = Number(meta.total_questions)
+      if (Number.isSafeInteger(responseQuestionTotal) && responseQuestionTotal > 0) {
+        setTotalQuestionCount(responseQuestionTotal)
+      }
+      const questionEvent = typeof meta.question_source === 'string' && meta.question_source.trim() !== ''
+      if (questionEvent) {
+        setCurrentQuestionIndex((index) => nextQuestionIndex(index, meta.question_source))
+        questionStartedAtRef.current = Date.now()
+        setQuestionElapsedSeconds(0)
+      }
+      setIsDeepeningQuestion(Boolean(meta.is_deepening))
+      setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
+      if (String(meta.utterance_save_failed) === 'true') setUtteranceSaveFailed(true)
+      if (userText) {
+        historyRef.current.push({ role: 'user', content: userText })
+        setUtterances(p => [...p, { role: 'user', text: userText }])
+      }
+      if (aiText) {
+        historyRef.current.push({ role: 'assistant', content: aiText })
+        setUtterances(p => [...p, { role: 'ai', text: aiText }])
+      }
+      noteVoiceDegrade(meta, audio)
       endIfLimitReached(meta)
       return audio
     }
@@ -302,5 +405,6 @@ export function useInterviewTurns({
     companyContextGenerationRef,
     doStartTurn,
     sendTurn,
+    sendTurnText,
   }
 }

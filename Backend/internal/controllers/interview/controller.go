@@ -389,14 +389,24 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 	questionElapsedSeconds := parseFormInt(r, "question_elapsed_seconds", 0)
 	questionDurationSeconds := parseFormInt(r, "question_duration_seconds", 0)
 
+	// テキスト回答（全音声失敗時の継続 #1831）。あれば音声は任意。
+	answerText := strings.TrimSpace(r.FormValue("answer_text"))
+	if utf8.RuneCountInString(answerText) > 2000 {
+		return echo.NewHTTPError(http.StatusBadRequest, "answer_text too long")
+	}
+
+	var audioData []byte
 	audioFile, _, err := r.FormFile("audio")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "audio file required")
-	}
-	defer audioFile.Close()
-	audioData, err := io.ReadAll(audioFile)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to read audio")
+		if answerText == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "audio file required")
+		}
+	} else {
+		defer audioFile.Close()
+		audioData, err = io.ReadAll(audioFile)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to read audio")
+		}
 	}
 
 	result, err := c.interviewService.Turn(
@@ -404,6 +414,7 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		userID,
 		sessionID,
 		audioData,
+		answerText,
 		companyName,
 		companyReading,
 		companyReadingResolved,

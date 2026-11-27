@@ -48,7 +48,7 @@ func TestTurn_BuildsHistoryFromSavedUtterances(t *testing.T) {
 		utters, nil, nil, nil, openai.NewWithBaseURL(server.URL, "gpt-4o-mini"), nil,
 	)
 
-	if _, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0); err != nil {
+	if _, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), "",  "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0); err != nil {
 		t.Fatalf("Turn error: %v", err)
 	}
 

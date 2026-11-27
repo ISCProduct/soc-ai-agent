@@ -8,16 +8,23 @@ interface Props {
   warningText: string | null
   sessionEnded: boolean
   utteranceSaveFailed: boolean
+  /** 音声縮退・テキスト継続の案内（#1831）。出さないときは null */
+  voiceDegradeText?: string | null
 }
 
 /** タイルの上に積む通知。面接は止めずに知らせるだけ。 */
-export default function NoticeBanners({ warningText, sessionEnded, utteranceSaveFailed }: Props) {
-  if (!warningText && !utteranceSaveFailed) return null
+export default function NoticeBanners({ warningText, sessionEnded, utteranceSaveFailed, voiceDegradeText }: Props) {
+  if (!warningText && !utteranceSaveFailed && !voiceDegradeText) return null
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, px: 1.5, pt: 1.5, flexShrink: 0 }}>
       {warningText && (
         <Typography role="status" sx={{ px: 2, py: 0.75, borderRadius: 1, fontSize: 13, fontWeight: 600, color: '#fff', bgcolor: sessionEnded ? CALL.danger : 'warning.dark' }}>
           {warningText}
+        </Typography>
+      )}
+      {voiceDegradeText && (
+        <Typography role="status" sx={{ px: 2, py: 0.75, borderRadius: 1, fontSize: 13, fontWeight: 600, color: CALL.ink, bgcolor: CALL.panel, border: `1px solid ${CALL.line}` }}>
+          {voiceDegradeText}
         </Typography>
       )}
       {/* 発話保存の失敗を面接中に見せる（#1476）。面接は続行できるため止めない */}
