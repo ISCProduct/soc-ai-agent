@@ -47,6 +47,7 @@ export function ChatModals({
       {/* 分析完了モーダル */}
       <Dialog
         open={showCompletionModal}
+        aria-labelledby="chat-completion-title"
         // 全フェーズを終えた後は、続けるチャットが無い（「チャットを続ける」も出さない）ので、意図して閉じない。
         // 閉じると、次にすることの無い画面に戻ってしまう。押せる操作「結果を見る」を必ず残す（キーボードでも届く）。
         onClose={allPhasesCompleted ? undefined : onContinueChat}
@@ -59,7 +60,7 @@ export function ChatModals({
           },
         }}
       >
-        <DialogTitle sx={{ textAlign: 'center', pb: 1 }}>
+        <DialogTitle id="chat-completion-title" sx={{ textAlign: 'center', pb: 1 }}>
           <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
             聞き取りが終わりました
           </Typography>
@@ -99,6 +100,7 @@ export function ChatModals({
       {/* チャット終了確認モーダル */}
       <Dialog
         open={showEndChatModal}
+        aria-labelledby="chat-end-confirm-title"
         onClose={onCancelEndChat}
         maxWidth="sm"
         fullWidth
@@ -109,7 +111,7 @@ export function ChatModals({
           },
         }}
       >
-        <DialogTitle sx={{ textAlign: 'center', pb: 1 }}>
+        <DialogTitle id="chat-end-confirm-title" sx={{ textAlign: 'center', pb: 1 }}>
           <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: 'warning.main' }}>
             チャットを終了しますか？
           </Typography>
@@ -146,6 +148,7 @@ export function ChatModals({
       {/* 強制終了モーダル（3回の無効回答） */}
       <Dialog
         open={showTerminationModal}
+        aria-labelledby="chat-termination-title"
         // このセッションは続けられない（サーバー側で終了済み）ので、意図して閉じない（Esc・幕のタップでも閉じない）。
         // 閉じられない理由を画面の文で示し、押せる操作「新しいセッションを開始」を必ず残す（開いたときにフォーカスを置く）。
         onClose={() => {}}
@@ -159,7 +162,7 @@ export function ChatModals({
           },
         }}
       >
-        <DialogTitle sx={{ textAlign: 'center', pb: 1 }}>
+        <DialogTitle id="chat-termination-title" sx={{ textAlign: 'center', pb: 1 }}>
           <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: 'error.main' }}>
             ⚠️ チャットを終了します
           </Typography>

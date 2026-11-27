@@ -19,14 +19,15 @@ async function silenceWhatsNew(page: Page) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
   })
   // お知らせは先頭1件だけ出す（#1576）。先生の案内の取得失敗が先頭に来てリマインダーが隠れないよう空にする。
-  await page.route('**/api/user/guidances', async (route) => {
+  await page.route('**/api/bff/user/guidances', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ guidances: [] }) })
   })
 }
 
 /** 履歴書リマインダーの Alert だけに絞り込む。 */
 function reminderAlert(page: Page) {
-  return page.getByRole('alert').filter({ hasText: /履歴書/ })
+  // リマインダーは画面を開いたときから出ている注意なので role="status"（#2217）
+  return page.getByRole('status').filter({ hasText: /履歴書/ })
 }
 
 test.describe('履歴書リマインダーカード', () => {

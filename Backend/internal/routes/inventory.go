@@ -29,6 +29,7 @@ var mainGoRoutes = []Route{
 	// /api の外。監視用。
 	{Method: "GET", Path: "/health"},
 	{Method: "GET", Path: "/healthz"},
+	{Method: "GET", Path: "/ready"},
 	{Method: "GET", Path: "/metrics"},
 
 	{Method: "POST", Path: "/api/company-entry"},
@@ -63,12 +64,13 @@ func Inventory() []Route {
 	SetupCompanySearchRoutes(api, nil, "", nil, nil)
 	SetupAdminRoutes(api,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", &admincontrollers.AIBudgetController{})
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", &admincontrollers.AIBudgetController{}, nil)
 	SetupResumeRoutes(api, nil, "", nil, nil, budget)
 	SetupInterviewRoutes(api, nil, nil, "", nil, nil, budget)
 	SetupGitHubRoutes(api, nil, "", nil, nil, budget)
 	SetupESRoutes(api, nil, nil, "", nil, nil, budget)
 	SetupScheduleRoutes(api, nil, "", nil, nil)
+	SetupGraduateOutcomeRoutes(api, nil, "", nil, nil)
 	SetupPortfolioRoutes(api, nil, "", nil, nil)
 	SetupNotificationRoutes(api, nil, "", nil, nil)
 	SetupGoogleCalendarRoutes(api, nil, "", nil, nil)
@@ -86,7 +88,7 @@ func Inventory() []Route {
 		"", nil, nil)
 	SetupUserRoutes(api, nil, nil, nil, nil,
 		&usercontrollers.StudentScoutController{},
-		"", nil, nil, &usercontrollers.AIBudgetController{})
+		"", nil, nil, &usercontrollers.AIBudgetController{}, nil, nil)
 	SetupCollectiveInsightRoutes(api, nil, "", nil, nil)
 	SetupAssessmentRoutes(api, nil, "", nil, nil, budget)
 	SetupAssessmentSchoolRoutes(api, nil, nil, nil, "")

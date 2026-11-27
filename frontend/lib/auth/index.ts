@@ -86,24 +86,37 @@ function migrateAuthValue(key: string): string | null {
   return null
 }
 
-// middleware と同じマージン（期限2分前に同期・リフレッシュする）
-const USER_TOKEN_REFRESH_MARGIN_SECONDS = 120
-
-function persistUserToken(token: string) {
-  getSessionStorage()?.setItem(AUTH_USER_TOKEN_KEY, token)
-  getLocalStorage()?.setItem(AUTH_USER_TOKEN_KEY, token)
-}
-
-// 管理者トークンは httpOnly Cookie にだけ置く（SOCAIAGENT-683）。以前の版がストレージに残した値を消す。
-function clearLegacyAdminToken() {
-  getSessionStorage()?.removeItem(AUTH_TOKEN_KEY)
-  getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
+// トークンは httpOnly Cookie にだけ置く（SOCAIAGENT-683）。以前の版がストレージに残した値を消す。
+// 学生の user_token は1時間で切れ、セッションの本体は以前から Cookie（refresh_token）にあるので、
+// 消してもログアウトにはならない。
+function clearLegacyTokens() {
+  for (const storage of [getSessionStorage(), getLocalStorage()]) {
+    storage?.removeItem(AUTH_TOKEN_KEY)
+    storage?.removeItem(AUTH_USER_TOKEN_KEY)
+  }
 }
 
 let adminTokenRefreshInFlight: Promise<void> | null = null
 // 管理者トークンを確かめた時刻からこの間は問い合わせない（画面遷移のたびに往復させない）
 const ADMIN_TOKEN_CHECK_INTERVAL_MS = 10 * 60 * 1000
 let adminTokenCheckedAt = 0
+
+/**
+ * Cookie のログインセッションが生きているか（middleware が必要なら更新したうえで）。
+ * 通信断・タイムアウトは「生きていない」とみなす。
+ */
+async function hasLiveSession(): Promise<boolean> {
+  try {
+    return await fetchAndReadWithTimeout(
+      '/api/auth/session',
+      { method: 'GET', cache: 'no-store', credentials: 'same-origin' },
+      AUTH_REFRESH_TIMEOUT_MS,
+      async (res) => res.ok,
+    )
+  } catch {
+    return false
+  }
+}
 
 /**
  * 管理者トークンの Cookie を、無い・期限が近ければ middleware に更新させる（SOCAIAGENT-476, 683）。
@@ -131,21 +144,6 @@ async function refreshAdminTokenCookie(): Promise<void> {
   }
 }
 
-/** JWT の exp を検証なしで読み、期限切れ（または間もなく期限切れ）か判定する */
-function userTokenNeedsRefresh(token: string): boolean {
-  try {
-    const payload = token.split('.')[1]
-    if (!payload) return true
-    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
-    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
-    const decoded: unknown = JSON.parse(atob(padded))
-    const exp = (decoded as { exp?: unknown }).exp
-    if (typeof exp !== 'number') return true
-    return exp - Date.now() / 1000 < USER_TOKEN_REFRESH_MARGIN_SECONDS
-  } catch {
-    return true
-  }
-}
 
 export interface User {
   user_id: number
@@ -183,7 +181,7 @@ export interface AuthResponse {
 
 export const authService = {
   async login(email: string, password: string): Promise<AuthResponse> {
-    const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
+    const res = await fetch('/api/bff/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getTenantHeaders() },
       body: JSON.stringify({ email, password }),
@@ -265,29 +263,23 @@ export const authService = {
   ): Promise<AuthResponse> {
     let promoteGuest = this.isGuestSession()
     if (promoteGuest) {
-      // localStorage の user_token は1時間で切れる。本登録は必ずメール往復を挟むので、
-      // 「夜に診断 → 翌朝メールから登録」で普通に期限切れになる。
-      // 期限切れのまま送るとサーバが 401 を返し、再読み込みしても localStorage は
-      // 直らないので登録自体ができなくなる。30日のリフレッシュトークンで入れ直す。
-      try {
-        await this.ensureFreshUserToken()
-      } catch {
-        // リフレッシュも切れている（30日超・Cookie削除など）。この場合はサーバ側でも
-        // ゲスト行を特定できず、何を渡しても引き継げない。登録自体を止める理由は
-        // 無いので、引き継ぎを諦めて通常登録として続ける。
-        // 「ゲストは特定できるが昇格できない」場合（本登録済み・管理者等）は
-        // サーバが 409 を返す。そちらを黙って新規作成に倒してはいけない。
+      // ゲストのセッションは Cookie にある。本登録は必ずメール往復を挟むので、
+      // 「夜に診断 → 翌朝メールから登録」でアクセストークンは切れているが、
+      // middleware が30日のリフレッシュトークンで入れ直す。リフレッシュも切れている
+      // （30日超・Cookie削除など）ときはサーバ側でもゲスト行を特定できず、引き継げない。
+      // 登録自体を止める理由は無いので、引き継ぎを諦めて通常登録として続ける。
+      // 「ゲストは特定できるが昇格できない」場合（本登録済み・管理者等）は
+      // サーバが 409 を返す。そちらを黙って新規作成に倒してはいけない。
+      if (!(await hasLiveSession())) {
         promoteGuest = false
       }
     }
-    const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
+    const res = await fetch('/api/bff/auth/register', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...getTenantHeaders(),
-        // ゲストのときだけ送る。通常の登録でトークンを送ると、
-        // 別アカウントを作りたい場合に引き継ぎ判定へ入ってしまう。
-        ...(promoteGuest ? { 'X-User-Token': this.getStoredUserToken() || '' } : {}),
+        // ゲストのセッション（Cookie）は promote_guest のときだけ中継ルートが Backend へ渡す
       },
       body: JSON.stringify({
         email,
@@ -307,16 +299,18 @@ export const authService = {
   },
 
   async createGuest(): Promise<AuthResponse> {
-    const res = await fetch(`${BACKEND_URL}/api/auth/guest`, {
+    // セッションを発行する POST は JSON 形式のみ受け付ける（他サイトからのフォーム送信を落とすため）
+    const res = await fetch('/api/bff/auth/guest', {
       method: 'POST',
-      headers: getTenantHeaders(),
+      headers: { ...getTenantHeaders(), 'Content-Type': 'application/json' },
+      body: '{}',
     })
     if (!res.ok) throw new Error(await extractErrorMessage(res, 'ゲストログインに失敗しました。時間をおいて再度お試しください。'))
     return res.json()
   },
 
   async getUser(): Promise<User> {
-    const res = await fetch(`${BACKEND_URL}/api/auth/user`, {
+    const res = await fetch('/api/bff/auth/user', {
       headers: this.getUserFetchHeaders(),
     })
     if (!res.ok) throw new Error(await extractErrorMessage(res, 'ユーザー情報の取得に失敗しました。'))
@@ -421,15 +415,12 @@ export const authService = {
     session?.setItem(AUTH_USER_KEY, userJson)
     local?.setItem(AUTH_USER_KEY, userJson)
     // 管理者トークンは下の POST で httpOnly Cookie にだけ入れる
-    clearLegacyAdminToken()
+    clearLegacyTokens()
     adminTokenCheckedAt = 0
-    if (authResponse.user_token) {
-      session?.setItem(AUTH_USER_TOKEN_KEY, authResponse.user_token)
-      local?.setItem(AUTH_USER_TOKEN_KEY, authResponse.user_token)
-    }
 
-    // httpOnly CookieにトークンをセットしてDevTools経由の露出を防ぐ
-    // refresh_token はストレージには保存せず httpOnly Cookie のみで保持する (#616)
+    // ログイン・本登録・ゲスト作成・OAuth のコード交換は、中継ルートがすでに httpOnly Cookie を張っていて
+    // トークンを返さない。トークンが届くのは OAuth の旧方式（user=）だけで、そのときだけ Cookie にする。
+    // 旧方式の削除は SOCAIAGENT-707。
     if (authResponse.user_token) {
       const userId = typeof authResponse.user_id === 'string' ? Number(authResponse.user_id) : authResponse.user_id
       // 遷移で打ち切られないよう待つ。ただし無期限には待たない。
@@ -451,7 +442,7 @@ export const authService = {
           AUTH_REFRESH_TIMEOUT_MS,
         )
       } catch {
-        // 通信断・タイムアウト。Cookie は無いが localStorage には入っている。
+        // 通信断・タイムアウト。Cookie が張れず、次の画面でログインし直しになる。
       }
     }
   },
@@ -460,12 +451,10 @@ export const authService = {
    * 現在の利用者がゲストかどうか。
    *
    * 本登録時に診断結果を引き継ぐかの判定に使う（#1374）。
-   * 保存されたユーザーとトークンの両方が揃っているときだけ true にする。
-   * どちらかが欠けていると、サーバ側で対象を特定できず登録が失敗する。
+   * セッションが生きているかは register が Cookie で確かめる。
    */
   isGuestSession(): boolean {
-    const user = this.getStoredUser()
-    return Boolean(user?.is_guest) && Boolean(this.getStoredUserToken())
+    return Boolean(this.getStoredUser()?.is_guest)
   },
 
   getStoredUser(): User | null {
@@ -480,52 +469,9 @@ export const authService = {
     }
   },
 
-  getStoredUserToken(): string | null {
-    return migrateAuthValue(AUTH_USER_TOKEN_KEY)
-  },
-
-  // ユーザーAPIリクエスト用のヘッダーを返す（X-User-Token JWT）
+  // ユーザーAPIリクエスト用のヘッダーを返す。X-User-Token は middleware が httpOnly Cookie から付ける
   getUserFetchHeaders(): Record<string, string> {
-    const token = this.getStoredUserToken()
-    return {
-      'X-User-Token': token || '',
-      ...getTenantHeaders(),
-    }
-  },
-
-  /**
-   * httpOnly Cookie（+ middleware 自動リフレッシュ）から有効な user_token を取得し、
-   * sessionStorage / localStorage へ同期する。
-   * Backend 直叩き（面接など）はストレージの JWT を使うため、参加前に呼ぶ。
-   *
-   * 呼び出し元は「本体のリクエストの前」にこれを待つので、ここが無期限だと
-   * 本体側のタイムアウトが張られる前に止まり、何秒待っても戻らなくなる（#1501）。
-   * 面接では終了処理が応答待ちのターンを待つため、そのまま
-   * finishSession もレポートのポーリングも永久に始まらない。必ず上限を掛ける。
-   */
-  async ensureFreshUserToken(): Promise<void> {
-    const current = this.getStoredUserToken()
-    if (current && !userTokenNeedsRefresh(current)) {
-      return
-    }
-
-    // 本文(JSON)の受信中に半開きで固まる場合も打ち切りたいので、
-    // ヘッダーまでしか見ない fetchWithTimeout ではなく読み込みまで見る方を使う。
-    const data = await fetchAndReadWithTimeout(
-      '/api/auth/session',
-      { method: 'GET', cache: 'no-store', credentials: 'same-origin' },
-      AUTH_REFRESH_TIMEOUT_MS,
-      async (res): Promise<{ user_token?: string }> => {
-        if (!res.ok) {
-          throw new Error('Unauthorized: ログインの有効期限が切れました。再ログインしてください。')
-        }
-        return res.json()
-      },
-    )
-    if (!data.user_token) {
-      throw new Error('Unauthorized: ログインの有効期限が切れました。再ログインしてください。')
-    }
-    persistUserToken(data.user_token)
+    return getTenantHeaders()
   },
 
   /**
@@ -533,7 +479,7 @@ export const authService = {
    * 管理APIの X-Admin-Token は middleware が Cookie から付けるので、画面はトークンを持たない。
    */
   async ensureFreshAdminToken(): Promise<void> {
-    clearLegacyAdminToken()
+    clearLegacyTokens()
     if (Date.now() - adminTokenCheckedAt < ADMIN_TOKEN_CHECK_INTERVAL_MS) return
     if (!adminTokenRefreshInFlight) {
       adminTokenRefreshInFlight = refreshAdminTokenCookie()

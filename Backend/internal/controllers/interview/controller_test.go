@@ -23,6 +23,7 @@ import (
 	"Backend/internal/services/shared"
 	"Backend/internal/services/storage"
 
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"gorm.io/gorm"
@@ -180,6 +181,47 @@ func TestInterviewController_StartTurn_OmitsCompanyInfoFromResponse(t *testing.T
 	assert.NotContains(t, metadata, "company_info")
 	assert.Equal(t, true, metadata["company_reading_resolved"])
 	svc.AssertExpectations(t)
+}
+
+// 上限・開始前の扱い（SOCAIAGENT-696）: 上限は 200 + limit_reached、ready は 409。
+func TestInterviewController_StartTurn_LimitAndNotStarted(t *testing.T) {
+	tests := []struct {
+		name       string
+		result     *interview.TurnResult
+		err        error
+		wantStatus int
+	}{
+		{name: "上限に達したら limit_reached を返す", result: &interview.TurnResult{AIText: "締め", LimitReached: true, LimitReason: "duration"}, wantStatus: http.StatusOK},
+		{name: "開始前のセッションは409", err: interview.ErrSessionNotStarted, wantStatus: http.StatusConflict},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/interviews/10/start-turn", bytes.NewReader([]byte(`{}`)))
+			req.Header.Set("Content-Type", "application/json")
+			req = testsupport.WithUserID(req, 1)
+			rec := httptest.NewRecorder()
+			ctx := testsupport.NewCtx(req, rec)
+			ctx.SetParamNames("id")
+			ctx.SetParamValues("10")
+			svc := &mocks.InterviewServiceMock{}
+			svc.On("StartTurn", mock.Anything, uint(1), uint(10), "", "", "", "", "", uint(0), 0, 0, 0, 0).Return(tt.result, tt.err)
+
+			err := newInterviewController(svc).StartTurn(ctx)
+			if tt.wantStatus != http.StatusOK {
+				var he *echo.HTTPError
+				if !errors.As(err, &he) || he.Code != tt.wantStatus {
+					t.Fatalf("err = %v, want status %d", err, tt.wantStatus)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			metadata := readInterviewMetadata(t, rec)
+			assert.Equal(t, true, metadata["limit_reached"])
+			assert.Equal(t, "duration", metadata["limit_reason"])
+		})
+	}
 }
 
 // ---- List ----
@@ -783,6 +825,77 @@ func TestInterviewController_RegenerateReport(t *testing.T) {
 			}
 			testsupport.AssertStatus(t, newInterviewController(svc).RegenerateReport, c, tt.wantStatus)
 			svc.AssertExpectations(t)
+		})
+	}
+}
+
+func TestInterviewController_Playback_DoesNotListAnotherUsersVideos(t *testing.T) {
+	tests := []struct {
+		name       string
+		withUser   bool
+		detailErr  error
+		wantStatus int
+	}{
+		{name: "未認証は401", withUser: false, wantStatus: http.StatusUnauthorized},
+		{name: "他人のセッションは403", withUser: true, detailErr: shared.ErrForbidden, wantStatus: http.StatusForbidden},
+		{name: "セッションが無いときは404", withUser: true, detailErr: gorm.ErrRecordNotFound, wantStatus: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/interviews/9/videos", nil)
+			if tt.withUser {
+				req = testsupport.WithUserID(req, 1)
+			}
+			rec := httptest.NewRecorder()
+			c := testsupport.NewCtx(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues("9")
+
+			svc := &mocks.InterviewServiceMock{}
+			if tt.withUser {
+				svc.On("GetSessionDetail", uint(1), uint(9)).Return(nil, tt.detailErr)
+			}
+			videoRepo := &mocks.InterviewVideoRepositoryMock{}
+			ctrl := interviewcontrollers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
+			testsupport.AssertStatus(t, ctrl.Playback, c, tt.wantStatus)
+			svc.AssertExpectations(t)
+			videoRepo.AssertNotCalled(t, "FindBySessionID", mock.Anything, mock.Anything)
+		})
+	}
+}
+
+func TestInterviewController_VideoPlaybackURL_DoesNotPresignAnotherUsersVideo(t *testing.T) {
+	tests := []struct {
+		name       string
+		withUser   bool
+		ownErr     error
+		wantStatus int
+		wantOwn    bool
+	}{
+		{name: "未認証は401", withUser: false, wantStatus: http.StatusUnauthorized},
+		{name: "他人のセッションは403", withUser: true, ownErr: shared.ErrForbidden, wantStatus: http.StatusForbidden, wantOwn: true},
+		{name: "セッションが無いときは404", withUser: true, ownErr: gorm.ErrRecordNotFound, wantStatus: http.StatusNotFound, wantOwn: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/interviews/9/videos/4/url", nil)
+			if tt.withUser {
+				req = testsupport.WithUserID(req, 1)
+			}
+			rec := httptest.NewRecorder()
+			c := testsupport.NewCtx(req, rec)
+			c.SetParamNames("id", "video_id")
+			c.SetParamValues("9", "4")
+
+			svc := &mocks.InterviewServiceMock{}
+			if tt.wantOwn {
+				svc.On("EnsureSessionOwnership", uint(1), uint(9)).Return(tt.ownErr)
+			}
+			videoRepo := &mocks.InterviewVideoRepositoryMock{}
+			ctrl := interviewcontrollers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
+			testsupport.AssertStatus(t, ctrl.VideoPlaybackURL, c, tt.wantStatus)
+			svc.AssertExpectations(t)
+			videoRepo.AssertNotCalled(t, "FindByID", mock.Anything, mock.Anything)
 		})
 	}
 }

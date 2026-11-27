@@ -136,7 +136,7 @@ describe('レポート再生成API (#1476)', () => {
     await interviewApi.regenerateReport(42, 7)
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toContain('/api/interviews/42/report/regenerate')
+    expect(url).toContain('/api/bff/interviews/42/report/regenerate')
     expect(init.method).toBe('POST')
     expect(JSON.parse(String(init.body))).toEqual({ user_id: 7 })
   })
