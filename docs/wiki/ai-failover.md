@@ -45,8 +45,12 @@ OpenAI の障害時に、音声面接（`/start-turn`・`/turn`）の STT・LLM�
 Terraform では `ai_failover_local_stt_url` / `ai_failover_local_llm_url` / `ai_failover_local_llm_model` / `ai_failover_local_tts_url` / `ai_failover_local_tts_speaker`（既定は空）で prod の Backend と staging の `.env` に渡す。
 staging は新規インスタンスの user_data にしか届かないので、稼働中のインスタンスは `/opt/app/.env` も手で更新する。
 
+## ローカル推論環境（子A #1832）
+
+推論 PC 向けの独立 Compose は [`infra/local-ai/`](../../infra/local-ai/README.md)。セットアップ・ヘルス・スモーク・ベンチのスクリプトと、実機未検証のチェックリストがある。接続先 URL を上記の環境変数へ渡せば、この縮退が有効になる。
+
 ## 未対応（別の PR）
 
 - 全音声失敗時のテキストでの面接継続の画面（フロント）。`ai_fallback` と音声なしの応答を使う
 - Realtime 失敗時の、確定した履歴からの Turn 方式への移行（今の画面は Realtime の経路を使っていない）
-- 実機（Ubuntu 8GB・GPU なし）での応答時間・品質の確認（子A #1832 の環境が要る）
+- 実機（Ubuntu 8GB・GPU なし）での応答時間・品質の確認（[`infra/local-ai`](../../infra/local-ai/README.md) のチェックリスト）

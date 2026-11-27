@@ -1,0 +1,56 @@
+# 親 #1831 / 子A #1832（SOCAIAGENT-465）
+# OpenAI 障害時の縮退先（Whisper.cpp / Ollama / VOICEVOX）を推論 PC で動かす。
+# 本体の docker compose（db/app/frontend 等）とは独立。このディレクトリだけで完結する。
+#
+# 使い方: ./scripts/setup.sh → ./scripts/healthcheck.sh → ./scripts/smoke.sh
+# Backend 側の接続は docs/wiki/ai-failover.md
+
+name: soc-local-ai
+
+services:
+  whisper:
+    build:
+      context: ./whisper
+    image: soc-local-ai-whisper:local
+    restart: unless-stopped
+    ports:
+      - "${LOCAL_AI_STT_PORT:-8080}:8080"
+    environment:
+      WHISPER_MODEL: "${WHISPER_MODEL:-tiny}"
+      WHISPER_THREADS: "${WHISPER_THREADS:-}"
+    volumes:
+      - whisper_models:/models
+    healthcheck:
+      # サーバーはルートに HTML を返す。推論 API 自体は multipart 必須なので GET で生存確認する。
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+  ollama:
+    # 必要なら digest や minor タグへピン留めする（実機で確認した版を推奨）。
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "${LOCAL_AI_LLM_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  voicevox:
+    # CPU 版。GPU なしの推論 PC 向け。
+    # イメージに curl が無いことがあるので、生存確認は scripts/healthcheck.sh に寄せる。
+    image: voicevox/voicevox_engine:cpu-ubuntu20.04-latest
+    restart: unless-stopped
+    ports:
+      - "${LOCAL_AI_TTS_PORT:-50021}:50021"
+
+volumes:
+  whisper_models:
+  ollama_data:
