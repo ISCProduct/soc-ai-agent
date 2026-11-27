@@ -67,6 +67,8 @@ tags:
     description: エントリーシートの添削とリライト（未ログインでも使える）
   - name: schedule
     description: 選考スケジュール
+  - name: graduate-outcomes
+    description: 卒業生の進路実績（学生向け、自分の学校の実績を人数で）
   - name: portfolio
     description: 自己分析ポートフォリオ（診断・面接・ES・適性検査のまとめ）
   - name: notifications
@@ -182,6 +184,13 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    CompanyBusinessTags:
+      type: object
+      properties:
+        company_id: { type: integer }
+        business_tags:
+          type: array
+          items: { type: string }
     Error:
       type: object
       description: |
@@ -220,6 +229,42 @@ components:
           description: |
             本人が同意を最後に変更した日時（同意の履歴の最後の行）。一度も変更していなければ null。
             履歴の記録を始める前（20261117104108 の適用前）から同意していた人は、本人が操作するまでは 20261117104108 の適用時刻になる
+
+    GrowthHistory:
+      type: object
+      description: スコアと診断フェーズの記録（SOCAIAGENT-601）。比較は新しい2件。値はシステムの見立て。
+      required: [points, has_previous, categories, phase]
+      properties:
+        points:
+          type: array
+          description: 古い順。最大30件。
+          items: { type: object }
+        has_previous: { type: boolean, description: 比較できる1つ前の記録がある }
+        categories:
+          type: array
+          items:
+            type: object
+            required: [category, change_label]
+            properties:
+              category: { type: string }
+              previous: { type: integer, nullable: true }
+              current: { type: integer, nullable: true }
+              delta: { type: integer, nullable: true }
+              change_label:
+                type: string
+                description: 伸びた / 落ちた / 変化なし / 新しく出た / 今回は出ていない
+        phase:
+          type: object
+          required: [completed_previous, completed_current, change_label, newly_completed]
+          properties:
+            completed_previous: { type: integer }
+            completed_current: { type: integer }
+            change_label:
+              type: string
+              description: 進んだ / 戻った / 変化なし / 比較できない
+            newly_completed:
+              type: array
+              items: { type: string }
 
     CompanyInterviewQuestionInput:
       type: object
@@ -783,6 +828,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AuthResponse" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/auth/verify-email:
     get:
@@ -1095,6 +1141,9 @@ paths:
     get:
       tags: [chat]
       summary: 現在のスコアを取得する
+      description: |
+        チャット由来のスコア（適性検査を合流させる前の値）。推薦の計算・軸ごとの内訳と同じ合流後の値は
+        `GET /api/chat/axis-scores` を使う（SOCAIAGENT-611）。
       security: [{ userToken: [] }]
       parameters:
         - in: query
@@ -1187,6 +1236,41 @@ paths:
         "400": { description: match_id が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/chat/matches/{id}/axes:
+    get:
+      tags: [chat]
+      summary: 推薦1件の、軸別のマッチの内訳（あなたのスコア・企業の重視度・一致度）
+      description: |
+        SOCAIAGENT-611。`id` は推薦の `match_id`（`UserCompanyMatch` の ID）。本人の推薦だけを返し、
+        他人の推薦・存在しない推薦・企業のプロファイルが無い推薦は 404。
+        10軸ごとに `user_score`（まだ診断で測れていない軸は null）・`company_weight`・`match`（100 - 差）を返す。
+        `strengths`（あなたも企業も60以上で差が15以内）と `gaps`（企業が60以上で、あなたが20以上下回る）は
+        決まった規則で作る文章で、それぞれ3件まで。推薦順位は変えない（自己理解のための説明）。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: 軸別の内訳 }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 推薦が見つからない }
+
+  /api/chat/axis-scores:
+    get:
+      tags: [chat]
+      summary: 本人の診断の10軸のスコア（「あなたの10の傾向」）
+      description: |
+        SOCAIAGENT-611。`/api/chat/matches/{id}/axes` の `user_score` と同じ基準（その診断のスコアに適性検査を合流させ、整数に丸めた値）で返す。
+        `/api/chat/scores` は合流前のチャット由来の値なので、同じ画面で内訳と並べると数値が食い違う。
+        `axes` は10軸の並びで、まだ測れていない軸の `score` は null。本人のスコアだけを返す。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: session_id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: 10軸のスコア }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /api/chat/favorites:
     get:
       tags: [chat]
@@ -1196,11 +1280,17 @@ paths:
         閲覧や再計算で進む更新時刻では選ばない。並びは適合度の高い順。
         重みプロファイルの無い企業は件数を数える前に外す。
         `limit` は 1 以上 100 以下。未指定・0以下・数値でないときは 50。100 を超える指定は 100。
+        `offset` は何社目から返すか。未指定・0以下・数値でないときは 0。末尾を超えても空の配列を返す。
+        対象ユーザーは認証だけを見る。クエリの user_id では他人のお気に入りを読めない。
       security: [{ userToken: [] }]
       parameters:
         - in: query
           name: limit
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - in: query
+          name: offset
+          description: 何社目から返すか。0 が先頭。
+          schema: { type: integer, minimum: 0, default: 0 }
       responses:
         "200":
           description: お気に入り企業
@@ -1221,6 +1311,13 @@ paths:
                         score: { type: integer }
                         industry: { type: string }
                         job_title: { type: string }
+                  total:
+                    type: integer
+                    description: ページを切る前の社数。0件のときは省略することがある。
+                  favorite_company_ids:
+                    type: array
+                    description: ページに載らない企業も含めた、お気に入りの企業ID。適合度の高い順。
+                    items: { type: integer }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "503": { description: マッチングサービスが無い }
 
@@ -1339,11 +1436,33 @@ paths:
         "200": { description: 推移 }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/interviews/axis-comparison:
+    get:
+      tags: [interviews]
+      summary: 2回の面接の軸別差分
+      description: |
+        比較先のスコアから比較元を引く。本人のセッションだけ比較できる。
+        `/:id` より先に登録している。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: base, required: true, schema: { type: integer }, description: 比較元のセッションID }
+        - { in: query, name: target, required: true, schema: { type: integer }, description: 比較先のセッションID }
+      responses:
+        "200": { description: 軸ごとの差分 }
+        "400": { description: セッション指定が不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: セッションまたはレポートが無い }
+
   /api/interviews/{id}:
     get:
       tags: [interviews]
       summary: セッション詳細
-      description: report.teacher_report_json は職員・管理者にのみ含まれる（認証ユーザーの実ロールで決まる。#1814）。
+      description: |
+        report.teacher_report_json は職員・管理者にのみ含まれる（認証ユーザーの実ロールで決まる。#1814）。
+        report.category_breakdown_json は質問の種類ごとの評価（SOCAIAGENT-610）。
+        `[{category, score(0〜5), weakness, practice}]` の JSON 文字列で、カテゴリは面接の進め方の5種類と「企業別の質問」。
+        この列を足す前のレポートは null。
       security: [{ userToken: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -1381,21 +1500,25 @@ paths:
     post:
       tags: [interviews]
       summary: 1ターンを開始する
+      description: "発話数・StartedAt からの経過時間・（フラグ有効時）予算の上限に達すると、AI を呼ばずに固定の締め文と limit_reached=true（limit_reason: utterances / duration / budget）を返す。クライアントは /finish で面接を終える。"
       security: [{ userToken: [] }]
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses:
-        "200": { description: 開始した }
+        "200": { description: 開始した（上限時は締め文と limit_reached） }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: 開始前（ready）のセッション }
 
   /api/interviews/{id}/turn:
     post:
       tags: [interviews]
       summary: 1ターンの応答を処理する
+      description: "発話数・StartedAt からの経過時間・（フラグ有効時）予算の上限に達すると、AI を呼ばずに固定の締め文と limit_reached=true（limit_reason: utterances / duration / budget）を返す。クライアントは /finish で面接を終える。"
       security: [{ userToken: [] }]
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses:
-        "200": { description: 次の質問 }
+        "200": { description: 次の質問（上限時は締め文と limit_reached） }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: 開始前（ready）のセッション }
 
   /api/interviews/{id}/utterances:
     post:
@@ -1472,6 +1595,36 @@ paths:
         "200": { description: アップロードした }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "413": { description: 512MB を超えた }
+
+  /api/interviews/{id}/videos:
+    get:
+      tags: [interviews]
+      summary: 本人の面接録画と、発話を録画時刻へ合わせる目安
+      description: |
+        保存先のキーと恒久URLは返さない。時刻は面接開始からの目安で、録画は面接開始の直後から始まる。
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 録画一覧と発話の目安時刻 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: セッションが無い }
+
+  /api/interviews/{id}/videos/{video_id}/url:
+    get:
+      tags: [interviews]
+      summary: 本人の面接録画の短時間再生URL
+      description: セッションとユーザーが一致する完了済み録画だけ。有効期限は15分。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: video_id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: 再生URL }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 録画が無い、または本人のものではない }
+        "422": { description: まだ再生できない }
 
   /api/hr/interviews:
     get:
@@ -2153,6 +2306,43 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { description: 通知が見つからない }
 
+  /api/graduate-outcomes:
+    get:
+      tags: [graduate-outcomes]
+      summary: 自分の学校の卒業生の進路実績（企業ごとの人数）
+      description: |
+        学生は `X-User-Token` から決まり、学校もその学生の登録から決まる（#2032）。学校の学園が本人の学園と一致するときだけ実績を返す。
+        卒業生の氏名・学科・メモは返さず人数だけ。学校が未登録なら `school_linked: false` で実績は空（他校の実績は返さない）。
+        人数が3人未満の区分（企業 × 年度 × 職種）は数を出さない。企業の `total`・年度別・一覧の `total` はどれも、見せる区分の和
+        （隠した人数は入れない）。3人未満の区分があれば `total_few`・`by_year_few` を立てる。見せる区分の無い企業は `total` が null。
+        並びは人数の多い順で、見せる区分の無い企業は末尾に企業名順。年度が未登録の実績は `year: 0` で、絞り込みの選択肢には出さない。
+        無効・削除済み・審査前のゲスト投稿の企業は含めない。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: year, description: 卒業年度で絞る（1900〜2100）, schema: { type: integer } }
+        - { in: query, name: industry, description: 業界で絞る, schema: { type: string } }
+      responses:
+        "200": { description: 企業ごとの人数と、絞り込みの選択肢（年度・業界） }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/graduate-outcomes/companies/{id}:
+    get:
+      tags: [graduate-outcomes]
+      summary: 自分の学校の卒業生の、1社への進路実績（年度別・職種別の人数）
+      description: |
+        3人未満の区分（年度 × 職種）は数を出さず、`total`・年度別・職種別はどれも見せる区分の和にする（年度別の和も職種別の和も `total` と一致する）。
+        3人未満の区分があれば `total_few`・`by_year_few`・`by_position_few` を立てる。見せる区分が無ければ `total` は null で内訳も返さない。
+        企業が存在しない、または学生に見せない企業なら 404。
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: 年度別・職種別の人数 }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 企業が見つからない }
+
   /api/schedule:
     get:
       tags: [schedule]
@@ -2408,6 +2598,96 @@ paths:
       responses:
         "200":
           description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/business-tags:
+    get:
+      tags: [admin-companies]
+      summary: 事業タグの一覧を取得
+      description: |
+        全企業で共通の事業タグ一覧（名前順）。登録時に既存のタグを選び、表記ゆれを防ぐために使う。
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: タグ一覧
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  business_tags:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        created_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/companies/{id}/business-tags:
+    get:
+      tags: [admin-companies]
+      summary: 企業の事業タグを取得
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 企業の事業タグ（名前順。未登録なら空配列）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyBusinessTags"
+        "404":
+          description: 企業が存在しない
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [admin-companies]
+      summary: 企業の事業タグを置き換える
+      description: |
+        システム管理者専用（担当校つき管理者・職員は 403）。送った一覧で丸ごと置き換え、空配列で全解除する。
+        各名前は NFKC で全角・半角をそろえ、前後と連続の空白を整える。重複は1つにまとめ、
+        一覧に無い名前は新しいタグとして作る。1件64文字・1社20件まで。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [business_tags]
+              properties:
+                business_tags:
+                  type: array
+                  maxItems: 20
+                  items: { type: string, maxLength: 64 }
+              example:
+                business_tags: [クラウド, 業務システム]
+      responses:
+        "200":
+          description: 置き換え後の事業タグ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyBusinessTags"
+        "400":
+          description: business_tags が無い・上限超過
+        "404":
+          description: 企業が存在しない
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -3911,6 +4191,27 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/admin/interviews/{id}/shadow-score:
+    get:
+      tags: [admin-analytics]
+      summary: 面接のローカル採点と LLM 採点の並び
+      description: |
+        管理者だけが見る。学生向けの画面やマッチングには使わない。担当校の外は拒否する。
+        シャドー採点が無いときは 404。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: セッションまたはシャドー採点が無い
+
   /api/admin/interviews/{id}/videos:
     get:
       tags: [admin-analytics]
@@ -3975,6 +4276,25 @@ paths:
       tags: [admin-analytics]
       summary: 就職実績を登録する
       security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/graduate-employments/summary:
+    get:
+      tags: [admin-analytics]
+      summary: 就職先の内訳（氏名なし）
+      description: |
+        担当校スコープ。年度・業界・学校ごとの件数と、登録件数に占める割合を返す。
+        卒業生全体の人数が無いため内定率は計算しない。氏名は含めない。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: query
+          name: school_id
+          schema:
+            type: integer
       responses:
         "200":
           description: 成功
@@ -4673,7 +4993,10 @@ paths:
   /health:
     get:
       tags: [ops]
-      summary: ヘルスチェック
+      summary: 生存確認
+      description: |
+        プロセスが応答できることだけを返す。DB は見ない。
+        ALB と ECS のヘルスチェックはこちら（または `/healthz`）のままにする。
       security: []
       responses:
         "200":
@@ -4682,11 +5005,26 @@ paths:
   /healthz:
     get:
       tags: [ops]
-      summary: ヘルスチェック（別名）
+      summary: 生存確認（別名）
+      description: ECS ターゲットグループと ALB が使うパス。`/health` と同じで、DB は見ない。
       security: []
       responses:
         "200":
           description: "`{\"status\":\"ok\"}`"
+
+  /ready:
+    get:
+      tags: [ops]
+      summary: 起動準備の確認
+      description: |
+        DB へ ping する。失敗時は 503。
+        ALB のヘルスチェック先にはしない。DB の瞬断でタスクが落ちるため。
+      security: []
+      responses:
+        "200":
+          description: "`{\"status\":\"ok\"}`"
+        "503":
+          description: "`{\"status\":\"unavailable\"}`"
 
   /metrics:
     get:
@@ -4859,7 +5197,9 @@ paths:
         カード用の短い事業説明・上場区分・出典、初期表示用の直接子会社リスト（読み仮名順）を含む。
         資本の鏡像行（A→B と B→A）は1本に畳む。取引の `direction_known` は現状常に false
         （from/to は取得起点→相手であり、提供側→利用側ではない）。
-        事業タグ専用データは未整備のため `business_tags` は空・`business_tags_status=unavailable`。
+        各ノードの `business_tags` は登録済みの事業タグ（名前順）。初期表示で折りたたまれる企業も含め、
+        返すノード全件に付く。タグがあれば `business_tags_status=available`、未登録・未確認なら
+        `business_tags=[]`・`business_tags_status=unavailable`（業種などから推測して補わない）。
         採用情報は含めない。審査前のゲスト投稿企業と停止中（is_active=false）の企業はノードから除外する。
 
         レート制限は IP 単位 300回/10分（`CORRELATION_MAP_RATE_LIMIT_PER_IP`、compare と共通）。
@@ -5004,6 +5344,95 @@ paths:
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/user/growth-history:
+    get:
+      tags: [user]
+      summary: スコアと診断フェーズの成長履歴を取得
+      description: |
+        本人の10カテゴリ適性と診断フェーズの記録（SOCAIAGENT-601）。
+        クエリの user_id は見ない。トークンの本人だけを返す。
+        比較は新しい2件。記録はこの機能を入れてから始まり、過去のスコアは復元しない。
+        値はシステムの見立てであり、確定した適性ではない。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GrowthHistory" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/admin/students/{id}/growth-history:
+    get:
+      tags: [admin-users]
+      summary: 担当校の学生の成長履歴を取得
+      description: |
+        職員が担当校の学生について、スコアと診断フェーズの記録を見る（SOCAIAGENT-601）。
+        担当外の学生は 403。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GrowthHistory" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 学生がいない }
+  /api/user/interview-video-retention:
+    get:
+      tags: [user]
+      summary: 自分の学校の面接動画の保持期間を取得
+      description: |
+        学校が選んだ保持期間（SOCAIAGENT-671）。30 / 90 / 180 日、または期限なし。
+        学校が無い学生は既定の 90 日。クエリの user_id は見ない。
+        退会者は対象外で、退会後12ヶ月の削除に従う。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [days, unlimited]
+                properties:
+                  days: { type: integer, nullable: true, description: 期限なしのときは null }
+                  unlimited: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/admin/schools/{id}/interview-video-retention:
+    put:
+      tags: [admin-schools]
+      summary: 学校の面接動画の保持期間を更新
+      description: |
+        学校管理者だけが変更できる（SOCAIAGENT-671）。職員は 403。
+        `days` は 30、90、180、または null（期限なし）。
+        短くしても、公開から30日の猶予が終わるまでは既存の録画を消さない。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [days]
+              properties:
+                days: { type: integer, nullable: true }
+      responses:
+        "200": { description: 更新した期間 }
+        "400": { description: 選べない日数 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 学校がいない }
   /api/user/training-consent:
     get:
       tags: [user]

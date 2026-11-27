@@ -56,6 +56,12 @@ export const ADMIN_NAV: AdminNavGroup[] = [
         cta: 'ベクトルDB管理へ',
       },
       {
+        title: '診断品質',
+        description: '診断の自動評価が低いセッションを確認します。学生の適性そのものではありません。',
+        href: '/admin/diagnosis-quality',
+        cta: '確認が必要な診断を見る',
+      },
+      {
         title: 'スコア精度検証',
         description: '相関分析・フェーズ別メトリクス・A/Bテスト・キャリブレーションを管理します。',
         href: '/admin/score-validation',

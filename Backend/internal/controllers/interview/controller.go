@@ -17,6 +17,7 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
@@ -65,6 +66,49 @@ func (c *InterviewController) GetTrend(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"points": points,
 	})
+}
+
+// CompareAxes GET /api/interviews/axis-comparison?base=&target=
+// 2回の面接について、評価軸ごとの差分を返す。
+func (c *InterviewController) CompareAxes(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	baseID, err := queryUint(ctx, "base")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "base にセッションIDを指定してください")
+	}
+	targetID, err := queryUint(ctx, "target")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "target にセッションIDを指定してください")
+	}
+	result, err := c.interviewService.CompareAxes(userID, baseID, targetID)
+	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		if errors.Is(err, interviewsvc.ErrInvalidComparison) {
+			return echo.NewHTTPError(http.StatusBadRequest, "異なる2つのセッションを指定してください")
+		}
+		if errors.Is(err, interviewsvc.ErrReportNotReady) {
+			return echo.NewHTTPError(http.StatusNotFound, "report not yet available")
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		}
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, result)
+}
+
+func queryUint(ctx echo.Context, key string) (uint, error) {
+	raw := ctx.QueryParam(key)
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || id == 0 {
+		return 0, err
+	}
+	return uint(id), nil
 }
 
 // GetReport GET /api/interviews/:id/report
@@ -225,6 +269,89 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 	})
 }
 
+// Playback GET /api/interviews/:id/videos
+// 本人の録画一覧と、発話を録画時刻へ合わせるための目安を返す。保存先のキーは返さない。
+func (c *InterviewController) Playback(ctx echo.Context) error {
+	sessionID, userID, err := c.ownedSession(ctx)
+	if err != nil {
+		return err
+	}
+	detail, err := c.interviewService.GetSessionDetail(userID, sessionID)
+	if err != nil {
+		return interviewAccessError(err)
+	}
+	videos := []interviewsvc.StudentVideo{}
+	if c.videoUpload != nil {
+		videos, err = c.videoUpload.ListForUser(ctx.Request().Context(), sessionID, userID)
+		if err != nil {
+			return httpapi.InternalError(err)
+		}
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"videos": videos,
+		"cues":   interviewsvc.ReviewCues(detail.Session.StartedAt, detail.Utterances),
+		"anchor": "session_started_at",
+	})
+}
+
+// VideoPlaybackURL GET /api/interviews/:id/videos/:video_id/url
+// 本人の完了済み録画にだけ、15分の再生URLを発行する。
+func (c *InterviewController) VideoPlaybackURL(ctx echo.Context) error {
+	sessionID, userID, err := c.ownedSession(ctx)
+	if err != nil {
+		return err
+	}
+	videoID, err := httpapi.UintParam(ctx, "video_id")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid video ID")
+	}
+	if c.videoUpload == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "video playback is not configured")
+	}
+	if err := c.interviewService.EnsureSessionOwnership(userID, sessionID); err != nil {
+		return interviewAccessError(err)
+	}
+	url, expiresAt, err := c.videoUpload.PresignForUser(ctx.Request().Context(), sessionID, videoID, userID)
+	if err != nil {
+		if errors.Is(err, interviewsvc.ErrVideoNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "video not found")
+		}
+		if errors.Is(err, interviewsvc.ErrVideoNotReady) {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, "video is not available yet")
+		}
+		if errors.Is(err, interviewsvc.ErrVideoPlaybackUnavailable) {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "video playback is not configured")
+		}
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]string{
+		"url":        url,
+		"expires_at": expiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
+func (c *InterviewController) ownedSession(ctx echo.Context) (uint, uint, error) {
+	sessionID, err := httpapi.UintParam(ctx, "id")
+	if err != nil {
+		return 0, 0, echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
+	}
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return 0, 0, echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	return sessionID, userID, nil
+}
+
+func interviewAccessError(err error) error {
+	if errors.Is(err, shared.ErrForbidden) {
+		return echo.NewHTTPError(http.StatusForbidden, "forbidden")
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	return httpapi.InternalError(err)
+}
+
 // Turn POST /api/interviews/:id/turn
 func (c *InterviewController) Turn(ctx echo.Context) error {
 	sessionID, err := httpapi.UintParam(ctx, "id")
@@ -298,10 +425,15 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrSessionFinished) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		if errors.Is(err, interviewsvc.ErrSessionNotStarted) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		return httpapi.InternalError(err)
 	}
 
 	return writeTurnMultipart(ctx, map[string]any{
+		"limit_reached":            result.LimitReached,
+		"limit_reason":             result.LimitReason,
 		"user_text":                result.UserText,
 		"ai_text":                  result.AIText,
 		"utterance_save_failed":    result.UtteranceSaveFailed,
@@ -370,10 +502,15 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrSessionFinished) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		if errors.Is(err, interviewsvc.ErrSessionNotStarted) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		return httpapi.InternalError(err)
 	}
 
 	return writeTurnMultipart(ctx, map[string]any{
+		"limit_reached":            result.LimitReached,
+		"limit_reason":             result.LimitReason,
 		"ai_text":                  result.AIText,
 		"utterance_save_failed":    result.UtteranceSaveFailed,
 		"question_source":          result.QuestionSource,

@@ -19,6 +19,7 @@
 - RDS MySQL（`db.t4g.micro`、`deletion_protection=true` が既定）
 - S3 + Secrets Manager
 - Route53: `<domain_name>`（apex, frontend） / `api.<domain_name>`（backend）を ALB に ALIAS レコードで紐付け
+- Discord の受け口は既定では作らない（`discord_bot_enabled`）。今の受け口は staging の Lambda。手順は `automation/discord/README.md`
 
 ## 前提
 
@@ -55,6 +56,10 @@ cp backend.hcl.example backend.hcl
 # bucket / dynamodb_table を bootstrap 出力に合わせて編集（key は prod/terraform.tfstate）
 terraform init -backend-config=backend.hcl
 ```
+
+> **既存の作業ディレクトリは `-upgrade` が必要:** Discord の受け口（`discord_lambda.tf`）で `archive` provider を追加した。
+> すでに `terraform init` 済みの環境では、lock file にこの provider が無いため `terraform init -upgrade -backend-config=backend.hcl` を実行する。
+> 本番で `discord_bot_enabled = true` にする手順（apply → 実コード配置 → Interactions Endpoint 切り替え、`BACKLOG_API_KEY` を #2563 の `DISCORD_BACKLOG_BOT_SECRET_ID` 方式に揃える）は `automation/discord/README.md` の「本番への切り替え手順」を参照。
 
 ### 4. plan / apply
 

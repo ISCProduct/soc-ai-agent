@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Alert,
   Badge,
   Box,
   Button,
@@ -20,6 +19,7 @@ import {
   Typography,
 } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
+import { Alert } from '@/components/common/Alert'
 import {
   MAX_CONSULTATION_LENGTH,
   askTeacher,
@@ -166,7 +166,7 @@ export default function ConsultationsPage() {
           <Alert severity="error" sx={{ mb: 1 }} action={<Button color="inherit" size="small" onClick={() => void load()}>再読み込み</Button>}>{error}</Alert>
         )}
         {unreadError && (
-          <Alert severity="warning" sx={{ mb: 1 }} action={<Button color="inherit" size="small" onClick={() => void refreshUnread()}>再取得</Button>}>
+          <Alert severity="warning" role="alert" sx={{ mb: 1 }} action={<Button color="inherit" size="small" onClick={() => void refreshUnread()}>再取得</Button>}>
             未読の数を読み込めませんでした。
           </Alert>
         )}
@@ -206,8 +206,8 @@ export default function ConsultationsPage() {
         )}
       </Container>
 
-      <Dialog open={openId !== null} onClose={() => setOpenId(null)} fullWidth maxWidth="sm">
-        <DialogTitle sx={{ pr: 6 }}>
+      <Dialog open={openId !== null} onClose={() => setOpenId(null)} fullWidth maxWidth="sm" aria-labelledby="student-consultation-dialog-title">
+        <DialogTitle id="student-consultation-dialog-title" sx={{ pr: 6 }}>
           相談のやり取り
           <IconButton aria-label="閉じる" onClick={() => setOpenId(null)} sx={{ position: 'absolute', right: 8, top: 8 }}>
             <CloseIcon />

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { SERVER_BACKEND_URL } from '@/lib/auth/session-cookies'
 import { respondWithStudentSession } from '@/lib/auth/issue-session'
+import { rejectCrossSiteSessionPost } from '@/lib/auth/session-request'
 import { buildProxyNetworkErrorResponse, extractUserAuthHeaders } from '@/lib/api-proxy'
 
 /**
@@ -12,7 +13,7 @@ const ALLOWED_PATHS = [
   // ログイン・本登録・ゲスト作成。応答のトークンはここで Cookie にし、画面へは渡さない
   /^auth\/(login|register|guest)$/,
   /^interviews(\/|$)/,
-  /^user\/(preferences|industries|guidances|training-consent|scouts|scout-blocks)(\/|$)/,
+  /^user\/(preferences|industries|guidances|training-consent|scouts|scout-blocks|interview-video-retention)(\/|$)/,
   /^auth\/user$/,
   /^realtime\/token$/,
 ]
@@ -36,6 +37,12 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
   const joined = path.join('/')
   if (path.some((seg) => seg === '' || seg === '.' || seg === '..') || !ALLOWED_PATHS.some((re) => re.test(joined))) {
     return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
+
+  // ログイン・登録・ゲスト作成はセッション Cookie を発行するので、他サイトからの送信を落とす
+  if (SESSION_ISSUING.test(joined)) {
+    const rejected = rejectCrossSiteSessionPost(request, `bff-${joined}`)
+    if (rejected) return rejected
   }
 
   const headers: Record<string, string> = extractUserAuthHeaders(request)

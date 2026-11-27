@@ -17,6 +17,7 @@ import (
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/organization"
 	"Backend/internal/services/prompts"
+	"Backend/internal/services/videoretention"
 	"Backend/migrations"
 	"context"
 	"errors"
@@ -98,7 +99,7 @@ func bootstrap() (*config.Config, *gorm.DB, *openai.Client, *config.OAuthConfig)
 }
 
 // newEchoServer はグローバルミドルウェア・メトリクス・ヘルスチェックを設定した Echo を返す。
-func newEchoServer(sentryOn bool, organizationService *organization.OrganizationService) *echo.Echo {
+func newEchoServer(sentryOn bool, organizationService *organization.OrganizationService, db *gorm.DB) *echo.Echo {
 	// Echo初期化
 	e := echo.New()
 	e.HideBanner = true
@@ -146,20 +147,41 @@ func newEchoServer(sentryOn bool, organizationService *organization.Organization
 		log.Println("[metrics] /metrics を有効化しました（Bearer 認証）")
 	}
 
-	// ヘルスチェックエンドポイント
-	// /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
-	// /health は後方互換のため維持
+	// /health と /healthz は生存確認。DB を見ない。
+	// ALB と ECS のヘルスチェックは /healthz のままにする。DB の瞬断でタスクを落とさないため。
+	// DB まで見る確認は /ready。
 	healthHandler := func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	}
 	e.GET("/health", healthHandler)
 	e.GET("/healthz", healthHandler)
+	e.GET("/ready", readyHandler(db))
 
 	return e
 }
 
+func readyHandler(db *gorm.DB) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if db == nil {
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		}
+		sqlDB, err := db.DB()
+		if err != nil {
+			slog.Warn("readiness: db handle", "err", err)
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		}
+		ctx, cancel := context.WithTimeout(c.Request().Context(), 2*time.Second)
+		defer cancel()
+		if err := sqlDB.PingContext(ctx); err != nil {
+			slog.Warn("readiness: ping failed", "err", err)
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		}
+		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	}
+}
+
 // startMaintenanceJobs は定期実行ジョブを safego 経由で起動する。
-func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionService *auth.UserDeletionService, notificationService *notificationsvc.Service, pendingRegistrationRepo *repositories.PendingRegistrationRepository, refreshTokenRepo *repositories.UserRefreshTokenRepository, companyUserRefreshRepo *repositories.CompanyUserRefreshTokenRepository, scoreValidationService *admin.ScoreValidationService) {
+func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionService *auth.UserDeletionService, notificationService *notificationsvc.Service, pendingRegistrationRepo *repositories.PendingRegistrationRepository, refreshTokenRepo *repositories.UserRefreshTokenRepository, companyUserRefreshRepo *repositories.CompanyUserRefreshTokenRepository, scoreValidationService *admin.ScoreValidationService, apiCallLogRepo *repositories.APICallLogRepository, videoRetention *videoretention.Purger) {
 	// 以下の定期実行は safego 経由で起動する。素の go だと 1 回の panic で
 	// Backend プロセスが丸ごと落ち、全ユーザーが 502 になる(#1405, #1446)。
 	// Every は各回を個別に recover するので、1 回落ちても次の回は走る。
@@ -183,6 +205,14 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 			slog.Warn("scout index reconcile incomplete", "attempted", attempted, "failed", failed)
 		}
 
+		// 使われなくなったゲスト（リフレッシュトークンの最終発行から7日）を退会させる（SOCAIAGENT-689）。
+		// 通常の退会と同じく12か月残し、保持期間を過ぎたらこの下のパージで物理削除される。
+		if expired, err := userDeletionService.ExpireStaleGuests(context.Background(), time.Now().UTC()); err != nil {
+			slog.Error("expire stale guests failed", "error", err)
+		} else if expired > 0 {
+			slog.Info("expired stale guests", "count", expired)
+		}
+
 		n, err := userDeletionService.PurgeExpiredWithdrawals(time.Now().UTC())
 		if err != nil {
 			slog.Error("purge expired withdrawals failed", "error", err)
@@ -197,9 +227,31 @@ func startMaintenanceJobs(crawlService *company.CrawlService, userDeletionServic
 	// 退会ユーザーの処理とは別の周期にする。あちらは RAG への HTTP を退会者ごとに待つので、
 	// 障害時に何時間も塞がり、DB だけで済むこの削除まで止まってしまうため（#2179 のレビュー）。
 	// 件数と失敗は Run の中でログに出す。
+	// 学校の保持期間を過ぎた面接動画（SOCAIAGENT-671）。退会の削除とは別。
+	// 公開から30日の猶予が終わるまでは何も消さない。
+	if videoRetention != nil {
+		safego.Every(24*time.Hour, true, func() {
+			n, err := videoRetention.Purge(context.Background(), time.Now().UTC())
+			if err != nil {
+				slog.Error("interview video retention purge failed", "error", err)
+				return
+			}
+			if n > 0 {
+				slog.Info("purged expired interview videos", "count", n)
+			}
+		})
+	}
+
 	expiredTokenPurger := maintenance.NewExpiredTokenPurger(pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, slog.Default())
 	safego.Every(24*time.Hour, true, func() {
 		expiredTokenPurger.Run(time.Now().UTC())
+	})
+
+	// api_call_logs は退会では消さない。24ヶ月より古い行だけ、日次合計へ畳んでから消す（SOCAIAGENT-528）。
+	// 学校の利用額と、単価を変えたあとの再計算の元を残すため。
+	apiCallLogRetainer := maintenance.NewAPICallLogRetainer(apiCallLogRepo, slog.Default())
+	safego.Every(24*time.Hour, true, func() {
+		apiCallLogRetainer.Run(context.Background(), time.Now().UTC())
 	})
 
 	// #203 スコアキャリブレーション自動適用（1日1回）。

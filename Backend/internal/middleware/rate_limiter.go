@@ -189,6 +189,12 @@ var VerificationResendRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, env
 // 同じ人のメールボックスに、短時間に何通も送らないための上限(サービス層が使う)。
 var VerificationResendEmailRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("VERIFICATION_RESEND_RATE_LIMIT_PER_EMAIL", 3))
 
+// GuestCreateRateLimiter はゲスト作成（POST /api/auth/guest）の IP 単位の制限器 (SOCAIAGENT-689)。
+// 未認証でユーザー行とトークンを作れるので、連打で行を積み上げられないための上限。
+// 学校の共有 IP・BFF 経由で IP が収束するため緩めに取り、環境変数で調整できるようにする。
+// ponytail: インメモリのため、ECS のタスクごとに数える。厳密にしたい場合は Redis 版に差し替える。
+var GuestCreateRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("GUEST_CREATE_RATE_LIMIT_PER_IP", 20))
+
 // RegistrationRequestRateLimiter / RegistrationRequestEmailRateLimiter は登録申請(確認メール送信)の制限器。
 // 認証メール再送と同じ値・同じ環境変数で調整する。回数は再送とは別に数える。
 var RegistrationRequestRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("VERIFICATION_RESEND_RATE_LIMIT_PER_IP", 10))
@@ -210,6 +216,11 @@ func ConfigureRateLimiters(login, passwordReset KeyRateLimiter) {
 // ALB から見た送信元は frontend タスクの出口IP1つに収束する。展示会会場のNATでも同様。
 // したがってIP単位は緩く取り、課金の総量は下の全体上限で止める。
 var GuestAIRateLimiter KeyRateLimiter = NewRateLimiter(10*time.Minute, envPositiveInt("GUEST_AI_RATE_LIMIT_PER_IP", 300))
+
+// AuthenticatedAIRateLimiter は認証済み利用者の AI 呼び出しを毎分で止める（SOCAIAGENT-529）。
+// 日次予算とは別。漏れたトークンで毎秒叩かれると、予算の集計が追いつく前に費用が積み上がる。
+// 面接の発話は数秒に1回なので、60回/分なら会話は通り、スクリプトの連打は止まる。
+var AuthenticatedAIRateLimiter KeyRateLimiter = NewRateLimiter(time.Minute, envPositiveInt("AUTHED_AI_RATE_LIMIT_PER_MINUTE", 60))
 
 // GuestAIGlobalRateLimiter は同エンドポイント群の全体上限（#1154）。
 // IPを変えれば per-IP 制限は回避できるため、実質的なコスト上限はこちらが担う。

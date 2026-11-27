@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	stdlog "log"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -233,4 +234,102 @@ func (r *APICallLogRepository) CountSearchCallsSince(since time.Time) (int64, er
 		Where("called_at >= ? AND LOWER(model) LIKE ?", since, "%search%").
 		Count(&count).Error
 	return count, err
+}
+
+const apiCallLogRetentionLock = "api_call_log_retention"
+
+// 日次合計へ畳む列。利用者 ID と遅延は残さない（SOCAIAGENT-528）。
+// school_id / organization_id の NULL は 0 に寄せ、UNIQUE が NULL を別物として増殖しないようにする。
+// cost_usd は元表で NULL を許す。全部 NULL の SUM は NULL になり、日次表の NOT NULL に入らない。
+const apiCallLogRollupInsert = `
+INSERT INTO api_call_log_daily (
+  called_on, model, feature, provider, school_id, organization_id,
+  prompt_stage, prompt_version, prompt_ab_group, price_basis, via_fallback,
+  prompt_tokens, completion_tokens, total_tokens, cost_usd,
+  audio_seconds, characters, web_search_calls, call_count
+)
+SELECT DATE(called_at), model, feature, provider,
+       IFNULL(school_id, 0), IFNULL(organization_id, 0),
+       prompt_stage, prompt_version, prompt_ab_group, price_basis, via_fallback,
+       SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens), IFNULL(SUM(cost_usd), 0),
+       SUM(audio_seconds), SUM(characters), SUM(web_search_calls), COUNT(*)
+FROM api_call_logs
+WHERE id IN (%s)
+GROUP BY DATE(called_at), model, feature, provider,
+         IFNULL(school_id, 0), IFNULL(organization_id, 0),
+         prompt_stage, prompt_version, prompt_ab_group, price_basis, via_fallback
+ON DUPLICATE KEY UPDATE
+  prompt_tokens = prompt_tokens + VALUES(prompt_tokens),
+  completion_tokens = completion_tokens + VALUES(completion_tokens),
+  total_tokens = total_tokens + VALUES(total_tokens),
+  cost_usd = cost_usd + VALUES(cost_usd),
+  audio_seconds = audio_seconds + VALUES(audio_seconds),
+  characters = characters + VALUES(characters),
+  web_search_calls = web_search_calls + VALUES(web_search_calls),
+  call_count = call_count + VALUES(call_count)`
+
+const apiCallLogRetentionSelect = `
+SELECT id FROM api_call_logs
+WHERE called_at < ?
+ORDER BY id
+LIMIT ?
+FOR UPDATE`
+
+// RollupBatch は cutoff より古い行を最大 limit 件、日次合計へ足してから消す。
+//
+// 合計の加算と削除は同じトランザクションで行う。途中で落ちても、足した分が消されずに残らない。
+// 複数台が同時に走ると二重に足すので、GET_LOCK を取れなかった回は何もしない（ran=false）。
+func (r *APICallLogRepository) RollupBatch(ctx context.Context, cutoff time.Time, limit int) (int, bool, error) {
+	if limit <= 0 {
+		return 0, true, nil
+	}
+	var deleted int
+	var ran bool
+	err := r.db.WithContext(ctx).Connection(func(conn *gorm.DB) error {
+		var got *int
+		if err := conn.Raw("SELECT GET_LOCK(?, 0)", apiCallLogRetentionLock).Scan(&got).Error; err != nil {
+			return err
+		}
+		if got == nil || *got != 1 {
+			return nil
+		}
+		ran = true
+		defer conn.Exec("SELECT RELEASE_LOCK(?)", apiCallLogRetentionLock)
+		return conn.Transaction(func(tx *gorm.DB) error {
+			n, err := rollupLockedBatch(tx, cutoff, limit)
+			deleted = n
+			return err
+		})
+	})
+	return deleted, ran, err
+}
+
+func rollupLockedBatch(tx *gorm.DB, cutoff time.Time, limit int) (int, error) {
+	var ids []uint
+	if err := tx.Raw(apiCallLogRetentionSelect, cutoff, limit).Scan(&ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	insert := fmt.Sprintf(apiCallLogRollupInsert, placeholders(len(ids)))
+	if err := tx.Exec(insert, args...).Error; err != nil {
+		return 0, err
+	}
+	del := "DELETE FROM api_call_logs WHERE id IN (" + placeholders(len(ids)) + ")"
+	if err := tx.Exec(del, args...).Error; err != nil {
+		return 0, err
+	}
+	return len(ids), nil
+}
+
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.Repeat("?,", n-1) + "?"
 }

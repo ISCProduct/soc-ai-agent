@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, Box, Button, CircularProgress, Stack, TextField, Typography } from '@mui/material'
+import { Box, Button, CircularProgress, Stack, TextField, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { MAX_CONSULTATION_LENGTH, countConsultationChars, type ConsultationThread as Thread } from '@/lib/consultation'
 
 type Props = {
@@ -111,7 +112,7 @@ export function ConsultationThread({ me, load, send, onChanged }: Props) {
   return (
     <Stack spacing={1.5}>
       {error && (
-        <Alert severity="warning" action={retry}>
+        <Alert severity="warning" role="alert" action={retry}>
           やり取りを最新にできませんでした。表示が古い可能性があります（{error}）
         </Alert>
       )}

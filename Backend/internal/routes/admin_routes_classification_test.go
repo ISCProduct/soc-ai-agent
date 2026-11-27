@@ -49,7 +49,9 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"GET /teacher/students/tendency-analysis":               classStaff,
 		"POST /teacher/students/:id/guidances":                  classStaff,
 		"GET /teacher/students/:id/es-reviews":                  classStaff,
+		"GET /students/:id/growth-history":                      classStaff,
 		"GET /interviews":                                       classStaff,
+		"GET /interviews/:id/shadow-score":                      classStaff,
 		"GET /interviews/:id/videos":                            classStaff,
 		"GET /interviews/videos/:video_id/url":                  classStaff,
 		"GET /dashboard/users":                                  classStaff,
@@ -59,6 +61,7 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"GET /applications":                                     classStaff,
 		"PATCH /applications/:id/status":                        classStaff,
 		"GET /graduate-employments":                             classStaff,
+		"GET /graduate-employments/summary":                     classStaff,
 		"POST /graduate-employments":                            classStaff,
 		"GET /graduate-employments/:id":                         classStaff,
 		"PUT /graduate-employments/:id":                         classStaff,
@@ -74,6 +77,8 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"DELETE /schools/:id/job-suppressions/:jobId":           classStaff,
 		"GET /companies":                                        classStaff,
 		"GET /companies/industries":                             classStaff,
+		"GET /business-tags":                                    classStaff,
+		"GET /companies/:id/business-tags":                      classStaff,
 		"GET /companies/names":                                  classStaff,
 		"GET /companies/:id":                                    classStaff,
 		"GET /companies/:id/interview-questions":                classStaff,
@@ -87,10 +92,11 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 	},
 	map[string]routeClass{
 		// ── 権限管理(requireAdmin) ──
-		"PUT /users/:id":                       classRequireAdmin,
-		"DELETE /users/:id":                    classRequireAdmin,
-		"POST /schools/:id/members":            classRequireAdmin,
-		"DELETE /schools/:id/members/:user_id": classRequireAdmin,
+		"PUT /users/:id":    classRequireAdmin,
+		"DELETE /users/:id": classRequireAdmin,
+		"PUT /schools/:id/interview-video-retention": classRequireAdmin,
+		"POST /schools/:id/members":                  classRequireAdmin,
+		"DELETE /schools/:id/members/:user_id":       classRequireAdmin,
 	},
 	// ── 意図的に staff へ開放(要判断) ──
 	// 求人(POST)は全テナント共通データを書き換える。締める場合は admin_routes.go の該当ルートへ
@@ -110,6 +116,7 @@ var expectedAdminRouteClasses = mergeRouteClasses(
 		"PATCH /companies/:id/publish":                         classPlatform,
 		"PATCH /companies/:id/verify":                          classPlatform,
 		"PATCH /companies/:id/reject":                          classPlatform,
+		"PUT /companies/:id/business-tags":                     classPlatform,
 		"PATCH /job-positions/:id/:action":                     classPlatform,
 		"POST /users/purge-expired":                            classPlatform,
 		"GET /organizations":                                   classPlatform,
@@ -207,12 +214,14 @@ var schoolScopedRoutes = map[string]bool{
 	"GET /users": true,
 	"GET /teacher/students/tendency-analysis": true,
 	"GET /teacher/students/:id/es-reviews":    true,
+	"GET /students/:id/growth-history":        true,
 	"GET /interviews":                         true,
 	"GET /dashboard/users":                    true,
 	"GET /dashboard/export/csv":               true,
 	"GET /dashboard/funnel":                   true,
 	"GET /applications":                       true,
 	"GET /graduate-employments":               true,
+	"GET /graduate-employments/summary":       true,
 }
 
 // 主体ごとの固定ID。fakeSchoolRepo の担当校は userID で引かれる。

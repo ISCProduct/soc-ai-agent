@@ -14,9 +14,9 @@ import {
   MenuItem,
   TextField,
   Typography,
-  Alert,
   Snackbar,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import PersonIcon from '@mui/icons-material/Person'
 import SchoolIcon from '@mui/icons-material/School'
 import WorkIcon from '@mui/icons-material/Work'
@@ -26,6 +26,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService, User } from '@/lib/auth'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
+import { GrowthHistoryCard } from '@/components/profile/GrowthHistoryCard'
 import { ScoutPreferencesCard } from '@/components/profile/ScoutPreferencesCard'
 import { TrainingConsentCard } from '@/components/profile/TrainingConsentCard'
 import { DeleteAccountDialog } from '@/components/profile/DeleteAccountDialog'
@@ -271,6 +272,7 @@ function ProfilePageContent() {
             </CardContent>
           </Card>
         )}
+        <GrowthHistoryCard />
         {/* ユーザーヘッダーカード */}
         <Card sx={{ mb: 3, borderRadius: 2 }}>
           <CardContent sx={{ p: 3 }}>
@@ -508,7 +510,7 @@ function ProfilePageContent() {
                 連携することで、面接スケジュールを登録・変更・キャンセルした際にGoogleカレンダーへ自動同期されます。
               </Typography>
               {calendarMessage && (
-                <Alert
+                <Alert role="alert"
                   severity={calendarConnected && calendarMessage.includes('連携しました') ? 'success' : calendarMessage.includes('解除') ? 'info' : 'error'}
                   sx={{ mb: 2 }}
                 >
@@ -516,7 +518,7 @@ function ProfilePageContent() {
                 </Alert>
               )}
               {calendarStatusError ? (
-                <Alert
+                <Alert role="alert"
                   severity="warning"
                   sx={{ mb: 2 }}
                   action={

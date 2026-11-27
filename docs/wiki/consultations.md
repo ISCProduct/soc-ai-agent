@@ -4,7 +4,7 @@
 
 ## しくみ
 
-- 案内（`teacher_student_guidances`）を1つのスレッドとし、発言を `guidance_messages`（`Backend/migrations/20261123065700_guidance_messages.up.sql`）に積む
+- 案内（`teacher_student_guidances`）を1つのスレッドとし、発言を `guidance_messages`（`Backend/migrations/20261127001600_guidance_messages.up.sql`）に積む
 - 学生からの質問は、種類 `question` の案内（`teacher_user_id = 0`）として作り、最初の発言も `guidance_messages` に入れる。担当校の先生なら誰でも答えられる
 - `read_at` は相手側が読んだ日時。スレッドを開くと、**その応答に含めた発言の ID だけ**が既読になる（取得のあとに届いた発言や、採番は先でもコミットが遅れて取得に含まれなかった発言は未読のまま）
 - 先生が返信するときは、画面に出ていた発言の ID の一覧（`seen_message_ids`）のうち学生の未読の発言を、返信と同じトランザクションで既読にする。「ID が N 以下」の範囲では決めない（画面に出ていなかった発言まで既読になるため）
@@ -61,7 +61,7 @@ GET でスレッドを開くと既読になる（既存の通知と同じく、�
 
 ## ロールバック
 
-`20261123065700_guidance_messages.down.sql` は `guidance_messages` を消す前に、学生の質問（`kind = 'question'`）の親の行を
+`20261127001600_guidance_messages.down.sql` は `guidance_messages` を消す前に、学生の質問（`kind = 'question'`）の親の行を
 閉じる（`dismissed_at` を入れる）。行は消さない（学生の質問の本文を残す）。旧版の `ListActiveByStudent` は種類で除外しないので、
 閉じないと学生の質問が「先生からの案内」としてホームに出るため。もう一度 up すると、閉じた質問は学生の相談一覧には出るが、
 ホームの案内（閉じていないもの）には出ない（質問はもともとホームに出さない）。

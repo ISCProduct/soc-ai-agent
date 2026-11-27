@@ -231,8 +231,8 @@ export default function AdminConsultationsPage() {
         </Box>
       )}
 
-      <Dialog open={openId !== null} onClose={() => setOpenId(null)} fullWidth maxWidth="sm">
-        <DialogTitle sx={{ pr: 6 }}>
+      <Dialog open={openId !== null} onClose={() => setOpenId(null)} fullWidth maxWidth="sm" aria-labelledby="admin-consultation-dialog-title">
+        <DialogTitle id="admin-consultation-dialog-title" sx={{ pr: 6 }}>
           相談のやり取り
           <IconButton aria-label="閉じる" onClick={() => setOpenId(null)} sx={{ position: 'absolute', right: 8, top: 8 }}>
             <CloseIcon />

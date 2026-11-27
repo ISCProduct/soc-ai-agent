@@ -121,7 +121,6 @@ export async function fetchTeacherThread(id: number): Promise<ConsultationThread
   return (await res.json()) as ConsultationThread
 }
 
-/** 先生の返信。seenMessageId は、返信を書いた画面に出ていた最後の発言の ID（そこまでの学生の発言を既読にする）。 */
 /**
  * 先生の返信。seenMessageIds は返信を書いた画面に出ていた学生の未読の発言の ID で、
  * Backend はそのうちのものだけを既読にする（画面に出ていなかった発言は ID が小さくても未読のまま）。
