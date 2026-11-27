@@ -100,11 +100,41 @@ services:
 新しい世代へ写してから切り替える。写している間も今の世代で検索できる。埋め込みは写すだけなので OpenAI は呼ばない。
 
 ```sh
-# 1. 今の世代から g2 へ写す（距離関数を変えるなら --space cosine）
-python scripts/rebuild_collections.py --to-suffix g2 --space cosine
+# 1. 今の世代から g2 へ写す（距離関数は既定で cosine。l2 のままにするなら --space l2）
+python scripts/rebuild_collections.py --to-suffix g2
 # 2. 件数を確かめ、rag-review の環境変数 RAG_COLLECTION_SUFFIX=g2 にして入れ替える
 # 3. 旧世代は 7日 残し（切り戻し用）、そのあと消す（接尾辞なしの世代は ""）
 python scripts/rebuild_collections.py --drop-suffix ""
 ```
 
-今使っている世代は `--drop-suffix` で消せない。学生プロフィール（`student_profiles`）は対象外。
+今使っている世代は `--drop-suffix` で消せない。学生プロフィール（`student_profiles`）は対象外（下の「距離関数」を参照）。
+
+### 距離関数（cosine。SOCAIAGENT-554）
+
+新しく作るコレクションは、企業データ・学生プロフィールとも距離関数を **cosine**（`hnsw:space`）にする（`vector_store.COLLECTION_METADATA`）。
+指定しないと Chroma の既定の **l2**（ユークリッド距離の2乗）になる。
+
+- Chroma はコレクションを作ったあとで距離関数を変えられない。既存の l2 のコレクションに cosine を指定して開いても、
+  **指定は黙って無視され l2 のまま**になる（chromadb 0.6.3 で確認）。既存のものは下の手順で新しいコレクションへ写して切り替える
+- OpenAI の埋め込みは長さ1なので、l2 と cosine で**検索の並び順は変わらない**（l2 の距離 = 2 × cosine 距離）。
+  変わるのは距離の値で、距離で閾値を決めるところ（学生検索の関連度の下限など）は距離関数によらない値に直して使う
+- 学生検索の関連度は `1/(1 + 2 × cosine 距離)`（`student_profile_store.relevance_score`）。l2 のコレクションでは以前の `1/(1+d)` と同じ値なので、
+  切り替えの前後で関連度の下限（`STUDENT_SEARCH_MIN_SCORE`、既定 0.38）の意味は変わらない
+- 今の距離関数と件数は `python scripts/rebuild_collections.py --status` で見る（書き込まない）
+
+企業データは、上の「全件再構築」で新しい世代へ写して切り替える（既定で cosine）。
+学生プロフィールは世代の接尾辞を持たないので、名前を入れ替える。
+
+```sh
+# 0. 学生プロフィールの書き込みを止める（rag-review を止め、スクリプトは別プロセスで動かす）
+# 1. 確認（件数と今の距離関数。書き込まない）
+python scripts/rebuild_collections.py --student-profiles
+# 2. student_profiles__cos554 に cosine で写し、元を student_profiles__l2old554 に、写しを student_profiles に改名する
+python scripts/rebuild_collections.py --student-profiles --apply
+# 3. rag-review を起動して学生検索の疎通を確かめる。7日 後に旧いコレクションを消す
+#    （旧いコレクションにも退会・同意撤回した学生の埋め込みが残るので、必ず消す）
+python scripts/rebuild_collections.py --drop-student-old
+```
+
+切り戻し: `student_profiles` を消して（または別名にして）、`student_profiles__l2old554` を `student_profiles` に改名する。
+staging で確かめてから本番で行う。

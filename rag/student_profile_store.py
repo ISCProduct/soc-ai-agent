@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from vector_store import get_chroma_client
+from vector_store import COLLECTION_METADATA, collection_space, get_chroma_client, to_cosine_distance
 
 logger = logging.getLogger("rag-review")
 
@@ -18,7 +18,18 @@ COLLECTION_STUDENT_PROFILES = "student_profiles"
 
 
 def _collection() -> Any:
-    return get_chroma_client().get_or_create_collection(COLLECTION_STUDENT_PROFILES)
+    # 新しく作るときは cosine（SOCAIAGENT-554）。既存の l2 のコレクションは l2 のまま開く
+    return get_chroma_client().get_or_create_collection(COLLECTION_STUDENT_PROFILES, metadata=dict(COLLECTION_METADATA))
+
+
+def relevance_score(distance: float, space: str) -> float:
+    """距離を 0<score<=1 の関連度へ写す。距離関数（l2 / cosine）によらず、同じ2つの埋め込みなら同じ値にする。
+
+    以前は l2（ユークリッド距離の2乗 d）のコレクションで 1/(1+d) にしていた。長さ1の埋め込みでは d = 2 × cosine 距離なので、
+    1/(1 + 2 × cosine 距離) にすると、l2 のコレクションでは今までと同じ値になり、cosine のコレクションへ切り替えても
+    関連度の下限（STUDENT_SEARCH_MIN_SCORE、既定 0.38）の意味が変わらない。
+    """
+    return 1.0 / (1.0 + 2.0 * to_cosine_distance(distance, space))
 
 
 def _doc_id(user_id: int) -> str:
@@ -73,14 +84,15 @@ def query_students(embedding: List[float], top_k: int, min_score: float = 0.0) -
     )
     metadatas = (result.get("metadatas") or [[]])[0]
     distances = (result.get("distances") or [[]])[0]
+    space = collection_space(collection)
 
     hits: List[Dict[str, Any]] = []
     for meta, distance in zip(metadatas, distances):
         user_id = (meta or {}).get("user_id")
         if user_id is None:
             continue
-        # Chroma の距離は小さいほど近い。1/(1+d) で 0<score<=1 の関連度へ写す。
-        score = 1.0 / (1.0 + float(distance))
+        # Chroma の距離は小さいほど近い。距離関数によらない関連度へ写す
+        score = relevance_score(float(distance), space)
         if score < min_score:
             continue
         hits.append({"user_id": int(user_id), "score": score})

@@ -40,8 +40,34 @@ DOC_TYPE_TO_COLLECTION = {
     "es_review": COLLECTION_ES_REVIEW,
 }
 
+# 新しく作るコレクションの距離関数（SOCAIAGENT-554）。指定しないと Chroma の既定の l2（ユークリッド距離の2乗）になる。
+# Chroma はコレクションを作ったあとで距離関数を変えられない。既存のコレクションにこの指定を付けて
+# get_or_create_collection を呼んでも、指定は無視されて l2 のまま開く（chromadb 0.6.3 で確認）。
+# 既存のコレクションを cosine にするときは scripts/rebuild_collections.py で新しいコレクションへ写して切り替える。
+COLLECTION_METADATA: Dict[str, str] = {"hnsw:space": "cosine"}
+
 _chroma_client: Any = None
 _chroma_lock = threading.Lock()
+
+
+def collection_space(collection: Any) -> str:
+    """コレクションの距離関数（l2 / cosine / ip）。指定なしで作られたものは Chroma の既定の l2。"""
+    metadata = getattr(collection, "metadata", None)
+    space = metadata.get("hnsw:space") if isinstance(metadata, dict) else None
+    return str(space or "l2")
+
+
+def to_cosine_distance(distance: float, space: str) -> float:
+    """Chroma が返す距離を、距離関数によらない cosine 距離（1 - 類似度）に直す。
+
+    - cosine: そのまま
+    - l2: ユークリッド距離の2乗。長さ1の埋め込み（OpenAI の埋め込み・評価のハッシュの埋め込み）なら 2 × cosine 距離
+    - ip: 1 - 内積（長さ1なら cosine 距離と同じ）
+    距離の値で閾値を決めるとき（学生検索の関連度の下限など）、コレクションの距離関数が違っても同じ意味になるようにする。
+    """
+    if space == "l2":
+        return float(distance) / 2.0
+    return float(distance)
 
 
 def reset_chroma_client_for_tests() -> None:
@@ -386,7 +412,7 @@ def set_cached_documents(
     fetched_at = datetime.now(timezone.utc).isoformat()
     try:
         client = get_chroma_client()
-        collection = client.get_or_create_collection(collection_name)
+        collection = client.get_or_create_collection(collection_name, metadata=dict(COLLECTION_METADATA))
         ids = _doc_ids(cache_key, len(docs))
         metadatas = [
             {
@@ -516,7 +542,7 @@ def replace_documents(
     logical = DOC_TYPE_TO_COLLECTION.get(doc_type or "", meta["collection"])
     meta["doc_type"] = doc_type or meta["doc_type"]
     client = get_chroma_client()
-    collection = client.get_or_create_collection(physical_collection_name(logical))
+    collection = client.get_or_create_collection(physical_collection_name(logical), metadata=dict(COLLECTION_METADATA))
     ids = _doc_ids(cache_key, len(docs))
     fetched_at = datetime.now(timezone.utc).isoformat()
     collection.upsert(

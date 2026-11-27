@@ -104,7 +104,8 @@ def migrate(source: str, host: str, port: int, dry_run: bool, limit_per_col: int
             print(f"  skip {name}: no embeddings")
             skipped_no_emb += 1
             continue
-        dcol = dst.get_or_create_collection(target)
+        # 移行先に新しく作るコレクションは cosine（SOCAIAGENT-554。vector_store.COLLECTION_METADATA と同じ）
+        dcol = dst.get_or_create_collection(target, metadata={"hnsw:space": "cosine"})
         batch_ids: List[str] = []
         batch_docs: List[str] = []
         batch_metas: List[Dict[str, Any]] = []
