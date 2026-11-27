@@ -48,8 +48,8 @@ func (s *stubMatchingService) GetTopMatches(context.Context, uint, string, int) 
 	return nil, nil
 }
 func (s *stubMatchingService) ToggleFavorite(uint, uint) error { return nil }
-func (s *stubMatchingService) ListFavoriteCompanies(context.Context, uint, int) ([]*models.UserCompanyMatch, error) {
-	return nil, nil
+func (s *stubMatchingService) ListFavoriteCompanies(context.Context, uint, int, int) ([]*models.UserCompanyMatch, int, []uint, error) {
+	return nil, 0, nil, nil
 }
 func (s *stubMatchingService) UnfavoriteCompany(context.Context, uint, uint) error { return nil }
 func (s *stubMatchingService) GetDiagnostics(uint, string) (*matching.MatchingDiagnostics, error) {
@@ -58,6 +58,13 @@ func (s *stubMatchingService) GetDiagnostics(uint, string) (*matching.MatchingDi
 
 func (s *stubMatchingService) ReasonScores(_ uint, scores []models.UserWeightScore) []models.UserWeightScore {
 	return scores
+}
+
+func (s *stubMatchingService) GetAxisBreakdown(uint, uint) (*matching.AxisBreakdown, error) {
+	return nil, nil
+}
+func (s *stubMatchingService) GetMyAxisScores(uint, string) ([]matching.MyAxisScore, error) {
+	return nil, nil
 }
 
 // TestRunBackgroundMatching_SkipsWhileRunning は実行中の同一セッションが

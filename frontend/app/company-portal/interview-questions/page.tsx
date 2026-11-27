@@ -240,8 +240,8 @@ export default function CompanyPortalInterviewQuestionsPage() {
         </Stack>
       )}
 
-      <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>{editingId === null ? '面接質問を追加' : '面接質問を編集'}</DialogTitle>
+      <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} fullWidth maxWidth="sm" aria-labelledby="portal-question-form-title">
+        <DialogTitle id="portal-question-form-title">{editingId === null ? '面接質問を追加' : '面接質問を編集'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
             {actionError && <Alert severity="error">{actionError}</Alert>}
@@ -306,11 +306,16 @@ export default function CompanyPortalInterviewQuestionsPage() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(pendingDelete)} onClose={() => !saving && setPendingDelete(null)}>
-        <DialogTitle>面接質問を削除しますか？</DialogTitle>
+      <Dialog
+        open={Boolean(pendingDelete)}
+        onClose={() => !saving && setPendingDelete(null)}
+        aria-labelledby="portal-question-delete-title"
+        aria-describedby="portal-question-delete-description"
+      >
+        <DialogTitle id="portal-question-delete-title">面接質問を削除しますか？</DialogTitle>
         <DialogContent>
           {actionError && <Alert severity="error" sx={{ mb: 2 }}>{actionError}</Alert>}
-          <Typography>削除した質問は今後の面接で使用されません。</Typography>
+          <Typography id="portal-question-delete-description">削除した質問は今後の面接で使用されません。</Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setPendingDelete(null)} disabled={saving}>キャンセル</Button>

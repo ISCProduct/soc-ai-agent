@@ -350,6 +350,23 @@ func echoGuestAIRateLimit() echo.MiddlewareFunc {
 	}
 }
 
+// echoAuthenticatedAIRateLimit は認証済みの AI 呼び出しを利用者ごとに毎分で止める（SOCAIAGENT-529）。
+// EchoUserAuth の後段に付ける。利用者 ID が無いリクエストは IP で数える。
+func echoAuthenticatedAIRateLimit() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			key := middleware.GetClientIP(c.Request())
+			if userID, ok := middleware.UserIDFromContext(c.Request().Context()); ok {
+				key = "user:" + strconv.FormatUint(uint64(userID), 10)
+			}
+			if !middleware.AuthenticatedAIRateLimiter.Allow(key) {
+				return echo.NewHTTPError(http.StatusTooManyRequests, "Too Many Requests: リクエスト上限に達しました。しばらく待ってから再試行してください。")
+			}
+			return next(c)
+		}
+	}
+}
+
 // EchoMetricsAuth は /metrics を Bearer トークンで保護するミドルウェア（#1186）。
 //
 // backend の ALB はインターネットに直結しているため、無防備に開けるとエンドポイント一覧・

@@ -1,6 +1,7 @@
 'use client'
 
-import { Alert, Button } from '@mui/material'
+import { Button } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { Refresh } from '@mui/icons-material'
 
 interface Props {
@@ -12,7 +13,7 @@ interface Props {
 export function AnalysisErrorAlert({ analysisError, onRetryAnalysis }: Props) {
   if (!analysisError) return null
   return (
-    <Alert severity="warning" sx={{ mb: 2 }}
+    <Alert role="alert" severity="warning" sx={{ mb: 2 }}
       action={<Button color="inherit" size="small" startIcon={<Refresh />} onClick={onRetryAnalysis}>再読み込み</Button>}>
       {analysisError}（回答の分析・向いている職種は表示されません）
     </Alert>
