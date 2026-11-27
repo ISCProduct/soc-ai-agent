@@ -247,6 +247,10 @@ PUT /api/collective-insights/consent
 | 撤回 | 同意の撤回をいつでも受け付け、撤回後は残っている音声をすべて削除する |
 | 書き起こし | 発話本文もPIIとして扱う。**リポジトリへコミットしない**（`.gitignore` 済み） |
 
+同意・撤回・削除窓口・別バケット・アクセスの記録の設計（テーブル・API・削除のきっかけ・後続課題）は
+[STT 評価用の実発話の収集の設計](../requirements/stt-eval-consent-design.md)（SOCAIAGENT-676）にある。実装は後続課題で、
+実装の PR でこの節も直す。
+
 **この表が埋まるまで収集を始めない。** 合成音声での評価
 （`RESULTS_synthetic.md` / `RESULTS_stt_hints.md`）は実発話の代わりにならないが、
 同意と削除手順が決まらないうちに実発話を集める方がリスクが大きい。
