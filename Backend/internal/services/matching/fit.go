@@ -34,8 +34,15 @@ const (
 	MinCompaniesForSpread = 5
 )
 
-// axisNames は 10 軸の名前。並びは profileAxisValues / axisMatchesOf と同じ。
-var axisNames = [10]string{"技術志向", "チームワーク志向", "リーダーシップ志向", "創造性志向", "安定志向", "成長志向", "ワークライフバランス", "チャレンジ志向", "細部志向", "コミュニケーション力"}
+// axisNames は 10 軸の名前（スコアのカテゴリ名）。並びは profileAxisValues / axisMatchesOf と同じ。
+// 10軸の定義は axis_breakdown.go の axes にまとめ、ここはそこから作る。
+var axisNames = func() [10]string {
+	var out [10]string
+	for i, a := range axes {
+		out[i] = a.category
+	}
+	return out
+}()
 
 // AxisFlags は 10 軸ごとの真偽（axisNames と同じ並び）。
 type AxisFlags [10]bool
@@ -44,11 +51,11 @@ type AxisFlags [10]bool
 func fitPenaltyEnabled() bool { return os.Getenv("MATCHING_FIT_PENALTY") != "off" }
 
 func profileAxisValues(p *models.CompanyWeightProfile) [10]float64 {
-	return [10]float64{
-		float64(p.TechnicalOrientation), float64(p.TeamworkOrientation), float64(p.LeadershipOrientation),
-		float64(p.CreativityOrientation), float64(p.StabilityOrientation), float64(p.GrowthOrientation),
-		float64(p.WorkLifeBalance), float64(p.ChallengeSeeking), float64(p.DetailOrientation), float64(p.CommunicationSkill),
+	var out [10]float64
+	for i, a := range axes {
+		out[i] = float64(a.weight(p))
 	}
+	return out
 }
 
 // InformativeAxes は、企業間でばらつきのある軸（標準偏差が MinAxisSpread 以上）。

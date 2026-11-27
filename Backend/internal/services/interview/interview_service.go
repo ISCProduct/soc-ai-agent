@@ -8,6 +8,7 @@ import (
 	"Backend/internal/services/costs"
 	"Backend/internal/services/email"
 	"Backend/internal/services/flywheel"
+	"Backend/internal/services/interview/shadowscorer"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
@@ -40,6 +41,9 @@ type InterviewService struct {
 	aiBudget             costs.AIBudgetStatusProvider
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
 	questionStateRepo    repository.InterviewQuestionStateRepository
+	researchRepo         repository.InterviewResearchRepository
+	researchTTL          time.Duration // 生成時に環境変数から1回だけ読む
+	skipScoreThreshold   *int          // 生成時に環境変数から1回だけ読む
 	skillScoreRepo       SkillScoreReader
 	companyRepo          shared.CompanyBriefReader
 	jobCh                chan uint
@@ -69,6 +73,12 @@ type InterviewService struct {
 	companyReadingFlight singleflight.Group
 	// schoolAccess は本人以外の管理者に課す担当校スコープ判定（SOCAIAGENT-687）。nil なら管理者も拒否する。
 	schoolAccess SchoolAccessChecker
+	// shadowStore は保存済みの結果を読むために常に入る。shadowScorer はフラグがオンのときだけ。
+	// shadowMaskFor は学習書き出しと同じ伏字。未設定なら生テキストでは採点しない。
+	// ローカル採点は interview_reports や user_weight_scores には書かない。
+	shadowScorer  shadowscorer.InterviewScorer
+	shadowStore   shadowScoreStore
+	shadowMaskFor func(ctx context.Context, userID uint) (func(string) string, error)
 }
 
 // SchoolAccessChecker は admin ルートと同じ担当校スコープ判定（school.SchoolService が満たす）。
@@ -108,6 +118,8 @@ func NewInterviewService(
 		workerStop:           make(chan struct{}),
 		workerFinished:       make(chan struct{}),
 		inFlightJobs:         map[uint]struct{}{},
+		researchTTL:          researchTTLFromEnv(),
+		skipScoreThreshold:   skipScoreThresholdFromEnv(),
 	}
 }
 
@@ -119,6 +131,11 @@ func (s *InterviewService) SetCompanyQuestionRepo(r repository.InterviewCompanyQ
 // SetQuestionStateRepo 面接質問キューリポジトリを注入する（オプション）
 func (s *InterviewService) SetQuestionStateRepo(r repository.InterviewQuestionStateRepository) {
 	s.questionStateRepo = r
+}
+
+// SetResearchRepo は Web 調査の質問候補を期限つきで読む保存先を注入する。
+func (s *InterviewService) SetResearchRepo(r repository.InterviewResearchRepository) {
+	s.researchRepo = r
 }
 
 // SetSkillScoreRepo GitHubスキルスコアリポジトリを注入する（オプション）

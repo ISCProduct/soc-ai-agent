@@ -359,8 +359,8 @@ export default function CompanyPortalSettingsPage() {
         </Table>
       </Paper>
 
-      <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>担当者を招待</DialogTitle>
+      <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} fullWidth maxWidth="sm" aria-labelledby="portal-invite-title">
+        <DialogTitle id="portal-invite-title">担当者を招待</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField

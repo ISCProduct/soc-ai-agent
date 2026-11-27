@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, type MouseEvent } from 'react'
-import { Alert, Box, Button, Snackbar, Stack, useMediaQuery, useTheme } from '@mui/material'
+import { useRef, useState, type MouseEvent } from 'react'
+import { Box, Button, Snackbar, Stack, useMediaQuery, useTheme } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import type { AnalysisScores, Company, MatchFeedbackVerdict, SnackbarState, SuggestedRole } from '../types'
 import { CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
@@ -17,13 +18,22 @@ import { ResultsFooterLinks } from './list/ResultsFooterLinks'
 import { ResultsHeader } from './list/ResultsHeader'
 import { RolesPanel } from './list/RolesPanel'
 import type { CompanyRowContext } from './list/rowContext'
+import MyCategoryScoresCard from './MyCategoryScoresCard'
+import type { AxisBreakdown } from '@/lib/axis-match'
 
 export interface ResultsListViewProps {
   companies: Company[]
+  /** 診断のセッション。あなたの10の傾向（SOCAIAGENT-611）の取得に使う。無ければ傾向を出さない */
+  sessionId?: string
   /** 診断をまたいで1社にまとめたお気に入り。並びは適合度の高い順 */
   favoriteCompanies: Company[]
   favoritesLoading: boolean
   favoritesError: string | null
+  /** ページを切る前の社数。未指定なら今見えている件数 */
+  favoritesTotal?: number
+  /** 今のページの先頭が何社目か。0 が先頭 */
+  favoritesOffset?: number
+  onFavoritesOffsetChange?: (offset: number) => void
   onRetryFavorites: () => void
   isProvisional: boolean
   diagnosisSummary?: string | null
@@ -65,9 +75,13 @@ export interface ResultsListViewProps {
  */
 export default function ResultsListView({
   companies,
+  sessionId,
   favoriteCompanies,
   favoritesLoading,
   favoritesError,
+  favoritesTotal: favoritesTotalProp,
+  favoritesOffset = 0,
+  onFavoritesOffsetChange,
   onRetryFavorites,
   isProvisional,
   diagnosisSummary = null,
@@ -100,17 +114,31 @@ export default function ResultsListView({
 }: ResultsListViewProps) {
   // この一覧は useResultsData の mounted 後にしか描画されない（page-content.tsx）。サーバー描画・hydration の最初の描画に
   // 出ないので、noSsr: true で最初から実際の幅で PC / SP を分けても不一致は起きない。
+  // 軸ごとの内訳を開いている推薦（match_id）。開いたときだけ取りに行く
+  const [openAxes, setOpenAxes] = useState<ReadonlySet<number>>(new Set())
+  // 取得済みの内訳。閉じて開き直すたびに取り直さない
+  const axesCache = useRef(new Map<number, AxisBreakdown>())
+  const toggleAxes = (matchId: number) => {
+    setOpenAxes((prev) => {
+      const next = new Set(prev)
+      if (next.has(matchId)) next.delete(matchId)
+      else next.add(matchId)
+      return next
+    })
+  }
   const isDesktop = useMediaQuery(useTheme().breakpoints.up('md'), { noSsr: true })
 
   // お気に入りは過去の診断も含め、同じ企業は1行。中身は呼び出し側がまとめて渡す（#2301）
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const listedCompanies = favoritesOnly ? favoriteCompanies : companies
+  const favoritesTotal = favoritesTotalProp ?? favoriteCompanies.length
   // 見出しの文には実際の最小・最大を渡す（scaleBand は描画用に同点の幅を広げるので使わない）
   const scores = listedCompanies.map((c) => c.matchScore)
   const band = { min: Math.min(...scores), max: Math.max(...scores) }
   const ctx: CompanyRowContext = {
     isDesktop, maxAxisCount: maxMatchedAxisCount(companies), isProvisional, isGuestUser, applyEnabled,
     favoritingId, applyingId, feedbackingId, onSelectCompany, onToggleFavorite, onFeedback, onApply, onNavigate,
+    openAxes, axesCache: axesCache.current, onToggleAxes: toggleAxes,
   }
   // PC はヘッダー右上、SP は一覧の下に1つだけ出す
   const email = <EmailButton isGuestUser={isGuestUser} emailSending={emailSending} onSendEmail={onSendEmail} fullWidth={!isDesktop} />
@@ -121,7 +149,11 @@ export default function ResultsListView({
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflowY: { xs: 'auto', md: 'hidden' }, backgroundColor: UI.paper }}>
       <ResultsHeader
-        companyCount={listedCompanies.length}
+        companyCount={
+          favoritesOnly && (favoritesTotal > listedCompanies.length || favoritesOffset > 0)
+            ? favoritesTotal
+            : listedCompanies.length
+        }
         favoritesOnly={favoritesOnly}
         isProvisional={isProvisional}
         diagnosisSummary={diagnosisSummary}
@@ -135,13 +167,15 @@ export default function ResultsListView({
         <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
           <Box sx={{ flex: 1, minWidth: 0, display: 'grid', gap: { xs: 2, md: 2.5 } }}>
             <AnalysisErrorAlert analysisError={analysisError} onRetryAnalysis={onRetryAnalysis} />
+            {/* 診断を切り替えたら作り直す（前の診断の10軸を残さない） */}
+            {sessionId && <MyCategoryScoresCard key={sessionId} sessionId={sessionId} />}
             {!isDesktop && coverage}
             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" role="group" aria-label="表示する企業">
               <Button variant={favoritesOnly ? 'text' : 'contained'} aria-pressed={!favoritesOnly} onClick={() => setFavoritesOnly(false)} sx={{ minHeight: 44 }}>
                 すべて
               </Button>
               <Button variant={favoritesOnly ? 'contained' : 'text'} aria-pressed={favoritesOnly} onClick={() => setFavoritesOnly(true)} sx={{ minHeight: 44 }}>
-                お気に入りだけ（{favoriteCompanies.length}）
+                お気に入りだけ（{favoritesTotal}）
               </Button>
             </Stack>
             {favoritesOnly ? (
@@ -149,6 +183,9 @@ export default function ResultsListView({
                 companies={favoriteCompanies}
                 loading={favoritesLoading}
                 error={favoritesError}
+                total={favoritesTotal}
+                offset={favoritesOffset}
+                onOffsetChange={onFavoritesOffsetChange}
                 favoritingId={favoritingId}
                 onRetry={onRetryFavorites}
                 onShowAll={() => setFavoritesOnly(false)}
@@ -179,7 +216,7 @@ export default function ResultsListView({
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         sx={ABOVE_BOTTOM_NAV_SX}
       >
-        <Alert
+        <Alert role="alert"
           severity={snackbar.severity}
           onClose={onCloseSnackbar}
           action={
