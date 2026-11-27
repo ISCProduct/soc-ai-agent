@@ -32,6 +32,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: Backend/go.mod
+
       - name: Setup Python
         uses: actions/setup-python@v7
         with:

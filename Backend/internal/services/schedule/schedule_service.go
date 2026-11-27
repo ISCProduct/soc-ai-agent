@@ -6,15 +6,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	"Backend/internal/safego"
 )
 
+// CalendarSyncer は予定の作成・更新・削除を Google カレンダーへ伝える。
+// 失敗は error で返す。呼び出し側がログと再試行を持つ。
+type CalendarSyncer interface {
+	CreateEvent(ctx context.Context, userID uint, ev *models.ScheduleEvent) error
+	UpdateEvent(ctx context.Context, userID uint, ev *models.ScheduleEvent) error
+	DeleteEvent(ctx context.Context, userID uint, googleEventID string) error
+}
+
 type ScheduleService struct {
 	repo         repository.ScheduleRepository
-	calendarSync *CalendarSyncService
+	calendarSync CalendarSyncer
 }
 
 func NewScheduleService(repo repository.ScheduleRepository) *ScheduleService {
@@ -22,7 +31,7 @@ func NewScheduleService(repo repository.ScheduleRepository) *ScheduleService {
 }
 
 // SetCalendarSyncService はGoogleカレンダー同期サービスを注入する（オプション）。
-func (s *ScheduleService) SetCalendarSyncService(svc *CalendarSyncService) {
+func (s *ScheduleService) SetCalendarSyncService(svc CalendarSyncer) {
 	s.calendarSync = svc
 }
 
@@ -47,7 +56,13 @@ func (s *ScheduleService) Create(userID uint, companyName, stage, title string, 
 	// Googleカレンダーへの同期は非同期で実行（スケジュール登録の成否には影響しない）
 	if s.calendarSync != nil {
 		// カレンダー同期は投げっぱなし。panic でプロセスを落とさない(#1446)。
-		safego.Go(func() { s.calendarSync.CreateEvent(context.Background(), userID, event) })
+		// 一時的な失敗は数回やり直す。黙って捨てると DB とカレンダーがずれたままになる。
+		ev := event
+		safego.Go(func() {
+			syncCalendar("CreateEvent", userID, func() error {
+				return s.calendarSync.CreateEvent(context.Background(), userID, ev)
+			})
+		})
 	}
 	return event, nil
 }
@@ -86,7 +101,12 @@ func (s *ScheduleService) Update(userID, eventID uint, companyName, stage, title
 		return nil, err
 	}
 	if s.calendarSync != nil {
-		safego.Go(func() { s.calendarSync.UpdateEvent(context.Background(), userID, event) })
+		ev := event
+		safego.Go(func() {
+			syncCalendar("UpdateEvent", userID, func() error {
+				return s.calendarSync.UpdateEvent(context.Background(), userID, ev)
+			})
+		})
 	}
 	return event, nil
 }
@@ -104,7 +124,11 @@ func (s *ScheduleService) Delete(userID, eventID uint) error {
 		return err
 	}
 	if s.calendarSync != nil && googleEventID != "" {
-		safego.Go(func() { s.calendarSync.DeleteEvent(context.Background(), userID, googleEventID) })
+		safego.Go(func() {
+			syncCalendar("DeleteEvent", userID, func() error {
+				return s.calendarSync.DeleteEvent(context.Background(), userID, googleEventID)
+			})
+		})
 	}
 	return nil
 }
@@ -172,6 +196,30 @@ func foldICSLine(line string) string {
 	}
 	b.WriteString("\r\n")
 	return b.String()
+}
+
+const calendarSyncAttempts = 3
+
+// calendarSyncPause は再試行の待ち。テストはここを差し替える。
+var calendarSyncPause = func(attempt int) {
+	time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
+}
+
+// syncCalendar は一時的な失敗だけやり直す。連携していない等の恒久的な失敗は1回で止める。
+func syncCalendar(op string, userID uint, fn func() error) {
+	var err error
+	for attempt := 1; attempt <= calendarSyncAttempts; attempt++ {
+		err = fn()
+		if err == nil {
+			return
+		}
+		if !isRetryableCalendar(err) || attempt == calendarSyncAttempts {
+			log.Printf("[CalendarSync] %s: user=%d failed (attempt %d/%d): %v", op, userID, attempt, calendarSyncAttempts, err)
+			return
+		}
+		log.Printf("[CalendarSync] %s: user=%d will retry (attempt %d/%d): %v", op, userID, attempt, calendarSyncAttempts, err)
+		calendarSyncPause(attempt)
+	}
 }
 
 func escapeICS(s string) string {

@@ -96,10 +96,18 @@ type LinkLister interface {
 type ReminderService struct {
 	issues     IssueLister
 	links      LinkLister
+	reviews    ReviewLister
 	webhookURL string
 	issueBase  string // 課題リンクの基点（https://iwasaki-ac.backlog.com）
 	reviewers  []int  // PR確認待ちの課題でレビューを促す Backlog ユーザーID
 	http       *http.Client
+}
+
+// SetReviews はレビュー待ち PR の取得を足す。未設定ならその節は出さない。
+func (s *ReminderService) SetReviews(r ReviewLister) {
+	if s != nil {
+		s.reviews = r
+	}
 }
 
 var webhookPattern = regexp.MustCompile(`^https://discord\.com/api/(?:v10/)?webhooks/[0-9]+/[A-Za-z0-9_-]+$`)
@@ -166,7 +174,13 @@ func (s *ReminderService) Run(ctx context.Context, dryRun bool) (*ReminderResult
 	if err != nil {
 		return nil, err
 	}
-	msgs := BuildReminder(issues, links, today, s.issueBase, s.reviewers)
+	prs, err := s.waitingPRs(ctx)
+	if err != nil {
+		// GitHub が落ちても、期限のリマインドは従来どおり出す。
+		log.Printf("[Reminder] レビュー待ち PR を取得できませんでした。Backlog のリマインドは続行します: %v", err)
+		prs = nil
+	}
+	msgs := BuildReminderIncludingPRs(issues, links, today, s.issueBase, s.reviewers, prs)
 	if len(issues) >= issueFetchLimit && len(msgs) > 0 {
 		// 取得上限に達すると、期限が後の課題が出ていない可能性がある。黙って落とさず知らせる。
 		msgs[len(msgs)-1] += fmt.Sprintf("\n⚠️ 取得上限(%d件)に達しました。一部の課題が出ていない可能性があります。", issueFetchLimit)
@@ -176,7 +190,7 @@ func (s *ReminderService) Run(ctx context.Context, dryRun bool) (*ReminderResult
 		return res, nil
 	}
 	for _, m := range msgs {
-		if err := s.post(ctx, m, mentionIDs(issues, links, s.reviewers)); err != nil {
+		if err := s.post(ctx, m, mentionIDs(issues, links, s.reviewers, prs)); err != nil {
 			return res, err
 		}
 		res.Posted = true
@@ -184,9 +198,16 @@ func (s *ReminderService) Run(ctx context.Context, dryRun bool) (*ReminderResult
 	return res, nil
 }
 
+func (s *ReminderService) waitingPRs(ctx context.Context) ([]WaitingPR, error) {
+	if s.reviews == nil {
+		return nil, nil
+	}
+	return s.reviews.Waiting(ctx)
+}
+
 // mentionIDs は本文に出てくる Discord ID。allowed_mentions に渡し、
 // 課題名などに混ざった @everyone や別人のメンションを無効にする。
-func mentionIDs(issues []BacklogIssue, links map[string]Link, reviewers []int) []string {
+func mentionIDs(issues []BacklogIssue, links map[string]Link, reviewers []int, prs []WaitingPR) []string {
 	byBacklog := map[int]string{}
 	for id, l := range links {
 		byBacklog[l.BacklogID] = id
@@ -210,8 +231,27 @@ func mentionIDs(issues []BacklogIssue, links map[string]Link, reviewers []int) [
 			add(r)
 		}
 	}
+	byGitHub := discordByGitHub(links)
+	for _, pr := range prs {
+		for _, login := range pr.Reviewers {
+			if d, ok := byGitHub[strings.ToLower(login)]; ok && !seen[d] {
+				seen[d] = true
+				ids = append(ids, d)
+			}
+		}
+	}
 	sort.Strings(ids)
 	return ids
+}
+
+func discordByGitHub(links map[string]Link) map[string]string {
+	out := map[string]string{}
+	for id, l := range links {
+		if login := strings.ToLower(strings.TrimSpace(l.GitHub)); login != "" {
+			out[login] = id
+		}
+	}
+	return out
 }
 
 func (s *ReminderService) post(ctx context.Context, content string, mentions []string) error {
@@ -260,7 +300,13 @@ type section struct {
 // 区切り、続きの通にも見出しを付け直す。担当者の区切りだけで分けると、1人で14件並ぶ
 // 日に1ブロックが上限を超え、Discord に拒否されて1通も届かない。
 func BuildReminder(issues []BacklogIssue, links map[string]Link, today, issueBase string, reviewers []int) []string {
-	if len(issues) == 0 {
+	return BuildReminderIncludingPRs(issues, links, today, issueBase, reviewers, nil)
+}
+
+// BuildReminderIncludingPRs は期限の課題に、レビュー待ちの PR を足した本文を返す。
+// 課題も PR も無ければ nil。PR が 0 件のときはその節を出さない。
+func BuildReminderIncludingPRs(issues []BacklogIssue, links map[string]Link, today, issueBase string, reviewers []int, prs []WaitingPR) []string {
+	if len(issues) == 0 && len(prs) == 0 {
 		return nil
 	}
 	byBacklog := map[int]string{}
@@ -315,9 +361,19 @@ func BuildReminder(issues []BacklogIssue, links map[string]Link, today, issueBas
 		}
 		sections = append(sections, sec)
 	}
+	if sec := reviewPRSection(prs, links); sec != nil {
+		sections = append(sections, *sec)
+	}
+	if len(sections) == 0 {
+		return nil
+	}
 
 	header := "📅 **Backlog 期限リマインド** (" + md(today) + ")\n"
 	footer := "\n間に合わない場合は `/deadline` で、新しい期限と理由を入力してください（Backlog に反映されます）。"
+	if len(issues) == 0 {
+		header = "📅 **朝のリマインド** (" + md(today) + ")\n"
+		footer = ""
+	}
 	var msgs []string
 	cur := header
 	for _, sec := range sections {
@@ -341,6 +397,27 @@ func BuildReminder(issues []BacklogIssue, links map[string]Link, today, issueBas
 
 // runeLen は Discord が数える「文字数」。
 func runeLen(s string) int { return utf8.RuneCountInString(s) }
+
+// reviewPRSection はレビュー待ち PR を、レビュアーへのメンション付きで1つの節にする。
+func reviewPRSection(prs []WaitingPR, links map[string]Link) *section {
+	if len(prs) == 0 {
+		return nil
+	}
+	byGitHub := discordByGitHub(links)
+	sec := &section{head: "👀 **レビュー待ちの PR**"}
+	for _, pr := range prs {
+		var who []string
+		for _, login := range pr.Reviewers {
+			if d, ok := byGitHub[strings.ToLower(login)]; ok {
+				who = append(who, "<@"+d+">")
+				continue
+			}
+			who = append(who, "**"+oneLine(login)+"** (Discord未登録。/link の github にログイン名を入れてください)")
+		}
+		sec.lines = append(sec.lines, fmt.Sprintf("・[#%d](<%s>) %s — %s", pr.Number, pr.URL, oneLine(pr.Title), strings.Join(who, " ")))
+	}
+	return sec
+}
 
 // reviewTargets は、レビューを促す対象の課題（PR確認待ち）。
 // レビュアー本人が担当の課題は除く。自分の PR を自分でレビューする依頼にならないように。

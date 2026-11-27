@@ -9,7 +9,7 @@ import (
 
 // #985: entitlementsは組織ごとのプランを反映するため、EchoUserAuthで組織IDを解決してから渡す。
 // /profileも以前は未認証でクエリのuser_idを信頼していたため、同様にEchoUserAuthを必須にする。
-func SetupUserRoutes(api *echo.Group, profileController *usercontrollers.IntegratedProfileController, entitlementController *usercontrollers.EntitlementController, preferenceController *usercontrollers.UserPreferenceController, guidanceController *usercontrollers.StudentGuidanceController, scoutController *usercontrollers.StudentScoutController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver, aiBudgetController *usercontrollers.AIBudgetController) {
+func SetupUserRoutes(api *echo.Group, profileController *usercontrollers.IntegratedProfileController, entitlementController *usercontrollers.EntitlementController, preferenceController *usercontrollers.UserPreferenceController, guidanceController *usercontrollers.StudentGuidanceController, scoutController *usercontrollers.StudentScoutController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver, aiBudgetController *usercontrollers.AIBudgetController, growthController *usercontrollers.GrowthController, videoRetentionController *usercontrollers.InterviewVideoRetentionController) {
 	user := api.Group("/user", EchoUserAuth(userSecret, access, orgs))
 	user.GET("/profile", profileController.GetProfile)
 	if aiBudgetController != nil {
@@ -20,7 +20,11 @@ func SetupUserRoutes(api *echo.Group, profileController *usercontrollers.Integra
 	user.PUT("/preferences", preferenceController.Put)
 	user.GET("/industries", preferenceController.Industries)
 	user.GET("/training-consent", preferenceController.GetTrainingConsent)
+	// 本人の学校が選んだ面接動画の保持期間（SOCAIAGENT-671）。クエリの user_id は見ない。
+	user.GET("/interview-video-retention", videoRetentionController.Get)
 	user.PUT("/training-consent", preferenceController.PutTrainingConsent)
+	// 本人のスコアと診断フェーズの履歴（SOCAIAGENT-601）。クエリの user_id は見ない。
+	user.GET("/growth-history", growthController.ForStudent)
 	// 教員からの軌道修正・提案案内
 	user.GET("/guidances", guidanceController.List)
 	user.POST("/guidances/:id/dismiss", guidanceController.Dismiss)
