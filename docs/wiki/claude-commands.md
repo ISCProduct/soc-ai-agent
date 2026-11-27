@@ -32,6 +32,7 @@
 | `/design-system` | デザインシステム（トークン・部品・学生3画面の型・モック規約）を読み込む | 作る画面の概要（任意） | 雛形 |
 | `/issue` | PRD / DesignDoc / 仕様書を Notion に作り Issue を起票 | 機能・バグの概要 | 手順 |
 | `/implement` | Issue または PR レビュー指摘を読んで実装 | Issue番号 または PR番号 | 手順 |
+| `/implement-auto` | 仕様確認から PR の CI が緑になるまでを自走（Cursor・Codex 版あり） | Backlog課題キー / Issue番号 / Notion URL | 手順 |
 | `/selfcheck` | マージ前のセルフチェック | Issue番号（省略可） | 手順 |
 | `/pr` | 変更をプッシュして PR を作成 | Issue番号 | 手順 |
 | `/code-review` | PR レビュー用のチェックリスト出力 | なし | 雛形 |
@@ -68,6 +69,7 @@
 ```
 
 全部を通す必要はありません。小さな修正なら `/implement` → `/selfcheck` → `/pr` だけで十分です。
+実装から PR・CI 対応までをまとめて任せるなら `/implement-auto <課題キー>` 1つで済みます。
 
 ---
 
@@ -151,6 +153,50 @@ Issue か PR の内容を読んで実装します。**引数はどちらでも�
 | レビュー修正 | `fix: address review comments for #<番号>` |
 
 破壊的変更が含まれる場合は、書き換える前に承認を取ります。
+
+### `/implement-auto`
+
+Backlog 課題などを渡すと、仕様の確認から PR の CI が緑になるまでを途中で止まらずに進めます。
+
+```
+/implement-auto SOCAIAGENT-123                # Backlog 課題
+/implement-auto https://app.notion.com/p/...  # Notion の仕様ページ
+/implement-auto 1523                          # GitHub Issue
+```
+
+流れは次のとおりです。
+
+1. **仕様を読む**: Backlog の課題とコメント（`.env` の `BACKLOG_SPACE_ID` / `BACKLOG_API_KEY` を使う）や Issue を読みます。本文に Notion のリンクがあれば、それも開いて読みます。
+2. **作業場所を作る**: `origin/main` から worktree を切ります。
+3. **実装する**: テストを先に書いて実装し、変異テストでテストが効いているかを確かめます。
+4. **手元で CI を回す**: 変更したパスに応じて、`test.yml` などと同じコマンドを実行します。
+   - Go: gofmt / vet / build / test
+   - フロントエンド: lint / 型検査 / jest
+   - RAG: ruff / mypy / pytest
+   - ワークフローの検査スクリプト、terraform fmt
+5. **セルフレビュー**: 正しさ・セキュリティ・テストの 3 観点でレビューし、本物の指摘だけを直します。
+6. **PR を出す**: develop 宛てに出します。タイトルには Backlog キーを入れます（無いと sync チェックが落ちます）。
+7. **CI を監視する**: 落ちたら直して push し直します。ブランチが遅れていれば `gh pr update-branch` で追いつかせます。
+8. **片付ける**: worktree を削除し、結果を報告します。
+
+**マージはしません。** レビューと release / main への昇格は人が行います。
+
+止まるのは次の場合だけです。
+- 仕様が読めない
+- 要件が矛盾していて、どちらを取るかで実装が変わる
+- データ削除などの破壊的な変更が入る
+
+Notion の読み方はツールごとに違います。
+
+| ツール | 呼び方 | ファイル | Notion の読み方 |
+|---|---|---|---|
+| Claude Code | `/implement-auto SOCAIAGENT-123` | `.claude/commands/implement-auto.md` | Claude-in-Chrome（ログイン済みの Chrome）。つながらなければ Notion MCP |
+| Cursor | `/implement-auto SOCAIAGENT-123` | `.cursor/commands/implement-auto.md` | Notion MCP。読めなければ内蔵ブラウザ |
+| Codex | `$implement-auto SOCAIAGENT-123`（または `/skills` から選ぶ） | `.agents/skills/implement-auto/SKILL.md` | Notion MCP。読めなければブラウザ機能 |
+
+Codex は、リポジトリに置いた `/prompts:` 形式のカスタムコマンドを読みません（`~/.codex/prompts/` のものだけを読みます）。そのため Codex 版はリポジトリのスキル（`.agents/skills/`）として置いています。
+
+Notion の長いページは、画面外のブロックが描画されません。ページ全体の文字を一度に取るだけでは前半が抜けるため、Claude Code 版はスクロールしながらブロックを集めます。ブラウザでの読み方は、ログインと読み取りだけです。書き込みやパスワードの入力はしません。
 
 ### `/selfcheck`
 
