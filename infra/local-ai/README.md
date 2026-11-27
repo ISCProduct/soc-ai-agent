@@ -17,7 +17,8 @@ Backend 側の縮退ロジックは `Backend/internal/aifailover`（子B #1833�
 ## 前提
 
 - Docker / Docker Compose v2
-- 推論 PC はアプリ（Backend）からプライベートネットワークで到達できること
+- 推論 PC の API は**認証なし・平文**。既定の公開先は `127.0.0.1`（`LOCAL_AI_BIND`）
+- Backend から到達できること。**本番 Backend は Fargate のため、推論 PC の LAN IP だけでは届かない**。VPN・SSM ポートフォワード・PrivateLink 等が必要
 - 推奨スペック: メモリ 8GB 以上・GPU なし（本 README の数値は**実機未検証**）
 
 ## セットアップ
@@ -25,23 +26,24 @@ Backend 側の縮退ロジックは `Backend/internal/aifailover`（子B #1833�
 ```bash
 cd infra/local-ai
 cp .env.example .env   # 初回。setup.sh でもコピーする
-./scripts/setup.sh     # build / up / ollama pull
+# VPN 越しに公開するときだけ LOCAL_AI_BIND をその側のアドレスに変更（0.0.0.0 は避ける）
+./scripts/setup.sh     # build / up / ollama-init（pull + warm-up）
 ./scripts/healthcheck.sh
 ./scripts/smoke.sh
-./scripts/bench.sh     # 任意。メモリと単発レイテンシ
+./scripts/bench.sh     # 任意。メモリと単発レイテンシ（LLM は1回目/2回目）
 ```
 
 停止:
 
 ```bash
 docker compose down
-# モデル volume も消すとき
+# モデル volume も消すとき（次回 setup で ollama-init が再 pull）
 docker compose down -v
 ```
 
 ## Backend への接続
 
-推論 PC の LAN IP を入れて、Backend の環境変数（または Terraform の `ai_failover_local_*`）へ渡す。
+推論 PC へ Backend から到達できるホスト名/IP を入れて、Backend の環境変数（または Terraform の `ai_failover_local_*`）へ渡す。
 
 ```bash
 AI_FAILOVER_LOCAL_STT_URL=http://10.0.0.5:8080
@@ -58,8 +60,8 @@ staging の稼働中インスタンスは user_data だけでは届かないこ�
 | コンポーネント | 既定 | 備考 |
 |---|---|---|
 | Whisper | `tiny` | `.env` の `WHISPER_MODEL=base` で精度寄り（メモリ増） |
-| Ollama | `qwen3:1.7b` | 8GB ではギリギリの想定。OOM したら `qwen3:0.6b` |
-| VOICEVOX | CPU イメージ | 話者 ID は `VOICEVOX_SPEAKER` / Backend の `AI_FAILOVER_LOCAL_TTS_SPEAKER` |
+| Ollama | `qwen3:1.7b` | 8GB ではギリギリの想定。OOM したら `qwen3:0.6b`。`OLLAMA_KEEP_ALIVE=-1` と warm-up でコールド回避 |
+| VOICEVOX | CPU イメージ（タグ固定） | 話者 ID は `VOICEVOX_SPEAKER` / Backend の `AI_FAILOVER_LOCAL_TTS_SPEAKER` |
 
 同時起動時のホスト全体 8GB 以内に収まるかは**未実測**。`./scripts/bench.sh` の `free -h` と `docker stats` を推論 PC で取り、下記へ追記する。
 
@@ -69,36 +71,43 @@ staging の稼働中インスタンスは user_data だけでは届かないこ�
 
 - [ ] Ubuntu 8GB・GPU なしでの同時起動（Whisper + Ollama + VOICEVOX）
 - [ ] 起動後の常駐メモリが 8GB に収まること
-- [ ] STT / LLM / TTS の単発レイテンシ（`bench.sh` の数値）
+- [ ] STT / LLM（1回目・2回目）/ TTS の単発レイテンシ（`bench.sh`）
 - [ ] 日本語面接音声での Whisper `tiny` / `base` の聞き取り品質
+- [ ] webm（`--convert`）経路の通し確認
 - [ ] Ollama `qwen3:1.7b` と `0.6b` の面接官応答の品質差
 - [ ] VOICEVOX 話者 ID `1` の声質が面接向けとして許容できるか
-- [ ] Backend（別マシン）からのプライベートネットワーク経由の通し試験（OpenAI を意図的に落としての縮退）
+- [ ] Backend（Fargate / staging）から VPN 等経由の通し試験（OpenAI を意図的に落としての縮退）
 
 ## ディレクトリ
 
 ```text
 infra/local-ai/
-  docker-compose.yml   # whisper / ollama / voicevox
+  docker-compose.yml
   .env.example
-  whisper/             # Whisper.cpp server の entrypoint
+  .gitignore
+  README.md
+  whisper/
+    Dockerfile
+    entrypoint.sh
   scripts/
     setup.sh
     healthcheck.sh
     smoke.sh
     bench.sh
-  testdata/smoke.wav   # smoke / bench 用の短い WAV
+    common.sh
+  testdata/smoke.wav
 ```
 
 ## トラブル
 
 | 症状 | 確認 |
 |---|---|
-| `healthcheck` で ollama が NG | `docker compose logs ollama`。モデル pull 前でも `/api/tags` は 200 になる想定 |
-| `smoke` の LLM が 404 | `OLLAMA_MODEL` を pull したか（`setup.sh`）。名前は `ollama list` で確認 |
-| Whisper が webm で失敗 | entrypoint は `--convert` 付き。ffmpeg がイメージに含まれる公式タグを使っているか |
-| メモリ不足で Ollama が落ちる | `.env` で `OLLAMA_MODEL=qwen3:0.6b` にして `./scripts/setup.sh` の pull を再実行 |
-| Backend から繋がらない | 推論 PC の firewall / bind。Compose は `0.0.0.0` で publish している |
+| `healthcheck` で ollama モデル NG | `compose logs ollama-init`。`down -v` 後は init が再 pull する |
+| `smoke` の LLM が `<think>` 除去後空 | `max_tokens` 不足やモデル不調。Backend でも失敗する |
+| Whisper が起動ループ | モデル取得失敗の残骸。volume を消すか不完全 `ggml-*.bin` を削除 |
+| Whisper が webm で失敗 | entrypoint は `--convert` 付き。ffmpeg がイメージに含まれる公式タグか |
+| メモリ不足で Ollama が落ちる | `.env` で `OLLAMA_MODEL=qwen3:0.6b` にして setup し直す |
+| Backend から繋がらない | `LOCAL_AI_BIND` と VPN/トンネル。Fargate から LAN IP 直指定は不可。Docker の ports は ufw を迂回する |
 
 ## 関連
 

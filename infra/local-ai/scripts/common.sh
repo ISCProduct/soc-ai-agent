@@ -12,16 +12,17 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-STT_PORT="${LOCAL_AI_STT_PORT:-8080}"
-LLM_PORT="${LOCAL_AI_LLM_PORT:-11434}"
-TTS_PORT="${LOCAL_AI_TTS_PORT:-50021}"
+LOCAL_AI_BIND="${LOCAL_AI_BIND:-127.0.0.1}"
+LOCAL_AI_STT_PORT="${LOCAL_AI_STT_PORT:-8080}"
+LOCAL_AI_LLM_PORT="${LOCAL_AI_LLM_PORT:-11434}"
+LOCAL_AI_TTS_PORT="${LOCAL_AI_TTS_PORT:-50021}"
 OLLAMA_MODEL="${OLLAMA_MODEL:-qwen3:1.7b}"
 VOICEVOX_SPEAKER="${VOICEVOX_SPEAKER:-1}"
-WHISPER_MODEL="${WHISPER_MODEL:-tiny}"
 
-STT_URL="${STT_URL:-http://127.0.0.1:${STT_PORT}}"
-LLM_URL="${LLM_URL:-http://127.0.0.1:${LLM_PORT}}"
-TTS_URL="${TTS_URL:-http://127.0.0.1:${TTS_PORT}}"
+# 呼び出し元の汎用 STT_URL 等は引き継がない（誤って外部 URL を叩かない）。
+LOCAL_AI_STT_URL="${LOCAL_AI_STT_URL:-http://${LOCAL_AI_BIND}:${LOCAL_AI_STT_PORT}}"
+LOCAL_AI_LLM_URL="${LOCAL_AI_LLM_URL:-http://${LOCAL_AI_BIND}:${LOCAL_AI_LLM_PORT}}"
+LOCAL_AI_TTS_URL="${LOCAL_AI_TTS_URL:-http://${LOCAL_AI_BIND}:${LOCAL_AI_TTS_PORT}}"
 
 compose() {
   docker compose -f "${ROOT}/docker-compose.yml" "$@"
@@ -40,4 +41,21 @@ require_cmd() {
 http_code() {
   local url="$1"
   curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 10 "${url}" || echo "000"
+}
+
+# mktemp ファイルを終了時に消す。
+cleanup_files=()
+cleanup() {
+  local f
+  for f in "${cleanup_files[@]:-}"; do
+    rm -f "${f}"
+  done
+}
+trap cleanup EXIT
+
+tmpfile() {
+  local f
+  f="$(mktemp)"
+  cleanup_files+=("${f}")
+  printf '%s' "${f}"
 }

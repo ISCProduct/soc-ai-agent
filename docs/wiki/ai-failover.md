@@ -47,7 +47,9 @@ staging は新規インスタンスの user_data にしか届かないので、�
 
 ## ローカル推論環境（子A #1832）
 
-推論 PC 向けの独立 Compose は [`infra/local-ai/`](../../infra/local-ai/README.md)。セットアップ・ヘルス・スモーク・ベンチのスクリプトと、実機未検証のチェックリストがある。接続先 URL を上記の環境変数へ渡せば、この縮退が有効になる。
+推論 PC 向けの独立 Compose は [`infra/local-ai/`](../../infra/local-ai/README.md)。セットアップ・ヘルス・スモーク・ベンチのスクリプトと、実機未検証のチェックリストがある。
+
+接続先 URL を上記の環境変数へ渡せば、この縮退が有効になる。ただし **本番 Backend は Fargate のため、推論 PC の LAN IP をそのまま書いても届かない**。VPN・SSM ポートフォワード・PrivateLink などで Backend → 推論 PC の到達経路を用意したうえで URL を渡す。推論側の API は認証なしなので、公開バインドは `LOCAL_AI_BIND`（既定 `127.0.0.1`）で絞る。
 
 ## 未対応（別の PR）
 

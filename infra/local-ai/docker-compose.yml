@@ -4,6 +4,9 @@
 #
 # 使い方: ./scripts/setup.sh → ./scripts/healthcheck.sh → ./scripts/smoke.sh
 # Backend 側の接続は docs/wiki/ai-failover.md
+#
+# 既定の公開先は 127.0.0.1（認証なし API を全インターフェースに晒さない）。
+# VPN 経由などで別ホストから触るときは LOCAL_AI_BIND にその側のアドレスを入れる。
 
 name: soc-local-ai
 
@@ -14,7 +17,7 @@ services:
     image: soc-local-ai-whisper:local
     restart: unless-stopped
     ports:
-      - "${LOCAL_AI_STT_PORT:-8080}:8080"
+      - "${LOCAL_AI_BIND:-127.0.0.1}:${LOCAL_AI_STT_PORT:-8080}:8080"
     environment:
       WHISPER_MODEL: "${WHISPER_MODEL:-tiny}"
       WHISPER_THREADS: "${WHISPER_THREADS:-}"
@@ -29,11 +32,14 @@ services:
       start_period: 120s
 
   ollama:
-    # 必要なら digest や minor タグへピン留めする（実機で確認した版を推奨）。
-    image: ollama/ollama:latest
+    # 必要なら digest へさらに固定する（実機で確認した版を推奨）。
+    image: ollama/ollama:0.12.3
     restart: unless-stopped
     ports:
-      - "${LOCAL_AI_LLM_PORT:-11434}:11434"
+      - "${LOCAL_AI_BIND:-127.0.0.1}:${LOCAL_AI_LLM_PORT:-11434}:11434"
+    environment:
+      # 縮退は障害時だけ動くので、コールドスタートで最初の生徒を待たせない。
+      OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:--1}"
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
@@ -43,13 +49,33 @@ services:
       retries: 5
       start_period: 30s
 
+  # down -v のあともモデルを戻す。restart: "no" のワンショット。
+  ollama-init:
+    image: ollama/ollama:0.12.3
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen3:1.7b}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        echo "[ollama-init] pull $${OLLAMA_MODEL}"
+        ollama pull "$${OLLAMA_MODEL}"
+        echo "[ollama-init] warm-up $${OLLAMA_MODEL}"
+        ollama run "$${OLLAMA_MODEL}" "ping" >/dev/null
+        echo "[ollama-init] done"
+    restart: "no"
+
   voicevox:
     # CPU 版。GPU なしの推論 PC 向け。
     # イメージに curl が無いことがあるので、生存確認は scripts/healthcheck.sh に寄せる。
-    image: voicevox/voicevox_engine:cpu-ubuntu20.04-latest
+    image: voicevox/voicevox_engine:cpu-ubuntu20.04-0.23.1
     restart: unless-stopped
     ports:
-      - "${LOCAL_AI_TTS_PORT:-50021}:50021"
+      - "${LOCAL_AI_BIND:-127.0.0.1}:${LOCAL_AI_TTS_PORT:-50021}:50021"
 
 volumes:
   whisper_models:
