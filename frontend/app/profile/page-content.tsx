@@ -26,6 +26,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService, User } from '@/lib/auth'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
+import { GrowthHistoryCard } from '@/components/profile/GrowthHistoryCard'
 import { ScoutPreferencesCard } from '@/components/profile/ScoutPreferencesCard'
 import { TrainingConsentCard } from '@/components/profile/TrainingConsentCard'
 import { DeleteAccountDialog } from '@/components/profile/DeleteAccountDialog'
@@ -271,6 +272,7 @@ function ProfilePageContent() {
             </CardContent>
           </Card>
         )}
+        <GrowthHistoryCard />
         {/* ユーザーヘッダーカード */}
         <Card sx={{ mb: 3, borderRadius: 2 }}>
           <CardContent sx={{ p: 3 }}>
@@ -348,13 +350,13 @@ function ProfilePageContent() {
                       基本情報
                     </Typography>
                   </Box>
+                  {/* 入力欄は size="small"（高さ約40px）にしない。押せる範囲を 44px 以上にする（#2214） */}
                   <TextField
                     fullWidth
                     label="名前"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     required
-                    size="small"
                     sx={{ mb: 2 }}
                   />
                   <TextField
@@ -363,7 +365,6 @@ function ProfilePageContent() {
                     label="区分"
                     value={targetLevel}
                     onChange={(e) => setTargetLevel(e.target.value)}
-                    size="small"
                     sx={{ mb: 3 }}
                   >
                     <MenuItem value="新卒">新卒</MenuItem>
@@ -386,7 +387,6 @@ function ProfilePageContent() {
                     value={schoolOption}
                     onChange={(e) => setSchoolOption(e.target.value)}
                     required
-                    size="small"
                     sx={{ mb: 2 }}
                   >
                     <MenuItem value="学校法人岩崎学園情報科学専門学校">
@@ -404,7 +404,6 @@ function ProfilePageContent() {
                       value={schoolName}
                       onChange={(e) => setSchoolName(e.target.value)}
                       required
-                      size="small"
                       sx={{ mb: 2 }}
                     />
                   )}
@@ -433,7 +432,6 @@ function ProfilePageContent() {
                       renderValue: (selected) => (selected as string[]).join(', '),
                     }}
                     helperText="複数選択可"
-                    size="small"
                     sx={{ mb: 2 }}
                   >
                     {CERTIFICATION_OPTIONS.map((option) => (
@@ -450,7 +448,6 @@ function ProfilePageContent() {
                     placeholder="例: 応用情報技術者、AWS SAA（改行区切り可）"
                     multiline
                     minRows={2}
-                    size="small"
                     sx={{ mb: 3 }}
                   />
 
