@@ -362,6 +362,13 @@ function InterviewContent() {
         onToggleMic={media.toggleMic}
         onToggleCamera={media.toggleCamera}
         lobbyVideoRef={media.lobbyVideoRef}
+        lobbyStream={media.lobbyStream}
+        micId={media.micId}
+        cameraId={media.cameraId}
+        speakerId={media.speakerId}
+        onSelectMic={(id) => { void media.selectInputDevice('mic', id) }}
+        onSelectCamera={(id) => { void media.selectInputDevice('camera', id) }}
+        onSelectSpeaker={media.selectSpeaker}
         onBack={handleBackToSelection}
         consentGiven={session.consentGiven}
         onConsentChange={session.setConsentGiven}
