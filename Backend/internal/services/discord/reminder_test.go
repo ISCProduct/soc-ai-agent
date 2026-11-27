@@ -271,11 +271,11 @@ func TestBuildReminder_レビュアー未設定なら従来どおり(t *testing.
 
 func TestMentionIDs_レビュアーはPR確認待ちがある日だけ許可する(t *testing.T) {
 	withPR := []BacklogIssue{issue("P-1", "x", "2026-11-04", statusPRReview, 2, "山田太郎")}
-	if got := strings.Join(mentionIDs(withPR, reviewerLinks, []int{1}), ","); got != "111,222" {
+	if got := strings.Join(mentionIDs(withPR, reviewerLinks, []int{1}, nil), ","); got != "111,222" {
 		t.Errorf("レビュアーと担当者の許可が揃っていない: %s", got)
 	}
 	noPR := []BacklogIssue{issue("P-1", "x", "2026-11-04", 2, 2, "山田太郎")}
-	if got := strings.Join(mentionIDs(noPR, reviewerLinks, []int{1}), ","); got != "222" {
+	if got := strings.Join(mentionIDs(noPR, reviewerLinks, []int{1}, nil), ","); got != "222" {
 		t.Errorf("PR確認待ちが無いのにレビュアーを許可している: %s", got)
 	}
 }
@@ -355,6 +355,71 @@ func TestBuildReminder_複数レビュアーの未登録を1人ずつ促す(t *t
 		t.Errorf("登録済みへのメンションと、未登録の案内が両方出ていない:\n%s", out)
 	}
 }
+
+func TestBuildReminderIncludingPRs_3件をメンションし0件は節を出さない(t *testing.T) {
+	links := map[string]Link{
+		"111": {BacklogID: 1, Name: "大橋和幸", GitHub: "Ohashi"},
+		"222": {BacklogID: 2, Name: "山田太郎", GitHub: "yamada"},
+	}
+	prs := []WaitingPR{
+		{Number: 12, Title: "修正A", URL: "https://github.com/o/r/pull/12", Reviewers: []string{"ohashi"}},
+		{Number: 13, Title: "修正B", URL: "https://github.com/o/r/pull/13", Reviewers: []string{"yamada"}},
+		{Number: 14, Title: "@everyone を含む", URL: "https://github.com/o/r/pull/14", Reviewers: []string{"nobody"}},
+	}
+	out := strings.Join(BuildReminderIncludingPRs([]BacklogIssue{issue("P-1", "x", "2026-11-04", 2, 1, "大橋和幸")}, links, "2026-11-04", base, nil, prs), "\n")
+	for _, number := range []string{"#12", "#13", "#14"} {
+		if !strings.Contains(out, number) {
+			t.Errorf("%s が無い:\n%s", number, out)
+		}
+	}
+	if !strings.Contains(out, "<@111>") || !strings.Contains(out, "<@222>") {
+		t.Errorf("登録済みレビュアーへのメンションが無い:\n%s", out)
+	}
+	if strings.Contains(out, "@everyone") {
+		t.Errorf("件名の @ が残っている:\n%s", out)
+	}
+	if !strings.Contains(out, "nobody") || !strings.Contains(out, "github") {
+		t.Errorf("未登録の案内が無い:\n%s", out)
+	}
+	without := strings.Join(BuildReminder([]BacklogIssue{issue("P-1", "x", "2026-11-04", 2, 1, "大橋和幸")}, links, "2026-11-04", base, nil), "")
+	if strings.Contains(without, "レビュー待ちの PR") {
+		t.Errorf("0件なのに節が出た:\n%s", without)
+	}
+}
+
+func TestReminder_Run_GitHub失敗でもBacklogは投稿する(t *testing.T) {
+	posted := false
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { posted = true }))
+	defer srv.Close()
+	svc := newReminder(srv.URL, &issuesStub{issues: []BacklogIssue{issue("P-1", "x", "2026-11-04", 2, 1, "大橋和幸")}})
+	svc.SetReviews(reviewStub{err: errors.New("github down")})
+	res, err := svc.Run(context.Background(), false)
+	if err != nil || !posted || !res.Posted {
+		t.Fatalf("Backlog の投稿が止まった: res=%+v err=%v posted=%v", res, err, posted)
+	}
+	if strings.Contains(strings.Join(res.Messages, ""), "レビュー待ちの PR") {
+		t.Fatal("失敗なのに PR の節が出た")
+	}
+}
+
+func TestReminder_Run_dryRunはPRも投稿しない(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer srv.Close()
+	svc := newReminder(srv.URL, &issuesStub{})
+	svc.SetReviews(reviewStub{prs: []WaitingPR{{Number: 3, Title: "t", URL: "https://github.com/o/r/pull/3", Reviewers: []string{"ohashi"}}}})
+	res, err := svc.Run(context.Background(), true)
+	if err != nil || called || res.Posted || !strings.Contains(strings.Join(res.Messages, ""), "#3") {
+		t.Fatalf("dry_run: res=%+v err=%v called=%v", res, err, called)
+	}
+}
+
+type reviewStub struct {
+	prs []WaitingPR
+	err error
+}
+
+func (r reviewStub) Waiting(context.Context) ([]WaitingPR, error) { return r.prs, r.err }
 
 func TestReminder_Run_取得上限に達したら注意書きを出す(t *testing.T) {
 	st := &issuesStub{issues: manyIssues(issueFetchLimit, 1, "大橋和幸", 2)}

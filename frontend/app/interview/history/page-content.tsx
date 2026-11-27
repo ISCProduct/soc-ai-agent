@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { formatDateTime } from '@/lib/i18n/format'
 import { useRouter } from 'next/navigation'
 import {
@@ -14,14 +14,17 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Typography,
-  Alert,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import PsychologyIcon from '@mui/icons-material/Psychology'
 import dynamic from 'next/dynamic'
 import { authService, User } from '@/lib/auth'
-import { interviewApi, InterviewDetail, InterviewSession, InterviewTrendPoint, TeacherReport } from '@/lib/interview'
+import { interviewApi, InterviewDetail, InterviewPlayback, InterviewSession, InterviewTrendPoint, TeacherReport } from '@/lib/interview'
+import ReviewPlayer from '@/components/interview/ReviewPlayer'
 import InterviewSummary from '../components/InterviewSummary'
+import { VideoRetentionNote } from '@/components/interview/VideoRetentionNote'
+import AxisComparison from '@/components/interview/AxisComparison'
 import { parseJsonSafe } from '@/lib/interview/utils'
 
 import { INTERVIEW_HISTORY_CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
@@ -58,6 +61,12 @@ export default function PageContent() {
   const [listError, setListError] = useState<string | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [trendError, setTrendError] = useState<string | null>(null)
+  const [playback, setPlayback] = useState<InterviewPlayback | null>(null)
+  const [playbackLoading, setPlaybackLoading] = useState(false)
+  const [playbackError, setPlaybackError] = useState<string | null>(null)
+  const [playbackRetry, setPlaybackRetry] = useState(0)
+  const [seek, setSeek] = useState<{ id: number; nonce: number } | null>(null)
+  const playbackGen = useRef(0)
 
   const limit = 10
 
@@ -101,6 +110,33 @@ export default function PageContent() {
   useEffect(() => { void loadSessions() }, [loadSessions])
   useEffect(() => { void loadTrend() }, [loadTrend])
 
+  useEffect(() => {
+    const sessionId = selectedDetail?.session.id
+    if (!sessionId) {
+      setPlayback(null)
+      setPlaybackError(null)
+      setPlaybackLoading(false)
+      return
+    }
+    const gen = playbackGen.current + 1
+    playbackGen.current = gen
+    setPlaybackLoading(true)
+    setPlaybackError(null)
+    void interviewApi.listPlayback(sessionId)
+      .then((data) => {
+        if (playbackGen.current !== gen) return
+        setPlayback(data)
+      })
+      .catch(() => {
+        if (playbackGen.current !== gen) return
+        setPlayback(null)
+        setPlaybackError('録画の情報を取得できませんでした')
+      })
+      .finally(() => {
+        if (playbackGen.current === gen) setPlaybackLoading(false)
+      })
+  }, [selectedDetail?.session.id, playbackRetry])
+
   // 教員モードは職員・管理者のみ。サーバー側の開示条件(is_staff/is_admin)と揃える(#1815)
   const isTeacher = Boolean(user?.is_staff || user?.is_admin)
 
@@ -133,7 +169,7 @@ export default function PageContent() {
               )}
             </Box>
             {/* 既定の40x40ではモバイルのタップ領域が足りない（#1481） */}
-            <IconButton onClick={() => router.push('/interview')} aria-label="面接画面へ戻る" sx={{ bgcolor: UI.tint, color: UI.inkSoft, width: 44, height: 44 }}>
+            <IconButton onClick={() => router.push('/interview')} aria-label="面接画面へ戻る" sx={{ bgcolor: UI.tint, color: UI.inkSoft }}>
               <ArrowBackIcon />
             </IconButton>
           </Box>
@@ -151,10 +187,10 @@ export default function PageContent() {
               onChange={(_, v) => { if (v !== null) setTrendLimit(v) }}
               size="small"
             >
-              {/* size="small" の高さ37pxではモバイルのタップ領域が足りない（#1481） */}
-              <ToggleButton value={5} sx={{ fontSize: 12, px: 1.5, minHeight: 44 }}>直近5回</ToggleButton>
-              <ToggleButton value={10} sx={{ fontSize: 12, px: 1.5, minHeight: 44 }}>直近10回</ToggleButton>
-              <ToggleButton value={0} sx={{ fontSize: 12, px: 1.5, minHeight: 44 }}>全期間</ToggleButton>
+              {/* size="small" の高さ37pxではモバイルのタップ領域が足りない（#1481）。高さ 44px は学生のテーマで付く。文字は本文の最小の 14px（#2214） */}
+              <ToggleButton value={5} sx={{ fontSize: 14, px: 1.5 }}>直近5回</ToggleButton>
+              <ToggleButton value={10} sx={{ fontSize: 14, px: 1.5 }}>直近10回</ToggleButton>
+              <ToggleButton value={0} sx={{ fontSize: 14, px: 1.5 }}>全期間</ToggleButton>
             </ToggleButtonGroup>
           </Stack>
           {trendLoading ? (
@@ -176,12 +212,14 @@ export default function PageContent() {
             </Box>
           )}
         </Paper>
+        {!trendLoading && !trendError ? <AxisComparison points={trendPoints} /> : null}
       </Box>
 
       <Box sx={{ display: 'flex', maxWidth: INTERVIEW_HISTORY_CONTENT_MAX_WIDTH, mx: 'auto', p: { xs: 2, md: 4 }, gap: 3, flexDirection: { xs: 'column', md: 'row' }, alignItems: 'flex-start' }}>
         {/* Session list */}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>セッション一覧</Typography>
+          <VideoRetentionNote />
           {loading ? (
             <ListSkeleton rows={3} label="面接履歴を読み込み中" />
           ) : listError ? (
@@ -266,6 +304,15 @@ export default function PageContent() {
           ) : (
             <Stack spacing={2}>
               {/* Report */}
+              <ReviewPlayer
+                sessionId={selectedDetail.session.id}
+                playback={playback}
+                loading={playbackLoading}
+                error={playbackError}
+                onRetry={() => setPlaybackRetry((current) => current + 1)}
+                seekUtteranceId={seek?.id ?? null}
+                seekNonce={seek?.nonce ?? 0}
+              />
               {selectedDetail.report ? (
                 <>
                   <InterviewSummary
@@ -273,6 +320,9 @@ export default function PageContent() {
                     utterances={selectedDetail.utterances}
                     userId={user?.user_id}
                     theme="light"
+                    onPlayEvidence={playback?.videos?.some((video) => video.status === 'done')
+                      ? (utteranceId) => setSeek({ id: utteranceId, nonce: Date.now() })
+                      : undefined}
                   />
 
                   {/* 教員用レポートパネル。開示判定はサーバー側（実ロールで teacher_report_json
@@ -343,7 +393,7 @@ export default function PageContent() {
                 </>
               ) : (
                 <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="text.secondary" role="status">
                     {selectedDetail.session.status === 'finished' ? 'レポートを生成中です...' : 'レポートは面接終了後に生成されます。'}
                   </Typography>
                 </Paper>

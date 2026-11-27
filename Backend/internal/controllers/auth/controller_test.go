@@ -338,7 +338,7 @@ func TestVerifyRegistration_JSONBody(t *testing.T) {
 func TestResetPassword_InvalidToken_ReturnsValidationError(t *testing.T) {
 	svc := &mockAuthService{
 		resetPasswordFn: func(_, _ string) error {
-			return errors.New("invalid or expired token")
+			return auth.ErrPasswordResetTokenInvalid
 		},
 	}
 	e, ctrl := newAuthTestServer(svc)

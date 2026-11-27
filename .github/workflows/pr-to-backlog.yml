@@ -256,6 +256,24 @@ jobs:
                           return bl_key
               return None
 
+          def list_pr_commits(pr_number):
+              """PR のコミットを全件返す。
+
+              /pulls/{n}/commits は1回100件・合計250件までしか返さない。per_page=250 と書いても
+              100件で切れ、昇格PR(300件超)の大半を読まずに success になっていた
+              (2026-11-24 の #2580 は368件中100件。101件目以降の課題が「ステージング環境反映」のまま)。
+              compare API でベースとの差分をページ送りで最後まで読む。"""
+              pr = gh_api(f"/pulls/{pr_number}")
+              base, head = pr['base']['sha'], pr['head']['sha']
+              commits, page = [], 1
+              while True:
+                  data = gh_api(f"/compare/{base}...{head}?per_page=100&page={page}")
+                  batch = data.get('commits') or []
+                  commits += batch
+                  if len(batch) < 100 or len(commits) >= data.get('total_commits', 0):
+                      return commits
+                  page += 1
+
           def resolve_bl_keys_from_commits(pr_number, depth=3, _seen_numbers=None):
               """プロモーションPRのコミットが参照する番号からBacklogキーを解決する。
               参照先がBacklogキーを持たない別のプロモーションPRだった場合は、
@@ -266,7 +284,7 @@ jobs:
                   _seen_numbers = set()
 
               try:
-                  commits = gh_api(f"/pulls/{pr_number}/commits?per_page=250")
+                  commits = list_pr_commits(pr_number)
               except Exception as e:
                   print(f"コミット一覧の取得に失敗しました(#{pr_number}): {e}", file=sys.stderr)
                   return set()
@@ -497,6 +515,19 @@ jobs:
                   print("閉じた PR の編集のため何もしません。")
                   sys.exit(0)
               is_draft = bool(pr.get('draft'))
+              # 昇格 PR（develop→release、release→main）は本文に課題キーを持たない。
+              # 含まれるマージ済み PR のコミットから課題を集め、各課題に昇格 PR の URL を載せる。
+              # ステータスはマージ時に進める（開いただけでは動かさない）。
+              if not own_key and (PR_HEAD_REF, PR_BASE_REF) in (('develop', 'release'), ('release', 'main')):
+                  keys = sorted(resolve_bl_keys_from_commits(PR_NUMBER))
+                  if not keys:
+                      warn("昇格 PR に含まれる PR から Backlog 課題を見つけられませんでした。"
+                           "含まれる PR のタイトルか本文に課題キーがあるか確認してください。")
+                      sys.exit(1)
+                  for key in keys:
+                      append_pr_url(key, PR_URL)
+                  print(f"昇格 PR に含まれる Backlog 課題: {', '.join(keys)}（PR URL を追記。ステータスはマージ時に進めます）")
+                  sys.exit(0)
               if not own_key:
                   warn("課題キーが見つからず、課題名でも特定できません。ステータスを更新しません。"
                        "PR タイトルに [SOCAIAGENT-N]、または本文に「Backlog: SOCAIAGENT-N」を書くと同期されます。")

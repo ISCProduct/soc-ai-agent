@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
 	"Backend/internal/models"
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -77,8 +78,8 @@ type CorrelationMapNode struct {
 	MainBusiness        string     `json:"main_business"`
 	Description         string     `json:"description"`
 	Industry            string     `json:"industry,omitempty"`   // 業種。事業タグではない
-	BusinessTags        []string   `json:"business_tags"`        // 事業・サービス分類。未整備時は空
-	BusinessTagsStatus  string     `json:"business_tags_status"` // available|unavailable
+	BusinessTags        []string   `json:"business_tags"`        // 事業・サービス分類。未登録なら空
+	BusinessTagsStatus  string     `json:"business_tags_status"` // available|unavailable（未登録・未確認）
 	MarketType          string     `json:"market_type"`          // prime|standard|growth|unlisted|""
 	MarketTypeKnown     bool       `json:"market_type_known"`    // false=未確認（非上場とは別）
 	IsListed            bool       `json:"is_listed"`
@@ -143,6 +144,7 @@ type CompanyCorrelationMap struct {
 type CompanyCorrelationMapService struct {
 	companyRepo  repository.CompanyRepository
 	relationRepo repository.CompanyRelationRepository
+	tagRepo      repository.CompanyBusinessTagRepository
 	graph        *CompanyRelationGraphService
 }
 
@@ -157,8 +159,13 @@ func NewCompanyCorrelationMapService(
 	}
 }
 
+// SetBusinessTagRepository は事業タグの読み出し元を注入する。未注入なら全企業 unavailable。
+func (s *CompanyCorrelationMapService) SetBusinessTagRepository(r repository.CompanyBusinessTagRepository) {
+	s.tagRepo = r
+}
+
 // Build は起点企業の相関図データを返す。
-func (s *CompanyCorrelationMapService) Build(focusID uint) (*CompanyCorrelationMap, error) {
+func (s *CompanyCorrelationMapService) Build(ctx context.Context, focusID uint) (*CompanyCorrelationMap, error) {
 	base, err := s.graph.BuildGraph(focusID)
 	if err != nil {
 		return nil, err
@@ -212,6 +219,15 @@ func (s *CompanyCorrelationMapService) Build(focusID uint) (*CompanyCorrelationM
 		visibleIDs = append(visibleIDs, n.ID)
 	}
 
+	// 初期表示で折りたたまれる企業も含め、返すノード全件のタグを1回で引く。
+	tagsByID := map[uint][]string{}
+	if s.tagRepo != nil {
+		tagsByID, err = s.tagRepo.NamesByCompanyIDs(ctx, visibleIDs)
+		if err != nil {
+			return nil, fmt.Errorf("load business tags: %w", err)
+		}
+	}
+
 	out := &CompanyCorrelationMap{
 		FocusCompanyID: focusID,
 		Nodes:          make([]CorrelationMapNode, 0, len(visibleIDs)),
@@ -221,7 +237,7 @@ func (s *CompanyCorrelationMapService) Build(focusID uint) (*CompanyCorrelationM
 
 	for _, id := range visibleIDs {
 		c := companyByID[id]
-		out.Nodes = append(out.Nodes, buildCorrelationNode(c, marketByID[id], id == focusID))
+		out.Nodes = append(out.Nodes, buildCorrelationNode(c, marketByID[id], tagsByID[id], id == focusID))
 	}
 	sortCorrelationNodes(out.Nodes)
 
@@ -385,7 +401,7 @@ func (s *CompanyCorrelationMapService) CompareBusiness(focusID, selectedID uint)
 	}, nil
 }
 
-func buildCorrelationNode(c models.Company, market *models.CompanyMarketInfo, isFocus bool) CorrelationMapNode {
+func buildCorrelationNode(c models.Company, market *models.CompanyMarketInfo, tags []string, isFocus bool) CorrelationMapNode {
 	reading := strings.TrimSpace(c.NameReading)
 	short, src, known := DeriveShortBusiness(c.MainBusiness, c.Description)
 	n := CorrelationMapNode{
@@ -400,7 +416,7 @@ func buildCorrelationNode(c models.Company, market *models.CompanyMarketInfo, is
 		Description:         c.Description,
 		Industry:            c.Industry,
 		BusinessTags:        []string{},
-		BusinessTagsStatus:  "unavailable", // 事業タグ専用データは未整備（industry は流用しない）
+		BusinessTagsStatus:  "unavailable", // 未登録。industry などから推測して補わない
 		IsFocus:             isFocus,
 		SourceURL:           c.SourceURL,
 		SourceFetchedAt:     c.SourceFetchedAt,
@@ -410,6 +426,10 @@ func buildCorrelationNode(c models.Company, market *models.CompanyMarketInfo, is
 	if isRegistryClosed(&c) {
 		n.RegistryClosed = true
 		n.RegistryClosedOn = c.RegistryClosedOn.Format("2006-01-02")
+	}
+	if len(tags) > 0 {
+		n.BusinessTags = tags
+		n.BusinessTagsStatus = "available"
 	}
 	if market != nil {
 		n.MarketTypeKnown = true

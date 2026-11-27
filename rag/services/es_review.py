@@ -13,7 +13,7 @@ from services.output_schemas import (
 )
 from services.prompt_versions import log_prompt_call, prompt_version
 
-from services.model_tiers import es_review_model
+from services.model_tiers import es_improve_model, es_review_model
 import json
 import logging
 import math
@@ -25,8 +25,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 
-from models import ESReviewFeedbackItem, ESReviewResponse, ESReviewUsage, ESStarBreakdown
+from models import ESReviewFeedbackItem, ESReviewModelUsage, ESReviewResponse, ESReviewUsage, ESStarBreakdown
 from services.sanitize import _sanitize_company_name_for_query, _wrap_untrusted_text
+from services.settings import SCORING_SEED, SCORING_TEMPERATURE
 
 logger = logging.getLogger("main")
 
@@ -155,11 +156,19 @@ class _UsageTally:
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.calls = 0
+        # モデルごとの内訳（呼んだ順）。評価と改善文でモデルが違う（SOCAIAGENT-559）
+        self.by_model: Dict[str, ESReviewModelUsage] = {}
 
-    def add(self, usage: Any) -> None:
+    def add(self, usage: Any, model: Optional[str] = None) -> None:
+        prompt = _as_int(getattr(usage, "prompt_tokens", 0))
+        completion = _as_int(getattr(usage, "completion_tokens", 0))
         self.calls += 1
-        self.prompt_tokens += _as_int(getattr(usage, "prompt_tokens", 0))
-        self.completion_tokens += _as_int(getattr(usage, "completion_tokens", 0))
+        self.prompt_tokens += prompt
+        self.completion_tokens += completion
+        entry = self.by_model.setdefault(model or self.model, ESReviewModelUsage(model=model or self.model))
+        entry.calls += 1
+        entry.prompt_tokens += prompt
+        entry.completion_tokens += completion
 
     def to_model(self) -> ESReviewUsage:
         return ESReviewUsage(
@@ -167,8 +176,13 @@ class _UsageTally:
             prompt_tokens=self.prompt_tokens,
             completion_tokens=self.completion_tokens,
             calls=self.calls,
+            by_model=list(self.by_model.values()),
             prompt_version=_PROMPT_VERSION,
         )
+
+
+# 改善文の生成に使う温度。採点は SCORING_TEMPERATURE（SOCAIAGENT-699）
+_DEFAULT_TEMPERATURE = 0.3
 
 
 def _chat_json(
@@ -179,6 +193,8 @@ def _chat_json(
         max_tokens: Optional[int],
         tally: Optional[_UsageTally] = None,
         schema: Optional[Tuple[str, Dict[str, Any]]] = None,
+        temperature: float = _DEFAULT_TEMPERATURE,
+        seed: Optional[int] = None,
 ) -> Tuple[str, str]:
     """JSON でチャット補完を1回呼び、(本文, finish_reason) を返す。
 
@@ -190,7 +206,9 @@ def _chat_json(
     """
     # max_tokens が None の段（改善文 / #1564）はキー自体を送らない。null を送っても
     # OpenAI 側は既定扱いだが、OpenAI 互換サーバ（vLLM / llama.cpp）での解釈差を避ける。
-    budget_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
+    budget_kwargs: Dict[str, Any] = {"max_tokens": max_tokens} if max_tokens is not None else {}
+    if seed is not None:
+        budget_kwargs["seed"] = seed
     # 評価・改善文のどちらの呼び出しでも、工程・版・モデルをログに出す（SOCAIAGENT-560）
     log_prompt_call("es_review", model)
     json_mode = {"type": "json_object"}
@@ -203,7 +221,7 @@ def _chat_json(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.3,
+            temperature=temperature,
             response_format=fmt,
             **budget_kwargs,
         )
@@ -216,7 +234,7 @@ def _chat_json(
         logger.warning("structured outputs unsupported model=%s; falling back to json mode error=%s", model, exc)
         resp = create(json_mode)
     if tally is not None:
-        tally.add(getattr(resp, "usage", None))
+        tally.add(getattr(resp, "usage", None), model)
     choice = resp.choices[0]
     return (choice.message.content or "", getattr(choice, "finish_reason", "") or "")
 
@@ -248,6 +266,8 @@ def _call_json_with_retry(
         truncated_message: Optional[str] = None,
         keep_truncated: bool = False,
         schema: Optional[Tuple[str, Dict[str, Any]]] = None,
+        temperature: float = _DEFAULT_TEMPERATURE,
+        seed: Optional[int] = None,
 ) -> Dict[str, Any]:
     """出力上限に到達した場合のみ、上限を引き上げて1回だけ再試行する。
 
@@ -261,7 +281,7 @@ def _call_json_with_retry(
     content = ""
     for attempt in (1, 2):
         content, finish_reason = _chat_json(
-            client, model, system_prompt, user_prompt, max_tokens, tally, schema
+            client, model, system_prompt, user_prompt, max_tokens, tally, schema, temperature, seed
         )
         if finish_reason != "length":
             return _parse_json_object(content)
@@ -530,6 +550,8 @@ def _run_es_review(
         max_retries=_OPENAI_MAX_RETRIES,
     )
     model = es_review_model()
+    # 改善文は評価のフィードバックに沿った書き直しなので軽量の層（SOCAIAGENT-559）
+    improve_model = es_improve_model()
     tally = _UsageTally(model)
     # 呼び出し元(routers/es.py)で既にサニタイズ済みだが、本関数単体でも安全性を
     # 保証するため防御的にもう一度サニタイズする(呼び出し元の実装変更に依存しない)。
@@ -742,12 +764,15 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
             label="review",
             tally=tally,
             schema=("es_review", ES_REVIEW_SCHEMA),
+            # 採点の呼び出しだけ温度を下げて seed を固定する（SOCAIAGENT-699）
+            temperature=SCORING_TEMPERATURE,
+            seed=SCORING_SEED,
         )
         feedback = str(review_data.get("feedback", ""))
 
         improved_data = _call_json_with_retry(
             client,
-            model,
+            improve_model,
             improved_system_prompt,
             _improved_user_prompt(feedback),
             # 改善文の予算は char_limit があるときだけ渡す。
@@ -792,7 +817,7 @@ source_excerpt は【ES文章】内の連続した文章を正確に引用して
                 try:
                     retry_data = _call_json_with_retry(
                         client,
-                        model,
+                        improve_model,
                         improved_system_prompt,
                         _improved_user_prompt(feedback, retry_note),
                         improved_budget,

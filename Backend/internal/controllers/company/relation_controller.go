@@ -59,7 +59,7 @@ func (ctrl *CompanyRelationController) GetCompanyRelations(ctx echo.Context) err
 // GetCompanyCorrelationMap 企業相関図（学生向け）用データを返す。
 // GET /api/companies/:id/correlation-map
 //
-// 既存の関係・市場情報・企業プロフィールを組み立てる。事業タグ専用データは未整備のため
+// 既存の関係・市場情報・企業プロフィール・事業タグを組み立てる。事業タグが未登録の企業は
 // business_tags は空・status=unavailable。採用情報は含めない。
 func (ctrl *CompanyRelationController) GetCompanyCorrelationMap(ctx echo.Context) error {
 	if ctrl.correlationMap == nil {
@@ -69,7 +69,7 @@ func (ctrl *CompanyRelationController) GetCompanyCorrelationMap(ctx echo.Context
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
 	}
-	view, err := ctrl.correlationMap.Build(uint(companyID))
+	view, err := ctrl.correlationMap.Build(ctx.Request().Context(), uint(companyID))
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "Company not found")

@@ -11,21 +11,35 @@ import {
   Tabs,
   Tab,
   Divider,
-  Alert,
 } from '@mui/material'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
+import { Alert } from '@/components/common/Alert'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import GoogleIcon from '@mui/icons-material/Google'
 import Link from 'next/link'
 import { authService, AuthResponse } from '@/lib/auth'
-import { BACKEND_URL } from '@/lib/backend-url'
 import { GUEST_LIMITATIONS } from '@/lib/guest-limits'
 import { StudentThemeToggle } from '@/components/layout/StudentThemeToggle'
-import { extractTenantSlug } from '@/lib/tenant'
+import { oauthStartUrl } from '@/lib/tenant'
 import { TabPanel, tabA11yProps } from '@/components/common/TabPanel'
 
 const AUTH_TABS_ID = 'auth'
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/**
+ * メールの形式の誤りの文（#2218）。何が起きたか＋次にすることの形にし、先頭に字形を付ける
+ * （エラーの色は comfortable では黒になるので、色だけでは誤りと分からない）。
+ * 次にすることは、@ の抜け・ドメインのドットの抜けなど、どの誤りにも当てはまるよう、正しい形の例で示す。
+ */
+function EmailFormatError() {
+  return (
+    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'flex-start', gap: 0.5 }}>
+      <ErrorOutlineIcon aria-hidden sx={{ fontSize: '1rem', mt: '1px' }} />
+      メールアドレスの形式が正しくありません。name@example.com のように入力してください
+    </Box>
+  )
+}
 
 interface LoginPageProps {
   onAuthSuccess: (authResponse: AuthResponse) => void
@@ -121,11 +135,9 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
   }
 
   const handleOAuthLogin = (provider: 'google' | 'github') => {
-    // バックエンドのOAuthエンドポイントへ直接遷移する
-    // fetch経由ではなく直接ナビゲートすることでクッキーが同一オリジンで正しく設定される
-    const slug = extractTenantSlug(window.location.hostname)
-    const tenantParam = slug ? `?tenant=${encodeURIComponent(slug)}` : ''
-    window.location.href = `${BACKEND_URL}/api/auth/${provider}${tenantParam}`
+    // 自サイトの開始ルートで照合値を httpOnly Cookie に入れてから、Backend の OAuth へ進む (SOCAIAGENT-683)。
+    // fetch ではなくナビゲートする（Backend の state Cookie を Backend のオリジンで設定させるため）
+    window.location.href = oauthStartUrl(provider, window.location.hostname)
   }
 
   return (
@@ -164,7 +176,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
             </Alert>
           )}
           {resendNotice && (
-            <Alert severity="success" sx={{ mb: 2 }}>
+            <Alert role="alert" severity="success" sx={{ mb: 2 }}>
               {resendNotice}
             </Alert>
           )}
@@ -184,7 +196,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 onChange={(e) => setEmail(e.target.value)}
                 onBlur={() => setEmailTouched(true)}
                 error={emailInvalid}
-                helperText={emailInvalid ? 'メールアドレスの形式が正しくありません' : ' '}
+                helperText={emailInvalid ? <EmailFormatError /> : ' '}
                 required
                 autoComplete="username"
                 slotProps={{ htmlInput: { inputMode: 'email' } }}
@@ -219,7 +231,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
 
           <TabPanel idPrefix={AUTH_TABS_ID} value={1} selectedValue={tabValue}>
             {registrationEmailSent ? (
-              <Alert severity="success">
+              <Alert role="alert" severity="success">
                 <strong>確認メールを送信しました</strong><br />
                 {email} 宛に確認リンクを送りました。メールを確認して登録を完了してください。
               </Alert>
@@ -236,7 +248,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                   onChange={(e) => setEmail(e.target.value)}
                   onBlur={() => setEmailTouched(true)}
                   error={emailInvalid}
-                  helperText={emailInvalid ? 'メールアドレスの形式が正しくありません' : ' '}
+                  helperText={emailInvalid ? <EmailFormatError /> : ' '}
                   required
                   autoComplete="email"
                   slotProps={{ htmlInput: { inputMode: 'email' } }}

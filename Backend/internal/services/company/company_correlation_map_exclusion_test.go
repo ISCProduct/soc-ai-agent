@@ -1,6 +1,7 @@
 package company_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -66,7 +67,7 @@ func TestCorrelationMap_ExcludesPublicBodiesAndKeepsPrivateAndUnchecked(t *testi
 		capitalRel(1, 5, "capital_affiliate"),
 		businessRel(1, 2, "business_partner", "取引"),
 	}
-	got, err := buildExclusionSvc(t, all, map[uint]*models.CompanyMarketInfo{}, rels).Build(1)
+	got, err := buildExclusionSvc(t, all, map[uint]*models.CompanyMarketInfo{}, rels).Build(context.Background(), 1)
 	require.NoError(t, err)
 
 	_, ok2 := nodeByID(got, 2)
@@ -96,7 +97,7 @@ func TestCorrelationMap_CountsAreComputedAfterExclusion(t *testing.T) {
 		all = append(all, models.Company{ID: i, Name: "子", NameReading: string(rune('a' + i)), CorporateKind: kind, RegistryCheckedAt: checked()})
 		rels = append(rels, capitalRel(1, i, "capital_subsidiary"))
 	}
-	got, err := buildExclusionSvc(t, all, map[uint]*models.CompanyMarketInfo{}, rels).Build(1)
+	got, err := buildExclusionSvc(t, all, map[uint]*models.CompanyMarketInfo{}, rels).Build(context.Background(), 1)
 	require.NoError(t, err)
 
 	assert.Equal(t, 6, got.Meta.DirectChildTotal)
@@ -118,7 +119,7 @@ func TestCorrelationMap_FocusExcludedIsNotFound(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			all := []models.Company{focus, {ID: 2, Name: "子", CorporateKind: "301", RegistryCheckedAt: checked()}}
 			svc := buildExclusionSvc(t, all, map[uint]*models.CompanyMarketInfo{}, []models.CompanyRelation{capitalRel(1, 2, "capital_subsidiary")})
-			_, err := svc.Build(1)
+			_, err := svc.Build(context.Background(), 1)
 			require.Error(t, err)
 			assert.ErrorIs(t, err, repository.ErrNotFound)
 		})
@@ -139,7 +140,7 @@ func TestCorrelationMap_ClosedCompanies(t *testing.T) {
 	for i := uint(2); i <= 6; i++ {
 		rels = append(rels, capitalRel(1, i, "capital_subsidiary"))
 	}
-	got, err := buildExclusionSvc(t, all, listed, rels).Build(1)
+	got, err := buildExclusionSvc(t, all, listed, rels).Build(context.Background(), 1)
 	require.NoError(t, err)
 
 	_, ok2 := nodeByID(got, 2)
@@ -198,7 +199,7 @@ func TestCorrelationMap_UncheckedIsNeverExcluded(t *testing.T) {
 	rels := []models.CompanyRelation{capitalRel(1, 2, "capital_subsidiary"), capitalRel(1, 3, "capital_subsidiary")}
 	svc := buildExclusionSvc(t, all, map[uint]*models.CompanyMarketInfo{}, rels)
 
-	got, err := svc.Build(1)
+	got, err := svc.Build(context.Background(), 1)
 	require.NoError(t, err)
 	_, ok2 := nodeByID(got, 2)
 	_, ok3 := nodeByID(got, 3)

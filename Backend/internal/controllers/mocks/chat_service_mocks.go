@@ -84,12 +84,21 @@ func (m *MatchingServiceMock) ToggleFavorite(matchID uint, userID uint) error {
 	return args.Error(0)
 }
 
-func (m *MatchingServiceMock) ListFavoriteCompanies(_ context.Context, userID uint, limit int) ([]*models.UserCompanyMatch, error) {
-	args := m.Called(userID, limit)
+func (m *MatchingServiceMock) ListFavoriteCompanies(_ context.Context, userID uint, offset, limit int) ([]*models.UserCompanyMatch, int, []uint, error) {
+	args := m.Called(userID, offset, limit)
+	var page []*models.UserCompanyMatch
 	if v := args.Get(0); v != nil {
-		return v.([]*models.UserCompanyMatch), args.Error(1)
+		page = v.([]*models.UserCompanyMatch)
 	}
-	return nil, args.Error(1)
+	total := 0
+	if v := args.Get(1); v != nil {
+		total = v.(int)
+	}
+	var companyIDs []uint
+	if v := args.Get(2); v != nil {
+		companyIDs = v.([]uint)
+	}
+	return page, total, companyIDs, args.Error(3)
 }
 
 func (m *MatchingServiceMock) UnfavoriteCompany(_ context.Context, userID uint, companyID uint) error {
@@ -108,6 +117,22 @@ func (m *MatchingServiceMock) GetDiagnostics(userID uint, sessionID string) (*ma
 // ReasonScores は合流しない（そのまま返す）。合流の検証は matching パッケージのテストで行う。
 func (m *MatchingServiceMock) ReasonScores(_ uint, scores []models.UserWeightScore) []models.UserWeightScore {
 	return scores
+}
+
+func (m *MatchingServiceMock) GetAxisBreakdown(matchID, userID uint) (*matching.AxisBreakdown, error) {
+	args := m.Called(matchID, userID)
+	if v := args.Get(0); v != nil {
+		return v.(*matching.AxisBreakdown), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *MatchingServiceMock) GetMyAxisScores(userID uint, sessionID string) ([]matching.MyAxisScore, error) {
+	args := m.Called(userID, sessionID)
+	if v := args.Get(0); v != nil {
+		return v.([]matching.MyAxisScore), args.Error(1)
+	}
+	return nil, args.Error(1)
 }
 
 // AnalysisScoringServiceMock AnalysisScoringServiceのモック実装

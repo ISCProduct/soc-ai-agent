@@ -8,9 +8,8 @@
 # Terraform は unknown な count を許さないので plan が `Invalid count argument` で止まる。
 # シークレットを1つ足した apply で初めて起きるため、気づくのは本番の apply 当日になる。
 #
-# modules/ecs_service には create_secrets_policy で件数判定を呼び出し側へ出す前例がある
-# (modules/ecs_service/variables.tf のコメントが理由も書いている)。
-# 同じ構図のモジュールと呼び出し側がその前例に従っていることを見る。
+# modules/ecs_service_fargate は create_secrets_policy で件数判定を呼び出し側へ出せる。
+# 呼び出し側がそれを明示していることを見る。
 #
 # 使い方: ./automation/test/ecs-secrets-policy-count-test.sh
 
@@ -78,7 +77,7 @@ if [ "$checked" -eq 0 ]; then
 fi
 
 # モジュール側に逃げ道（create_secrets_policy）があること。
-for mod in "$ROOT"/infra/terraform/modules/ecs_service "$ROOT"/infra/terraform/modules/ecs_service_fargate; do
+for mod in "$ROOT"/infra/terraform/modules/ecs_service_fargate; do
   [ -d "$mod" ] || continue
   if ! strip_comments < "$mod/variables.tf" | grep -q 'variable "create_secrets_policy"'; then
     echo "FAIL $(basename "$mod"): create_secrets_policy が無い（呼び出し側が件数判定を明示できない）"

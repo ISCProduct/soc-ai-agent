@@ -10,10 +10,11 @@ import (
 )
 
 const (
-	questionSourceCustom    = "custom"
-	questionSourceGenerated = "generated"
-	questionSourceTopic     = "topic"
-	questionSourceFollowUp  = "follow_up"
+	questionSourceCustom     = "custom"      // 手動登録
+	questionSourceGenerated  = "generated"   // 自動生成。採点とは別
+	questionSourceAIResearch = "ai_research" // Web 調査。面接中には検索しない
+	questionSourceTopic      = "topic"
+	questionSourceFollowUp   = "follow_up"
 
 	questionStatusPending     = "pending"
 	questionStatusAsked       = "asked"
@@ -49,6 +50,12 @@ type questionDirective struct {
 	TotalQuestions int
 	// CompanyQuestionID は元の企業別カスタム質問（評価したい観点の引き先）。標準トピックでは nil
 	CompanyQuestionID *uint
+	// DeepeningFocus は深掘りで引き出したい STAR の要素の指示。欠けている要素が無ければ空
+	DeepeningFocus string
+	// DeepeningOf は深掘りの元の質問。Text（定型文）は学生の回答の一部を含むのでプロンプトに入れず、こちらを渡す
+	DeepeningOf string
+	// followUpState は深掘りで作った状態行。面接官の実際の発話で質問文を上書きするのに使う
+	followUpState *models.InterviewQuestionState
 }
 
 type companyQuestionHintsContextKey struct{}
@@ -90,7 +97,7 @@ func normalizeCompanyQuestionHints(hints []string) []string {
 
 // BuildQuestionQueue は必須質問→企業別候補→標準トピック→推奨質問の順でキューを構築する。
 // 保存済み質問がある場合は、生成候補を追加しない。
-func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompanyQuestion, generatedHints ...string) []models.InterviewQuestionState {
+func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompanyQuestion, hintSource string, generatedHints ...string) []models.InterviewQuestionState {
 	states := make([]models.InterviewQuestionState, 0)
 	order := 0
 
@@ -116,10 +123,13 @@ func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompan
 
 	appendCustom(true)
 	if len(customQuestions) == 0 {
+		if hintSource != questionSourceGenerated {
+			hintSource = questionSourceAIResearch
+		}
 		for _, hint := range normalizeCompanyQuestionHints(generatedHints) {
 			states = append(states, models.InterviewQuestionState{
 				SessionID:    sessionID,
-				Source:       questionSourceGenerated,
+				Source:       hintSource,
 				Category:     "企業別質問",
 				QuestionText: hint,
 				Status:       questionStatusPending,

@@ -47,7 +47,9 @@ class _R(io.BytesIO):
 _ROUTES = {json.dumps(list(routes), ensure_ascii=False)}
 def _fake(req, *a, **k):
     for frag, resp in _ROUTES:
-        if req.full_url.split('?')[0].endswith(frag): return _R(_j.dumps(resp).encode())
+        # '?' を含む frag はクエリまで含めて照合する(ページ送りの検査用)
+        url = req.full_url if '?' in frag else req.full_url.split('?')[0]
+        if url.endswith(frag): return _R(_j.dumps(resp).encode())
     return _R(b'[]' if '/commits' in req.full_url else {json.dumps(json.dumps(pr))}.encode())
 urllib.request.urlopen = _fake
 '''
@@ -116,12 +118,32 @@ run('P3 節の後ろの本文を URL 行に連結しない', dict(ACTION='opened
 run('P4 同じURLを二重に積まない(PATCHしない)', dict(ACTION='synchronize', PR_NUMBER='9'), (5, 'PR確認待ち'), pr=PRU,
     desc=f'本文\n\n## GitHub PR\n{U}')
 # --- 昇格PR: コミットが参照するPRにキーが無くても、ブランチ名の番号から Issue を辿る ---
-PROMO = dict(PRBASE, number=100, title='Release: develop to main', base={'ref': 'main'}, head={'ref': 'release'}, merged=True)
+PROMO = dict(PRBASE, number=100, title='Release: develop to main', base={'ref': 'main', 'sha': 'b100'}, head={'ref': 'release', 'sha': 'h100'}, merged=True)
+PROMO_CHILD = [('/compare/b100...h100', {'total_commits': 1, 'commits': [{'commit': {'message': 'Merge pull request #50 from o/fix/x'}}]}),
+               ('/issues/50', {'title': 'fix: 監査ログ [SOCAIAGENT-123]', 'body': '', 'pull_request': {}})]
+for head, base in (('develop', 'release'), ('release', 'main')):
+    promo_open = dict(PRBASE, number=100, title=f'deploy: {head} → {base}', html_url='promo-url', base={'ref': base, 'sha': 'b100'}, head={'ref': head, 'sha': 'h100'})
+    # 含まれる PR の課題に昇格 PR の URL を載せ、ステータスは動かさない
+    run(f'Q0 昇格PR({head}→{base})を開くと含まれるPRの課題を参照する', dict(ACTION='opened', PR_NUMBER='100'), (6, 'ステージング環境反映'),
+        pr=promo_open, routes=PROMO_CHILD, desc='', expect_desc='\n\n## GitHub PR\npromo-url')
+# 含まれる PR から課題が1件も見つからなければ赤くする
+run('Q0b 昇格PRで課題が見つからなければ警告', dict(ACTION='opened', PR_NUMBER='100'), (6, 'ステージング環境反映'),
+    pr=dict(PRBASE, number=100, title='deploy: develop → release', base={'ref': 'release', 'sha': 'b100'}, head={'ref': 'develop', 'sha': 'h100'}),
+    routes=[('/compare/b100...h100', {'total_commits': 0, 'commits': []})], expect_warn=True, expect_rc=1)
 run('Q 昇格PR→キー無しの子PRをブランチ名の番号から解決', dict(ACTION='closed', PR_NUMBER='100'), (6, 'ステージング環境反映'), pr=PROMO,
-    routes=[('/pulls/100/commits', [{'commit': {'message': 'fix: 監査ログ (#50)'}}]),
+    routes=[('/compare/b100...h100', {'total_commits': 1, 'commits': [{'commit': {'message': 'fix: 監査ログ (#50)'}}]}),
             ('/issues/50', {'title': 'fix: 監査ログ (#50)', 'body': '', 'pull_request': {}}),
             ('/pulls/50', {'head': {'ref': 'fix/1991-audit-log'}}),
             ('/issues/1991', {'title': '[SOCAIAGENT-488] 監査ログ', 'body': ''})],
+    expect_patch=4)
+
+# 昇格PRのコミットが100件を超えても全件読む。/pulls/{n}/commits は1回100件・合計250件までで、
+# 2026-11-24 の #2580(368件)では101件目以降の課題が「ステージング環境反映」のまま残った
+_FILLER = [{'commit': {'message': f'chore: 雑多 {i}'}} for i in range(100)]
+run('Q2 昇格PRのコミットが100件を超えても101件目の課題を拾う', dict(ACTION='closed', PR_NUMBER='100'), (6, 'ステージング環境反映'), pr=PROMO,
+    routes=[('/compare/b100...h100?per_page=100&page=1', {'total_commits': 101, 'commits': _FILLER}),
+            ('/compare/b100...h100?per_page=100&page=2', {'total_commits': 101, 'commits': [{'commit': {'message': 'Merge pull request #50 from o/fix/x'}}]}),
+            ('/issues/50', {'title': 'fix: 監査ログ [SOCAIAGENT-123]', 'body': '', 'pull_request': {}})],
     expect_patch=4)
 
 if FAILED:

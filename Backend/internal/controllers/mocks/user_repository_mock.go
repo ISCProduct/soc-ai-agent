@@ -2,6 +2,7 @@ package mocks
 
 import (
 	"Backend/internal/models"
+	"context"
 	"time"
 
 	"github.com/stretchr/testify/mock"
@@ -64,8 +65,8 @@ func (m *UserRepositoryMock) GetUserByVerificationToken(token string) (*models.U
 	return nil, args.Error(1)
 }
 
-func (m *UserRepositoryMock) GetUserByPasswordResetToken(token string) (*models.User, error) {
-	args := m.Called(token)
+func (m *UserRepositoryMock) GetUserByPasswordResetTokenHash(_ context.Context, hash string) (*models.User, error) {
+	args := m.Called(hash)
 	if v := args.Get(0); v != nil {
 		return v.(*models.User), args.Error(1)
 	}
