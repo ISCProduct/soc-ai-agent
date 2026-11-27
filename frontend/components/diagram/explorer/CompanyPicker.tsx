@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Box, Button, ButtonBase, TextField, Typography } from '@mui/material'
+import { Box, Button, ButtonBase, TextField, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import ArrowForward from '@mui/icons-material/ArrowForward'
 import { PageLoading } from '@/components/common/PageLoading'
 import { fetchCompanyRelations, type CapitalRelation } from '@/lib/company/data'

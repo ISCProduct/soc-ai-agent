@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Alert, Box, Button, Chip, SwipeableDrawer, Tab, Tabs, useMediaQuery, useTheme } from '@mui/material'
+import { Box, Button, Chip, SwipeableDrawer, Tab, Tabs, useMediaQuery, useTheme } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { PageLoading } from '@/components/common/PageLoading'
 import { childrenOf, partnersOf, companyTags, topBusinessTags, fetchCorrelationMap, sortCompanies, type CorrelationMap, type CorrelationMode } from '@/lib/company/correlation-map'
 import { CompanyGraph } from './CompanyGraph'

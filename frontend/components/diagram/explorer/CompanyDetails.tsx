@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Alert, Button, CircularProgress, Link as MuiLink } from '@mui/material'
+import { Button, CircularProgress, Link as MuiLink } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import OpenInNew from '@mui/icons-material/OpenInNew'
 import { businessText, companyTags, fetchCorrelationCompare, marketLabel, safeSourceURL, type CorrelationCompare, type CorrelationMap, type CorrelationMode, type CorrelationNode } from '@/lib/company/correlation-map'
 import styles from './explorer.module.css'
@@ -69,7 +70,7 @@ export function CompanyDetails({ node, map, mode, onClose, onFocus }: {
       </section>
       {node.id !== focus.id && <section>{<Button fullWidth aria-expanded={showComparison} onClick={() => setShowComparison((value) => !value)}>起点の企業と比較する</Button>}
         {showComparison && <div>
-        {error ? <Alert severity="info" action={<Button onClick={() => setRetry((value) => value + 1)}>再試行</Button>}>比較情報を取得できませんでした。</Alert> : comparison ? <>
+        {error ? <Alert severity="info" role="alert" action={<Button onClick={() => setRetry((value) => value + 1)}>再試行</Button>}>比較情報を取得できませんでした。</Alert> : comparison ? <>
           {[comparison.focus, comparison.selected].map((company) => <div className={styles.comparison} key={company.id}><h4>{company.name}</h4><p>{businessText(company)}</p></div>)}
         </> : <p role="status"><CircularProgress size={20} aria-hidden /> 比較情報を読み込み中…</p>}
         </div>}
