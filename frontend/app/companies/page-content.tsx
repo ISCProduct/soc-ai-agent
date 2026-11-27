@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import NextLink from 'next/link'
 import {
-  Alert,
   Box,
   Button,
   Card,
@@ -19,6 +18,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import Favorite from '@mui/icons-material/Favorite'
 import FavoriteBorder from '@mui/icons-material/FavoriteBorder'
 import {
@@ -182,7 +182,7 @@ export default function CompanySearchPage() {
         </Box>
 
         {optionsError && (
-          <Alert severity="warning" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={() => void loadOptions()}>再読み込み</Button>}>
+          <Alert role="alert" severity="warning" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={() => void loadOptions()}>再読み込み</Button>}>
             絞り込みの選択肢を読み込めませんでした。企業名での検索はできます。
           </Alert>
         )}
@@ -193,7 +193,7 @@ export default function CompanySearchPage() {
         )}
         {favoriteError && <Alert severity="error" sx={{ mb: 2 }}>{favoriteError}</Alert>}
         {favoritesLoadFailed && result && !error && (
-          <Alert
+          <Alert role="alert"
             severity="warning"
             sx={{ mb: 2 }}
             action={<Button color="inherit" size="small" onClick={() => void loadFavorites(result.companies.map((c) => c.id), seq.current)}>再読み込み</Button>}

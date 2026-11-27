@@ -360,11 +360,25 @@ def gh_prs(repo: str, token: str, merged_days: int) -> list[dict]:
 
 
 def gh_commit_subjects(repo: str, token: str, number: int) -> list[str]:
-    """PR のコミット題名。取れなければ空（展開できないだけで、他の検知は続ける）。"""
+    """PR のコミット題名。取れなければ空（展開できないだけで、他の検知は続ける）。
+
+    /pulls/{n}/commits は1回100件・合計250件までしか返さず、昇格 PR(300件超)の大半を
+    読めていなかった。compare API でベースとの差分をページ送りで最後まで読む
+    (pr-to-backlog.yml の list_pr_commits と同じ)。
+    """
+    api = f"https://api.github.com/repos/{repo}"
     try:
-        commits = gh_get(
-            f"https://api.github.com/repos/{repo}/pulls/{number}/commits?per_page=250", token
-        )
+        pr = gh_get(f"{api}/pulls/{number}", token)
+        base, head = pr["base"]["sha"], pr["head"]["sha"]
+        commits: list[dict] = []
+        page = 1
+        while True:
+            data = gh_get(f"{api}/compare/{base}...{head}?per_page=100&page={page}", token)
+            batch = data.get("commits") or []
+            commits += batch
+            if len(batch) < 100 or len(commits) >= data.get("total_commits", 0):
+                break
+            page += 1
     except Exception as e:  # noqa: BLE001
         print(f"#{number} のコミット取得に失敗: {e}", file=sys.stderr)
         return []

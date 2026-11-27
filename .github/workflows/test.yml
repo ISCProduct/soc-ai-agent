@@ -216,6 +216,14 @@ jobs:
       - name: ワークフローの checkout 漏れ検査
         run: ./automation/test/workflow-checkout-test.sh
 
+      # サードパーティ Actions がタグの付け替えで差し替わらないこと。
+      - name: サードパーティ Actions の SHA 固定検査
+        run: ./automation/test/third-party-action-pin-test.sh
+
+      # HSTS が Next の本番と CloudFront の両方に付くこと。
+      - name: HSTS ヘッダの検査
+        run: ./automation/test/hsts-header-test.sh
+
       # 反映後スモークがデプロイと同じ concurrency group にいること。
       # ずれるとスモーク中に次のデプロイが環境を落とし、変更と無関係に全滅する。
       - name: スモークの concurrency group 検査
@@ -320,7 +328,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: 1.15.8
           terraform_wrapper: false
@@ -355,7 +363,7 @@ jobs:
           go-version-file: ./Backend/go.mod
           cache-dependency-path: ./Backend/go.sum
 
-      - uses: golangci/golangci-lint-action@v9.3.0
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.15.0
           working-directory: Backend
@@ -371,7 +379,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: aquasecurity/trivy-action@v0.36.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: infra/terraform
@@ -435,8 +443,10 @@ jobs:
       - name: Run type check
         run: npx next typegen && npx tsc --noEmit
 
+      # カバレッジを測り、frontend/jest.config.ts の coverageThreshold を下回ったら落とす（#2046）。
+      # 以前は --no-coverage で、テストの網羅の後退に気づけなかった。
       - name: Run unit tests
-        run: npm test -- --no-coverage
+        run: npm test -- --coverage --coverageReporters=text-summary
 
   e2e-frontend:
     name: Frontend E2E Tests (Playwright)

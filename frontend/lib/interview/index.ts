@@ -55,6 +55,25 @@ export type InterviewUtterance = {
   created_at: string
 }
 
+export type StudentVideo = {
+  id: number
+  status: string
+  mime_type: string
+  uploaded_at?: string
+}
+
+export type ReviewCue = {
+  utterance_id: number
+  role: string
+  offset_seconds: number | null
+}
+
+export type InterviewPlayback = {
+  videos: StudentVideo[]
+  cues: ReviewCue[]
+  anchor: string
+}
+
 export type TeacherReport = {
   overall_comment: string
   detailed_evidence: Record<string, string>
@@ -203,6 +222,18 @@ export const interviewApi = {
       body: JSON.stringify({ user_id: userId }),
     })
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+  },
+
+  async listPlayback(sessionId: number): Promise<InterviewPlayback> {
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}/videos`, undefined, LIST_FETCH_TIMEOUT_MS)
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+    return (await res.json()) as InterviewPlayback
+  },
+
+  async videoPlaybackURL(sessionId: number, videoId: number): Promise<{ url: string; expires_at: string }> {
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}/videos/${videoId}/url`, undefined, LIST_FETCH_TIMEOUT_MS)
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+    return (await res.json()) as { url: string; expires_at: string }
   },
 
   async getDetail(sessionId: number, userId: number): Promise<InterviewDetail> {

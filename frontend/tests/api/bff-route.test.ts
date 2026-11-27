@@ -135,4 +135,14 @@ describe('/api/bff/[...path]', () => {
     const response = await GET(new NextRequest('http://localhost:3000/api/bff/interviews'), ctx('interviews'))
     expect(response.status).toBeGreaterThanOrEqual(500)
   })
+
+  it('面接動画の保持期間は許可リストに入り、Backend へ中継する', async () => {
+    const request = new NextRequest('http://localhost:3000/api/bff/user/interview-video-retention', {
+      headers: { 'X-User-Token': 'cookie-jwt' },
+    })
+    const response = await GET(request, ctx('user/interview-video-retention'))
+    expect(response.status).toBe(200)
+    expect(backendCall().url).toMatch(/\/api\/user\/interview-video-retention$/)
+    expect(backendCall().headers['X-User-Token']).toBe('cookie-jwt')
+  })
 })
