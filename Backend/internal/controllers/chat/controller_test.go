@@ -826,7 +826,7 @@ func TestChatController_GetFavorites_Limit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			matchSvc := &mocks.MatchingServiceMock{}
-			matchSvc.On("ListFavoriteCompanies", uint(1), tt.wantLimit).Return([]*models.UserCompanyMatch{}, nil)
+			matchSvc.On("ListFavoriteCompanies", uint(1), 0, tt.wantLimit).Return([]*models.UserCompanyMatch{}, 0, []uint(nil), nil)
 			req := httptest.NewRequest(http.MethodGet, "/api/chat/favorites"+tt.query, nil)
 			req = testsupport.WithUserID(req, 1)
 			rec := httptest.NewRecorder()
@@ -836,9 +836,38 @@ func TestChatController_GetFavorites_Limit(t *testing.T) {
 	}
 }
 
+func TestChatController_GetFavorites_OffsetUsesAuthenticatedUser(t *testing.T) {
+	matchSvc := &mocks.MatchingServiceMock{}
+	matchSvc.On("ListFavoriteCompanies", uint(1), 100, 100).Return([]*models.UserCompanyMatch{
+		{ID: 9, CompanyID: 42, MatchScore: 10, Company: models.Company{ID: 42, Name: "後の企業"}},
+	}, 101, []uint{7, 42}, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/favorites?limit=100&offset=100&user_id=99", nil)
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	testsupport.AssertStatus(t, newChatController(nil, matchSvc, nil, nil, nil).GetFavorites, testsupport.NewCtx(req, rec), http.StatusOK)
+	matchSvc.AssertExpectations(t)
+
+	var body struct {
+		Recommendations []struct {
+			ID int `json:"id"`
+		} `json:"recommendations"`
+		Total int    `json:"total"`
+		IDs   []uint `json:"favorite_company_ids"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if body.Total != 101 || len(body.IDs) != 2 || body.IDs[1] != 42 {
+		t.Fatalf("total=%d ids=%v, want 101 / [7 42]", body.Total, body.IDs)
+	}
+	if len(body.Recommendations) != 1 || body.Recommendations[0].ID != 42 {
+		t.Fatalf("page = %+v, want company 42", body.Recommendations)
+	}
+}
+
 func TestChatController_GetFavorites_ServiceError(t *testing.T) {
 	matchSvc := &mocks.MatchingServiceMock{}
-	matchSvc.On("ListFavoriteCompanies", uint(1), 50).Return(nil, errors.New("db error"))
+	matchSvc.On("ListFavoriteCompanies", uint(1), 0, 50).Return(nil, 0, []uint(nil), errors.New("db error"))
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/favorites", nil)
 	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()

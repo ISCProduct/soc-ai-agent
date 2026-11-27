@@ -188,7 +188,7 @@ PRD でも「初期データ投入作業自体はスコープ外」としてい�
 
 - `industries.parent_id` はシードが設定しておらず全件 NULL。
   親子関係は `level` でしか判別できない。一覧は大分類（level 0）のみを対象にしている
-- マッチ度は #1124 で線形化され、95〜99 への張り付きは解消済み。同点は残る。副キーは [SOCAIAGENT-674](https://iwasaki-ac.backlog.com/view/SOCAIAGENT-674)（課金・プランは使わない）。develop では同点は DB の取得順のまま
+- マッチ度は #1124 で線形化され、95〜99 への張り付きは解消済み。同点は残る。同点は `match_tie_key`、次に `company_id`、最後に行の `id` で決まる（SOCAIAGENT-674。課金・プランは使わない）。
   UI では順位として扱い、数値を適合率のように見せないこと
 
 ---
@@ -339,7 +339,7 @@ type CompanyWeightProfile struct {
 
 本番相当の842社での実測。7軸は面接だけ受けた学生（`interviewScoreMapping` の反映先7軸しか
 持たない）で、1点の重みが 1.43倍になるうえ、格子が粗くなるぶん**同点はさらに増える**。
-同点は `sort.SliceStable` により DB の取得順のまま残る。決定的な副キーは [SOCAIAGENT-674](https://iwasaki-ac.backlog.com/view/SOCAIAGENT-674)（課金・プランは使わない）。
+同点は `match_tie_key`（`CRC32(CONCAT(user_id, ':', company_id))` の生成列）、次に `company_id`、最後に行の `id` で決まる。取得順には依存しない。並びは `idx_ucm_user_session_rank` に載せる（SOCAIAGENT-674）。課金・プランは使わない。
 
 固定は `matching/match_resolution_test.go`、小数化の経緯は §6.3（#1560 / SOCAIAGENT-513）。
 
@@ -701,9 +701,8 @@ rubric 0 と 5 は 0〜100 の clamp に当たるため、上下に半分はみ�
   変わるのは、小数の値を持つ軸で1点未満の差が総合マッチ度に反映されることだけ。
   1点の変化が総合マッチ度を `1/計測軸数` 点動かす関係は、`match_resolution_test.go`
   （`TestMatchScoreMovesOnePointPerUserPoint` など）で固定している。
-- **同点の割り方は別問題。** 小数化で同点が割れる場合があるが、それは割る根拠のある順序ではない。
-  同点は `sort.SliceStable` により DB の取得順のまま残る（`topMatchesByScore`）。
-  副キーの設計は [SOCAIAGENT-674](https://iwasaki-ac.backlog.com/view/SOCAIAGENT-674) で扱う。
+- **同点の割り方。** 小数化で同点が割れる場合があるが、それは割る根拠のある順序ではない。
+  同点は `topMatchesByScore` が `matchrank.Less` で割り、DB の `ORDER BY match_tie_key, company_id, id` と同じ順になる。取得順のままではない（SOCAIAGENT-674）。
 - **相関検証は粗いまま。** `/api/admin/score-validation/correlation`（§7）は
   `FLOOR(uws.score / 20)` で 20点幅のバンドに丸めるので、1点未満の改善は観測できない。
   小数化の効果をこの経路で確かめられる、とは主張しない。

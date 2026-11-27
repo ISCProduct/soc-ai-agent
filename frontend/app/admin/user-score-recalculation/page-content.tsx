@@ -433,9 +433,14 @@ export default function PageContent() {
           )}
         </Stack>
       )}
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
-        <DialogTitle>ユーザースコア再計算を開始しますか？</DialogTitle>
-        <DialogContent>
+      <Dialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        aria-labelledby="user-score-start-title"
+        aria-describedby="user-score-start-description"
+      >
+        <DialogTitle id="user-score-start-title">ユーザースコア再計算を開始しますか？</DialogTitle>
+        <DialogContent id="user-score-start-description">
           <Typography>
             {preview?.eligible_sessions ?? 0} セッションを再計算します。費用概算は
             ${preview?.estimated_cost_usd.toFixed(4) ?? '0.0000'} USDです。
@@ -449,10 +454,15 @@ export default function PageContent() {
           <Button variant="contained" onClick={() => void startJob()}>開始する</Button>
         </DialogActions>
       </Dialog>
-      <Dialog open={cancelConfirmOpen} onClose={() => setCancelConfirmOpen(false)}>
-        <DialogTitle>再計算を中止しますか？</DialogTitle>
+      <Dialog
+        open={cancelConfirmOpen}
+        onClose={() => setCancelConfirmOpen(false)}
+        aria-labelledby="user-score-cancel-title"
+        aria-describedby="user-score-cancel-description"
+      >
+        <DialogTitle id="user-score-cancel-title">再計算を中止しますか？</DialogTitle>
         <DialogContent>
-          <Typography>
+          <Typography id="user-score-cancel-description">
             再計算済みのセッションは新しい値のまま残ります（中止の後に「元に戻す」で戻せます）。未処理のセッションは、次に開始するジョブの対象になります。
           </Typography>
         </DialogContent>
@@ -461,10 +471,15 @@ export default function PageContent() {
           <Button variant="contained" color="error" onClick={() => void cancelJob()}>中止する</Button>
         </DialogActions>
       </Dialog>
-      <Dialog open={rollbackConfirmOpen} onClose={() => setRollbackConfirmOpen(false)}>
-        <DialogTitle>再計算の前の値に戻しますか？</DialogTitle>
+      <Dialog
+        open={rollbackConfirmOpen}
+        onClose={() => setRollbackConfirmOpen(false)}
+        aria-labelledby="user-score-rollback-title"
+        aria-describedby="user-score-rollback-description"
+      >
+        <DialogTitle id="user-score-rollback-title">再計算の前の値に戻しますか？</DialogTitle>
         <DialogContent>
-          <Typography>
+          <Typography id="user-score-rollback-description">
             このジョブが置き換えたスコアを元に戻し、企業マッチングも作り直します。再計算の後にチャット回答や履歴書・ES・面接の反映があったセッションは戻しません。
           </Typography>
         </DialogContent>

@@ -9,8 +9,8 @@ import {
   TextField,
   Button,
   Typography,
-  Alert,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import Link from 'next/link'
 import { authService } from '@/lib/auth'
 
@@ -84,7 +84,7 @@ function ResetPasswordForm() {
 
           {success ? (
             <>
-              <Alert severity="success" sx={{ mb: 3 }}>
+              <Alert role="alert" severity="success" sx={{ mb: 3 }}>
                 パスワードをリセットしました。ログインしてください。
               </Alert>
               <Typography variant="body2" align="center" color="text.secondary">

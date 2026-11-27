@@ -72,13 +72,14 @@ Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確
 
 | コマンド | 内容 |
 |---|---|
-| `/link member:@誰か backlog:名前` | 紐づける。`backlog` は入力すると Backlog のメンバーが候補に出る。名前は完全一致 |
+| `/link member:@誰か backlog:名前 github:ログイン名` | 紐づける。`github` は任意。朝のリマインドで、その人にレビューが来ている PR をメンションする |
 | `/unlink member:@誰か` | 解除する |
-| `/link-list` | 一覧を本人にだけ表示する |
+| `/link-list` | 一覧を本人にだけ表示する。2000文字を超えるときは `page` で続きを見る |
 
-- 表は SSM Parameter `/soc-app/discord-backlog-links` に JSON で持つ。突き合わせは Backlog のユーザーID。
-- 同じ Backlog ユーザーを別の Discord ユーザーに紐づけることはできない（先に `/unlink`）。
-- 4KB の上限があり、40人強まで。超える場合は DynamoDB へ移す。
+- 表は DynamoDB（`${project}-discord-backlog-links`、1人1項目）に持つ。突き合わせは Backlog のユーザーID。
+- 以前の SSM Parameter `/soc-app/discord-backlog-links` は、初回の読み出しで DynamoDB へ移す。移したあとは SSM へ書き戻さない。
+- 同じ Backlog ユーザー、同じ GitHub ログイン名（大文字小文字は区別しない）を別の Discord ユーザーに紐づけることはできない（先に `/unlink`）。
+- 人数の上限は置かない。別の人の `/link` が同時でも、相手の行は消えない。
 - 有効にするには Secrets Manager `<project>/discord-backlog-bot` に Bot ユーザーの API キーが要る。未設定なら `/link` 系は「利用できません」を返す。個人のキーは Lambda に置かない。
 - コマンドの追加後に `automation/discord/register-commands.sh` を再実行する。
 
@@ -89,7 +90,11 @@ Backlog の期限通知でメンションを飛ばす・`/deadline` で本人確
 - 対象ステータス: 未対応・処理中・PR確認待ち。保留・処理済み・ステージング反映以降は対象外。
 - 担当者は `/link` で紐づけた人にメンションする。未登録の人は名前だけで、「Discord未登録」と出る。
 - 「PR確認待ち」の課題があるときは、レビュアー（terraform の `backlog_reviewer_ids`、既定は大橋和幸）にもメンションして、レビューを促す。レビュアー本人が担当の課題は対象にしない。
-- 対象が無い日は何も投稿しない。
+- 開いている PR のうち、レビュー待ちのものも同じ投稿に載せる。Draft と、最新のコミットに変更要求が付いたまま更新が無い PR は除く。レビューは履歴なので、人ごとに最新の意見（承認・変更要求・却下）で判断する（変更要求のあとに承認した人は載せない）。
+- 個人宛てのレビュー依頼だけを拾う。チーム宛ての依頼は載らない。開いている PR は更新が新しい順に50件まで（超えたら CloudWatch Logs に警告を出す）。0件ならその節は出さない。GitHub の取得に失敗しても、Backlog の期限リマインドは投稿する。
+- メンション先は `/link` の `github`（GitHub のログイン名）で引く。未設定の人はログイン名だけで、「Discord未登録」と出る。
+- 取得用のトークンは `GITHUB_PR_READ_TOKEN`（Pull requests の読み取りだけ）。`/prod` の配信用 `GITHUB_DISPATCH_TOKEN` は使わない。同じ値を入れると節を出さない。対象リポジトリは `GITHUB_DISPATCH_REPO`（terraform の `github_dispatch_repo`）と同じ。トークンが無ければ節を出さない。
+- 課題もレビュー待ち PR も無い日は何も投稿しない。
 - 投稿先は Webhook（terraform の `discord_reminder_webhook_url`）。未設定なら動かない。
 - 手動確認（投稿しない）: Lambda を `{"source":"backlog-deadline-reminder","dry_run":true}` で invoke すると、投稿予定の本文が返る。
 - 再試行はしない（成功後の失敗で二重投稿になるため）。失敗は CloudWatch Logs `/aws/lambda/<project>-discord` の `[Reminder]` に残る。
@@ -131,4 +136,46 @@ rm -f /tmp/backlog-bot-key
 Lambda は起動時に読んだキーを持ち続ける。書き換えたあとは実行環境を入れ替える（次のデプロイか、`aws lambda update-function-configuration` で設定を一度更新する）。
 
 Bot ユーザーと API キーの発行は Backlog の画面で行う。ここにはキーを書かない。
+
+## 実機確認（SOCAIAGENT-512）
+
+受け口は staging の Lambda です。書き込みの確認は、変更してよい課題を1つ決めてから行います。終わったら期限を元に戻します。
+
+1. `/deadline` でその課題の期限を動かす。Backlog の期限が変わり、コメントが残る。
+2. 同じコマンドで元の期限に戻す。
+3. 拒否を確認する。未紐づけのメンバー、他人の課題、過去の日付、今日から180日より先。いずれも本人にだけ失敗が返る。
+4. 朝のリマインドは、先に `{"source":"backlog-deadline-reminder","dry_run":true}` で本文を見る。投稿してよいと分かってから、スケジュールを有効にする。
+
+## 止める・障害に気付く
+
+朝のリマインドを止めるときは、スケジュールを `DISABLED` にする。staging は `soc-stg-backlog-deadline-reminder`、本番は `discord_reminder_schedule_enabled = false` で apply する。再試行はしないので、止めたあとに同じ通知が追い打ちされることはない。
+
+失敗は CloudWatch Logs `/aws/lambda/<project>-discord` の `[Reminder]` と `[Discord]` に残る。本番で受け口を有効にしているときは、Lambda の Errors が1件でも SNS `<project>-alarms`（`alarm_email`）へ届く。`alarm_email` が空だと、アラームは状態を持つだけでメールは飛ばない。
+
+本番の受け口は `discord_bot_enabled = true` で作る。既定は作らない。両方のスケジュールを ENABLED のままにすると、平日の朝に同じ内容が2回投稿される。
+
+### 本番への切り替え手順
+
+順番を守る。**apply → 実コードの配置 → Interactions Endpoint の切り替え**。
+
+1. **事前準備**
+   - staging の朝リマインド（`soc-stg-backlog-deadline-reminder`）を先に止める。
+   - `BACKLOG_API_KEY` の渡し方を揃える。いまの prod は terraform 変数 `backlog_api_key` を Lambda の環境変数に直接入れている。有効にする前に、#2563 の `DISCORD_BACKLOG_BOT_SECRET_ID`（Secrets Manager から読む方式）に合わせる。この PR では実装しない。
+2. **apply**: `infra/terraform/environments/prod` で `discord_bot_enabled = true` にして apply する。
+   - 初回は `archive` provider が増えているため、先に `terraform init -upgrade` が要る（`infra/terraform/environments/prod/README.md` も参照）。
+   - この時点の Lambda は **プレースホルダの bootstrap zip**（実体のない zip）。このまま Endpoint を切り替えると応答できず、Discord の検証に失敗する。
+3. **実コードの配置**: 次のどちらかで `cmd/discord-lambda` のビルド成果物を入れる。
+   - 手動（CLI）:
+     ```bash
+     cd Backend
+     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o bootstrap ./cmd/discord-lambda
+     zip -j discord-lambda.zip bootstrap
+     aws lambda update-function-code --function-name <project>-discord --zip-file fileb://discord-lambda.zip
+     aws lambda wait function-updated --function-name <project>-discord
+     ```
+   - CI: `deployment.yml` の `deploy-discord-lambda-prod` だけを再実行する（`main` の Deploy 実行から該当ジョブを Re-run）。
+     Deploy workflow を `workflow_dispatch` で実行すると `deploy-production`（ECS 本番デプロイ）も一緒に走る点に注意する。
+   - apply より前に `main` へ入った場合、関数が無いので `deploy-discord-lambda-prod` は ResourceNotFoundException のときだけスキップする。それ以外の AWS エラーはジョブが失敗する。
+4. **Interactions Endpoint の切り替え**: 実コードが入ったことを確認してから、Discord Developer Portal の Interactions Endpoint URL を本番の URL に変える。`register-commands.sh` が必要なら併せて再実行する。
+5. 朝リマインドを有効にするのは、切り替えを確認してから（`discord_reminder_schedule_enabled = true`）。
 

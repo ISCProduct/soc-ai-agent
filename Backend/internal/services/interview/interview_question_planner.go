@@ -10,10 +10,11 @@ import (
 )
 
 const (
-	questionSourceCustom    = "custom"
-	questionSourceGenerated = "generated"
-	questionSourceTopic     = "topic"
-	questionSourceFollowUp  = "follow_up"
+	questionSourceCustom     = "custom"      // 手動登録
+	questionSourceGenerated  = "generated"   // 自動生成。採点とは別
+	questionSourceAIResearch = "ai_research" // Web 調査。面接中には検索しない
+	questionSourceTopic      = "topic"
+	questionSourceFollowUp   = "follow_up"
 
 	questionStatusPending     = "pending"
 	questionStatusAsked       = "asked"
@@ -96,7 +97,7 @@ func normalizeCompanyQuestionHints(hints []string) []string {
 
 // BuildQuestionQueue は必須質問→企業別候補→標準トピック→推奨質問の順でキューを構築する。
 // 保存済み質問がある場合は、生成候補を追加しない。
-func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompanyQuestion, generatedHints ...string) []models.InterviewQuestionState {
+func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompanyQuestion, hintSource string, generatedHints ...string) []models.InterviewQuestionState {
 	states := make([]models.InterviewQuestionState, 0)
 	order := 0
 
@@ -122,10 +123,13 @@ func BuildQuestionQueue(sessionID uint, customQuestions []models.InterviewCompan
 
 	appendCustom(true)
 	if len(customQuestions) == 0 {
+		if hintSource != questionSourceGenerated {
+			hintSource = questionSourceAIResearch
+		}
 		for _, hint := range normalizeCompanyQuestionHints(generatedHints) {
 			states = append(states, models.InterviewQuestionState{
 				SessionID:    sessionID,
-				Source:       questionSourceGenerated,
+				Source:       hintSource,
 				Category:     "企業別質問",
 				QuestionText: hint,
 				Status:       questionStatusPending,

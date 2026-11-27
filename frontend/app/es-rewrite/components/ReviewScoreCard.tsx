@@ -1,4 +1,5 @@
-import { Alert, Box, LinearProgress, Paper, Stack, Typography } from '@mui/material'
+import { Box, LinearProgress, Paper, Stack, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { formatDate } from '@/lib/i18n/format'
 import { UI } from '@/lib/design/tokens'
 import type { ReviewResult } from '../types'

@@ -331,6 +331,13 @@ variable "backlog_reviewer_ids" {
   default     = "2505302"
 }
 
+variable "github_pr_read_token" {
+  type        = string
+  sensitive   = true
+  description = "朝のリマインドがレビュー待ち PR を読むための GitHub トークン（Pull requests の読み取りだけ）。配信用の github_dispatch_token とは別にする。未設定なら PR の節は出さない"
+  default     = ""
+}
+
 variable "github_dispatch_repo" {
   type        = string
   description = "workflow_dispatch の対象リポジトリ(owner/repo)"

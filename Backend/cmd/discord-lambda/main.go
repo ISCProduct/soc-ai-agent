@@ -68,6 +68,9 @@ func main() {
 		handler.WithLinks(links, backlog)
 		handler.WithDeadline(backlog, backlog.ProjectKey(), backlog.BaseURL())
 		reminder = discord.NewReminderServiceFromEnv(backlog, links)
+		if reminder != nil {
+			reminder.SetReviews(discord.NewGitHubReviewClientFromEnv())
+		}
 	}
 
 	lambda.Start(newLambdaHandler(handler, discord.NewWorkflowDispatcherFromEnv(), reminder))

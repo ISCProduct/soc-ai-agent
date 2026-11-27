@@ -100,6 +100,12 @@ function fakeMedia(): InterviewMedia {
 
 const flush = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 
+/**
+ * 時計だけ進め、タイマーは鳴らさない。面接のタイマーは毎回 Date.now から経過を計算するので、
+ * 30分ぶん（1800回）鳴らさなくても結果は同じ。全部鳴らすと1件2秒かかり、負荷が高いと5秒の上限を超える。
+ */
+const skipClock = (ms: number) => jest.setSystemTime(Date.now() + ms)
+
 type Route = (url: string, init?: RequestInit) => FakeResponse | Promise<FakeResponse> | undefined
 
 describe('useInterviewSession の挙動', () => {
@@ -465,11 +471,13 @@ describe('useInterviewSession の挙動', () => {
       expect(result.current.questionElapsedSeconds).toBe(5)
       expect(result.current.sessionWarningShown).toBe(false)
 
-      await act(async () => { await jest.advanceTimersByTimeAsync((28 * 60 - 5) * 1000) })
+      skipClock((28 * 60 - 6) * 1000)
+      await act(async () => { await jest.advanceTimersByTimeAsync(1000) })
       expect(result.current.sessionWarningShown).toBe(true)
       expect(calls.some(u => u.endsWith('/finish'))).toBe(false)
 
-      await act(async () => { await jest.advanceTimersByTimeAsync(2 * 60 * 1000) })
+      skipClock((2 * 60 - 1) * 1000)
+      await act(async () => { await jest.advanceTimersByTimeAsync(1000) })
       await act(async () => { await jest.advanceTimersByTimeAsync(0) })
       expect(calls.some(u => u.endsWith('/finish'))).toBe(true)
       expect(result.current.errorMessage).toBe(FORCED_STOP_MESSAGE)
@@ -540,7 +548,8 @@ describe('useInterviewSession の挙動', () => {
       await act(async () => { await result.current.handleJoin() })
 
       // 時間切れ後、録画の取得が返るまでにタイマーが何度も鳴る
-      await act(async () => { await jest.advanceTimersByTimeAsync(30 * 60 * 1000 + 5000) })
+      skipClock(30 * 60 * 1000)
+      await act(async () => { await jest.advanceTimersByTimeAsync(5000) })
       await act(async () => {
         releaseVideo()
         await jest.advanceTimersByTimeAsync(0)
@@ -586,7 +595,9 @@ describe('useInterviewSession の挙動', () => {
       const handleStop = jest.fn().mockResolvedValue(undefined)
       const { result, unmount } = renderHook(() => useInterviewClock({ selectedPosition, handleStop }))
       act(() => { result.current.startTimer() })
-      await act(async () => { await jest.advanceTimersByTimeAsync((28 * 60 + 10) * 1000) })
+      // 残り2分の手前まで時計を飛ばし、そこから境目をまたいで10回鳴らす
+      skipClock((28 * 60 - 5) * 1000)
+      await act(async () => { await jest.advanceTimersByTimeAsync(15_000) })
 
       expect(result.current.sessionWarningShown).toBe(true)
       expect(trueCalls).toBe(1)

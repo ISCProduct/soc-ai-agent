@@ -2,6 +2,7 @@ package admin
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"encoding/json"
@@ -127,7 +128,7 @@ func fetchTextWithCookies(url string, cookies []models.ScraperCookie) (string, e
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SocAI/1.0; +https://example.com/bot)")
+	req.Header.Set("User-Agent", companyfetch.UserAgent())
 
 	for _, c := range cookies {
 		req.AddCookie(&http.Cookie{Name: c.Name, Value: c.Value})

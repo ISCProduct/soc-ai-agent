@@ -119,6 +119,12 @@ COMMANDS='[
         "type": 3,
         "required": true,
         "autocomplete": true
+      },
+      {
+        "name": "github",
+        "description": "GitHubのログイン名(レビュー待ちPRのメンションに使う。空なら外す)",
+        "type": 3,
+        "required": false
       }
     ]
   },
@@ -170,7 +176,16 @@ COMMANDS='[
     "description": "DiscordとBacklogの紐づけ一覧を表示します",
     "type": 1,
     "dm_permission": false,
-    "default_member_permissions": "0"
+    "default_member_permissions": "0",
+    "options": [
+      {
+        "name": "page",
+        "description": "一覧のページ（1から）",
+        "type": 4,
+        "required": false,
+        "min_value": 1
+      }
+    ]
   },
   {
     "name": "prod",

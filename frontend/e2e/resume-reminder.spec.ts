@@ -26,7 +26,8 @@ async function silenceWhatsNew(page: Page) {
 
 /** 履歴書リマインダーの Alert だけに絞り込む。 */
 function reminderAlert(page: Page) {
-  return page.getByRole('alert').filter({ hasText: /履歴書/ })
+  // リマインダーは画面を開いたときから出ている注意なので role="status"（#2217）
+  return page.getByRole('status').filter({ hasText: /履歴書/ })
 }
 
 test.describe('履歴書リマインダーカード', () => {

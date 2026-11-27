@@ -19,6 +19,7 @@ import MailOutline from '@mui/icons-material/MailOutline'
 import ManageAccounts from '@mui/icons-material/ManageAccounts'
 import Quiz from '@mui/icons-material/Quiz'
 import RecordVoiceOver from '@mui/icons-material/RecordVoiceOver'
+import School from '@mui/icons-material/School'
 import Search from '@mui/icons-material/Search'
 import { authService, type User } from '@/lib/auth'
 import { HOME_COLORS, HOME_LAYOUT } from '@/lib/home-theme'
@@ -75,6 +76,7 @@ const NAV_ICONS: Record<string, React.ComponentType<SvgIconProps>> = {
   '/schedule': CalendarMonth,
   '/favorites': Favorite,
   '/applications': Assignment,
+  '/graduate-outcomes': School,
   '/companies': Search,
   '/scout': MailOutline,
   '/profile': ManageAccounts,

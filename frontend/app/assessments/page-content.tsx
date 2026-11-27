@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Alert, Box, Button, Card, CardContent, IconButton, Paper, Stack, Typography } from '@mui/material'
+import { Box, Button, Card, CardContent, IconButton, Paper, Stack, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import ArrowBack from '@mui/icons-material/ArrowBack'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ListSkeleton } from '@/components/common/ListSkeleton'

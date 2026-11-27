@@ -290,8 +290,8 @@ export default function CompanyPortalJobsPage() {
         </Paper>
       )}
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>{editingId === null ? '求人を作る' : '求人を編集'}</DialogTitle>
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm" aria-labelledby="portal-job-form-title">
+        <DialogTitle id="portal-job-form-title">{editingId === null ? '求人を作る' : '求人を編集'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
@@ -372,10 +372,17 @@ export default function CompanyPortalJobsPage() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} fullWidth maxWidth="xs">
-        <DialogTitle>求人を削除</DialogTitle>
+      <Dialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        fullWidth
+        maxWidth="xs"
+        aria-labelledby="portal-job-delete-title"
+        aria-describedby="portal-job-delete-description"
+      >
+        <DialogTitle id="portal-job-delete-title">求人を削除</DialogTitle>
         <DialogContent>
-          <Typography variant="body2">
+          <Typography id="portal-job-delete-description" variant="body2">
             「{form.title.trim() || 'この求人'}」を削除します。学生の企業詳細からも消えます。削除した求人は元に戻せません。
           </Typography>
           {deleteError && (

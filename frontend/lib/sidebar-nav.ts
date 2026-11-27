@@ -19,6 +19,8 @@ export const SIDEBAR_NAV_ITEMS = [
   { href: '/schedule', label: t('sidebar.schedule') },
   { href: '/favorites', label: t('sidebar.favorites') },
   { href: '/applications', label: t('sidebar.applications') },
+  // 卒業生の進路実績（#2032）。ほかに入口が無いので共通メニューから行けるようにする
+  { href: '/graduate-outcomes', label: t('sidebar.graduateOutcomes') },
   // 企業を探す（SOCAIAGENT-612）。推薦とは別に、自分の条件で探す入口
   { href: '/companies', label: t('sidebar.companySearch') },
   { href: '/scout', label: t('sidebar.scout') },
@@ -58,6 +60,7 @@ export const HOME_SIDEBAR_GROUPS = [
       { href: '/schedule', label: t('sidebar.schedule') },
       { href: '/favorites', label: t('sidebar.favorites') },
       { href: '/applications', label: t('sidebar.applications') },
+      { href: '/graduate-outcomes', label: t('sidebar.graduateOutcomes') },
       { href: '/companies', label: t('sidebar.companySearch') },
       { href: '/scout', label: t('sidebar.scout') },
     ],

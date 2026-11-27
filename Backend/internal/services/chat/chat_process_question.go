@@ -2,6 +2,7 @@ package chat
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/growth"
 	"Backend/internal/services/judgment"
 	"context"
 	"fmt"
@@ -46,6 +47,11 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		if err := s.updatePhaseProgress(currentPhase, isQualityAnswer); err != nil {
 			log.Printf("Warning: failed to update phase progress: %v\n", err)
 		}
+	}
+	// フェーズを進めたあとで写す。スコア更新の途中で写すと、この回答の進みが1つ遅れる。
+	// 再計算（ReplaceChatSessionScores）からは呼ばない。再計算は成長ではない。
+	if isQualityAnswer || jobJustResolved {
+		s.recordGrowth(req.UserID, growth.SourceChat, req.SessionID)
 	}
 
 	// 4. 既に聞いた質問を全て収集（重複防止を徹底）

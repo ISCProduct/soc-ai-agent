@@ -4,6 +4,7 @@ import (
 	admincontrollers "Backend/internal/controllers/admin"
 	applicationcontrollers "Backend/internal/controllers/application"
 	insightcontrollers "Backend/internal/controllers/insight"
+	usercontrollers "Backend/internal/controllers/user"
 	"Backend/internal/repositories"
 	"Backend/internal/services/school"
 
@@ -40,6 +41,7 @@ func SetupAdminRoutes(
 	schoolService *school.SchoolService,
 	adminSecret string,
 	aiBudgetController *admincontrollers.AIBudgetController,
+	growthController *usercontrollers.GrowthController,
 ) {
 	admin := api.Group("/admin", EchoAdminAuth(userRepo, adminSecret))
 	schoolScope := EchoAdminSchoolScope(schoolService)
@@ -60,8 +62,11 @@ func SetupAdminRoutes(
 	admin.POST("/teacher/students/:id/guidances", teacherGuidanceController.Create)
 	// ES添削の履歴（#1531）。担当校スコープを通し、学園一致はクエリ側で担保する。
 	admin.GET("/teacher/students/:id/es-reviews", teacherESReviewController.List, schoolScope)
+	// 学生のスコアと診断フェーズの履歴（SOCAIAGENT-601）。担当校の学生だけ。
+	admin.GET("/students/:id/growth-history", growthController.ForStaff, schoolScope)
 
 	admin.GET("/interviews", adminInterviewController.ListSessions, schoolScope)
+	admin.GET("/interviews/:id/shadow-score", adminInterviewController.ShadowScore)
 	admin.GET("/interviews/:id/videos", adminInterviewController.ListVideos)
 	admin.GET("/interviews/videos/:video_id/url", adminInterviewController.VideoURL)
 
@@ -82,6 +87,8 @@ func SetupAdminRoutes(
 
 	// 学校メンバー・企業承認は担当校の運営業務
 	admin.GET("/schools/:id", adminSchoolController.Get)
+	// 面接動画の保持期間（SOCAIAGENT-671）。学校管理者のみ。職員は変更できない。
+	admin.PUT("/schools/:id/interview-video-retention", adminSchoolController.UpdateInterviewVideoRetention, requireAdmin)
 	admin.POST("/schools/:id/members", adminSchoolController.AddMember, requireAdmin)
 	admin.DELETE("/schools/:id/members/:user_id", adminSchoolController.RemoveMember, requireAdmin)
 	admin.GET("/schools/:id/company-approvals", adminSchoolController.ListCompanyApprovals)
@@ -117,6 +124,10 @@ func SetupAdminRoutes(
 	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo)
 	admin.POST("/companies/:id/confirm-info", adminCompanyController.ConfirmCompanyInfo)
 	admin.GET("/companies/:id/relation-graph", adminCompanyGraphController.RelationGraph)
+	// 事業タグ（SOCAIAGENT-717）。タグ一覧は全校共有のため、書き込みはシステム管理者専用。
+	admin.GET("/business-tags", adminCompanyController.ListBusinessTags)
+	admin.GET("/companies/:id/business-tags", adminCompanyController.GetCompanyBusinessTags)
+	admin.PUT("/companies/:id/business-tags", adminCompanyController.UpdateCompanyBusinessTags, platform)
 	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
 	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion, platform)
 	admin.POST("/companies/:id/interview-questions/generate", adminInterviewController.GenerateCompanyQuestions, platform)

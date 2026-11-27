@@ -2,6 +2,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Box, Button, Checkbox, Collapse, FormControlLabel, Typography } from '@mui/material'
 import { UI } from '@/lib/design/tokens'
+import { useVideoRetentionSentence } from '@/components/interview/VideoRetentionNote'
 import { MIN_TAP_SIZE, textLinkSx } from './lobbyStyles'
 
 interface ConsentCheckProps {
@@ -20,6 +21,7 @@ const DETAILS_ID = 'lobby-consent-details'
  */
 export default function ConsentCheck({ checked, onChange }: ConsentCheckProps) {
   const [open, setOpen] = useState(false)
+  const retentionSentence = useVideoRetentionSentence()
   return (
     <Box>
       <FormControlLabel
@@ -37,7 +39,7 @@ export default function ConsentCheck({ checked, onChange }: ConsentCheckProps) {
               録画と会話の記録を、フィードバックのためだけに使うことに同意します
             </Typography>
             <Typography sx={{ fontSize: 12, color: UI.inkSoft, mt: 0.5 }}>
-              企業には渡りません。録画は有効な間は保管し、退会後12ヶ月で削除します。AI の学習への利用は別の設定で、同意した場合のみです。
+              企業には渡りません。{retentionSentence} AI の学習への利用は別の設定で、同意した場合のみです。
             </Typography>
           </Box>
         }

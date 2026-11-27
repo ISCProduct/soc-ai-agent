@@ -10,10 +10,10 @@ import {
   Typography,
   TextField,
   Button,
-  Alert,
   CircularProgress,
   MenuItem,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { authService } from '@/lib/auth'
 import { CERTIFICATION_OPTIONS, joinCertifications } from '@/lib/profile'
 

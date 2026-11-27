@@ -2,7 +2,6 @@
 
 import { FormEvent, useEffect, useState } from 'react'
 import {
-  Alert,
   Box,
   Button,
   Card,
@@ -16,6 +15,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { authService } from '@/lib/auth'
 
 type IndustryOption = { id: number; name: string; level: number }
@@ -127,7 +127,7 @@ export function ScoutPreferencesCard() {
           </Alert>
         )}
         {saved && (
-          <Alert severity="success" sx={{ mb: 2 }}>
+          <Alert role="alert" severity="success" sx={{ mb: 2 }}>
             保存しました
           </Alert>
         )}

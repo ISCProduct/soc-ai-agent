@@ -1,4 +1,5 @@
-import { Alert, Box, Button, Chip, Divider, IconButton, Paper, Stack, Tooltip, Typography } from '@mui/material'
+import { Box, Button, Chip, Divider, IconButton, Paper, Stack, Tooltip, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CheckIcon from '@mui/icons-material/Check'
 import FormatFindingsSection from '@/components/feedback/FormatFindingsSection'

@@ -371,6 +371,8 @@ GET /api/admin/costs/monthly   # 月別コスト
 - Realtime: `REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200` を超えるとメール/Slack
   - `REALTIME_ALERT_EMAILS` / `REALTIME_ALERT_SLACK_WEBHOOK_URL`
 
+`api_call_logs` の生の行は呼び出しから24ヶ月残す。それより古い行は、日次の合計 `api_call_log_daily` へ畳んでから消す（SOCAIAGENT-528）。合計に残すのはトークン、金額、音声の秒数、文字数、Web検索回数、件数と、モデル・機能・推論先・学校・組織・プロンプトの工程と版・単価の根拠・フォールバックかどうか。利用者 ID と遅延は畳まない。退会では消さない。管理画面の日次（最大90日）と月次（最大24ヶ月）は、残っている生の行を読む。
+
 
 ### AI利用予算（利用者・学校単位）
 

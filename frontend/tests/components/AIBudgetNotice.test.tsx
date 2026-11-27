@@ -102,7 +102,8 @@ describe('AIBudgetNotice', () => {
   it('学校の上限で止まっているときは金額を出さずに伝える', async () => {
     mockBudget({ user: { daily: period(0), monthly: period(0) }, school_blocked: true, limit_configured: true, allowed: false })
     render(<AIBudgetNotice />)
-    const alert = await screen.findByRole('alert')
+    // 画面を開いたときから出ている warning の案内は、割り込まない role="status"（#2217）
+    const alert = await screen.findByRole('status')
     expect(alert).toHaveTextContent('学校のAI利用上限')
     expect(alert).not.toHaveTextContent('$')
   })

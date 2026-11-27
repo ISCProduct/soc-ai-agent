@@ -89,8 +89,6 @@ async function mockCompanyPage(page: Page, users: MockCompanyUser[]) {
 test.describe('企業ユーザーの無効化', () => {
   test.beforeEach(async ({ page }) => {
     await setupAuth(page, TEST_ADMIN)
-    // window.confirm はデフォルトで dismiss されるため、明示的に承認する
-    page.on('dialog', (dialog) => dialog.accept())
   })
 
   test('無効化済みユーザーは「無効」と表示され「有効」にはならない', async ({ page }) => {
@@ -131,6 +129,8 @@ test.describe('企業ユーザーの無効化', () => {
       (req) => req.method() === 'PATCH' && req.url().includes('/company-users/1'),
     )
     await row.getByRole('button', { name: '無効化' }).click()
+    // 確認は MUI のダイアログ（window.confirm ではない。SOCAIAGENT-534）
+    await page.getByRole('dialog', { name: '担当者を無効化' }).getByRole('button', { name: '無効化する' }).click()
     await patched
 
     expect(patchBodies).toEqual([JSON.stringify({ disabled: true })])
@@ -175,6 +175,8 @@ test.describe('企業ユーザーの無効化', () => {
 
     const row = page.getByRole('row').filter({ hasText: 'active@example.com' })
     await row.getByRole('button', { name: '無効化' }).click()
+    // 確認は MUI のダイアログ（window.confirm ではない。SOCAIAGENT-534）
+    await page.getByRole('dialog', { name: '担当者を無効化' }).getByRole('button', { name: '無効化する' }).click()
 
     await expect(page.getByText('無効化に失敗しました（サーバーエラー）')).toBeVisible({ timeout: 8000 })
     await expect(row.getByText('有効', { exact: true })).toBeVisible()

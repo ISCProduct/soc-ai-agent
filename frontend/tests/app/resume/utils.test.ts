@@ -21,21 +21,24 @@ import {
 
 describe('severityConfig / getSeverityConfig', () => {
   it('既知の severity に設定を返す', () => {
-    expect(severityConfig.critical).toEqual({
+    // 字形（Icon）も持つ（#2218）。色・文字・枠の色はこれまでどおり
+    expect(severityConfig.critical).toMatchObject({
       color: 'error',
       label: '重大',
       borderColor: '#d32f2f',
     })
+    expect(severityConfig.critical.Icon).toBeDefined()
     expect(severityConfig.warning.label).toBe('注意')
     expect(severityConfig.info.color).toBe('info')
   })
 
   it('未知の severity にはデフォルト表示を返す', () => {
-    expect(getSeverityConfig('unknown')).toEqual({
+    expect(getSeverityConfig('unknown')).toMatchObject({
       color: 'default',
       label: 'unknown',
       borderColor: '#9e9e9e',
     })
+    expect(getSeverityConfig('unknown').Icon).toBeDefined()
   })
 
   it('既知の severity は getSeverityConfig でも同じ値', () => {

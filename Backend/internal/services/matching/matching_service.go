@@ -5,6 +5,7 @@ import (
 	"Backend/domain/valueobject"
 	"Backend/internal/aimodel"
 	"Backend/internal/config"
+	"Backend/internal/matchrank"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/assessment"
@@ -272,15 +273,16 @@ func (s *MatchingService) applyAIReasonsToTopMatches(
 
 // topMatchesByScore は MatchScore 降順の上位 limit 件を返す。
 // pending の並び順は保存順に影響するため変更せず、スライスだけ複製して並べ替える。
-// 同点時の順序を安定させるため SliceStable を使う。
+// 同点は DB の FindTopMatchesByUserAndSession と同じ副キー（matchrank）で決める。
 func topMatchesByScore(pending []*models.UserCompanyMatch, limit int) []*models.UserCompanyMatch {
 	if limit <= 0 || len(pending) == 0 {
 		return nil
 	}
 	sorted := make([]*models.UserCompanyMatch, len(pending))
 	copy(sorted, pending)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return sorted[i].MatchScore > sorted[j].MatchScore
+	sort.Slice(sorted, func(i, j int) bool {
+		a, b := sorted[i], sorted[j]
+		return matchrank.Less(a.MatchScore, a.UserID, a.CompanyID, a.ID, b.MatchScore, b.UserID, b.CompanyID, b.ID)
 	})
 	if limit > len(sorted) {
 		limit = len(sorted)
@@ -479,12 +481,16 @@ func (s *MatchingService) ToggleFavorite(matchID uint, userID uint) error {
 }
 
 // ListFavoriteCompanies は過去の診断を含め、お気に入り企業を1社1行で返す。
-func (s *MatchingService) ListFavoriteCompanies(ctx context.Context, userID uint, limit int) ([]*models.UserCompanyMatch, error) {
+// offset 社目から limit 件。total はページを切る前の社数。
+// companyIDs は表示できる全社の企業IDで、ページの外のハートを付けるために使う。
+// 取得そのものは全件のまま。件数の上限はページを切るときに掛ける。
+func (s *MatchingService) ListFavoriteCompanies(ctx context.Context, userID uint, offset, limit int) ([]*models.UserCompanyMatch, int, []uint, error) {
 	rows, err := s.matchRepo.FindFavoritedByUser(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, 0, nil, err
 	}
-	return DedupedFavorites(rows, limit), nil
+	page, total, companyIDs := PageFavorites(rows, offset, limit)
+	return page, total, companyIDs, nil
 }
 
 // UnfavoriteCompany はそのユーザーの、その企業のお気に入りを診断をまたいで外す。

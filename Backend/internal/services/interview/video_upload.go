@@ -81,3 +81,73 @@ func (s *VideoUploadService) Start(ctx context.Context, sessionID, userID uint, 
 	})
 	return video, nil
 }
+
+// StudentVideo は学生に返してよい録画メタデータ。保存先のキーや恒久URLは含めない。
+type StudentVideo struct {
+	ID         uint       `json:"id"`
+	Status     string     `json:"status"`
+	MimeType   string     `json:"mime_type"`
+	UploadedAt *time.Time `json:"uploaded_at,omitempty"`
+}
+
+// VideoPresigner は保存済みオブジェクトの短時間URLを発行する。
+type VideoPresigner interface {
+	PresignGetURL(ctx context.Context, key string, expires time.Duration) (string, error)
+}
+
+var (
+	ErrVideoNotFound            = errors.New("video not found")
+	ErrVideoNotReady            = errors.New("video is not available yet")
+	ErrVideoPlaybackUnavailable = errors.New("video playback is not configured")
+)
+
+const playbackURLLifetime = 15 * time.Minute
+
+// ListForUser はセッションの録画のうち、そのユーザーのものだけを返す。
+func (s *VideoUploadService) ListForUser(ctx context.Context, sessionID, userID uint) ([]StudentVideo, error) {
+	videos, err := s.repo.FindBySessionID(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]StudentVideo, 0, len(videos))
+	for _, video := range videos {
+		if video.UserID != userID {
+			continue
+		}
+		out = append(out, StudentVideo{
+			ID:         video.ID,
+			Status:     video.Status,
+			MimeType:   video.MimeType,
+			UploadedAt: video.UploadedAt,
+		})
+	}
+	return out, nil
+}
+
+// PresignForUser は本人の完了済み録画にだけ、短時間の再生URLを発行する。
+// セッションIDとユーザーIDが一致しない録画は、存在しないものとして扱う。
+func (s *VideoUploadService) PresignForUser(ctx context.Context, sessionID, videoID, userID uint) (string, time.Time, error) {
+	video, err := s.repo.FindByID(ctx, videoID)
+	if err != nil {
+		// 存在しない録画だけを404にする。DB障害まで404にすると、障害が「動画が無い」に化けて気づけない。
+		if errors.Is(err, repository.ErrNotFound) {
+			return "", time.Time{}, ErrVideoNotFound
+		}
+		return "", time.Time{}, fmt.Errorf("録画の取得に失敗しました: %w", err)
+	}
+	if video == nil || video.SessionID != sessionID || video.UserID != userID {
+		return "", time.Time{}, ErrVideoNotFound
+	}
+	if video.Status != "done" || video.DriveFileID == "" {
+		return "", time.Time{}, ErrVideoNotReady
+	}
+	presigner, ok := s.store.(VideoPresigner)
+	if !ok || presigner == nil {
+		return "", time.Time{}, ErrVideoPlaybackUnavailable
+	}
+	url, err := presigner.PresignGetURL(ctx, video.DriveFileID, playbackURLLifetime)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return url, time.Now().Add(playbackURLLifetime).UTC(), nil
+}

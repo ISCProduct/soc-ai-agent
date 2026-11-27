@@ -47,6 +47,11 @@ const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+  // 本番だけ付ける。開発の http://localhost に付くと、ブラウザがそのオリジンを HTTPS へ固定する。
+  // max-age は Backend の HSTS と同じ 2 年。preload は外すと戻せないので付けない。
+  ...(!isDev
+    ? [{ key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' }]
+    : []),
 ]
 
 // 面接ページはカメラ・マイクへのアクセスが必要なため Permissions-Policy を上書き

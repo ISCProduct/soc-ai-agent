@@ -18,9 +18,9 @@ import {
   FormControl,
   InputLabel,
   Snackbar,
-  Alert,
   IconButton,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { ArrowBack, Edit, Check } from '@mui/icons-material'
 import { authService } from '@/lib/auth'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
@@ -29,7 +29,9 @@ import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
 import {
   STATUS_COLORS,
+  STATUS_ICONS,
   STATUS_LABELS,
+  UNKNOWN_STATUS_ICON,
   isTerminalStatus,
   nextActionLabel,
   userNextStatuses,
@@ -47,6 +49,12 @@ interface Application {
   notes: string
   applied_at: string | null
   status_updated_at: string | null
+}
+
+/** ステータスの字形（文字のラベルと並べるので、読み上げには出さない） */
+function StatusIcon({ status }: { status: string }) {
+  const Icon = STATUS_ICONS[status] ?? UNKNOWN_STATUS_ICON
+  return <Icon aria-hidden data-testid={`status-icon-${status}`} />
 }
 
 function ApplicationsContent() {
@@ -186,6 +194,8 @@ function ApplicationsContent() {
                     )}
                   </Box>
                   <Chip
+                    // 色だけでなく字形と文字でも状態を示す（#2218）
+                    icon={<StatusIcon status={app.status} />}
                     label={STATUS_LABELS[app.status] || app.status}
                     color={STATUS_COLORS[app.status] || 'default'}
                     size="small"
@@ -261,7 +271,7 @@ function ApplicationsContent() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         sx={ABOVE_BOTTOM_NAV_SX}
       >
-        <Alert severity={snackbar.severity} onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}>
+        <Alert role="alert" severity={snackbar.severity} onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}>
           {snackbar.message}
         </Alert>
       </Snackbar>

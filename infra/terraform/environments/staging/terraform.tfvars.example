@@ -57,6 +57,10 @@ service_secret_plain = "change-me-service-secret"
 # github_dispatch_token = "<GitHub Fine-grained PAT: Actions=Read and write>"
 # github_dispatch_repo  = "ISCProduct/soc-ai-agent"
 #
+# 朝のリマインドがレビュー待ち PR を読むトークン。配信用とは別の、Pull requests 読み取り専用。
+# 未設定なら PR の節は出さず、期限リマインドだけ投稿する。
+# github_pr_read_token = "<GitHub Fine-grained PAT: Pull requests=Read-only>"
+#
 # Discord が Backlog を更新する Bot 専用 API キー。個人のキーは入れない。
 # 初回 apply で Secrets Manager <project>/discord-backlog-bot に書き、以降は CLI で更新する。
 # 未設定でも apply できる。その場合は automation/discord/README.md の手順で書いてから /link と /deadline が動く。

@@ -1,5 +1,6 @@
 import type { MouseEvent } from 'react'
 import type { Company, MatchFeedbackVerdict } from '../../types'
+import type { AxisBreakdown } from '@/lib/axis-match'
 
 /** 企業行が親から受け取る共通の状態・ハンドラ */
 export interface CompanyRowContext {
@@ -18,4 +19,9 @@ export interface CompanyRowContext {
   onFeedback?: (e: MouseEvent, company: Company, verdict: MatchFeedbackVerdict) => void
   onApply: (e: MouseEvent, company: Company) => void
   onNavigate: (path: string) => void
+  /** 軸ごとの内訳を開いている推薦（match_id）（SOCAIAGENT-611） */
+  openAxes: ReadonlySet<number>
+  /** 取得済みの内訳。閉じて開き直すたびに取り直さない */
+  axesCache: Map<number, AxisBreakdown>
+  onToggleAxes: (matchId: number) => void
 }

@@ -828,3 +828,74 @@ func TestInterviewController_RegenerateReport(t *testing.T) {
 		})
 	}
 }
+
+func TestInterviewController_Playback_DoesNotListAnotherUsersVideos(t *testing.T) {
+	tests := []struct {
+		name       string
+		withUser   bool
+		detailErr  error
+		wantStatus int
+	}{
+		{name: "未認証は401", withUser: false, wantStatus: http.StatusUnauthorized},
+		{name: "他人のセッションは403", withUser: true, detailErr: shared.ErrForbidden, wantStatus: http.StatusForbidden},
+		{name: "セッションが無いときは404", withUser: true, detailErr: gorm.ErrRecordNotFound, wantStatus: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/interviews/9/videos", nil)
+			if tt.withUser {
+				req = testsupport.WithUserID(req, 1)
+			}
+			rec := httptest.NewRecorder()
+			c := testsupport.NewCtx(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues("9")
+
+			svc := &mocks.InterviewServiceMock{}
+			if tt.withUser {
+				svc.On("GetSessionDetail", uint(1), uint(9)).Return(nil, tt.detailErr)
+			}
+			videoRepo := &mocks.InterviewVideoRepositoryMock{}
+			ctrl := interviewcontrollers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
+			testsupport.AssertStatus(t, ctrl.Playback, c, tt.wantStatus)
+			svc.AssertExpectations(t)
+			videoRepo.AssertNotCalled(t, "FindBySessionID", mock.Anything, mock.Anything)
+		})
+	}
+}
+
+func TestInterviewController_VideoPlaybackURL_DoesNotPresignAnotherUsersVideo(t *testing.T) {
+	tests := []struct {
+		name       string
+		withUser   bool
+		ownErr     error
+		wantStatus int
+		wantOwn    bool
+	}{
+		{name: "未認証は401", withUser: false, wantStatus: http.StatusUnauthorized},
+		{name: "他人のセッションは403", withUser: true, ownErr: shared.ErrForbidden, wantStatus: http.StatusForbidden, wantOwn: true},
+		{name: "セッションが無いときは404", withUser: true, ownErr: gorm.ErrRecordNotFound, wantStatus: http.StatusNotFound, wantOwn: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/interviews/9/videos/4/url", nil)
+			if tt.withUser {
+				req = testsupport.WithUserID(req, 1)
+			}
+			rec := httptest.NewRecorder()
+			c := testsupport.NewCtx(req, rec)
+			c.SetParamNames("id", "video_id")
+			c.SetParamValues("9", "4")
+
+			svc := &mocks.InterviewServiceMock{}
+			if tt.wantOwn {
+				svc.On("EnsureSessionOwnership", uint(1), uint(9)).Return(tt.ownErr)
+			}
+			videoRepo := &mocks.InterviewVideoRepositoryMock{}
+			ctrl := interviewcontrollers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
+			testsupport.AssertStatus(t, ctrl.VideoPlaybackURL, c, tt.wantStatus)
+			svc.AssertExpectations(t)
+			videoRepo.AssertNotCalled(t, "FindByID", mock.Anything, mock.Anything)
+		})
+	}
+}

@@ -13,7 +13,7 @@ const ALLOWED_PATHS = [
   // ログイン・本登録・ゲスト作成。応答のトークンはここで Cookie にし、画面へは渡さない
   /^auth\/(login|register|guest)$/,
   /^interviews(\/|$)/,
-  /^user\/(preferences|industries|guidances|training-consent|scouts|scout-blocks)(\/|$)/,
+  /^user\/(preferences|industries|guidances|training-consent|scouts|scout-blocks|interview-video-retention)(\/|$)/,
   /^auth\/user$/,
   /^realtime\/token$/,
 ]

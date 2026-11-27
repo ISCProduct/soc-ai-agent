@@ -78,7 +78,7 @@ describe('お気に入り画面', () => {
       method: 'POST',
       body: JSON.stringify({ company_id: 7 }),
     }))
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/chat/favorites?limit=100', expect.anything())
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/chat/favorites?limit=100&offset=0', expect.anything())
   })
 
   it('解除に失敗しても一覧を取り直す', async () => {
@@ -94,6 +94,30 @@ describe('お気に入り画面', () => {
     expect(await screen.findByText('お気に入りの更新に失敗しました')).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: '北見工業' })).toBeInTheDocument()
     expect(screen.queryByText('お気に入りにした企業はまだありません')).not.toBeInTheDocument()
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/chat/favorites?limit=100', expect.anything())
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/chat/favorites?limit=100&offset=0', expect.anything())
+  })
+
+  it('100社を超えると次の100社を読める', async () => {
+    mockFavorites({
+      recommendations: [company],
+      total: 101,
+      favorite_company_ids: [7, 8],
+    })
+    render(<PageContent />)
+    expect(await screen.findByText('全101社のうち 1–1社目')).toBeInTheDocument()
+
+    const fetchMock = global.fetch as jest.Mock
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        recommendations: [{ ...company, id: 8, category_name: '後の企業' }],
+        total: 101,
+        favorite_company_ids: [7, 8],
+      }),
+    })
+    fireEvent.click(screen.getByRole('button', { name: '次の100社' }))
+    expect(await screen.findByRole('button', { name: '後の企業' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/chat/favorites?limit=100&offset=100', expect.anything())
+    expect(screen.getByRole('button', { name: '前の100社' })).toBeInTheDocument()
   })
 })

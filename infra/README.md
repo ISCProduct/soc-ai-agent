@@ -24,6 +24,7 @@ infra/
       network, rds, s3, secrets, alb, ecs_cluster, ecs_service, ecs_service_fargate   # AWS
       cloudfront_app_proxy, ecr, error_fallback                                        # AWS
       *_legacy                           # レガシー（参照なし）
+  local-ai/              # OpenAI 障害時の縮退先（Whisper.cpp / Ollama / VOICEVOX）。本体 Compose とは独立（#1832）
   ecs/                   # 旧 task-def JSON（参照用）
   nginx/                 # staging edge の nginx 設定（staging-edge.conf）
   scripts/

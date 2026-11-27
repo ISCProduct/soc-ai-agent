@@ -21,9 +21,15 @@ import {
   findLastAssistantQuestionMessage,
   isValidationFeedbackMessage,
   isValidationTerminationMessage,
+  CHAT_UNSENT_DRAFT_KEY,
+  saveUnsentDraft,
+  takeUnsentDraft,
 } from '../utils'
 import { useChatAutoScroll } from './useChatAutoScroll'
 import type { Message, PhaseProgress, ProgressTotals, ChoiceOption } from '../types'
+
+// 送れなかった文章のキー（#2213）。定義は utils.ts（ログアウトの消去と同じ場所）にあり、テスト向けにここからも出す
+export { CHAT_UNSENT_DRAFT_KEY }
 
 /**
  * MuiChat の状態・副作用・ハンドラを集約するフック。
@@ -33,6 +39,17 @@ export function useMuiChat() {
   const router = useRouter()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
+
+  // 接続エラーで送れなかった文章があれば、入力欄へ戻す（自動では送り直さない。二重に送らないため）。
+  // 書いた利用者と今の利用者が同じときだけ戻す（共用 PC で、前の学生の文章を次の学生に出さない）
+  useEffect(() => {
+    try {
+      const draft = takeUnsentDraft(sessionStorage, authService.getStoredUser()?.user_id)
+      if (draft) setInput(draft)
+    } catch {
+      // ストレージが使えなければ何もしない
+    }
+  }, [])
   const [isLoading, setIsLoading] = useState(false)
   const [analysisComplete, setAnalysisComplete] = useState(false)
   const [allPhasesCompleted, setAllPhasesCompleted] = useState(false)
@@ -407,7 +424,15 @@ export function useMuiChat() {
         }
         setMessages((prev) => [...prev, completionMessage])
       } else if (error instanceof UserFacingApiError && error.gateway) {
-        router.replace(gatewayErrorPath(error.status))
+        // エラー画面へ移るとこの画面は外れ、入力欄を空にした文章が消える。502〜504 はバックエンドに届いていないことがあり、
+        // 履歴にも残らないので、戻ったときに入力欄へ戻せるようタブの中だけに取っておく（#2213 のレビュー）
+        try {
+          saveUnsentDraft(sessionStorage, messageText, authService.getStoredUser()?.user_id)
+        } catch {
+          // ストレージが使えなければ諦める（送信の失敗の案内は、エラー画面が出す）
+        }
+        // 「元の画面に戻る」でこのページへ戻れるように、いまのパスを渡す（replace なので history.back では戻れない）
+        router.replace(gatewayErrorPath(error.status, `${window.location.pathname}${window.location.search}`))
       } else {
         const errorMsg: Message = {
           id: makeMessageId(),

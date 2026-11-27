@@ -36,6 +36,8 @@ export function useCompanyRowActions({
   const [fetchPrimaryId, setFetchPrimaryId] = useState<number | null>(null)
   const [menuAnchor, setMenuAnchor] = useState<CompanyMenuAnchor | null>(null)
   const [bulkPublishing, setBulkPublishing] = useState(false)
+  // 一括公開の確認ダイアログで確認中の対象（開いた時点の企業に固定する）。null なら閉じている（SOCAIAGENT-534）
+  const [bulkPublishTargets, setBulkPublishTargets] = useState<Company[] | null>(null)
 
   const publishCompany = async (companyId: number): Promise<boolean> => {
     const res = await fetch(`/api/admin/companies/${companyId}/publish`, {
@@ -71,9 +73,15 @@ export function useCompanyRowActions({
       return
     }
 
-    const ok = window.confirm(`選択した ${targets.length} 社を学生に公開しますか？`)
-    if (!ok) return
+    // 確認は MUI のダイアログで行う（window.confirm はスタイルもテストもできない。SOCAIAGENT-534）
+    setBulkPublishTargets(targets)
+  }
 
+  const cancelBulkPublish = () => setBulkPublishTargets(null)
+
+  const confirmBulkPublish = async () => {
+    const targets = bulkPublishTargets
+    if (!targets || targets.length === 0) return
     setBulkPublishing(true)
     setError('')
     setFetchMessage('')
@@ -100,6 +108,8 @@ export function useCompanyRowActions({
       await reloadCurrentList('status')
     } finally {
       setBulkPublishing(false)
+      // 終わったら（成功・失敗とも）確認ダイアログを閉じる。結果は画面のメッセージで出す
+      setBulkPublishTargets(null)
     }
   }
 
@@ -227,6 +237,9 @@ export function useCompanyRowActions({
     bulkPublishing,
     handlePublish,
     handleBulkPublish,
+    bulkPublishTargets,
+    confirmBulkPublish,
+    cancelBulkPublish,
     handleSetVerified,
     handleReject,
     handleFetchPrimary,

@@ -195,7 +195,7 @@ test.describe('AI 面接の本編フロー', () => {
 
     await endInterview(page)
     // 終了 API を待たずにレポート画面へ進み、生成中を出す
-    await expect(page.getByText('レポートを作っています')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByRole('heading', { name: 'レポートを作っています' })).toBeVisible({ timeout: 15000 })
     // ポーリング（3秒ごと）で2回目にレポートが届く
     await expect(page.getByText(REPORT.summary_text).first()).toBeVisible({ timeout: 20000 })
     expect(calls.finish).toBe(1)

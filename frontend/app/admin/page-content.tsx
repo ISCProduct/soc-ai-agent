@@ -18,6 +18,7 @@ import { visibleAdminNav } from '@/lib/admin/nav'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { StudentsNeedingAttention } from '@/components/admin/StudentsNeedingAttention'
+import { InterviewVideoRetentionCard } from '@/components/admin/InterviewVideoRetentionCard'
 
 const cardSx = {
   height: '100%',
@@ -133,6 +134,7 @@ export default function PageContent() {
 
       {/* 教員が最初に見るべきもの（いま声をかける学生）をカードより先に出す（#1573） */}
       <StudentsNeedingAttention />
+      <InterviewVideoRetentionCard />
 
       {visibleAdminNav(restricted === null ? null : isPlatform).map((group) => (
         <HubSection

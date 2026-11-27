@@ -34,7 +34,28 @@ export function userFacingApiMessage(status: number, raw = ''): string {
   return '処理に失敗しました。しばらくしてから再試行してください。'
 }
 
-export function gatewayErrorPath(status = 502): string {
+/**
+ * 接続エラーの画面（/error）へのパス。from を渡すと、エラー画面の「再試行」でそのページへ戻る。
+ * code は画面には出さない（記録・調査用。#2213）。
+ */
+export function gatewayErrorPath(status = 502, from?: string): string {
   const code = isGatewayStatus(status) ? status : 502
-  return `/error?code=${code}`
+  const back = safeReturnPath(from)
+  return back ? `/error?code=${code}&from=${encodeURIComponent(back)}` : `/error?code=${code}`
+}
+
+/**
+ * エラー画面の「再試行」で戻ってよいパスなら返す。同じサイトの中のパス（`/` で始まり、`//` や `/\` で始まらない）だけを通し、
+ * エラー画面そのもの（/error）は通さない（読み直すだけになるため）。外のサイトへ飛ばされないようにする。
+ */
+export function safeReturnPath(from: string | null | undefined): string | null {
+  if (typeof from !== 'string' || from.length === 0 || from.length > 2048) return null
+  if (!from.startsWith('/') || from.startsWith('//') || from.startsWith('/\\')) return null
+  for (let i = 0; i < from.length; i++) {
+    const c = from.charCodeAt(i)
+    if (c < 0x20 || c === 0x7f) return null // 改行・タブなどの制御文字
+  }
+  const path = from.split(/[?#]/)[0]
+  if (path === '/error' || path.startsWith('/error/')) return null
+  return from
 }

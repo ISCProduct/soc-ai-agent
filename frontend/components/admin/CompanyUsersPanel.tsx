@@ -17,6 +17,7 @@ import {
 import { authService } from '@/lib/auth'
 import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin/fetch'
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
+import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 
 type CompanyUserItem = {
   id: number
@@ -47,6 +48,8 @@ export function CompanyUsersPanel({ companyId }: { companyId: string }) {
   const [loading, setLoading] = useState(false)
   // 二重送信防止。処理中の行だけボタンを無効化する
   const [pendingId, setPendingId] = useState<number | null>(null)
+  // 無効化の確認ダイアログで確認中の担当者。null なら閉じている
+  const [disableTarget, setDisableTarget] = useState<CompanyUserItem | null>(null)
 
   const loadUsers = useCallback(() => {
     fetch(`/api/admin/companies/${companyId}/company-users`, {
@@ -64,11 +67,16 @@ export function CompanyUsersPanel({ companyId }: { companyId: string }) {
     loadUsers()
   }, [loadUsers])
 
+  // 無効化は確認ダイアログで確定してから実行する。再有効化は確認なしでそのまま実行する
   const handleToggleDisabled = async (user: CompanyUserItem) => {
-    const disabled = !user.disabled
-    if (disabled && !window.confirm(`${user.email} を無効化します。この担当者は企業ポータルにログインできなくなります。よろしいですか？`)) {
+    if (!user.disabled) {
+      setDisableTarget(user)
       return
     }
+    await updateDisabled(user, false)
+  }
+
+  const updateDisabled = async (user: CompanyUserItem, disabled: boolean) => {
     setError('')
     setSuccess('')
     setPendingId(user.id)
@@ -166,6 +174,22 @@ export function CompanyUsersPanel({ companyId }: { companyId: string }) {
           ))}
         </TableBody>
       </AdminTableWrapper>
+      <ConfirmDialog
+        open={disableTarget !== null}
+        title="担当者を無効化"
+        message={disableTarget ? `${disableTarget.email} を無効化します。この担当者は企業ポータルにログインできなくなります。よろしいですか？` : ''}
+        confirmLabel="無効化する"
+        destructive
+        onConfirm={async () => {
+          if (!disableTarget) return
+          try {
+            await updateDisabled(disableTarget, true)
+          } finally {
+            setDisableTarget(null)
+          }
+        }}
+        onCancel={() => setDisableTarget(null)}
+      />
     </Stack>
   )
 }

@@ -52,6 +52,9 @@ __pycache__/
 # Playwright の実行結果（生成物）。追跡すると毎回差分が出る
 frontend/test-results/
 
+# jest --coverage の出力（生成物。#2046 で CI がカバレッジを測るようになった）
+frontend/coverage/
+
 # next dev が自動生成するエージェント指示ファイル。
 # 生成物であり、各PRの差分に毎回混入するため追跡しない（#1074 レビュー指摘）。
 frontend/AGENTS.md

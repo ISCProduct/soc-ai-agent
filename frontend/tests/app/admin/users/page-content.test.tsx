@@ -67,14 +67,16 @@ describe('管理ユーザー画面 通信失敗時の挙動 (#1066)', () => {
   })
 
   it('削除が通信エラーで失敗しても、エラーが表示されボタンが操作可能に戻る', async () => {
-    jest.spyOn(window, 'confirm').mockReturnValue(true)
     mockListThen(() => Promise.reject(new TypeError('Failed to fetch')))
     render(<PageContent />)
 
     const remove = await screen.findByRole('button', { name: '削除' })
     fireEvent.click(remove)
+    fireEvent.click(await screen.findByRole('button', { name: '完全削除する' }))
 
     expect(await screen.findByText('通信エラーが発生しました。しばらくしてから再試行してください。')).toBeInTheDocument()
+    // 失敗しても確認ダイアログを開いたままにせず、画面のエラーが見えるよう閉じる
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     await waitFor(() => expect(screen.getByRole('button', { name: '削除' })).not.toBeDisabled())
   })
 
@@ -109,6 +111,64 @@ describe('管理ユーザー画面 通信失敗時の挙動 (#1066)', () => {
 
     expect(await screen.findByText('ただいま接続できません。しばらくしてから再試行してください。')).toBeInTheDocument()
     expect(screen.queryByText(/<html>/)).not.toBeInTheDocument()
+  })
+})
+
+// 完全削除の確認は window.confirm ではなく MUI の Dialog で行う（SOCAIAGENT-534）
+describe('管理ユーザー画面 完全削除の確認ダイアログ', () => {
+  afterEach(() => {
+    global.fetch = originalFetch
+    jest.restoreAllMocks()
+  })
+
+  function deleteCalls(fetchMock: jest.Mock) {
+    return fetchMock.mock.calls.filter((c) => (c[1]?.method || '').toUpperCase() === 'DELETE')
+  }
+
+  function mockListAndDeleteOk() {
+    const fetchMock = jest.fn().mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {
+      const method = (init?.method || 'GET').toUpperCase()
+      if (method === 'GET') {
+        return Promise.resolve({ ok: true, status: 200, text: async () => JSON.stringify({ users: [USER], total: 1 }) })
+      }
+      return Promise.resolve({ ok: true, status: 200, text: async () => '{}' })
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+    return fetchMock
+  }
+
+  it('削除を押すと確認ダイアログが出て、確定するまで DELETE を呼ばない', async () => {
+    const confirmSpy = jest.spyOn(window, 'confirm')
+    const fetchMock = mockListAndDeleteOk()
+    render(<PageContent />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '削除' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'ユーザーを完全削除' })
+    expect(dialog).toHaveTextContent(
+      'student@example.com を完全削除します。履歴書・面接動画を含む個人データは復元できません。よろしいですか？',
+    )
+    expect(screen.getByRole('button', { name: '完全削除する' })).toHaveClass('MuiButton-colorError')
+    expect(deleteCalls(fetchMock)).toHaveLength(0)
+    expect(confirmSpy).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '完全削除する' }))
+
+    await waitFor(() => expect(deleteCalls(fetchMock)).toHaveLength(1))
+    expect(String(deleteCalls(fetchMock)[0][0])).toBe('/api/admin/users/7')
+    await waitFor(() => expect(screen.queryByText('student@example.com')).not.toBeInTheDocument())
+  })
+
+  it('キャンセルすると DELETE を呼ばず、一覧もそのまま残る', async () => {
+    const fetchMock = mockListAndDeleteOk()
+    render(<PageContent />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '削除' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'キャンセル' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(deleteCalls(fetchMock)).toHaveLength(0)
+    expect(screen.getByText('student@example.com')).toBeInTheDocument()
   })
 })
 

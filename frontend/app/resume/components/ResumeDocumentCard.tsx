@@ -1,7 +1,8 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { Alert, Box, Button, ButtonBase, LinearProgress, Stack, TextField, Typography } from '@mui/material'
+import { Box, Button, ButtonBase, LinearProgress, Stack, TextField, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import CloudUploadIcon from '@mui/icons-material/CloudUpload'
 import DescriptionIcon from '@mui/icons-material/Description'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'

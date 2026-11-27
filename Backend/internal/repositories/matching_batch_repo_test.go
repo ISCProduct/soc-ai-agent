@@ -264,6 +264,8 @@ func TestFindTopMatchesByUserAndSession_ExcludesCompaniesWithoutProfile(t *testi
 		"company_weight_profiles",         // 突き合わせ先
 		"job_position_id IS NULL",         // 会社単位プロファイルのみ（求人単位を拾わない）
 		"user_company_matches.company_id", // 相関先を取り違えると全件通過する
+		"match_tie_key",
+		"company_id ASC",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("発行SQLに %q が無い:\n%s", want, sql)

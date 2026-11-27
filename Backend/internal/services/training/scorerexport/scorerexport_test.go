@@ -790,6 +790,52 @@ func TestNewMasker_KnownEmail(t *testing.T) {
 	}
 }
 
+type maskUserStub struct {
+	user *models.User
+	err  error
+}
+
+func (s maskUserStub) GetUserByID(uint) (*models.User, error) { return s.user, s.err }
+
+type maskTermsStub struct {
+	calls int
+	terms repositories.TrainingMaskingTerms
+	err   error
+}
+
+func (s *maskTermsStub) ListTrainingMaskingTerms(context.Context) (repositories.TrainingMaskingTerms, error) {
+	s.calls++
+	return s.terms, s.err
+}
+
+func TestInterviewShadowMask_UsesExportDictionary(t *testing.T) {
+	terms := &maskTermsStub{terms: repositories.TrainingMaskingTerms{Companies: []string{"架空製作所"}}}
+	masker := NewInterviewShadowMask(maskUserStub{user: &models.User{
+		ID: 7, Name: "山田太郎", Email: "taro@example.com", SchoolName: "架空高校",
+	}}, terms)
+	mask, err := masker.ForUser(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := mask("山田太郎です。架空製作所と taro@example.com")
+	if strings.Contains(got, "山田") || strings.Contains(got, "架空製作所") || strings.Contains(got, "taro@example.com") {
+		t.Fatalf("伏字が残った: %s", got)
+	}
+	if _, err := masker.ForUser(context.Background(), 7); err != nil {
+		t.Fatal(err)
+	}
+	if terms.calls != 1 {
+		t.Fatalf("学校・企業名の一覧を %d 回読んだ", terms.calls)
+	}
+}
+
+func TestInterviewShadowMask_MissingUser(t *testing.T) {
+	masker := NewInterviewShadowMask(maskUserStub{}, &maskTermsStub{})
+	if _, err := masker.ForUser(context.Background(), 1); err == nil {
+		t.Fatal("学生がいないのに伏字を作った")
+	}
+}
+
 func envOf(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
 }

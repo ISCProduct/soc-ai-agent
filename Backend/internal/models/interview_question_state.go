@@ -7,7 +7,7 @@ type InterviewQuestionState struct {
 	ID                uint      `gorm:"primaryKey" json:"id"`
 	SessionID         uint      `gorm:"index;not null" json:"session_id"`
 	CompanyQuestionID *uint     `gorm:"index" json:"company_question_id,omitempty"`
-	Source            string    `gorm:"size:20;not null" json:"source"` // custom | topic | follow_up
+	Source            string    `gorm:"size:20;not null" json:"source"` // custom | generated | ai_research | topic | follow_up
 	Category          string    `gorm:"size:100" json:"category"`
 	QuestionText      string    `gorm:"type:text;not null" json:"question_text"`
 	Status            string    `gorm:"size:20;not null;default:'pending'" json:"status"` // pending | asked | answered | skipped

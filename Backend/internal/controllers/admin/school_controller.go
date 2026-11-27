@@ -4,6 +4,7 @@ import (
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/services/school"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -84,6 +85,42 @@ func (c *AdminSchoolController) Get(ctx echo.Context) error {
 		return mapSchoolError(err)
 	}
 	return ctx.JSON(http.StatusOK, found)
+}
+
+// UpdateInterviewVideoRetention PUT /api/admin/schools/:id/interview-video-retention
+// days は 30 / 90 / 180。null は期限なし。職員はルート側で拒否する。
+func (c *AdminSchoolController) UpdateInterviewVideoRetention(ctx echo.Context) error {
+	id, err := httpapi.UintParam(ctx, "id")
+	if err != nil {
+		return err
+	}
+	if err := c.ensureSchoolAccess(ctx, id); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(ctx.Request().Body).Decode(&raw); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+	encoded, ok := raw["days"]
+	if !ok {
+		return echo.NewHTTPError(http.StatusBadRequest, "days is required")
+	}
+	var days *int
+	if string(encoded) != "null" {
+		var value int
+		if err := json.Unmarshal(encoded, &value); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "days must be 30, 90, 180, or null")
+		}
+		days = &value
+	}
+	updated, err := c.schools.UpdateInterviewVideoRetention(id, days)
+	if err != nil {
+		return mapSchoolError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"days":      updated.InterviewVideoRetentionDays,
+		"unlimited": updated.InterviewVideoRetentionDays == nil,
+	})
 }
 
 // AddMember POST /api/admin/schools/:id/members
@@ -285,7 +322,7 @@ func mapSchoolError(err error) error {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	case errors.Is(err, school.ErrSchoolAlreadyAssigned), errors.Is(err, school.ErrCompanyAlreadyApproved):
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
-	case errors.Is(err, school.ErrSchoolNameRequired), errors.Is(err, school.ErrSchoolOrgRequired):
+	case errors.Is(err, school.ErrSchoolNameRequired), errors.Is(err, school.ErrSchoolOrgRequired), errors.Is(err, school.ErrInvalidVideoRetention):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	case errors.Is(err, school.ErrMemberNotFound), errors.Is(err, school.ErrMemberOrganizationMismatch):
 		// 「存在しない」と「他学園に存在する」を同じ応答にする。打ち分けると、担当校を持つ

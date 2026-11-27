@@ -2,6 +2,7 @@ package admin
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/diagnosis"
 	"net/http"
 	"strconv"
@@ -43,7 +44,9 @@ func (c *AdminDiagnosisQualityController) List(ctx echo.Context) error {
 	if ctx.QueryParam("session_id") != "" {
 		return c.GetBySession(ctx)
 	}
-	limit, _ := strconv.Atoi(ctx.QueryParam("limit"))
+	// 他の管理系一覧と同じ 100 で頭打ちにする。未指定・0・数値以外は 50。
+	// 上限が無いと limit=1000000 がそのまま一覧取得へ渡る（SOCAIAGENT-530）。
+	limit := httpapi.LimitQuery(ctx, "limit", 50)
 	rows, err := c.service.ListRecentReports(limit)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})

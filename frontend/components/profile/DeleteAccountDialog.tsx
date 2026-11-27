@@ -19,8 +19,8 @@ export function DeleteAccountDialog({ open, deleting, onClose, onConfirm }: Dele
     onClose()
   }
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth>
-      <DialogTitle>アカウントを退会しますか？</DialogTitle>
+    <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth aria-labelledby="account-delete-title">
+      <DialogTitle id="account-delete-title">アカウントを退会しますか？</DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary">
           退会後すぐにログインできなくなり、サービス上でのデータ閲覧もできなくなります。

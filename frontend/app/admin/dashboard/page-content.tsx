@@ -364,8 +364,8 @@ export default function PageContent() {
       </Paper>
 
       {/* Session detail dialog */}
-      <Dialog open={!!detailUser} onClose={() => setDetailUser(null)} maxWidth="md" fullWidth>
-        <DialogTitle>
+      <Dialog open={!!detailUser} onClose={() => setDetailUser(null)} maxWidth="md" fullWidth aria-labelledby="admin-session-history-title">
+        <DialogTitle id="admin-session-history-title">
           {detailUser?.name || detailUser?.email} — セッション履歴
         </DialogTitle>
         <DialogContent>

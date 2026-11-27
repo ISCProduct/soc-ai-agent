@@ -33,6 +33,7 @@ type AdminCompanyController struct {
 	techFetcher      *company.TechStackFetcher
 	catalogWarm      *company.CatalogWarmService
 	missingBatch     *company.CompanyMissingBatchService
+	businessTags     repository.CompanyBusinessTagRepository
 	// schoolRestricted は「担当校つき管理者か」を返す。公開状態の変更可否の判定に使う。
 	schoolRestricted func(adminUserID uint) (bool, error)
 }

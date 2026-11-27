@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import {
-  Alert,
   Box,
   Button,
   FormControl,
@@ -16,6 +15,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { ListSkeleton } from '@/components/common/ListSkeleton'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import {
@@ -267,7 +267,7 @@ export default function PageContent() {
       />
 
       {timeUp ? (
-        <Alert severity="warning" sx={{ mb: 2 }} data-testid="ability-time-up">
+        <Alert role="alert" severity="warning" sx={{ mb: 2 }} data-testid="ability-time-up">
           制限時間を過ぎました。これ以上は回答できません。「提出する」を押すと、ここまでの回答で結果が出ます。
         </Alert>
       ) : (

@@ -217,6 +217,11 @@ func ConfigureRateLimiters(login, passwordReset KeyRateLimiter) {
 // したがってIP単位は緩く取り、課金の総量は下の全体上限で止める。
 var GuestAIRateLimiter KeyRateLimiter = NewRateLimiter(10*time.Minute, envPositiveInt("GUEST_AI_RATE_LIMIT_PER_IP", 300))
 
+// AuthenticatedAIRateLimiter は認証済み利用者の AI 呼び出しを毎分で止める（SOCAIAGENT-529）。
+// 日次予算とは別。漏れたトークンで毎秒叩かれると、予算の集計が追いつく前に費用が積み上がる。
+// 面接の発話は数秒に1回なので、60回/分なら会話は通り、スクリプトの連打は止まる。
+var AuthenticatedAIRateLimiter KeyRateLimiter = NewRateLimiter(time.Minute, envPositiveInt("AUTHED_AI_RATE_LIMIT_PER_MINUTE", 60))
+
 // GuestAIGlobalRateLimiter は同エンドポイント群の全体上限（#1154）。
 // IPを変えれば per-IP 制限は回避できるため、実質的なコスト上限はこちらが担う。
 var GuestAIGlobalRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("GUEST_AI_RATE_LIMIT_GLOBAL", 1000))

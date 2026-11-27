@@ -9,9 +9,9 @@ import {
   TextField,
   Button,
   Typography,
-  Alert,
   CircularProgress,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { authService } from '@/lib/auth'
 
 function RegisterConfirmForm() {

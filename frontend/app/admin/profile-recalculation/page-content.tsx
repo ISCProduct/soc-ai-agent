@@ -329,10 +329,15 @@ export default function PageContent() {
         </Card>
       </Stack>
 
-      <Dialog open={rollbackCompanyId !== null} onClose={() => setRollbackCompanyId(null)}>
-        <DialogTitle>ロールバックの確認</DialogTitle>
+      <Dialog
+        open={rollbackCompanyId !== null}
+        onClose={() => setRollbackCompanyId(null)}
+        aria-labelledby="company-profile-rollback-title"
+        aria-describedby="company-profile-rollback-description"
+      >
+        <DialogTitle id="company-profile-rollback-title">ロールバックの確認</DialogTitle>
         <DialogContent>
-          <Typography>
+          <Typography id="company-profile-rollback-description">
             企業ID {rollbackCompanyId} のプロファイルを直前のバージョンにロールバックします。よろしいですか？
           </Typography>
         </DialogContent>
