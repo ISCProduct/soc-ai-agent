@@ -15,6 +15,15 @@ export const STUDENT_THEME_LABELS: Record<StudentThemeMode, string> = {
 // 定義は design-tokens に一本化してある（企業ポータルも同じ書体を使うため）。
 const FONT_FAMILY = FONT_STACK_PROPORTIONAL
 
+/** 押せる範囲の最小の大きさ（px）。縦横ともこれ以上にする（#2214、資料 08章）。 */
+export const TOUCH_TARGET_MIN = 44
+
+/** Checkbox・Radio のアイコンの大きさ（px。MUI の既定）。 */
+const CHECK_CONTROL_ICON = 24
+
+/** Checkbox・Radio の余白（px）。アイコンと合わせて TOUCH_TARGET_MIN にする。 */
+export const CHECK_CONTROL_PADDING = (TOUCH_TARGET_MIN - CHECK_CONTROL_ICON) / 2
+
 /** パターン3 既定: Wong に近い色覚セーフ青 */
 export const COMFORTABLE_PRIMARY = '#0072B2'
 
@@ -196,6 +205,48 @@ export function createStudentMuiTheme(mode: StudentThemeMode) {
       MuiButton: {
         styleOverrides: {
           root: { textTransform: 'none', fontWeight: 700, minHeight: 44 },
+        },
+      },
+      // #2214: アイコンだけのボタン・切り替えボタンの押せる範囲を縦横 44px 以上にする。
+      // MUI 既定は IconButton が約40px（small は約30px）、ToggleButton small が約37px。
+      // アイコンや文字の大きさは変えず、最小の大きさだけを広げる（中身は中央に寄る）。
+      // 管理画面・企業ポータルは別のテーマ（lib/admin/theme.ts・lib/company/theme.ts）なので影響しない。
+      MuiIconButton: {
+        styleOverrides: {
+          root: { minWidth: TOUCH_TARGET_MIN, minHeight: TOUCH_TARGET_MIN },
+        },
+      },
+      MuiToggleButton: {
+        styleOverrides: {
+          root: { minWidth: TOUCH_TARGET_MIN, minHeight: TOUCH_TARGET_MIN },
+        },
+      },
+      // Autocomplete の ▼（popupIndicator）・×（clearIndicator）も中身は IconButton なので、上の 44px が効いてしまう。
+      // MUI は入力欄の右に、この2つの分の余白を固定で取っている（▼だけで 39px・両方で 65px）ため、44px にすると
+      // 入力した文字の上に重なる（相関図の企業検索。#2624 のレビュー）。▼・× は Tab で止まらず（tabIndex -1）、
+      // 入力欄そのものを押しても開けるので、44px の対象から外して MUI 既定の大きさに戻す。
+      MuiAutocomplete: {
+        styleOverrides: {
+          popupIndicator: { minWidth: 'auto', minHeight: 'auto' },
+          clearIndicator: { minWidth: 'auto', minHeight: 'auto' },
+        },
+      },
+      // Checkbox・Radio は既定の余白 9px だと、24px のアイコンと合わせて 42px。余白を 10px にして 44px にする。
+      // 呼び出し側ごとに書くと漏れる（/company-entry の同意が 42px のままだった。#2624 のレビュー）ので、ここで1か所にする。
+      MuiCheckbox: {
+        styleOverrides: {
+          root: { padding: CHECK_CONTROL_PADDING },
+        },
+      },
+      MuiRadio: {
+        styleOverrides: {
+          root: { padding: CHECK_CONTROL_PADDING },
+        },
+      },
+      // 押せる Chip（onClick を渡したもの）は、既定の高さ 32px では足りないので 44px にする。角は丸いまま。
+      MuiChip: {
+        styleOverrides: {
+          clickable: { height: TOUCH_TARGET_MIN, borderRadius: TOUCH_TARGET_MIN / 2 },
         },
       },
       MuiCard: {

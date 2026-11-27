@@ -243,25 +243,34 @@ export function ChatInputBar({
                 },
               }}
             />
-            <IconButton
-              color="primary"
-              onClick={() => onSend()}
-              disabled={!canSend || isLoading || !!historyLoadError}
-              aria-label="メッセージを送信"
-              sx={{
-                bgcolor: CHAT_ACCENT,
-                color: '#fff',
-                mb: 2.5,
-                '&:hover': {
-                  bgcolor: CHAT_ACCENT_HOVER,
-                },
-                '&.Mui-disabled': {
-                  bgcolor: '#e0e0e0',
-                },
-              }}
-            >
-              <Send />
-            </IconButton>
+            {/*
+              送信もアイコンだけのボタンなので、見える手がかりとして Tooltip を付ける（#2214）。押せる範囲の 44px はテーマで付く。
+              押せないとき（disabled）も Tooltip が出るよう span で包む（音声入力と同じ）。
+              読み上げの名前はボタンの aria-label（メッセージを送信）が持つ。Tooltip は span に付くので、ボタンの名前・説明にはならない。
+            */}
+            <Tooltip title="送信">
+              <span style={{ display: 'inline-flex' }}>
+                <IconButton
+                  color="primary"
+                  onClick={() => onSend()}
+                  disabled={!canSend || isLoading || !!historyLoadError}
+                  aria-label="メッセージを送信"
+                  sx={{
+                    bgcolor: CHAT_ACCENT,
+                    color: '#fff',
+                    mb: 2.5,
+                    '&:hover': {
+                      bgcolor: CHAT_ACCENT_HOVER,
+                    },
+                    '&.Mui-disabled': {
+                      bgcolor: '#e0e0e0',
+                    },
+                  }}
+                >
+                  <Send />
+                </IconButton>
+              </span>
+            </Tooltip>
           </Box>
         </Box>
       )}
