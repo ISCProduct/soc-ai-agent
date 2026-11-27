@@ -33,3 +33,23 @@ func TestClient_RequestErrorDoesNotLeakKey(t *testing.T) {
 		t.Errorf("エラー文にキーが含まれる、またはエラーにならない: %v", err)
 	}
 }
+
+func TestDocument_ViewerURL(t *testing.T) {
+	tests := []struct {
+		name string
+		doc  Document
+		want string
+	}{
+		{"PDF があるときは PDF へ直接つなぐ", Document{DocID: "S100WOE6", PDFFlag: "1"}, "https://disclosure2dl.edinet-fsa.go.jp/searchdocument/pdf/S100WOE6.pdf"},
+		{"PDF がないときは閲覧ページ", Document{DocID: "S100WOE6", PDFFlag: "0"}, "https://disclosure2.edinet-fsa.go.jp/WZEK0040.aspx?S100WOE6"},
+		{"pdfFlag が無い応答でも閲覧ページ", Document{DocID: "S100WOE6"}, "https://disclosure2.edinet-fsa.go.jp/WZEK0040.aspx?S100WOE6"},
+		{"書類 ID の区切り文字はパスに入れない", Document{DocID: "S100/../x", PDFFlag: "1"}, "https://disclosure2dl.edinet-fsa.go.jp/searchdocument/pdf/S100%2F..%2Fx.pdf"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.doc.ViewerURL(); got != tt.want {
+				t.Errorf("ViewerURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

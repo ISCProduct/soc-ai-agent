@@ -41,6 +41,7 @@ type Document struct {
 	ParentDocID      string `json:"parentDocID"`
 	WithdrawalStatus string `json:"withdrawalStatus"`
 	CSVFlag          string `json:"csvFlag"`
+	PDFFlag          string `json:"pdfFlag"`
 }
 
 // IsAnnualReport は一般企業の有価証券報告書（訂正を含む）で、CSV が取れるものかを返す。
@@ -50,8 +51,13 @@ func (d Document) IsAnnualReport() bool {
 		d.OrdinanceCode == "010" && d.WithdrawalStatus == "0" && d.CSVFlag == "1" && d.JCN != ""
 }
 
-// ViewerURL は EDINET の書類閲覧ページの URL（学生に見せる出典）。
+// ViewerURL は学生に見せる出典の URL。PDF があるときは、閲覧ページを経由せず PDF へ直接つなぐ。
+// 閲覧ページ（WZEK0040.aspx）は書類 ID をそのままクエリに置く形式で、名前付きパラメータを前提にした
+// 開き方ができないため、PDF がない書類だけの代替にする（#2599 のレビュー指摘）。
 func (d Document) ViewerURL() string {
+	if d.PDFFlag == "1" {
+		return "https://disclosure2dl.edinet-fsa.go.jp/searchdocument/pdf/" + url.PathEscape(d.DocID) + ".pdf"
+	}
 	return "https://disclosure2.edinet-fsa.go.jp/WZEK0040.aspx?" + url.QueryEscape(d.DocID)
 }
 
