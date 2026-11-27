@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Alert, Box, Button, Collapse, MenuItem, Stack, TextField, Typography } from '@mui/material'
+import { Box, Button, Collapse, MenuItem, Stack, TextField, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import { UI } from '@/lib/design/tokens'
@@ -99,7 +100,7 @@ export default function EsTemplatePanel({ questionType, draft, maxLength, onInse
               </Stack>
             </>
           )}
-          {notice && <Alert severity="warning" sx={{ mt: 1.5 }}>{notice}</Alert>}
+          {notice && <Alert role="alert" severity="warning" sx={{ mt: 1.5 }}>{notice}</Alert>}
           <Typography sx={{ fontSize: 12, color: UI.inkFaint, mt: 1.5 }}>
             例文は書き方の型を示すものです。【 】の部分を自分の経験に置き換え、そのまま提出しないでください。
           </Typography>

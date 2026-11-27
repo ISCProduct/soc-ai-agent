@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import {
-  Alert,
   Box,
   Card,
   CardContent,
@@ -11,10 +10,10 @@ import {
   Switch,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { authService } from '@/lib/auth'
-import { BACKEND_URL } from '@/lib/config'
 
-const ENDPOINT = `${BACKEND_URL}/api/user/training-consent`
+const ENDPOINT = '/api/bff/user/training-consent'
 
 /**
  * この画面に出している同意の文言の版（#2168）。保存のたびに送り、サーバーは今の版と一致したときだけ記録する。
@@ -125,7 +124,7 @@ export function TrainingConsentCard() {
         ) : (
           <>
             {stale && (
-              <Alert severity="warning" sx={{ mb: 1 }}>
+              <Alert role="alert" severity="warning" sx={{ mb: 1 }}>
                 同意の文言が更新されたため、保存しませんでした。画面を再読み込みして、新しい文言を確認してから操作してください。
               </Alert>
             )}
@@ -135,7 +134,7 @@ export function TrainingConsentCard() {
               </Alert>
             )}
             {saved && (
-              <Alert severity="success" sx={{ mb: 1 }}>
+              <Alert role="alert" severity="success" sx={{ mb: 1 }}>
                 {allow ? '学習への利用に同意しました' : '学習への利用をオフにしました'}
               </Alert>
             )}

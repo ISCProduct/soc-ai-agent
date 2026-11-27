@@ -371,8 +371,8 @@ function ABTestTab({ headers }: { headers: Record<string, string> }) {
         </Box>
       )}
 
-      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>バリアント作成</DialogTitle>
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth aria-labelledby="variant-create-title">
+        <DialogTitle id="variant-create-title">バリアント作成</DialogTitle>
         <DialogContent>
           <Stack spacing={2} mt={1}>
             <TextField
@@ -561,7 +561,6 @@ export default function PageContent() {
     if (!platformReady) return
     setHeaders({
       'X-Admin-Email': user.email,
-      'X-Admin-Token': authService.getStoredToken() || '',
     })
   }, [platformReady])
 

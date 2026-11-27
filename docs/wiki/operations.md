@@ -371,6 +371,8 @@ GET /api/admin/costs/monthly   # 月別コスト
 - Realtime: `REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200` を超えるとメール/Slack
   - `REALTIME_ALERT_EMAILS` / `REALTIME_ALERT_SLACK_WEBHOOK_URL`
 
+`api_call_logs` の生の行は呼び出しから24ヶ月残す。それより古い行は、日次の合計 `api_call_log_daily` へ畳んでから消す（SOCAIAGENT-528）。合計に残すのはトークン、金額、音声の秒数、文字数、Web検索回数、件数と、モデル・機能・推論先・学校・組織・プロンプトの工程と版・単価の根拠・フォールバックかどうか。利用者 ID と遅延は畳まない。退会では消さない。管理画面の日次（最大90日）と月次（最大24ヶ月）は、残っている生の行を読む。
+
 
 ### AI利用予算（利用者・学校単位）
 
@@ -604,9 +606,10 @@ EventBridge Scheduler へ移すまで（#1388）は、以下を手順として�
 
 4. 朝いちばんで `/health` を確認する（上のコマンド）
 
-   **`/health` は生存確認だけ**で、DB 接続も外部 API も見ていない
-   （`cmd/server/main.go` のハンドラは無条件に 200 を返す）。
-   RDS が落ちている・タスク定義が古い状態でも 200 になるので、
+   **`/health` と `/healthz` は生存確認だけ**で、DB 接続も外部 API も見ていない
+   （`cmd/server/server.go`。ALB のヘルスチェックは `/healthz` のまま）。
+   DB まで見るのは `/ready`（ping に失敗すると 503）。認証は無く、返すのは `ok` / `unavailable` だけなので、外から分かるのは DB の生死です。ALB のヘルスチェックは `/healthz` のままにする。
+   `/ready` に向けると、DB の瞬断でタスクが落ちる。RDS が落ちている・タスク定義が古い状態でも `/health` は 200 になるので、
    これだけで「動いている」と判断しないこと。前日ステップ3を1本だけでも通すのが確実。
 5. 異常があれば Discord の運用アラートチャンネルを確認する（#1355 の通知先）
 
@@ -753,7 +756,7 @@ null を返し、`Backend/internal/observability/sentry.go` も DSN 空なら初
 
 - `Authorization` / `Cookie` / `X-*-Token` などの認証ヘッダー
 - **URL のクエリとフラグメント** — `/verify-email?token=` `/company-portal/setup?token=`
-  `/auth/callback?user=` にワンタイムトークンやユーザー情報が載るため
+  `/auth/callback?user=`（旧方式）/ `/auth/callback?code=` にワンタイムトークンやユーザー情報が載るため
 - **Referer** — 遷移元のクエリ（＝トークン）が載る
 - リクエストボディ（履歴書・チャット本文の混入防止）
 - パンくずの URL、および console のパンくずは丸ごと破棄

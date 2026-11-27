@@ -1,7 +1,7 @@
 'use client'
 
 import { useParams, useRouter } from 'next/navigation'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import {
   Box,
@@ -15,6 +15,7 @@ import {
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import { GraduateOutcomeCard } from '@/components/company/GraduateOutcomeCard'
 import BusinessIcon from '@mui/icons-material/Business'
 import PlaceIcon from '@mui/icons-material/Place'
 import PeopleIcon from '@mui/icons-material/People'
@@ -78,11 +79,17 @@ export default function PageContent() {
   const [activeTab, setActiveTab] = useState<RelationTab>('capital')
   const [jobPositions, setJobPositions] = useState<JobPosition[]>([])
 
+  // 企業を移ったり再読み込みしたりしたとき、前の取得の応答で上書きしないための連番
+  const detailRequestSeq = useRef(0)
+
   const fetchCompanyDetail = useCallback(async () => {
     const companyId = String(params.id)
+    const seq = ++detailRequestSeq.current
+    const isStale = () => seq !== detailRequestSeq.current
     setLoadStatus('loading')
     try {
       const response = await fetchWithTimeout(`/api/companies/${companyId}`)
+      if (isStale()) return
       if (response.status === 404) {
         setCompany(null)
         setLoadStatus('not_found')
@@ -94,9 +101,11 @@ export default function PageContent() {
         return
       }
       const raw: unknown = await response.json()
+      if (isStale()) return
       setCompany(mapCompanyApiToViewModel(raw))
       setLoadStatus('ok')
     } catch (error) {
+      if (isStale()) return
       console.error('Failed to fetch company details:', error)
       setCompany(null)
       setLoadStatus('error')
@@ -105,12 +114,16 @@ export default function PageContent() {
 
   useEffect(() => {
     const companyId = String(params.id)
+    // 企業を移ったら前の企業の求人は消し、前の取得の応答は捨てる
+    let cancelled = false
+    setJobPositions([])
 
     const fetchJobPositions = async () => {
       try {
         const res = await fetch(`/api/companies/${companyId}/job-positions`)
-        if (!res.ok) return
+        if (cancelled || !res.ok) return
         const raw: unknown = await res.json()
+        if (cancelled) return
         const payload =
           raw && typeof raw === 'object' && !Array.isArray(raw)
             ? (raw as { data?: unknown; positions?: JobPosition[] })
@@ -120,7 +133,7 @@ export default function PageContent() {
           : payload?.data && typeof payload.data === 'object' && !Array.isArray(payload.data)
             ? (payload.data as { positions?: JobPosition[] }).positions
             : undefined
-        if (Array.isArray(positions)) setJobPositions(positions)
+        setJobPositions(Array.isArray(positions) ? positions : [])
       } catch {
         // job positions are optional
       }
@@ -128,6 +141,9 @@ export default function PageContent() {
 
     void fetchCompanyDetail()
     void fetchJobPositions()
+    return () => {
+      cancelled = true
+    }
   }, [params.id, fetchCompanyDetail])
 
   if (loadStatus === 'loading') {
@@ -427,6 +443,9 @@ export default function PageContent() {
             </CardContent>
           </Card>
         </Box>
+
+        {/* 自分の学校の先輩の進路実績（#2032）。実績が無ければ出さない */}
+        <GraduateOutcomeCard companyId={String(params.id)} />
 
         {jobPositions.length > 0 && (
           <Card sx={{ mt: 3, borderRadius: 2 }}>

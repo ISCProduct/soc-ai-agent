@@ -294,6 +294,22 @@ many_fixed = [f"- SOCAIAGENT-{n} 「ステージング環境反映」→「完�
 total = build_fix_message(many_fixed) + "\n\n" + build_message(many, "ISCProduct/soc-ai-agent", 1700 - len(build_fix_message(many_fixed)) - 2)
 check("自動更新が多くても通知全体が2000文字に収まる", len(total) < 2000, True)
 
+# 昇格 PR のコミットは100件を超える。/pulls/{n}/commits は1回100件・合計250件までなので、
+# 101件目以降の子 PR を展開できず、漏れたズレを検知できなかった(2026-11-24 の #2580 は368件)
+def fake_gh_get(url, token, attempts=3):
+    if url.endswith("/pulls/7"):
+        return {"base": {"sha": "b7"}, "head": {"sha": "h7"}}
+    if "/compare/b7...h7?per_page=100&page=1" in url:
+        return {"total_commits": 101, "commits": [{"commit": {"message": f"chore: {i}"}} for i in range(100)]}
+    if "/compare/b7...h7?per_page=100&page=2" in url:
+        return {"total_commits": 101, "commits": [{"commit": {"message": "Merge pull request #50 from o/x"}}]}
+    raise AssertionError(f"想定外の URL: {url}")
+orig_gh_get = A.gh_get
+A.gh_get = fake_gh_get
+subjects = A.gh_commit_subjects(REPO, "t", 7)
+A.gh_get = orig_gh_get
+check("昇格PRのコミットが100件を超えても101件目まで読む", (len(subjects), subjects[-1] if subjects else ""), (101, "Merge pull request #50 from o/x"))
+
 if failures:
     print(f"FAIL: {failures} 件")
     sys.exit(1)

@@ -1,12 +1,10 @@
 package costs
 
 import (
+	"Backend/internal/config"
 	"errors"
 	"fmt"
 	"log"
-	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -68,12 +66,7 @@ func NewInterviewBudgetService(repo interviewSessionCounter, notify func(Intervi
 	if alert <= 0 || alert > limit {
 		alert = limit
 	}
-	enforce := false
-	if v := strings.TrimSpace(os.Getenv("INTERVIEW_BUDGET_ENFORCE")); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			enforce = b
-		}
-	}
+	enforce := config.InterviewBudgetEnforce()
 	return &InterviewBudgetService{
 		repo:           repo,
 		limit:          limit,
@@ -155,9 +148,9 @@ func (s *InterviewBudgetService) notifyIfNeeded(status InterviewBudgetStatus) {
 // 既存の企業検索アラートと同じWebhookを使う。通知先を増やすより、
 // 費用の話が1か所に集まる方が気づかれやすい。
 func NotifyInterviewBudgetToDiscord(status InterviewBudgetStatus) {
-	webhook := strings.TrimSpace(os.Getenv("COMPANY_SEARCH_ALERT_DISCORD_WEBHOOK_URL"))
+	webhook := config.CompanySearchAlertDiscordWebhookURL()
 	if webhook == "" {
-		webhook = strings.TrimSpace(os.Getenv("OPENAI_COST_ALERT_DISCORD_WEBHOOK_URL"))
+		webhook = config.OpenAICostAlertDiscordWebhookURL()
 	}
 	if webhook == "" {
 		log.Printf("[InterviewBudget] ALERT month=%s count=%d/%d enforce=%t (webhook未設定)",

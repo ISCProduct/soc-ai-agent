@@ -54,6 +54,10 @@ def client():
 def _reset_vector_store_client():
     """各テスト前にベクトルストアのシングルトンをクリアする。"""
     import vector_store
+    from services.cache import clear_query_embedding_cache
     vector_store.reset_chroma_client_for_tests()
+    # クエリの埋め込みのキャッシュも、テストの間で持ち越さない（SOCAIAGENT-556）
+    clear_query_embedding_cache()
     yield
     vector_store.reset_chroma_client_for_tests()
+    clear_query_embedding_cache()

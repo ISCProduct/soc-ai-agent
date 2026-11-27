@@ -1,0 +1,81 @@
+== err=<nil>
+== 応答
+{
+  "response": "好きな技術について教えてください。\n\nこの中で、あなたに一番近いものを選んでください。\n1) 自分で調べて作ったり試すのが好き\n2) 授業や課題で必要なら前向きに取り組む\n3) 興味はあるが自分から触るほどではない\n4) あまり気が向かない\n5) その他（自由記述）",
+  "question_weight_id": 21,
+  "all_phases": [
+    {
+      "phase_id": 1,
+      "phase_name": "job_analysis",
+      "display_name": "job_analysis（表示名）",
+      "questions_asked": 0,
+      "valid_answers": 0,
+      "completion_score": 0,
+      "is_completed": false,
+      "min_questions": 3,
+      "max_questions": 5
+    },
+    {
+      "phase_id": 2,
+      "phase_name": "interest_analysis",
+      "display_name": "interest_analysis（表示名）",
+      "questions_asked": 0,
+      "valid_answers": 0,
+      "completion_score": 0,
+      "is_completed": false,
+      "min_questions": 3,
+      "max_questions": 0
+    }
+  ],
+  "is_complete": false,
+  "total_questions": 8,
+  "answered_questions": 2,
+  "evaluated_categories": 0,
+  "total_categories": 10,
+  "job_category_id": 5,
+  "judgment_percent": 0
+}
+== 保存したメッセージ
+[
+  {
+    "id": 0,
+    "organization_id": 0,
+    "session_id": "char-session",
+    "user_id": 42,
+    "role": "assistant",
+    "content": "好きな技術について教えてください。\n\nこの中で、あなたに一番近いものを選んでください。\n1) 自分で調べて作ったり試すのが好き\n2) 授業や課題で必要なら前向きに取り組む\n3) 興味はあるが自分から触るほどではない\n4) あまり気が向かない\n5) その他（自由記述）",
+    "question_weight_id": 21,
+    "weight_category": "技術志向",
+    "created_at": "0001-01-01T00:00:00Z"
+  }
+]
+== 保存した AI 質問
+null
+== 更新した進捗
+[
+  {
+    "id": 12,
+    "user_id": 0,
+    "session_id": "",
+    "phase_id": 2,
+    "phase": {
+      "id": 2,
+      "phase_name": "interest_analysis",
+      "display_name": "interest_analysis（表示名）",
+      "phase_order": 0,
+      "description": "interest_analysis の合成説明",
+      "min_questions": 3,
+      "max_questions": 0,
+      "created_at": "0001-01-01T00:00:00Z",
+      "updated_at": "0001-01-01T00:00:00Z"
+    },
+    "questions_asked": 2,
+    "valid_answers": 1,
+    "invalid_answers": 0,
+    "completion_score": 33.33333333333333,
+    "is_completed": false,
+    "created_at": "0001-01-01T00:00:00Z",
+    "updated_at": "0001-01-01T00:00:00Z"
+  }
+]
+== AI呼び出し回数: 0

@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"Backend/internal/matchrank"
 	"Backend/internal/models"
 	"context"
 
@@ -98,6 +99,8 @@ func (r *UserCompanyMatchRepository) CreateOrUpdateBatch(matches []*models.UserC
 // プロファイル生成をやり直せばそのまま復帰できる。削除すると復帰できない。
 //
 // companyIDColumn は呼び出し元がコード内リテラルで渡す列名（外部入力を渡さないこと）。
+// テーブル名つきで渡すこと。無修飾の "company_id" は内側の cwp.company_id に解決され、
+// 対象企業と結びつかない（どこかの企業にプロファイルがあれば常に真になる）。
 func CompanyHasWeightProfileSQL(companyIDColumn string) string {
 	return "EXISTS (SELECT 1 FROM company_weight_profiles cwp" +
 		" WHERE cwp.company_id = " + companyIDColumn +
@@ -111,7 +114,7 @@ func (r *UserCompanyMatchRepository) FindTopMatchesByUserAndSession(
 	var ms []*models.UserCompanyMatch
 	err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).
 		Where(CompanyHasWeightProfileSQL("user_company_matches.company_id")).
-		Order("match_score DESC").
+		Order(matchrank.OrderSQL).
 		Limit(limit).
 		Preload("Company").
 		Preload("JobPosition").
@@ -144,7 +147,7 @@ SELECT id FROM (
            ORDER BY created_at DESC, id DESC
          ) AS rn
   FROM user_company_matches
-  WHERE user_id = ? AND is_favorited = ? AND `+CompanyHasWeightProfileSQL("company_id")+`
+  WHERE user_id = ? AND is_favorited = ? AND `+CompanyHasWeightProfileSQL("user_company_matches.company_id")+`
 ) ranked
 WHERE rn = 1`, userID, true).Scan(&picked).Error
 	if err != nil {
