@@ -305,6 +305,39 @@ describe('useResultsData お気に入りの解除', () => {
     })
     expect(result.current.favoriteCompanies.map((item) => item.name)).toEqual(['北見工業'])
   })
+
+  it('今のページに無い企業IDでも、おすすめ一覧のハートを付ける', async () => {
+    global.fetch = jest.fn((url: string) => {
+      if (String(url).startsWith('/api/chat/favorites?')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            recommendations: [favorite],
+            total: 2,
+            favorite_company_ids: [7, 8],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    }) as unknown as typeof fetch
+
+    const { result } = renderHook(() => useResultsData())
+    await act(async () => {})
+    await act(async () => {
+      recommendationResolvers.s1({
+        ok: true,
+        json: async () => ({
+          recommendations: [
+            favorite,
+            { id: 8, match_id: 21, category_name: '別の企業', score: 70, is_favorited: false },
+          ],
+        }),
+      })
+    })
+
+    expect(result.current.favoritesTotal).toBe(2)
+    expect(result.current.companies.find((company) => company.id === '8')?.isFavorited).toBe(true)
+  })
 })
 
 // SOCAIAGENT-670: 推薦への「合う／合わない」。同じ判定をもう一度押すと取り消す。

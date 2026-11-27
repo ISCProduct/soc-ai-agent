@@ -41,6 +41,8 @@ jobs:
     name: Deploy Discord Lambda
     runs-on: ubuntu-latest
     environment: staging
+    permissions:
+      contents: read
     concurrency:
       group: deploy-discord-lambda
       cancel-in-progress: true
@@ -78,6 +80,62 @@ jobs:
             --query 'LastUpdateStatus' --output text
 
           # 更新の反映を待たずに次のリクエストが来ると、古いコードで応答することがある。
+          aws lambda wait function-updated --function-name "$FUNCTION_NAME"
+          echo "$FUNCTION_NAME を更新しました"
+
+  # 本番の受け口は terraform の discord_bot_enabled で作るまで存在しない。
+  # 関数が無い間はこのジョブを失敗にしない（SOCAIAGENT-512）。
+  deploy-discord-lambda-prod:
+    if: github.ref_name == 'main'
+    name: Deploy Discord Lambda (production)
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    concurrency:
+      group: deploy-discord-lambda-prod
+      cancel-in-progress: true
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+      FUNCTION_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}-discord
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: ./Backend/go.mod
+          cache-dependency-path: ./Backend/go.sum
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build and deploy
+        working-directory: ./Backend
+        run: |
+          set -e
+          # 関数が無い（ResourceNotFoundException）ときだけスキップする。
+          # 権限不足・スロットリング・ネットワーク断などは握りつぶさず失敗させる。
+          if ! GET_OUT=$(aws lambda get-function --function-name "$FUNCTION_NAME" 2>&1); then
+            if echo "$GET_OUT" | grep -q "ResourceNotFoundException"; then
+              echo "本番の Discord Lambda は未作成です。discord_bot_enabled を有効にするまでスキップします"
+              exit 0
+            fi
+            echo "::error::aws lambda get-function が ResourceNotFoundException 以外で失敗しました"
+            echo "$GET_OUT" >&2
+            exit 1
+          fi
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o bootstrap ./cmd/discord-lambda
+          zip -j discord-lambda.zip bootstrap
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file fileb://discord-lambda.zip \
+            --query 'LastUpdateStatus' --output text
           aws lambda wait function-updated --function-name "$FUNCTION_NAME"
           echo "$FUNCTION_NAME を更新しました"
 
