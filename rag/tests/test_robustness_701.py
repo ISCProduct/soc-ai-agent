@@ -5,6 +5,8 @@
 import inspect
 import json
 import logging
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -44,6 +46,40 @@ def test_healthz_200_with_internal_token(client, monkeypatch):
     res = client.get("/healthz")
     assert res.status_code == 200
     assert res.json()["internal_auth"] == {"configured": True}
+
+
+def test_healthz_pings_chroma_off_the_event_loop(client, monkeypatch):
+    """同期の Chroma 確認はイベントループではなく専用スレッドで動く（ループを塞がない）。"""
+    seen = {}
+
+    def ping():
+        seen["thread"] = threading.current_thread().name
+        return True, "ok"
+
+    monkeypatch.setattr(health_router, "ping_chroma", ping)
+    assert client.get("/healthz").status_code == 200
+    assert seen["thread"].startswith("healthz-ping")
+
+
+def test_healthz_503_when_chroma_ping_hangs(client, monkeypatch):
+    """Chroma がハングしても上限時間で打ち切り、待ち続けずに 503 を返す。"""
+    release = threading.Event()
+
+    def hang():
+        release.wait(5)
+        return True, "ok"
+
+    monkeypatch.setattr(health_router, "ping_chroma", hang)
+    monkeypatch.setattr(health_router, "_CHROMA_PING_TIMEOUT_SEC", 0.2)
+    try:
+        started = time.monotonic()
+        res = client.get("/healthz")
+        elapsed = time.monotonic() - started
+    finally:
+        release.set()
+    assert res.status_code == 503
+    assert res.json()["vector_store"] == {"ok": False, "detail": "unavailable"}
+    assert elapsed < 2
 
 
 # ---- Mid-3 / Low-8: 例外文を応答・ログに出さない ----

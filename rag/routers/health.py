@@ -1,10 +1,13 @@
 """ヘルスチェックエンドポイント。"""
 from __future__ import annotations
 
+import asyncio
 import hmac
+import logging
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Request
@@ -16,6 +19,7 @@ from services.model_tiers import es_review_model
 from vector_store import ping_chroma
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # OpenAI への到達確認（?deep=1）の結果を覚える秒数と、確認の上限時間（SOCAIAGENT-562）。
 # ヘルスチェックは頻繁に呼ばれるので、毎回 OpenAI へ問い合わせない。
@@ -23,6 +27,12 @@ _OPENAI_PROBE_TTL_SEC = 60.0
 _OPENAI_PROBE_TIMEOUT_SEC = 3.0
 _openai_probe: Dict[str, Any] = {"at": 0.0, "result": None}
 _openai_probe_lock = threading.Lock()
+
+# /healthz の Chroma 確認の上限時間。コンテナのヘルスチェック（urlopen の timeout=3）より短くする（SOCAIAGENT-701）。
+_CHROMA_PING_TIMEOUT_SEC = 2.0
+# /healthz の Chroma 確認専用のスレッド。Chroma がハングして確認が戻らなくても、
+# 埋まるのはこの2本だけで、ほかの処理のスレッドプールは食い潰さない。
+_ping_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="healthz-ping")
 
 
 def _chat_model() -> str:
@@ -70,8 +80,9 @@ def _openai_status(deep: bool) -> Dict[str, Any]:
     return status
 
 
-def _payload(deep: bool) -> Dict[str, Any]:
-    ok, _ = ping_chroma()
+def _payload(deep: bool, ok: bool | None = None) -> Dict[str, Any]:
+    if ok is None:
+        ok, _ = ping_chroma()
     openai_status = _openai_status(deep)
     openai_ok = openai_status["configured"] and openai_status.get("reachable", True)
     return {
@@ -106,6 +117,23 @@ def health(request: Request, deep: bool = False) -> dict:
     return _payload(deep)
 
 
+async def _ping_chroma_with_timeout() -> bool:
+    """Chroma の確認を専用スレッドで行い、上限時間を過ぎたら届かないとみなす。
+
+    ping_chroma は同期の一覧取得なので、イベントループ上で直接呼ぶと
+    Chroma がハングしたときにループごと止まり、ほかのリクエストも進まなくなる。
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        ok, _ = await asyncio.wait_for(
+            loop.run_in_executor(_ping_executor, ping_chroma), _CHROMA_PING_TIMEOUT_SEC
+        )
+        return ok
+    except asyncio.TimeoutError:
+        logger.warning("chroma ping timed out timeout_sec=%s", _CHROMA_PING_TIMEOUT_SEC)
+        return False
+
+
 # /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
 # /health は後方互換のため維持
 @router.get("/healthz")
@@ -114,6 +142,7 @@ async def healthz() -> dict:
 
     async にしてイベントループ上で返す。同期の重い処理でスレッドプールが埋まっていても、
     ヘルスチェックが待たされてタスクが入れ替えられないようにする（SOCAIAGENT-701）。
+    Chroma の確認だけは同期なので、専用スレッドに逃がして上限時間で打ち切る。
 
     内部トークンが空だと /health 以外は全部 503 になる（main の内部認証）ので、/healthz も 503 にして
     設定の誤りに気づけるようにする。起動は失敗させない。
@@ -121,7 +150,7 @@ async def healthz() -> dict:
     OpenAI の状態は payload に載せるが、503 にはしない。OpenAI の障害でタスクを入れ替えても
     直らず、全タスクが入れ替わり続けるだけになるため。
     """
-    payload = _payload(deep=False)
+    payload = _payload(deep=False, ok=await _ping_chroma_with_timeout())
     token_configured = bool(os.getenv("RAG_INTERNAL_TOKEN", "").strip())
     payload["internal_auth"] = {"configured": token_configured}
     if not payload["vector_store"]["ok"] or not token_configured:

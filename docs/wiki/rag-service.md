@@ -49,7 +49,7 @@ SOC AI Agent の RAG（Retrieval-Augmented Generation）サービスは Python /
 | POST | `/company/hints` | 企業面接ヒント収集 |
 | POST | `/es/review` | エントリーシートレビュー |
 | GET | `/health` | ヘルスチェック（Chroma 接続含む） |
-| GET | `/healthz` | ヘルスチェック（Chroma 失敗時・`RAG_INTERNAL_TOKEN` 未設定時 503） |
+| GET | `/healthz` | ヘルスチェック（Chroma 失敗時・Chroma が2秒以内に応答しないとき・`RAG_INTERNAL_TOKEN` 未設定時 503） |
 | POST | `/company/context` | Backend からの企業コンテキスト書き込み |
 | GET | `/vector/status` | ベクトルインデックス状況 |
 | POST | `/vector/reembed` | 企業ベクトル削除・再埋め込み |
