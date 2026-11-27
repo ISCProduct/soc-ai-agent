@@ -233,6 +233,8 @@ func hardDeleteUserData(tx *gorm.DB, userID uint, collectiveAnonymousID string) 
 		&models.AIGeneratedQuestion{},
 		&models.ConversationContext{},
 		&models.UserWeightScore{},
+		// 成長の記録（SOCAIAGENT-601）。スコアの写しなので退会後に残さない
+		&models.UserGrowthSnapshot{},
 		// 再計算の控え（#1770）。scores_json にスコアを丸ごと持つので、退会後に残さない
 		&models.UserScoreRecalculationSnapshot{},
 		&models.UserAnalysisProgress{},
@@ -241,6 +243,7 @@ func hardDeleteUserData(tx *gorm.DB, userID uint, collectiveAnonymousID string) 
 		// 推薦へのフィードバック（SOCAIAGENT-670）。推薦（user_company_matches）への FK があるので、推薦より先に消す
 		&models.UserMatchFeedback{},
 		&models.UserCompanyMatch{},
+		&models.ApplicationStatusEvent{},
 		&models.UserApplicationStatus{},
 		&models.CompanyReview{},
 		&models.ResumeDocument{},

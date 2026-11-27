@@ -14,6 +14,7 @@ import {
 } from './components/ResultsStatusViews'
 import ResultsListView from './components/ResultsListView'
 import AnalysisScoreCard from './components/AnalysisScoreCard'
+import MyCategoryScoresCard from './components/MyCategoryScoresCard'
 import { LowMatchConfirmDialog } from '@/app/results/components/LowMatchConfirmDialog'
 
 /** ReactFlow 依存の詳細ビューは一覧表示では不要のため遅延ロード */
@@ -51,6 +52,9 @@ function ResultsContent() {
     sessionId,
     companies,
     favoriteCompanies,
+    favoritesTotal,
+    favoritesOffset,
+    setFavoritesOffset,
     favoritesLoading,
     favoritesError,
     retryFavorites,
@@ -133,6 +137,8 @@ function ResultsContent() {
           analysisError={analysisError}
           onRetryAnalysis={handleRetryAnalysis}
         />
+        {/* 推薦が0件でも、自分の10の傾向は見られるようにする（推薦とは別に取れる情報） */}
+        <MyCategoryScoresCard key={sessionId} sessionId={sessionId} />
         <ResultsEmptyView reason={emptyReason} onBackToChat={handleBack} />
       </ResultsFallbackColumn>
     )
@@ -147,6 +153,8 @@ function ResultsContent() {
           analysisError={analysisError}
           onRetryAnalysis={handleRetryAnalysis}
         />
+        {/* 推薦が0件でも、自分の10の傾向は見られるようにする（推薦とは別に取れる情報） */}
+        <MyCategoryScoresCard key={sessionId} sessionId={sessionId} />
         <ResultsNoMatchView onReset={handleReset} />
       </ResultsFallbackColumn>
     )
@@ -171,7 +179,11 @@ function ResultsContent() {
     <>
     <ResultsListView
       companies={companies}
+      sessionId={sessionId}
       favoriteCompanies={favoriteCompanies}
+      favoritesTotal={favoritesTotal}
+      favoritesOffset={favoritesOffset}
+      onFavoritesOffsetChange={setFavoritesOffset}
       favoritesLoading={favoritesLoading}
       favoritesError={favoritesError}
       onRetryFavorites={retryFavorites}

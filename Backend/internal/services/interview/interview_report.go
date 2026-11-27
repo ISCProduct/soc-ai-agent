@@ -341,6 +341,8 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	if err := s.reportRepo.Upsert(report); err != nil {
 		return err
 	}
+	// ローカル採点はレポート保存の後。失敗しても、上で書いた LLM の採点はそのまま残す。
+	s.recordShadowScore(ctx, session.UserID, sessionID, utterances)
 	return s.applyReportScores(session, report, utterances)
 }
 

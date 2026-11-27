@@ -28,6 +28,7 @@ import ManageAccountsIcon from '@mui/icons-material/ManageAccounts'
 import HomeIcon from '@mui/icons-material/Home'
 import FactCheckIcon from '@mui/icons-material/FactCheck'
 import QuizIcon from '@mui/icons-material/Quiz'
+import SchoolIcon from '@mui/icons-material/School'
 import SearchIcon from '@mui/icons-material/Search'
 import { STUDENT_FOCUS_OUTLINE, UI } from '@/lib/design/tokens'
 import {
@@ -57,6 +58,7 @@ const NAV_ICONS: Record<NavHref, React.ReactNode> = {
   '/schedule': <CalendarMonthIcon color="inherit" />,
   '/favorites': <FavoriteIcon color="inherit" />,
   '/applications': <AssignmentIcon color="inherit" />,
+  '/graduate-outcomes': <SchoolIcon color="inherit" />,
   '/companies': <SearchIcon color="inherit" />,
   '/scout': <MailOutlineIcon color="inherit" />,
   '/profile': <ManageAccountsIcon color="inherit" />,

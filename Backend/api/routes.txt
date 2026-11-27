@@ -1,7 +1,7 @@
 # 実装に登録されている全エンドポイント。
 # 手で編集しない。次のコマンドで生成する:
 #   cd Backend && go test ./internal/routes/ -run TestRouteCatalog -update
-# 合計 318 本
+# 合計 334 本
 GET /api/ability-assessments
 POST /api/ability-assessments/:templateId/sessions
 GET /api/ability-assessments/sessions/:sessionId
@@ -17,11 +17,14 @@ GET /api/admin/assessment-templates
 POST /api/admin/assessment-templates
 GET /api/admin/assessment-templates/:id/students
 GET /api/admin/audit-logs
+GET /api/admin/business-tags
 POST /api/admin/collective-insights/rebuild-summaries
 GET /api/admin/companies
 POST /api/admin/companies
 GET /api/admin/companies/:id
 PUT /api/admin/companies/:id
+GET /api/admin/companies/:id/business-tags
+PUT /api/admin/companies/:id/business-tags
 GET /api/admin/companies/:id/company-users
 POST /api/admin/companies/:id/company-users
 PATCH /api/admin/companies/:id/company-users/:userID
@@ -77,6 +80,7 @@ GET /api/admin/graduate-employments/:id
 PUT /api/admin/graduate-employments/:id
 GET /api/admin/graduate-employments/summary
 GET /api/admin/interviews
+GET /api/admin/interviews/:id/shadow-score
 GET /api/admin/interviews/:id/videos
 GET /api/admin/interviews/videos/:video_id/url
 GET /api/admin/job-categories
@@ -105,6 +109,7 @@ POST /api/admin/schools/:id/company-applications/:appId/reject
 GET /api/admin/schools/:id/company-approvals
 POST /api/admin/schools/:id/company-approvals
 DELETE /api/admin/schools/:id/company-approvals/:company_id
+PUT /api/admin/schools/:id/interview-video-retention
 GET /api/admin/schools/:id/job-suppressions
 POST /api/admin/schools/:id/job-suppressions
 DELETE /api/admin/schools/:id/job-suppressions/:jobId
@@ -121,6 +126,7 @@ GET /api/admin/score-validation/variants/results
 GET /api/admin/scraper-sessions
 POST /api/admin/scraper-sessions
 DELETE /api/admin/scraper-sessions/:site_key
+GET /api/admin/students/:id/growth-history
 GET /api/admin/teacher/students/:id/es-reviews
 POST /api/admin/teacher/students/:id/guidances
 GET /api/admin/teacher/students/tendency-analysis
@@ -179,11 +185,13 @@ GET /api/auth/verify-email
 POST /api/auth/verify-registration
 POST /api/chat
 GET /api/chat/analysis
+GET /api/chat/axis-scores
 POST /api/chat/favorite
 GET /api/chat/favorites
 POST /api/chat/favorites/remove
 GET /api/chat/history
 POST /api/chat/match-feedback
+GET /api/chat/matches/:id/axes
 GET /api/chat/recommendations
 GET /api/chat/scores
 POST /api/chat/send-report
@@ -264,6 +272,8 @@ GET /api/google-calendar/callback
 GET /api/google-calendar/connect
 DELETE /api/google-calendar/disconnect
 GET /api/google-calendar/status
+GET /api/graduate-outcomes
+GET /api/graduate-outcomes/companies/:id
 GET /api/hr/applications
 PATCH /api/hr/applications/:id/status
 GET /api/hr/interviews
@@ -281,6 +291,8 @@ POST /api/interviews/:id/start-turn
 POST /api/interviews/:id/turn
 POST /api/interviews/:id/upload-video
 POST /api/interviews/:id/utterances
+GET /api/interviews/:id/videos
+GET /api/interviews/:id/videos/:video_id/url
 GET /api/interviews/axis-comparison
 GET /api/interviews/trend
 GET /api/notifications
@@ -303,9 +315,11 @@ GET /api/schedule/:id
 PUT /api/schedule/:id
 GET /api/schedule/export/ics
 GET /api/user/ai-budget
+GET /api/user/growth-history
 GET /api/user/guidances
 POST /api/user/guidances/:id/dismiss
 GET /api/user/industries
+GET /api/user/interview-video-retention
 GET /api/user/preferences
 PUT /api/user/preferences
 GET /api/user/profile

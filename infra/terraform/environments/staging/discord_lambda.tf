@@ -73,11 +73,25 @@ resource "aws_iam_role_policy" "discord_lambda" {
         ]
       },
       {
-        # /link で作る Discord ↔ Backlog の対応表(JSON 1本)。
+        # 移行前の対応表。新しい書き込みは DynamoDB。
+        # Put は、テーブル追加より先に動いている旧バイナリが /link を書けるように残す。
         Sid      = "LinkParameter"
         Effect   = "Allow"
         Action   = ["ssm:GetParameter", "ssm:PutParameter"]
         Resource = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/discord-backlog-links"]
+      },
+      {
+        Sid    = "LinkTable"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Scan",
+          "dynamodb:TransactWriteItems",
+          "dynamodb:ConditionCheckItem",
+        ]
+        Resource = [aws_dynamodb_table.discord_links.arn]
       },
       {
         # Bot 専用の Backlog API キー。個人のキーは読ませない (SOCAIAGENT-510)。
@@ -88,6 +102,21 @@ resource "aws_iam_role_policy" "discord_lambda" {
       },
     ]
   })
+}
+
+# Discord ↔ Backlog の対応表。SSM の 4KB では約40人で止まるため、1人1項目で持つ。
+# Lambda は VPC の外（このファイル先頭のコメント）なので、DynamoDB のパブリックエンドポイントを使う。
+resource "aws_dynamodb_table" "discord_links" {
+  name         = "${var.project_name}-discord-backlog-links"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "pk"
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  tags = local.tags
 }
 
 # 実体のバイナリは CI（deployment.yml）が update-function-code で入れる。
@@ -127,11 +156,13 @@ resource "aws_lambda_function" "discord" {
       DISCORD_ALLOWED_ROLE_ID = var.discord_allowed_role_id
       GITHUB_DISPATCH_TOKEN   = var.github_dispatch_token
       GITHUB_DISPATCH_REPO    = var.github_dispatch_repo
+      GITHUB_PR_READ_TOKEN    = var.github_pr_read_token
       # キーそのものは置かない。個人の backlog_api_key は渡さない (SOCAIAGENT-510)。
       DISCORD_BACKLOG_BOT_SECRET_ID = aws_secretsmanager_secret.discord_backlog_bot.name
 
       DISCORD_REMINDER_WEBHOOK_URL = var.discord_reminder_webhook_url
       BACKLOG_REVIEWER_IDS         = var.backlog_reviewer_ids
+      DISCORD_LINKS_TABLE          = aws_dynamodb_table.discord_links.name
     }
   }
 

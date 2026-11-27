@@ -162,9 +162,10 @@ func TestCalculateMatching_NoAICallsWhenFlagOff(t *testing.T) {
 
 func TestTopMatchesByScore(t *testing.T) {
 	mk := func(id uint, score float64) *models.UserCompanyMatch {
-		return &models.UserCompanyMatch{CompanyID: id, MatchScore: score}
+		return &models.UserCompanyMatch{ID: id, UserID: 1, CompanyID: id, MatchScore: score}
 	}
-	pending := []*models.UserCompanyMatch{mk(1, 10), mk(2, 50), mk(3, 30), mk(4, 50)}
+	// ユーザー1の同点では CRC32("1:2") < CRC32("1:4") なので企業2が企業4より前。
+	pending := []*models.UserCompanyMatch{mk(4, 50), mk(1, 10), mk(3, 30), mk(2, 50)}
 
 	tests := []struct {
 		name  string
@@ -172,7 +173,7 @@ func TestTopMatchesByScore(t *testing.T) {
 		want  []uint
 	}{
 		{"上位2件をスコア降順で返す", 2, []uint{2, 4}},
-		{"同点は元の順序を保つ(SliceStable)", 3, []uint{2, 4, 3}},
+		{"同点は入力順ではなくCRC32で決まる", 3, []uint{2, 4, 3}},
 		{"limitが件数を超えたら全件", 99, []uint{2, 4, 3, 1}},
 		{"limit=0は空", 0, nil},
 		{"負のlimitは空", -1, nil},
