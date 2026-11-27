@@ -222,7 +222,7 @@ Turn 経路の STT / TTS の単価は `Backend/internal/services/costs/api_cost_
 | --- | --- | --- |
 | 案の選択 | A / B のいずれか | プロダクト判断 |
 | B 採用時のモデル | `gpt-realtime-mini` か `gpt-realtime`（約3倍） | 実際に聞いて判断 |
-| STT モデル | **2026-10-11 に `gpt-transcribe` へ変更。** 実際の面接音声13発話（動画の音声トラック、正解は復元）で誤り率は mini 23% / `gpt-transcribe` 18%（**この13発話の出どころと同意の根拠は未確認**。確認できるまで品質の根拠として扱わない。SOCAIAGENT-676 の U1、[設計](./stt-eval-consent-design.md) の0章）。再送先だった `gpt-4o-transcribe` は語の羅列の prompt をそのまま返し誤り率 83% だったため再送先から外した。以下は変更前の判断記録。`gpt-4o-mini-transcribe` を既定値として採用 | 単価は半額。**合成音声で検証済み**（`docs/research/interview-audio-eval/RESULTS_stt_hints.md`）で、CER・固有名詞正解率に差は出なかった。ただし **mini は「御社」を8/8で「本社」と誤認する**ため、この語を検知して高精度モデルへ再送するフォールバックを併用する。実発話の精度と再送率は未測定で、問題が出たら `OPENAI_WHISPER_MODEL=gpt-4o-transcribe` に戻す。戻すときは `terraform.tfvars` の `openai_whisper_model` を変更して apply する |
+| STT モデル | **2026-10-11 に `gpt-transcribe` へ変更。** 実際の面接音声13発話（動画の音声トラック、正解は復元）で誤り率は mini 23% / `gpt-transcribe` 18%（**この比較は再確認中のため、確認が済むまで品質の根拠として扱わない**。SOCAIAGENT-676 の U1、[設計](./stt-eval-consent-design.md) の0章）。再送先だった `gpt-4o-transcribe` は語の羅列の prompt をそのまま返し誤り率 83% だったため再送先から外した。以下は変更前の判断記録。`gpt-4o-mini-transcribe` を既定値として採用 | 単価は半額。**合成音声で検証済み**（`docs/research/interview-audio-eval/RESULTS_stt_hints.md`）で、CER・固有名詞正解率に差は出なかった。ただし **mini は「御社」を8/8で「本社」と誤認する**ため、この語を検知して高精度モデルへ再送するフォールバックを併用する。実発話の精度と再送率は未測定で、問題が出たら `OPENAI_WHISPER_MODEL=gpt-4o-transcribe` に戻す。戻すときは `terraform.tfvars` の `openai_whisper_model` を変更して apply する |
 | 既存 Realtime 実装の扱い | A 採用時、削除するか凍結して残すか | 本書は削除を推奨 |
 
 ## 10. 2026-11 追記: OpenAI モデル廃止による再検討（SOCAIAGENT-625）
