@@ -14,7 +14,36 @@ def _matches(metadata: Dict[str, Any], where: Optional[Dict[str, Any]]) -> bool:
         return True
     if "$and" in where:
         return all(_matches(metadata, clause) for clause in where["$and"])
-    return all(metadata.get(key) == value for key, value in where.items())
+    return all(_match_value(metadata.get(key), value) for key, value in where.items())
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _comparable(a: Any, b: Any) -> bool:
+    """本物の Chroma と同じく、型の違う値（数値と文字列など）は比較せず、条件に当たらない扱いにする。"""
+    return (_is_number(a) and _is_number(b)) or (isinstance(a, str) and isinstance(b, str))
+
+
+_OPS = {
+    "$eq": lambda a, b: a == b,
+    "$ne": lambda a, b: a != b,
+    "$gt": lambda a, b: _comparable(a, b) and a > b,
+    "$gte": lambda a, b: _comparable(a, b) and a >= b,
+    "$lt": lambda a, b: _comparable(a, b) and a < b,
+    "$lte": lambda a, b: _comparable(a, b) and a <= b,
+    "$in": lambda a, b: a in b,
+    "$nin": lambda a, b: a not in b,
+}
+
+
+def _match_value(actual: Any, cond: Any) -> bool:
+    # Chroma と同じく {"$gte": n} などの比較演算子を受ける（SOCAIAGENT-659 の TTL 条件）。
+    # 値を持たない文書・型の違う値は比較演算子に当たらない
+    if isinstance(cond, dict):
+        return all(_OPS[op](actual, operand) for op, operand in cond.items())
+    return actual == cond
 
 
 def _l2_squared(a: List[float], b: List[float]) -> float:
@@ -40,6 +69,32 @@ class MemoryCollection:
         for doc_id in list(self._rows):
             if (ids and doc_id in ids) or (where and _matches(self._rows[doc_id]["metadata"], where)):
                 del self._rows[doc_id]
+
+    def get(self, ids=None, where=None, include=None, limit=None, offset=0) -> Dict[str, Any]:
+        rows = [
+            (doc_id, row)
+            for doc_id, row in self._rows.items()
+            if (ids is None or doc_id in ids) and _matches(row["metadata"], where)
+        ]
+        rows = rows[offset:] if limit is None else rows[offset:offset + limit]
+        return {
+            "ids": [doc_id for doc_id, _ in rows],
+            "documents": [row["document"] for _, row in rows],
+            "metadatas": [row["metadata"] for _, row in rows],
+        }
+
+    def update(self, ids, metadatas=None, documents=None, embeddings=None) -> None:
+        # 本物の Chroma と同じく、メタデータは項目ごとにマージする（渡さなかった項目は残る）
+        for index, doc_id in enumerate(ids):
+            row = self._rows.get(doc_id)
+            if row is None:
+                continue
+            if metadatas:
+                row["metadata"] = {**row["metadata"], **dict(metadatas[index])}
+            if documents:
+                row["document"] = documents[index]
+            if embeddings:
+                row["embedding"] = list(embeddings[index])
 
     def count(self) -> int:
         return len(self._rows)

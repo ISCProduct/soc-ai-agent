@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from typing import Any, Callable
@@ -97,6 +98,8 @@ from services.settings import (  # noqa: F401 — re-export; patches target main
 )
 from vector_store import (  # noqa: E402, F401
     _sanitize_collection_name,
+    backfill_failed_collections,
+    backfill_fetched_at_ts,
     build_cache_key,
     delete_company_documents,
     describe_backend as describe_chroma_backend,
@@ -202,6 +205,59 @@ def log_openai_version() -> None:
     has_responses = hasattr(openai_module.OpenAI, "responses")
     logger.info("openai version=%s responses_api=%s", version, has_responses)
     logger.info("vector_store backend=%s", describe_chroma_backend())
+
+
+def _backfill_retry_settings() -> tuple:
+    """起動時の backfill の試行回数と、最初の待ち時間（秒）。待ちは試すたびに倍にする。"""
+    try:
+        attempts = max(1, int(os.getenv("RAG_BACKFILL_ATTEMPTS", "4")))
+    except ValueError:
+        attempts = 4
+    try:
+        delay = max(0.0, float(os.getenv("RAG_BACKFILL_RETRY_DELAY_SEC", "5")))
+    except ValueError:
+        delay = 5.0
+    return attempts, delay
+
+
+def _run_fetched_at_ts_backfill() -> None:
+    """起動時の backfill。失敗したら（chroma に届かない・一部のコレクションが失敗した）待って試し直す。
+
+    chroma は独立した ECS サービスなので、rag-review の起動時にまだ届かないことがある。既定
+    （RAG_ALLOW_WEB_SEARCH_FALLBACK=false）では検索で取り直されないので、補えなかった文書は
+    TTL 切れまで見えなくなる。そのため数回まで試し直す。最後まで失敗しても起動は止めない。
+    """
+    attempts, delay = _backfill_retry_settings()
+    for attempt in range(1, attempts + 1):
+        try:
+            result = backfill_fetched_at_ts(get_chroma_client(), apply=True)
+            failed = backfill_failed_collections(result)
+            if not failed:
+                logger.info("fetched_at_ts backfill done result=%s", result)
+                return
+            logger.warning(
+                "fetched_at_ts backfill failed attempt=%d/%d collections=%s result=%s", attempt, attempts, failed, result
+            )
+        except Exception as exc:  # 失敗しても起動は止めない
+            logger.warning("fetched_at_ts backfill failed attempt=%d/%d error=%s", attempt, attempts, exc)
+        if attempt < attempts:
+            time.sleep(delay * (2 ** (attempt - 1)))
+    logger.warning("fetched_at_ts backfill gave up after %d attempts (next startup will retry)", attempts)
+
+
+@app.on_event("startup")
+def start_fetched_at_ts_backfill() -> None:
+    """既存の文書に fetched_at_ts を補う backfill を、起動時にバックグラウンドで1回流す（SOCAIAGENT-659）。
+
+    検索は TTL を fetched_at_ts の where で絞るので、補っていない文書は検索に当たらない。
+    通常の push デプロイでも既存のキャッシュが残るよう、新しい rag-review が起動するたびに流す。
+    何度流しても同じ結果になり、デプロイ中に旧版が書いた文書も次の起動で補われる。
+    RAG_BACKFILL_ON_STARTUP=0 で止められる（手動は scripts/backfill_fetched_at_ts.py）。
+    失敗したら RAG_BACKFILL_ATTEMPTS 回まで、RAG_BACKFILL_RETRY_DELAY_SEC 秒から倍々に待って試し直す。
+    """
+    if os.getenv("RAG_BACKFILL_ON_STARTUP", "1").strip().lower() in ("0", "false", "off"):
+        return
+    threading.Thread(target=_run_fetched_at_ts_backfill, name="fetched-at-ts-backfill", daemon=True).start()
 
 
 # ルーター登録
