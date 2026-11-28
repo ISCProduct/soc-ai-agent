@@ -5,7 +5,7 @@ import { Box, IconButton, Tooltip, Typography } from '@mui/material'
 import { Favorite } from '@mui/icons-material'
 import type { CategoryScores, Company } from '../types'
 import { CATEGORY_SCORE_LABELS } from '../utils'
-import { UI } from '@/lib/design/tokens'
+import { focusRingSx, UI } from '@/lib/design/tokens'
 
 const AXIS_KEYS = Object.keys(CATEGORY_SCORE_LABELS) as (keyof CategoryScores)[]
 
@@ -142,7 +142,7 @@ export default function FavoritesCompareList({
                   fontWeight: 700,
                   color: UI.ink,
                   textAlign: 'left',
-                  '&:focus-visible': { outline: `3px solid ${UI.mark}`, outlineOffset: 2 },
+                  '&:focus-visible': focusRingSx(),
                 }}
               >
                 {company.name}

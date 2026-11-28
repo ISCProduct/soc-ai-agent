@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode, type RefCallback, type RefObject } from 'react'
 import { Box } from '@mui/material'
 
+import { NIGHT_SURFACE_ATTR } from '@/lib/student-theme'
 import { CALL } from '../callTokens'
 import { setInterviewSessionActive } from '../sessionChrome'
 import type { Utterance } from '../types'
@@ -87,7 +88,8 @@ export default function SessionScreen(props: SessionScreenProps) {
   const chipLabel = props.isDeepeningQuestion ? '深掘り質問' : props.questionCategory
 
   return (
-    <Box sx={{ height: '100vh', '@supports (height: 100dvh)': { height: '100dvh' }, width: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', bgcolor: CALL.stage, color: CALL.ink }}>
+    // 暗い面なので、フォーカスの枠を明るい色にする（NIGHT_SURFACE_ATTR。#2219）
+    <Box {...NIGHT_SURFACE_ATTR} sx={{ height: '100vh', '@supports (height: 100dvh)': { height: '100dvh' }, width: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', bgcolor: CALL.stage, color: CALL.ink }}>
       <NoticeBanners
         warningText={isConnected ? sessionWarningText(props.sessionWarningShown, remainingSeconds) : null}
         sessionEnded={remainingSeconds <= 0}
