@@ -15,6 +15,9 @@ export const UI = Object.fromEntries(
   Object.entries(STUDENT_SURFACES.comfortable).map(([k, v]) => [k, `var(${surfaceVar(k as keyof StudentSurface)}, ${v})`]),
 ) as Record<keyof StudentSurface, string>
 
+/** 個別の操作部品も、通常2px・高コントラスト3pxの共通フォーカスに追従する。 */
+export const STUDENT_FOCUS_OUTLINE = `var(--ui-focus-width, 2px) solid ${UI.mark}`
+
 /**
  * 本文の列幅。ヘッダーの帯と本文で同じ値を使い、列の左端を揃える。
  *

@@ -1,17 +1,19 @@
 'use client'
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Avatar, Box, Button, Drawer, Tooltip, Typography, type SvgIconProps } from '@mui/material'
+import { Avatar, Box, Button, Drawer, IconButton, Tooltip, Typography, type SvgIconProps } from '@mui/material'
 import AdminPanelSettings from '@mui/icons-material/AdminPanelSettings'
 import Assessment from '@mui/icons-material/Assessment'
 import Assignment from '@mui/icons-material/Assignment'
 import BorderAll from '@mui/icons-material/BorderAll'
 import Business from '@mui/icons-material/Business'
 import CalendarMonth from '@mui/icons-material/CalendarMonth'
+import Close from '@mui/icons-material/Close'
 import Description from '@mui/icons-material/Description'
 import EditNote from '@mui/icons-material/EditNote'
+import ExpandMore from '@mui/icons-material/ExpandMore'
 import Favorite from '@mui/icons-material/Favorite'
 import History from '@mui/icons-material/History'
 import Home from '@mui/icons-material/Home'
@@ -23,6 +25,8 @@ import School from '@mui/icons-material/School'
 import Search from '@mui/icons-material/Search'
 import { authService, type User } from '@/lib/auth'
 import { HOME_COLORS, HOME_LAYOUT } from '@/lib/home-theme'
+import { STUDENT_FOCUS_OUTLINE, UI } from '@/lib/design/tokens'
+import { useStudentTheme } from '@/components/providers/MuiProvider'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { getApplicationsNavTarget } from '@/lib/sidebar-navigation'
 import {
@@ -83,7 +87,94 @@ const NAV_ICONS: Record<string, React.ComponentType<SvgIconProps>> = {
   '/admin': AdminPanelSettings,
 }
 
-const headingSx = { fontWeight: 700, fontSize: 16, lineHeight: 1.5, color: HOME_COLORS.ink } as const
+const sectionHeadingSx = { fontWeight: 600, fontSize: 13, lineHeight: 1.5, color: UI.inkSoft } as const
+const hiddenScrollbarSx = {
+  scrollbarWidth: 'none',
+  '&::-webkit-scrollbar': { display: 'none' },
+} as const
+
+/** スクロールバーを隠していても、下に続きがあることを伝える。 */
+function useSidebarScrollHint(enabled = true) {
+  // モバイルの Portal は後からマウントされるため、要素が揃ってから監視を始める。
+  const [viewport, viewportRef] = useState<HTMLElement | null>(null)
+  const [content, contentRef] = useState<HTMLDivElement | null>(null)
+  const [hasMoreBelow, setHasMoreBelow] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!enabled || !viewport || !content) return
+
+    const update = () => {
+      // 小数点を含むスクロール位置と、非表示のドロワーを考慮する。
+      const hasMore = viewport.clientHeight > 0 && viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight > 1
+      // 操作中の矢印が消えるときも、キーボードの現在地をメニュー内に保つ。
+      if (!hasMore && buttonRef.current === document.activeElement) {
+        Array.from(content.querySelectorAll<HTMLAnchorElement>('a[href]')).at(-1)?.focus({ preventScroll: true })
+      }
+      setHasMoreBelow(hasMore)
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(viewport)
+    observer.observe(content)
+    viewport.addEventListener('scroll', update, { passive: true })
+    window.addEventListener('resize', update)
+    return () => {
+      observer.disconnect()
+      viewport.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [enabled, viewport, content])
+
+  const scrollDown = () => {
+    if (!viewport) return
+    viewport.scrollBy({
+      top: viewport.clientHeight * 0.75,
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    })
+  }
+
+  return { viewportRef, contentRef, buttonRef, scrollDown, hasMoreBelow: enabled && hasMoreBelow }
+}
+
+function ScrollHint({ visible, buttonRef, onScrollDown }: {
+  visible: boolean
+  buttonRef: Ref<HTMLButtonElement>
+  onScrollDown: () => void
+}) {
+  if (!visible) return null
+  return (
+    <Box
+      sx={{
+        position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 1,
+        display: 'flex', justifyContent: 'center', pt: 2,
+        pb: { xs: 'calc(8px + env(safe-area-inset-bottom))', md: 1 },
+        pointerEvents: 'none',
+      }}
+    >
+      <Box
+        data-testid="menu-scroll-fade"
+        aria-hidden="true"
+        sx={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: `linear-gradient(to bottom, transparent, ${UI.field})` }}
+      />
+      <Tooltip title="下のメニュー項目を表示" placement="top" disableTouchListener>
+        <IconButton
+          ref={buttonRef}
+          aria-label="下のメニュー項目を表示"
+          onClick={onScrollDown}
+          sx={{
+            width: 44, height: 44, pointerEvents: 'auto', color: UI.mark, bgcolor: UI.field,
+            border: `1px solid ${UI.ruleSoft}`,
+            '&:hover': { bgcolor: UI.markTint },
+            '&:focus-visible': { outline: STUDENT_FOCUS_OUTLINE, outlineOffset: 2 },
+          }}
+        >
+          <ExpandMore aria-hidden="true" fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    </Box>
+  )
+}
 
 /**
  * ホーム（相談中心）の左サイドバー（Figma「改善G／相談中心」ノード 37:340）。
@@ -93,6 +184,9 @@ const headingSx = { fontWeight: 700, fontSize: 16, lineHeight: 1.5, color: HOME_
 export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose }: HomeSidebarProps) {
   const router = useRouter()
   const pathname = usePathname() ?? '/'
+  const { mode } = useStudentTheme()
+  // 通常表示は既存ホームの青を保ち、高コントラスト時はテーマの青に追従する。
+  const navIconColor = mode === 'high-contrast' ? UI.mark : HOME_COLORS.link
   // ナビの表示名は辞書（messages/ja.json の nav）が正本
   const t = useTranslations('nav')
   const [questionCount, setQuestionCount] = useState(0)
@@ -100,6 +194,8 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
   const [judgmentPercent, setJudgmentPercent] = useState<number | null>(null)
   const [phases, setPhases] = useState<PhaseProgress[] | null>(null)
   const [isAdmin, setIsAdmin] = useState(!!user.is_admin)
+  const mobileScroll = useSidebarScrollHint(mobileOpen)
+  const desktopScroll = useSidebarScrollHint()
 
   useEffect(() => {
     setIsAdmin(!!user.is_admin)
@@ -166,24 +262,25 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
           alignItems: 'center',
           gap: 1.5,
           minHeight: 44,
+          flexShrink: 0,
           px: 1.5,
-          borderRadius: '4px',
+          borderRadius: 1,
           textDecoration: 'none',
-          bgcolor: current ? HOME_COLORS.activeBg : 'transparent',
-          color: current ? HOME_COLORS.primary : HOME_COLORS.navInk,
+          bgcolor: current ? UI.markTint : 'transparent',
+          color: current ? UI.mark : UI.ink,
+          typography: 'body1',
           fontWeight: current ? 700 : 400,
-          fontSize: 16,
-          lineHeight: 1.5,
-          '&:hover': { bgcolor: current ? HOME_COLORS.activeBg : HOME_COLORS.page },
+          '&:hover': { bgcolor: current ? UI.markTint : UI.tint },
+          '&:focus-visible': { outline: STUDENT_FOCUS_OUTLINE, outlineOffset: -2 },
         }}
       >
         {/* 現在地のバー（色に加えて形でも示す） */}
-        <Box aria-hidden sx={{ width: 4, height: 24, flexShrink: 0, bgcolor: current ? HOME_COLORS.primary : 'transparent' }} />
-        {Icon && <Icon aria-hidden fontSize="small" sx={{ flexShrink: 0, color: current ? HOME_COLORS.primary : HOME_COLORS.link }} />}
+        <Box aria-hidden sx={{ width: 4, height: 24, flexShrink: 0, borderRadius: '2px', bgcolor: current ? UI.mark : 'transparent' }} />
+        {Icon && <Icon aria-hidden fontSize="small" sx={{ flexShrink: 0, color: current ? UI.mark : navIconColor }} />}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           {label}
           {opts.secondary && (
-            <Typography component="span" sx={{ display: 'block', fontSize: 12, color: HOME_COLORS.soft, fontWeight: 400 }}>
+            <Typography component="span" sx={{ display: 'block', fontSize: 12, color: UI.inkSoft, fontWeight: 400 }}>
               {opts.secondary}
             </Typography>
           )}
@@ -192,102 +289,141 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
     )
   }
 
-  const content = (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100%', p: 2, bgcolor: HOME_COLORS.white }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, gap: 1 }}>
+  const content = (mobile: boolean) => (
+    <Box ref={mobile ? undefined : desktopScroll.contentRef} sx={{ display: 'flex', flexDirection: 'column', height: { xs: '100%', md: 'auto' }, minHeight: '100%', p: { xs: 0, md: 2 }, bgcolor: UI.field }}>
+      {/* モバイルでは上部をスクロール領域の外に置き、いつでも閉じられるようにする。 */}
+      <Box sx={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
+        px: { xs: 2, md: 1.5 }, gap: 1,
+        pt: { xs: 'calc(8px + env(safe-area-inset-top))', md: 0 },
+        pb: { xs: 1, md: 0 },
+        borderBottom: { xs: `1px solid ${UI.ruleSoft}`, md: 'none' },
+      }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-          <Avatar sx={{ width: 32, height: 32, bgcolor: HOME_COLORS.link, fontSize: 16 }}>{user.name.charAt(0).toUpperCase()}</Avatar>
-          <Typography noWrap sx={{ ...headingSx }}>
-            {user.name}
+          <Avatar sx={{ width: 32, height: 32, flexShrink: 0, bgcolor: UI.markTint, color: UI.mark, fontSize: 16 }}>{user.is_guest ? 'G' : user.name.charAt(0).toUpperCase()}</Avatar>
+          <Typography noWrap sx={{ fontWeight: 600, fontSize: 14, lineHeight: 1.5, color: UI.ink }}>
+            {user.is_guest ? 'ゲストユーザー' : user.name}
           </Typography>
-          {user.is_guest && (
-            <Typography component="span" sx={{ fontSize: 12, color: HOME_COLORS.soft }}>
-              ゲスト
-            </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <Button
+            onClick={onLogout}
+            sx={{
+              minWidth: 0, p: 0.5, fontSize: 12, fontWeight: 400, color: UI.inkSoft, textTransform: 'none', flexShrink: 0,
+              '&:hover': { bgcolor: UI.tint },
+              '&:focus-visible': { outline: STUDENT_FOCUS_OUTLINE, outlineOffset: -2 },
+            }}
+          >
+            ログアウト
+          </Button>
+          {mobile && (
+            <IconButton
+              aria-label={t('menu.close')}
+              onClick={onMobileClose}
+              sx={{
+                width: 44, height: 44, flexShrink: 0, color: UI.inkSoft,
+                '&:hover': { bgcolor: UI.tint },
+                '&:focus-visible': { outline: STUDENT_FOCUS_OUTLINE, outlineOffset: -2 },
+              }}
+            >
+              <Close />
+            </IconButton>
           )}
         </Box>
-        <Button
-          onClick={onLogout}
-          sx={{ minWidth: 0, p: 0.5, fontSize: 16, fontWeight: 400, color: HOME_COLORS.soft, textTransform: 'none', flexShrink: 0 }}
-        >
-          ログアウト
-        </Button>
       </Box>
-      <Box sx={{ height: 8 }} />
+      <Box sx={{ height: 8, flexShrink: 0 }} />
 
-      <Box component="nav" aria-label="メニュー" sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-        {navItem(HOME_SIDEBAR_TOP[0].href, HOME_SIDEBAR_TOP[0].label)}
-        {navItem(HOME_SIDEBAR_TOP[1].href, HOME_SIDEBAR_TOP[1].label, {
-          // 結果画面へは、いまのチャットの session を付けて遷移する（付けられないときはチャットへ）
-          onClick: (e) => {
-            e.preventDefault()
-            router.push(getResultsPathOrChat())
-          },
-        })}
+      <Box ref={mobile ? mobileScroll.viewportRef : undefined} component="nav" aria-label="メニュー" sx={{
+        display: 'flex', flexDirection: 'column', flex: 1,
+        minHeight: { xs: 0, md: 'auto' },
+        overflowY: { xs: 'auto', md: 'visible' },
+        scrollPaddingBottom: { xs: 'calc(68px + env(safe-area-inset-bottom))', md: 68 },
+        overscrollBehaviorY: { xs: 'contain', md: 'auto' },
+        px: { xs: 2, md: 0 },
+        // 末尾の項目と画面端の間に32pxを確保（PCは外側の16pxと合わせる）。
+        pb: { xs: 'calc(32px + env(safe-area-inset-bottom))', md: 2 },
+        ...hiddenScrollbarSx,
+      }}>
+        <Box ref={mobile ? mobileScroll.contentRef : undefined} sx={{ display: 'flex', flexDirection: 'column', flex: '1 0 auto' }}>
+          {navItem(HOME_SIDEBAR_TOP[0].href, HOME_SIDEBAR_TOP[0].label)}
+          {navItem(HOME_SIDEBAR_TOP[1].href, HOME_SIDEBAR_TOP[1].label, {
+            // 結果画面へは、いまのチャットの session を付けて遷移する（付けられないときはチャットへ）
+            onClick: (e) => {
+              e.preventDefault()
+              router.push(getResultsPathOrChat())
+            },
+          })}
 
-        <Box sx={{ height: 12 }} />
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, fontSize: 16, lineHeight: 1.5 }}>
-          <Typography component="span" sx={headingSx}>
-            {t('groups.analysis')}
-          </Typography>
-          <Typography component="span" sx={{ fontSize: 16, color: HOME_COLORS.soft }}>
-            {`判定の進み具合 ${progress.percent}%`}
-          </Typography>
-        </Box>
-        <Box sx={{ px: 1.5, py: 0.5 }}>
-          <Box
-            role="progressbar"
-            aria-label="自己分析の進み具合"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={progress.percent}
-            sx={{ height: 8, borderRadius: '4px', bgcolor: HOME_COLORS.track, overflow: 'hidden' }}
-          >
-            <Box sx={{ height: '100%', width: `${progress.percent}%`, bgcolor: HOME_COLORS.primary }} />
-          </Box>
-        </Box>
-        {HOME_SIDEBAR_ANALYSIS.map((i) => navItem(i.href, i.label))}
-
-        {HOME_SIDEBAR_GROUPS.map((group) => (
-          <Box key={group.heading} sx={{ display: 'flex', flexDirection: 'column' }}>
-            <Box sx={{ height: 12 }} />
-            <Typography component="p" sx={{ ...headingSx, px: 1.5 }}>
-              {group.heading}
+          <Box sx={{ height: 24, flexShrink: 0 }} />
+          <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1, minHeight: 24, flexShrink: 0, px: 1.5 }}>
+            <Typography component="span" sx={sectionHeadingSx}>
+              {t('groups.analysis')}
             </Typography>
-            {group.items.map((i) =>
-              i.href === '/applications' ? (
-                // ゲストは選考管理を使えない。押すとログインへ送る（既存の挙動）
-                <Tooltip key={i.href} title={user.is_guest ? '選考管理はログイン後に利用できます' : ''} disableHoverListener={!user.is_guest}>
-                  <Box>
-                    {navItem(i.href, i.label, {
-                      hrefOverride: getApplicationsNavTarget(!!user.is_guest),
-                      secondary: user.is_guest ? 'ログインが必要です' : undefined,
-                    })}
-                  </Box>
-                </Tooltip>
-              ) : (
-                navItem(i.href, i.label)
-              ),
-            )}
+            <Typography
+              component="span"
+              sx={{ fontSize: 12, lineHeight: 1.5, fontWeight: 400, color: UI.inkSoft, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
+            >
+              {`判定の進み具合 ${progress.percent}%`}
+            </Typography>
           </Box>
-        ))}
+          <Box sx={{ px: 1.5, py: 0.5, flexShrink: 0 }}>
+            <Box
+              role="progressbar"
+              aria-label="自己分析の進み具合"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={progress.percent}
+              sx={{ height: 8, borderRadius: '4px', bgcolor: UI.ruleSoft, overflow: 'hidden' }}
+            >
+              <Box sx={{ height: '100%', width: `${progress.percent}%`, bgcolor: UI.mark }} />
+            </Box>
+          </Box>
+          {HOME_SIDEBAR_ANALYSIS.map((i) => navItem(i.href, i.label))}
 
-        <Box sx={{ flex: 1, minHeight: 16 }} />
-        {navItem(HOME_SIDEBAR_FOOTER.href, HOME_SIDEBAR_FOOTER.label)}
-        {isAdmin && navItem(SIDEBAR_ADMIN_NAV.href, SIDEBAR_ADMIN_NAV.label)}
+          {HOME_SIDEBAR_GROUPS.map((group) => (
+            <Box key={group.heading} sx={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+              <Box sx={{ height: 24, flexShrink: 0 }} />
+              <Typography component="p" sx={{ ...sectionHeadingSx, px: 1.5 }}>
+                {group.heading}
+              </Typography>
+              {group.items.map((i) =>
+                i.href === '/applications' ? (
+                  // ゲストは選考管理を使えない。押すとログインへ送る（既存の挙動）
+                  <Tooltip key={i.href} title={user.is_guest ? '選考管理はログイン後に利用できます' : ''} disableHoverListener={!user.is_guest}>
+                    <Box>
+                      {navItem(i.href, i.label, {
+                        hrefOverride: getApplicationsNavTarget(!!user.is_guest),
+                        secondary: user.is_guest ? 'ログインが必要です' : undefined,
+                      })}
+                    </Box>
+                  </Tooltip>
+                ) : (
+                  navItem(i.href, i.label)
+                ),
+              )}
+            </Box>
+          ))}
+
+          <Box sx={{ flex: 1, minHeight: 24 }} />
+          {navItem(HOME_SIDEBAR_FOOTER.href, HOME_SIDEBAR_FOOTER.label)}
+          {isAdmin && navItem(SIDEBAR_ADMIN_NAV.href, SIDEBAR_ADMIN_NAV.label)}
+        </Box>
       </Box>
     </Box>
   )
 
   const drawerSx = {
-    width: HOME_LAYOUT.sidebarWidth,
+    width: { xs: 'min(360px, calc(100vw - 24px))', md: HOME_LAYOUT.sidebarWidth },
     flexShrink: 0,
     '& .MuiDrawer-paper': {
-      width: HOME_LAYOUT.sidebarWidth,
+      width: { xs: 'min(360px, calc(100vw - 24px))', md: HOME_LAYOUT.sidebarWidth },
+      height: { xs: '100dvh', md: '100%' },
       boxSizing: 'border-box',
-      bgcolor: HOME_COLORS.white,
-      borderRight: `1px solid ${HOME_COLORS.sidebarBorder}`,
-      overflowY: 'auto',
+      bgcolor: UI.field,
+      boxShadow: 'none',
+      borderRight: `1px solid ${UI.ruleSoft}`,
+      // フェードはスクロール領域の外に重ね、常に画面の下端に置く。
+      overflowY: 'hidden',
     },
   }
 
@@ -295,11 +431,19 @@ export function HomeSidebar({ user, onLogout, mobileOpen = false, onMobileClose 
     <>
       {/* モバイル用: Temporary Drawer */}
       <Drawer variant="temporary" open={mobileOpen} onClose={onMobileClose} ModalProps={{ keepMounted: true }} className={styles.drawerMobile} sx={drawerSx}>
-        {content}
+        {content(true)}
+        <ScrollHint visible={mobileScroll.hasMoreBelow} buttonRef={mobileScroll.buttonRef} onScrollDown={mobileScroll.scrollDown} />
       </Drawer>
       {/* デスクトップ用: Permanent Drawer */}
       <Drawer variant="permanent" className={styles.drawerDesktop} sx={drawerSx} open>
-        {content}
+        <Box
+          ref={desktopScroll.viewportRef}
+          data-testid="desktop-menu-scroll"
+          sx={{ height: '100%', minHeight: 0, overflowY: 'auto', scrollPaddingBottom: 68, ...hiddenScrollbarSx }}
+        >
+          {content(false)}
+        </Box>
+        <ScrollHint visible={desktopScroll.hasMoreBelow} buttonRef={desktopScroll.buttonRef} onScrollDown={desktopScroll.scrollDown} />
       </Drawer>
     </>
   )
