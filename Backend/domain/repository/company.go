@@ -95,3 +95,17 @@ type GBizInfoRepository interface {
 	ReplaceFinances(companyID uint, rows []models.GBizFinance) error
 	UpsertWorkplace(workplace *models.GBizWorkplace) error
 }
+
+// CompanyResearchRepository は企業研究AIの材料（文章と数字）を読み書きする（SOCAIAGENT-724）。
+type CompanyResearchRepository interface {
+	// UpsertDocument は (company_id, source_type, source_ref) で1行に保つ。
+	// 本文のハッシュが前と同じなら何も書かず false を返す（呼び出し側は RAG への登録を省ける）。
+	UpsertDocument(ctx context.Context, doc *models.CompanyDocument) (changed bool, err error)
+	ListDocuments(ctx context.Context, companyID uint) ([]models.CompanyDocument, error)
+	// UpsertFacts は (company_id, field, source_type) で1行に保つ。
+	UpsertFacts(ctx context.Context, facts []models.CompanyFact) error
+	ListFacts(ctx context.Context, companyID uint) ([]models.CompanyFact, error)
+	// ListDocumentsToIndex / MarkIndexed は RAG への登録ジョブが使う（SOCAIAGENT-725）。
+	ListDocumentsToIndex(ctx context.Context, limit int) ([]models.CompanyDocument, error)
+	MarkIndexed(ctx context.Context, docs []models.CompanyDocument, at time.Time) error
+}
