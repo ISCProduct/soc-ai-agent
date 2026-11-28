@@ -163,13 +163,15 @@ def parse_cache_key(cache_key: str) -> Dict[str, str]:
     company_segment = parts[0] if parts else "unknown"
     role = parts[1] if len(parts) > 1 else "general"
     company, company_hash = _split_company_segment(company_segment)
-    if role == "es_review":
+    if role == "es_review" or role.startswith("es_review::"):
+        # 「企業::es_review::役割」は ES 添削の観点ごとのキー（エンジニア向けなど、#2082）
+        es_role = role.split("::", 1)[1] if "::" in role else "general"
         return {
             "collection": COLLECTION_ES_REVIEW,
             "doc_type": "es_review",
             "company": company or "unknown",
             "company_hash": company_hash,
-            "role": "general",
+            "role": es_role or "general",
             "cache_key": key,
         }
     # デフォルトは企業調査。履歴書レビューは呼び出し側で doc_type を上書きする。
@@ -199,7 +201,8 @@ def build_cache_key(
     if doc_type == "interview_hints":
         return f"hints::{company_segment}::{role}"
     if doc_type == "es_review":
-        return f"{company_segment}::es_review"
+        # 役割（観点）を省いたときは今までどおりのキー。エンジニア向けなどは「::es_review::役割」
+        return f"{company_segment}::es_review" if role == "general" else f"{company_segment}::es_review::{role}"
     return f"{company_segment}::{role}"
 
 
