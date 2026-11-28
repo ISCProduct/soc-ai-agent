@@ -99,6 +99,17 @@ func RelationGraphMaxNodes() int { return getIntOrDefault("RELATION_GRAPH_MAX_NO
 
 func RelationEnrichMaxTargets() int { return getIntOrDefault("RELATION_ENRICH_MAX_TARGETS", 12) }
 
+// RelationAutofetchMax は関係の保存時に、新しく作った関連企業の詳細を続けて取得する上限（1社あたり）。
+// 1社ごとに Web検索が走るため、グループ企業の多い会社で検索が連鎖しないよう抑える（SOCAIAGENT-723）。
+// 0 なら続けて取得しない。上限を超えた企業は draft のまま残り、定期取得で後から埋まる。
+func RelationAutofetchMax() int {
+	// getIntOrDefault は 0 を既定値に戻すため使わない（0 は「取得しない」の意味で有効）。
+	if v, err := strconv.Atoi(os.Getenv("RELATION_AUTOFETCH_MAX")); err == nil && v >= 0 {
+		return v
+	}
+	return 10
+}
+
 func ValidationCacheTTLMinutes() int { return getIntOrDefault("VALIDATION_CACHE_TTL_MINUTES", 30) }
 
 // MatchingReasonAITopN は AI マッチング理由を生成する上位件数（#1061）。

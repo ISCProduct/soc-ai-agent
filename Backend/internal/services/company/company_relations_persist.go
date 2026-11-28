@@ -3,6 +3,7 @@ package company
 import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
+	"Backend/internal/config"
 	"Backend/internal/models"
 	"context"
 	"errors"
@@ -17,6 +18,8 @@ func (f *CompanyRelationsFetcher) persistResult(ctx context.Context, company *mo
 		return 0, fmt.Errorf("relation repository is nil")
 	}
 	saved := 0
+	autofetched := 0
+	autofetchMax := config.RelationAutofetchMax()
 	now := time.Now()
 	sourceTag := result.Source
 	if sourceTag == "" {
@@ -46,7 +49,8 @@ func (f *CompanyRelationsFetcher) persistResult(ctx context.Context, company *mo
 			// 新規作成した関連企業自体の詳細情報(業種・住所・URL等)を埋める。
 			// 失敗しても関係の保存自体はブロックしない(空データのまま残るがdraft/is_provisionalで
 			// 識別でき、後から個別に再取得できるため)。
-			if f.infoFetcher != nil {
+			if f.infoFetcher != nil && autofetched < autofetchMax {
+				autofetched++
 				if _, err := f.infoFetcher.FetchAndSave(ctx, toCompany.ID, false); err != nil {
 					log.Printf("[CompanyRelations] 関連企業%q(id=%d)の詳細情報取得に失敗: %v", name, toCompany.ID, err)
 				}

@@ -1,4 +1,4 @@
-h1:SV62kTXjSV9uzGeWv2LWbY0JS0dI3aWCwJgvn3asyjw=
+h1:GhB5cInELbOJBGDAIzF0cY7e8h5xHMA+1zn2RjrNr9Y=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -95,4 +95,9 @@ h1:SV62kTXjSV9uzGeWv2LWbY0JS0dI3aWCwJgvn3asyjw=
 20261126214045_user_company_match_tie_key.up.sql h1:NfTvFH2wpJkgkn8SmHfOwBxFUPGCQLK+i+yrt/ksVU4=
 20261126214046_create_user_growth_snapshots.up.sql h1:AUYTxIJwCiSUfE8SXT28NljMZ2Gq205SKCVKnvwP32Q=
 20261126214047_school_interview_video_retention.up.sql h1:O7yI4cQ9cU60cP8GpAZxga2Fu3JKfXGFBzjZ+6v9OFk=
-20261127001600_guidance_messages.up.sql h1:xXRPCy9PGeAFkDDpMmfnpTPAnz9GkCESkbMF95VeX3E=
+20261128132218_user_weight_scores_score_decimal.up.sql h1:2nzJYCD2K+5O8ZXqKM9aFF1G3aYhrY8ZROih+AnqbE8=
+20261128200505_create_company_documents.up.sql h1:kcjVt6iKcPgACCvXO2H6qSaAAmwA/oH5dKgPbQBauic=
+20261128200506_create_company_facts.up.sql h1:ePWBd86eNjC8GSOpCkcIVTERa1hqZsLYUoQkCF+LyZw=
+20261128200507_crawl_sources_add_progress_cursor.up.sql h1:omfx43vSiiElbl4q7h8ips2h94CmHAUMtQAjULOtYdc=
+20261128200508_create_company_research_chat_quotas.up.sql h1:F6CUQxZvKZzV+suxWAOxjgfLr5aiP47IZZPeHtKY7kE=
+20261128201100_guidance_messages.up.sql h1:nKm+VOrZrJpXTuXzo5EYoPH/zvQ4O+U/fBeHdKYxObE=

@@ -15,8 +15,10 @@ type CrawlSource struct {
 	IsActive     bool       `gorm:"default:true" json:"is_active"`
 	LastRunAt    *time.Time `json:"last_run_at,omitempty"`
 	NextRunAt    *time.Time `json:"next_run_at,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	// ProgressCursor は処理済みの位置（EDINET なら最後に処理した書類一覧の日付 YYYY-MM-DD）。
+	ProgressCursor string    `gorm:"type:varchar(64);not null;default:''" json:"progress_cursor,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // CrawlRun tracks execution history for a source.
