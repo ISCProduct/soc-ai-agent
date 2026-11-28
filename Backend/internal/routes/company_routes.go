@@ -44,3 +44,10 @@ func echoCorrelationMapRateLimit() echo.MiddlewareFunc {
 		}
 	}
 }
+
+// SetupCompanyResearchRoutes 企業研究AIチャット（SOCAIAGENT-724）。ログイン必須。
+// 外部の AI を呼ぶので AI 予算を適用する（材料が無いときは AI を呼ばないため Deferred）。
+// 1日の質問回数の上限はサービス側で数える（COMPANY_RESEARCH_CHAT_DAILY_LIMIT）。
+func SetupCompanyResearchRoutes(api *echo.Group, ctrl *companycontrollers.ResearchChatController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver, budget AIBudgetGuards) {
+	api.POST("/companies/:id/research-chat", ctrl.Ask, EchoUserAuth(userSecret, access, orgs), budget.Deferred)
+}

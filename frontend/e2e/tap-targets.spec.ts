@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { setupAuth, TEST_ADMIN, TEST_USER } from './fixtures/auth'
+import { sampleMap } from '../tests/fixtures/correlation-map'
 
 /**
  * #1481: モバイルのタップ領域は高さ44px以上。
@@ -138,15 +139,11 @@ function controlRoot(input: Locator, className: 'MuiCheckbox-root' | 'MuiRadio-r
 
 async function openCorrelationDiagram(page: Page) {
   await setupAuth(page, TEST_USER)
-  const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
-  const a = { id: 1, name: '親ホールディングス' }
-  const b = { id: 2, name: '子テック' }
-  await page.route('**/api/companies/relations*', (route) =>
-    route.fulfill(json([{ id: 10, parent_id: 1, child_id: 2, relation_type: 'capital_subsidiary', ratio: 60, description: '', parent: a, child: b }])),
-  )
-  await page.route('**/api/companies/market-info*', (route) => route.fulfill(json([])))
-  await page.route(/\/api\/companies\/\d+/, (route) => route.fulfill(json({ id: 2, name: b.name })))
-  await page.goto('/correlation-diagram?company_id=2')
+  const map = sampleMap()
+  await page.route('**/api/**', (route) => route.fulfill({ json: {} }))
+  await page.route('**/api/bff/auth/user', (route) => route.fulfill({ json: TEST_USER }))
+  await page.route('**/api/companies/*/correlation-map', (route) => route.fulfill({ json: map }))
+  await page.goto('/correlation-diagram?company_id=1')
 }
 
 // #2214: 学生のテーマで押せる範囲を 44px 以上にしたもの（IconButton・ToggleButton・Checkbox・Radio・押せる Chip）を、
@@ -177,34 +174,10 @@ test.describe('学生画面の押せる範囲（#2214）', () => {
     }
   })
 
-  test('企業相関図の切り替え（ToggleButton）は 44x44 以上', async ({ page }) => {
+  test('企業相関図の切り替え（Tab）は 44x44 以上', async ({ page }) => {
     await openCorrelationDiagram(page)
-    for (const name of ['資本関連図', 'ビジネス関連図']) {
-      await expectMinBox(page.getByRole('button', { name, exact: true }), 44, 44)
-    }
-  })
-
-  // 44px の対象から外した Autocomplete の ▼・× が、入力した文字の上に重ならないこと（#2624 のレビュー）
-  test('企業相関図の企業検索の ▼・× は、入力欄の文字に重ならない', async ({ page }) => {
-    await openCorrelationDiagram(page)
-    const input = page.getByRole('combobox', { name: '企業を検索' })
-    await expect(input).toHaveValue('子テック')
-    await input.focus()
-    const root = page.locator('.MuiAutocomplete-inputRoot')
-    const inputBox = await input.boundingBox()
-    const rootBox = await root.boundingBox()
-    expect(inputBox && rootBox).toBeTruthy()
-    // 文字が描かれるのは input の右の余白（padding-right）より内側。MUI は ▼・× をこの余白に少し重ねて置く。
-    const inputPaddingRight = await input.evaluate((el) => parseFloat(getComputedStyle(el).paddingRight) || 0)
-    const textRight = inputBox!.x + inputBox!.width - inputPaddingRight
-    for (const cls of ['.MuiAutocomplete-popupIndicator', '.MuiAutocomplete-clearIndicator']) {
-      const box = await root.locator(cls).boundingBox()
-      expect(box, cls).toBeTruthy()
-      // 文字が描かれる範囲の右端より右にあり、入力欄の枠の中に収まる
-      expect(box!.x, cls).toBeGreaterThanOrEqual(textRight - 0.5)
-      expect(box!.x + box!.width, cls).toBeLessThanOrEqual(rootBox!.x + rootBox!.width + 0.5)
-      expect(box!.y, cls).toBeGreaterThanOrEqual(rootBox!.y - 0.5)
-      expect(box!.y + box!.height, cls).toBeLessThanOrEqual(rootBox!.y + rootBox!.height + 0.5)
+    for (const name of ['親会社・子会社', '取引・協力関係']) {
+      await expectMinBox(page.getByRole('tab', { name, exact: true }), 44, 44)
     }
   })
 })
