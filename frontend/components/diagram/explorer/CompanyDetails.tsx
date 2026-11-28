@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { FormEvent, useEffect, useId, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Button, CircularProgress, Link as MuiLink } from '@mui/material'
+import { Button, CircularProgress, Link as MuiLink, TextField } from '@mui/material'
 import { Alert } from '@/components/common/Alert'
 import OpenInNew from '@mui/icons-material/OpenInNew'
 import { businessText, companyTags, fetchCorrelationCompare, marketLabel, safeSourceURL, type CorrelationCompare, type CorrelationMap, type CorrelationMode, type CorrelationNode } from '@/lib/company/correlation-map'
+import { askResearchChat, MAX_RESEARCH_QUESTION_LENGTH, ResearchChatError, type ResearchChatAnswer } from '@/lib/company/research-chat'
 import styles from './explorer.module.css'
 
 export function CompanyDetails({ node, map, mode, onClose, onFocus }: {
@@ -16,11 +17,16 @@ export function CompanyDetails({ node, map, mode, onClose, onFocus }: {
   const [comparison, setComparison] = useState<CorrelationCompare | null>(null)
   const [error, setError] = useState(false)
   const [retry, setRetry] = useState(0)
-  const [aiNoticeOpen, setAiNoticeOpen] = useState(false)
+  const [aiOpen, setAiOpen] = useState(false)
+  const [question, setQuestion] = useState('')
+  const [asking, setAsking] = useState(false)
+  const [askError, setAskError] = useState<string | null>(null)
+  const [answer, setAnswer] = useState<ResearchChatAnswer | null>(null)
   const aiHeading = useRef<HTMLHeadingElement>(null)
+  const questionFieldId = useId()
   useEffect(() => {
-    if (aiNoticeOpen) aiHeading.current?.focus()
-  }, [aiNoticeOpen])
+    if (aiOpen) aiHeading.current?.focus()
+  }, [aiOpen])
   const focus = map.nodes.find((company) => company.id === map.focus_company_id)!
   useEffect(() => {
     const controller = new AbortController()
@@ -32,16 +38,85 @@ export function CompanyDetails({ node, map, mode, onClose, onFocus }: {
       .catch(() => { if (!controller.signal.aborted) setError(true) })
     return () => controller.abort()
   }, [focus.id, node.id, retry])
+  useEffect(() => {
+    setQuestion('')
+    setAskError(null)
+    setAnswer(null)
+    setAsking(false)
+  }, [node.id, aiOpen])
   const capital = map.capital_edges.filter((edge) => edge.parent_id === node.id || edge.child_id === node.id)
   const business = map.business_edges.filter((edge) => edge.from_id === node.id || edge.to_id === node.id)
   const source = safeSourceURL(node.source_url)
-  if (aiNoticeOpen) return <div className={styles.details}>
+
+  async function onAsk(event: FormEvent) {
+    event.preventDefault()
+    const text = question.trim()
+    if (!text || asking) return
+    setAsking(true)
+    setAskError(null)
+    setAnswer(null)
+    try {
+      const result = await askResearchChat(node.id, text, {
+        compareWith: node.id === focus.id ? undefined : focus.id,
+      })
+      setAnswer(result)
+    } catch (err) {
+      setAskError(err instanceof ResearchChatError ? err.message : '質問を送れませんでした。もう一度お試しください。')
+    } finally {
+      setAsking(false)
+    }
+  }
+
+  if (aiOpen) return <div className={styles.details}>
     <header className={`${styles.detailHeader} ${styles.aiHeader}`}>
-      <h2 id="company-details-title" ref={aiHeading} tabIndex={-1}>企業研究AI</h2>
-      <Button variant="outlined" onClick={onClose}>閉じる</Button>
+      <div>
+        <span className={styles.context}>{node.name}について</span>
+        <h2 id="company-details-title" ref={aiHeading} tabIndex={-1}>企業研究AI</h2>
+      </div>
+      <Button variant="outlined" onClick={() => setAiOpen(false)}>閉じる</Button>
     </header>
-    <div className={styles.detailBody}><p className={styles.aiNotice}>AIチャットは準備中です</p></div>
+    <div className={styles.detailBody}>
+      <p className={styles.aiNotice}>登録情報と有価証券報告書などの材料だけで答えます。Web検索はしません。回答は参考情報です。</p>
+      <form className={styles.aiForm} onSubmit={onAsk}>
+        <TextField
+          id={questionFieldId}
+          label="質問"
+          value={question}
+          onChange={(event) => setQuestion(event.target.value)}
+          fullWidth
+          multiline
+          minRows={3}
+          inputProps={{ maxLength: MAX_RESEARCH_QUESTION_LENGTH }}
+          helperText={`${[...question].length} / ${MAX_RESEARCH_QUESTION_LENGTH}文字`}
+          disabled={asking}
+        />
+        <Button type="submit" variant="contained" fullWidth disabled={asking || !question.trim()} className={styles.aiButton}>
+          {asking ? '考えています…' : '質問する'}
+        </Button>
+      </form>
+      {asking && <p role="status" className={styles.aiStatus}><CircularProgress size={20} aria-hidden /> 回答を用意しています…</p>}
+      {askError && <Alert severity="error" role="alert" action={<Button onClick={() => setAskError(null)}>閉じる</Button>}>{askError}</Alert>}
+      {answer && <section className={styles.aiAnswer} aria-live="polite">
+        <h3>{answer.status === 'answered' ? '回答（参考）' : '材料からは確認できませんでした'}</h3>
+        <p>{answer.answer}</p>
+        {answer.sources.length > 0 && <>
+          <h4>出典</h4>
+          <ul className={styles.aiSources}>
+            {answer.sources.map((item, index) => {
+              const href = safeSourceURL(item.url)
+              return <li key={`${item.company_id}-${item.type}-${index}`}>
+                {href
+                  ? <MuiLink href={href} target="_blank" rel="noopener noreferrer">{item.title || item.type} <OpenInNew fontSize="inherit" /><span className={styles.srOnly}>（新しいタブ）</span></MuiLink>
+                  : <span>{item.title || item.type}</span>}
+                {(item.as_of || item.fetched_at) && <span className={styles.context}> {item.as_of || item.fetched_at}</span>}
+              </li>
+            })}
+          </ul>
+        </>}
+      </section>}
+    </div>
   </div>
+
   return <div className={styles.details}>
     <header className={styles.detailHeader}>
       <div><span className={styles.context}>選択中</span><h2 id="company-details-title">{node.name}</h2></div>
@@ -85,7 +160,7 @@ export function CompanyDetails({ node, map, mode, onClose, onFocus }: {
       {node.id !== focus.id && <Button variant="outlined" fullWidth onClick={() => onFocus(node.id)}>この企業からつながりを探す</Button>}
     </div>
     <footer className={styles.detailFooter}>
-      <Button variant="outlined" fullWidth onClick={() => setAiNoticeOpen(true)} className={styles.aiButton}>
+      <Button variant="outlined" fullWidth onClick={() => setAiOpen(true)} className={styles.aiButton}>
         AIに質問する
       </Button>
       <Button component={Link} href={`/company/${node.id}`} variant="contained" fullWidth>企業詳細を見る</Button>

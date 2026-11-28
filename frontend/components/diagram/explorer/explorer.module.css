@@ -89,7 +89,15 @@
 .aiHeader { padding-right:120px; min-height:64px; }
 .aiHeader h2 { margin:0; font-size:22px; }
 .aiHeader h2:focus-visible { outline:2px solid var(--ui-mark,#0072b2); outline-offset:4px; }
-.aiNotice { font-weight:700; }
+.aiNotice { font-weight:600; margin:0 0 16px; color:var(--ui-ink-soft,#475569); line-height:1.6; }
+.aiForm { display:flex; flex-direction:column; gap:12px; margin-bottom:16px; }
+.aiStatus { display:flex; align-items:center; gap:8px; margin:0 0 12px; }
+.aiAnswer { margin-top:8px; padding:16px; border:1px solid var(--ui-rule,#d0d7de); border-radius:12px; background:var(--ui-paper,#f4f7fb); }
+.aiAnswer h3 { margin:0 0 8px; font-size:16px; }
+.aiAnswer h4 { margin:16px 0 8px; font-size:14px; }
+.aiAnswer p { margin:0; line-height:1.7; white-space:pre-wrap; }
+.aiSources { margin:0; padding-left:1.2em; }
+.aiSources li { margin-bottom:6px; line-height:1.5; }
 .detailBody { overflow:auto; flex:1; padding:16px 24px; font-size:16px; line-height:1.6; overflow-wrap:anywhere; }
 .detailBody:focus-visible { outline:2px solid var(--ui-mark,#0072b2); outline-offset:-2px; }
 .detailBody section { margin-top:16px; }
