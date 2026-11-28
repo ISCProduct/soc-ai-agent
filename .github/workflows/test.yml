@@ -192,6 +192,11 @@ jobs:
       - name: staging の .env 継ぎ足し検査
         run: ./automation/test/staging-env-topup-test.sh
 
+      # staging のデプロイ手順（sudo bash -c の単一引用符の中）に構文エラーが無いこと。
+      # 単一引用符を1つ書くだけで外側の引用が閉じ、デプロイが構文エラーで止まる。
+      - name: staging のデプロイ手順の構文検査
+        run: ./automation/test/staging-deploy-script-syntax-test.sh
+
       # SERVICE_SECRET の例示値が「弾かれる値」と一致していること。
       # example をコピーしたまま apply すると、リポジトリを読める第三者が
       # サービス間エンドポイントを叩ける状態になる。

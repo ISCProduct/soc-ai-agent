@@ -27,6 +27,7 @@ import (
 	"Backend/internal/observability"
 	"Backend/internal/openai"
 	"Backend/internal/queue"
+	"Backend/internal/ragclient"
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
 	"Backend/internal/scraper"
@@ -42,6 +43,7 @@ import (
 	"Backend/internal/services/companyportal"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
+	"Backend/internal/services/edinet"
 	"Backend/internal/services/email"
 	"Backend/internal/services/esreview"
 	"Backend/internal/services/flywheel"
@@ -339,7 +341,8 @@ func main() {
 	gbizInfoService.SetDetailFetcher(infoFetcher)
 	// gBizINFO は法人番号が無いと何も引けない。商号しか分かっていない企業のために、
 	// 国税庁 法人番号システムで法人番号を特定できるようにする(未設定なら無効)。
-	gbizInfoService.SetCorporateNumberFinder(houjinbangou.NewClientFromEnv())
+	houjinBangouClient := houjinbangou.NewClientFromEnv()
+	gbizInfoService.SetCorporateNumberFinder(houjinBangouClient)
 	relationsFetcher := company.NewCompanyRelationsFetcher(companyRepo, companyRelationRepo, aiClient, gbizInfoService)
 	relationsFetcher.SetSearchBudget(companySearchBudget)
 	relationsFetcher.SetSearchFlight(companySearchFlight)
@@ -350,6 +353,11 @@ func main() {
 	jobFetcher.SetSearchFlight(companySearchFlight)
 	crawlService.SetInfoFetcher(infoFetcher)
 	crawlService.SetJobFetcher(jobFetcher)
+	crawlService.SetCorporateNumberFinder(houjinBangouClient)
+	companyResearchRepo := repositories.NewCompanyResearchRepository(db)
+	researchRAG := ragclient.NewResearchClient(config.RAGReviewURL())
+	crawlService.SetEDINETIngest(edinet.NewClient(cfg.EDINETBaseURL, cfg.EDINETAPIKey), companyResearchRepo)
+	crawlService.SetResearchIndexer(researchRAG)
 	auditLogService := admin.NewAuditLogService(auditLogRepo)
 	analysisService := analysis.NewAnalysisScoringService(
 		userWeightScoreRepo,
@@ -628,6 +636,8 @@ func main() {
 	aiBudgetGuards := routes.NewAIBudgetGuards(aiBudgetService)
 	routes.SetupChatRoutes(api, chatController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupCompanyRoutes(api, relationController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
+	researchChatService := company.NewResearchChatService(companyRepo, companyResearchRepo, researchRAG, aiClient, repositories.NewResearchChatQuotaRepository(db))
+	routes.SetupCompanyResearchRoutes(api, companycontrollers.NewResearchChatController(researchChatService, subjectReader), cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 学生向けの企業検索（SOCAIAGENT-612）。業界・地域・職種で絞り込み、企業名順で返す
 	routes.SetupCompanySearchRoutes(api, companysearchcontrollers.NewController(repositories.NewCompanySearchRepository(db)), cfg.UserSecret, userDeletionService, organizationService)
 	industryWeightProfileRepo := repositories.NewIndustryWeightProfileRepository(db)

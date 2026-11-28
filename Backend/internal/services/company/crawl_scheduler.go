@@ -2,17 +2,30 @@ package company
 
 import (
 	"Backend/internal/models"
+	"context"
 	"log"
 	"time"
 )
 
 func (s *CrawlService) RunDueSources() {
-	s.runDueSources()
+	// タスクが複数起動していても、定期取得は DB のロックを取れた1本だけが実行する。
+	ok, err := s.repo.WithRunLock(context.Background(), s.runDueSources)
+	if err != nil {
+		log.Printf("[Crawl] run lock failed: %v", err)
+		return
+	}
+	if !ok {
+		log.Printf("[Crawl] 別のタスクが定期取得を実行中のためスキップします")
+	}
 }
 
 func (s *CrawlService) runDueSources() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// 起動時にロックを取れず自動作成のジョブを確かめられなかった場合も、ここ（ロックの中）で一度確かめる。
+	if !s.defaultsEnsured.Load() {
+		s.ensureDefaultSourcesLocked()
+	}
 	now := time.Now()
 	sources, err := s.repo.ListDueSources(now)
 	if err != nil {
@@ -81,4 +94,26 @@ func computeNextRun(now time.Time, source *models.CrawlSource) *time.Time {
 
 func lastDayOfMonth(year int, month time.Month, loc *time.Location) int {
 	return time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
+}
+
+// EnsureDefaultCrawlSources は自動で作る定期取得ジョブ（L1 温存・法人番号の補完・EDINET・RAG への登録）を、
+// 無ければ作る。「無いことを確かめてから作る」間に別のタスクが同じことをすると二重に作られるので、
+// 定期取得と同じ DB ロックの中で1台だけが行う。取れなかったときは、ロックを持っているタスクが
+// 自分の起動時に作っているので何もしない（次の起動で改めて確かめる）。
+func (s *CrawlService) EnsureDefaultCrawlSources() {
+	ok, err := s.repo.WithRunLock(context.Background(), s.ensureDefaultSourcesLocked)
+	if err != nil {
+		log.Printf("[Crawl] ensure sources: lock failed: %v", err)
+	} else if !ok {
+		log.Printf("[Crawl] ensure sources: 別のタスクが実行中のため、次の定期取得の周期で確かめます")
+	}
+}
+
+// ensureDefaultSourcesLocked は定期取得のロックを持っている前提で、自動作成のジョブを確かめる。
+func (s *CrawlService) ensureDefaultSourcesLocked() {
+	s.EnsureL1WarmCrawlSource()
+	s.EnsureCorporateNumberFillCrawlSource()
+	s.EnsureEDINETDailyCrawlSource()
+	s.EnsureResearchIndexCrawlSource()
+	s.defaultsEnsured.Store(true)
 }
