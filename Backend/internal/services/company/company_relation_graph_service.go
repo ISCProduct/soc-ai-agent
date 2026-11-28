@@ -58,10 +58,17 @@ type CompanyRelationGraph struct {
 type CompanyRelationGraphService struct {
 	companyRepo  repository.CompanyRepository
 	relationRepo repository.CompanyRelationRepository
+	// excludeNode が true の企業は枠に入れず、経由にも使わない（相関図の国の機関・閉鎖企業除外など）。
+	excludeNode func(*models.Company, *models.CompanyMarketInfo) bool
 }
 
 func NewCompanyRelationGraphService(companyRepo repository.CompanyRepository, relationRepo repository.CompanyRelationRepository) *CompanyRelationGraphService {
 	return &CompanyRelationGraphService{companyRepo: companyRepo, relationRepo: relationRepo}
+}
+
+// SetExcludeNode は BFS 中に除外する企業の判定を設定する。未設定なら除外しない。
+func (s *CompanyRelationGraphService) SetExcludeNode(fn func(*models.Company, *models.CompanyMarketInfo) bool) {
+	s.excludeNode = fn
 }
 
 // BuildGraph は companyID を起点に資本関係を BFS で辿ったグラフを返す。
@@ -90,23 +97,28 @@ func (s *CompanyRelationGraphService) BuildGraph(companyID uint) (*CompanyRelati
 	companyCache[companyID] = focusCompany
 
 	// addNode はキャッシュ済みの企業データでグラフにノードを追加する。
+	// 除外対象は枠に数えず、経由にも使わない（呼び出し側が SetExcludeNode で指定）。
 	addNode := func(id uint) bool {
 		if _, ok := nodeSeen[id]; ok {
 			return true
-		}
-		if len(nodeSeen) >= RelationGraphMaxNodes {
-			graph.Truncated = true
-			return false
 		}
 		company, ok := companyCache[id]
 		if !ok {
 			return false
 		}
+		market := marketInfoCache[id]
+		if s.excludeNode != nil && s.excludeNode(company, market) {
+			return false
+		}
+		if len(nodeSeen) >= RelationGraphMaxNodes {
+			graph.Truncated = true
+			return false
+		}
 		marketType := ""
 		isListed := false
-		if info, ok := marketInfoCache[id]; ok && info != nil {
-			marketType = info.MarketType
-			isListed = info.IsListed
+		if market != nil {
+			marketType = market.MarketType
+			isListed = market.IsListed
 		}
 		nodeSeen[id] = struct{}{}
 		graph.Nodes = append(graph.Nodes, RelationGraphNode{
@@ -261,6 +273,9 @@ func (s *CompanyRelationGraphService) BuildGraph(companyID uint) (*CompanyRelati
 				}
 				partner, ok := companyCache[partnerID]
 				if !ok {
+					continue
+				}
+				if s.excludeNode != nil && s.excludeNode(partner, marketInfoCache[partnerID]) {
 					continue
 				}
 				businessSeen[key] = struct{}{}

@@ -198,6 +198,12 @@ export default function PageContent() {
           {g.suggested_industries && g.suggested_industries.length > 0 && (
             <>（参考: {g.suggested_industries.join('、')}）</>
           )}
+          {/* 案内に返信・相談できる（#2028） */}
+          <Box component="span" sx={{ display: 'block', mt: 0.5 }}>
+            <MuiLink component={NextLink} href={`/consultations?thread=${g.id}`} sx={{ fontWeight: 600 }}>
+              先生に返信する
+            </MuiLink>
+          </Box>
         </Alert>
       ),
     })

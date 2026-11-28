@@ -740,6 +740,9 @@ module "backend" {
     SENTRY_ENVIRONMENT = "production"
     # Cloud Map(Service Discovery)経由でrag-reviewタスクへ到達する
     RAG_REVIEW_URL = "http://rag-review.${aws_service_discovery_private_dns_namespace.internal.name}:9000"
+    # 企業研究AI（SOCAIAGENT-724/725）。材料の取り込みとチャットAPIを有効化。
+    COMPANY_RESEARCH_INGEST_ENABLED = "true"
+    COMPANY_RESEARCH_CHAT_ENABLED   = "true"
     }, {
     for stage, version in var.prompt_versions :
     "PROMPT_VERSION_${upper(stage)}" => version

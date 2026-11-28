@@ -26,7 +26,9 @@ func (r *TeacherStudentGuidanceRepository) ListActiveByStudent(studentUserID uin
 		limit = 10
 	}
 	var rows []models.TeacherStudentGuidance
-	err := r.db.Where("student_user_id = ? AND dismissed_at IS NULL", studentUserID).
+	// 学生が自分で送った質問（kind=question）は、ホームの「先生から」の案内には出さない。
+	// 返答があっても閉じられずに残り、先生からの案内を10件の枠から押し出すため（相談の画面から開ける）。
+	err := r.db.Where("student_user_id = ? AND dismissed_at IS NULL AND kind <> ?", studentUserID, models.GuidanceKindQuestion).
 		Order("created_at DESC, id DESC").
 		Limit(limit).
 		Find(&rows).Error
