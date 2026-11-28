@@ -442,7 +442,7 @@ def test_set_cached_documents_doc_type_override():
     meta = collection.upsert.call_args.kwargs["metadatas"][0]
     assert meta["doc_type"] == "resume_review"
     assert meta["source"] == "web_search"
-    client.get_or_create_collection.assert_called_with(vs.COLLECTION_COMPANY_CONTEXT)
+    client.get_or_create_collection.assert_called_with(vs.COLLECTION_COMPANY_CONTEXT, metadata={"hnsw:space": "cosine"})
 
 
 def test_company_hash_uses_full_sha256_digest():

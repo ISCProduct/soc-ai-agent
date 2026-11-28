@@ -10,15 +10,35 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from vector_store import get_chroma_client
+from vector_store import (
+    COLLECTION_METADATA,
+    _collection_names,
+    collection_space,
+    get_chroma_client,
+    to_cosine_distance,
+)
 
 logger = logging.getLogger("rag-review")
 
 COLLECTION_STUDENT_PROFILES = "student_profiles"
+# cosine へ切り替える前の l2 のコレクション（SOCAIAGENT-554。scripts/rebuild_collections.py --student-profiles が作る）。
+# 切り戻し用に7日残すので、その間の削除（同意撤回・退会）はこちらにも反映する
+COLLECTION_STUDENT_PROFILES_OLD = "student_profiles__l2old554"
 
 
 def _collection() -> Any:
-    return get_chroma_client().get_or_create_collection(COLLECTION_STUDENT_PROFILES)
+    # 新しく作るときは cosine（SOCAIAGENT-554）。既存の l2 のコレクションは l2 のまま開く
+    return get_chroma_client().get_or_create_collection(COLLECTION_STUDENT_PROFILES, metadata=dict(COLLECTION_METADATA))
+
+
+def relevance_score(distance: float, space: str) -> float:
+    """距離を 0<score<=1 の関連度へ写す。距離関数（l2 / cosine）によらず、同じ2つの埋め込みなら同じ値にする。
+
+    以前は l2（ユークリッド距離の2乗 d）のコレクションで 1/(1+d) にしていた。長さ1の埋め込みでは d = 2 × cosine 距離なので、
+    1/(1 + 2 × cosine 距離) にすると、l2 のコレクションでは今までと同じ値になり、cosine のコレクションへ切り替えても
+    関連度の下限（STUDENT_SEARCH_MIN_SCORE、既定 0.38）の意味が変わらない。
+    """
+    return 1.0 / (1.0 + 2.0 * to_cosine_distance(distance, space))
 
 
 def _doc_id(user_id: int) -> str:
@@ -48,11 +68,48 @@ def upsert_student(user_id: int, text: str, embedding: List[float]) -> None:
 
 
 def delete_student(user_id: int) -> int:
-    """学生のベクトルを削除する。存在しない場合も正常終了する（冪等）。"""
+    """学生のベクトルを削除する。存在しない場合も正常終了する（冪等）。
+
+    cosine へ切り替える前のコレクション（切り戻し用に残しているもの）があれば、そこからも消す。
+    消さないと、切り戻したときに同意撤回・退会した学生が検索に戻る（SOCAIAGENT-554）。
+    """
     collection = _collection()
     collection.delete(ids=[_doc_id(user_id)])
+    _delete_from_old(user_id)
     logger.info("student profile deleted user_id=%s", user_id)
     return 1
+
+
+def _delete_from_old(user_id: int) -> None:
+    """切り替え前のコレクションからも消す。無ければ何もしない。
+
+    「無い」と分かったときだけ何もしない。接続の失敗などはそのまま上げる（呼び出し元の
+    DELETE /student-search/{user_id} が失敗を返し、Backend にログが出る）。握りつぶすと、
+    旧いほうに残ったまま切り戻したときに、同意撤回・退会した学生が検索に戻る。
+    """
+    client = get_chroma_client()
+    if COLLECTION_STUDENT_PROFILES_OLD not in _collection_names(client):
+        return  # 切り替え前のコレクションが無い（切り替えていない・消し終わった）
+    try:
+        old = client.get_collection(COLLECTION_STUDENT_PROFILES_OLD)
+    except _MISSING_COLLECTION_ERRORS:
+        return  # 一覧を見たあとに消された
+    old.delete(ids=[_doc_id(user_id)])
+
+
+def _missing_collection_errors() -> tuple:
+    """コレクションが無いときに get_collection が投げる例外（chromadb 0.6 は InvalidCollectionException、それより前は ValueError）。"""
+    errors: list = [ValueError]
+    try:
+        from chromadb.errors import InvalidCollectionException
+    except ImportError:
+        pass
+    else:
+        errors.append(InvalidCollectionException)
+    return tuple(errors)
+
+
+_MISSING_COLLECTION_ERRORS = _missing_collection_errors()
 
 
 def query_students(embedding: List[float], top_k: int, min_score: float = 0.0) -> List[Dict[str, Any]]:
@@ -73,14 +130,15 @@ def query_students(embedding: List[float], top_k: int, min_score: float = 0.0) -
     )
     metadatas = (result.get("metadatas") or [[]])[0]
     distances = (result.get("distances") or [[]])[0]
+    space = collection_space(collection)
 
     hits: List[Dict[str, Any]] = []
     for meta, distance in zip(metadatas, distances):
         user_id = (meta or {}).get("user_id")
         if user_id is None:
             continue
-        # Chroma の距離は小さいほど近い。1/(1+d) で 0<score<=1 の関連度へ写す。
-        score = 1.0 / (1.0 + float(distance))
+        # Chroma の距離は小さいほど近い。距離関数によらない関連度へ写す
+        score = relevance_score(float(distance), space)
         if score < min_score:
             continue
         hits.append({"user_id": int(user_id), "score": score})
