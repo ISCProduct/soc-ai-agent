@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,7 +21,16 @@ type CrawlService struct {
 	aiClient    *openai.Client
 	jobFetcher  *JobFetchService
 	infoFetcher *CompanyInfoFetcher
-	mu          sync.Mutex
+	// numberFinder は法人番号の補完に使う（未設定なら補完ジョブは作らない）
+	numberFinder corporateNumberFinder
+	// edinet / researchRepo は EDINET の取り込みに使う（未設定なら取り込みジョブは作らない）
+	edinet       edinetFetcher
+	researchRepo repository.CompanyResearchRepository
+	// indexer は企業研究AIの文章を RAG に登録する
+	indexer researchIndexer
+	mu      sync.Mutex
+	// defaultsEnsured は自動作成のジョブを確かめ終えたか（起動時にロックを取れなかったら定期取得の中で確かめる）
+	defaultsEnsured atomic.Bool
 }
 
 func NewCrawlService(repo repository.CrawlRepository, companyRepo repository.CompanyRepository, popularRepo repository.CompanyPopularityRepository, aiClient *openai.Client) *CrawlService {
@@ -176,7 +186,7 @@ func validateCrawlSource(source *models.CrawlSource) error {
 		"mynavi_company":    true,
 		"openwork_company":  true,
 	}
-	allTypes := []string{"company", "popular_companies", "job_site_company", "job_listing", "mynavi_company", "openwork_company", "fetch_info_all", "fetch_jobs_all", "fetch_persona_all", "warm_l1_catalog"}
+	allTypes := []string{"company", "popular_companies", "job_site_company", "job_listing", "mynavi_company", "openwork_company", "fetch_info_all", "fetch_jobs_all", "fetch_persona_all", "warm_l1_catalog", fillCorporateNumbersTarget, edinetDailyTarget, researchIndexTarget}
 	validType := false
 	for _, t := range allTypes {
 		if source.TargetType == t {
