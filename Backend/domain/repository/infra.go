@@ -2,6 +2,7 @@ package repository
 
 import (
 	"Backend/internal/models"
+	"context"
 	"time"
 )
 
@@ -18,6 +19,9 @@ type CrawlRepository interface {
 	CreateSource(source *models.CrawlSource) error
 	UpdateSource(source *models.CrawlSource) error
 	ListDueSources(now time.Time) ([]models.CrawlSource, error)
+	// ClaimSource は実行前にソースを確保する（next_run_at を now+lease へ先送り）。
+	// onlyIfDue=true（定期実行）は next_run_at<=now のときだけ、false（手動実行）は確保中でなければ確保する。
+	ClaimSource(ctx context.Context, id uint, now time.Time, lease time.Duration, onlyIfDue bool) (bool, error)
 	CreateRun(run *models.CrawlRun) error
 	UpdateRun(run *models.CrawlRun) error
 	ListRuns(sourceID uint, limit int) ([]models.CrawlRun, error)

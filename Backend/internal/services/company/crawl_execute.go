@@ -7,13 +7,22 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 )
 
-func (s *CrawlService) runSource(source *models.CrawlSource) (*models.CrawlRun, error) {
+func (s *CrawlService) runSource(source *models.CrawlSource, onlyIfDue bool) (*models.CrawlRun, error) {
 	if source == nil {
 		return nil, errors.New("source not found")
+	}
+	claimed, err := s.repo.ClaimSource(context.Background(), source.ID, time.Now(), crawlClaimLease(), onlyIfDue)
+	if err != nil {
+		return nil, err
+	}
+	if !claimed {
+		log.Printf("[Crawl] claim skipped source=%d (他の実行体が確保中)", source.ID)
+		return nil, ErrCrawlSourceBusy
 	}
 	run := &models.CrawlRun{
 		SourceID:  source.ID,
@@ -26,7 +35,7 @@ func (s *CrawlService) runSource(source *models.CrawlSource) (*models.CrawlRun, 
 	}
 
 	message := ""
-	if err := s.executeCrawl(source); err != nil {
+	if err := s.executeCrawlRecovered(source); err != nil {
 		message = err.Error()
 		run.Status = "failed"
 	} else {
@@ -47,6 +56,30 @@ func (s *CrawlService) runSource(source *models.CrawlSource) (*models.CrawlRun, 
 	}
 
 	return run, nil
+}
+
+// ErrCrawlSourceBusy は他の実行体がソースを確保中で実行しなかったことを表す。
+var ErrCrawlSourceBusy = errors.New("このソースは実行中です。しばらくしてから再実行してください")
+
+const defaultCrawlClaimLease = 2 * time.Hour
+
+// crawlClaimLease は確保時の先送り時間。最長クロールより長くする。CRAWL_CLAIM_LEASE（例: 3h）で変更可。
+func crawlClaimLease() time.Duration {
+	if d, err := time.ParseDuration(os.Getenv("CRAWL_CLAIM_LEASE")); err == nil && d > 0 {
+		return d
+	}
+	return defaultCrawlClaimLease
+}
+
+// executeCrawlRecovered は panic を失敗に変換し、run が running のまま残らないようにする。
+func (s *CrawlService) executeCrawlRecovered(source *models.CrawlSource) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[Crawl] panic を failed にしました source=%d: %v", source.ID, r)
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	return s.executeCrawl(source)
 }
 
 func (s *CrawlService) executeCrawl(source *models.CrawlSource) error {

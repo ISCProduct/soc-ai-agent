@@ -2,6 +2,7 @@ package company
 
 import (
 	"Backend/internal/models"
+	"errors"
 	"log"
 	"time"
 )
@@ -20,7 +21,7 @@ func (s *CrawlService) runDueSources() {
 		return
 	}
 	for i := range sources {
-		if _, err := s.runSource(&sources[i]); err != nil {
+		if _, err := s.runSource(&sources[i], true); err != nil && !errors.Is(err, ErrCrawlSourceBusy) {
 			log.Printf("[Crawl] runSource failed source=%d: %v", sources[i].ID, err)
 		}
 	}

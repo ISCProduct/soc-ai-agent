@@ -3,6 +3,7 @@ package admin
 import (
 	"Backend/internal/services/company"
 	"Backend/internal/services/interfaces"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -74,6 +75,9 @@ func (c *AdminCrawlController) RunSource(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid source id")
 	}
 	run, err := c.service.RunSource(uint(id))
+	if errors.Is(err, company.ErrCrawlSourceBusy) {
+		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}

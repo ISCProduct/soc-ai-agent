@@ -121,7 +121,7 @@ func (s *CrawlService) RunSource(id uint) (*models.CrawlRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.runSource(source)
+	return s.runSource(source, false)
 }
 
 // EnsureL1WarmCrawlSource は日次 L1 温存ジョブが無ければ作成する（#586）。
