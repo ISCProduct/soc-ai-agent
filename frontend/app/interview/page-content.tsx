@@ -442,6 +442,8 @@ function InterviewContent() {
       turnPending={session.turnPending}
       errorMessage={session.errorMessage}
       utteranceSaveFailed={session.utteranceSaveFailed}
+      voiceDegradeText={session.voiceDegradeText}
+      textContinueMode={session.textContinueMode}
       sessionVideoCallbackRef={media.sessionVideoCallbackRef}
       transcriptEndRef={session.transcriptEndRef}
       aiAudioRef={session.aiAudioRef}
@@ -451,6 +453,7 @@ function InterviewContent() {
       onToggleHandsFree={() => session.setHandsFreeMode(p => !p)}
       onStartRecording={session.startRecording}
       onStopRecording={session.stopRecording}
+      onSubmitTextAnswer={(text) => { void session.sendTurnText(text) }}
       onJoin={session.handleJoin}
       onStop={session.handleStop}
     />

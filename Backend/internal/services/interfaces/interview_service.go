@@ -27,6 +27,7 @@ type InterviewService interface {
 		userID uint,
 		sessionID uint,
 		audioData []byte,
+		answerText string,
 		companyName, companyReading string,
 		companyReadingResolved bool,
 		position, companyInfo, companyType string,

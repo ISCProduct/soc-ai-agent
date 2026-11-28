@@ -40,11 +40,15 @@ const jsonResponse = (body: unknown, ok = true): FakeResponse => ({
 })
 
 /** 面接ターンの応答（multipart/mixed: JSONメタ + 音声） */
-const turnResponse = (meta: Record<string, string | boolean | number>): FakeResponse => {
+const turnResponse = (
+  meta: Record<string, string | boolean | number | string[]>,
+  options?: { emptyAudio?: boolean },
+): FakeResponse => {
   const boundary = 'turnboundary'
+  const audioPart = options?.emptyAudio ? '' : 'AUDIO'
   const body =
     `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(meta)}\r\n` +
-    `--${boundary}\r\nContent-Type: audio/mpeg\r\n\r\nAUDIO\r\n` +
+    `--${boundary}\r\nContent-Type: audio/mpeg\r\n\r\n${audioPart}\r\n` +
     `--${boundary}--\r\n`
   const bytes = new TextEncoder().encode(body)
   return {
@@ -290,6 +294,77 @@ describe('useInterviewSession の挙動', () => {
 
     expect(result.current.turnPending).toBe(false)
     expect(result.current.errorMessage).toBeTruthy()
+
+    unmount()
+  })
+
+  it('空音声のあと音声が復旧したらバナーは消え、文字回答欄は残る（#1831）', async () => {
+    const { result, unmount } = renderSession(fakeMedia())
+    await act(async () => { await result.current.handleJoin() })
+
+    route = (url, init) => {
+      if (!url.endsWith('/turn')) return undefined
+      turnBodies.push(init?.body as FormData)
+      return turnResponse({ user_text: '回答', ai_text: '次へ' }, { emptyAudio: true })
+    }
+    act(() => { result.current.startRecording() })
+    act(() => { result.current.stopRecording() })
+    await flush()
+    await flush()
+
+    expect(result.current.textContinueMode).toBe(true)
+    expect(result.current.voiceDegradeText).toMatch(/再生できません/)
+
+    route = (url, init) => {
+      if (!url.endsWith('/turn')) return undefined
+      turnBodies.push(init?.body as FormData)
+      return turnResponse({ user_text: '2つ目', ai_text: '続けます' })
+    }
+    act(() => { result.current.startRecording() })
+    act(() => { result.current.stopRecording() })
+    await flush()
+    await flush()
+
+    expect(result.current.textContinueMode).toBe(true)
+    expect(result.current.voiceDegradeText).toBeNull()
+
+    unmount()
+  })
+
+  it('stt_failed なら文字回答欄に入り、sendTurnText は answer_text を送る（#1831）', async () => {
+    const { result, unmount } = renderSession(fakeMedia())
+    await act(async () => { await result.current.handleJoin() })
+
+    route = (url, init) => {
+      if (!url.endsWith('/turn')) return undefined
+      turnBodies.push(init?.body as FormData)
+      return turnResponse({
+        user_text: '（聞き取れませんでした）',
+        ai_text: 'もう一度お願いします',
+        stt_failed: true,
+      })
+    }
+    act(() => { result.current.startRecording() })
+    act(() => { result.current.stopRecording() })
+    await flush()
+    await flush()
+
+    expect(result.current.textContinueMode).toBe(true)
+    expect(result.current.voiceDegradeText).toMatch(/聞き取れません/)
+
+    route = (url, init) => {
+      if (!url.endsWith('/turn')) return undefined
+      turnBodies.push(init?.body as FormData)
+      return turnResponse({ user_text: 'チームで開発しました', ai_text: '具体的には？' })
+    }
+    await act(async () => { await result.current.sendTurnText('チームで開発しました') })
+    await flush()
+
+    const textTurn = turnBodies[1]
+    expect(textTurn.get('answer_text')).toBe('チームで開発しました')
+    expect(textTurn.get('audio')).toBeNull()
+    expect(result.current.voiceDegradeText).toBeNull()
+    expect(result.current.textContinueMode).toBe(true)
 
     unmount()
   })

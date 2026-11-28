@@ -74,7 +74,7 @@ export function parseMediaError(error: unknown): string {
  */
 export async function parseMultipartResponse(
   res: Response
-): Promise<{ meta: Record<string, string>; audio: Blob }> {
+): Promise<{ meta: Record<string, unknown>; audio: Blob }> {
   const contentType = res.headers.get('content-type') || ''
   const boundaryMatch = contentType.match(/boundary=([^\s;]+)/)
   if (!boundaryMatch) throw new Error('No boundary in multipart response')

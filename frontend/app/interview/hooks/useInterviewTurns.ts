@@ -9,6 +9,13 @@ import { buildCompanyInfo } from '../utils'
 import { applyCompanyReadingResponse } from '../companyReadingContext'
 import { nextQuestionIndex } from '../questionEvents'
 import { fetchAndReadWithTimeout } from '@/lib/fetch-timeout'
+import {
+  isEmptyAudio,
+  metaFlagTrue,
+  parseAIFallback,
+  voiceDegradeReason,
+  type VoiceDegradeReason,
+} from '../lib/aiFallback'
 import type { Utterance, InterviewCompany, Position } from '../types'
 
 /**
@@ -50,6 +57,11 @@ type UseInterviewTurnsArgs = {
   setUtteranceSaveFailed: Dispatch<SetStateAction<boolean>>
   /** サーバーが上限（発話数・経過時間・予算）に達したと返したときに呼ぶ（SOCAIAGENT-696） */
   onLimitReached: () => void
+  /**
+   * 毎ターンの音声縮退判定（null 含む）（#1831）。
+   * バナーは直近ターンに合わせ、文字回答欄の sticky ON は親側で決める。
+   */
+  onVoiceDegradeUpdate: (reason: VoiceDegradeReason) => void
 }
 
 /**
@@ -81,14 +93,22 @@ export function useInterviewTurns({
   setErrorMessage,
   setUtteranceSaveFailed,
   onLimitReached,
+  onVoiceDegradeUpdate,
 }: UseInterviewTurnsArgs) {
   /**
    * サーバーが上限（発話数・経過時間・予算）に達したと返したら、締めの文を表示したまま
    * 既存の終了経路で面接を終え、途中までのレポートを作る（SOCAIAGENT-696）。
    * 終了処理は応答待ちのターン（＝この応答）を待つので、ここでは待たずに呼ぶ。
    */
-  const endIfLimitReached = (meta: Record<string, string>) => {
+  const endIfLimitReached = (meta: Record<string, unknown>) => {
     if (String(meta.limit_reached) === 'true') onLimitReached()
+  }
+
+  /** 毎ターンの縮退判定を親へ渡す（null = 音声は問題なし。#1831）。 */
+  const noteVoiceDegrade = (meta: Record<string, unknown>, audio: Blob) => {
+    onVoiceDegradeUpdate(voiceDegradeReason(audio, parseAIFallback(meta), {
+      sttFailed: metaFlagTrue(meta, 'stt_failed'),
+    }))
   }
   /**
    * 応答待ちのターン(#1476)。
@@ -140,7 +160,10 @@ export function useInterviewTurns({
    */
   const playTurnAudio = async (receiving: Promise<Blob>): Promise<void> => {
     const gen = audioGenerationRef.current
-    await playAudioBlob(await trackTurn(receiving), gen)
+    const audio = await trackTurn(receiving)
+    // TTS 失敗時は空のパートが来る。再生を試みるとエラーになり面接の流れが乱れる。
+    if (isEmptyAudio(audio)) return
+    await playAudioBlob(audio, gen)
   }
 
   const doStartTurn = async (sessionId: number, userId: number) => {
@@ -174,7 +197,7 @@ export function useInterviewTurns({
         companyContextGeneration,
         companyContextGenerationRef.current,
       )
-      const aiText: string = meta.ai_text || ''
+      const aiText = typeof meta.ai_text === 'string' ? meta.ai_text : ''
       const responseQuestionTotal = Number(meta.total_questions)
       if (Number.isSafeInteger(responseQuestionTotal) && responseQuestionTotal > 0) {
         setTotalQuestionCount(responseQuestionTotal)
@@ -192,6 +215,7 @@ export function useInterviewTurns({
         historyRef.current.push({ role: 'assistant', content: aiText })
         setUtterances(p => [...p, { role: 'ai', text: aiText }])
       }
+      noteVoiceDegrade(meta, audio)
       endIfLimitReached(meta)
       return audio
     }
@@ -200,18 +224,10 @@ export function useInterviewTurns({
     await playTurnAudio(receiving)
   }
 
-  const sendTurn = async () => {
-    if (!user || !session) { setTurnPending(false); return }
-    const chunks = audioChunksRef.current
-    if (chunks.length === 0) { setTurnPending(false); return }
-    // 実際に録れた形式で送る。Blob の type と拡張子が実体とずれると、
-    // 受け側の形式判定とファイル名が食い違う。
-    const format = recorderFormatRef.current
-    const blobType = chunks[0]?.type || format.mimeType || 'audio/webm'
-    const ext = extFromMimeType(blobType) || format.ext
-    const audioBlob = new Blob(chunks, { type: blobType })
+  /** /turn 共通のフォーム項目（音声 or テキストは呼び出し側で足す）（#1831）。 */
+  const buildTurnFormData = () => {
+    if (!user) return null
     const formData = new FormData()
-    formData.append('audio', audioBlob, `audio.${ext}`)
     formData.append('user_id', String(user.user_id))
     formData.append('turn_count', String(Math.floor(historyRef.current.length / 2) + 1))
     const progress = progressRef.current
@@ -233,56 +249,80 @@ export function useInterviewTurns({
       'question_hints',
       JSON.stringify(companyQuestionHints.slice(0, 5).map((question) => question.slice(0, 300))),
     )
-    const companyContextGeneration = companyContextGenerationRef.current
-    const receive = async (): Promise<Blob> => {
-      // Backend は保存済みの発話から履歴を組み直す（#1636）。発話はサーバーがターンの中で
-      // 保存し終えてから応答する。冒頭の質問より先に回答が保存されないよう、/start-turn の
-      // 応答を待ってから送る(#1969)。
-      await startTurnSettledRef.current
-      const { meta, audio } = await fetchAndReadWithTimeout(`/api/bff/interviews/${session.id}/turn`, {
-        method: 'POST',
-        headers: { ...authService.getUserFetchHeaders() },
-        body: formData,
-      }, TURN_FETCH_TIMEOUT_MS, async res => {
-        if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
-        return parseMultipartResponse(res)
-      })
-      if (companyContextGeneration !== companyContextGenerationRef.current) return audio
-      companyContextRef.current = applyCompanyReadingResponse(
-        companyContextRef.current,
-        meta,
-        companyContextGeneration,
-        companyContextGenerationRef.current,
-      )
-      const userText: string = meta.user_text || ''
-      const aiText: string = meta.ai_text || ''
-      const responseQuestionTotal = Number(meta.total_questions)
-      if (Number.isSafeInteger(responseQuestionTotal) && responseQuestionTotal > 0) {
-        setTotalQuestionCount(responseQuestionTotal)
-      }
-      const questionEvent = typeof meta.question_source === 'string' && meta.question_source.trim() !== ''
-      if (questionEvent) {
-        setCurrentQuestionIndex((index) => nextQuestionIndex(index, meta.question_source))
-        questionStartedAtRef.current = Date.now()
-        setQuestionElapsedSeconds(0)
-      }
-      setIsDeepeningQuestion(Boolean(meta.is_deepening))
-      setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
-      // 書き起こしはサーバーが user → ai の順に保存済み(#1969)。ここでは表示だけを更新する。
-      if (String(meta.utterance_save_failed) === 'true') setUtteranceSaveFailed(true)
-      if (userText) {
-        historyRef.current.push({ role: 'user', content: userText })
-        setUtterances(p => [...p, { role: 'user', text: userText }])
-      }
-      if (aiText) {
-        historyRef.current.push({ role: 'assistant', content: aiText })
-        setUtterances(p => [...p, { role: 'ai', text: aiText }])
-      }
-      endIfLimitReached(meta)
-      return audio
+    return formData
+  }
+
+  /** /turn 応答の共通反映（#1831）。fallbackUserText はメタに user_text が無いときの表示用。 */
+  const applyTurnResponse = (
+    meta: Record<string, unknown>,
+    audio: Blob,
+    companyContextGeneration: number,
+    fallbackUserText = '',
+  ): Blob => {
+    if (companyContextGeneration !== companyContextGenerationRef.current) return audio
+    companyContextRef.current = applyCompanyReadingResponse(
+      companyContextRef.current,
+      meta,
+      companyContextGeneration,
+      companyContextGenerationRef.current,
+    )
+    const userText = typeof meta.user_text === 'string' ? meta.user_text : fallbackUserText
+    const aiText = typeof meta.ai_text === 'string' ? meta.ai_text : ''
+    const responseQuestionTotal = Number(meta.total_questions)
+    if (Number.isSafeInteger(responseQuestionTotal) && responseQuestionTotal > 0) {
+      setTotalQuestionCount(responseQuestionTotal)
     }
+    const questionEvent = typeof meta.question_source === 'string' && meta.question_source.trim() !== ''
+    if (questionEvent) {
+      setCurrentQuestionIndex((index) => nextQuestionIndex(index, meta.question_source))
+      questionStartedAtRef.current = Date.now()
+      setQuestionElapsedSeconds(0)
+    }
+    setIsDeepeningQuestion(Boolean(meta.is_deepening))
+    setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
+    // 書き起こしはサーバーが user → ai の順に保存済み(#1969)。ここでは表示だけを更新する。
+    if (String(meta.utterance_save_failed) === 'true') setUtteranceSaveFailed(true)
+    if (userText) {
+      historyRef.current.push({ role: 'user', content: userText })
+      setUtterances(p => [...p, { role: 'user', text: userText }])
+    }
+    if (aiText) {
+      historyRef.current.push({ role: 'assistant', content: aiText })
+      setUtterances(p => [...p, { role: 'ai', text: aiText }])
+    }
+    noteVoiceDegrade(meta, audio)
+    endIfLimitReached(meta)
+    return audio
+  }
+
+  const postTurn = async (
+    formData: FormData,
+    companyContextGeneration: number,
+    fallbackUserText = '',
+  ): Promise<Blob> => {
+    if (!session) return new Blob([])
+    // Backend は保存済みの発話から履歴を組み直す（#1636）。発話はサーバーがターンの中で
+    // 保存し終えてから応答する。冒頭の質問より先に回答が保存されないよう、/start-turn の
+    // 応答を待ってから送る(#1969)。
+    await startTurnSettledRef.current
+    const { meta, audio } = await fetchAndReadWithTimeout(`/api/bff/interviews/${session.id}/turn`, {
+      method: 'POST',
+      headers: { ...authService.getUserFetchHeaders() },
+      body: formData,
+    }, TURN_FETCH_TIMEOUT_MS, async res => {
+      if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+      return parseMultipartResponse(res)
+    })
+    return applyTurnResponse(meta, audio, companyContextGeneration, fallbackUserText)
+  }
+
+  const runTurnRequest = async (
+    formData: FormData,
+    companyContextGeneration: number,
+    fallbackUserText = '',
+  ) => {
     try {
-      await playTurnAudio(receive())
+      await playTurnAudio(postTurn(formData, companyContextGeneration, fallbackUserText))
     } catch (e: unknown) {
       if (companyContextGeneration === companyContextGenerationRef.current) {
         setErrorMessage(parseMediaError(e))
@@ -294,6 +334,35 @@ export function useInterviewTurns({
     }
   }
 
+  const sendTurn = async () => {
+    if (!user || !session) { setTurnPending(false); return }
+    const chunks = audioChunksRef.current
+    if (chunks.length === 0) { setTurnPending(false); return }
+    // 実際に録れた形式で送る。Blob の type と拡張子が実体とずれると、
+    // 受け側の形式判定とファイル名が食い違う。
+    const format = recorderFormatRef.current
+    const blobType = chunks[0]?.type || format.mimeType || 'audio/webm'
+    const ext = extFromMimeType(blobType) || format.ext
+    const audioBlob = new Blob(chunks, { type: blobType })
+    const formData = buildTurnFormData()
+    if (!formData) { setTurnPending(false); return }
+    formData.append('audio', audioBlob, `audio.${ext}`)
+    await runTurnRequest(formData, companyContextGenerationRef.current)
+  }
+
+  /** 音声の代わりに文字回答を送る（#1831）。 */
+  const sendTurnText = async (answerText: string) => {
+    if (!user || !session) return
+    const trimmed = answerText.trim()
+    if (!trimmed) return
+    setTurnPending(true)
+    setErrorMessage(null)
+    const formData = buildTurnFormData()
+    if (!formData) { setTurnPending(false); return }
+    formData.append('answer_text', trimmed.slice(0, 2000))
+    await runTurnRequest(formData, companyContextGenerationRef.current, trimmed)
+  }
+
   return {
     inFlightTurnRef,
     startTurnSettledRef,
@@ -302,5 +371,6 @@ export function useInterviewTurns({
     companyContextGenerationRef,
     doStartTurn,
     sendTurn,
+    sendTurnText,
   }
 }
