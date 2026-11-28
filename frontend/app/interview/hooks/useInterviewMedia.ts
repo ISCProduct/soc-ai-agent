@@ -92,7 +92,7 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
       try {
         // 取得は acquireStream に一本化する。ここで直接 getUserMedia すると
         // handleStart の ensureStream() と二重に走り、片方が取り残される。
-        const stream = await acquireStream()
+        const stream = await acquireForLobby()
         // cancelled でもストリームは止めない。streamRef が所有しており、
         // 面接中も使い続ける。ここで止めると handleStart 側が死んだストリームを掴む。
         if (cancelled) return
@@ -121,13 +121,11 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
     }
   }, [status])
 
-  const classifyMediaError = async (err: unknown): Promise<string> => {
-    const kind = classifyMediaErrorKind(err)
-    if (kind !== 'denied') return mediaErrorMessage(kind)
-
-    // 権限拒否と分かっている場合だけ、どちらが拒否されたのかを個別に確かめる。
-    // デバイス使用中など他の失敗でここへ来ると、この問い合わせも失敗して
-    // 「許可したのに権限エラー」と誤表示する原因になる。
+  /**
+   * カメラとマイクを1つずつ取り直し、権限で拒否されたものの名前を返す。
+   * 使用中や未検出は権限の問題ではないので挙げない。
+   */
+  const findBlockedDevices = async (): Promise<string[]> => {
     const blocked: string[] = []
     for (const [label, constraints] of [
       ['カメラ', { video: true }],
@@ -137,11 +135,38 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
         const probe = await navigator.mediaDevices.getUserMedia(constraints)
         probe.getTracks().forEach((t) => t.stop())
       } catch (probeErr) {
-        // 拒否されたものだけを挙げる。使用中や未検出は権限の問題ではない。
         if (classifyMediaErrorKind(probeErr) === 'denied') blocked.push(label)
       }
     }
+    return blocked
+  }
+
+  const classifyMediaError = async (err: unknown): Promise<string> => {
+    const kind = classifyMediaErrorKind(err)
+    if (kind !== 'denied') return mediaErrorMessage(kind)
+
+    // 権限拒否と分かっている場合だけ、どちらが拒否されたのかを個別に確かめる。
+    // デバイス使用中など他の失敗でここへ来ると、この問い合わせも失敗して
+    // 「許可したのに権限エラー」と誤表示する原因になる。
+    const blocked = await findBlockedDevices()
     return mediaErrorMessage('denied', blocked.length > 0 ? blocked.join('と') : undefined)
+  }
+
+  /**
+   * 準備画面用の取得。
+   *
+   * 初めて開いて許可ダイアログに答えた回だけ、許可したのに拒否扱いで失敗し、
+   * リロードすると直る不具合があった (#2633)。拒否扱いで失敗しても、
+   * 個別に確かめてどちらも拒否されていなければ、もう一度だけ取り直す。
+   */
+  const acquireForLobby = async (): Promise<MediaStream> => {
+    try {
+      return await acquireStream()
+    } catch (err: unknown) {
+      if (classifyMediaErrorKind(err) !== 'denied') throw err
+      if ((await findBlockedDevices()).length > 0) throw err
+      return acquireStream()
+    }
   }
 
   /** ページリロードせず getUserMedia を再実行する（会社選択状態を維持）。 */
@@ -154,7 +179,7 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
     // 進行中の取得があれば、その結果を掴まないよう捨てる
     acquiringRef.current = null
     try {
-      const stream = await acquireStream()
+      const stream = await acquireForLobby()
       // エラー UI 解除後に video がマウントされるのを待つ
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
