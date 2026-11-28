@@ -1,4 +1,4 @@
-h1:yEsf2AYftSlBgqdzhFK5fT6UrzAlFfvcTqHpZJhjdWs=
+h1:y86iVuKQH1lfW5t+/eR73ubZmKrVDB7G0+aW6hH7Fh0=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -100,3 +100,4 @@ h1:yEsf2AYftSlBgqdzhFK5fT6UrzAlFfvcTqHpZJhjdWs=
 20261128200506_create_company_facts.up.sql h1:ePWBd86eNjC8GSOpCkcIVTERa1hqZsLYUoQkCF+LyZw=
 20261128200507_crawl_sources_add_progress_cursor.up.sql h1:omfx43vSiiElbl4q7h8ips2h94CmHAUMtQAjULOtYdc=
 20261128200508_create_company_research_chat_quotas.up.sql h1:F6CUQxZvKZzV+suxWAOxjgfLr5aiP47IZZPeHtKY7kE=
+20261128201000_add_registry_status_to_companies.up.sql h1:NqWKRMphLhFPko+CNGOPwk2agvmRCSmBy070qR0uQwo=

@@ -164,6 +164,11 @@ func (c *Client) get(ctx context.Context, path string, params url.Values) ([]Cor
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		// url.Error はクエリ（アプリケーションID）付きの URL を文面に含むので、URL を外して返す。
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = fmt.Errorf("%s: %w", ue.Op, ue.Err)
+		}
 		return nil, fmt.Errorf("houjinbangou: リクエストに失敗しました: %w", err)
 	}
 	defer resp.Body.Close()
