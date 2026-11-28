@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { InterviewStatus } from '../types'
 import { shouldStartInterviewMediaPreview } from './mediaPreviewGate'
+import { setAudioOutputId } from '@/lib/interview/audio-output'
 import {
   MEDIA_CONSTRAINTS,
+  buildMediaConstraints,
   classifyMediaErrorKind,
   isStreamUsable,
   mediaErrorMessage,
@@ -26,6 +28,14 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
   const [micEnabled, setMicEnabled] = useState(true)
   const [cameraEnabled, setCameraEnabled] = useState(true)
   const [lobbyPermissionError, setLobbyPermissionError] = useState<string | null>(null)
+  // 準備画面で選んだ機器（#2634）。'' は既定の機器。
+  // 取得（acquireStream）は再生成しない callback なので、最新値は ref からも読めるようにする。
+  const [micId, setMicId] = useState('')
+  const [cameraId, setCameraId] = useState('')
+  const [speakerId, setSpeakerId] = useState('')
+  const deviceIdsRef = useRef({ mic: '', camera: '' })
+  // 準備画面のプレビューに繋いだストリーム。音量メーターと機器一覧の取得のきっかけに使う。
+  const [lobbyStream, setLobbyStream] = useState<MediaStream | null>(null)
 
   const streamRef = useRef<MediaStream | null>(null)
   // getUserMedia の同時実行を1本にまとめる。
@@ -57,7 +67,19 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
     if (acquiringRef.current) return acquiringRef.current
 
     const pending = (async () => {
-      const stream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS)
+      const { mic, camera } = deviceIdsRef.current
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(buildMediaConstraints(mic, camera))
+      } catch (err: unknown) {
+        // 選んだ機器が抜かれた等で取れないときは、既定の機器で取り直す
+        const name = (err as { name?: unknown } | null)?.name
+        if ((!mic && !camera) || (name !== 'OverconstrainedError' && name !== 'NotFoundError')) throw err
+        deviceIdsRef.current = { mic: '', camera: '' }
+        setMicId('')
+        setCameraId('')
+        stream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS)
+      }
       // 待っている間に別経路が使えるストリームを確保していたら、
       // 今取得したほうを捨てる。掴みっぱなしを作らない。
       const existing = streamRef.current
@@ -100,6 +122,7 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
           lobbyVideoRef.current.srcObject = stream
           lobbyVideoRef.current.play().catch(() => undefined)
         }
+        setLobbyStream(stream)
         setLobbyPermissionError(null)
       } catch (err: unknown) {
         if (cancelled) return
@@ -155,6 +178,10 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
     acquiringRef.current = null
     try {
       const stream = await acquireStream()
+      // 取り直したトラックにも、今のオン／オフを引き継ぐ
+      stream.getAudioTracks().forEach((t) => { t.enabled = micEnabled })
+      stream.getVideoTracks().forEach((t) => { t.enabled = cameraEnabled })
+      setLobbyStream(stream)
       // エラー UI 解除後に video がマウントされるのを待つ
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
@@ -166,6 +193,19 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
     } catch (err: unknown) {
       setLobbyPermissionError(await classifyMediaError(err))
     }
+  }
+
+  /** 準備画面でマイク／カメラを選び直す。今のストリームを止めて、選んだ機器で取り直す。 */
+  const selectInputDevice = async (kind: 'mic' | 'camera', id: string) => {
+    deviceIdsRef.current = { ...deviceIdsRef.current, [kind]: id }
+    if (kind === 'mic') setMicId(id)
+    else setCameraId(id)
+    await retryLobbyPreview()
+  }
+
+  const selectSpeaker = (id: string) => {
+    setAudioOutputId(id)
+    setSpeakerId(id)
   }
 
   const ensureStream = async (): Promise<MediaStream> => {
@@ -183,6 +223,7 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
   }
 
   const stopStream = () => {
+    setLobbyStream(null)
     // 進行中の取得結果が後から streamRef に入るのを防ぐ。
     // これが無いと、停止したつもりのストリームが残って次回の取得を妨げる。
     const pending = acquiringRef.current
@@ -269,6 +310,12 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
     startVideoRecording,
     stopAndCollectVideoBlob,
     retryLobbyPreview,
+    lobbyStream,
+    micId,
+    cameraId,
+    speakerId,
+    selectInputDevice,
+    selectSpeaker,
   }
 }
 

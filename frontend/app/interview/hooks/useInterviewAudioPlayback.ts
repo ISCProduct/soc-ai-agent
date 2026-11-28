@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { measureLevel, setAiAudioMeter } from '@/lib/interview/ai-audio-meter'
+import { applyAudioOutput } from '@/lib/interview/audio-output'
 
 /**
  * 面接官の応答音声の再生と、リップシンク用の音量（aiLevel）。
@@ -67,6 +68,8 @@ export function useInterviewAudioPlayback() {
         aiAudioCtxRef.current = new AudioContext()
       }
       const ctx = aiAudioCtxRef.current
+      // 準備画面で選んだスピーカーから鳴らす（#2634）
+      await applyAudioOutput(ctx)
       await ctx.resume()
       // await中に次のターンが始まっていれば、この古い音声は再生せず破棄する
       if (gen !== audioGenerationRef.current) { cleanup(); return }

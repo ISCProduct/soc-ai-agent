@@ -6,6 +6,7 @@ import { UI } from '@/lib/design/tokens'
 
 import type { InterviewCompany } from '../types'
 import CameraPreview from './lobby/CameraPreview'
+import DeviceSettings from './lobby/DeviceSettings'
 import type { FocusGoal } from './lobby/FocusGoalCard'
 import JoinPanel from './lobby/JoinPanel'
 import LobbyFooter from './lobby/LobbyFooter'
@@ -30,6 +31,14 @@ export interface LobbyScreenProps {
   onToggleMic: () => void
   onToggleCamera: () => void
   lobbyVideoRef: RefObject<HTMLVideoElement | null>
+  /** プレビューに繋いだストリーム。機器一覧と音量メーターに使う */
+  lobbyStream: MediaStream | null
+  micId: string
+  cameraId: string
+  speakerId: string
+  onSelectMic: (id: string) => void
+  onSelectCamera: (id: string) => void
+  onSelectSpeaker: (id: string) => void
   onBack: () => void
   /** 録画同意（画面内のチェックボックス）。false の間は開始できない */
   consentGiven: boolean
@@ -71,6 +80,15 @@ export default function LobbyScreen(props: LobbyScreenProps) {
             onRetryPermissions={props.onRetryPermissions}
             onToggleCamera={props.onToggleCamera}
             onToggleMic={props.onToggleMic}
+          />
+          <DeviceSettings
+            stream={props.lobbyStream}
+            micId={props.micId}
+            cameraId={props.cameraId}
+            speakerId={props.speakerId}
+            onSelectMic={props.onSelectMic}
+            onSelectCamera={props.onSelectCamera}
+            onSelectSpeaker={props.onSelectSpeaker}
           />
         </Box>
         <JoinPanel

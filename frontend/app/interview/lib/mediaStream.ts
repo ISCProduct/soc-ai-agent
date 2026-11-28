@@ -30,6 +30,15 @@ export const MEDIA_CONSTRAINTS: MediaStreamConstraints = {
   video: true,
 }
 
+/** 準備画面で選んだ機器を制約に足す（#2634）。'' は既定の機器。 */
+export function buildMediaConstraints(micId: string, cameraId: string): MediaStreamConstraints {
+  const audio = MEDIA_CONSTRAINTS.audio as MediaTrackConstraints
+  return {
+    audio: micId ? { ...audio, deviceId: { exact: micId } } : audio,
+    video: cameraId ? { deviceId: { exact: cameraId } } : MEDIA_CONSTRAINTS.video,
+  }
+}
+
 /**
  * ストリームが使い物になるか。
  *
