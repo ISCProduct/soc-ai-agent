@@ -1,9 +1,8 @@
-{
-  "name": "spec-requirements",
-  "description": "要件抽出＋ユーザーストーリー生成",
-  "argument_hint": "機能名、ターゲットユーザー、目的、制約を入力"
-}
 ---
+name: spec-requirements
+description: 機能の目的とユーザーを確認し、ユーザーストーリー、受け入れ条件、非機能要件、成功指標を整理する。
+---
+
 # 要件抽出セッション
 
 ## 0. 入力サマリ
