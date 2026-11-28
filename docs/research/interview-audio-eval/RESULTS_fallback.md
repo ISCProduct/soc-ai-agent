@@ -106,7 +106,8 @@ fell_back=true の件数 / STT 呼び出し総数 = 再送率
 
 実発話での評価（Task 6）は、**取り扱いを決めるまで着手しない**。
 決めるべき項目と方針は `docs/wiki/data-privacy.md` の
-「STT評価用に収集する発話音声」にまとめた。
+「STT評価用に収集する発話音声」にまとめた。同意・削除窓口などの設計は
+`docs/requirements/stt-eval-consent-design.md`（SOCAIAGENT-676）にある。
 
 要点は次の3つ。
 
