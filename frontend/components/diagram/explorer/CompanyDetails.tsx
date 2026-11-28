@@ -73,10 +73,12 @@ export function CompanyDetails({ node, map, mode, onClose, onFocus }: {
         <span className={styles.context}>{node.name}について</span>
         <h2 id="company-details-title" ref={aiHeading} tabIndex={-1}>企業研究AI</h2>
       </div>
-      <Button variant="outlined" onClick={() => setAiOpen(false)}>閉じる</Button>
+      {/* 閉じるは詳細パネル自体を閉じ、カードへフォーカスを戻す（既存E2E・操作感） */}
+      <Button variant="outlined" onClick={onClose}>閉じる</Button>
     </header>
     <div className={styles.detailBody}>
       <p className={styles.aiNotice}>登録情報と有価証券報告書などの材料だけで答えます。Web検索はしません。回答は参考情報です。</p>
+      <Button variant="text" onClick={() => setAiOpen(false)} sx={{ alignSelf: 'flex-start', mb: 1, minHeight: 44 }}>企業情報に戻る</Button>
       <form className={styles.aiForm} onSubmit={onAsk}>
         <TextField
           id={questionFieldId}
