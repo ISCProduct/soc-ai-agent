@@ -9,7 +9,7 @@ SOC AI Agent: 採用支援SaaS (Go + Next.js + Python RAG)
 ### RAG (Python)
 - `cd rag && pip install -r requirements.txt -c constraints.txt && python3 main.py` (9000)
 ### Docker
-- `docker compose up -d`（db/app/frontend/rag-review/chroma/company-graphを含む全サービスを起動。`docker compose stop` / `down` で全停止・削除可）
+- `docker compose up -d`（ローカル。db/app/frontend/rag-review/chroma/company-graphを含む。company-graph は staging / 本番では起動していない。`docker compose stop` / `down` で全停止・削除可）
 - RAGのみ起動/リビルド: `make rag-up` または `docker compose up -d --build chroma rag-review`
 - スモーク: `make rag-smoke`（`/health` の `vector_store.ok` と Chroma heartbeat）
 - 旧イメージ疑い: `make rag-rebuild`
@@ -32,7 +32,7 @@ SOC AI Agent: 採用支援SaaS (Go + Next.js + Python RAG)
 - **共通**: 日本語(コメント/コミット), UTF-8/LF, camelCase(Go/TS), snake_case(Py)
 - **Go 1.25+**: `any`, `slices`, `for i := range n`, `errors.Is/As`, 手動DI, テーブル駆動テスト,TDD
 - **FE**: 型安全(any禁止), Functional Components/Hooks, MUI, App Router。UI/UXの設計・改修は `.claude/skills/school-career-ui-design/SKILL.md` に従う
-- **RAG**: Python 3.10+ 型ヒント, Pydantic, `logging`, プロンプト管理
+- **RAG**: Python 3.12 型ヒント, Pydantic, `logging`, プロンプト管理
 - **AI/LLM**: プロンプト版管理, ストリーミング, JSON出力検証, APIキー秘匿
 
 ## 注意点

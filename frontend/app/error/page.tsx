@@ -1,34 +1,30 @@
 import type { Metadata } from 'next'
 import { ServiceErrorView } from '@/components/common/ServiceErrorView'
+import { safeReturnPath } from '@/lib/user-facing-error'
 
 const TITLE = '接続できません | 就活AI'
-const DESCRIPTION = 'サーバーに接続できませんでした。しばらくしてから再試行してください。'
+const DESCRIPTION = 'サーバーに接続できませんでした。しばらくしてから、もう一度お試しください。'
 
-export async function generateMetadata({
-  searchParams,
-}: {
-  searchParams: Promise<{ code?: string }>
-}): Promise<Metadata> {
-  const { code } = await searchParams
-  const title = code ? `接続できません (${code}) | 就活AI` : TITLE
-  return {
-    title,
+// クエリの code（ステータスコード）は画面にもタイトルにも出さない（#2213）。
+export const metadata: Metadata = {
+  title: TITLE,
+  description: DESCRIPTION,
+  robots: { index: false, follow: false },
+  openGraph: {
+    title: TITLE,
     description: DESCRIPTION,
-    robots: { index: false, follow: false },
-    openGraph: {
-      title,
-      description: DESCRIPTION,
-      locale: 'ja_JP',
-      type: 'website',
-    },
-  }
+    locale: 'ja_JP',
+    type: 'website',
+  },
 }
 
 export default async function ServiceErrorPage({
   searchParams,
 }: {
-  searchParams: Promise<{ code?: string }>
+  searchParams: Promise<{ from?: string | string[] }>
 }) {
-  const { code } = await searchParams
-  return <ServiceErrorView code={code} />
+  const { from } = await searchParams
+  // 「再試行」は、エラーになったページ（from）へ戻って読み直す。同じサイトの中のパスだけを通し、無ければトップへ。
+  const retryHref = safeReturnPath(typeof from === 'string' ? from : undefined) ?? '/'
+  return <ServiceErrorView kind="connection" retryHref={retryHref} />
 }

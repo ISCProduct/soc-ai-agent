@@ -21,7 +21,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
   const search = request.nextUrl.search
   try {
-    const result = await proxyAdminBackend('GET', `/api/admin/teacher/students/${id}/es-reviews${search}`, {
+    const result = await proxyAdminBackend('GET', `/api/admin/teacher/students/${encodeURIComponent(id)}/es-reviews${search}`, {
       headers: adminProxyHeaders(request.headers),
       timeoutMs: 15_000,
     })

@@ -157,6 +157,7 @@ func TestSummarizeRepo_ValidFullNameReturnsSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	expectOwnRepos(mock, 7, fullName)
 	mock.ExpectQuery("SELECT \\* FROM `git_hub_profiles`").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "git_hub_login", "access_token"}).
 			AddRow(1, 7, "me", "plain-token"))

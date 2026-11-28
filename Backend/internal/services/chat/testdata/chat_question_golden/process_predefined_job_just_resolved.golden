@@ -1,0 +1,58 @@
+== err=<nil>
+== 応答
+{
+  "response": "開発の経験を教えてください。",
+  "question_weight_id": 9,
+  "all_phases": [
+    {
+      "phase_id": 1,
+      "phase_name": "job_analysis",
+      "display_name": "job_analysis（表示名）",
+      "questions_asked": 0,
+      "valid_answers": 0,
+      "completion_score": 0,
+      "is_completed": false,
+      "min_questions": 3,
+      "max_questions": 5
+    },
+    {
+      "phase_id": 2,
+      "phase_name": "interest_analysis",
+      "display_name": "interest_analysis（表示名）",
+      "questions_asked": 0,
+      "valid_answers": 0,
+      "completion_score": 0,
+      "is_completed": false,
+      "min_questions": 3,
+      "max_questions": 0
+    }
+  ],
+  "is_complete": false,
+  "total_questions": 8,
+  "answered_questions": 1,
+  "evaluated_categories": 0,
+  "total_categories": 10,
+  "job_category_id": 5,
+  "judgment_percent": 0
+}
+== 保存したメッセージ
+[
+  {
+    "id": 0,
+    "organization_id": 0,
+    "session_id": "char-session",
+    "user_id": 42,
+    "role": "assistant",
+    "content": "開発の経験を教えてください。",
+    "question_weight_id": 9,
+    "weight_category": "技術志向",
+    "created_at": "0001-01-01T00:00:00Z"
+  }
+]
+== 保存した AI 質問
+null
+== 更新した進捗
+null
+== AI呼び出し回数: 1
+== プロンプト 1
+[{"content":[{"text":"次の質問を、新卒でも答えやすい短い質問に言い換えてください。\n\n## 制約\n- 1文で、40〜80文字程度\n- 例示やカッコ補足は入れない\n- 元の質問の意図・キーワードを必ず保持する\n- 質問文のみを返す\n\n## 自己検証\n言い換えた質問が以下を満たすか確認してから出力してください：\n1. 元の質問が問いたい「評価対象（技術志向・リーダーシップ等）」が伝わるか\n2. 新卒学生が学生生活の経験で答えられる内容か\n3. 40〜80文字の範囲に収まっているか\n\n質問:\nありがとうございます！それでは、適性診断を始めますね。\n\nこれまでに取り組んだ開発経験について教えてください。（授業や趣味でも構いません）","type":"input_text"}],"role":"user"}]

@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/interview-questions`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${encodeURIComponent(id)}/interview-questions`, {
     headers: {
       'X-Admin-Email': request.headers.get('x-admin-email') || '',
       'X-Admin-Token': request.headers.get('x-admin-token') || '',
@@ -25,7 +25,7 @@ export async function POST(
 ) {
   const { id } = await params
   const body = await request.json()
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/interview-questions`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${encodeURIComponent(id)}/interview-questions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

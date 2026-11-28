@@ -52,4 +52,23 @@ describe('本番の Content-Security-Policy', () => {
     expect(permissions[0].value).toContain('camera=(self)')
     expect(permissions[0].value).toContain('microphone=(self)')
   })
+
+  it.each(['/(.*)', '/interview'])('%s は base-uri / form-action / object-src を絞る', async (prefix) => {
+    const value = csp(await headersFor(prefix))
+    expect(value).toContain("base-uri 'self'")
+    expect(value).toContain("form-action 'self'")
+    expect(value).toContain("object-src 'none'")
+  })
+
+  it.each(['/(.*)', '/interview'])('%s はブラウザから使っていない外部 API への接続を許可しない', async (prefix) => {
+    expect(csp(await headersFor(prefix))).not.toContain('api.openai.com')
+  })
+})
+
+
+describe('Live2D の資産のキャッシュ', () => {
+  it('面接のたびに問い合わせ直さないよう、キャッシュさせる', async () => {
+    const cache = (await headersFor('/live2d')).find((h) => h.key === 'Cache-Control')
+    expect(cache?.value).toMatch(/max-age=[1-9]\d*/)
+  })
 })

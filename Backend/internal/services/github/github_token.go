@@ -1,16 +1,16 @@
 package github
 
 import (
+	"Backend/internal/config"
 	"Backend/internal/crypto"
 	"Backend/internal/models"
 	"fmt"
 	"log"
-	"os"
 )
 
 // StoreAccessToken GitHubアクセストークンを AES-GCM で暗号化してDBに保存する（#326）
 func (s *GitHubService) StoreAccessToken(userID uint, login, accessToken string) error {
-	encryptionKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
+	encryptionKey := config.TokenEncryptionKey()
 	storedToken := accessToken
 	if encryptionKey != "" {
 		encrypted, err := crypto.EncryptToken(accessToken, encryptionKey)
@@ -32,7 +32,7 @@ func (s *GitHubService) StoreAccessToken(userID uint, login, accessToken string)
 
 // loadAccessToken StoreAccessToken と対になる復号。鍵未設定時は平文保存として扱う（#326）
 func loadAccessToken(userID uint, stored string) (string, error) {
-	encryptionKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
+	encryptionKey := config.TokenEncryptionKey()
 	if encryptionKey == "" {
 		return stored, nil
 	}

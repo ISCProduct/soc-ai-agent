@@ -10,6 +10,7 @@ _ENVS = [
     "OPENAI_ES_REVIEW_MODEL",
     "OPENAI_REVIEW_MODEL",
     "OPENAI_HINTS_PARSE_MODEL",
+    "OPENAI_ES_IMPROVE_MODEL",
 ]
 
 
@@ -61,3 +62,18 @@ def test_healthはES添削で使うモデルを返す(monkeypatch, client):
     monkeypatch.setenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
     body = client.get("/health").json()
     assert body.get("chat_model") == model_tiers.es_review_model() == "gpt-4o"
+
+
+
+def test_ES添削の改善文は軽量の層(monkeypatch):
+    """改善文の生成は評価より軽い処理なので軽量の層にする（SOCAIAGENT-559）。評価は上位のまま。"""
+    assert model_tiers.es_improve_model() == "gpt-4o-mini"
+    assert model_tiers.es_review_model() == "gpt-4o"
+    # OPENAI_CHAT_MODEL（評価の既定を変える既存の変数）には引きずられない
+    monkeypatch.setenv("OPENAI_CHAT_MODEL", "gpt-4.1")
+    assert model_tiers.es_improve_model() == "gpt-4o-mini"
+    monkeypatch.setenv("AI_MODEL_LIGHT", "gpt-4.1-nano")
+    assert model_tiers.es_improve_model() == "gpt-4.1-nano"
+    # 工程ごとの設定が最優先（元の上位モデルに戻すとき）
+    monkeypatch.setenv("OPENAI_ES_IMPROVE_MODEL", "gpt-4o")
+    assert model_tiers.es_improve_model() == "gpt-4o"

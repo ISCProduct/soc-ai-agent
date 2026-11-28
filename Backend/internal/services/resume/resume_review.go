@@ -2,6 +2,7 @@ package resume
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/config"
 	"Backend/internal/repositories"
 	"Backend/internal/safego"
 	"Backend/internal/services/piimask"
@@ -123,8 +124,11 @@ const (
 	// requestReviewJSON が枠を倍にして1度だけやり直す。
 	ReviewMaxOutputTokens = 2400
 
-	// ReviewTemperature はレビュー生成の温度。
-	ReviewTemperature = 0.2
+	// ReviewTemperature はレビュー生成（採点を含む）の温度。同一入力での点のゆらぎを下げるため、
+	// 面接レポート（interview.ReportTemperature, SOCAIAGENT-513）と同じ 0.01 にする（SOCAIAGENT-699）。
+	// 0 にしないのは、温度を省略する経路で API 既定の 1.0 になりうるため。
+	// seed は固定しない。この呼び出しは Responses API で、seed のパラメータが無い。
+	ReviewTemperature = 0.01
 
 	// ReviewMaxItems はプロンプトが指定している items の上限。
 	// プロンプト本文と指示遵守率の判定で同じ値を使う。
@@ -231,7 +235,7 @@ func (s *ResumeService) candidateContextForRAG(userID uint) string {
 
 // ctx はリクエストIDを RAG へ伝播させるために受け取る(#1188)
 func (s *ResumeService) fetchRAGReport(ctx context.Context, resumeText, companyName, jobTitle string, userID uint) (string, error) {
-	baseURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
+	baseURL := config.RAGReviewURL()
 	if baseURL == "" {
 		return "", errors.New("RAG_REVIEW_URL is not set")
 	}
@@ -287,7 +291,7 @@ func (s *ResumeService) fetchRAGReport(ctx context.Context, resumeText, companyN
 // fetchRAGReportStream は FastAPI ストリーミングエンドポイントを呼び出し、
 // SSE レスポンスボディ (io.ReadCloser) を返す。呼び出し元がクローズする責務を持つ。
 func (s *ResumeService) fetchRAGReportStream(ctx context.Context, resumeText, companyName, jobTitle string, userID uint) (io.ReadCloser, error) {
-	baseURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
+	baseURL := config.RAGReviewURL()
 	if baseURL == "" {
 		return nil, errors.New("RAG_REVIEW_URL is not set")
 	}
@@ -408,6 +412,13 @@ func (s *ResumeService) persistReview(doc *models.ResumeDocument, review *models
 	return nil
 }
 
+// reviewProgressEvent は、画面の進み具合表示に使う progress イベントを作る。
+// stage は 0=書類を読み取る / 1=内容を確認する / 2=レポートを書く / 3=仕上げをする。
+// percent は処理の節目ごとの目安で、実測の進捗ではない。
+func reviewProgressEvent(stage, percent int, message string) map[string]any {
+	return map[string]any{"type": "progress", "stage": stage, "percent": percent, "message": message}
+}
+
 func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uint, requestingUserID uint, companyName, jobTitle, candidateType string, w http.ResponseWriter) error {
 	sendEvent := func(v map[string]any) {
 		data, _ := json.Marshal(v)
@@ -432,7 +443,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 	// 未登録企業の取得は最大 provisionTimeout かかる。その間レスポンスが
 	// 無言だとエッジ(60秒)に切られるため、先に1イベント流して時計を進めておく。
-	sendEvent(map[string]any{"type": "progress", "message": "企業情報を確認しています"})
+	sendEvent(reviewProgressEvent(0, 5, "企業情報を確認しています"))
 
 	canonicalName, err := s.ensureRealCompany(ctx, companyName)
 	if err != nil {
@@ -488,6 +499,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 	_ = s.repo.ReplaceTextBlocks(doc.ID, blocks)
 	findings := formatFindingsFor(blocks)
+	sendEvent(reviewProgressEvent(1, 30, "書類の内容を確認しています"))
 
 	// 外へ送るのは伏字済みの写しだけ。失敗したら送らない
 	masked, err := s.maskBlocksForLLM(doc.UserID, blocks)
@@ -499,6 +511,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	text := buildResumeText(masked, reviewTextLimit)
 
 	// RAGレポートをストリーミングしつつ全文を収集する
+	sendEvent(reviewProgressEvent(2, 50, "レポートを書いています"))
 	ragReport := s.streamRAGReport(ctx, w, text, companyName, jobTitle, doc.UserID)
 
 	// スコア・指摘事項を生成
@@ -508,6 +521,8 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		sendEvent(map[string]any{"type": "error", "message": reviewScoreErrorMessage(err)})
 		return err
 	}
+
+	sendEvent(reviewProgressEvent(3, 85, "仕上げをしています"))
 
 	// レビューを保存する。注釈PDFより先に行う。
 	// ここが欠けていたため、画面には出るのに resume_reviews が0件のままだった(#1332)。

@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"context"
 	"errors"
 	"time"
 
@@ -58,6 +59,15 @@ func (r *GitHubRepository) GetRepositories(userID uint) ([]models.GitHubRepo, er
 		return nil, err
 	}
 	return repos, nil
+}
+
+// ListOwnRepoFullNames 同期済みリポジトリのうち、本人が作成者または共同編集者のものの full_name を返す（SOCAIAGENT-698）。
+func (r *GitHubRepository) ListOwnRepoFullNames(ctx context.Context, userID uint) ([]string, error) {
+	var names []string
+	if err := r.db.WithContext(ctx).Model(&models.GitHubRepo{}).Where("user_id = ? AND is_owner_or_collaborator = ?", userID, true).Pluck("full_name", &names).Error; err != nil {
+		return nil, err
+	}
+	return names, nil
 }
 
 // ReplaceLanguageStats ユーザーの言語使用比率を全件置換

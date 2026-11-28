@@ -1,6 +1,5 @@
 /** @jest-environment jsdom */
 
-import { BACKEND_URL } from '@/lib/config'
 import { studentScoutService } from '@/lib/scout/api'
 
 jest.mock('@/lib/auth', () => ({
@@ -27,7 +26,7 @@ describe('studentScoutService', () => {
     await studentScoutService.list({ limit: 30, offset: 30 })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `${BACKEND_URL}/api/user/scouts?limit=30&offset=30`,
+      `/api/bff/user/scouts?limit=30&offset=30`,
       expect.objectContaining({
         headers: expect.objectContaining({ 'X-User-Token': 'user-jwt' }),
       }),
@@ -49,10 +48,10 @@ describe('studentScoutService', () => {
 
     const urls = fetchMock.mock.calls.map((call) => call[0] as string)
     expect(urls).toEqual([
-      `${BACKEND_URL}/api/user/scouts/4/view`,
-      `${BACKEND_URL}/api/user/scouts/4/accept`,
-      `${BACKEND_URL}/api/user/scouts/4/decline`,
-      `${BACKEND_URL}/api/user/scout-blocks`,
+      `/api/bff/user/scouts/4/view`,
+      `/api/bff/user/scouts/4/accept`,
+      `/api/bff/user/scouts/4/decline`,
+      `/api/bff/user/scout-blocks`,
     ])
     const methods = fetchMock.mock.calls.map((call) => (call[1] as RequestInit).method)
     expect(methods).toEqual(['POST', 'POST', 'POST', 'POST'])

@@ -254,10 +254,15 @@ export default function PageContent() {
         </Card>
       </Stack>
 
-      <Dialog open={deleteTarget !== null} onClose={() => setDeleteTarget(null)}>
-        <DialogTitle>削除の確認</DialogTitle>
+      <Dialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        aria-labelledby="scraper-session-delete-title"
+        aria-describedby="scraper-session-delete-description"
+      >
+        <DialogTitle id="scraper-session-delete-title">削除の確認</DialogTitle>
         <DialogContent>
-          <Typography>
+          <Typography id="scraper-session-delete-description">
             セッション &quot;{deleteTarget}&quot; を削除します。よろしいですか？
           </Typography>
         </DialogContent>

@@ -1,8 +1,8 @@
 package interview
 
 import (
+	"Backend/internal/config"
 	"context"
-	"os"
 	"time"
 
 	"Backend/internal/openai"
@@ -54,7 +54,7 @@ func recordTTSUsage(ctx context.Context, cli *openai.Client, text string, latenc
 // ttsModelName は実際に使われる音声合成モデル名を返す。
 // openai.TTS と同じ解決順にする（ずれると費用の内訳がモデル名で割れなくなる）。
 func ttsModelName() string {
-	if m := os.Getenv("OPENAI_TTS_MODEL"); m != "" {
+	if m := config.OpenAITTSModel(); m != "" {
 		return m
 	}
 	return openai.DefaultTTSModel

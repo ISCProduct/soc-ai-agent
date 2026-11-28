@@ -14,7 +14,12 @@
 
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-WF="$ROOT/.github/workflows/deployment.yml"
+WF="$ROOT/.github/workflows/deploy-production-job.yml"
+CALLER="$ROOT/.github/workflows/deployment.yml"
+if ! grep -q 'uses: \./\.github/workflows/deploy-production-job.yml' "$CALLER"; then
+  echo "NG: deployment.yml が deploy-production-job.yml を呼んでいない" >&2
+  exit 1
+fi
 
 WORK=$(mktemp -d)
 FRAGMENT="$WORK/fragment.sh"
@@ -24,7 +29,7 @@ trap 'rm -rf "$WORK"' EXIT
 # 抜き出せなければ「テストしたつもり」になるので必ず失敗させる。
 START=$(grep -n "Scale production services back to zero" "$WF" | head -1 | cut -d: -f1)
 if [ -z "$START" ]; then
-  echo "NG: 0へ戻すステップが見つかりません。deployment.yml の構造変更を確認してください。" >&2
+  echo "NG: 0へ戻すステップが見つかりません。deploy-production-job.yml の構造変更を確認してください。" >&2
   exit 1
 fi
 # YAML の `if:` / `run:` 行を含めると source した時点で構文エラーになり、

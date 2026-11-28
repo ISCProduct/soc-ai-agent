@@ -152,7 +152,7 @@ export default function PageContent() {
         ...(schoolId !== undefined ? { school_id: String(schoolId) } : {}),
       })
       const res = await fetch(`/api/admin/dashboard/users?${params}`, {
-        headers: { 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' },
+        headers: { 'X-Admin-Email': adminEmail },
       })
       if (!res.ok) throw new Error('データの取得に失敗しました')
       const data = await res.json()
@@ -182,7 +182,7 @@ export default function PageContent() {
       : '/api/admin/dashboard/export'
     const link = document.createElement('a')
     link.href = exportUrl
-    const headers = new Headers({ 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' })
+    const headers = new Headers({ 'X-Admin-Email': adminEmail })
     fetch(exportUrl, { headers })
       .then(res => res.blob())
       .then(blob => {
@@ -200,7 +200,7 @@ export default function PageContent() {
     setDetailLoading(true)
     try {
       const res = await fetch(`/api/admin/dashboard/users/${user.user_id}/sessions`, {
-        headers: { 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' },
+        headers: { 'X-Admin-Email': adminEmail },
       })
       const data = await res.json()
       setDetailSessions(data.sessions ?? [])
@@ -364,8 +364,8 @@ export default function PageContent() {
       </Paper>
 
       {/* Session detail dialog */}
-      <Dialog open={!!detailUser} onClose={() => setDetailUser(null)} maxWidth="md" fullWidth>
-        <DialogTitle>
+      <Dialog open={!!detailUser} onClose={() => setDetailUser(null)} maxWidth="md" fullWidth aria-labelledby="admin-session-history-title">
+        <DialogTitle id="admin-session-history-title">
           {detailUser?.name || detailUser?.email} — セッション履歴
         </DialogTitle>
         <DialogContent>

@@ -19,7 +19,6 @@ import {
 } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
 import { authService } from '@/lib/auth'
-import { adminTokenNeedsRefresh } from '@/lib/auth/admin-token'
 import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import { ADMIN_COLORS } from '@/lib/design-tokens'
 import { activeAdminNavItem, visibleAdminNav } from '@/lib/admin/nav'
@@ -48,12 +47,6 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let alive = true
-    if (!adminTokenNeedsRefresh(authService.getStoredToken())) {
-      setAdminTokenPhase('ready')
-      return () => {
-        alive = false
-      }
-    }
     // 表示中（ready）の遷移では本文を隠さない。隠すとアンマウントされ、遷移先の入力が消える。
     // 背景で取り直し、失敗してもまだ有効なトークンで動いている間は ready のまま残す。
     setAdminTokenPhase((phase) => (phase === 'ready' ? phase : 'pending'))

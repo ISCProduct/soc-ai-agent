@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -60,7 +59,7 @@ func newEmbClient(t *testing.T) (*openai.Client, *embServer) {
 func TestAnswerSimilarity_質問側の埋め込みはキャッシュされる(t *testing.T) {
 	client, es := newEmbClient(t)
 	s := &ChatService{aiClient: client}
-	ctx := context.Background()
+	ctx := guardedCtx()
 
 	var first float64
 	for i := range 3 {
@@ -87,7 +86,7 @@ func TestAnswerSimilarity_質問側の埋め込みはキャッシュされる(t 
 func TestAnswerSimilarity_取得エラーはキャッシュしない(t *testing.T) {
 	client, es := newEmbClient(t)
 	s := &ChatService{aiClient: client}
-	ctx := context.Background()
+	ctx := guardedCtx()
 
 	es.mu.Lock()
 	es.fail = true

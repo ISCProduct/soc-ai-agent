@@ -166,7 +166,8 @@ func ValidatePublicHTTPURL(rawURL string) error {
 	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("invalid url: %w", err)
+		// url.Parse のエラーは元の URL（クエリのトークン等）を含むので、ログに出る値へ混ぜない
+		return fmt.Errorf("invalid url")
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return fmt.Errorf("only http/https urls are allowed")
@@ -207,7 +208,7 @@ func FetchURLText(ctx context.Context, rawURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SocAI/1.0; +https://example.com/bot)")
+	req.Header.Set("User-Agent", UserAgent())
 	client := &http.Client{
 		Timeout: 15 * time.Second,
 		// 接続直前に解決済みIPを検査する(#1408)。ValidatePublicHTTPURL だけだと

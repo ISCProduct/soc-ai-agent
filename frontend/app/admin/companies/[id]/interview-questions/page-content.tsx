@@ -33,6 +33,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import { authService } from '@/lib/auth'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 
@@ -85,6 +86,14 @@ export default function PageContent() {
   useEffect(() => {
     const user = authService.getStoredUser()
     if (!user?.is_admin && !user?.is_staff) window.location.href = '/'
+  }, [])
+
+  // 企業マスタ・面接質問は全校共有のため、書き込みはシステム管理者のみ（API も 403 を返す）
+  const [isPlatform, setIsPlatform] = useState(false)
+  useEffect(() => {
+    getAdminSchoolAccess()
+      .then((access) => setIsPlatform(!access.restricted))
+      .catch(() => setIsPlatform(false))
   }, [])
 
   const [companyName, setCompanyName] = useState('')
@@ -263,20 +272,27 @@ export default function PageContent() {
         <Typography variant="body2" color="text.secondary">
           登録した質問はAI面接のシステムプロンプトに自動的に注入されます。
         </Typography>
-        <Stack direction="row" spacing={1}>
-          <Button
-            variant="outlined"
-            startIcon={generating ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
-            onClick={handleGenerate}
-            disabled={generating}
-          >
-            {generating ? 'AI生成中...' : 'AIで自動生成'}
-          </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
-            質問を追加
-          </Button>
-        </Stack>
+        {isPlatform && (
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="outlined"
+              startIcon={generating ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
+              onClick={handleGenerate}
+              disabled={generating}
+            >
+              {generating ? 'AI生成中...' : 'AIで自動生成'}
+            </Button>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+              質問を追加
+            </Button>
+          </Stack>
+        )}
       </Box>
+      {!isPlatform && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          面接質問は全校で共有するため、追加・編集・削除はシステム管理者のみ行えます。修正が必要なときはシステム管理者に依頼してください。
+        </Alert>
+      )}
 
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
@@ -284,7 +300,7 @@ export default function PageContent() {
         </Box>
       ) : questions.length === 0 ? (
         <Paper elevation={0} sx={{ p: 4, textAlign: 'center', border: '1px dashed #e2e8f0' }}>
-          <Typography color="text.secondary">質問が登録されていません。「質問を追加」から登録してください。</Typography>
+          <Typography color="text.secondary">{isPlatform ? '質問が登録されていません。「質問を追加」から登録してください。' : '質問が登録されていません。'}</Typography>
         </Paper>
       ) : (
         <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0' }}>
@@ -296,7 +312,7 @@ export default function PageContent() {
                 <TableCell sx={{ fontWeight: 700, width: 140 }}>職種（空=全共通）</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>質問文</TableCell>
                 <TableCell sx={{ fontWeight: 700, width: 80 }}>必須</TableCell>
-                <TableCell sx={{ fontWeight: 700, width: 100 }}>操作</TableCell>
+                {isPlatform && <TableCell sx={{ fontWeight: 700, width: 100 }}>操作</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -324,20 +340,22 @@ export default function PageContent() {
                       <Chip label="必須" size="small" color="error" sx={{ fontWeight: 700 }} />
                     )}
                   </TableCell>
-                  <TableCell>
-                    <Stack direction="row" spacing={0.5}>
-                      <Tooltip title="編集">
-                        <IconButton size="small" onClick={() => openEdit(q)} aria-label="質問を編集">
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="削除">
-                        <IconButton size="small" color="error" onClick={() => setDeleteConfirmId(q.id)} aria-label="質問を削除">
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
-                  </TableCell>
+                  {isPlatform && (
+                    <TableCell>
+                      <Stack direction="row" spacing={0.5}>
+                        <Tooltip title="編集">
+                          <IconButton size="small" onClick={() => openEdit(q)} aria-label="質問を編集">
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="削除">
+                          <IconButton size="small" color="error" onClick={() => setDeleteConfirmId(q.id)} aria-label="質問を削除">
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
@@ -346,8 +364,8 @@ export default function PageContent() {
       )}
 
       {/* 作成/編集ダイアログ */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{editingId ? '質問を編集' : '質問を追加'}</DialogTitle>
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth aria-labelledby="admin-question-form-title">
+        <DialogTitle id="admin-question-form-title">{editingId ? '質問を編集' : '質問を追加'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2.5} sx={{ mt: 1 }}>
             <TextField
@@ -423,10 +441,17 @@ export default function PageContent() {
       </Dialog>
 
       {/* AI生成プレビューダイアログ */}
-      <Dialog open={generateDialogOpen} onClose={() => setGenerateDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>AIが生成した面接質問（{generatedQuestions.length}件）</DialogTitle>
+      <Dialog
+        open={generateDialogOpen}
+        onClose={() => setGenerateDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        aria-labelledby="admin-generated-questions-title"
+        aria-describedby="admin-generated-questions-description"
+      >
+        <DialogTitle id="admin-generated-questions-title">AIが生成した面接質問（{generatedQuestions.length}件）</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          <Typography id="admin-generated-questions-description" variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             企業情報・求人情報をもとにAIが生成しました。追加したい質問を選択してください。
           </Typography>
           <Stack spacing={1}>
@@ -490,10 +515,17 @@ export default function PageContent() {
       </Dialog>
 
       {/* 削除確認ダイアログ */}
-      <Dialog open={deleteConfirmId !== null} onClose={() => setDeleteConfirmId(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>質問を削除しますか？</DialogTitle>
+      <Dialog
+        open={deleteConfirmId !== null}
+        onClose={() => setDeleteConfirmId(null)}
+        maxWidth="xs"
+        fullWidth
+        aria-labelledby="admin-question-delete-title"
+        aria-describedby="admin-question-delete-description"
+      >
+        <DialogTitle id="admin-question-delete-title">質問を削除しますか？</DialogTitle>
         <DialogContent>
-          <Typography variant="body2">この操作は取り消せません。</Typography>
+          <Typography id="admin-question-delete-description" variant="body2">この操作は取り消せません。</Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setDeleteConfirmId(null)}>キャンセル</Button>

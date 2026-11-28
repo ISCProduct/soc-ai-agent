@@ -1,7 +1,6 @@
 package github
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -101,7 +100,7 @@ func TestGenerateRepoSummary_SendsWrappedPrompt(t *testing.T) {
 	defer server.Close()
 
 	s := &GitHubService{openaiClient: openai.NewWithBaseURL(server.URL, "gpt-4o-mini")}
-	got, err := s.generateRepoSummary(context.Background(), repoNameAttack, readmeAttack, "")
+	got, err := s.generateRepoSummary(passThroughGuardCtx(), repoNameAttack, readmeAttack, "")
 	if err != nil {
 		t.Fatalf("generateRepoSummary error: %v", err)
 	}

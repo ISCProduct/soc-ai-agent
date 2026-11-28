@@ -26,6 +26,7 @@
 - [ローカル開発](#ローカル開発)
 - [Docker Compose](#docker-compose)
 - [GitHub CLI セットアップ](#github-cli-セットアップ)
+- [Codex Skills](#codex-skills)
 - [Copilot カスタムコマンド共有](#copilot-カスタムコマンド共有)
 - [主要APIエンドポイント](#主要apiエンドポイント)
 - [品質管理](#品質管理)
@@ -145,7 +146,7 @@ routes/                      ルーティング・ミドルウェア適用
 |----|---------|
 | Backend | Go 1.25 / Echo v4 / GORM (MySQL 8.0) / Redis / AWS SDK v2 / go-openai / Sentry |
 | Frontend | Next.js 16 / React 19 / TypeScript / MUI v7 / Radix UI / React Flow / Three.js / Sentry |
-| RAG | Python 3.10 / FastAPI / LangChain / ChromaDB / OpenAI Embeddings / Sentry |
+| RAG | Python 3.12 / FastAPI / LangChain / ChromaDB / OpenAI Embeddings / Sentry |
 | インフラ | AWS ECS（staging: on EC2 / 本番: on Fargate）+ ALB / RDS / S3 / Terraform |
 | CI・テスト | GitHub Actions / Docker Compose / Jest / Playwright E2E / pytest |
 
@@ -442,6 +443,18 @@ gh pr checks
 ```
 
 ---
+
+## Codex Skills
+
+チーム共有の Codex Skills は [`.agents/skills/`](./.agents/skills/) にあります。Codex でこのリポジトリを開き、以前の `/prompts:<名前>` は `$<名前>` で呼び出します。例として、`/prompts:spec-design` は `$spec-design` になりました。
+
+| 用途 | スキル |
+| --- | --- |
+| レビュー用のひな形・確認項目 | `$code-review`、`$code-review-local`、`$k` |
+| カタグルマのコードレビュー | `$katagrma-code-review` |
+| 要件整理とシステム設計 | `$spec-requirements`、`$spec-design` |
+| 課題起票、実装・レビュー対応、PR 作成 | `$issue`、`$implement`、`$pr` |
+| 仕様確認から PR の CI 確認まで | `$implement-auto` |
 
 ## Copilot カスタムコマンド共有
 

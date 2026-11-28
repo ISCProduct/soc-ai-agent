@@ -1,5 +1,4 @@
 import { authService } from '@/lib/auth'
-import { BACKEND_URL } from '@/lib/config'
 
 export interface StudentGuidance {
   id: number
@@ -10,12 +9,10 @@ export interface StudentGuidance {
 }
 
 // Backend 直叩きは localStorage/sessionStorage の JWT をそのまま使うため、middleware の
-// Cookie 自動リフレッシュが効かない。ログインから1時間を超えるとトークンが失効したまま
-// 残り続け、他の画面は正常なのにここだけ401になる。面接・スカウトAPIと同じく、
-// 本体のリクエスト前に ensureFreshUserToken() で同期する。
+// 以前は Backend を直接呼んでいて Cookie 自動リフレッシュが効かず、ログインから1時間を超えると
+// ここだけ401になった。今は中継ルート（/api/bff）を通すので、middleware が Cookie から付け直す。
 export async function fetchActiveGuidances(): Promise<StudentGuidance[]> {
-  await authService.ensureFreshUserToken()
-  const res = await fetch(`${BACKEND_URL}/api/user/guidances`, {
+  const res = await fetch(`/api/bff/user/guidances`, {
     cache: 'no-store',
     headers: authService.getUserFetchHeaders(),
   })
@@ -25,8 +22,7 @@ export async function fetchActiveGuidances(): Promise<StudentGuidance[]> {
 }
 
 export async function dismissGuidance(id: number): Promise<void> {
-  await authService.ensureFreshUserToken()
-  const res = await fetch(`${BACKEND_URL}/api/user/guidances/${id}/dismiss`, {
+  const res = await fetch(`/api/bff/user/guidances/${id}/dismiss`, {
     method: 'POST',
     headers: authService.getUserFetchHeaders(),
   })

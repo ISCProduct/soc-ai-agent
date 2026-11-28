@@ -23,7 +23,7 @@ import (
 // interviewReportLLMCallTimeout はレポート生成の LLM 呼び出し1回の締切。
 //
 // 試行上限(60秒)と同じ値だと、1試行目が長引いたときに再試行の余地がなくなる。
-// レポートは非同期ジョブ（上限10分）で生成され、利用者を画面で待たせない。maxTokens=2000 で
+// レポートは非同期ジョブ（上限10分）で生成され、利用者を画面で待たせない。maxTokens=ReportMaxTokens で
 // INTERVIEW_REPORT_MODEL により重いモデルにもなるため、論理コールの上限と同じ長さにする。
 const interviewReportLLMCallTimeout = 2 * time.Minute
 
@@ -281,6 +281,9 @@ func BuildReportPrompts(lang, transcript string) (systemPrompt, userPrompt strin
     "communication": null,
     "enthusiasm": 123
   },
+  "category_breakdown": [
+    {"category": "自己紹介・志望動機", "score": 3, "weakness": "志望理由が一般的で、その企業を選んだ理由が伝わりにくい", "practice": "企業の事業と自分の経験を結びつけて1文で言えるようにする"}
+  ],
   "strengths": ["強み1", "強み2", "強み3"],
   "improvements": ["改善点1", "改善点2", "改善点3"],
   "teacher": {
@@ -299,8 +302,10 @@ func BuildReportPrompts(lang, transcript string) (systemPrompt, userPrompt strin
 ※ strengths/improvementsは各2〜4件のリスト形式で具体的に記述してください。
 ※ teacher以下は教員専用の詳細情報として出力してください。
 
+%s
+
 Interview transcript:
-%s`, lang, BuildRubricPromptSection(),
+%s`, lang, BuildRubricPromptSection(), categoryBreakdownPromptSection(),
 		// transcript は面接官（role=ai）の発話も含むので、面接プロンプトへの注入で
 		// 面接官に任意のテキストを言わせれば2ホップで採点プロンプトへ届く（#1600）。
 		// 受験者の発話自体も自由記述なので、いずれにせよ非信頼テキストとして囲む。
@@ -336,6 +341,8 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	if err := s.reportRepo.Upsert(report); err != nil {
 		return err
 	}
+	// ローカル採点はレポート保存の後。失敗しても、上で書いた LLM の採点はそのまま残す。
+	s.recordShadowScore(ctx, session.UserID, sessionID, utterances)
 	return s.applyReportScores(session, report, utterances)
 }
 
@@ -373,8 +380,10 @@ const (
 	ReportTemperature float32 = 0.01
 	// ReportSeed は採点の seed（best effort。OpenAI は完全一致を保証しない）。
 	ReportSeed = 513
-	// ReportMaxTokens は採点応答の出力上限。
-	ReportMaxTokens = 2000
+	// ReportMaxTokens は採点応答の出力上限（評価ハーネス cmd/aibench も同じ値を使う）。
+	// 質問カテゴリ別の評価（SOCAIAGENT-610、最大6件×2文）を足したぶん 2000 から増やした。
+	// 足りないと JSON が途中で切れ、レポート全体が読めなくなる。
+	ReportMaxTokens = 2600
 )
 
 // generateReportPayload は LLM に講評を作らせ、保存してよい内容を返す。
@@ -512,6 +521,9 @@ func (s *InterviewService) buildReportRecord(sessionID uint, payload reportPaylo
 		StrengthsJSON:            string(strengthsJSON),
 		ImprovementsJSON:         string(improvementsJSON),
 		TeacherReportJSON:        string(teacherJSON),
+		// 知らないカテゴリ・範囲外の点数は捨てる。ルーブリックのスコアを捨てた場合も、
+		// カテゴリ別の評価は別に検証しているので残す
+		CategoryBreakdownJSON: categoryBreakdownJSON(SanitizeCategoryBreakdown(payload.CategoryBreakdown)),
 	}
 }
 
@@ -729,9 +741,11 @@ type reportPayload struct {
 	Scores               map[string]int    `json:"scores"`
 	Evidence             map[string]string `json:"evidence"`
 	EvidenceUtteranceIDs map[string]*uint  `json:"evidence_utterance_ids"`
-	Strengths            []string          `json:"strengths"`
-	Improvements         []string          `json:"improvements"`
-	Teacher              *teacherReport    `json:"teacher"`
+	// CategoryBreakdown は質問カテゴリ別の評価（SOCAIAGENT-610）。保存前に SanitizeCategoryBreakdown を通す
+	CategoryBreakdown []CategoryBreakdown `json:"category_breakdown"`
+	Strengths         []string            `json:"strengths"`
+	Improvements      []string            `json:"improvements"`
+	Teacher           *teacherReport      `json:"teacher"`
 }
 
 // parseReportJSON は LLM 出力を reportPayload として読む。

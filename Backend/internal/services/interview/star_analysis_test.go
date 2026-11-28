@@ -165,16 +165,11 @@ func TestSTARMissing_AsksActionBeforeResult(t *testing.T) {
 	}
 }
 
-// 欠落要素をLLMプロンプトに明示していること。
+// 欠落要素を深掘りの指示に明示していること。
 // これが抜けると、成果が語られていない回答にも「きっかけ」を聞き返す。
-func TestBuildFollowUpUserPrompt_NamesMissingElement(t *testing.T) {
+func TestDeepeningFocus_NamesMissingElement(t *testing.T) {
 	// 成果(R)だけが無い回答
-	answer := "大学のチーム開発で進捗の遅れという課題があり、タスク管理の仕組みを提案して導入しました。"
-	got := buildFollowUpUserPrompt("学生時代に力を入れたことは？", answer)
-
-	if !strings.Contains(got, answer) {
-		t.Error("回答本文がプロンプトに含まれていない")
-	}
+	got := deepeningFocus("大学のチーム開発で進捗の遅れという課題があり、タスク管理の仕組みを提案して導入しました。")
 	if !strings.Contains(got, "「成果」") {
 		t.Errorf("欠落要素を指定していない: %s", got)
 	}
@@ -186,10 +181,8 @@ func TestBuildFollowUpUserPrompt_NamesMissingElement(t *testing.T) {
 }
 
 // STAR が揃った回答には余計な指定をしない。
-func TestBuildFollowUpUserPrompt_CompleteAnswerHasNoDirective(t *testing.T) {
-	answer := "大学のゼミで集計が遅いという課題があり、自動化を実装して作業時間を5時間短縮しました。"
-	got := buildFollowUpUserPrompt("学生時代に力を入れたことは？", answer)
-	if strings.Contains(got, "含まれていません") {
+func TestDeepeningFocus_CompleteAnswerHasNoDirective(t *testing.T) {
+	if got := deepeningFocus("大学のゼミで集計が遅いという課題があり、自動化を実装して作業時間を5時間短縮しました。"); got != "" {
 		t.Errorf("STARが揃っているのに欠落を指定した: %s", got)
 	}
 }

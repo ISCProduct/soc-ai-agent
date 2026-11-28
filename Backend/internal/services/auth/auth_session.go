@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -185,7 +184,7 @@ func (s *AuthService) RefreshSession(refreshToken string) (*AuthResponse, error)
 	if s.refreshTokens == nil {
 		return nil, errors.New("refresh token service not configured")
 	}
-	userSecret := os.Getenv("USER_SECRET")
+	userSecret := config.UserSecret()
 	if userSecret == "" {
 		return nil, errors.New("USER_SECRET is not configured")
 	}

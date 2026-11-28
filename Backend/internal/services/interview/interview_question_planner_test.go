@@ -13,7 +13,7 @@ func TestBuildQuestionQueueOrdersRequiredBeforeTopics(t *testing.T) {
 		{ID: 1, Category: "技術", QuestionText: "推奨質問", IsRequired: false, Priority: 2},
 		{ID: 2, Category: "志望動機", QuestionText: "必須質問", IsRequired: true, Priority: 1},
 	}
-	queue := BuildQuestionQueue(10, custom)
+	queue := BuildQuestionQueue(10, custom, "")
 	if len(queue) != len(interviewTopics)+2 {
 		t.Fatalf("queue length = %d, want %d", len(queue), len(interviewTopics)+2)
 	}
@@ -27,23 +27,28 @@ func TestBuildQuestionQueueOrdersRequiredBeforeTopics(t *testing.T) {
 
 func TestBuildQuestionQueueUsesGeneratedHintsOnlyWithoutCustomQuestions(t *testing.T) {
 	hints := []string{"  質問A  ", "質問A", "質問B"}
-	queue := BuildQuestionQueue(10, nil, hints...)
+	queue := BuildQuestionQueue(10, nil, questionSourceAIResearch, hints...)
 	if len(queue) != len(interviewTopics)+2 {
 		t.Fatalf("queue length = %d, want %d", len(queue), len(interviewTopics)+2)
 	}
-	if queue[0].Source != questionSourceGenerated || queue[0].QuestionText != "質問A" {
-		t.Fatalf("first generated question = %+v", queue[0])
+	if queue[0].Source != questionSourceAIResearch || queue[0].QuestionText != "質問A" {
+		t.Fatalf("first research question = %+v", queue[0])
 	}
-	if queue[1].Source != questionSourceGenerated || queue[1].QuestionText != "質問B" {
-		t.Fatalf("second generated question = %+v", queue[1])
+	if queue[1].Source != questionSourceAIResearch || queue[1].QuestionText != "質問B" {
+		t.Fatalf("second research question = %+v", queue[1])
 	}
 
 	custom := []models.InterviewCompanyQuestion{{Category: "必須", QuestionText: "登録済み質問", IsRequired: true}}
-	withCustom := BuildQuestionQueue(11, custom, hints...)
+	withCustom := BuildQuestionQueue(11, custom, questionSourceAIResearch, hints...)
 	for _, state := range withCustom {
-		if state.Source == questionSourceGenerated {
-			t.Fatalf("generated question was added despite saved custom questions: %+v", state)
+		if state.Source == questionSourceAIResearch {
+			t.Fatalf("research question was added despite saved custom questions: %+v", state)
 		}
+	}
+
+	generated := BuildQuestionQueue(12, nil, questionSourceGenerated, "自動で作った質問")
+	if generated[0].Source != questionSourceGenerated {
+		t.Fatalf("generated source = %s", generated[0].Source)
 	}
 }
 
@@ -235,7 +240,7 @@ func TestBuildInterviewSystemPromptWithDirective(t *testing.T) {
 	prompt := buildInterviewSystemPrompt(
 		"テスト株式会社", "", "エンジニア", "", "general",
 		nil, nil, 0, 0, 1, 5, 0, 180,
-		&questionDirective{Text: "具体的な失敗経験を教えてください。", Source: questionSourceCustom, Category: "強み・弱み", IsDeepening: true},
+		&questionDirective{Text: "定型の追質問", DeepeningOf: "具体的な失敗経験を教えてください。", Source: questionSourceCustom, Category: "強み・弱み", IsDeepening: true},
 	)
 	if !containsAll(prompt, []string{"【今回の質問】", "深掘り質問", "具体的な失敗経験を教えてください。"}) {
 		t.Fatalf("prompt missing directive section: %s", prompt)
@@ -246,7 +251,7 @@ func TestBuildInterviewSystemPromptDoesNotMapCompanyCategoriesToStandardTopics(t
 	prompt := buildInterviewSystemPrompt(
 		"テスト株式会社", "", "エンジニア", "", "general",
 		nil, nil, 0, 60, 1, 5, 0, 180,
-		&questionDirective{Text: "質問", Source: questionSourceGenerated, Category: "企業別質問"},
+		&questionDirective{Text: "質問", Source: questionSourceAIResearch, Category: "企業別質問"},
 	)
 	if !strings.Contains(prompt, "企業独自のカテゴリを標準トピックへ無理に読み替えず") {
 		t.Fatalf("prompt does not preserve the question queue category: %s", prompt)

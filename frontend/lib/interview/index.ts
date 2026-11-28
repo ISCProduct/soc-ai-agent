@@ -1,4 +1,3 @@
-import { BACKEND_URL } from '../backend-url'
 import { authService } from '../auth/index'
 import { fetchWithTimeout, LIST_FETCH_TIMEOUT_MS } from '../fetch-timeout'
 import { extractApiErrorMessage } from '../interview/utils'
@@ -56,6 +55,25 @@ export type InterviewUtterance = {
   created_at: string
 }
 
+export type StudentVideo = {
+  id: number
+  status: string
+  mime_type: string
+  uploaded_at?: string
+}
+
+export type ReviewCue = {
+  utterance_id: number
+  role: string
+  offset_seconds: number | null
+}
+
+export type InterviewPlayback = {
+  videos: StudentVideo[]
+  cues: ReviewCue[]
+  anchor: string
+}
+
 export type TeacherReport = {
   overall_comment: string
   detailed_evidence: Record<string, string>
@@ -73,6 +91,8 @@ export type InterviewReport = {
   strengths_json?: string
   improvements_json?: string
   teacher_report_json?: string  // 教員のみ返却
+  /** 質問の種類ごとの評価（SOCAIAGENT-610）。この機能より前のレポートは null */
+  category_breakdown_json?: string | null
   created_at: string
   updated_at: string
 }
@@ -91,6 +111,22 @@ export type InterviewTrendPoint = {
   ownership: number | null
   communication: number | null
   enthusiasm: number | null
+}
+
+export type AxisScoreDelta = {
+  axis: string
+  label: string
+  base: number | null
+  target: number | null
+  delta: number | null
+  direction: 'improved' | 'declined' | 'unchanged' | 'unavailable'
+  change_label: string
+}
+
+export type AxisComparisonResult = {
+  base_session_id: number
+  target_session_id: number
+  axes: AxisScoreDelta[]
 }
 
 export type PhraseSuggestion = {
@@ -116,7 +152,6 @@ async function interviewFetch(
   init?: RequestInit,
   timeoutMs: number = LIST_FETCH_TIMEOUT_MS,
 ): Promise<Response> {
-  await authService.ensureFreshUserToken()
   const headers = new Headers(init?.headers)
   const authHeaders = authService.getUserFetchHeaders()
   Object.entries(authHeaders).forEach(([k, v]) => headers.set(k, v))
@@ -126,7 +161,7 @@ async function interviewFetch(
 
 export const interviewApi = {
   async createSession(userId: number, language = 'ja', interviewerGender?: string): Promise<InterviewSession> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews`, {
+    const res = await interviewFetch(`/api/bff/interviews`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, language, interviewer_gender: interviewerGender }),
@@ -136,7 +171,7 @@ export const interviewApi = {
   },
 
   async startSession(sessionId: number, userId: number): Promise<InterviewSession> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/start`, {
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId }),
@@ -146,7 +181,7 @@ export const interviewApi = {
   },
 
   async finishSession(sessionId: number, userId: number): Promise<InterviewSession> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/finish`, {
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}/finish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId }),
@@ -166,7 +201,7 @@ export const interviewApi = {
    * この ID をサーバー側の一意制約に当てて二重保存を防ぐ。
    */
   async saveUtterance(sessionId: number, userId: number, role: 'user', text: string, clientUtteranceId: string): Promise<void> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/utterances`, {
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}/utterances`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, role, text, client_utterance_id: clientUtteranceId }),
@@ -181,7 +216,7 @@ export const interviewApi = {
    * 失敗しても呼び出し側はポーリングを続けるので、ここでは投げっぱなしにしない（呼び出し側で握る）。
    */
   async regenerateReport(sessionId: number, userId: number): Promise<void> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/report/regenerate`, {
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}/report/regenerate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId }),
@@ -189,29 +224,41 @@ export const interviewApi = {
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
   },
 
+  async listPlayback(sessionId: number): Promise<InterviewPlayback> {
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}/videos`, undefined, LIST_FETCH_TIMEOUT_MS)
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+    return (await res.json()) as InterviewPlayback
+  },
+
+  async videoPlaybackURL(sessionId: number, videoId: number): Promise<{ url: string; expires_at: string }> {
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}/videos/${videoId}/url`, undefined, LIST_FETCH_TIMEOUT_MS)
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+    return (await res.json()) as { url: string; expires_at: string }
+  },
+
   async getDetail(sessionId: number, userId: number): Promise<InterviewDetail> {
     // 教員用レポートを返すかはサーバーが認証済みユーザーの実ロールで決める(#1814)。
     // クライアントから role は送らない。
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}`, undefined, LIST_FETCH_TIMEOUT_MS)
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
   async getReport(sessionId: number, userId: number): Promise<InterviewReport | null> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/report`)
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}/report`)
     if (res.status === 404) return null
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
   async listSessions(userId: number, page = 1, limit = 20): Promise<{ sessions: InterviewSession[]; total: number }> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews?page=${page}&limit=${limit}`, undefined, LIST_FETCH_TIMEOUT_MS)
+    const res = await interviewFetch(`/api/bff/interviews?page=${page}&limit=${limit}`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
   async createRealtimeToken(userId: number, interviewId: number): Promise<string> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/realtime/token`, {
+    const res = await interviewFetch(`/api/bff/realtime/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, interview_id: interviewId }),
@@ -222,7 +269,7 @@ export const interviewApi = {
   },
 
   async getPhraseSuggestions(sessionId: number, userId: number): Promise<PhraseSuggestion[]> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/phrase-suggestions`, undefined, LIST_FETCH_TIMEOUT_MS)
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}/phrase-suggestions`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const data = await res.json()
     return data.suggestions as PhraseSuggestion[]
@@ -230,14 +277,24 @@ export const interviewApi = {
 
   async getTrend(userId: number, limit = 0): Promise<InterviewTrendPoint[]> {
     const params = limit > 0 ? `?limit=${limit}` : ''
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/trend${params}`, undefined, LIST_FETCH_TIMEOUT_MS)
+    const res = await interviewFetch(`/api/bff/interviews/trend${params}`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const data = await res.json()
     return data.points as InterviewTrendPoint[]
   },
 
+  async compareAxes(baseSessionId: number, targetSessionId: number): Promise<AxisComparisonResult> {
+    const params = new URLSearchParams({
+      base: String(baseSessionId),
+      target: String(targetSessionId),
+    })
+    const res = await interviewFetch(`/api/bff/interviews/axis-comparison?${params}`, undefined, LIST_FETCH_TIMEOUT_MS)
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+    return (await res.json()) as AxisComparisonResult
+  },
+
   async sendReportEmail(sessionId: number, userId: number): Promise<{ message: string }> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/send-report`, {
+    const res = await interviewFetch(`/api/bff/interviews/${sessionId}/send-report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId }),
@@ -255,8 +312,7 @@ export const interviewApi = {
     return new Promise((resolve, reject) => {
       void (async () => {
         try {
-          await authService.ensureFreshUserToken()
-        } catch (e) {
+                } catch (e) {
           reject(e instanceof Error ? e : new Error(String(e)))
           return
         }
@@ -266,7 +322,7 @@ export const interviewApi = {
       form.append('video', blob, `interview_${sessionId}.webm`)
 
       const xhr = new XMLHttpRequest()
-      xhr.open('POST', `${BACKEND_URL}/api/interviews/${sessionId}/upload-video`)
+      xhr.open('POST', `/api/bff/interviews/${sessionId}/upload-video`)
       const userHeaders = authService.getUserFetchHeaders()
       Object.entries(userHeaders).forEach(([k, v]) => xhr.setRequestHeader(k, v))
 

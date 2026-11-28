@@ -14,7 +14,7 @@ import (
 // lookupCompanyBriefFromCache は1レビューで最大2回呼ばれる。記録しないと
 // レビューのたびに AI コールを撃ち続けることになり、失敗が続く企業ほど高くつく。
 func TestLookupCompanyBrief_PersonaFailureIsNotRetried(t *testing.T) {
-	comp := &models.Company{ID: 7, Name: "株式会社テスト", Industry: "情報通信業"}
+	comp := &models.Company{ID: 7, IsActive: true, Name: "株式会社テスト", Industry: "情報通信業"}
 	persona := &personaStub{err: errors.New("ai down")}
 
 	svc := &ResumeService{}

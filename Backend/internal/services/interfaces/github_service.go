@@ -11,7 +11,7 @@ type GitHubService interface {
 	GetLanguageStats(userID uint) ([]models.GitHubLanguageStat, error)
 	TriggerAsyncSync(userID uint, force bool)
 	SyncUserData(ctx context.Context, userID uint, force bool) error
-	ListRepoSummaries(userID uint) ([]models.GitHubRepoSummary, error)
+	ListRepoSummaries(ctx context.Context, userID uint) ([]models.GitHubRepoSummary, error)
 	SummarizeRepo(ctx context.Context, userID uint, fullName string, forceRefresh bool, targetRole string) (*models.GitHubRepoSummary, error)
 }
 

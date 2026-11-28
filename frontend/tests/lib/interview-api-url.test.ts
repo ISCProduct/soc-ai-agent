@@ -37,7 +37,7 @@ describe('interviewApi の URL 組み立て', () => {
 
   it('getDetail は role をクエリに付けない（認可はサーバー側の実ロール。#1814）', async () => {
     await interviewApi.getDetail(5, 1)
-    expect(calledUrl()).toMatch(/\/api\/interviews\/5$/)
+    expect(calledUrl()).toMatch(/\/api\/bff\/interviews\/5$/)
     expect(calledUrl()).not.toContain('role')
   })
 
@@ -54,11 +54,11 @@ describe('interviewApi の URL 組み立て', () => {
 
   it('getTrend は limit 指定時だけクエリを付け、?で始まる', async () => {
     await interviewApi.getTrend(1, 5)
-    expect(calledUrl()).toContain('/api/interviews/trend?limit=5')
+    expect(calledUrl()).toContain('/api/bff/interviews/trend?limit=5')
   })
 
   it('getTrend は limit 未指定ならクエリ無し', async () => {
     await interviewApi.getTrend(1)
-    expect(calledUrl()).toMatch(/\/api\/interviews\/trend$/)
+    expect(calledUrl()).toMatch(/\/api\/bff\/interviews\/trend$/)
   })
 })

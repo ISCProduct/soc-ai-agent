@@ -2,6 +2,7 @@ package companyauth
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/services/shared"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -211,8 +212,8 @@ func (s *CompanyUserService) Register(req RegisterRequest) (*AuthResponse, error
 	if len([]rune(name)) > 255 {
 		return nil, errors.New("name is too long")
 	}
-	if len(password) < 8 {
-		return nil, errors.New("password must be at least 8 characters")
+	if err := shared.ValidatePassword(password); err != nil {
+		return nil, err
 	}
 
 	existing, err := s.users.FindByEmail(emailAddr)
@@ -259,8 +260,8 @@ func (s *CompanyUserService) AcceptInvite(req AcceptInviteRequest) (*AuthRespons
 	if token == "" || password == "" {
 		return nil, errors.New("token and password are required")
 	}
-	if len(password) < 8 {
-		return nil, errors.New("password must be at least 8 characters")
+	if err := shared.ValidatePassword(password); err != nil {
+		return nil, err
 	}
 
 	user, err := s.users.FindByInviteTokenHash(hashToken(token))

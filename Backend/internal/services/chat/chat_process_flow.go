@@ -62,8 +62,7 @@ func (s *ChatService) handleAllPhasesCompletedFromPhaseError(ctx context.Context
 	}
 
 	allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
-	// ここで要約を生成して保存（failure を許容して応答は続行）
-	summary, _ := s.buildAndSaveSessionSummary(ctx, req.UserID, req.SessionID)
+	summary := s.sessionSummaryForResponse(ctx, req.UserID, req.SessionID)
 	return &ChatResponse{
 		Response:            completionMsg,
 		IsComplete:          true,
@@ -122,8 +121,7 @@ func (s *ChatService) handleAllPhasesCompletedFromCount(
 			totalMinQuestions += phase.MinQuestions
 		}
 	}
-	// ここで要約を生成して保存
-	summary, _ := s.buildAndSaveSessionSummary(ctx, req.UserID, req.SessionID)
+	summary := s.sessionSummaryForResponse(ctx, req.UserID, req.SessionID)
 	return &ChatResponse{
 		Response:            completionMsg,
 		IsComplete:          true,

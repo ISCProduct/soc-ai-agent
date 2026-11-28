@@ -168,26 +168,6 @@ func (s *ChatService) getLastPhaseProgress(userID uint, sessionID string) (*mode
 	return &progresses[len(progresses)-1], nil
 }
 
-func allPhasesReachedMax(progresses []models.UserAnalysisProgress, phases []models.AnalysisPhase) bool {
-	if len(phases) == 0 {
-		return false
-	}
-	progressMap := make(map[uint]models.UserAnalysisProgress, len(progresses))
-	for _, p := range progresses {
-		progressMap[p.PhaseID] = p
-	}
-	for _, phase := range phases {
-		p, ok := progressMap[phase.ID]
-		if !ok {
-			return false
-		}
-		if phase.MaxQuestions > 0 && p.QuestionsAsked < phase.MaxQuestions {
-			return false
-		}
-	}
-	return true
-}
-
 func shouldForceTextQuestion(history []models.ChatMessage, currentPhase *models.UserAnalysisProgress) bool {
 	if currentPhase == nil || currentPhase.Phase == nil {
 		return false

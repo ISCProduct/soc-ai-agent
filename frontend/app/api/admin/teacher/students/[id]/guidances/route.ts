@@ -12,7 +12,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { id } = await params
   const body = await request.text()
   try {
-    const result = await proxyAdminBackend('POST', `/api/admin/teacher/students/${id}/guidances`, {
+    const result = await proxyAdminBackend('POST', `/api/admin/teacher/students/${encodeURIComponent(id)}/guidances`, {
       headers: adminProxyHeaders(request.headers),
       body,
       timeoutMs: 15_000,

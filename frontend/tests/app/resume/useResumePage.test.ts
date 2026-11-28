@@ -252,6 +252,57 @@ describe('useResumePage handleReview のストリーム中断 (SOCAIAGENT-664)',
     expect(result.current.reviewError).toBe('レビューに失敗しました。時間をおいてもう一度お試しください。')
   })
 
+  it('progress を受け取るたびに進み具合を更新し、範囲外の％は 0〜100 に収める', async () => {
+    const result = await setup(() =>
+      sse(
+        { type: 'progress', stage: 0, percent: 5, message: '企業情報を確認しています' },
+        { type: 'progress', stage: 2, percent: 50 },
+        { type: 'progress', stage: 3, percent: 150 },
+      ),
+    )
+    await act(async () => {
+      await result.current.handleReview()
+    })
+    expect(result.current.reviewProgress).toEqual({ stage: 3, percent: 100 })
+  })
+
+  it('stage や percent が無い progress は無視する', async () => {
+    const result = await setup(() => sse({ type: 'progress', stage: 1, percent: 30 }, { type: 'progress', message: '企業情報を確認しています' }))
+    await act(async () => {
+      await result.current.handleReview()
+    })
+    expect(result.current.reviewProgress).toEqual({ stage: 1, percent: 30 })
+  })
+
+  it('前より小さい％や前の段階が届いても、進み具合を逆戻りさせない', async () => {
+    const result = await setup(() =>
+      sse({ type: 'progress', stage: 2, percent: 50 }, { type: 'progress', stage: 1, percent: 30 }, { type: 'progress', stage: 1.5, percent: 60 }),
+    )
+    await act(async () => {
+      await result.current.handleReview()
+    })
+    expect(result.current.reviewProgress).toEqual({ stage: 2, percent: 50 })
+  })
+
+  it('もう一度レビューを始めたら、前回の進み具合を消す', async () => {
+    let first = true
+    const result = await setup(() => {
+      if (first) {
+        first = false
+        return sse({ type: 'progress', stage: 2, percent: 50 })
+      }
+      return sse({ type: 'chunk', text: 'x' })
+    })
+    await act(async () => {
+      await result.current.handleReview()
+    })
+    expect(result.current.reviewProgress).toEqual({ stage: 2, percent: 50 })
+    await act(async () => {
+      await result.current.handleReview()
+    })
+    expect(result.current.reviewProgress).toBeNull()
+  })
+
   it('再試行を始めたら中断表示を消す', async () => {
     let first = true
     const result = await setup(() => {

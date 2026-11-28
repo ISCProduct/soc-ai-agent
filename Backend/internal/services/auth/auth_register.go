@@ -4,6 +4,7 @@ import (
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/safego"
+	"Backend/internal/services/shared"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -87,8 +88,8 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 	if req.Email == "" || req.Password == "" {
 		return nil, errors.New("email and password are required")
 	}
-	if len(req.Password) < 8 {
-		return nil, errors.New("password must be at least 8 characters")
+	if err := shared.ValidatePassword(req.Password); err != nil {
+		return nil, err
 	}
 
 	// トークン検証

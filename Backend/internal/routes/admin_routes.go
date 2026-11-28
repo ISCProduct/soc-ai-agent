@@ -4,6 +4,7 @@ import (
 	admincontrollers "Backend/internal/controllers/admin"
 	applicationcontrollers "Backend/internal/controllers/application"
 	insightcontrollers "Backend/internal/controllers/insight"
+	usercontrollers "Backend/internal/controllers/user"
 	"Backend/internal/repositories"
 	"Backend/internal/services/school"
 
@@ -40,6 +41,7 @@ func SetupAdminRoutes(
 	schoolService *school.SchoolService,
 	adminSecret string,
 	aiBudgetController *admincontrollers.AIBudgetController,
+	growthController *usercontrollers.GrowthController,
 ) {
 	admin := api.Group("/admin", EchoAdminAuth(userRepo, adminSecret))
 	schoolScope := EchoAdminSchoolScope(schoolService)
@@ -60,8 +62,11 @@ func SetupAdminRoutes(
 	admin.POST("/teacher/students/:id/guidances", teacherGuidanceController.Create)
 	// ES添削の履歴（#1531）。担当校スコープを通し、学園一致はクエリ側で担保する。
 	admin.GET("/teacher/students/:id/es-reviews", teacherESReviewController.List, schoolScope)
+	// 学生のスコアと診断フェーズの履歴（SOCAIAGENT-601）。担当校の学生だけ。
+	admin.GET("/students/:id/growth-history", growthController.ForStaff, schoolScope)
 
 	admin.GET("/interviews", adminInterviewController.ListSessions, schoolScope)
+	admin.GET("/interviews/:id/shadow-score", adminInterviewController.ShadowScore)
 	admin.GET("/interviews/:id/videos", adminInterviewController.ListVideos)
 	admin.GET("/interviews/videos/:video_id/url", adminInterviewController.VideoURL)
 
@@ -75,12 +80,15 @@ func SetupAdminRoutes(
 	admin.PATCH("/applications/:id/status", appController.AdminUpdateStatus)
 
 	admin.GET("/graduate-employments", adminJobController.GraduateEmployments, schoolScope)
+	admin.GET("/graduate-employments/summary", adminJobController.GraduateEmploymentSummary, schoolScope)
 	admin.POST("/graduate-employments", adminJobController.CreateGraduateEmployment)
 	admin.GET("/graduate-employments/:id", adminJobController.GetGraduateEmployment)
 	admin.PUT("/graduate-employments/:id", adminJobController.UpdateGraduateEmployment)
 
 	// 学校メンバー・企業承認は担当校の運営業務
 	admin.GET("/schools/:id", adminSchoolController.Get)
+	// 面接動画の保持期間（SOCAIAGENT-671）。学校管理者のみ。職員は変更できない。
+	admin.PUT("/schools/:id/interview-video-retention", adminSchoolController.UpdateInterviewVideoRetention, requireAdmin)
 	admin.POST("/schools/:id/members", adminSchoolController.AddMember, requireAdmin)
 	admin.DELETE("/schools/:id/members/:user_id", adminSchoolController.RemoveMember, requireAdmin)
 	admin.GET("/schools/:id/company-approvals", adminSchoolController.ListCompanyApprovals)
@@ -97,23 +105,34 @@ func SetupAdminRoutes(
 	admin.POST("/schools/:id/job-suppressions", adminSchoolJobSuppressionController.Create)
 	admin.DELETE("/schools/:id/job-suppressions/:jobId", adminSchoolJobSuppressionController.Delete)
 
-	// 企業・求人カタログの閲覧と基本編集（掲載承認のため全件閲覧は担当校管理者にも必要）
+	// 企業・求人カタログの閲覧（掲載承認のため全件閲覧は担当校管理者にも必要）。
+	// 企業マスタと面接質問は全校共有のため、書き込みはシステム管理者専用（SOCAIAGENT-692）。
 	admin.GET("/companies", adminCompanyController.List)
 	admin.GET("/companies/industries", adminCompanyController.Industries)
 	admin.GET("/companies/names", adminCompanyController.Names)
 	admin.GET("/companies/:id", adminCompanyController.Get)
-	admin.PUT("/companies/:id", adminCompanyController.Update)
+	admin.PUT("/companies/:id", adminCompanyController.Update, platform)
 	// 掲載公開・非公開は全テナント共通の DataStatus / IsActive を書き換えるのでシステム管理者専用。
 	// 担当校ごとの掲載可否は /schools/:id/company-approvals で扱う。
 	admin.PATCH("/companies/:id/publish", adminCompanyController.Publish, platform)
 	admin.PATCH("/companies/:id/verify", adminCompanyController.Verify, platform)
 	admin.PATCH("/companies/:id/reject", adminCompanyController.Reject, platform)
+	// 企業情報の「取得」「確定」ボタンは職員にも開ける（オーナー決定 2026-11-22、SOCAIAGENT-692）。
+	// 企業マスタは学校に属さないため担当校スコープは掛からない。費用は Search の月次予算と
+	// singleflight（取得側の fetcher に配線済み）で全体として抑える。
+	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack)
+	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo)
+	admin.POST("/companies/:id/confirm-info", adminCompanyController.ConfirmCompanyInfo)
 	admin.GET("/companies/:id/relation-graph", adminCompanyGraphController.RelationGraph)
+	// 事業タグ（SOCAIAGENT-717）。タグ一覧は全校共有のため、書き込みはシステム管理者専用。
+	admin.GET("/business-tags", adminCompanyController.ListBusinessTags)
+	admin.GET("/companies/:id/business-tags", adminCompanyController.GetCompanyBusinessTags)
+	admin.PUT("/companies/:id/business-tags", adminCompanyController.UpdateCompanyBusinessTags, platform)
 	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
-	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion)
-	admin.POST("/companies/:id/interview-questions/generate", adminInterviewController.GenerateCompanyQuestions)
-	admin.PUT("/companies/:id/interview-questions/:qid", adminInterviewController.UpdateCompanyQuestion)
-	admin.DELETE("/companies/:id/interview-questions/:qid", adminInterviewController.DeleteCompanyQuestion)
+	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion, platform)
+	admin.POST("/companies/:id/interview-questions/generate", adminInterviewController.GenerateCompanyQuestions, platform)
+	admin.PUT("/companies/:id/interview-questions/:qid", adminInterviewController.UpdateCompanyQuestion, platform)
+	admin.DELETE("/companies/:id/interview-questions/:qid", adminInterviewController.DeleteCompanyQuestion, platform)
 	admin.GET("/job-categories", adminJobController.JobCategories)
 	admin.GET("/job-positions", adminJobController.JobPositions)
 	admin.POST("/job-positions", adminJobController.CreateJobPosition)
@@ -212,9 +231,6 @@ func SetupAdminRoutes(
 	admin.POST("/companies/web-search-relations", adminCompanyController.WebSearchCompanyRelations, platform)
 	admin.GET("/companies/:id/gbiz-search", adminCompanyController.SearchGBiz, platform)
 	admin.POST("/companies/:id/gbiz-sync", adminCompanyController.SyncGBiz, platform)
-	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack, platform)
-	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo, platform)
-	admin.POST("/companies/:id/confirm-info", adminCompanyController.ConfirmCompanyInfo, platform)
 	admin.POST("/companies/:id/fetch-relations", adminCompanyController.FetchCompanyRelations, platform)
 	admin.POST("/companies/:id/confirm-relations", adminCompanyController.ConfirmCompanyRelations, platform)
 	admin.POST("/companies/:id/fetch-jobs", adminCompanyController.FetchJobs, platform)

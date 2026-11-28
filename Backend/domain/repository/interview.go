@@ -69,3 +69,10 @@ type InterviewQuestionStateRepository interface {
 	FindBySessionID(sessionID uint) ([]models.InterviewQuestionState, error)
 	FindLatestAsked(sessionID uint) (*models.InterviewQuestionState, error)
 }
+
+// InterviewResearchRepository は Web 調査で得た質問候補を、期限つきで保持する。
+// 面接の途中では検索しない。期限内の保存結果だけを使う。
+type InterviewResearchRepository interface {
+	FindFresh(ctx context.Context, companyKey, position string, now time.Time) ([]string, bool, error)
+	Save(ctx context.Context, companyKey, position string, questions []string, fetchedAt, expiresAt time.Time) error
+}

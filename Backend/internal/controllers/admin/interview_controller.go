@@ -3,10 +3,12 @@ package admin
 import (
 	"Backend/domain/repository"
 	"Backend/internal/controllers/httpapi"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/companyportal"
+	"Backend/internal/services/costs"
 	"Backend/internal/services/interview"
 	"Backend/internal/services/school"
 	"Backend/internal/services/shared"
@@ -36,6 +38,7 @@ type AdminInterviewController struct {
 	userRepo            repository.UserRepository
 	sessionRepo         repository.InterviewSessionRepository
 	schools             *school.SchoolService
+	aiBudget            costs.AIBudgetStatusProvider
 }
 
 func NewAdminInterviewController(
@@ -83,6 +86,11 @@ func (c *AdminInterviewController) ensureSchoolAccessForUser(ctx echo.Context, o
 // SetOpenAIClient OpenAIクライアントを注入する
 func (c *AdminInterviewController) SetOpenAIClient(client *openai.Client) {
 	c.openaiClient = client
+}
+
+// SetAIBudget は面接質問の AI 生成に使う予算判定を注入する。
+func (c *AdminInterviewController) SetAIBudget(p costs.AIBudgetStatusProvider) {
+	c.aiBudget = p
 }
 
 // SetUserAccessGuard 退会済みユーザーの動画閲覧を遮断するために注入する
@@ -296,6 +304,17 @@ func (c *AdminInterviewController) GenerateCompanyQuestions(ctx echo.Context) er
 	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 60*time.Second)
 	defer cancel()
 
+	// 静的シークレットでの呼び出し（利用者なし）は予算の対象外。ほかの AI ルートの予算判定と同じ扱い。
+	if userID, ok := middleware.AdminUserIDFromContext(reqCtx); ok {
+		if err := costs.CheckUserAIBudget(reqCtx, c.aiBudget, userID); err != nil {
+			if errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+				return httpapi.AIBudgetExceeded(ctx)
+			}
+			httpapi.LogError(err)
+			return httpapi.AIBudgetUnavailable()
+		}
+	}
+
 	questions, err := c.generateQuestionsWithAI(reqCtx, company, positions)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("AI生成失敗: %v", err))
@@ -360,7 +379,8 @@ JSON配列形式のみで回答（説明文不要）:
   }
 ]`, companyFacts)
 
-	ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport)
+	// 送るのは企業情報だけで学生の文章を含まないので、学生由来の機能名でもガードを明示的に外す（SOCAIAGENT-697）。
+	ctx = usagectx.WithFeature(openai.WithoutInputGuard(ctx), usagectx.FeatureInterviewReport)
 	jsonStr, err := c.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.7, 2000)
 	if err != nil {
 		return nil, err
@@ -482,6 +502,33 @@ func (c *AdminInterviewController) ListVideos(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"videos": videos,
 	})
+}
+
+// ShadowScore は管理者だけが、LLM の採点とローカル採点の並びを見る。
+// 学生向けの API には出さない。担当校の外は拒否する。
+func (c *AdminInterviewController) ShadowScore(ctx echo.Context) error {
+	sessionID, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
+	}
+	if c.sessionRepo == nil || c.interviewService == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "school access check is not configured")
+	}
+	session, err := c.sessionRepo.FindByID(uint(sessionID))
+	if err != nil || session == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	if err := c.ensureSchoolAccessForUser(ctx, session.UserID); err != nil {
+		return err
+	}
+	view, err := c.interviewService.ShadowComparison(ctx.Request().Context(), uint(sessionID))
+	if errors.Is(err, repository.ErrNotFound) {
+		return echo.NewHTTPError(http.StatusNotFound, "シャドー採点はありません")
+	}
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch shadow score")
+	}
+	return ctx.JSON(http.StatusOK, view)
 }
 
 // VideoURL handles GET /api/admin/interviews/:id/videos/:video_id/url

@@ -6,6 +6,7 @@ package resume
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -359,5 +360,17 @@ func TestValidateURL(t *testing.T) {
 				t.Errorf("エラーなしを期待したが発生した: url=%s, err=%v", tt.rawURL, err)
 			}
 		})
+	}
+}
+
+// progress イベントの形は画面（進み具合の表示）が読む契約。キー名と値を固定する
+func TestReviewProgressEvent(t *testing.T) {
+	got, err := json.Marshal(reviewProgressEvent(2, 50, "レポートを書いています"))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"message":"レポートを書いています","percent":50,"stage":2,"type":"progress"}`
+	if string(got) != want {
+		t.Fatalf("progress イベント: got %s, want %s", got, want)
 	}
 }

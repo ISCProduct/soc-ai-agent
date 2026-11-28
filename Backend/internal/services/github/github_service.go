@@ -4,7 +4,10 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/repositories"
+	"Backend/internal/services/piimask"
 	"Backend/internal/services/skillscore"
+	"context"
+	"strings"
 	"time"
 )
 
@@ -27,7 +30,11 @@ type GitHubService struct {
 	apiBaseURL        string // テスト用オーバーライド（空なら githubAPIBase を使用）
 	graphQLURL        string // テスト用オーバーライド（空なら githubGraphQLURL を使用）
 	openaiClient      *openai.Client
+	subjects          piimask.SubjectReader // README を外部 LLM へ送る前の伏字の辞書に使う登録情報（SOCAIAGENT-697）
 }
+
+// SetSubjectReader は、伏字に使う学生の登録情報（氏名・メール・学校名）の読み取りを設定する。
+func (s *GitHubService) SetSubjectReader(r piimask.SubjectReader) { s.subjects = r }
 
 func NewGitHubService(githubRepo *repositories.GitHubRepository, skillScoreService *skillscore.SkillScoreService, openaiClient *openai.Client) *GitHubService {
 	return &GitHubService{
@@ -72,6 +79,25 @@ func (s *GitHubService) GetLanguageStats(userID uint) ([]models.GitHubLanguageSt
 }
 
 // ListRepoSummaries DBからAI要約一覧を取得する。今のプロンプトの版で作られたものだけを返す（#2185）。
-func (s *GitHubService) ListRepoSummaries(userID uint) ([]models.GitHubRepoSummary, error) {
-	return s.githubRepo.ListRepoSummaries(userID, repoSummaryPromptVersion)
+// 本人が作成者・共同編集者として同期済みでないリポジトリの要約は、消さずに一覧から隠す（SOCAIAGENT-698）。
+func (s *GitHubService) ListRepoSummaries(ctx context.Context, userID uint) ([]models.GitHubRepoSummary, error) {
+	summaries, err := s.githubRepo.ListRepoSummaries(userID, repoSummaryPromptVersion)
+	if err != nil {
+		return nil, err
+	}
+	names, err := s.githubRepo.ListOwnRepoFullNames(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	own := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		own[strings.ToLower(n)] = struct{}{}
+	}
+	visible := make([]models.GitHubRepoSummary, 0, len(summaries))
+	for _, sm := range summaries {
+		if _, ok := own[strings.ToLower(sm.FullName)]; ok {
+			visible = append(visible, sm)
+		}
+	}
+	return visible, nil
 }

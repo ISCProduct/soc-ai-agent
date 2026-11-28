@@ -8,6 +8,7 @@ import (
 	"Backend/internal/services/costs"
 	"Backend/internal/services/email"
 	"Backend/internal/services/flywheel"
+	"Backend/internal/services/interview/shadowscorer"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
@@ -40,6 +41,9 @@ type InterviewService struct {
 	aiBudget             costs.AIBudgetStatusProvider
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
 	questionStateRepo    repository.InterviewQuestionStateRepository
+	researchRepo         repository.InterviewResearchRepository
+	researchTTL          time.Duration // 生成時に環境変数から1回だけ読む
+	skipScoreThreshold   *int          // 生成時に環境変数から1回だけ読む
 	skillScoreRepo       SkillScoreReader
 	companyRepo          shared.CompanyBriefReader
 	jobCh                chan uint
@@ -67,6 +71,24 @@ type InterviewService struct {
 	ownsCompany          func(userID, companyID uint) (bool, error)
 	companyReadingCache  companyReadingCache
 	companyReadingFlight singleflight.Group
+	// schoolAccess は本人以外の管理者に課す担当校スコープ判定（SOCAIAGENT-687）。nil なら管理者も拒否する。
+	schoolAccess SchoolAccessChecker
+	// shadowStore は保存済みの結果を読むために常に入る。shadowScorer はフラグがオンのときだけ。
+	// shadowMaskFor は学習書き出しと同じ伏字。未設定なら生テキストでは採点しない。
+	// ローカル採点は interview_reports や user_weight_scores には書かない。
+	shadowScorer  shadowscorer.InterviewScorer
+	shadowStore   shadowScoreStore
+	shadowMaskFor func(ctx context.Context, userID uint) (func(string) string, error)
+}
+
+// SchoolAccessChecker は admin ルートと同じ担当校スコープ判定（school.SchoolService が満たす）。
+type SchoolAccessChecker interface {
+	CanAdminAccessUser(isAdmin bool, actorID, targetOrganizationID uint, targetSchoolID *uint) (bool, error)
+}
+
+// SetSchoolAccess は担当校スコープ判定を注入する。未注入だと本人以外は管理者でも拒否する(fail-close)。
+func (s *InterviewService) SetSchoolAccess(c SchoolAccessChecker) {
+	s.schoolAccess = c
 }
 
 // SkillScoreReader はGitHubスキルスコア取得の最小インターフェース。
@@ -96,6 +118,8 @@ func NewInterviewService(
 		workerStop:           make(chan struct{}),
 		workerFinished:       make(chan struct{}),
 		inFlightJobs:         map[uint]struct{}{},
+		researchTTL:          researchTTLFromEnv(),
+		skipScoreThreshold:   skipScoreThresholdFromEnv(),
 	}
 }
 
@@ -107,6 +131,11 @@ func (s *InterviewService) SetCompanyQuestionRepo(r repository.InterviewCompanyQ
 // SetQuestionStateRepo 面接質問キューリポジトリを注入する（オプション）
 func (s *InterviewService) SetQuestionStateRepo(r repository.InterviewQuestionStateRepository) {
 	s.questionStateRepo = r
+}
+
+// SetResearchRepo は Web 調査の質問候補を期限つきで読む保存先を注入する。
+func (s *InterviewService) SetResearchRepo(r repository.InterviewResearchRepository) {
+	s.researchRepo = r
 }
 
 // SetSkillScoreRepo GitHubスキルスコアリポジトリを注入する（オプション）
@@ -290,6 +319,10 @@ type TurnResult struct {
 	// UtteranceSaveFailed はターンの発話を書き起こしへ保存できなかったことを示す（#1969）。
 	// 面接は止めず、画面に「記録できていない」ことを出すために返す（#1476 と同じ扱い）。
 	UtteranceSaveFailed bool
+	// LimitReached は発話数・経過時間・予算の上限に達し、AI を呼ばずに締めの文を返したこと（SOCAIAGENT-696）。
+	// FE はこれを受けて既存の終了経路（/finish）で面接を終え、途中までのレポートを作る。
+	LimitReached bool
+	LimitReason  string
 }
 
 func (s *InterviewService) estimateCost(start, end *time.Time) float64 {
@@ -309,10 +342,24 @@ func (s *InterviewService) isAllowed(actorID uint, ownerID uint) bool {
 		return true
 	}
 	user, err := s.userRepo.GetUserByID(actorID)
-	if err != nil || user == nil {
+	if err != nil || user == nil || !user.IsAdmin {
 		return false
 	}
-	return user.IsAdmin
+	// 本人以外の管理者は、admin ルート（/api/admin/interviews）と同じ担当校スコープで判定する（SOCAIAGENT-687）。
+	if s.schoolAccess == nil {
+		log.Printf("[Interview] WARN: 担当校スコープ判定が未設定のため管理者の閲覧を拒否しました actor=%d", actorID)
+		return false
+	}
+	owner, err := s.userRepo.GetUserByID(ownerID)
+	if err != nil || owner == nil {
+		return false
+	}
+	ok, err := s.schoolAccess.CanAdminAccessUser(true, actorID, owner.OrganizationID, owner.SchoolID)
+	if err != nil {
+		log.Printf("[Interview] WARN: 担当校スコープ判定に失敗したため拒否しました actor=%d: %v", actorID, err)
+		return false
+	}
+	return ok
 }
 
 // redactTeacherReport は教員用レポートを見てよい実ロール（職員・管理者）以外には

@@ -4,7 +4,6 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"Backend/internal/services/chat"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
@@ -19,6 +18,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,7 +35,7 @@ type ChatController struct {
 	userRepo        repository.UserRepository
 	emailService    ifaces.EmailService
 	jobs            shared.JobEnqueuer
-	qualityRepo     *repositories.DiagnosisQualityRepository
+	quality         *diagnosis.QualityService
 	matchingTimers  sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
 	matchingRunning sync.Map // key: sessionID, value: struct{}（実行中の多重起動防止, #1167）
 	aiBudget        costs.AIBudgetStatusProvider
@@ -76,16 +76,16 @@ func (c *ChatController) SetJobEnqueuer(j shared.JobEnqueuer) {
 	c.jobs = j
 }
 
-// SetDiagnosisQualityRepo は recommendations に診断信頼度を載せるための参照先。
-func (c *ChatController) SetDiagnosisQualityRepo(r *repositories.DiagnosisQualityRepository) {
-	c.qualityRepo = r
+// SetDiagnosisQualityService は recommendations に診断信頼度を載せるための参照先。
+func (c *ChatController) SetDiagnosisQualityService(s *diagnosis.QualityService) {
+	c.quality = s
 }
 
 func (c *ChatController) loadDiagnosisQuality(userID uint, sessionID string) (confidence int, flags []string, summary string) {
-	if c.qualityRepo == nil {
+	if c.quality == nil {
 		return 0, nil, ""
 	}
-	report, err := c.qualityRepo.FindByUserAndSession(userID, sessionID)
+	report, err := c.quality.FindReport(userID, sessionID)
 	if err != nil || report == nil {
 		return 0, nil, ""
 	}
@@ -489,6 +489,45 @@ func (c *ChatController) ToggleFavorite(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, map[string]bool{"ok": true})
 }
 
+// GetAxisBreakdown は GET /api/chat/matches/:id/axes（本人の推薦1件の、軸別のマッチの内訳。SOCAIAGENT-611）。
+// 他人の推薦・存在しない推薦は 404（ID の有無を探らせない）。
+func (c *ChatController) GetAxisBreakdown(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	matchID, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
+	if err != nil || matchID == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "id が不正です")
+	}
+	out, err := c.matchingService.GetAxisBreakdown(uint(matchID), userID)
+	if errors.Is(err, shared.ErrNotFound) {
+		return echo.NewHTTPError(http.StatusNotFound, "match not found")
+	}
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, out)
+}
+
+// GetMyAxisScores は GET /api/chat/axis-scores?session_id=（本人の診断の10軸のスコア。SOCAIAGENT-611）。
+// 「軸ごとの内訳」と同じく、適性検査を合流させた値を返す（/api/chat/scores は合流前のチャット由来の値）。
+func (c *ChatController) GetMyAxisScores(ctx echo.Context) error {
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	sessionID := ctx.QueryParam("session_id")
+	if sessionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
+	}
+	out, err := c.matchingService.GetMyAxisScores(userID, sessionID)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{"axes": out})
+}
+
 // GetFavorites は過去の診断を含め、お気に入り企業を1社1行で返す (GET /api/chat/favorites)
 func (c *ChatController) GetFavorites(ctx echo.Context) error {
 	userID, ok := httpapi.UserID(ctx)
@@ -499,15 +538,27 @@ func (c *ChatController) GetFavorites(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "matching service not available")
 	}
 
+	// ユーザーIDは認証だけを見る。クエリの user_id では他人のお気に入りを読めない。
 	limit := httpapi.LimitQuery(ctx, "limit", 50)
-	matches, err := c.matchingService.ListFavoriteCompanies(ctx.Request().Context(), userID, limit)
+	offset := httpapi.IntQuery(ctx, "offset", 0)
+	matches, total, companyIDs, err := c.matchingService.ListFavoriteCompanies(ctx.Request().Context(), userID, offset, limit)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
-	displayed := matching.DisplayableMatches(matches)
-	return ctx.JSON(http.StatusOK, matching.RecommendationResponse{
-		Recommendations: matching.BuildRecommendations(displayed, nil),
-	})
+	// 0件を null にすると、画面が空の案内ではなく読み込み失敗になる。
+	// 末尾を超えた offset も空配列で返し、画面が前のページへ戻れるようにする。
+	recommendations := matching.BuildRecommendations(matches, nil)
+	if recommendations == nil {
+		recommendations = []matching.Recommendation{}
+	}
+	resp := matching.RecommendationResponse{
+		Recommendations: recommendations,
+		Total:           total,
+	}
+	if len(companyIDs) > 0 {
+		resp.FavoriteCompanyIDs = companyIDs
+	}
+	return ctx.JSON(http.StatusOK, resp)
 }
 
 // RemoveFavoriteCompany は企業のお気に入りを診断をまたいで外す (POST /api/chat/favorites/remove)

@@ -349,6 +349,12 @@ func TestSchoolService_StudentStatusesOrderAndPrivacy(t *testing.T) {
 			t.Fatal("他校の学生の受検が混ざっている")
 		}
 	}
+	// 在籍4人。受検開始は途中2人と提出1人。未受検1人。期限超過は未提出の3人。
+	if got.Rollup.StudentCount != 4 || got.Rollup.StartedCount != 3 || got.Rollup.SubmittedCount != 1 ||
+		got.Rollup.NotStartedCount != 1 || got.Rollup.OverdueCount != 3 ||
+		got.Rollup.StartedPercent != 75 || got.Rollup.SubmittedPercent != 25 {
+		t.Fatalf("rollup = %+v", got.Rollup)
+	}
 }
 
 func TestSchoolService_StudentStatusesRanking(t *testing.T) {

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import NextLink from 'next/link'
-import { Alert, Box, Button, ButtonBase, Skeleton, Typography } from '@mui/material'
+import { Box, Button, ButtonBase, Skeleton, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { HOME_COLORS, HOME_LAYOUT } from '@/lib/home-theme'
 import { canDismiss, type StudentGuidance } from '@/lib/teacher-guidance'
 import { type NextAction } from '@/lib/next-actions'

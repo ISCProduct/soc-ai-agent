@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/relation-graph`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${encodeURIComponent(id)}/relation-graph`, {
     headers: {
       'X-Admin-Email': request.headers.get('x-admin-email') || '',
       'X-Admin-Token': request.headers.get('x-admin-token') || '',

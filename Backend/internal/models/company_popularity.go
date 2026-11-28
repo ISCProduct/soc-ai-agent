@@ -18,6 +18,13 @@ type CompanyPopularityRecord struct {
 }
 
 // GraduateEmployment stores alumni employment reports.
+// GraduatePlacement は就職先集計の1行。氏名は含めない。
+type GraduatePlacement struct {
+	GraduationYear int
+	SchoolName     string
+	Industry       string
+}
+
 type GraduateEmployment struct {
 	ID             uint                `gorm:"primaryKey" json:"id"`
 	CompanyID      uint                `gorm:"not null;index" json:"company_id"`

@@ -197,6 +197,17 @@ func TestDeadline_Backlog失敗の内部情報を返さず種類で言い分け�
 	if got := run(nil, &backlogStatusError{Status: 400}); !strings.Contains(got, "受け付けませんでした") {
 		t.Errorf("400: %s", got)
 	}
+	if got := run(nil, &backlogStatusError{Status: 403}); !strings.Contains(got, "更新権限がありません") {
+		t.Errorf("403: %s", got)
+	}
+	// 401 は権限ではなく Bot キーの無効・期限切れ。403 と文言を分ける。
+	got401 := run(nil, &backlogStatusError{Status: 401})
+	if !strings.Contains(got401, "API キーが無効または期限切れ") || strings.Contains(got401, "更新権限がありません") {
+		t.Errorf("401: %s", got401)
+	}
+	if got := run(&backlogStatusError{Status: 401}, nil); !strings.Contains(got, "API キーが無効または期限切れ") {
+		t.Errorf("課題取得時の401: %s", got)
+	}
 	if got := run(nil, context.DeadlineExceeded); !strings.Contains(got, "反映されたかは Backlog で確認") {
 		t.Errorf("タイムアウトは成否不明と伝える: %s", got)
 	}

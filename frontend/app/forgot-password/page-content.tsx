@@ -8,8 +8,8 @@ import {
   TextField,
   Button,
   Typography,
-  Alert,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import Link from 'next/link'
 import { authService } from '@/lib/auth'
 
@@ -61,7 +61,7 @@ export default function PageContent() {
           )}
 
           {sent ? (
-            <Alert severity="success" sx={{ mb: 3 }}>
+            <Alert role="alert" severity="success" sx={{ mb: 3 }}>
               <strong>メールを送信しました</strong>
               <br />
               {email} 宛にパスワードリセット用のリンクを送りました。メールをご確認ください。

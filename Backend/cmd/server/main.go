@@ -12,6 +12,7 @@ import (
 	companysearchcontrollers "Backend/internal/controllers/companysearch"
 	escontrollers "Backend/internal/controllers/es"
 	githubcontrollers "Backend/internal/controllers/github"
+	graduateoutcomecontrollers "Backend/internal/controllers/graduateoutcome"
 	insightcontrollers "Backend/internal/controllers/insight"
 	interviewcontrollers "Backend/internal/controllers/interview"
 	notificationcontrollers "Backend/internal/controllers/notification"
@@ -46,9 +47,12 @@ import (
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/gbizinfo"
 	"Backend/internal/services/github"
+	graduateoutcomesvc "Backend/internal/services/graduateoutcome"
+	"Backend/internal/services/growth"
 	"Backend/internal/services/houjinbangou"
 	"Backend/internal/services/hr"
 	"Backend/internal/services/interview"
+	"Backend/internal/services/interview/shadowscorer"
 	"Backend/internal/services/matching"
 	notificationsvc "Backend/internal/services/notification"
 	"Backend/internal/services/oauth"
@@ -67,6 +71,8 @@ import (
 	"Backend/internal/services/teacher"
 	"Backend/internal/services/training"
 	"Backend/internal/services/training/scorerexport"
+	"Backend/internal/services/userpreference"
+	"Backend/internal/services/videoretention"
 	"context"
 	"log"
 	"log/slog"
@@ -211,6 +217,8 @@ func main() {
 	questionWeightRepo := repositories.NewQuestionWeightRepository(db)
 	chatMessageRepo := repositories.NewChatMessageRepository(db)
 	userWeightScoreRepo := repositories.NewUserWeightScoreRepository(db)
+	growthSnapshots := repositories.NewUserGrowthSnapshotRepository(db)
+	growthRecorder := growth.NewSnapshotter(growthSnapshots)
 	aiGeneratedQuestionRepo := repositories.NewAIGeneratedQuestionRepository(db)
 	predefinedQuestionRepo := repositories.NewPredefinedQuestionRepository(db)
 	phaseRepo := repositories.NewAnalysisPhaseRepository(db)
@@ -302,7 +310,7 @@ func main() {
 	oauthService := oauth.NewOAuthService(userRepo, oauthConfig, githubService)
 	oauthService.SetRefreshTokenService(refreshTokenService)
 	chatService := chat.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
-	questionService := chat.NewQuestionGeneratorService(aiClient, questionWeightRepo)
+	chatService.SetGrowthRecorder(growthRecorder)
 	matchingService := matching.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
 	resumeService := resume.NewResumeService(resumeRepo, "storage/resumes", aiClient)
 	// 履歴書を外部の LLM へ送る前の伏字の辞書に、その学生の氏名・メール・学校名を使う。読めないときは送らない
@@ -314,6 +322,7 @@ func main() {
 		return piimask.Subject{Name: u.Name, Email: u.Email, SchoolName: u.SchoolName}, nil
 	})
 	resumeService.SetSubjectReader(subjectReader)
+	githubService.SetSubjectReader(subjectReader) // GitHub 要約の README も、外の LLM へ送る前に同じ辞書で伏字にする
 	escontrollers.SetSubjectReader(subjectReader) // ES 添削・リライトも、外の LLM へ送る前に同じ辞書で伏字にする
 	crawlService := company.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 	gbizInfoRepo := repositories.NewGBizInfoRepository(db)
@@ -355,6 +364,15 @@ func main() {
 	)
 	analysisService.SetSubjectReader(subjectReader) // 直近の発言を外の LLM へ送る前に、同じ辞書で伏字にする
 	interviewService := interview.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
+	// 保存先は採点フラグと別に置く。フラグを切ったあとも、保存済みの結果を管理者が読めるようにする。
+	shadowStore := repositories.NewInterviewShadowScoreRepository(db)
+	interviewService.SetShadowStore(shadowStore)
+	interviewService.SetShadowMask(scorerexport.NewInterviewShadowMask(userRepo, repositories.NewTrainingScorerExportRepository(db)).ForUser)
+	if scorer, err := shadowscorer.LoadFromEnv(interview.RubricKeys(), interview.RubricScoreMin, interview.RubricScoreMax); err != nil {
+		log.Printf("シャドー採点を有効にできません: %v", err)
+	} else if scorer != nil {
+		interviewService.SetShadowScorer(scorer, shadowStore)
+	}
 	// 面接1回ごとに STT / LLM / TTS を叩くため、セッション数がそのまま費用に効く。
 	// 既定は監視のみで、止めるのは INTERVIEW_BUDGET_ENFORCE を明示したときだけ。
 	interviewService.SetBudgetGuard(costs.NewInterviewBudgetService(interviewSessionRepo, costs.NotifyInterviewBudgetToDiscord))
@@ -383,13 +401,16 @@ func main() {
 
 	// クロス機能連携サービス（チャットスコア↔面接/職務経歴書レビュー）
 	crossFeatureService := flywheel.NewCrossFeatureIntegrationService(userWeightScoreRepo)
+	crossFeatureService.SetGrowthRecorder(growthRecorder)
 	interviewService.SetCrossFeatureService(crossFeatureService)
 	interviewService.SetMatchingRunner(matchingService)
 	interviewService.SetAIBudget(aiBudgetService)
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
+	interviewService.SetResearchRepo(repositories.NewInterviewResearchRepository(db))
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
 	interviewService.SetCompanyRepo(companyPublicRepo)
+	interviewService.SetSchoolAccess(schoolService)
 	interviewService.SetCompanyOwnerChecker(func(userID, companyID uint) (bool, error) {
 		return shared.UserOwnsCompany(companyAccessRepo, userID, companyID)
 	})
@@ -401,7 +422,7 @@ func main() {
 	organizationRepo := repositories.NewOrganizationRepository(db)
 	organizationService := organization.NewOrganizationService(organizationRepo)
 	authController := authcontrollers.NewAuthController(authService, cfg.UserSecret)
-	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService)
+	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService, auth.NewOAuthCodeStore(rdb))
 	chatController := chatcontrollers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	// 推薦への「合う／合わない」（SOCAIAGENT-670）
 	chatController.SetMatchFeedback(matching.NewMatchFeedbackService(repositories.NewUserMatchFeedbackRepository(db)))
@@ -409,10 +430,12 @@ func main() {
 	if jobEnqueuer != nil {
 		chatController.SetJobEnqueuer(jobEnqueuer)
 	}
-	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
-	questionController := chatcontrollers.NewQuestionController(questionService)
+	chatController.SetDiagnosisQualityService(diagnosisQualityService)
 	relationController := companycontrollers.NewCompanyRelationController(companyQueryRepo, aiClient)
-	relationController.SetCorrelationMapService(company.NewCompanyCorrelationMapService(companyRepo, companyRelationRepo))
+	businessTagRepo := repositories.NewCompanyBusinessTagRepository(db)
+	correlationMapService := company.NewCompanyCorrelationMapService(companyRepo, companyRelationRepo)
+	correlationMapService.SetBusinessTagRepository(businessTagRepo)
+	relationController.SetCorrelationMapService(correlationMapService)
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
 	companyValidator.SetSearchFlight(companySearchFlight)
@@ -426,6 +449,7 @@ func main() {
 	// 企業検索・マッチング・面接ヒントからも参照できるようになる（#1124）。
 	resumeService.SetCompanyProvisioner(infoFetcher)
 	adminCompanyController := admincontrollers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
+	adminCompanyController.SetBusinessTagRepository(businessTagRepo)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
 	adminCompanyController.SetSchoolRestrictionChecker(func(adminUserID uint) (bool, error) {
 		restricted, _, err := schoolService.ResolveAdminAccess(adminUserID)
@@ -497,6 +521,7 @@ func main() {
 	adminInterviewController.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	adminInterviewController.SetCompanyRepo(companyRepo)
 	adminInterviewController.SetOpenAIClient(aiClient)
+	adminInterviewController.SetAIBudget(aiBudgetService)
 	adminInterviewController.SetUserAccessGuard(userDeletionService)
 	adminInterviewController.SetSchoolAccess(userRepo, interviewSessionRepo, schoolService)
 	adminJobController.SetSchoolAccess(schoolService)
@@ -526,8 +551,8 @@ func main() {
 	companyAuthController := companycontrollers.NewCompanyAuthController(companyUserService)
 	companyPortalController := companycontrollers.NewCompanyPortalController(companyUserService)
 	adminCompanyUserController := companycontrollers.NewAdminCompanyUserController(companyUserService)
-	releaseNoteService := release.NewReleaseNoteService(repositories.NewReleaseNoteRepository(db), aiClient)
-	releaseNoteController := releasecontrollers.NewReleaseNoteController(releaseNoteService, userRepo)
+	releaseNoteService := release.NewReleaseNoteService(repositories.NewReleaseNoteRepository(db), userRepo, aiClient)
+	releaseNoteController := releasecontrollers.NewReleaseNoteController(releaseNoteService)
 	githubController := githubcontrollers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := escontrollers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)
@@ -547,6 +572,7 @@ func main() {
 	appService := application.NewApplicationService(appStatusRepo, matchRepo, companyAccessRepo)
 	appService.SetNotifier(notificationService)
 	appService.SetScoreSnapshotReader(userWeightScoreRepo)
+	appService.SetStatusEventRecorder(appStatusRepo)
 	appController := applicationcontrollers.NewApplicationController(appService)
 	appController.SetSchoolAccess(schoolService)
 	hrStudentAnalysisService := hr.NewStudentAnalysisService(
@@ -575,7 +601,7 @@ func main() {
 	authService.SetScoutIndexSyncer(scoutIndexSyncer)
 	// 退会時のベクトル削除と、日次のリコンサイル(ReconcileScoutIndex)も同じ同期処理を使う（#1094, #1204）。
 	userDeletionService.SetScoutIndexSyncer(scoutIndexSyncer)
-	userPreferenceController := usercontrollers.NewUserPreferenceController(userPreferenceRepo, scoutIndexSyncer, industryRepo)
+	userPreferenceController := usercontrollers.NewUserPreferenceController(userpreference.NewService(userPreferenceRepo), scoutIndexSyncer, industryRepo)
 	integratedProfileController := usercontrollers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
 	entitlementController := usercontrollers.NewEntitlementController(organizationService)
 	scoreValidationRepo := repositories.NewScoreValidationRepository(db)
@@ -583,7 +609,7 @@ func main() {
 	scoreValidationController := admincontrollers.NewAdminScoreValidationController(scoreValidationService)
 	// #203: 有効なキャリブレーション重みをマッチング計算へ適用（未アクティブなら全軸1.0）
 	matchingService.SetCalibrationWeightReader(scoreValidationRepo)
-	diagnosisQualityController := admincontrollers.NewAdminDiagnosisQualityController(diagnosisQualityRepo)
+	diagnosisQualityController := admincontrollers.NewAdminDiagnosisQualityController(diagnosisQualityService)
 	collectiveInsightRepo := repositories.NewCollectiveInsightRepository(db)
 	collectiveInsightService := flywheel.NewCollectiveInsightService(collectiveInsightRepo, userWeightScoreRepo)
 	collectiveInsightController := insightcontrollers.NewCollectiveInsightController(collectiveInsightService)
@@ -592,7 +618,7 @@ func main() {
 	scraperSessionService := admin.NewScraperSessionService(scraperSessionRepo)
 	scraperSessionController := admincontrollers.NewAdminScraperSessionController(scraperSessionService)
 
-	e := newEchoServer(sentryOn, organizationService)
+	e := newEchoServer(sentryOn, organizationService, db)
 
 	// APIルートグループ
 	api := e.Group("/api")
@@ -600,7 +626,7 @@ func main() {
 	// ルーティング設定
 	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret, userDeletionService, organizationService)
 	aiBudgetGuards := routes.NewAIBudgetGuards(aiBudgetService)
-	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
+	routes.SetupChatRoutes(api, chatController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupCompanyRoutes(api, relationController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 学生向けの企業検索（SOCAIAGENT-612）。業界・地域・職種で絞り込み、企業名順で返す
 	routes.SetupCompanySearchRoutes(api, companysearchcontrollers.NewController(repositories.NewCompanySearchRepository(db)), cfg.UserSecret, userDeletionService, organizationService)
@@ -619,7 +645,8 @@ func main() {
 	teacherGuidanceController := insightcontrollers.NewTeacherGuidanceController(guidanceService, schoolService)
 	teacherESReviewController := insightcontrollers.NewTeacherESReviewController(esReviewRepo)
 	studentGuidanceController := usercontrollers.NewStudentGuidanceController(guidanceService)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, userScoreRecalculationController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, teacherGuidanceController, teacherESReviewController, userRepo, schoolService, cfg.AdminSecret, adminAIBudgetController)
+	growthController := usercontrollers.NewGrowthController(growthSnapshots, userRepo, schoolService)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, userScoreRecalculationController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, teacherGuidanceController, teacherESReviewController, userRepo, schoolService, cfg.AdminSecret, adminAIBudgetController, growthController)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 適性検査 第1段（#1678）。結果は source=assessment で user_weight_scores へ入り、マッチングへ合流する
 	assessmentRepo := repositories.NewAssessmentRepository(db)
@@ -627,6 +654,7 @@ func main() {
 	// 本人が選んだ職種の募集がある企業を加点する（SOCAIAGENT-670。加点のみ・除外なし）
 	matchingService.SetJobPreferenceReader(repositories.NewJobPreferenceRepository(db))
 	assessmentService := assessmentsvc.NewService(assessmentRepo, matchingService, userWeightScoreRepo)
+	assessmentService.SetGrowthRecorder(growthRecorder)
 	routes.SetupAssessmentRoutes(api, assessmentcontrollers.NewController(assessmentService), cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	// 適性検査 第2段（#1675）。学校独自テンプレートはマッチングに合流させない
 	routes.SetupAssessmentSchoolRoutes(api, assessmentcontrollers.NewSchoolController(assessmentsvc.NewSchoolService(assessmentRepo)), userRepo, schoolService, cfg.AdminSecret)
@@ -640,6 +668,8 @@ func main() {
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupESRoutes(api, esRewriteController, esReviewController, cfg.UserSecret, userDeletionService, organizationService, aiBudgetGuards)
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
+	// 卒業生の進路実績（#2032）。学生の学校の実績を、氏名などを出さず人数で返す
+	routes.SetupGraduateOutcomeRoutes(api, graduateoutcomecontrollers.NewController(graduateoutcomesvc.NewService(repositories.NewGraduateOutcomeRepository(db))), cfg.UserSecret, userDeletionService, organizationService)
 	// 自己分析ポートフォリオ（#2030）。本人の診断・面接・ES・適性検査をまとめる
 	routes.SetupPortfolioRoutes(api, portfoliocontrollers.NewController(portfoliosvc.NewService(repositories.NewPortfolioRepository(db), repositories.NewUserWeightScoreRepository(db))), cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupNotificationRoutes(api, notificationcontrollers.NewController(notificationService), cfg.UserSecret, userDeletionService, organizationService)
@@ -675,7 +705,8 @@ func main() {
 	companyPortalScoutController := companycontrollers.NewCompanyPortalScoutController(scoutService)
 	studentScoutController := usercontrollers.NewStudentScoutController(scoutService)
 	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyPortalInterviewQuestionController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, companyPortalSchoolApplicationController, companyPortalScoutController, cfg.CompanyUserSecret, companyUserRepo, companyRepo)
-	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, studentGuidanceController, studentScoutController, cfg.UserSecret, userDeletionService, organizationService, userAIBudgetController)
+	videoRetentionController := usercontrollers.NewInterviewVideoRetentionController(userRepo, schoolService)
+	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, studentGuidanceController, studentScoutController, cfg.UserSecret, userDeletionService, organizationService, userAIBudgetController, growthController, videoRetentionController)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
 	api.GET("/whats-new", releaseNoteController.List, routes.EchoUserAuth(cfg.UserSecret, userDeletionService))
@@ -698,7 +729,7 @@ func main() {
 	// 共有シークレットのみで認証する(#861)
 	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.ServiceSecret))
 
-	startMaintenanceJobs(crawlService, userDeletionService, notificationService, pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, scoreValidationService)
+	startMaintenanceJobs(crawlService, userDeletionService, notificationService, pendingRegistrationRepo, refreshTokenRepo, companyUserRefreshRepo, scoreValidationService, apiCallLogRepo, videoretention.NewPurger(videoRepo, s3UploadService))
 
 	startServer(e, cfg.ServerPort, interviewService, queueServer)
 }

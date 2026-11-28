@@ -2,16 +2,20 @@ package openai
 
 import (
 	"Backend/internal/aimodel"
+	"Backend/internal/config"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Transcribe は音声データを Whisper でテキストに変換します
@@ -73,13 +77,102 @@ func (cli *Client) Transcribe(ctx context.Context, audio []byte, filename string
 // 書き写すと片方だけ変わり、ログ上のモデル名と実際が食い違う。
 const DefaultTTSModel = "tts-1"
 
-// TTS は OpenAI TTS API でテキストを音声に変換し、mp3 バイト列を返します
+// TTS は OpenAI TTS API でテキストを音声に変換し、mp3 バイト列を返します。
+//
+// 生成時間は文の長さにほぼ比例し、面接のターンでは最も遅い工程になる。
+// 文の区切りで最大 ttsMaxChunks 個に分けて同時に作り、mp3 をそのままつなげる
+// （mp3 はフレームの連続なので、つなげても1本の音声として再生できる）。
 func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) {
 	if err := cli.ensureAudio(); err != nil {
 		return nil, err
 	}
+	chunks := splitForTTS(text, ttsMaxChunks)
+	if len(chunks) <= 1 {
+		return cli.ttsOne(ctx, text, voice)
+	}
+	// 1つでも失敗したら全体が失敗なので、残りの要求は取り消して早く返す
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	parts := make([][]byte, len(chunks))
+	errs := make([]error, len(chunks))
+	var wg sync.WaitGroup
+	for i, chunk := range chunks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// panic を失敗として返す。握りつぶすと途中が欠けた音声をつなげて返してしまう
+			defer func() {
+				if r := recover(); r != nil {
+					errs[i] = fmt.Errorf("tts chunk panic: %v", r)
+				}
+			}()
+			parts[i], errs[i] = cli.ttsOne(ctx, chunk, voice)
+			if errs[i] != nil {
+				cancel()
+			}
+		}()
+	}
+	wg.Wait()
+	// 取り消しで止めた要求の context.Canceled ではなく、元の失敗を返す
+	for _, err := range errs {
+		if err != nil && !errors.Is(err, context.Canceled) {
+			return nil, err
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	return bytes.Join(parts, nil), nil
+}
 
-	model := os.Getenv("OPENAI_TTS_MODEL")
+// ttsMaxChunks は1回の読み上げで同時に呼ぶ上限。面接の応答は2〜3文（150文字以内）。
+const ttsMaxChunks = 3
+
+// splitForTTS は文末（。！？!?）で区切り、長さがなるべく揃うよう最大 max 個にまとめる。
+// 区切りが無い・短い文は1つのまま返す（分けても速くならず、つなぎ目が増えるだけ）。
+func splitForTTS(text string, max int) []string {
+	var sentences []string
+	var cur []rune
+	for _, r := range text {
+		cur = append(cur, r)
+		if strings.ContainsRune("。！？!?", r) {
+			sentences = append(sentences, string(cur))
+			cur = nil
+		}
+	}
+	if strings.TrimSpace(string(cur)) != "" {
+		sentences = append(sentences, string(cur))
+	} else if len(cur) > 0 && len(sentences) > 0 {
+		sentences[len(sentences)-1] += string(cur)
+	}
+	if len(sentences) <= 1 || max <= 1 {
+		return []string{text}
+	}
+	if len(sentences) <= max {
+		return sentences
+	}
+	// 残りの文字数を残りの個数で割った長さを目安に、前から詰める
+	total := utf8.RuneCountInString(text)
+	var out []string
+	var buf strings.Builder
+	for i, s := range sentences {
+		buf.WriteString(s)
+		left := max - len(out)
+		if left > 1 && i < len(sentences)-1 && utf8.RuneCountInString(buf.String()) >= total/max {
+			out = append(out, buf.String())
+			buf.Reset()
+		}
+	}
+	if buf.Len() > 0 {
+		out = append(out, buf.String())
+	}
+	return out
+}
+
+// ttsOne は1回の API 呼び出しで読み上げる。
+func (cli *Client) ttsOne(ctx context.Context, text, voice string) ([]byte, error) {
+
+	model := config.OpenAITTSModel()
 	if model == "" {
 		model = DefaultTTSModel
 	}

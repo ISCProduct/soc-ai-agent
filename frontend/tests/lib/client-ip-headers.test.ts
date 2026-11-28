@@ -11,7 +11,8 @@ import { POST as companyLogin } from '@/app/api/company-auth/login/route'
 function requestWith(headers: Record<string, string>): NextRequest {
   return new NextRequest('http://localhost:3000/api/company-auth/login', {
     method: 'POST',
-    headers,
+    // 自サイトからの JSON 送信（他サイトからの送信は session-post-cross-site.test.ts で見る）
+    headers: { 'content-type': 'application/json', origin: 'http://localhost:3000', ...headers },
     body: JSON.stringify({ email: 'hr@example.com', password: 'pw' }),
   })
 }

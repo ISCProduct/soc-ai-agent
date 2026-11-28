@@ -160,3 +160,28 @@ func TestReplaceRepositories_WithRepos(t *testing.T) {
 	require.NoError(t, err)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
+
+// SOCAIAGENT-698: マイグレーションで既存の行を 1 にしたあと、同期の入れ替えで正しい値に戻ることを確かめる。
+// false はゼロ値なので、列を INSERT から省くと DB の既定値に頼ることになる。false を明示的に書くこと。
+func TestReplaceRepositories_WritesOwnerFlagExplicitly(t *testing.T) {
+	db, mock := newTestDB(t)
+	repo := repositories.NewGitHubRepository(db)
+
+	repos := []models.GitHubRepo{
+		{UserID: 1, Name: "own", FullName: "user/own", IsOwnerOrCollaborator: true},
+		{UserID: 1, Name: "org", FullName: "org/other", IsOwnerOrCollaborator: false},
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectExec("DELETE").WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec("INSERT INTO `git_hub_repos` .*`is_owner_or_collaborator`").
+		WithArgs(
+			1, "own", "user/own", "", "", 0, 0, false, true, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			1, "org", "org/other", "", "", 0, 0, false, false, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 2))
+	mock.ExpectCommit()
+
+	require.NoError(t, repo.ReplaceRepositories(1, repos))
+	assert.NoError(t, mock.ExpectationsWereMet())
+}

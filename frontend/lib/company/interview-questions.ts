@@ -19,7 +19,6 @@ export interface CompanyInterviewQuestionInput {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  await companyAuthService.ensureFreshToken()
   const res = await fetch(`/api/company-portal${path}`, {
     ...init,
     headers: {

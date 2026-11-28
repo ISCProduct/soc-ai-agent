@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const res = await fetch(`${BACKEND_URL}/api/admin/dashboard/users/${id}/sessions`, {
+  const res = await fetch(`${BACKEND_URL}/api/admin/dashboard/users/${encodeURIComponent(id)}/sessions`, {
     headers: {
       'X-Admin-Email': request.headers.get('x-admin-email') || '',
       'X-Admin-Token': request.headers.get('x-admin-token') || '',

@@ -1,9 +1,9 @@
 package interview
 
 import (
+	"Backend/internal/config"
 	"Backend/internal/openai"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 )
@@ -37,7 +37,7 @@ type STTObservation struct {
 // 以前はここに同じ文字列を書き写し「一致させること」とコメントで縛っていたが、
 // 実際には片方だけ変わって食い違っていた。規約ではなく型で守る。
 func STTModelName() string {
-	if m := os.Getenv("OPENAI_WHISPER_MODEL"); m != "" {
+	if m := config.OpenAIWhisperModel(); m != "" {
 		return m
 	}
 	return openai.DefaultTranscribeModel

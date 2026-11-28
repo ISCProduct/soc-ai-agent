@@ -11,6 +11,7 @@ import (
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
+	"Backend/internal/services/growth"
 
 	"github.com/google/uuid"
 )
@@ -54,6 +55,16 @@ type Service struct {
 	repo     Repository
 	matching MatchingRunner
 	chat     ChatSessionFinder
+	growth   growth.Recorder
+}
+
+// SetGrowthRecorder は、標準検査の提出がスコアを書いたあとに履歴を1行残す。
+// 学校独自テンプレートはスコアを書かないので残さない。失敗しても提出は成功のまま。
+func (s *Service) SetGrowthRecorder(r growth.Recorder) {
+	if s == nil {
+		return
+	}
+	s.growth = r
 }
 
 func NewService(repo Repository, matching MatchingRunner, chat ChatSessionFinder) *Service {
@@ -272,6 +283,10 @@ func (s *Service) Submit(ctx context.Context, userID uint, publicID string) (map
 	// 学校独自テンプレートはマッチングに使わないので user_weight_scores へは書かない（#1675）。
 	if err := s.repo.Submit(sess, scores, "assessment:"+sess.PublicID, t.IsStandard); err != nil {
 		return nil, err
+	}
+	// 提出トランザクションの外で残す。履歴の失敗で受検結果を巻き戻さない。
+	if t.IsStandard && s.growth != nil {
+		s.growth.Record(userID, growth.SourceAssessment, "assessment:"+sess.PublicID)
 	}
 	s.rematch(ctx, userID, sess.TemplateID)
 	return scores, nil

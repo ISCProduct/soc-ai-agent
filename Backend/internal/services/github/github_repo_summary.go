@@ -2,6 +2,8 @@ package github
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/openai"
+	"Backend/internal/services/piimask"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
@@ -24,6 +26,10 @@ var ErrInvalidRepoFullName = errors.New("full_name は owner/repo の形式で�
 // ErrInvalidRepoSummaryOutput モデルの出力が要約として保存できる形になっていないことを表す。
 // このときは保存しないので、次の依頼で作り直される。
 var ErrInvalidRepoSummaryOutput = errors.New("AI の要約の出力が不正です")
+
+// ErrRepoNotSummarizable 要約を頼まれたリポジトリが、本人が作成者または共同編集者として同期済みのものではないことを表す（SOCAIAGENT-698）。
+// コントローラはこのエラーを 404 に変え、文言をそのまま返す（リポジトリの存在の有無は伝えない）。
+var ErrRepoNotSummarizable = errors.New("要約できるのは、自分が作成者または共同編集者のリポジトリだけです。一覧に無いときは、リポジトリを同期してください。")
 
 // errInvalidREADMEResponse README の取得（HTTP）は成功したが、応答の JSON・base64 を解釈できなかったことを表す。
 // 取得の失敗（5xx・通信エラーなど）とログの文言を分け、原因を切り分けられるようにする（#2231 のレビュー）。
@@ -84,6 +90,13 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 	if err := ValidateRepoFullName(fullName); err != nil {
 		return nil, err
 	}
+	// 本人が作成者・共同編集者として同期済みのリポジトリだけを対象にする（SOCAIAGENT-698）。
+	// キャッシュ・予算・README の取得・AI の呼び出しより前に見る。以降は同期済みの表記（大文字小文字）を使う。
+	ownName, err := s.ownRepoFullName(ctx, userID, fullName)
+	if err != nil {
+		return nil, err
+	}
+	fullName = ownName
 
 	// キャッシュ確認
 	if !forceRefresh {
@@ -146,7 +159,9 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 	}
 
 	// AI要約生成
-	summary, err := s.generateRepoSummary(ctx, fullName, readme, targetRole)
+	// README は学生が書いた文章なので、chat・面接と同じく登録情報の辞書と規則で伏字にしてから送る（SOCAIAGENT-697）。
+	// 伏字を準備できないときは openai 側が送信せず ErrInputGuardFailed を返し、下の要約の失敗になる。
+	summary, err := s.generateRepoSummary(openai.WithInputGuard(ctx, piimask.GuardFor(s.subjects, userID)), fullName, readme, targetRole)
 	if err != nil {
 		return nil, fmt.Errorf("AI summary generation failed: %w", err)
 	}
@@ -157,6 +172,23 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 		return nil, fmt.Errorf("save summary: %w", err)
 	}
 	return summary, nil
+}
+
+// ownRepoFullName fullName が、本人が作成者・共同編集者として同期済みのリポジトリなら、その同期済みの表記を返す。
+// GitHub のリポジトリ名は大文字小文字を区別しないので、比較も区別しない。無ければ ErrRepoNotSummarizable。
+func (s *GitHubService) ownRepoFullName(ctx context.Context, userID uint, fullName string) (string, error) {
+	names, err := s.githubRepo.ListOwnRepoFullNames(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	for _, n := range names {
+		if strings.EqualFold(n, fullName) {
+			return n, nil
+		}
+	}
+	// リポジトリ名は利用者の入力なので出さない
+	log.Printf("[SummarizeRepo] user %d: rejected repository not owned or not synced", userID)
+	return "", ErrRepoNotSummarizable
 }
 
 // githubAccessError は、GitHub API のエラーが利用者の再連携・権限の付与で直るものなら、

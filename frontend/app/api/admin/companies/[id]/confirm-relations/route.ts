@@ -10,7 +10,7 @@ export async function POST(
 ) {
   const { id } = await params
   const body = await request.text()
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/confirm-relations`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${encodeURIComponent(id)}/confirm-relations`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

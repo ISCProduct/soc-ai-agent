@@ -73,7 +73,7 @@ func (m *mockUserRepo2) RenewEmailVerification(uint, string, time.Time) (bool, e
 func (m *mockUserRepo2) GetUserByVerificationToken(token string) (*models.User, error) {
 	return nil, nil
 }
-func (m *mockUserRepo2) GetUserByPasswordResetToken(token string) (*models.User, error) {
+func (m *mockUserRepo2) GetUserByPasswordResetTokenHash(_ context.Context, token string) (*models.User, error) {
 	return nil, nil
 }
 func (m *mockUserRepo2) GetUserByOAuth(provider, oauthID string) (*models.User, error) {

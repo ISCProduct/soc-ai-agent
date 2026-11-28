@@ -13,7 +13,6 @@ package controllers_test
 
 import (
 	admincontrollers "Backend/internal/controllers/admin"
-	chatcontrollers "Backend/internal/controllers/chat"
 	companycontrollers "Backend/internal/controllers/company"
 	escontrollers "Backend/internal/controllers/es"
 	"Backend/internal/controllers/mocks"
@@ -146,33 +145,6 @@ func TestAdminInterviewController_VideoURL_SchoolAccessDenied(t *testing.T) {
 	testsupport.AssertStatus(t, c.VideoURL, ctx, http.StatusForbidden)
 	videoRepo.AssertExpectations(t)
 	userRepo.AssertExpectations(t)
-}
-
-// ---- QuestionController ----
-
-func TestQuestionController_GenerateQuestions_MissingCategory(t *testing.T) {
-	c := chatcontrollers.NewQuestionController(nil)
-	body, _ := json.Marshal(map[string]any{"count": 5})
-	req := httptest.NewRequest(http.MethodPost, "/api/questions/generate", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	testsupport.AssertStatus(t, c.GenerateQuestions, testsupport.NewCtx(req, rec), http.StatusBadRequest)
-}
-
-func TestQuestionController_CreateQuestion_MissingFields(t *testing.T) {
-	c := chatcontrollers.NewQuestionController(nil)
-	body, _ := json.Marshal(map[string]any{"question": ""})
-	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	testsupport.AssertStatus(t, c.CreateQuestion, testsupport.NewCtx(req, rec), http.StatusBadRequest)
-}
-
-func TestQuestionController_GetQuestionsByCategory_MissingCategory(t *testing.T) {
-	c := chatcontrollers.NewQuestionController(nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/questions", nil)
-	rec := httptest.NewRecorder()
-	testsupport.AssertStatus(t, c.GetQuestionsByCategory, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 // ---- ScheduleController ----

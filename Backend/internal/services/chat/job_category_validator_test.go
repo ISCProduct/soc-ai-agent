@@ -11,6 +11,10 @@ import (
 type jobCategoryRepoMock struct {
 	topCategories    []models.JobCategory
 	topCategoriesErr error
+	byIDs            []models.JobCategory
+	byIDsErr         error
+	byIDsCalls       int
+	byIDsArgs        []uint
 }
 
 func (m *jobCategoryRepoMock) FindAll(context.Context) ([]models.JobCategory, error) {
@@ -19,6 +23,15 @@ func (m *jobCategoryRepoMock) FindAll(context.Context) ([]models.JobCategory, er
 
 func (m *jobCategoryRepoMock) FindByID(context.Context, uint) (*models.JobCategory, error) {
 	return nil, nil
+}
+
+func (m *jobCategoryRepoMock) FindByIDs(ctx context.Context, ids []uint) ([]models.JobCategory, error) {
+	m.byIDsCalls++
+	m.byIDsArgs = append([]uint(nil), ids...)
+	if m.byIDsErr != nil {
+		return nil, m.byIDsErr
+	}
+	return m.byIDs, nil
 }
 
 func (m *jobCategoryRepoMock) FindByName(context.Context, string) ([]models.JobCategory, error) {
@@ -114,6 +127,49 @@ func TestNormalizeNumericAnswer_returnsErrorOnTopCategoryFetchFailure(t *testing
 	}
 
 	if _, err := v.normalizeNumericAnswer(context.Background(), "1", ""); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestLoadMatchedCategories_OneLookupKeepsOrderAndSkipsMissing(t *testing.T) {
+	repo := &jobCategoryRepoMock{
+		byIDs: []models.JobCategory{
+			{ID: 2, Name: "営業"},
+			{ID: 9, Name: "研究"},
+		},
+	}
+	v := &JobCategoryValidator{jobCategoryRepo: repo}
+
+	got, err := v.loadMatchedCategories(context.Background(), []uint{9, 2, 9, 3})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.byIDsCalls != 1 {
+		t.Fatalf("FindByIDs calls = %d, want 1", repo.byIDsCalls)
+	}
+	if len(got) != 3 || got[0].Name != "研究" || got[1].Name != "営業" || got[2].Name != "研究" {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestLoadMatchedCategories_EmptySkipsLookup(t *testing.T) {
+	repo := &jobCategoryRepoMock{}
+	v := &JobCategoryValidator{jobCategoryRepo: repo}
+	got, err := v.loadMatchedCategories(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %#v", got)
+	}
+	if repo.byIDsCalls != 0 {
+		t.Fatalf("FindByIDs calls = %d, want 0", repo.byIDsCalls)
+	}
+}
+
+func TestLoadMatchedCategories_ReturnsLookupError(t *testing.T) {
+	v := &JobCategoryValidator{jobCategoryRepo: &jobCategoryRepoMock{byIDsErr: errors.New("db down")}}
+	if _, err := v.loadMatchedCategories(context.Background(), []uint{1}); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }

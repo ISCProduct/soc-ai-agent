@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const body = await request.text()
-  const response = await fetch(`${BACKEND_URL}/api/admin/crawl-sources/${id}`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/crawl-sources/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',

@@ -682,3 +682,33 @@ func TestDiffペア一致率(t *testing.T) {
 		t.Error("今回が未計測なら比べない")
 	}
 }
+
+// ES 添削は評価と改善文でモデルが違う。モデルごとの内訳があれば、モデルごとの単価で見積もり、
+// 使ったモデルを全部残す（全量を評価のモデルの単価にすると、改善文を軽量にした分の削減が出ない）。
+func TestAggregate_モデルごとの内訳でコストを見積もる(t *testing.T) {
+	obs := []Observation{
+		{CaseID: "c1", Label: LabelGood, Run: 1, Score: 0.8, PromptTokens: 3000, CompletionTokens: 1500,
+			TokensByModel: map[string]ModelTokens{
+				"gpt-4o":      {PromptTokens: 1000, CompletionTokens: 500},
+				"gpt-4o-mini": {PromptTokens: 2000, CompletionTokens: 1000},
+			}},
+	}
+	s := Aggregate(TargetES, "gpt-4o", "rag:/es/review", "2026-11-23T00:00:00Z", obs)
+	// gpt-4o は $2.50/1M入力, $10.00/1M出力。gpt-4o-mini は $0.15 / $0.60
+	want := 1000*2.50/1_000_000 + 500*10.00/1_000_000 + 2000*0.15/1_000_000 + 1000*0.60/1_000_000
+	if math.Abs(s.TotalCostUSD-want) > 1e-12 {
+		t.Errorf("合計コスト = %v, want %v", s.TotalCostUSD, want)
+	}
+	if !slices.Equal(s.ModelsUsed, []string{"gpt-4o", "gpt-4o-mini"}) {
+		t.Errorf("使ったモデル = %v", s.ModelsUsed)
+	}
+	// 内訳が無ければ、今までどおり対象のモデルの単価で見積もる
+	plain := Aggregate(TargetES, "gpt-4o", "rag:/es/review", "2026-11-23T00:00:00Z",
+		[]Observation{{CaseID: "c1", Label: LabelGood, Run: 1, Score: 0.8, PromptTokens: 1000, CompletionTokens: 500}})
+	if want := 1000*2.50/1_000_000 + 500*10.00/1_000_000; math.Abs(plain.TotalCostUSD-want) > 1e-12 {
+		t.Errorf("内訳なしのコスト = %v, want %v", plain.TotalCostUSD, want)
+	}
+	if !slices.Equal(plain.ModelsUsed, []string{"gpt-4o"}) {
+		t.Errorf("内訳なしの使ったモデル = %v", plain.ModelsUsed)
+	}
+}

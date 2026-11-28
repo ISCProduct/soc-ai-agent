@@ -22,7 +22,7 @@ export async function GET(
     return Response.json({ error: 'invalid company id' }, { status: 400 })
   }
   try {
-    const result = await proxyAdminBackend('GET', `/api/admin/companies/${id}`, {
+    const result = await proxyAdminBackend('GET', `/api/admin/companies/${encodeURIComponent(id)}`, {
       headers: adminProxyHeaders(request.headers),
       timeoutMs: 15_000,
     })
@@ -42,7 +42,7 @@ export async function PUT(
   }
   const body = await request.text()
   try {
-    const result = await proxyAdminBackend('PUT', `/api/admin/companies/${id}`, {
+    const result = await proxyAdminBackend('PUT', `/api/admin/companies/${encodeURIComponent(id)}`, {
       headers: adminProxyHeaders(request.headers),
       body,
       timeoutMs: 30_000,

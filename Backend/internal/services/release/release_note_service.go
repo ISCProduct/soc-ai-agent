@@ -17,6 +17,10 @@ import (
 
 var ErrReleaseNoteLLMClientNil = errors.New("openai client is nil")
 
+// ErrReleaseNoteViewerNotFound は閲覧者のユーザーが読めない（無い・DBエラー）こと。
+// 閲覧者の種別が分からないまま絞り込まずに返さないよう、呼び出し側は未認証として扱う。
+var ErrReleaseNoteViewerNotFound = errors.New("release note viewer not found")
+
 const releaseNoteSummarySystemPrompt = `あなたはtoC向けSaaSのリリースノート編集者です。開発者向けのPRタイトル・本文から、エンドユーザー向けにやさしい日本語で1〜2文の更新内容を要約し、対象読者(audience)を分類してください。
 
 読み手はパソコンやITに詳しくない学生・教員です。専門用語を知らない人が読んで意味が分かる文章にしてください。
@@ -210,12 +214,13 @@ type releaseNoteSummaryResult struct {
 }
 
 type ReleaseNoteService struct {
-	repo repository.ReleaseNoteRepository
-	llm  *openai.Client
+	repo  repository.ReleaseNoteRepository
+	users repository.UserRepository
+	llm   *openai.Client
 }
 
-func NewReleaseNoteService(repo repository.ReleaseNoteRepository, llm *openai.Client) *ReleaseNoteService {
-	return &ReleaseNoteService{repo: repo, llm: llm}
+func NewReleaseNoteService(repo repository.ReleaseNoteRepository, users repository.UserRepository, llm *openai.Client) *ReleaseNoteService {
+	return &ReleaseNoteService{repo: repo, users: users, llm: llm}
 }
 
 // IngestMergedPRs は未取り込みのPRのみAIで要約しDBへ保存する（pr_numberでべき等）。
@@ -323,4 +328,14 @@ func (s *ReleaseNoteService) List(ctx context.Context, limit int, role string, i
 		return nil, fmt.Errorf("list release notes: %w", err)
 	}
 	return notes, nil
+}
+
+// ListForUser は閲覧者のrole/isAdminを読み、その人に見せてよい更新情報を新しい順に返す。
+// 閲覧者が読めなければ ErrReleaseNoteViewerNotFound を返す。
+func (s *ReleaseNoteService) ListForUser(ctx context.Context, limit int, userID uint) ([]models.ReleaseNote, error) {
+	user, err := s.users.GetUserByID(userID)
+	if err != nil || user == nil {
+		return nil, ErrReleaseNoteViewerNotFound
+	}
+	return s.List(ctx, limit, user.Role, user.IsAdmin)
 }

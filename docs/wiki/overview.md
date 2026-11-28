@@ -148,7 +148,7 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
 │   └── finetune/            # ファインチューニング関連
 ├── infra/terraform/         # AWS インフラ設定（staging / prod / modules）
 ├── automation/              # Discord通知・ワークフロー検査スクリプト
-├── tools/company-graph/     # 企業スクレイピング（別Goモジュール）
+├── tools/company-graph/     # 企業スクレイピング（別Goモジュール。ローカルの compose のみ。staging / 本番には載せていない）
 ├── compose.yml              # Docker Compose（ローカル開発用）
 └── docker-compose.yml       # Docker Compose（staging EC2 用）
 ```
@@ -169,7 +169,7 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
 | Frontend | Next.js / React / TypeScript | 16 / 19 / — |
 | UI ライブラリ | MUI | v7 |
 | 面接官アバター | SVGイラスト(自前実装、音声振幅駆動の口パク) | — |
-| RAG | Python / FastAPI / LangChain / ChromaDB | 3.10+ |
+| RAG | Python / FastAPI / LangChain / ChromaDB | 3.12 |
 | ベクトル DB | ChromaDB | — |
 | AI | OpenAI API（GPT-4o / Realtime） | — |
 | 動画・PDF | AWS S3 | — |

@@ -21,7 +21,7 @@ export async function POST(
   if (cacheOnly === 'true') qs.set('cache_only', 'true')
   const query = qs.toString() ? `?${qs.toString()}` : ''
   try {
-    const result = await proxyAdminBackend('POST', `/api/admin/companies/${id}/fetch-relations${query}`, {
+    const result = await proxyAdminBackend('POST', `/api/admin/companies/${encodeURIComponent(id)}/fetch-relations${query}`, {
       headers: adminProxyHeaders(request.headers),
       timeoutMs: 120_000,
     })

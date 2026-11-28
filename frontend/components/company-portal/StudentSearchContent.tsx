@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Alert,
@@ -47,6 +47,8 @@ export function StudentSearchContent() {
   const [error, setError] = useState('')
   // セマンティック検索中は関連度順のためページングを無効化する
   const [isSemantic, setIsSemantic] = useState(false)
+  // 検索の応答が前後したとき、最後に出した検索の結果だけを反映するための連番
+  const searchSeq = useRef(0)
 
   const buildFilters = useCallback(
     (offset: number): StudentFilters => ({
@@ -62,6 +64,8 @@ export function StudentSearchContent() {
 
   const runSearch = useCallback(
     async (nextPage: number) => {
+      const seq = ++searchSeq.current
+      const isLatest = () => seq === searchSeq.current
       setLoading(true)
       setError('')
       try {
@@ -70,14 +74,15 @@ export function StudentSearchContent() {
         const result = query
           ? await companyStudentService.semanticSearch(query, { ...filters, offset: 0 })
           : await companyStudentService.search(filters)
+        if (!isLatest()) return
         setItems(result.items)
         setTotal(result.total)
         setIsSemantic(Boolean(query))
         setPage(query ? 0 : nextPage)
       } catch (e) {
-        setError(e instanceof Error ? e.message : '検索に失敗しました')
+        if (isLatest()) setError(e instanceof Error ? e.message : '検索に失敗しました')
       } finally {
-        setLoading(false)
+        if (isLatest()) setLoading(false)
       }
     },
     [buildFilters, semanticQuery],
@@ -88,6 +93,8 @@ export function StudentSearchContent() {
       router.replace('/company-portal/sign-in')
       return
     }
+    const seq = ++searchSeq.current
+    const isLatest = () => seq === searchSeq.current
     Promise.all([
       companyStudentService.search({ limit: PAGE_SIZE, offset: 0 }),
       companyStudentService.listTagNames().catch(() => ({ items: [] })),
@@ -98,13 +105,19 @@ export function StudentSearchContent() {
         .catch(() => ({ items: [] })),
     ])
       .then(([result, tags, industryRes]) => {
-        setItems(result.items)
-        setTotal(result.total)
         setTagNames(tags.items || [])
         setIndustries((industryRes.items as IndustryOption[]) || [])
+        // 初回取得より後に検索が出ていれば、一覧はその結果を優先する
+        if (!isLatest()) return
+        setItems(result.items)
+        setTotal(result.total)
       })
-      .catch(() => setError('学生一覧の取得に失敗しました'))
-      .finally(() => setLoading(false))
+      .catch(() => {
+        if (isLatest()) setError('学生一覧の取得に失敗しました')
+      })
+      .finally(() => {
+        if (isLatest()) setLoading(false)
+      })
   }, [router])
 
   const onSubmit = (e: FormEvent) => {

@@ -3,6 +3,7 @@
 package repository
 
 import (
+	"context"
 	"time"
 
 	"Backend/internal/models"
@@ -21,7 +22,8 @@ type UserRepository interface {
 	// RenewEmailVerification はメール認証トークンと期限だけを、未認証(email_verified_at が NULL)の行に限って更新する。
 	// 更新した場合に true を返す。認証済み・存在しない行では false(エラーではない)。
 	RenewEmailVerification(userID uint, token string, expires time.Time) (bool, error)
-	GetUserByPasswordResetToken(token string) (*models.User, error)
+	// GetUserByPasswordResetTokenHash は再設定トークンの SHA-256 hex でユーザーを引く。見つからなければ nil, nil。
+	GetUserByPasswordResetTokenHash(ctx context.Context, hash string) (*models.User, error)
 	GetUserByOAuth(provider, oauthID string) (*models.User, error)
 }
 

@@ -2,6 +2,7 @@ package costs
 
 import (
 	"Backend/internal/companyfetch"
+	"Backend/internal/config"
 	"Backend/internal/repositories"
 	"Backend/internal/services/email"
 	"Backend/internal/services/shared"
@@ -10,8 +11,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,12 +47,7 @@ func NewCompanySearchBudgetService(repo *repositories.APICallLogRepository, emai
 	if alert <= 0 {
 		alert = limit
 	}
-	enforce := true
-	if v := strings.TrimSpace(os.Getenv("COMPANY_SEARCH_BUDGET_ENFORCE")); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			enforce = b
-		}
-	}
+	enforce := config.CompanySearchBudgetEnforce()
 	return &CompanySearchBudgetService{
 		repo:           repo,
 		emailService:   emailService,
@@ -122,11 +116,11 @@ func (s *CompanySearchBudgetService) notifyIfNeeded(status CompanySearchBudgetSt
 	)
 	log.Printf("[CompanySearchBudget] ALERT %s", strings.ReplaceAll(body, "\n", " ")) // logpolicy:ok 企業検索の予算アラート本文で、個人情報を含まない
 
-	if webhook := strings.TrimSpace(os.Getenv("COMPANY_SEARCH_ALERT_SLACK_WEBHOOK_URL")); webhook != "" {
+	if webhook := config.CompanySearchAlertSlackWebhookURL(); webhook != "" {
 		if err := postCompanySearchSlackAlert(webhook, subject+"\n"+body); err != nil {
 			log.Printf("[CompanySearchBudget] slack alert failed: %v", err)
 		}
-	} else if webhook := strings.TrimSpace(os.Getenv("REALTIME_ALERT_SLACK_WEBHOOK_URL")); webhook != "" {
+	} else if webhook := config.RealtimeAlertSlackWebhookURL(); webhook != "" {
 		if err := postCompanySearchSlackAlert(webhook, subject+"\n"+body); err != nil {
 			log.Printf("[CompanySearchBudget] slack alert (realtime webhook) failed: %v", err)
 		}
@@ -144,11 +138,11 @@ func (s *CompanySearchBudgetService) notifyIfNeeded(status CompanySearchBudgetSt
 		}
 	}
 
-	if webhook := strings.TrimSpace(os.Getenv("COMPANY_SEARCH_ALERT_DISCORD_WEBHOOK_URL")); webhook != "" {
+	if webhook := config.CompanySearchAlertDiscordWebhookURL(); webhook != "" {
 		if err := postCompanySearchDiscordAlert(webhook, subject+"\n"+body); err != nil {
 			log.Printf("[CompanySearchBudget] discord alert failed: %v", err)
 		}
-	} else if webhook := strings.TrimSpace(os.Getenv("OPENAI_COST_ALERT_DISCORD_WEBHOOK_URL")); webhook != "" {
+	} else if webhook := config.OpenAICostAlertDiscordWebhookURL(); webhook != "" {
 		if err := postCompanySearchDiscordAlert(webhook, subject+"\n"+body); err != nil {
 			log.Printf("[CompanySearchBudget] discord alert (openai cost webhook) failed: %v", err)
 		}

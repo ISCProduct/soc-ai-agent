@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState, type MouseEvent } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import {
-  Alert,
   Badge,
   Box,
   Button,
@@ -17,6 +16,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { visuallyHidden } from '@mui/utils'
 import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone'
 import { authService } from '@/lib/auth'
@@ -67,7 +67,8 @@ export function NotificationBell() {
 
   useEffect(() => {
     const user = authService.getStoredUser()
-    setLoggedIn(Boolean(user && !user.is_admin && authService.getUserFetchHeaders()['X-User-Token']))
+    // トークンは httpOnly Cookie にだけあり JS からは見えない（SOCAIAGENT-683）。保存済みのユーザーで判定する
+    setLoggedIn(Boolean(user && !user.is_admin))
   }, [pathname])
 
   const refreshCount = useCallback(async () => {

@@ -63,8 +63,8 @@ test.describe('実Backend結合（ローカル統合テスト環境専用）', (
   })
 
   // 認証だけでなく、実際のDB書き込み→別リクエストでの読み戻しまで検証する。
-  // lib/auth/index.ts の実装どおり、トークンは localStorage/sessionStorage に
-  // 保存され、Backend呼び出しは X-User-Token ヘッダーで行う（Cookieではない）。
+  // トークンは httpOnly Cookie にだけ入る（SOCAIAGENT-683）。Backend への直接呼び出しは
+  // X-User-Token ヘッダーで行うため、テストはブラウザの Cookie から値を取り出して使う。
   test('プロフィール更新が実DBへ書き込まれ、別リクエストで読み戻せる', async ({ page }) => {
     await page.goto('/login')
     await page.waitForLoadState('networkidle')
@@ -73,7 +73,7 @@ test.describe('実Backend結合（ローカル統合テスト環境専用）', (
     await page.getByRole('button', { name: 'ログイン', exact: true }).click()
     await expect(page).not.toHaveURL(/\/login/, { timeout: 10000 })
 
-    const token = await page.evaluate(() => window.localStorage.getItem('user_token'))
+    const token = (await page.context().cookies()).find((c) => c.name === 'user_token')?.value
     expect(token).toBeTruthy()
 
     const newName = `E2E更新 ${Date.now()}`

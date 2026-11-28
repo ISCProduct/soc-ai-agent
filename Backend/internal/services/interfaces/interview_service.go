@@ -10,12 +10,13 @@ type InterviewService interface {
 	CreateSession(userID uint, language string, interviewerGender string) (*interview.InterviewSessionResponse, error)
 	StartSession(userID uint, sessionID uint) (*interview.InterviewSessionResponse, error)
 	FinishSession(userID uint, sessionID uint) (*interview.InterviewSessionResponse, error)
-	ListSessions(userID uint, all bool, limit int, offset int) ([]interview.InterviewSessionResponse, int64, error)
+	ListSessions(userID uint, limit int, offset int) ([]interview.InterviewSessionResponse, int64, error)
 	ListSessionsForOwner(userID, companyID uint, limit int, offset int) ([]interview.InterviewSessionResponse, int64, error)
 	GetSessionDetail(userID uint, sessionID uint) (*interview.InterviewDetailResponse, error)
 	GetReport(userID uint, sessionID uint) (*models.InterviewReport, error)
 	GetPhraseSuggestions(ctx context.Context, userID uint, sessionID uint) ([]interview.PhraseSuggestion, error)
 	GetTrend(userID uint, limit int) ([]interview.InterviewTrendPoint, error)
+	CompareAxes(userID, baseSessionID, targetSessionID uint) (*interview.AxisComparison, error)
 	SendReportEmail(userID, sessionID uint) error
 	SaveUtterance(userID uint, sessionID uint, role string, text string, clientUtteranceID string) error
 	RegenerateReport(userID uint, sessionID uint) (bool, error)

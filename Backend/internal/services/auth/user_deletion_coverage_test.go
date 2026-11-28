@@ -39,7 +39,7 @@ var userRowsKeptAfterPurge = map[string]string{
 
 	// 以下は、退会時の扱いを別途決める。
 	"admin_school_memberships":  "退会時の扱いは別途決める",
-	"api_call_logs":             "退会時の扱いは別途決める",
+	"api_call_logs":             "退会では消さない。24ヶ月より古い行は日次合計へ畳んでから消す",
 	"company_ownerships":        "退会時の扱いは別途決める",
 	"diagnosis_quality_reports": "退会時の扱いは別途決める",
 }

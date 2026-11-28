@@ -13,7 +13,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
     }
 
-    const res = await fetch(`${BACKEND_URL}/api/schedule/${id}`, { headers: authHeaders })
+    const res = await fetch(`${BACKEND_URL}/api/schedule/${encodeURIComponent(id)}`, { headers: authHeaders })
     if (!res.ok) {
       const errorText = await res.text()
       return NextResponse.json({ error: errorText.trim() }, { status: res.status })
@@ -38,7 +38,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     const body = await request.text()
-    const res = await fetch(`${BACKEND_URL}/api/schedule/${id}`, {
+    const res = await fetch(`${BACKEND_URL}/api/schedule/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body,
@@ -66,7 +66,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
     }
 
-    const res = await fetch(`${BACKEND_URL}/api/schedule/${id}`, {
+    const res = await fetch(`${BACKEND_URL}/api/schedule/${encodeURIComponent(id)}`, {
       method: 'DELETE',
       headers: authHeaders,
     })

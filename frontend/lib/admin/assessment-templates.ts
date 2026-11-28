@@ -29,11 +29,22 @@ export interface StudentAssessmentStatus {
   top_categories: string[]
 }
 
+export interface AssessmentRollup {
+  student_count: number
+  started_count: number
+  submitted_count: number
+  not_started_count: number
+  overdue_count: number
+  started_percent: number
+  submitted_percent: number
+}
+
 export interface StudentStatusList {
   template_id: number
   title: string
   due_at?: string
   students: StudentAssessmentStatus[]
+  rollup: AssessmentRollup
 }
 
 export interface QuestionDraft {

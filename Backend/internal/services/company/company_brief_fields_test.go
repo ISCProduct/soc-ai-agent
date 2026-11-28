@@ -25,13 +25,14 @@ func TestBuildCompanyBrief_FieldSelection(t *testing.T) {
 		},
 		{
 			name:    "名前だけでも成立する",
-			company: &models.Company{Name: "株式会社テスト"},
+			company: &models.Company{IsActive: true, Name: "株式会社テスト"},
 			want:    []string{"企業名: 株式会社テスト"},
 			notWant: []string{"業種:", "所在地:", "事業:", "文化:", "働き方:", "技術スタック:", "重視傾向:"},
 		},
 		{
 			name: "空白だけの値は行ごと出さない",
 			company: &models.Company{
+				IsActive:  true,
 				Name:      "株式会社テスト",
 				Industry:  "   ",
 				Location:  "\t\n",
@@ -44,6 +45,7 @@ func TestBuildCompanyBrief_FieldSelection(t *testing.T) {
 		{
 			name: "事業はMainBusinessを優先する",
 			company: &models.Company{
+				IsActive:     true,
 				Name:         "株式会社テスト",
 				MainBusiness: "BtoB SaaSの開発",
 				Description:  "会社説明のフォールバック",
@@ -54,6 +56,7 @@ func TestBuildCompanyBrief_FieldSelection(t *testing.T) {
 		{
 			name: "MainBusinessが空ならDescriptionへ落ちる",
 			company: &models.Company{
+				IsActive:    true,
 				Name:        "株式会社テスト",
 				Description: "会社説明のフォールバック",
 			},
@@ -62,6 +65,7 @@ func TestBuildCompanyBrief_FieldSelection(t *testing.T) {
 		{
 			name: "MainBusinessが空白だけでもDescriptionへ落ちる",
 			company: &models.Company{
+				IsActive:     true,
 				Name:         "株式会社テスト",
 				MainBusiness: "   ",
 				Description:  "会社説明のフォールバック",
@@ -72,17 +76,17 @@ func TestBuildCompanyBrief_FieldSelection(t *testing.T) {
 			// TechStack は JSON 文字列で保存されており、未取得は "null" / "[]"。
 			// そのまま載せると「技術スタック: null」がプロンプトに流れる。
 			name:    "技術スタックのnullは載せない",
-			company: &models.Company{Name: "株式会社テスト", TechStack: "null"},
+			company: &models.Company{IsActive: true, Name: "株式会社テスト", TechStack: "null"},
 			notWant: []string{"技術スタック:"},
 		},
 		{
 			name:    "技術スタックの空配列は載せない",
-			company: &models.Company{Name: "株式会社テスト", TechStack: "[]"},
+			company: &models.Company{IsActive: true, Name: "株式会社テスト", TechStack: "[]"},
 			notWant: []string{"技術スタック:"},
 		},
 		{
 			name:    "技術スタックに中身があれば載せる",
-			company: &models.Company{Name: "株式会社テスト", TechStack: `["Go","TypeScript"]`},
+			company: &models.Company{IsActive: true, Name: "株式会社テスト", TechStack: `["Go","TypeScript"]`},
 			want:    []string{"技術スタック:", "Go"},
 		},
 	}
@@ -120,6 +124,7 @@ func TestBuildCompanyBrief_FieldSelection(t *testing.T) {
 func TestBuildCompanyBrief_TrimsLongValues(t *testing.T) {
 	long := strings.Repeat("あ", 500)
 	got := BuildCompanyBrief(&models.Company{
+		IsActive:     true,
 		Name:         "株式会社テスト",
 		MainBusiness: long,
 		Culture:      long,
@@ -140,7 +145,7 @@ func TestBuildCompanyBrief_TrimsLongValues(t *testing.T) {
 
 // TestBuildCompanyBrief_TopWeights は重視傾向の選び方を固定する（#1124）。
 func TestBuildCompanyBrief_TopWeights(t *testing.T) {
-	comp := &models.Company{Name: "株式会社テスト"}
+	comp := &models.Company{IsActive: true, Name: "株式会社テスト"}
 
 	t.Run("上位3件までしか出さない", func(t *testing.T) {
 		got := BuildCompanyBrief(comp, &models.CompanyWeightProfile{

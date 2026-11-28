@@ -123,6 +123,7 @@ curl -s https://stg.shukatsu-ai.jp/ | grep -E 'og:title|起動'
 | --- | --- |
 | `DB_PASSWORD` | Secrets Manager `<project>/db` の `password`（正本は `modules/rds` の `random_password`） |
 | API キー・OAuth クライアントシークレット・`ADMIN_SECRET` / `SERVICE_SECRET` など | Secrets Manager `<project>/app-env` |
+| Discord Bot の Backlog API キー（個人のキーは置かない） | Secrets Manager `<project>/discord-backlog-bot`（平文1本。Lambda の環境変数には置かない） |
 | 自動生成（`USER_SECRET` / `OAUTH_STATE_SECRET` / `TOKEN_ENCRYPTION_KEY` / `BFF_INTERNAL_TOKEN`） | Secrets Manager `<project>/app-env`（Terraform の `random_password`） |
 | 秘密でない値（ドメイン・モデル名など） | user_data のまま |
 
@@ -136,6 +137,8 @@ user_data は起動時にインスタンスロール（`secretsmanager:GetSecret
 値のローテーションは `terraform apply` では行えない（`ignore_changes = [secret_string]`）。
 AWS CLI で書き換える。手順は `docs/wiki/prod-secrets-rotation.md` と同じ
 （`--secret-id` を `soc-stg/app-env` に読み替える）。**反映にはインスタンスの入れ替えが必要**。
+
+`<project>/discord-backlog-bot` はアプリの `.env` とは別の平文1本で、Lambda だけが読む。手順は `automation/discord/README.md`。反映は Lambda の実行環境の入れ替えで、EC2 の入れ替えは要らない。
 
 user_data の `.env` 生成ロジックは手元で検証できる（AWS 不要。起動確認そのものは staging で行う）:
 

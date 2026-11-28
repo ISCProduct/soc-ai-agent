@@ -15,7 +15,7 @@ export async function PATCH(
   const { id } = await params
   const body = await request.text()
   try {
-    const result = await proxyAdminBackend('PATCH', `/api/admin/applications/${id}/status`, {
+    const result = await proxyAdminBackend('PATCH', `/api/admin/applications/${encodeURIComponent(id)}/status`, {
       headers: adminProxyHeaders(request.headers),
       body,
       timeoutMs: 15_000,

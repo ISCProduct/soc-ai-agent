@@ -36,7 +36,7 @@ export async function PATCH(
   const { id, userID } = await params
   const body = await request.text()
   const response = await fetch(
-    `${BACKEND_URL}/api/admin/companies/${id}/company-users/${userID}`,
+    `${BACKEND_URL}/api/admin/companies/${encodeURIComponent(id)}/company-users/${encodeURIComponent(userID)}`,
     {
       method: 'PATCH',
       headers: adminHeaders(request),

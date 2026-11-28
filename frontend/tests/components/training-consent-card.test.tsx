@@ -25,7 +25,7 @@ beforeEach(() => {
   putReply = { ok: true, body: { allow_training_use: true } }
   putBodies = []
   global.fetch = jest.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-    expect(String(input)).toContain('/api/user/training-consent')
+    expect(String(input)).toContain('/api/bff/user/training-consent')
     const reply = init?.method === 'PUT' ? putReply : getReply
     if (init?.method === 'PUT') putBodies.push(JSON.parse(String(init.body)))
     return {

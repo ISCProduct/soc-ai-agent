@@ -118,3 +118,28 @@ export async function parseMultipartResponse(
 
   return { meta, audio }
 }
+
+/** 質問の種類ごとの評価の1件（SOCAIAGENT-610）。 */
+export type QuestionCategoryScore = { category: string; score: number; weakness: string; practice: string }
+
+/**
+ * report.category_breakdown_json を読む。壊れている・形が違う行は捨てる（画面全体は止めない）。
+ * 無い（この機能より前のレポート）なら空の配列。
+ */
+export function parseQuestionCategoryBreakdown(value?: string | null): QuestionCategoryScore[] {
+  const raw = parseJsonSafe(value ?? undefined)
+  if (!Array.isArray(raw)) return []
+  const out: QuestionCategoryScore[] = []
+  for (const item of raw as unknown[]) {
+    if (typeof item !== 'object' || item === null) continue
+    const r = item as Record<string, unknown>
+    if (typeof r.category !== 'string' || !r.category || typeof r.score !== 'number' || !Number.isFinite(r.score)) continue
+    out.push({
+      category: r.category,
+      score: Math.max(0, Math.min(5, Math.round(r.score))),
+      weakness: typeof r.weakness === 'string' ? r.weakness : '',
+      practice: typeof r.practice === 'string' ? r.practice : '',
+    })
+  }
+  return out
+}

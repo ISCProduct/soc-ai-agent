@@ -57,3 +57,13 @@ frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:l
 # backend_memory = 512
 # frontend_cpu    = 256
 # frontend_memory = 512
+
+# Discord の受け口を本番 ALB に作る（SOCAIAGENT-512）。既定は作らない。
+# 有効にする前に、staging の朝リマインドを止める。両方有効だと同じ通知が2回投稿される。
+# キーは Bot ユーザーのもの。個人のキーは入れない。このファイルは git に含めない。
+# discord_bot_enabled = false
+# discord_reminder_schedule_enabled = false
+# discord_public_key = "<Discord Developer Portal の PUBLIC KEY>"
+# discord_allowed_role_id = "<ロールID>"
+# backlog_api_key = "<Backlog Bot ユーザーの API キー>"
+# discord_reminder_webhook_url = "https://discord.com/api/webhooks/<id>/<token>"

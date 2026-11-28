@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"Backend/internal/models"
@@ -399,6 +400,81 @@ func maskingRules() []masking.Rule {
 	return append(masking.DefaultRules(), masking.Rule{
 		Key: keyKnownEmail, Token: masking.TokenEmail, Method: masking.MethodDictionary,
 	})
+}
+
+// InterviewShadowMask は、本番のシャドー採点が学習書き出しと同じ伏字を使うための読み込み。
+// 学校名と企業名の一覧は 10 分キャッシュする。学生の氏名は毎回読む。
+type InterviewShadowMask struct {
+	users interface {
+		GetUserByID(uint) (*models.User, error)
+	}
+	terms interface {
+		ListTrainingMaskingTerms(context.Context) (repositories.TrainingMaskingTerms, error)
+	}
+	mu         sync.Mutex
+	cached     repositories.TrainingMaskingTerms
+	freshUntil time.Time
+}
+
+// NewInterviewShadowMask は user と学校・企業名の一覧から伏字関数を作る。
+func NewInterviewShadowMask(
+	users interface {
+		GetUserByID(uint) (*models.User, error)
+	},
+	terms interface {
+		ListTrainingMaskingTerms(context.Context) (repositories.TrainingMaskingTerms, error)
+	},
+) *InterviewShadowMask {
+	return &InterviewShadowMask{users: users, terms: terms}
+}
+
+// ForUser は、その学生の辞書で伏字にする関数を返す。読めなければ採点してはならない。
+func (m *InterviewShadowMask) ForUser(ctx context.Context, userID uint) (func(string) string, error) {
+	if m == nil || m.users == nil || m.terms == nil {
+		return nil, errors.New("scorerexport: 伏字の読み込みが未設定です")
+	}
+	u, err := m.users.GetUserByID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if u == nil {
+		return nil, errors.New("scorerexport: 伏字にする学生が見つかりません")
+	}
+	terms, err := m.maskingTerms(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return MaskText(repositories.TrainingSubject{
+		UserID: u.ID, Name: u.Name, Email: u.Email, SchoolName: u.SchoolName,
+	}, terms)
+}
+
+func (m *InterviewShadowMask) maskingTerms(ctx context.Context) (repositories.TrainingMaskingTerms, error) {
+	m.mu.Lock()
+	if time.Now().Before(m.freshUntil) {
+		terms := m.cached
+		m.mu.Unlock()
+		return terms, nil
+	}
+	m.mu.Unlock()
+	loaded, err := m.terms.ListTrainingMaskingTerms(ctx)
+	if err != nil {
+		return repositories.TrainingMaskingTerms{}, err
+	}
+	m.mu.Lock()
+	m.cached = loaded
+	m.freshUntil = time.Now().Add(10 * time.Minute)
+	m.mu.Unlock()
+	return loaded, nil
+}
+
+// MaskText は学習書き出しと同じ辞書で伏字にする関数を返す。本番の推論もこれを使う。
+func MaskText(subj repositories.TrainingSubject, terms repositories.TrainingMaskingTerms) (func(string) string, error) {
+	m, err := newMasker(subj, terms)
+	if err != nil {
+		return nil, err
+	}
+	return m.Mask, nil
 }
 
 // newMasker は学生1人ぶんの辞書で Masker を作る。

@@ -2,6 +2,7 @@ package companyauth
 
 import (
 	"Backend/internal/safego"
+	"Backend/internal/services/shared"
 	"errors"
 	"fmt"
 	"log"
@@ -76,8 +77,8 @@ func (s *CompanyUserService) ResetPassword(req ResetPasswordRequest) (*AuthRespo
 	if token == "" || req.Password == "" {
 		return nil, errors.New("token and password are required")
 	}
-	if len(req.Password) < 8 {
-		return nil, errors.New("password must be at least 8 characters")
+	if err := shared.ValidatePassword(req.Password); err != nil {
+		return nil, err
 	}
 
 	user, err := s.users.FindByPasswordResetTokenHash(hashToken(token))

@@ -4,6 +4,14 @@
 
 SaaS 向けに契約組織（テナント）単位でデータを分離するための基盤です。
 
+組織（`organizations`）と学校（`schools`）は別の境界です。
+
+- 画面のホスト名からフロントの middleware が `X-Tenant-Slug` を付け、バックエンドの `EchoTenantResolver` が slug で組織を解決する。クライアントが付けた `X-Tenant-Slug` は middleware が捨てて、ホストから付け直す。
+- 学生の学校は `users.school_id`。学校名の自己申告から解決し、教員向けの一覧は `school_id` と `organization_id` の両方で絞る。
+- 職員は `users.role = staff`。担当校は `admin_school_memberships`。担当校が無い職員は何も見えない。全校を見るのは `is_admin` のときだけ（`school.ResolveAccess`）。
+
+組織側の分離は次のとおりです。
+
 - `organizations` … テナント本体
 - `organization_memberships` … ユーザー所属と組織内ロール（`owner` / `admin` / `member`）
 - 主要ユーザーデータに `organization_id` を付与し、リポジトリ層でクロステナント参照を遮断

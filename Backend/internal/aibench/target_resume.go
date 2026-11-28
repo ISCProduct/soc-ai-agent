@@ -131,6 +131,11 @@ func evaluateResumeResponse(o Observation, c Case, res CallResult) Observation {
 
 	o.RawScore = float64(overall)
 	o.Score = float64(overall) / 100
+	// 軸別の点を残し、同一入力でのゆらぎを軸ごとに見られるようにする（SOCAIAGENT-699）
+	o.AxisScores = make(map[string]float64, len(resp.Scores))
+	for k, v := range resp.Scores {
+		o.AxisScores[k] = float64(v)
+	}
 
 	if needsJSONRecovery(res.Text) {
 		// プロンプトは「出力は次のJSONのみ」と指示している

@@ -1,6 +1,7 @@
 package costs
 
 import (
+	"Backend/internal/config"
 	"Backend/internal/models"
 	openaiPkg "Backend/internal/openai"
 	"Backend/internal/repositories"
@@ -659,10 +660,7 @@ func (s *APICostService) sendSlackAlert(text string) {
 		}
 		return
 	}
-	webhook := strings.TrimSpace(os.Getenv("OPENAI_COST_ALERT_SLACK_WEBHOOK_URL"))
-	if webhook == "" {
-		webhook = strings.TrimSpace(os.Getenv("REALTIME_ALERT_SLACK_WEBHOOK_URL"))
-	}
+	webhook := config.OpenAICostAlertSlackWebhookURL()
 	if webhook == "" {
 		return
 	}
@@ -678,7 +676,7 @@ func (s *APICostService) sendDiscordAlert(content string) {
 		}
 		return
 	}
-	webhook := strings.TrimSpace(os.Getenv("OPENAI_COST_ALERT_DISCORD_WEBHOOK_URL"))
+	webhook := config.OpenAICostAlertDiscordWebhookURL()
 	if webhook == "" {
 		return
 	}

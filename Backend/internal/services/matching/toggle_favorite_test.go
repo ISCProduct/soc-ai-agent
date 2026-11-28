@@ -107,11 +107,50 @@ func TestListFavoriteCompanies_DedupesRepoRows(t *testing.T) {
 	}}
 	s := &MatchingService{matchRepo: repo}
 
-	got, err := s.ListFavoriteCompanies(context.Background(), 1, 50)
+	got, total, ids, err := s.ListFavoriteCompanies(context.Background(), 1, 0, 50)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(got) != 1 || got[0].ID != 2 {
 		t.Fatalf("got %+v, want the newer row only", got)
+	}
+	if total != 1 || len(ids) != 1 || ids[0] != 10 {
+		t.Fatalf("total=%d ids=%v, want 1 / [10]", total, ids)
+	}
+}
+
+func TestListFavoriteCompanies_OffsetReturnsLaterCompanies(t *testing.T) {
+	at := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	rows := make([]*models.UserCompanyMatch, 0, 3)
+	for i, companyID := range []uint{30, 10, 20} {
+		rows = append(rows, &models.UserCompanyMatch{
+			ID:         uint(i + 1),
+			CompanyID:  companyID,
+			MatchScore: float64(100 - i*10),
+			CreatedAt:  at,
+			Company:    models.Company{ID: companyID},
+		})
+	}
+	// スコア順は 30, 10, 20。2社目から1社だけ返す。
+	repo := &stubToggleFavoriteMatchRepo{favorited: rows}
+	s := &MatchingService{matchRepo: repo}
+
+	got, total, ids, err := s.ListFavoriteCompanies(context.Background(), 1, 1, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 3 || len(ids) != 3 || ids[0] != 30 || ids[2] != 20 {
+		t.Fatalf("total=%d ids=%v, want 3社すべて", total, ids)
+	}
+	if len(got) != 1 || got[0].CompanyID != 10 {
+		t.Fatalf("got %+v, want company 10 only", got)
+	}
+
+	past, pastTotal, _, err := s.ListFavoriteCompanies(context.Background(), 1, 100, 100)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pastTotal != 3 || len(past) != 0 {
+		t.Fatalf("末尾を超えたページは空。total=%d len=%d", pastTotal, len(past))
 	}
 }

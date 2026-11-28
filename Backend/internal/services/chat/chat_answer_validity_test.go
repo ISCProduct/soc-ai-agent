@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,7 +78,7 @@ func TestCheckAnswerValidity_ValidAnswerResetsCount(t *testing.T) {
 	v, c := &fakeValidationRepo{count: 2}, &fakeChatRepo{}
 	s := newValidityService(v, c)
 
-	handled, text, err := s.checkAnswerValidity(context.Background(), assistantQuestion(textQuestion),
+	handled, text, err := s.checkAnswerValidity(guardedCtx(), assistantQuestion(textQuestion),
 		"その経験は少ないですが児童養護施設の案件を担当しました", 1, "s1")
 
 	if err != nil || handled || text != "" {
@@ -100,7 +99,7 @@ func TestCheckAnswerValidity_InvalidAnswerWarnsThenTerminatesOnThird(t *testing.
 
 	// 1回目・2回目は警告。2回目は終了の予告つき
 	for i, wantWarn := range []string{"", "次も同じだと、このチャットは一度終了します"} {
-		handled, text, err := s.checkAnswerValidity(context.Background(), hist, "あ", 7, "s1")
+		handled, text, err := s.checkAnswerValidity(guardedCtx(), hist, "あ", 7, "s1")
 		if err != nil || !handled {
 			t.Fatalf("%d回目: handled=%v err=%v", i+1, handled, err)
 		}
@@ -116,7 +115,7 @@ func TestCheckAnswerValidity_InvalidAnswerWarnsThenTerminatesOnThird(t *testing.
 	}
 
 	// 3回目で強制終了
-	handled, text, err := s.checkAnswerValidity(context.Background(), hist, "あ", 7, "s1")
+	handled, text, err := s.checkAnswerValidity(guardedCtx(), hist, "あ", 7, "s1")
 	if err != nil || !handled || text != validationTerminatedMessage() {
 		t.Fatalf("3回目: handled=%v text=%q err=%v", handled, text, err)
 	}
@@ -140,7 +139,7 @@ func TestCheckAnswerValidity_EmptyOtherChoiceDoesNotCount(t *testing.T) {
 	s := newValidityService(v, c)
 
 	// 「その他」を記号だけで選んだ: 数えず、書き方だけ伝える
-	handled, text, err := s.checkAnswerValidity(context.Background(), assistantQuestion(choiceQuestion), "C", 1, "s1")
+	handled, text, err := s.checkAnswerValidity(guardedCtx(), assistantQuestion(choiceQuestion), "C", 1, "s1")
 
 	if err != nil || !handled || text != validationOtherNeedsTextMessage() {
 		t.Fatalf("handled=%v text=%q err=%v", handled, text, err)
@@ -158,7 +157,7 @@ func TestCheckAnswerValidity_NoQuestionInHistoryExpectsJobChoice(t *testing.T) {
 	v, c := &fakeValidationRepo{}, &fakeChatRepo{}
 	s := newValidityService(v, c)
 
-	handled, _, err := s.checkAnswerValidity(context.Background(), nil, "開発 インフラ", 1, "s1")
+	handled, _, err := s.checkAnswerValidity(guardedCtx(), nil, "開発 インフラ", 1, "s1")
 	if err != nil || handled {
 		t.Fatalf("handled=%v err=%v, want 有効", handled, err)
 	}
@@ -168,21 +167,21 @@ func TestCheckAnswerValidity_Errors(t *testing.T) {
 	t.Run("回数の加算に失敗", func(t *testing.T) {
 		v := &fakeValidationRepo{incrementErr: errors.New("db down")}
 		s := newValidityService(v, &fakeChatRepo{})
-		handled, text, err := s.checkAnswerValidity(context.Background(), assistantQuestion(textQuestion), "あ", 1, "s1")
+		handled, text, err := s.checkAnswerValidity(guardedCtx(), assistantQuestion(textQuestion), "あ", 1, "s1")
 		if !handled || text != "" || err == nil || !strings.Contains(err.Error(), "failed to increment invalid count") {
 			t.Fatalf("handled=%v text=%q err=%v", handled, text, err)
 		}
 	})
 	t.Run("無効回答の案内の保存に失敗", func(t *testing.T) {
 		s := newValidityService(&fakeValidationRepo{}, &fakeChatRepo{createErr: errors.New("db down")})
-		handled, text, err := s.checkAnswerValidity(context.Background(), assistantQuestion(textQuestion), "あ", 1, "s1")
+		handled, text, err := s.checkAnswerValidity(guardedCtx(), assistantQuestion(textQuestion), "あ", 1, "s1")
 		if !handled || text != "" || err == nil || !strings.Contains(err.Error(), "failed to save assistant message for invalid answer") {
 			t.Fatalf("handled=%v text=%q err=%v", handled, text, err)
 		}
 	})
 	t.Run("「その他」の案内の保存に失敗", func(t *testing.T) {
 		s := newValidityService(&fakeValidationRepo{}, &fakeChatRepo{createErr: errors.New("db down")})
-		handled, text, err := s.checkAnswerValidity(context.Background(), assistantQuestion(choiceQuestion), "C", 1, "s1")
+		handled, text, err := s.checkAnswerValidity(guardedCtx(), assistantQuestion(choiceQuestion), "C", 1, "s1")
 		if !handled || text != "" || err == nil || !strings.Contains(err.Error(), "failed to save assistant message for empty other choice") {
 			t.Fatalf("handled=%v text=%q err=%v", handled, text, err)
 		}
@@ -273,7 +272,7 @@ func TestValidateAnswerRelevance_TextQuestion(t *testing.T) {
 			if tt.client != nil {
 				s.aiClient = tt.client(t)
 			}
-			got, err := s.validateAnswerRelevance(context.Background(), textQuestion, tt.answer)
+			got, err := s.validateAnswerRelevance(guardedCtx(), textQuestion, tt.answer)
 			if (err != nil) != tt.wantErr || got != tt.want {
 				t.Fatalf("got=%v err=%v, want got=%v wantErr=%v", got, err, tt.want, tt.wantErr)
 			}
@@ -307,7 +306,7 @@ func TestValidateAnswerRelevance_ChoiceQuestion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			calls.Store(0)
 			s := &ChatService{aiClient: tt.client(t)}
-			got, err := s.validateAnswerRelevance(context.Background(), choiceQuestion, tt.answer)
+			got, err := s.validateAnswerRelevance(guardedCtx(), choiceQuestion, tt.answer)
 			if (err != nil) != tt.wantErr || got != tt.want {
 				t.Fatalf("got=%v err=%v, want got=%v wantErr=%v", got, err, tt.want, tt.wantErr)
 			}
@@ -325,7 +324,7 @@ func TestValidateAnswerRelevance_ChoiceQuestionAIErrorIsReturned(t *testing.T) {
 	t.Cleanup(srv.Close)
 	s := &ChatService{aiClient: openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")}
 
-	got, err := s.validateAnswerRelevance(context.Background(), choiceQuestion, "あ")
+	got, err := s.validateAnswerRelevance(guardedCtx(), choiceQuestion, "あ")
 	if got || err == nil || !strings.Contains(err.Error(), "AI validation error") {
 		t.Fatalf("got=%v err=%v, want AI 判定の失敗を返す", got, err)
 	}

@@ -2,7 +2,6 @@
 
 import { FormEvent, useEffect, useState } from 'react'
 import {
-  Alert,
   Box,
   Button,
   Card,
@@ -16,8 +15,8 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { authService } from '@/lib/auth'
-import { BACKEND_URL } from '@/lib/config'
 
 type IndustryOption = { id: number; name: string; level: number }
 
@@ -50,10 +49,10 @@ export function ScoutPreferencesCard() {
   useEffect(() => {
     const headers = authService.getUserFetchHeaders()
     Promise.all([
-      fetch(`${BACKEND_URL}/api/user/preferences`, { headers }).then((r) =>
+      fetch(`/api/bff/user/preferences`, { headers }).then((r) =>
         r.ok ? r.json() : Promise.reject(new Error('failed')),
       ),
-      fetch(`${BACKEND_URL}/api/user/industries`, { headers })
+      fetch(`/api/bff/user/industries`, { headers })
         .then((r) => (r.ok ? r.json() : { items: [] }))
         .catch(() => ({ items: [] })),
     ])
@@ -76,7 +75,7 @@ export function ScoutPreferencesCard() {
     setError('')
     setSaved(false)
     try {
-      const res = await fetch(`${BACKEND_URL}/api/user/preferences`, {
+      const res = await fetch(`/api/bff/user/preferences`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
         body: JSON.stringify({
@@ -128,7 +127,7 @@ export function ScoutPreferencesCard() {
           </Alert>
         )}
         {saved && (
-          <Alert severity="success" sx={{ mb: 2 }}>
+          <Alert role="alert" severity="success" sx={{ mb: 2 }}>
             保存しました
           </Alert>
         )}

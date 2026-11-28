@@ -10,7 +10,7 @@ export async function PUT(
 ) {
   const { id, qid } = await params
   const body = await request.json()
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/interview-questions/${qid}`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${encodeURIComponent(id)}/interview-questions/${encodeURIComponent(qid)}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -28,7 +28,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; qid: string }> },
 ) {
   const { id, qid } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/interview-questions/${qid}`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${encodeURIComponent(id)}/interview-questions/${encodeURIComponent(qid)}`, {
     method: 'DELETE',
     headers: {
       'X-Admin-Email': request.headers.get('x-admin-email') || '',

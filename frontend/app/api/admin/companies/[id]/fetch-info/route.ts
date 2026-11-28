@@ -17,7 +17,7 @@ export async function POST(
   const force = request.nextUrl.searchParams.get('force')
   const qs = force === 'true' ? '?force=true' : ''
   try {
-    const result = await proxyAdminBackend('POST', `/api/admin/companies/${id}/fetch-info${qs}`, {
+    const result = await proxyAdminBackend('POST', `/api/admin/companies/${encodeURIComponent(id)}/fetch-info${qs}`, {
       headers: adminProxyHeaders(request.headers),
       timeoutMs: 120_000,
     })

@@ -3,6 +3,7 @@ package auth
 import (
 	"Backend/internal/config"
 	"Backend/internal/middleware"
+	authsvc "Backend/internal/services/auth"
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/organization"
 	"encoding/base64"
@@ -10,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 
 	"github.com/labstack/echo/v4"
 )
@@ -17,10 +19,57 @@ import (
 type OAuthController struct {
 	oauthService  ifaces.OAuthService
 	organizations *organization.OrganizationService
+	codes         *authsvc.OAuthCodeStore
 }
 
-func NewOAuthController(oauthService ifaces.OAuthService, organizations *organization.OrganizationService) *OAuthController {
-	return &OAuthController{oauthService: oauthService, organizations: organizations}
+func NewOAuthController(oauthService ifaces.OAuthService, organizations *organization.OrganizationService, codes *authsvc.OAuthCodeStore) *OAuthController {
+	return &OAuthController{oauthService: oauthService, organizations: organizations, codes: codes}
+}
+
+// oauthCodeExchangeEnabled は OAuth 完了時にトークンを URL へ載せず、短命コードを渡すか (SOCAIAGENT-683)。
+// FE がコード交換に対応してから true にする。false の間は従来どおり user= で渡す。
+func oauthCodeExchangeEnabled() bool {
+	return os.Getenv("OAUTH_CODE_EXCHANGE") == "true"
+}
+
+// completeLogin は OAuth 完了後に FE の /auth/callback へ戻す。
+func (c *OAuthController) completeLogin(ctx echo.Context, provider, redirectBase, bind string, resp *authsvc.AuthResponse) error {
+	userData, _ := json.Marshal(resp)
+	if !oauthCodeExchangeEnabled() {
+		redirectURL := redirectBase + "/auth/callback?provider=" + provider + "&user=" + base64.URLEncoding.EncodeToString(userData)
+		return ctx.Redirect(http.StatusTemporaryRedirect, redirectURL)
+	}
+	// ログインを始めたブラウザの照合値が無いと、交換時に本人のブラウザか確かめられない
+	if bind == "" {
+		log.Printf("[OAuth] %s callback: missing bind", provider)
+		return ctx.Redirect(http.StatusTemporaryRedirect, redirectBase+"?error=auth_failed")
+	}
+	code, err := c.codes.Issue(ctx.Request().Context(), userData, bind)
+	if err != nil {
+		log.Printf("[OAuth] %s callback: issue code: %v", provider, err)
+		return ctx.Redirect(http.StatusTemporaryRedirect, redirectBase+"?error=auth_failed")
+	}
+	return ctx.Redirect(http.StatusTemporaryRedirect, redirectBase+"/auth/callback?provider="+provider+"&code="+url.QueryEscape(code))
+}
+
+// ExchangeCode は OAuth 完了時の短命コードを認証情報と交換する (SOCAIAGENT-683)。
+// POST /api/auth/oauth/exchange。FE の Route Handler がサーバー間で呼び、結果を httpOnly Cookie にする。
+// verifier はログインを始めたブラウザだけが持つ値で、コード発行時の照合値と合わなければ拒否する。
+func (c *OAuthController) ExchangeCode(ctx echo.Context) error {
+	var req struct {
+		Code     string `json:"code"`
+		Verifier string `json:"verifier"`
+	}
+	if err := ctx.Bind(&req); err != nil || req.Code == "" || req.Verifier == "" {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	payload, err := c.codes.Redeem(ctx.Request().Context(), req.Code, req.Verifier)
+	if err != nil {
+		// コード・verifier の値はログに出さない
+		log.Printf("[OAuth] code exchange rejected: %v", err)
+		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "invalid or expired code"})
+	}
+	return ctx.JSONBlob(http.StatusOK, payload)
 }
 
 // resolveTenantOrgID はテナントslugからOrganizationIDを解決する。
@@ -76,6 +125,7 @@ func (c *OAuthController) GoogleLogin(ctx echo.Context) error {
 	}
 	// 学園サブドメインのテナントslugをCookieに保存し、コールバック時に引き継ぐ
 	middleware.SetOAuthTenantSlug(ctx.Response().Writer, ctx.QueryParam("tenant"))
+	middleware.SetOAuthBind(ctx.Response().Writer, ctx.QueryParam("bind"))
 
 	url := c.oauthService.GetGoogleAuthURL(state)
 
@@ -90,6 +140,7 @@ func (c *OAuthController) GoogleCallback(ctx echo.Context) error {
 	// state Cookieより先にテナントslug Cookieを消費する(state検証に失敗した場合も
 	// エラーリダイレクト先として使うため。両者は独立したCookieで管理されている)。
 	tenantSlug := middleware.ConsumeOAuthTenantSlug(ctx.Response().Writer, ctx.Request())
+	bind := middleware.ConsumeOAuthBind(ctx.Response().Writer, ctx.Request())
 	redirectBase := c.tenantRedirectBase(tenantSlug)
 
 	// state 検証（CSRF 対策 #324）
@@ -112,9 +163,7 @@ func (c *OAuthController) GoogleCallback(ctx echo.Context) error {
 		return ctx.Redirect(http.StatusTemporaryRedirect, redirectBase+"?error=auth_failed")
 	}
 
-	userData, _ := json.Marshal(resp)
-	redirectURL := redirectBase + "/auth/callback?provider=google&user=" + base64.URLEncoding.EncodeToString(userData)
-	return ctx.Redirect(http.StatusTemporaryRedirect, redirectURL)
+	return c.completeLogin(ctx, "google", redirectBase, bind, resp)
 }
 
 // GitHubLogin GitHub OAuth認証開始
@@ -127,6 +176,7 @@ func (c *OAuthController) GitHubLogin(ctx echo.Context) error {
 	}
 	// 学園サブドメインのテナントslugをCookieに保存し、コールバック時に引き継ぐ
 	middleware.SetOAuthTenantSlug(ctx.Response().Writer, ctx.QueryParam("tenant"))
+	middleware.SetOAuthBind(ctx.Response().Writer, ctx.QueryParam("bind"))
 
 	url := c.oauthService.GetGitHubAuthURL(state)
 
@@ -148,6 +198,7 @@ func (c *OAuthController) GitHubCallback(ctx echo.Context) error {
 	// state Cookieより先にテナントslug Cookieを消費する(state検証に失敗した場合も
 	// エラーリダイレクト先として使うため。両者は独立したCookieで管理されている)。
 	tenantSlug := middleware.ConsumeOAuthTenantSlug(ctx.Response().Writer, ctx.Request())
+	bind := middleware.ConsumeOAuthBind(ctx.Response().Writer, ctx.Request())
 	redirectBase := c.tenantRedirectBase(tenantSlug)
 
 	// state 検証（CSRF 対策 #324）
@@ -170,7 +221,5 @@ func (c *OAuthController) GitHubCallback(ctx echo.Context) error {
 		return ctx.Redirect(http.StatusTemporaryRedirect, redirectBase+"?error=auth_failed")
 	}
 
-	userData, _ := json.Marshal(resp)
-	redirectURL := redirectBase + "/auth/callback?provider=github&user=" + base64.URLEncoding.EncodeToString(userData)
-	return ctx.Redirect(http.StatusTemporaryRedirect, redirectURL)
+	return c.completeLogin(ctx, "github", redirectBase, bind, resp)
 }

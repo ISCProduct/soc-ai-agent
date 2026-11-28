@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Alert, Box, Button, LinearProgress, Paper, Stack, Typography } from '@mui/material'
+import { Box, Button, LinearProgress, Paper, Stack, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { ListSkeleton } from '@/components/common/ListSkeleton'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import { getResultsPathOrChat } from '@/lib/results-navigation'

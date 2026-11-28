@@ -12,7 +12,7 @@
 |-------|-------------|------------|
 | Go | 1.25 以上 | `go version` |
 | Node.js | 24.22.1（`frontend/.nvmrc`） | `node --version` |
-| Python | 3.10 以上 | `python3 --version` |
+| Python | 3.12（RAG イメージと同じ） | `python3 --version` |
 | Docker | 24 以上 | `docker --version` |
 | Docker Compose | v2 (Plugin) | `docker compose version` |
 | Git | — | `git --version` |
@@ -234,6 +234,7 @@ go test ./...                             # 全テスト
 ```sh
 cd frontend
 npm run lint          # ESLint チェック
+npx next typegen && npx tsc --noEmit  # 型チェック（CI の Frontend Unit Tests でも実行）
 npm run build         # 本番ビルド（型チェック含む）
 ```
 
@@ -385,7 +386,7 @@ git commit -m "feat: #xxx 変更内容"
 
 # テスト実行
 cd Backend && go test ./...
-cd frontend && npm run lint
+cd frontend && npm run lint && npx next typegen && npx tsc --noEmit
 
 # PR を作成
 gh pr create --title "Resolve #xxx: 機能説明" --base main

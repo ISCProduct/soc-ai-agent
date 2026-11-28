@@ -37,8 +37,8 @@ func (m *GitHubServiceMock) SyncUserData(ctx context.Context, userID uint, force
 	return m.Called(ctx, userID, force).Error(0)
 }
 
-func (m *GitHubServiceMock) ListRepoSummaries(userID uint) ([]models.GitHubRepoSummary, error) {
-	args := m.Called(userID)
+func (m *GitHubServiceMock) ListRepoSummaries(ctx context.Context, userID uint) ([]models.GitHubRepoSummary, error) {
+	args := m.Called(ctx, userID)
 	return args.Get(0).([]models.GitHubRepoSummary), args.Error(1)
 }
 

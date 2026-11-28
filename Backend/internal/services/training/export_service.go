@@ -21,6 +21,10 @@ import (
 // 片方だけ増やすと、Backend が出したデータを RAG 側が黙って捨てる。
 var OutcomeStatuses = []string{"rejected", "offered", "accepted"}
 
+// ExportMaxLimit は1回の書き出しで返すセッション数の既定値かつ上限（SOCAIAGENT-694）。
+// 続きは offset で取る。
+const ExportMaxLimit = 1000
+
 // Utterance は面接の1発話。RAG 側が期待する形に合わせる。
 type Utterance struct {
 	Role string `json:"role"`
@@ -98,17 +102,28 @@ func (s *Service) Count(ctx context.Context) (*Stats, error) {
 //
 // ユーザー発話のみを含める。AI発話を prompt に混ぜると、モデルの出力を
 // 教師信号にすることになり蒸留にあたる。
-func (s *Service) Export(ctx context.Context, limit int) ([]Session, error) {
+//
+// limit は 0 以下・上限超えなら ExportMaxLimit に丸める。offset は対象セッション（発話の有無で絞る前）の位置。
+// 発話の無いセッションは落とすため、返る件数が limit 未満でも続きがありうる。
+// 続きがありうるとき nextOffset に次の offset を返す（0 は続きなし）。
+func (s *Service) Export(ctx context.Context, limit, offset int) (sessions []Session, nextOffset int, err error) {
 	if s == nil || s.repo == nil {
-		return nil, fmt.Errorf("training: db is nil")
+		return nil, 0, fmt.Errorf("training: db is nil")
 	}
+	if limit <= 0 || limit > ExportMaxLimit {
+		limit = ExportMaxLimit
+	}
+	offset = max(offset, 0)
 
-	rows, err := s.repo.ListOutcomeSessions(ctx, OutcomeStatuses, limit)
+	rows, err := s.repo.ListOutcomeSessions(ctx, OutcomeStatuses, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("training: セッションの取得に失敗しました: %w", err)
+		return nil, 0, fmt.Errorf("training: セッションの取得に失敗しました: %w", err)
+	}
+	if len(rows) == limit {
+		nextOffset = offset + limit
 	}
 	if len(rows) == 0 {
-		return []Session{}, nil
+		return []Session{}, 0, nil
 	}
 
 	ids := make([]uint, 0, len(rows))
@@ -120,7 +135,7 @@ func (s *Service) Export(ctx context.Context, limit int) ([]Session, error) {
 
 	utts, err := s.repo.ListUserUtterances(ctx, ids)
 	if err != nil {
-		return nil, fmt.Errorf("training: 発話の取得に失敗しました: %w", err)
+		return nil, 0, fmt.Errorf("training: 発話の取得に失敗しました: %w", err)
 	}
 
 	bySession := make(map[uint][]Utterance, len(ids))
@@ -141,5 +156,5 @@ func (s *Service) Export(ctx context.Context, limit int) ([]Session, error) {
 			Utterances:        us,
 		})
 	}
-	return out, nil
+	return out, nextOffset, nil
 }

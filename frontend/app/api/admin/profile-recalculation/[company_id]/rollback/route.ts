@@ -28,7 +28,7 @@ export async function POST(
   { params }: { params: Promise<{ company_id: string }> }
 ) {
   const { company_id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/profile-recalculation/${company_id}/rollback`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/profile-recalculation/${encodeURIComponent(company_id)}/rollback`, {
     method: 'POST',
     headers: adminHeaders(request),
   })

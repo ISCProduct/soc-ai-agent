@@ -31,7 +31,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/company-users`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${encodeURIComponent(id)}/company-users`, {
     headers: adminHeaders(request),
   })
   return proxyJson(response)
@@ -43,7 +43,7 @@ export async function POST(
 ) {
   const { id } = await params
   const body = await request.text()
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/company-users`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${encodeURIComponent(id)}/company-users`, {
     method: 'POST',
     headers: adminHeaders(request),
     body,

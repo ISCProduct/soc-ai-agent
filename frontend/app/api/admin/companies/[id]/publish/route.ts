@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/publish`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${encodeURIComponent(id)}/publish`, {
     method: 'PATCH',
     headers: {
       'X-Admin-Email': request.headers.get('x-admin-email') || '',

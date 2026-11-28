@@ -134,6 +134,7 @@ func TestResolveCompanyInfo_PrefersDBBrief(t *testing.T) {
 		byID: map[uint]*models.Company{
 			42: {
 				ID:           42,
+				IsActive:     true,
 				Name:         "中小SIテスト株式会社",
 				MainBusiness: "受託開発・SES",
 				Culture:      "チームワーク重視",

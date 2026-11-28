@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { Alert, Box, Button, Snackbar, Typography } from '@mui/material'
+import { Box, Button, Snackbar, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import { authService } from '@/lib/auth'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
@@ -13,6 +14,8 @@ import { CONTENT_MAX_WIDTH } from '@/lib/design/tokens'
 import FavoritesCompareList from '@/app/results/components/FavoritesCompareList'
 import type { Company, SnackbarState } from '@/app/results/types'
 import { mapRecommendationToCompany } from '@/app/results/utils'
+import { FavoritesPageNav } from '@/components/favorites/FavoritesPageNav'
+import { FAVORITES_PAGE_SIZE, favoritesListUrl, readFavoritesTotal } from '@/lib/favorites-page'
 
 /**
  * 診断をまたいだお気に入りだけを見る画面。
@@ -23,6 +26,8 @@ export default function PageContent() {
   const router = useRouter()
   const requestRef = useRef(0)
   const [companies, setCompanies] = useState<Company[]>([])
+  const [offset, setOffset] = useState(0)
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [favoritingId, setFavoritingId] = useState<number | null>(null)
@@ -32,8 +37,9 @@ export default function PageContent() {
     const id = ++requestRef.current
     setLoading(true)
     setLoadError(null)
+    let steppingBack = false
     try {
-      const res = await fetch('/api/chat/favorites?limit=100', {
+      const res = await fetch(favoritesListUrl(offset), {
         headers: authService.getUserFetchHeaders(),
         cache: 'no-store',
       })
@@ -44,17 +50,25 @@ export default function PageContent() {
       if (!data || !Array.isArray(data.recommendations)) {
         throw new Error('お気に入りの形式が正しくありません')
       }
-      setCompanies(
-        data.recommendations.map((rec: unknown, index: number) => mapRecommendationToCompany(rec, index)),
+      const mapped = data.recommendations.map((rec: unknown, index: number) =>
+        mapRecommendationToCompany(rec, index),
       )
+      // 最後の1社を外すと、そのページは空になる。前の100社へ戻す。
+      if (mapped.length === 0 && offset > 0) {
+        steppingBack = true
+        setOffset((current) => Math.max(0, current - FAVORITES_PAGE_SIZE))
+        return
+      }
+      setCompanies(mapped)
+      setTotal(readFavoritesTotal(data.total, mapped.length))
     } catch (err) {
       if (id !== requestRef.current) return
       setCompanies([])
       setLoadError(err instanceof Error ? err.message : 'お気に入りを読み込めませんでした')
     } finally {
-      if (id === requestRef.current) setLoading(false)
+      if (id === requestRef.current && !steppingBack) setLoading(false)
     }
-  }, [])
+  }, [offset])
 
   useEffect(() => {
     void loadFavorites()
@@ -110,6 +124,8 @@ export default function PageContent() {
         >
           {loadError}
         </Alert>
+      ) : companies.length === 0 && offset > 0 ? (
+        <ListSkeleton rows={3} label="お気に入りを読み込み中" />
       ) : companies.length === 0 ? (
         <EmptyState
           title="お気に入りにした企業はまだありません"
@@ -122,12 +138,20 @@ export default function PageContent() {
           }
         />
       ) : (
-        <FavoritesCompareList
-          companies={companies}
-          favoritingId={favoritingId}
-          onSelectCompany={(company) => router.push(`/company/${company.id}`)}
-          onToggleFavorite={(e, company) => void handleUnfavorite(e, company)}
-        />
+        <>
+          <FavoritesCompareList
+            companies={companies}
+            favoritingId={favoritingId}
+            onSelectCompany={(company) => router.push(`/company/${company.id}`)}
+            onToggleFavorite={(e, company) => void handleUnfavorite(e, company)}
+          />
+          <FavoritesPageNav
+            total={total}
+            offset={offset}
+            pageCount={companies.length}
+            onOffsetChange={setOffset}
+          />
+        </>
       )}
 
       <Snackbar
@@ -137,7 +161,7 @@ export default function PageContent() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         sx={ABOVE_BOTTOM_NAV_SX}
       >
-        <Alert severity={snackbar.severity} onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}>
+        <Alert role="alert" severity={snackbar.severity} onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}>
           {snackbar.message}
         </Alert>
       </Snackbar>

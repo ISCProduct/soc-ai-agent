@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
       upstreamHeaders.Range = range
     }
 
-    const response = await fetch(`${BACKEND_URL}/api/resume/document?document_id=${documentId}`, {
+    const response = await fetch(`${BACKEND_URL}/api/resume/document?document_id=${encodeURIComponent(documentId)}`, {
       headers: upstreamHeaders,
     })
     if (!response.ok) {

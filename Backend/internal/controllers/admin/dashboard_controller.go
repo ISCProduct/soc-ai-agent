@@ -9,10 +9,13 @@ import (
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/organization"
 	"Backend/internal/services/school"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -127,6 +130,56 @@ func avgScoresJSON(scoresJSON string) (map[string]float64, *float64) {
 	return scores, &avg
 }
 
+// avgScoreBatchSize は IN 句に載せる ID 数の上限(MySQL のプレースホルダ上限 65535 を超えないため)。
+const avgScoreBatchSize = 1000
+
+// userAvgScores はユーザーごとの終了済みセッションの平均スコアを返す(スコアのあるユーザーのみ)。
+// ID を avgScoreBatchSize 件ずつ分けて取得する。失敗した範囲はスコア無しとして飛ばし、成功した範囲の平均は返す。
+// セッションID取得の失敗は該当なしとして扱い(従来動作)、レポート取得の失敗のみ最初のエラーを返す。
+func (c *AdminDashboardController) userAvgScores(ctx context.Context, userIDs []uint) (map[uint]float64, error) {
+	sessionToUser := map[uint]uint{}
+	var allSessionIDs []uint
+	for chunk := range slices.Chunk(userIDs, avgScoreBatchSize) {
+		idsByUser, err := c.sessionRepo.ListFinishedSessionIDsByUsers(ctx, chunk)
+		if err != nil {
+			// この範囲のユーザーはスコア無しになる。気づけるようログに残す。
+			log.Printf("[AdminDashboard] finished session ids batch fetch failed (users=%d): %v", len(chunk), err)
+			continue
+		}
+		for _, uid := range chunk {
+			for _, id := range idsByUser[uid] {
+				allSessionIDs = append(allSessionIDs, id)
+				sessionToUser[id] = uid
+			}
+		}
+	}
+	sum := map[uint]float64{}
+	cnt := map[uint]int{}
+	var firstErr error
+	for chunk := range slices.Chunk(allSessionIDs, avgScoreBatchSize) {
+		reports, err := c.reportRepo.FindBySessionIDs(chunk)
+		if err != nil {
+			log.Printf("[AdminDashboard] reports batch fetch failed (sessions=%d): %v", len(chunk), err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		for _, rep := range reports {
+			if _, avg := avgScoresJSON(rep.ScoresJSON); avg != nil {
+				uid := sessionToUser[rep.SessionID]
+				sum[uid] += *avg
+				cnt[uid]++
+			}
+		}
+	}
+	result := make(map[uint]float64, len(cnt))
+	for uid, n := range cnt {
+		result[uid] = sum[uid] / float64(n)
+	}
+	return result, firstErr
+}
+
 // ListUsers handles GET /api/admin/dashboard/users
 func (c *AdminDashboardController) ListUsers(ctx echo.Context) error {
 	limit := httpapi.LimitQuery(ctx, "limit", 25)
@@ -153,43 +206,16 @@ func (c *AdminDashboardController) ListUsers(ctx echo.Context) error {
 		return httpapi.InternalError(err)
 	}
 
-	// Collect all finished session IDs to batch-fetch reports
-	var allSessionIDs []uint
-	sessionToUser := map[uint]uint{}
-	for _, u := range users {
-		ids, err := c.sessionRepo.ListFinishedSessionIDsByUser(u.ID)
-		if err != nil {
-			continue
-		}
-		for _, id := range ids {
-			allSessionIDs = append(allSessionIDs, id)
-			sessionToUser[id] = u.ID
-		}
-	}
-
-	reports, err := c.reportRepo.FindBySessionIDs(allSessionIDs)
+	userAvg, err := c.userAvgScores(ctx.Request().Context(), userIDs)
 	if err != nil {
 		return httpapi.InternalError(err)
-	}
-
-	// Compute per-user avg scores
-	userScoreSum := map[uint]float64{}
-	userScoreCount := map[uint]int{}
-	for _, rep := range reports {
-		_, avg := avgScoresJSON(rep.ScoresJSON)
-		if avg != nil {
-			uid := sessionToUser[rep.SessionID]
-			userScoreSum[uid] += *avg
-			userScoreCount[uid]++
-		}
 	}
 
 	summaries := make([]UserScoreSummary, 0, len(users))
 	for _, u := range users {
 		stat := statMap[u.ID]
 		var avgScore *float64
-		if cnt := userScoreCount[u.ID]; cnt > 0 {
-			v := userScoreSum[u.ID] / float64(cnt)
+		if v, ok := userAvg[u.ID]; ok {
 			avgScore = &v
 		}
 		summaries = append(summaries, UserScoreSummary{
@@ -312,26 +338,8 @@ func (c *AdminDashboardController) ExportCSV(ctx echo.Context) error {
 
 	statMap, _ := c.sessionRepo.GetUserStatsBatch(userIDs)
 
-	var allSessionIDs []uint
-	sessionToUser := map[uint]uint{}
-	for _, u := range users {
-		ids, _ := c.sessionRepo.ListFinishedSessionIDsByUser(u.ID)
-		for _, id := range ids {
-			allSessionIDs = append(allSessionIDs, id)
-			sessionToUser[id] = u.ID
-		}
-	}
-	reports, _ := c.reportRepo.FindBySessionIDs(allSessionIDs)
-	userScoreSum := map[uint]float64{}
-	userScoreCount := map[uint]int{}
-	for _, rep := range reports {
-		_, avg := avgScoresJSON(rep.ScoresJSON)
-		if avg != nil {
-			uid := sessionToUser[rep.SessionID]
-			userScoreSum[uid] += *avg
-			userScoreCount[uid]++
-		}
-	}
+	// 取得失敗時は平均スコア空欄で出力を続ける(従来動作)
+	userAvg, _ := c.userAvgScores(ctx.Request().Context(), userIDs)
 
 	w := ctx.Response().Writer
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
@@ -342,8 +350,8 @@ func (c *AdminDashboardController) ExportCSV(ctx echo.Context) error {
 	for _, u := range users {
 		stat := statMap[u.ID]
 		avgScore := ""
-		if cnt := userScoreCount[u.ID]; cnt > 0 {
-			avgScore = fmt.Sprintf("%.2f", userScoreSum[u.ID]/float64(cnt))
+		if v, ok := userAvg[u.ID]; ok {
+			avgScore = fmt.Sprintf("%.2f", v)
 		}
 		lastSession := ""
 		if stat.LastSessionAt != nil {

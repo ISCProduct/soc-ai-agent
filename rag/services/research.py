@@ -26,6 +26,7 @@ from services.sanitize import (
     _wrap_untrusted_text,
 )
 from services import query_cache
+from services.deadline import run_with_deadline
 from services.settings import DEFAULT_SEARCH_LOG_DIR
 
 logger = logging.getLogger("main")
@@ -492,25 +493,50 @@ def _save_search_log(
         logger.warning("search log save failed company=%s error=%s", company_name, exc)
 
 
+# 検索ログの保存は結果に要らないので、上限時間の外（別のスレッド）で行う。ログ用のディスクが
+# 詰まって遅くても、完成した要約を上限切れで捨てないように（レビューの指摘）
+_SEARCH_LOG_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rag-search-log")
+
+
+def _save_search_log_in_background(*args) -> None:
+    import main as m
+
+    def run() -> None:
+        try:
+            m._save_search_log(*args)
+        except Exception as exc:  # ログの失敗で処理を止めない
+            logger.warning("search log save failed error=%s", exc)
+
+    _SEARCH_LOG_EXECUTOR.submit(run)
+
+
 async def _run_web_search_pipeline(company_name: str, job_title: str) -> str:
     """クエリ生成 → 並列Web Search → LLM要約 → ログ保存 の非同期パイプライン。
 
     キャッシュミス時に呼び出し、構造化された採用情報サマリーを返す。
+    全体に上限時間があり、過ぎたら空文字を返す（services/deadline.py、SOCAIAGENT-558）。
     """
+    return await run_with_deadline(
+        lambda executor: _web_search_steps(company_name, job_title, executor),
+        "web_search", company_name,
+    )
+
+
+async def _web_search_steps(company_name: str, job_title: str, executor: ThreadPoolExecutor) -> str:
+    """_run_web_search_pipeline の中身。どの段も渡された専用のスレッドプールで走らせる。"""
     import main as m
 
     loop = asyncio.get_event_loop()
 
     # クエリ生成（スレッドプールで実行）
     queries = await loop.run_in_executor(
-        None, m._generate_search_queries, company_name, job_title
+        executor, m._generate_search_queries, company_name, job_title
     )
 
     # Web Search を並列実行
-    with ThreadPoolExecutor() as executor:
-        raw_results = list(await asyncio.gather(
-            *[loop.run_in_executor(executor, m._web_search_openai, q) for q in queries]
-        ))
+    raw_results = list(await asyncio.gather(
+        *[loop.run_in_executor(executor, m._web_search_openai, q) for q in queries]
+    ))
     raw_results = [r for r in raw_results if r]
 
     if not raw_results:
@@ -526,12 +552,10 @@ async def _run_web_search_pipeline(company_name: str, job_title: str) -> str:
 
     # 採用観点での要約
     summary = await loop.run_in_executor(
-        None, m._summarize_for_hiring, company_name, job_title, ranked_results
+        executor, m._summarize_for_hiring, company_name, job_title, ranked_results
     )
 
-    # JSONL ログ保存（非同期、失敗しても処理を止めない）
-    await loop.run_in_executor(
-        None, m._save_search_log, company_name, job_title, queries, raw_results, summary
-    )
+    # JSONL ログ保存（上限時間の外で、待たずに。失敗しても処理を止めない）
+    _save_search_log_in_background(company_name, job_title, queries, raw_results, summary)
 
     return summary

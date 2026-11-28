@@ -1,6 +1,7 @@
 package email
 
 import (
+	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/services/analysis"
 	"bytes"
@@ -420,7 +421,7 @@ const interviewReportEmailTemplate = `<!DOCTYPE html>
 
 // SendRegistrationEmail 仮登録確認メールを送信（メールアドレスのみ、Userオブジェクト不要）
 func (s *EmailService) SendRegistrationEmail(email, token string) error {
-	appURL := os.Getenv("FRONTEND_URL")
+	appURL := config.FrontendURL()
 	if appURL == "" {
 		appURL = "http://localhost:3000"
 	}
@@ -487,7 +488,7 @@ func (s *EmailService) SendSystemAlertEmail(recipients []string, subject, body s
 // SendCompanyEntryThankYouAndInvite 企業情報投稿への感謝と本登録依頼メール（#754）
 // inviteToken が空の場合はログイン案内のみ（既に会員の場合）。
 func (s *EmailService) SendCompanyEntryThankYouAndInvite(email, companyName, inviteToken string) error {
-	appURL := os.Getenv("FRONTEND_URL")
+	appURL := config.FrontendURL()
 	if appURL == "" {
 		appURL = "http://localhost:3000"
 	}
@@ -527,7 +528,7 @@ func (s *EmailService) SendCompanyEntryThankYouAndInvite(email, companyName, inv
 
 // SendCompanyUserInvite は企業ポータル招待メールを送る（#1091）。
 func (s *EmailService) SendCompanyUserInvite(email, companyName, inviteToken string) error {
-	appURL := os.Getenv("FRONTEND_URL")
+	appURL := config.FrontendURL()
 	if appURL == "" {
 		appURL = "http://localhost:3000"
 	}
@@ -553,7 +554,7 @@ func (s *EmailService) SendCompanyUserInvite(email, companyName, inviteToken str
 // SendCompanyUserPasswordReset は企業ポータルのパスワード再設定メールを送る（#1196）。
 // 企業ユーザーには再設定手段が無く、パスワードを忘れると復旧不能だった。
 func (s *EmailService) SendCompanyUserPasswordReset(email, resetToken string) error {
-	appURL := os.Getenv("FRONTEND_URL")
+	appURL := config.FrontendURL()
 	if appURL == "" {
 		appURL = "http://localhost:3000"
 	}

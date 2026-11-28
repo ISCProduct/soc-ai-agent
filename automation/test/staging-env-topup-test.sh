@@ -3,7 +3,7 @@
 #
 # ASG は version=$Latest で Launch Template を更新しても既存インスタンスを置換しないため、
 # app_user_data.sh.tftpl へ1行足しただけでは稼働中の /opt/app/.env に反映されない。
-# そのために deployment.yml の「Deploy via SSH」には SSM から値を読んで .env を
+# そのために deploy-staging-job.yml の「Deploy via SSH」には SSM から値を読んで .env を
 # 書き換える継ぎ足し処理がある(#1407 で BFF_INTERNAL_TOKEN に導入)。
 #
 # 新しいシークレットを SSM パラメータで配るとき、この継ぎ足しを足し忘れると
@@ -14,7 +14,12 @@
 
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-WF="$ROOT/.github/workflows/deployment.yml"
+WF="$ROOT/.github/workflows/deploy-staging-job.yml"
+CALLER="$ROOT/.github/workflows/deployment.yml"
+if ! grep -q 'uses: \./\.github/workflows/deploy-staging-job.yml' "$CALLER"; then
+  echo "FAIL deployment.yml が deploy-staging-job.yml を呼んでいない" >&2
+  exit 1
+fi
 TF="$ROOT/infra/terraform/environments/staging/main.tf"
 TPL="$ROOT/infra/terraform/environments/staging/app_user_data.sh.tftpl"
 
@@ -50,7 +55,7 @@ fi
 # 「Deploy via SSH」ステップの本体だけを見る。他のジョブの SSM 参照を拾わないため。
 SSH_STEP=$(grep -n 'name: Deploy via SSH' "$WF" | head -1 | cut -d: -f1)
 if [ -z "$SSH_STEP" ]; then
-  echo "FAIL deployment.yml に staging の「Deploy via SSH」ステップが無い"
+  echo "FAIL deploy-staging-job.yml に staging の「Deploy via SSH」ステップが無い"
   exit 1
 fi
 SSH_END=$(awk -v s="$SSH_STEP" 'NR > s && /^      - name: /{print NR; exit}' "$WF")

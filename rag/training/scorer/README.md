@@ -81,7 +81,7 @@ Go の版で変わります（今の x/text v0.43.0 では Go 1.26 までが 15.
 - 学習したときの版（`unicodedata.unidata_version`）を、ヘッダの `features.unicode_version` に書きます。
 - Go の推論は `norm.Version` と一致しなければモデルを使いません。Python の `model.load` も、実行環境の版と違えばエラーにします。
 - **学習は、Go の版に合う Python で行います。** 今のバックエンド（Go 1.26）は 15.0.0 なので、
-  RAG のイメージと同じ Python 3.12 で学習します（CI のテストは 3.10 で動きますが、テストで作るモデルはその場で読むだけです）。
+  RAG のイメージと同じ Python 3.12 で学習します。CI のテストも 3.12 で、テストで作るモデルはその場で読むだけです。
   Go を 1.27 以降に上げるときは、学習に使う Python の版も合わせて見直します。
 - 対になっていないサロゲートは、Go では JSON を読む時点で U+FFFD になり同じ入力を作れないので、ゴールデンには入れず、
   Python のテスト（`test_normalize`）だけで確かめています。
@@ -124,6 +124,13 @@ N バイト       ヘッダ（JSON、UTF-8）
   合わなければエラーにします。Go も同じ確認をしてから使います。
 - **推論**：x を上の手順の特徴量として、軸ごとに `z = Σ value × float64(weight[axis][index])`（添字の昇順に足す）。
   スコアは `0 + (z > θ_k となる k の数)`、確信度の目安には期待値 `Σ σ(z − θ_k)` を使えます。
+
+## Go での推論と配線確認
+
+推論は `Backend/internal/services/interview/shadowscorer` が、このファイルと同じ確認をしてから採点します。
+アプリでは `INTERVIEW_SHADOW_SCORER=true` と `INTERVIEW_SHADOW_MODEL_PATH` を置いたときだけ、面接レポートの保存後に裏で採点し、`interview_shadow_scores` へ保存します。発話は学習書き出しと同じ伏字を通してから特徴量にします。保存する `model_version` はモデルファイル全体の SHA-256 です。既定はオフです。採点を止めたあとも、保存済みの結果は管理者が読めます。結果は `interview_reports.scores_json`、`user_weight_scores`、マッチング、学生の画面には使いません。
+
+人工データで「書き出し → 学習 → Go の推論」まで通す確認は `rag/tests/test_scorer_go_wiring.py` です。Python 3.12（Unicode 15.0.0）と Go が要ります。結果は配線が通ったことだけで、精度の主張には使いません。
 
 ## 評価レポート
 

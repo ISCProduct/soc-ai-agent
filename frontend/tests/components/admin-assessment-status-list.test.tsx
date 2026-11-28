@@ -16,7 +16,20 @@ const row = (over: Partial<StudentAssessmentStatus>): StudentAssessmentStatus =>
   ...over,
 })
 
-const data = (students: StudentAssessmentStatus[]): StudentStatusList => ({ template_id: 1, title: 'A校', students })
+const data = (students: StudentAssessmentStatus[]): StudentStatusList => ({
+  template_id: 1,
+  title: 'A校',
+  students,
+  rollup: {
+    student_count: students.length,
+    started_count: 1,
+    submitted_count: 1,
+    not_started_count: Math.max(students.length - 1, 0),
+    overdue_count: students.filter((s) => s.overdue).length,
+    started_percent: students.length === 0 ? 0 : 25,
+    submitted_percent: students.length === 0 ? 0 : 25,
+  },
+})
 
 describe('StatusList', () => {
   it('Backend が返した順（期限超過 → 未受検 → 途中 → 完了）をそのまま並べる', () => {

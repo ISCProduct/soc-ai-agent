@@ -27,7 +27,7 @@ def test_upsert_student_uses_stable_doc_id():
 
     kwargs = collection.upsert.call_args.kwargs
     assert kwargs["ids"] == ["student-42"]
-    assert kwargs["documents"] == ["取得資格: 基本情報"]
+    assert kwargs["documents"] == [""]
     assert kwargs["metadatas"][0]["user_id"] == 42
 
 

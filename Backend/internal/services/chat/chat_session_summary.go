@@ -10,6 +10,16 @@ import (
 	"strings"
 )
 
+// sessionSummaryForResponse は要約を応答へ載せる。生成に失敗しても診断完了の応答は止めない。
+// 要約そのものが応答本文に入るため、ここでは非同期にしない。
+func (s *ChatService) sessionSummaryForResponse(ctx context.Context, userID uint, sessionID string) *SessionSummary {
+	summary, err := s.buildAndSaveSessionSummary(ctx, userID, sessionID)
+	if err != nil {
+		log.Printf("Warning: failed to build session summary: user=%d session=%s err=%v\n", userID, sessionID, err)
+	}
+	return summary
+}
+
 // buildAndSaveSessionSummary チャットセッションの要約（強み・注意点・おすすめの働き方）を生成し、DBに保存します。
 func (s *ChatService) buildAndSaveSessionSummary(ctx context.Context, userID uint, sessionID string) (*SessionSummary, error) {
 	if s.aiClient == nil || s.chatMessageRepo == nil || s.userWeightScoreRepo == nil || s.conversationContextRepo == nil {

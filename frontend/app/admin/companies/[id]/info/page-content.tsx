@@ -26,7 +26,7 @@ export default function PageContent() {
   const params = useParams()
   const id = params.id as string
 
-  // 掲載状態（ステータス・暫定データ）はシステム管理者しか変えられない（API も 403 を返す）
+  // 企業マスタは全校共有のため、保存（PUT）と掲載状態の変更はシステム管理者のみ（API も 403 を返す）
   const [isPlatform, setIsPlatform] = useState(false)
 
   useEffect(() => {
@@ -480,9 +480,15 @@ export default function PageContent() {
           </>
         )}
 
-        <Button variant="outlined" onClick={handleSave} disabled={!name.trim()}>
-          手入力のみ保存（メタデータ更新なし）
-        </Button>
+        {isPlatform ? (
+          <Button variant="outlined" onClick={handleSave} disabled={!name.trim()}>
+            手入力のみ保存（メタデータ更新なし）
+          </Button>
+        ) : (
+          <Alert severity="info">
+            企業情報は全校で共有するため、手入力での保存はシステム管理者のみ行えます。修正が必要なときはシステム管理者に依頼してください。
+          </Alert>
+        )}
       </Stack>
       <CompanyUsersPanel companyId={id} />
     </AdminFormContainer>

@@ -22,6 +22,7 @@ Object.assign(globalThis, { TextEncoder, TextDecoder })
 // ここをモックで即解決にすると、更新が半開きで固まるケースを再現できない（#1501）。
 
 import { useInterviewSession, REPORT_RETRY_FAILED_MESSAGE } from '@/app/interview/hooks/useInterviewSession'
+import { LIMIT_REACHED_MESSAGE } from '@/app/interview/finishOutcome'
 import type { InterviewMedia } from '@/app/interview/hooks/useInterviewMedia'
 import type { InterviewCompany, Position } from '@/app/interview/types'
 import type { User } from '@/lib/auth'
@@ -159,9 +160,12 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
   let hangTurnBody: boolean
   /** true の間は /api/auth/session が応答せず固まる（middleware のトークン更新が半開き） */
   let hangAuthSession: boolean
+  /** /start-turn が返すメタ情報 */
+  let startTurnMeta: Record<string, string | boolean>
 
   beforeEach(() => {
     calls = []
+    startTurnMeta = { ai_text: '自己紹介をお願いします' }
     releaseTurn = null
     holdStartTurn = false
     releaseStartTurn = null
@@ -190,7 +194,7 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
         return jsonResponse({ user_token: tokenExpiringIn(3600) })
       }
       if (url.includes('/start-turn')) {
-        if (!holdStartTurn) return turnResponse({ ai_text: '自己紹介をお願いします' })
+        if (!holdStartTurn) return turnResponse(startTurnMeta)
         return new Promise<FakeResponse>(resolve => { releaseStartTurn = resolve })
       }
       if (url.includes('/turn')) {
@@ -268,6 +272,46 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
       await new Promise(resolve => setTimeout(resolve, 0))
     })
     expect(result.current.utteranceSaveFailed).toBe(true)
+
+    unmount()
+  })
+
+  /**
+   * サーバーが上限（発話数・経過時間・予算）に達したと返したら、固定の締め文を表示し、
+   * 既存の終了経路（finishSession）で面接を終えて途中までのレポートを作る（SOCAIAGENT-696）。
+   */
+  it('ターンの応答が limit_reached なら締めの文を出して終了APIを呼ぶ', async () => {
+    const media = fakeMedia()
+    const { result, unmount } = renderSession(media)
+
+    await act(async () => { await result.current.handleJoin() })
+    act(() => { result.current.startRecording() })
+    act(() => { result.current.stopRecording() })
+    act(() => { deliverRecorderStops() })
+    await flush()
+    await act(async () => {
+      releaseTurn?.(turnResponse({ ai_text: '本日の面接はここまでです', limit_reached: true, limit_reason: 'duration' }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    await flush()
+
+    expect(calls.some(u => u.includes('/finish'))).toBe(true)
+    expect(result.current.errorMessage).toBe(LIMIT_REACHED_MESSAGE)
+    expect(result.current.utterances.at(-1)).toEqual({ role: 'ai', text: '本日の面接はここまでです' })
+
+    unmount()
+  })
+
+  it('/start-turn の応答が limit_reached でも終了APIを呼ぶ', async () => {
+    startTurnMeta = { ai_text: '本日の面接はここまでです', limit_reached: true, limit_reason: 'budget' }
+    const media = fakeMedia()
+    const { result, unmount } = renderSession(media)
+
+    await act(async () => { await result.current.handleJoin() })
+    await flush()
+
+    expect(calls.some(u => u.includes('/finish'))).toBe(true)
+    expect(result.current.errorMessage).toBe(LIMIT_REACHED_MESSAGE)
 
     unmount()
   })
@@ -444,60 +488,8 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     }
   })
 
-  /**
-   * ターンは本体の通信を投げる前にトークン更新(/api/auth/session)を待つ（#1501）。
-   * この更新に上限が無いと、middleware 側の更新通信が半開きになったとき
-   * ターンのタイムアウト（90秒）はそもそも張られず、応答待ちのターンは永久に残る。
-   * 画面だけ「レポートを生成中」へ進み、finishSession もポーリングも始まらない。
-   */
-  it('トークン更新が返らないターンがあっても、上限を超えたら終了処理へ進む', async () => {
-    const advance = (ms: number) => act(async () => { await jest.advanceTimersByTimeAsync(ms) })
-    try {
-      const media = fakeMedia()
-      const { result, unmount } = renderSession(media)
-
-      await act(async () => { await result.current.handleJoin() })
-
-      // 最終ターンの直前に有効期限が近づいた状態。ここから更新が半開きで固まる
-      storeUserToken(tokenExpiringIn(10))
-      hangAuthSession = true
-
-      act(() => { result.current.startRecording() })
-      act(() => { result.current.stopRecording() })
-      jest.useFakeTimers({
-        doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate', 'performance', 'Date', 'requestAnimationFrame', 'cancelAnimationFrame'],
-      })
-      act(() => { deliverRecorderStops() })
-      await advance(0)
-      // トークン更新で止まっているので、ターン本体はまだ投げられていない
-      expect(calls.some(u => u.includes('/api/auth/session'))).toBe(true)
-      expect(calls.some(u => u.endsWith('/turn'))).toBe(false)
-
-      let stopped = false
-      let stopping: Promise<void> = Promise.resolve()
-      await act(async () => {
-        stopping = result.current.handleStop().then(() => { stopped = true })
-        await jest.advanceTimersByTimeAsync(0)
-      })
-      expect(stopped).toBe(false)
-      expect(calls.some(u => u.includes('/finish'))).toBe(false)
-
-      // 掴んだままの更新は返らないが、以降の通信は復帰した状態
-      hangAuthSession = false
-      // トークン更新の上限（15秒）まで進める。ターンの90秒より手前で打ち切れること
-      await advance(15_000)
-      await act(async () => { await stopping })
-
-      expect(stopped).toBe(true)
-      expect(calls.some(u => u.includes('/finish'))).toBe(true)
-      // 失敗はユーザーに見せる（黙って「生成中」のままにしない）
-      expect(result.current.errorMessage).toContain('タイムアウト')
-
-      unmount()
-    } finally {
-      jest.useRealTimers()
-    }
-  })
+  // ターンの前のトークン更新(/api/auth/session)は無くなった（SOCAIAGENT-683: middleware が
+  // 同じリクエストの中で Cookie を更新する）。ターン本体が固まる場合は上のテストが見ている。
 
   it('録音中に完了した場合、その録音を新しいターンとして送らない', async () => {
     const media = fakeMedia()

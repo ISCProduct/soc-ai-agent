@@ -8,9 +8,11 @@ import asyncio
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from typing import List, Optional
 
 from models import CompanyHintsResponse
+from services.deadline import run_with_deadline
 from services.sanitize import (
     _sanitize_company_name_for_query,
     _sanitize_job_title,
@@ -49,19 +51,37 @@ def _run_hints_web_search(company_name: str, position: str) -> Optional[str]:
 async def _run_hints_web_search_pipeline(
         company_name: str, role_text: str, queries: List[str]
 ) -> str:
-    """面接調査クエリを並列Web Searchし、面接観点でLLM要約して返す。"""
+    """面接調査クエリを並列Web Searchし、面接観点でLLM要約して返す。
+
+    全体に上限時間があり、過ぎたら空文字を返す（services/deadline.py、SOCAIAGENT-558）。
+    """
+    # 上限までに検索が終わっていれば、要約が間に合わなくても検索結果の連結を返す
+    # （要約が失敗したときと同じ扱い。下の except 節）
+    progress: dict = {}
+    return await run_with_deadline(
+        lambda executor: _hints_web_search_steps(company_name, role_text, queries, executor, progress),
+        "hints_web_search", company_name,
+        fallback=lambda: progress.get("raw", ""),
+    )
+
+
+async def _hints_web_search_steps(
+        company_name: str, role_text: str, queries: List[str], executor: ThreadPoolExecutor,
+        progress: Optional[dict] = None,
+) -> str:
     import main as m
 
     loop = asyncio.get_event_loop()
 
-    with ThreadPoolExecutor() as executor:
-        raw_results = list(await asyncio.gather(
-            *[loop.run_in_executor(executor, m._web_search_openai, q) for q in queries]
-        ))
+    raw_results = list(await asyncio.gather(
+        *[loop.run_in_executor(executor, m._web_search_openai, q) for q in queries]
+    ))
     raw_results = [r for r in raw_results if r]
 
     if not raw_results:
         return ""
+    if progress is not None:
+        progress["raw"] = "\n\n".join(raw_results)
 
     # 面接観点での要約（一次情報優先）
     api_key = os.getenv("OPENAI_API_KEY")
@@ -94,7 +114,10 @@ async def _run_hints_web_search_pipeline(
              )
     try:
         log_prompt_call("hints_summary", summary_model())
-        resp = client.chat.completions.create(
+        # 同期の呼び出しをコルーチンの中で直接呼ぶと、イベントループが止まって上限時間で
+        # 打ち切れない。専用のスレッドプールで走らせる（SOCAIAGENT-558）
+        resp = await loop.run_in_executor(executor, partial(
+            client.chat.completions.create,
             model=summary_model(),
             messages=[
                 {
@@ -110,7 +133,7 @@ async def _run_hints_web_search_pipeline(
             ],
             temperature=0.2,
             max_tokens=800,
-        )
+        ))
         summary = resp.choices[0].message.content or ""
         logger.info("hints web search summary company=%s chars=%d", company_name, len(summary))
         return summary.strip()

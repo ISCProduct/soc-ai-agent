@@ -12,7 +12,7 @@ async function mockHome(page: Page, opts: HomeMock = {}) {
   await page.route('**/api/chat/history*', (route) => route.fulfill(json([])))
   await page.route('**/api/schedule', (route) => route.fulfill(json(opts.schedule ?? [])))
   await page.route('**/api/applications', (route) => route.fulfill(json({ applications: [] })))
-  await page.route('**/api/user/guidances', (route) => route.fulfill(json({ guidances: opts.guidances ?? [] })))
+  await page.route('**/api/bff/user/guidances', (route) => route.fulfill(json({ guidances: opts.guidances ?? [] })))
   await page.route('**/api/whats-new', (route) => route.fulfill(json([])))
   await page.route('**/api/resume/status', (route) =>
     route.fulfill(json({ has_document: true, latest_score: 90, needs_attention: false })),
@@ -112,7 +112,7 @@ test.describe('ホーム（相談中心・広い画面）', () => {
       guidances: [{ id: 7, kind: 'low_match', message: '応募先を一緒に見直しましょう', created_at: '2026-10-01T00:00:00Z' }],
     })
     let dismissed = 0
-    await page.route('**/api/user/guidances/7/dismiss', async (route) => {
+    await page.route('**/api/bff/user/guidances/7/dismiss', async (route) => {
       dismissed++
       await route.fulfill(json({}))
     })
@@ -129,7 +129,7 @@ test.describe('ホーム（相談中心・広い画面）', () => {
   test('案内の取得に失敗したら、その欄だけにエラーと再読み込みを出し、ほかの欄とメインは使える', async ({ page }) => {
     await mockHome(page)
     let fail = true
-    await page.route('**/api/user/guidances', (route) =>
+    await page.route('**/api/bff/user/guidances', (route) =>
       fail
         ? route.fulfill({ status: 500, contentType: 'application/json', body: '{}' })
         : route.fulfill(json({ guidances: [{ id: 1, kind: 'low_match', message: '応募先を一緒に見直しましょう', created_at: '2026-10-01T00:00:00Z' }] })),

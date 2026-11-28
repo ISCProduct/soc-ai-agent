@@ -1,7 +1,10 @@
 package routes
 
 import (
+	"net/http"
+
 	companycontrollers "Backend/internal/controllers/company"
+	"Backend/internal/middleware"
 	"Backend/internal/services/auth"
 
 	"github.com/labstack/echo/v4"
@@ -25,6 +28,19 @@ func SetupCompanyRoutes(api *echo.Group, relationController *companycontrollers.
 	companies.GET("/:id/relations", relationController.GetCompanyRelations)
 	companies.GET("/:id/market-info", relationController.GetCompanyMarketInfo)
 	// 企業相関図（学生向け）。既存の関係・企業プロフィールを画面用に組み立てる。
-	companies.GET("/:id/correlation-map", relationController.GetCompanyCorrelationMap)
-	companies.GET("/:id/correlation-map/compare", relationController.CompareCompanyBusiness)
+	// 未認証で叩けるため、IP単位のレート制限で連打を止める（SOCAIAGENT-694）。
+	companies.GET("/:id/correlation-map", relationController.GetCompanyCorrelationMap, echoCorrelationMapRateLimit())
+	companies.GET("/:id/correlation-map/compare", relationController.CompareCompanyBusiness, echoCorrelationMapRateLimit())
+}
+
+// echoCorrelationMapRateLimit は企業相関図のIP単位レート制限ミドルウェア（SOCAIAGENT-694）。
+func echoCorrelationMapRateLimit() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if !middleware.CorrelationMapRateLimiter.Allow(middleware.GetClientIP(c.Request())) {
+				return echo.NewHTTPError(http.StatusTooManyRequests, "Too Many Requests: リクエスト上限に達しました。しばらく待ってから再試行してください。")
+			}
+			return next(c)
+		}
+	}
 }

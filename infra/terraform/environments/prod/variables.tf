@@ -299,6 +299,17 @@ variable "ai_model_light" {
   }
 }
 
+variable "es_improve_model" {
+  type        = string
+  description = "ES添削の改善文のモデル（OPENAI_ES_IMPROVE_MODEL、SOCAIAGENT-559）。空なら軽量の層（既定 gpt-4o-mini）。品質が落ちたら評価と同じモデルを入れて戻す"
+  default     = ""
+
+  validation {
+    condition     = var.es_improve_model == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$", var.es_improve_model))
+    error_message = "es_improve_model はモデル名（英数字・.・_・:・-）か空文字にしてください。"
+  }
+}
+
 # OpenAI 障害時の音声面接の縮退（#1833）。空なら縮退しない（今まで通り OpenAI だけ）。
 # ローカルの推論先は #1832 で用意する。詳細は docs/wiki/ai-failover.md
 variable "ai_failover_local_stt_url" {
@@ -329,4 +340,65 @@ variable "ai_failover_local_tts_speaker" {
   type        = string
   description = "VOICEVOX の話者 ID。空ならアプリの既定（1）"
   default     = ""
+}
+
+# Discord の受け口。既定では作らない。
+# 今の受け口は staging の Lambda で、本番の起動/停止もそこが受ける。
+# 有効にすると本番 ALB に同じ受け口ができる。朝のリマインドは別フラグで、
+# staging と両方有効にすると同じ通知が2回投稿される（SOCAIAGENT-512）。
+variable "discord_bot_enabled" {
+  type        = bool
+  description = "本番 ALB に Discord の受け口（Lambda）を作る。既定は false"
+  default     = false
+}
+
+variable "discord_reminder_schedule_enabled" {
+  type        = bool
+  description = "本番の朝リマインドを発火する。既定は DISABLED。staging のスケジュールを止めてから true にする"
+  default     = false
+}
+
+variable "discord_public_key" {
+  type        = string
+  description = "Discord Application の Public Key。未設定時は署名検証に失敗する"
+  default     = ""
+}
+
+variable "discord_allowed_role_id" {
+  type        = string
+  description = "本番の起動/停止コマンドを実行できる Discord ロール ID"
+  default     = ""
+}
+
+variable "github_dispatch_token" {
+  type        = string
+  sensitive   = true
+  description = "Discord の /prod から本番起動ワークフローを即時起動する GitHub トークン。未設定でも次の毎時実行までは動く"
+  default     = ""
+}
+
+variable "github_dispatch_repo" {
+  type        = string
+  description = "workflow_dispatch の対象リポジトリ(owner/repo)"
+  default     = "ISCProduct/soc-ai-agent"
+}
+
+variable "backlog_api_key" {
+  type        = string
+  sensitive   = true
+  description = "Discord から Backlog を読む・更新する API キー。Bot ユーザーのキーを入れる。個人のキーは入れない。未設定なら /link と /deadline は動かない"
+  default     = ""
+}
+
+variable "discord_reminder_webhook_url" {
+  type        = string
+  sensitive   = true
+  description = "朝のリマインドの投稿先 Discord Webhook URL。未設定ならリマインドは投稿しない"
+  default     = ""
+}
+
+variable "backlog_reviewer_ids" {
+  type        = string
+  description = "PR確認待ちの課題でレビューを促す Backlog ユーザー ID（カンマ区切り）"
+  default     = "2505302"
 }

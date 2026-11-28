@@ -22,6 +22,11 @@ func (r roleUserRepoStub) GetUserByID(id uint) (*models.User, error) {
 	return nil, errors.New("user not found")
 }
 
+// allowAllSchools は担当校なしの管理者として学校スコープを常に通す（判定自体は interview_school_scope_test.go）。
+type allowAllSchools struct{}
+
+func (allowAllSchools) CanAdminAccessUser(bool, uint, uint, *uint) (bool, error) { return true, nil }
+
 // TestTeacherReportVisibility は教員用レポートを返すかを「サーバー側の実ロール」だけで決める
 // 回帰テスト（#1814）。クライアントが role を送れる経路は無いので、呼び出し元の
 // userID だけで結果が決まることを、詳細取得とレポート単体取得の両方で確認する。
@@ -61,6 +66,7 @@ func TestTeacherReportVisibility(t *testing.T) {
 			sessionRepo := newSessionRepoStub(&models.InterviewSession{ID: sessionID, UserID: tt.session})
 			reportRepo := &reportRepoStub{last: &models.InterviewReport{SessionID: sessionID, TeacherReportJSON: secret}}
 			svc := NewInterviewService(sessionRepo, &utterRepoStub{}, reportRepo, roleUserRepoStub{users: tt.users}, nil, nil, nil)
+			svc.SetSchoolAccess(allowAllSchools{})
 
 			detail, derr := svc.GetSessionDetail(tt.actor, sessionID)
 			report, rerr := svc.GetReport(tt.actor, sessionID)

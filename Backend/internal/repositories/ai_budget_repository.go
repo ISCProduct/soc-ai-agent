@@ -71,6 +71,18 @@ func (r *AIBudgetRepository) SchoolIDForUser(ctx context.Context, userID uint) (
 	return row.SchoolID, nil
 }
 
+// IsGuestUser は利用者がゲストかを返す。行が無ければ false (SOCAIAGENT-689)。
+func (r *AIBudgetRepository) IsGuestUser(ctx context.Context, userID uint) (bool, error) {
+	var row struct {
+		IsGuest bool
+	}
+	err := r.db.WithContext(ctx).Model(&models.User{}).Select("is_guest").Where("id = ?", userID).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	return row.IsGuest, err
+}
+
 // AIBudgetUsage は利用者または学校の日次・月次の利用額。
 type AIBudgetUsage struct {
 	Daily   float64

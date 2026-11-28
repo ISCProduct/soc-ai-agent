@@ -14,6 +14,13 @@ DEFAULT_RESUME_REVIEW_INPUT_CHAR_LIMIT = 10000
 # 極端に遅延するとハングしうる状態だった。同じ環境変数・既定値で統一する。
 DEFAULT_OPENAI_TIMEOUT_SEC = 60.0
 
+# 採点（評価）の呼び出しだけに使う温度と seed（SOCAIAGENT-699）。
+# 同一入力での点のゆらぎを下げるため、Backend の面接レポート（interview.ReportTemperature /
+# ReportSeed, SOCAIAGENT-513）と同じ値にそろえる。seed は best effort で完全一致は保証されない。
+# 改善文の生成は表現の幅が要るので、これを使わず従来の温度のままにする。
+SCORING_TEMPERATURE = 0.01
+SCORING_SEED = 513
+
 DEFAULT_WEB_SEARCH_MODEL = "gpt-4o-mini"
 DEFAULT_SEARCH_LOG_DIR = "/app/search_logs"
 

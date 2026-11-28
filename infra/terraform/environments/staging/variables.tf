@@ -307,7 +307,14 @@ variable "github_dispatch_token" {
 variable "backlog_api_key" {
   type        = string
   sensitive   = true
-  description = "Discordの /link で Backlog のメンバー一覧を引くためのAPIキー(読み取りのみ)。未設定なら /link 系は「利用できません」を返す"
+  description = "廃止。Lambda には渡さない。残っている tfvars を壊さないため変数だけ残している。Bot キーは backlog_bot_api_key_plain (SOCAIAGENT-510)"
+  default     = ""
+}
+
+variable "backlog_bot_api_key_plain" {
+  type        = string
+  sensitive   = true
+  description = "Discord Bot 用の Backlog API キー。初回 apply で Secrets Manager <project>/discord-backlog-bot へ書き、以降は Secrets Manager 側が正 (SOCAIAGENT-510)。個人のキーは入れない。未設定でも apply 可（その場合は CLI で書いてから /link と /deadline が動く）"
   default     = ""
 }
 
@@ -322,6 +329,13 @@ variable "backlog_reviewer_ids" {
   type        = string
   description = "PR確認待ちの課題でレビューを促す Backlog ユーザーID(カンマ区切り)。空なら促さない"
   default     = "2505302"
+}
+
+variable "github_pr_read_token" {
+  type        = string
+  sensitive   = true
+  description = "朝のリマインドがレビュー待ち PR を読むための GitHub トークン（Pull requests の読み取りだけ）。配信用の github_dispatch_token とは別にする。未設定なら PR の節は出さない"
+  default     = ""
 }
 
 variable "github_dispatch_repo" {
@@ -414,6 +428,17 @@ variable "ai_model_light" {
   validation {
     condition     = var.ai_model_light == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$", var.ai_model_light))
     error_message = "ai_model_light はモデル名（英数字・.・_・:・-）か空文字にしてください。"
+  }
+}
+
+variable "es_improve_model" {
+  type        = string
+  description = "ES添削の改善文のモデル（OPENAI_ES_IMPROVE_MODEL、SOCAIAGENT-559）。空なら軽量の層（既定 gpt-4o-mini）。品質が落ちたら評価と同じモデルを入れて戻す"
+  default     = ""
+
+  validation {
+    condition     = var.es_improve_model == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$", var.es_improve_model))
+    error_message = "es_improve_model はモデル名（英数字・.・_・:・-）か空文字にしてください。"
   }
 }
 

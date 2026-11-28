@@ -2,9 +2,12 @@ package auth
 
 import (
 	"Backend/internal/config"
+	"Backend/internal/services/shared"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -122,7 +125,9 @@ func (s *AuthService) RequestPasswordReset(email string) error {
 	token := base64.URLEncoding.EncodeToString(b)
 
 	expiresAt := time.Now().Add(config.PasswordResetTokenTTL)
-	user.PasswordResetToken = token
+	// DB には平文を置かない。メールには平文を送り、照合はハッシュで行う（SOCAIAGENT-693）。
+	tokenHash := hashPasswordResetToken(token)
+	user.PasswordResetTokenHash = &tokenHash
 	user.PasswordResetExpiresAt = &expiresAt
 
 	if err := s.userRepo.UpdateUser(user); err != nil {
@@ -140,21 +145,29 @@ func (s *AuthService) RequestPasswordReset(email string) error {
 	return s.emailService.SendPasswordResetEmail(user.Email, token, appURL)
 }
 
+// ErrPasswordResetTokenInvalid は再設定トークンが空・不明・期限切れであることを表す。
+// どれに当たるかは区別しない（トークンの存在を推測させない）(SOCAIAGENT-693)。
+var ErrPasswordResetTokenInvalid = errors.New("invalid or expired token")
+
 // ResetPassword トークンを検証して新パスワードをセット
 func (s *AuthService) ResetPassword(token, newPassword string) error {
 	if token == "" {
-		return errors.New("token is required")
+		return ErrPasswordResetTokenInvalid
+	}
+	// 登録と同じ検証。72バイト超を bcrypt に渡して内部のエラー文を返さない（SOCAIAGENT-693）。
+	if err := shared.ValidatePassword(newPassword); err != nil {
+		return err
 	}
 
-	user, err := s.userRepo.GetUserByPasswordResetToken(token)
+	user, err := s.userRepo.GetUserByPasswordResetTokenHash(context.Background(), hashPasswordResetToken(token))
 	if err != nil {
 		return fmt.Errorf("failed to find user: %w", err)
 	}
 	if user == nil {
-		return errors.New("invalid or expired token")
+		return ErrPasswordResetTokenInvalid
 	}
 	if user.PasswordResetExpiresAt == nil || time.Now().After(*user.PasswordResetExpiresAt) {
-		return errors.New("invalid or expired token")
+		return ErrPasswordResetTokenInvalid
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcryptCost)
@@ -163,7 +176,7 @@ func (s *AuthService) ResetPassword(token, newPassword string) error {
 	}
 
 	user.Password = string(hashedPassword)
-	user.PasswordResetToken = ""
+	user.PasswordResetTokenHash = nil
 	user.PasswordResetExpiresAt = nil
 	// 管理者トークンも失効させる(#1155)。リフレッシュトークンだけ失効させても、
 	// 管理者トークンは TTL 切れまで使えてしまい「漏洩に気づいてパスワードを変えた」が効かない。
@@ -182,4 +195,10 @@ func (s *AuthService) ResetPassword(token, newPassword string) error {
 		}
 	}
 	return nil
+}
+
+// hashPasswordResetToken は再設定トークン平文の SHA-256 hex を返す。トークンは高エントロピーの乱数なので bcrypt は不要。
+func hashPasswordResetToken(plain string) string {
+	sum := sha256.Sum256([]byte(plain))
+	return hex.EncodeToString(sum[:])
 }

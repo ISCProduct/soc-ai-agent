@@ -16,7 +16,7 @@ export async function DELETE(
   try {
     const result = await proxyAdminBackend(
       'DELETE',
-      `/api/admin/schools/${id}/company-approvals/${companyId}`,
+      `/api/admin/schools/${encodeURIComponent(id)}/company-approvals/${encodeURIComponent(companyId)}`,
       { headers: adminProxyHeaders(request.headers), timeoutMs: 15_000 },
     )
     return jsonFromProxyResult(result)

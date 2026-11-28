@@ -1,4 +1,5 @@
-import { Alert, type AlertProps } from '@mui/material'
+import { type AlertProps } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 
 type ErrorAlertProps = Omit<AlertProps, 'severity' | 'children'> & {
   error?: string | null

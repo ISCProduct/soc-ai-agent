@@ -14,9 +14,9 @@ import {
   MenuItem,
   TextField,
   Typography,
-  Alert,
   Snackbar,
 } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import PersonIcon from '@mui/icons-material/Person'
 import SchoolIcon from '@mui/icons-material/School'
 import WorkIcon from '@mui/icons-material/Work'
@@ -26,12 +26,14 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService, User } from '@/lib/auth'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
+import { GrowthHistoryCard } from '@/components/profile/GrowthHistoryCard'
 import { ScoutPreferencesCard } from '@/components/profile/ScoutPreferencesCard'
 import { TrainingConsentCard } from '@/components/profile/TrainingConsentCard'
 import { DeleteAccountDialog } from '@/components/profile/DeleteAccountDialog'
 import { ABOVE_BOTTOM_NAV_SX, SNACKBAR_AUTO_HIDE_MS } from '@/lib/sidebar-nav'
 import { PageLoading } from '@/components/common/PageLoading'
 import { StudentThemeToggle } from '@/components/layout/StudentThemeToggle'
+import { isGoogleAuthUrl } from '@/lib/google-auth-url'
 
 export default function PageContent() {
   return (
@@ -194,6 +196,7 @@ function ProfilePageContent() {
       })
       if (!res.ok) throw new Error('Failed to get auth URL')
       const data = await res.json()
+      if (!isGoogleAuthUrl(data.auth_url)) throw new Error('Unexpected auth URL')
       window.location.href = data.auth_url
     } catch {
       setCalendarMessage('Googleカレンダー連携の開始に失敗しました')
@@ -269,6 +272,7 @@ function ProfilePageContent() {
             </CardContent>
           </Card>
         )}
+        <GrowthHistoryCard />
         {/* ユーザーヘッダーカード */}
         <Card sx={{ mb: 3, borderRadius: 2 }}>
           <CardContent sx={{ p: 3 }}>
@@ -346,13 +350,13 @@ function ProfilePageContent() {
                       基本情報
                     </Typography>
                   </Box>
+                  {/* 入力欄は size="small"（高さ約40px）にしない。押せる範囲を 44px 以上にする（#2214） */}
                   <TextField
                     fullWidth
                     label="名前"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     required
-                    size="small"
                     sx={{ mb: 2 }}
                   />
                   <TextField
@@ -361,7 +365,6 @@ function ProfilePageContent() {
                     label="区分"
                     value={targetLevel}
                     onChange={(e) => setTargetLevel(e.target.value)}
-                    size="small"
                     sx={{ mb: 3 }}
                   >
                     <MenuItem value="新卒">新卒</MenuItem>
@@ -384,7 +387,6 @@ function ProfilePageContent() {
                     value={schoolOption}
                     onChange={(e) => setSchoolOption(e.target.value)}
                     required
-                    size="small"
                     sx={{ mb: 2 }}
                   >
                     <MenuItem value="学校法人岩崎学園情報科学専門学校">
@@ -402,7 +404,6 @@ function ProfilePageContent() {
                       value={schoolName}
                       onChange={(e) => setSchoolName(e.target.value)}
                       required
-                      size="small"
                       sx={{ mb: 2 }}
                     />
                   )}
@@ -431,7 +432,6 @@ function ProfilePageContent() {
                       renderValue: (selected) => (selected as string[]).join(', '),
                     }}
                     helperText="複数選択可"
-                    size="small"
                     sx={{ mb: 2 }}
                   >
                     {CERTIFICATION_OPTIONS.map((option) => (
@@ -448,7 +448,6 @@ function ProfilePageContent() {
                     placeholder="例: 応用情報技術者、AWS SAA（改行区切り可）"
                     multiline
                     minRows={2}
-                    size="small"
                     sx={{ mb: 3 }}
                   />
 
@@ -506,7 +505,7 @@ function ProfilePageContent() {
                 連携することで、面接スケジュールを登録・変更・キャンセルした際にGoogleカレンダーへ自動同期されます。
               </Typography>
               {calendarMessage && (
-                <Alert
+                <Alert role="alert"
                   severity={calendarConnected && calendarMessage.includes('連携しました') ? 'success' : calendarMessage.includes('解除') ? 'info' : 'error'}
                   sx={{ mb: 2 }}
                 >
@@ -514,7 +513,7 @@ function ProfilePageContent() {
                 </Alert>
               )}
               {calendarStatusError ? (
-                <Alert
+                <Alert role="alert"
                   severity="warning"
                   sx={{ mb: 2 }}
                   action={

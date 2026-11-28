@@ -247,6 +247,7 @@ func TestEvaluateInterviewResponse(t *testing.T) {
 
 	okBody := func(extra string) string {
 		return `{"summary":"よくできました",` +
+			`"category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"数字を添える"}],` +
 			`"scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
 			`"evidence":{"logic":"文化祭の実行委員長として30人のチームをまとめ、来場者を前年の1.5倍にしました"},` +
 			`"evidence_utterance_ids":{"logic":2},` +
@@ -277,7 +278,7 @@ func TestEvaluateInterviewResponse(t *testing.T) {
 		{
 			// 欠けた項目を無視して平均すると、1項目だけ返すモデルが満点になる
 			name: "欠けた評価項目は0として平均する",
-			res: CallResult{Text: `{"summary":"s","scores":{"logic":5},"evidence":{},` +
+			res: CallResult{Text: `{"summary":"s","category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"数字を添える"}],"scores":{"logic":5},"evidence":{},` +
 				`"strengths":["a","b"],"improvements":["c","d"],` +
 				`"teacher":{"overall_comment":"t","detailed_evidence":{},"coaching_points":["p"]}}`},
 			wantScore:      1.0 / 5, // (5+0+0+0+0)/5 = 1.0 → /5 = 0.2
@@ -285,7 +286,7 @@ func TestEvaluateInterviewResponse(t *testing.T) {
 		},
 		{
 			name: "値域外のスコア",
-			res: CallResult{Text: `{"summary":"s","scores":{"logic":9,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
+			res: CallResult{Text: `{"summary":"s","category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"数字を添える"}],"scores":{"logic":9,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
 				`"evidence":{},"strengths":["a","b"],"improvements":["c","d"],` +
 				`"teacher":{"overall_comment":"t","detailed_evidence":{},"coaching_points":["p"]}}`},
 			wantScore:      5.0 / 5, // (9+4+4+4+4)/5 = 5.0 → /5 = 1.0
@@ -293,22 +294,39 @@ func TestEvaluateInterviewResponse(t *testing.T) {
 		},
 		{
 			name: "strengthsが1件（2〜4件の指示に違反）",
-			res: CallResult{Text: `{"summary":"s","scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
+			res: CallResult{Text: `{"summary":"s","category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"数字を添える"}],"scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
 				`"evidence":{},"strengths":["a"],"improvements":["c","d"],` +
 				`"teacher":{"overall_comment":"t","detailed_evidence":{},"coaching_points":["p"]}}`},
 			wantScore:      0.8,
 			wantViolations: []string{"strengths_count"},
 		},
 		{
-			name: "teacherが無い",
+			name: "category_breakdownが無い（本番の strict スキーマでは必須）",
 			res: CallResult{Text: `{"summary":"s","scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
+				`"evidence":{},"strengths":["a","b"],"improvements":["c","d"],` +
+				`"teacher":{"overall_comment":"t","detailed_evidence":{},"coaching_points":["p"]}}`},
+			wantScore:      0.8,
+			wantViolations: []string{"category_breakdown_missing"},
+		},
+		{
+			name: "category_breakdownに知らないカテゴリ・範囲外の点数がある",
+			res: CallResult{Text: `{"summary":"s","category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"p"},{"category":"趣味","score":3,"weakness":"w","practice":"p"},{"category":"逆質問","score":9,"weakness":"w","practice":"p"}],` +
+				`"scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
+				`"evidence":{},"strengths":["a","b"],"improvements":["c","d"],` +
+				`"teacher":{"overall_comment":"t","detailed_evidence":{},"coaching_points":["p"]}}`},
+			wantScore:      0.8,
+			wantViolations: []string{"category_breakdown_invalid"},
+		},
+		{
+			name: "teacherが無い",
+			res: CallResult{Text: `{"summary":"s","category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"数字を添える"}],"scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
 				`"evidence":{},"strengths":["a","b"],"improvements":["c","d"]}`},
 			wantScore:      0.8,
 			wantViolations: []string{"teacher_missing"},
 		},
 		{
 			name: "受験者が言っていない根拠は捏造として数える",
-			res: CallResult{Text: `{"summary":"s","scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
+			res: CallResult{Text: `{"summary":"s","category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"数字を添える"}],"scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
 				`"evidence":{"logic":"部活で全国大会に出場した経験を語っていました"},` +
 				`"strengths":["a","b"],"improvements":["c","d"],` +
 				`"teacher":{"overall_comment":"t","detailed_evidence":{},"coaching_points":["p"]}}`},
@@ -318,7 +336,7 @@ func TestEvaluateInterviewResponse(t *testing.T) {
 		{
 			// 引用は正しくても、引用元の utterance ID が別の発話なら本番は弾く
 			name: "引用元の発話IDが違う根拠は未照合として数える",
-			res: CallResult{Text: `{"summary":"s","scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
+			res: CallResult{Text: `{"summary":"s","category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"数字を添える"}],"scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
 				`"evidence":{"logic":"文化祭の実行委員長として30人のチームをまとめ、来場者を前年の1.5倍にしました"},` +
 				`"evidence_utterance_ids":{"logic":4},` +
 				`"strengths":["a","b"],"improvements":["c","d"],` +
@@ -328,7 +346,7 @@ func TestEvaluateInterviewResponse(t *testing.T) {
 		},
 		{
 			name: "引用元の発話IDが無い根拠は未照合として数える",
-			res: CallResult{Text: `{"summary":"s","scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
+			res: CallResult{Text: `{"summary":"s","category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"数字を添える"}],"scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
 				`"evidence":{"logic":"文化祭の実行委員長として30人のチームをまとめ、来場者を前年の1.5倍にしました"},` +
 				`"evidence_utterance_ids":{"logic":null},` +
 				`"strengths":["a","b"],"improvements":["c","d"],` +
@@ -338,7 +356,7 @@ func TestEvaluateInterviewResponse(t *testing.T) {
 		},
 		{
 			name: "面接官の発言を根拠にしても捏造として数える",
-			res: CallResult{Text: `{"summary":"s","scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
+			res: CallResult{Text: `{"summary":"s","category_breakdown":[{"category":"職務経験・実績","score":4,"weakness":"","practice":"数字を添える"}],"scores":{"logic":4,"specificity":4,"ownership":4,"communication":4,"enthusiasm":4},` +
 				`"evidence":{"logic":"学生時代に力を入れたことを教えてください"},` +
 				`"strengths":["a","b"],"improvements":["c","d"],` +
 				`"teacher":{"overall_comment":"t","detailed_evidence":{},"coaching_points":["p"]}}`},

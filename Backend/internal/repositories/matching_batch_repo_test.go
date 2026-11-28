@@ -264,6 +264,8 @@ func TestFindTopMatchesByUserAndSession_ExcludesCompaniesWithoutProfile(t *testi
 		"company_weight_profiles",         // 突き合わせ先
 		"job_position_id IS NULL",         // 会社単位プロファイルのみ（求人単位を拾わない）
 		"user_company_matches.company_id", // 相関先を取り違えると全件通過する
+		"match_tie_key",
+		"company_id ASC",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("発行SQLに %q が無い:\n%s", want, sql)
@@ -298,6 +300,8 @@ func TestFindFavoritedByUser_PicksNewestSessionAndRequiresProfile(t *testing.T) 
 		"is_favorited = ?",
 		"company_weight_profiles",
 		"job_position_id IS NULL",
+		// 無修飾の company_id だと内側の cwp.company_id に解決され、対象企業と結びつかない
+		"cwp.company_id = user_company_matches.company_id",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("発行SQLに %q が無い:\n%s", want, sql)

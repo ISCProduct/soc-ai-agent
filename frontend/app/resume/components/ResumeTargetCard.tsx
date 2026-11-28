@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Box, ButtonBase, InputAdornment, LinearProgress, Stack, TextField, Typography } from '@mui/material'
+import { Box, ButtonBase, InputAdornment, LinearProgress, Stack, TextField, Typography } from '@mui/material'
+import { Alert } from '@/components/common/Alert'
 import SearchIcon from '@mui/icons-material/Search'
 import type { CompanyCandidate } from '../types'
 import { UI } from '@/lib/design/tokens'

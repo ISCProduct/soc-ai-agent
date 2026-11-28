@@ -66,7 +66,7 @@ func TestLLM_FallbackUpgradesLowConfidence(t *testing.T) {
 	// キーワードなし・短答 → ルールベースは "low" になる
 	q := &models.PredefinedQuestion{}
 	result, err := e.EvaluateWithLLMFallback(
-		context.Background(), q,
+		guardedCtx(), q,
 		"ITに興味を持ったきっかけは？",
 		"やりがいを感じました",
 	)
@@ -95,7 +95,7 @@ func TestLLM_FallbackSkipsLLMWhenNotLow(t *testing.T) {
 		PositiveKeywords: `["実装","成果","改善","取り組み","経験"]`,
 	}
 	answer := "具体的には、実際に3ヶ月かけてシステムを実装して改善した経験があります。成果として取り組み効率が向上しました。"
-	_, err := e.EvaluateWithLLMFallback(context.Background(), q, "開発経験について教えてください", answer)
+	_, err := e.EvaluateWithLLMFallback(guardedCtx(), q, "開発経験について教えてください", answer)
 	require.NoError(t, err)
 	assert.False(t, called, "confidence がlowでないのにLLMが呼ばれた")
 }
@@ -106,7 +106,7 @@ func TestLLM_FallbackNilClientFallsBackToRuleBase(t *testing.T) {
 	e := chat.NewAnswerEvaluator()
 	q := &models.PredefinedQuestion{}
 
-	resultFallback, err := e.EvaluateWithLLMFallback(context.Background(), q, "質問", "回答")
+	resultFallback, err := e.EvaluateWithLLMFallback(guardedCtx(), q, "質問", "回答")
 	require.NoError(t, err)
 
 	resultRule, err := e.Evaluate(q, "回答")
@@ -130,7 +130,7 @@ func TestLLM_HybridMergesConfidence(t *testing.T) {
 	e := chat.NewAnswerEvaluatorWithLLM(client)
 
 	q := &models.PredefinedQuestion{}
-	result, err := e.EvaluateHybrid(context.Background(), q, "強みを教えてください", "問題解決が得意です", 0.4)
+	result, err := e.EvaluateHybrid(guardedCtx(), q, "強みを教えてください", "問題解決が得意です", 0.4)
 	require.NoError(t, err)
 	assert.Equal(t, "high", result.Confidence)
 }
@@ -145,7 +145,7 @@ func TestLLM_HybridScoreIsBlended(t *testing.T) {
 	e := chat.NewAnswerEvaluatorWithLLM(client)
 
 	q := &models.PredefinedQuestion{}
-	result, err := e.EvaluateHybrid(context.Background(), q, "質問", "回答", 0.5)
+	result, err := e.EvaluateHybrid(guardedCtx(), q, "質問", "回答", 0.5)
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, result.Score, 0, "スコアが負になった")
 	assert.LessOrEqual(t, result.Score, 10, "スコアが10を超えた")
@@ -157,7 +157,7 @@ func TestLLM_HybridNilClientEqualsEvaluate(t *testing.T) {
 	e := chat.NewAnswerEvaluator()
 	q := &models.PredefinedQuestion{}
 
-	hybrid, err := e.EvaluateHybrid(context.Background(), q, "質問", "回答", 0.5)
+	hybrid, err := e.EvaluateHybrid(guardedCtx(), q, "質問", "回答", 0.5)
 	require.NoError(t, err)
 
 	rule, err := e.Evaluate(q, "回答")
@@ -176,7 +176,7 @@ func TestHumanScoring_RecordsPromptVersionOnlyAfterSuccessfulLLM(t *testing.T) {
 
 	evaluator := chat.NewAnswerEvaluatorWithLLM(internalOpenAI.NewWithBaseURL(srv.URL, "gpt-4o-mini"))
 	result := evaluator.EvaluateHumanScoringWithContext(
-		context.Background(), "志望理由を教えてください", "成長できる環境で挑戦したいです", false, false, nil,
+		guardedCtx(), "志望理由を教えてください", "成長できる環境で挑戦したいです", false, false, nil,
 	)
 	assert.Equal(t, "score-t1", result.PromptVersion)
 
@@ -186,7 +186,7 @@ func TestHumanScoring_RecordsPromptVersionOnlyAfterSuccessfulLLM(t *testing.T) {
 	defer failedServer.Close()
 	failedEvaluator := chat.NewAnswerEvaluatorWithLLM(internalOpenAI.NewWithBaseURL(failedServer.URL, "gpt-4o-mini"))
 	failedResult := failedEvaluator.EvaluateHumanScoringWithContext(
-		context.Background(), "志望理由を教えてください", "成長できる環境で挑戦したいです", false, false, nil,
+		guardedCtx(), "志望理由を教えてください", "成長できる環境で挑戦したいです", false, false, nil,
 	)
 	assert.Empty(t, failedResult.PromptVersion)
 }
@@ -211,4 +211,9 @@ func TestLLM_MergeConfidence(t *testing.T) {
 		got := chat.MergeConfidence(tt.a, tt.b)
 		assert.Equal(t, tt.want, got, "MergeConfidence(%q, %q)", tt.a, tt.b)
 	}
+}
+
+// guardedCtx は、素通しの入力ガードを付けた context を返す（usage_feature_test.go の同名の関数と同じ。SOCAIAGENT-697）。
+func guardedCtx() context.Context {
+	return internalOpenAI.WithInputGuard(context.Background(), func(s string) (string, error) { return s, nil })
 }

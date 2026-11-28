@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: NextRequest) {
   const url = new URL(request.url)
   const sourceId = url.searchParams.get('source_id')
-  const query = sourceId ? `?source_id=${sourceId}` : ''
+  const query = sourceId ? `?source_id=${encodeURIComponent(sourceId)}` : ''
   const response = await fetch(`${BACKEND_URL}/api/admin/crawl-runs${query}`, {
     headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '',
       'X-Admin-Token': request.headers.get('x-admin-token') || '' },

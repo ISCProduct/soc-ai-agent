@@ -64,6 +64,15 @@ const statusList = (id: number, title: string, studentName: string): StatusView 
     student_id: 1, name: studentName, status: 'submitted', overdue: false,
     answered_count: 1, question_count: 1, top_categories: [],
   }],
+  rollup: {
+    student_count: 1,
+    started_count: 1,
+    submitted_count: 1,
+    not_started_count: 0,
+    overdue_count: 0,
+    started_percent: 100,
+    submitted_percent: 100,
+  },
 })
 
 describe('学校独自の適性検査: 後着応答の上書き', () => {

@@ -33,6 +33,16 @@ def es_review_model() -> str:
     return resolve("OPENAI_ES_REVIEW_MODEL", ENV_PREMIUM, _env("OPENAI_CHAT_MODEL") or "gpt-4o")
 
 
+def es_improve_model() -> str:
+    """ES添削の改善文の生成（軽量の層、SOCAIAGENT-559）。OPENAI_ES_IMPROVE_MODEL → AI_MODEL_LIGHT → gpt-4o-mini。
+
+    ES添削は「評価（第1呼び出し）」と「改善文（第2呼び出し）」の2回で、以前はどちらも上位モデルだった。
+    評価は良し悪しの判断なので上位に残し、改善文は評価のフィードバックに沿った書き直しなので軽量にする。
+    元の上位モデルに戻すときは OPENAI_ES_IMPROVE_MODEL に es_review_model と同じ値を入れる。
+    """
+    return resolve("OPENAI_ES_IMPROVE_MODEL", ENV_LIGHT, "gpt-4o-mini")
+
+
 def resume_review_model() -> str:
     """履歴書レビューのレポート（上位の層）。OPENAI_REVIEW_MODEL → AI_MODEL_PREMIUM → gpt-4o-mini。"""
     return resolve("OPENAI_REVIEW_MODEL", ENV_PREMIUM, "gpt-4o-mini")
