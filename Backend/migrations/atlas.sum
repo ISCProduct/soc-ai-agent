@@ -1,4 +1,4 @@
-h1:ySfWoiW/99nanYJrTJlwZ130znmYcbmnlDXe2inG3o0=
+h1:8hn/W/K+H6begEc9gYUdHV7dblIZWazyhI2TiQ8uPkQ=
 000001_init_schema.up.sql h1:7/a/jDWOYKJebsHYFwcxHFTwpMlrRtMNTUDw9MasZUk=
 000002_create_user_refresh_tokens.up.sql h1:TwVBfn19t4a8Ljhh3cdNHHBlYs8ohnAOKGPbYkyof6Y=
 000003_add_withdrawn_users.up.sql h1:/yGy9guVbBsBonDXe6n7eE167F0OKoSBsgBIqFGMIjs=
@@ -95,3 +95,4 @@ h1:ySfWoiW/99nanYJrTJlwZ130znmYcbmnlDXe2inG3o0=
 20261126214045_user_company_match_tie_key.up.sql h1:NfTvFH2wpJkgkn8SmHfOwBxFUPGCQLK+i+yrt/ksVU4=
 20261126214046_create_user_growth_snapshots.up.sql h1:AUYTxIJwCiSUfE8SXT28NljMZ2Gq205SKCVKnvwP32Q=
 20261126214047_school_interview_video_retention.up.sql h1:O7yI4cQ9cU60cP8GpAZxga2Fu3JKfXGFBzjZ+6v9OFk=
+20261128132218_user_weight_scores_score_decimal.up.sql h1:2nzJYCD2K+5O8ZXqKM9aFF1G3aYhrY8ZROih+AnqbE8=
