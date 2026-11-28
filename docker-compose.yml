@@ -58,7 +58,7 @@ services:
     build: ./rag
     restart: unless-stopped
     ports:
-      - "${RAG_REVIEW_PORT:-9000}:9000"
+      - "127.0.0.1:${RAG_REVIEW_PORT:-9000}:9000"
     env_file:
       - .env
     environment:
@@ -76,7 +76,7 @@ services:
     image: chromadb/chroma:0.6.3
     restart: unless-stopped
     ports:
-      - "${CHROMA_HOST_PORT:-8000}:8000"
+      - "127.0.0.1:${CHROMA_HOST_PORT:-8000}:8000"
     volumes:
       - chroma_data:/chroma/chroma
     environment:

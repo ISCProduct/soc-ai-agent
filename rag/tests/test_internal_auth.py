@@ -36,10 +36,13 @@ class TestInternalAuth:
         )
         assert res.status_code == 503
 
-    def test_トークン未設定でもヘルスチェックは通る(self, raw_client, monkeypatch):
+    def test_トークン未設定でもヘルスチェックは認証で弾かない(self, raw_client, monkeypatch):
         monkeypatch.delenv("RAG_INTERNAL_TOKEN", raising=False)
+        assert raw_client.get("/health").status_code == 200
+        # /healthz は認証の免除パスのまま。トークン未設定は設定の誤りとして 503 を返す（SOCAIAGENT-701）
         res = raw_client.get("/healthz")
-        assert res.status_code == 200
+        assert res.status_code == 503
+        assert res.json()["internal_auth"] == {"configured": False}
 
     def test_正しいトークンは通過する(self, client):
         # conftest の client フィクスチャは正しいトークンを付与している

@@ -12,6 +12,7 @@ import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from models import COMPANY_CONTEXT_MAX_LENGTH
 from services.embed import embed_texts
 from student_profile_store import delete_student, query_students, upsert_student
 
@@ -48,7 +49,8 @@ def default_min_score() -> float:
 
 class StudentIndexRequest(BaseModel):
     user_id: int = Field(gt=0)
-    text: str = Field(min_length=1)
+    # 企業コンテキストと同じ上限（SOCAIAGENT-701）
+    text: str = Field(min_length=1, max_length=COMPANY_CONTEXT_MAX_LENGTH)
 
 
 class StudentQueryRequest(BaseModel):
@@ -76,8 +78,9 @@ def student_index(request: StudentIndexRequest) -> dict:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("student index failed user_id=%s error=%s", request.user_id, exc)
-        raise HTTPException(status_code=503, detail=f"student index failed: {exc}") from exc
+        # 例外の本文は学生のテキストを含みうるので、応答にもログにも出さない（SOCAIAGENT-701）
+        logger.error("student index failed user_id=%s error=%s", request.user_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="student index failed") from exc
     return {"status": "ok", "user_id": request.user_id}
 
 
@@ -92,8 +95,8 @@ def student_query(request: StudentQueryRequest) -> StudentQueryResponse:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("student query failed error=%s", exc)
-        raise HTTPException(status_code=503, detail=f"student query failed: {exc}") from exc
+        logger.error("student query failed error=%s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="student query failed") from exc
     return StudentQueryResponse(hits=[StudentHit(**h) for h in hits])
 
 
@@ -105,6 +108,6 @@ def student_delete(user_id: int) -> dict:
     try:
         delete_student(user_id)
     except Exception as exc:
-        logger.exception("student delete failed user_id=%s error=%s", user_id, exc)
-        raise HTTPException(status_code=503, detail=f"student delete failed: {exc}") from exc
+        logger.error("student delete failed user_id=%s error=%s", user_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="student delete failed") from exc
     return {"status": "ok", "user_id": user_id}

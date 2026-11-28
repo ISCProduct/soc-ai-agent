@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Set
 
 from fastapi import APIRouter, HTTPException
 
@@ -24,19 +24,30 @@ def vector_status(company: Optional[str] = None) -> dict:
     try:
         return get_index_status(company_filter, company_original=company_original)
     except Exception as exc:
-        logger.exception("vector status failed error=%s", exc)
-        raise HTTPException(status_code=503, detail=f"vector status failed: {exc}") from exc
+        # 例外の本文は応答にもログにも出さない（SOCAIAGENT-701）
+        logger.error("vector status failed error=%s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="vector status failed") from exc
 
 
 # 同じ企業の再埋め込みを並行させない（SOCAIAGENT-658）。置き換えの途中に別の置き換えが入ると、
 # 片方が書いた文書をもう片方が「旧文書」として消しうる。
-_reembed_locks: Dict[str, threading.Lock] = {}
-_reembed_locks_guard = threading.Lock()
+# 走っている企業のキーだけを持ち、終わったら消す。企業ごとのロックを残し続けると、
+# 企業名の数だけ増え続けるため（SOCAIAGENT-701）。
+_reembed_running: Set[str] = set()
+_reembed_running_guard = threading.Lock()
 
 
-def _company_lock(key: str) -> threading.Lock:
-    with _reembed_locks_guard:
-        return _reembed_locks.setdefault(key, threading.Lock())
+def _try_start(key: str) -> bool:
+    with _reembed_running_guard:
+        if key in _reembed_running:
+            return False
+        _reembed_running.add(key)
+        return True
+
+
+def _finish(key: str) -> None:
+    with _reembed_running_guard:
+        _reembed_running.discard(key)
 
 
 def _refresh_targets(doc_type: Optional[str]) -> List[str]:
@@ -72,8 +83,8 @@ def vector_reembed(request: VectorReembedRequest) -> VectorReembedResponse:
     }:
         raise HTTPException(status_code=400, detail="invalid doc_type")
 
-    lock = _company_lock(build_cache_key("lock", safe_company, company_original=request.company_name))
-    if not lock.acquire(blocking=False):
+    lock_key = build_cache_key("lock", safe_company, company_original=request.company_name)
+    if not _try_start(lock_key):
         raise HTTPException(status_code=409, detail="reembed already running for this company")
     try:
         if not request.refresh:
@@ -83,8 +94,8 @@ def vector_reembed(request: VectorReembedRequest) -> VectorReembedResponse:
                     safe_company, doc_type=doc_type, company_original=request.company_name
                 )
             except Exception as exc:
-                logger.exception("vector delete failed company=%s error=%s", safe_company, exc)
-                raise HTTPException(status_code=503, detail=f"vector delete failed: {exc}") from exc
+                logger.error("vector delete failed company=%s error=%s", safe_company, type(exc).__name__)
+                raise HTTPException(status_code=503, detail="vector delete failed") from exc
             return VectorReembedResponse(
                 status="ok",
                 company=safe_company,
@@ -122,7 +133,9 @@ def vector_reembed(request: VectorReembedRequest) -> VectorReembedResponse:
                     cache_keys[target], [text], embeddings, source="web_search", doc_type=target
                 )
             except Exception as exc:
-                logger.exception("vector reembed failed company=%s doc_type=%s error=%s", safe_company, target, exc)
+                logger.error(
+                    "vector reembed failed company=%s doc_type=%s error=%s", safe_company, target, type(exc).__name__
+                )
                 # 例外の本文は内部情報を含みうるので、種類だけを返す
                 results.append(VectorReembedResult(doc_type=target, status="failed", error=type(exc).__name__))
                 continue
@@ -143,4 +156,4 @@ def vector_reembed(request: VectorReembedRequest) -> VectorReembedResponse:
             results=results,
         )
     finally:
-        lock.release()
+        _finish(lock_key)
