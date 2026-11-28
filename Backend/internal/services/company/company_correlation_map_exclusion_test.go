@@ -189,6 +189,30 @@ func TestCorrelationMap_CompareUsesSameRules(t *testing.T) {
 	}
 }
 
+// 除外はノード上限の前に効く。国の機関が枠を埋めても、民間の子は相関図に残る。
+func TestCorrelationMap_ExclusionDoesNotConsumeNodeCap(t *testing.T) {
+	max := company.RelationGraphMaxNodes
+	all := []models.Company{{ID: 1, Name: "起点", NameReading: "きてん", CorporateKind: "301", RegistryCheckedAt: checked()}}
+	var rels []models.CompanyRelation
+	// 国の機関を上限ちょうどまで並べ、最後に民間を1社置く。
+	for i := 2; i <= max; i++ {
+		id := uint(i)
+		all = append(all, models.Company{ID: id, Name: "国の機関", NameReading: "あ", CorporateKind: "101", RegistryCheckedAt: checked()})
+		rels = append(rels, capitalRel(1, id, "capital_subsidiary"))
+	}
+	privateID := uint(max + 1)
+	all = append(all, models.Company{ID: privateID, Name: "民間企業", NameReading: "みんかん", CorporateKind: "301", RegistryCheckedAt: checked()})
+	rels = append(rels, capitalRel(1, privateID, "capital_subsidiary"))
+
+	got, err := buildExclusionSvc(t, all, map[uint]*models.CompanyMarketInfo{}, rels).Build(context.Background(), 1)
+	require.NoError(t, err)
+
+	_, okPrivate := nodeByID(got, privateID)
+	assert.True(t, okPrivate, "除外を枠の前に行うと、国の機関のあとに並ぶ民間も載る")
+	assert.Equal(t, 1, got.Meta.DirectChildTotal)
+	assert.False(t, got.Meta.Truncated)
+}
+
 // 未確認（registry_checked_at が NULL）の企業は、種別や閉鎖日が入っていても除外しない。
 func TestCorrelationMap_UncheckedIsNeverExcluded(t *testing.T) {
 	all := []models.Company{

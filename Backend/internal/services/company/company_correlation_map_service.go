@@ -152,10 +152,13 @@ func NewCompanyCorrelationMapService(
 	companyRepo repository.CompanyRepository,
 	relationRepo repository.CompanyRelationRepository,
 ) *CompanyCorrelationMapService {
+	graph := NewCompanyRelationGraphService(companyRepo, relationRepo)
+	// 国の機関・閉鎖企業は枠を埋める前に除き、経由にも使わない（レビュー指摘）。
+	graph.SetExcludeNode(correlationExcluded)
 	return &CompanyCorrelationMapService{
 		companyRepo:  companyRepo,
 		relationRepo: relationRepo,
-		graph:        NewCompanyRelationGraphService(companyRepo, relationRepo),
+		graph:        graph,
 	}
 }
 
